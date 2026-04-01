@@ -1,0 +1,1197 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.org/runtrace/manifest.schema.json",
+    "title": "runtrace Manifest",
+    "description": "Schema for a runtrace execution manifest.",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "schema_version",
+        "manifest_type",
+        "run",
+        "timing",
+        "invocation",
+        "capture",
+        "status"
+    ],
+    "properties": {
+        "schema_version": {
+            "type": "string",
+            "pattern": "^1\\.0(\\.\\d+)?$",
+            "description": "Schema version for this manifest."
+        },
+        "manifest_type": {
+            "type": "string",
+            "const": "runtrace-manifest"
+        },
+        "run": {
+            "$ref": "#/$defs/run"
+        },
+        "timing": {
+            "$ref": "#/$defs/timing"
+        },
+        "invocation": {
+            "$ref": "#/$defs/invocation"
+        },
+        "capture": {
+            "$ref": "#/$defs/capture"
+        },
+        "status": {
+            "$ref": "#/$defs/run_status"
+        },
+        "process": {
+            "$ref": "#/$defs/process"
+        },
+        "host": {
+            "$ref": "#/$defs/host"
+        },
+        "python": {
+            "$ref": "#/$defs/python_runtime"
+        },
+        "packages": {
+            "$ref": "#/$defs/packages_section"
+        },
+        "environment": {
+            "$ref": "#/$defs/environment_section"
+        },
+        "git": {
+            "$ref": "#/$defs/git_section"
+        },
+        "hardware": {
+            "$ref": "#/$defs/hardware_section"
+        },
+        "resources": {
+            "$ref": "#/$defs/resources_section"
+        },
+        "console": {
+            "$ref": "#/$defs/console_section"
+        },
+        "subprocesses": {
+            "type": "array",
+            "items": {
+                "$ref": "#/$defs/subprocess_record"
+            },
+            "default": []
+        },
+        "artifacts": {
+            "type": "array",
+            "items": {
+                "$ref": "#/$defs/artifact"
+            },
+            "default": []
+        },
+        "determinism": {
+            "$ref": "#/$defs/determinism_section"
+        },
+        "config": {
+            "$ref": "#/$defs/config_section"
+        },
+        "errors": {
+            "$ref": "#/$defs/errors_section"
+        },
+        "extensions": {
+            "type": "object",
+            "description": "Optional namespaced extension sections contributed by plugins.",
+            "propertyNames": {
+                "pattern": "^[A-Za-z0-9_.-]+$"
+            },
+            "additionalProperties": true,
+            "default": {}
+        }
+    },
+    "$defs": {
+        "status_value": {
+            "type": "string",
+            "enum": [
+                "complete",
+                "partial",
+                "unavailable",
+                "suppressed",
+                "failed"
+            ]
+        },
+        "capture_state": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "status"
+            ],
+            "properties": {
+                "status": {
+                    "$ref": "#/$defs/status_value"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": []
+                }
+            }
+        },
+        "utc_datetime": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$"
+        },
+        "path_string": {
+            "type": "string",
+            "minLength": 1
+        },
+        "hash_record": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "algorithm",
+                "value"
+            ],
+            "properties": {
+                "algorithm": {
+                    "type": "string",
+                    "examples": [
+                        "sha256"
+                    ]
+                },
+                "value": {
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "redacted_value": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "representation"
+            ],
+            "properties": {
+                "representation": {
+                    "type": "string",
+                    "enum": [
+                        "plain",
+                        "redacted",
+                        "hashed",
+                        "suppressed",
+                        "unavailable"
+                    ]
+                },
+                "value": {},
+                "hash": {
+                    "$ref": "#/$defs/hash_record"
+                }
+            }
+        },
+        "run": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "run_id",
+                "capture_state"
+            ],
+            "properties": {
+                "run_id": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "parent_run_id": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "session_id": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "run_label": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "library_version": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "profile": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "timing": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "started_at_utc",
+                "capture_state"
+            ],
+            "properties": {
+                "started_at_utc": {
+                    "$ref": "#/$defs/utc_datetime"
+                },
+                "ended_at_utc": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/utc_datetime"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "elapsed_seconds": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "cpu_time_seconds": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "invocation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "argv",
+                "capture_state"
+            ],
+            "properties": {
+                "argv": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "command_line": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "rerun_command": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "entrypoint_type": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "script",
+                        "module",
+                        "interactive",
+                        "notebook",
+                        "packaged_binary",
+                        "unknown",
+                        null
+                    ]
+                },
+                "script": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "path": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "real_path": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "basename": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "sha256": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        }
+                    },
+                    "default": {}
+                },
+                "working_directory": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "path": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "real_path": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        }
+                    },
+                    "default": {}
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "capture": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "output_base_dir",
+                "run_dir",
+                "capture_state"
+            ],
+            "properties": {
+                "output_base_dir": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "run_dir": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "event_stream_enabled": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "console_capture_mode": {
+                    "type": "string",
+                    "enum": [
+                        "off",
+                        "basic",
+                        "standard",
+                        "deep"
+                    ]
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "run_status": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "outcome",
+                "capture_state"
+            ],
+            "properties": {
+                "outcome": {
+                    "type": "string",
+                    "enum": [
+                        "running",
+                        "completed",
+                        "failed",
+                        "interrupted",
+                        "partial",
+                        "unknown"
+                    ]
+                },
+                "exit_code": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "signal": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "process": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "capture_state"
+            ],
+            "properties": {
+                "pid": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "ppid": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "user": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "username": {
+                            "$ref": "#/$defs/redacted_value"
+                        },
+                        "uid": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ]
+                        },
+                        "gid": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ]
+                        }
+                    },
+                    "default": {}
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "host": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "capture_state"
+            ],
+            "properties": {
+                "hostname": {
+                    "$ref": "#/$defs/redacted_value"
+                },
+                "fqdn": {
+                    "$ref": "#/$defs/redacted_value"
+                },
+                "os_name": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "os_version": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "kernel_version": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "platform": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "architecture": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "python_runtime": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "capture_state"
+            ],
+            "properties": {
+                "executable": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "version": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "implementation": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "prefix": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "base_prefix": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "virtual_env": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "sys_path": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": []
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "package_record": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "name",
+                "version"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "location": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "editable": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                }
+            }
+        },
+        "packages_section": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "capture_state"
+            ],
+            "properties": {
+                "mode": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "imported-only",
+                        "top-level-installed",
+                        "full-environment",
+                        null
+                    ]
+                },
+                "records": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/package_record"
+                    },
+                    "default": []
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "environment_entry": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "name",
+                "value"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "value": {
+                    "$ref": "#/$defs/redacted_value"
+                },
+                "source": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "process",
+                        "config",
+                        "derived",
+                        null
+                    ]
+                }
+            }
+        },
+        "environment_section": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "capture_state"
+            ],
+            "properties": {
+                "mode": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "allowlist",
+                        "filtered",
+                        "full",
+                        null
+                    ]
+                },
+                "variables": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/environment_entry"
+                    },
+                    "default": []
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "git_section": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "capture_state"
+            ],
+            "properties": {
+                "repo_root": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "commit": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "branch": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "dirty": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "remote_url": {
+                    "$ref": "#/$defs/redacted_value"
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "cpu_record": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "model": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "physical_cores": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "logical_cores": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "architecture": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            },
+            "default": {}
+        },
+        "gpu_record": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "vendor": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "model": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "memory_total_bytes": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "driver_version": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            },
+            "default": {}
+        },
+        "hardware_section": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "capture_state"
+            ],
+            "properties": {
+                "cpu": {
+                    "$ref": "#/$defs/cpu_record"
+                },
+                "memory_total_bytes": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "gpus": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/gpu_record"
+                    },
+                    "default": []
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "resources_section": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "capture_state"
+            ],
+            "properties": {
+                "peak_rss_bytes": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "end_rss_bytes": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "console_stream": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "captured"
+            ],
+            "properties": {
+                "captured": {
+                    "type": "boolean"
+                },
+                "path": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "encoding": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "line_timestamps": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "lines_captured": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                }
+            }
+        },
+        "console_section": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "capture_mode",
+                "capture_state"
+            ],
+            "properties": {
+                "capture_mode": {
+                    "type": "string",
+                    "enum": [
+                        "off",
+                        "basic",
+                        "standard",
+                        "deep"
+                    ]
+                },
+                "stdout": {
+                    "$ref": "#/$defs/console_stream"
+                },
+                "stderr": {
+                    "$ref": "#/$defs/console_stream"
+                },
+                "combined": {
+                    "$ref": "#/$defs/console_stream"
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "subprocess_record": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "argv",
+                "capture_state"
+            ],
+            "properties": {
+                "argv": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "resolved_executable": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "started_at_utc": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/utc_datetime"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "ended_at_utc": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/utc_datetime"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "exit_code": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "cwd": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "artifact": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "role",
+                "path"
+            ],
+            "properties": {
+                "role": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "exists": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "size_bytes": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "modified_at_utc": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/utc_datetime"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "hash": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/hash_record"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                }
+            }
+        },
+        "determinism_section": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "capture_state"
+            ],
+            "properties": {
+                "python_hash_seed": {
+                    "$ref": "#/$defs/redacted_value"
+                },
+                "registered_seeds": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                            "name",
+                            "value"
+                        ],
+                        "properties": {
+                            "name": {
+                                "type": "string"
+                            },
+                            "value": {}
+                        }
+                    },
+                    "default": []
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "config_section": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "resolved_config_path",
+                "capture_state"
+            ],
+            "properties": {
+                "resolved_config_path": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "sources_path": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "source_files": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                            "path"
+                        ],
+                        "properties": {
+                            "path": {
+                                "type": "string"
+                            },
+                            "hash": {
+                                "anyOf": [
+                                    {
+                                        "$ref": "#/$defs/hash_record"
+                                    },
+                                    {
+                                        "type": "null"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "default": []
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "error_record": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "kind"
+            ],
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "exception",
+                        "warning",
+                        "capture-error",
+                        "signal",
+                        "other"
+                    ]
+                },
+                "type": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "message": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "traceback": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            }
+        },
+        "errors_section": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "capture_state"
+            ],
+            "properties": {
+                "records": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/error_record"
+                    },
+                    "default": []
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        }
+    }
+}

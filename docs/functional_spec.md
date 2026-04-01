@@ -92,6 +92,7 @@ with tracked_run():
 ## 4. Required artifacts
 
 Each run MUST produce a `manifest.json` containing structured metadata about the run.
+The data model for this manifest MUST strictly adhere to the formal JSON Schema defined in `schemas/manifest.schema.json`.
 
 The manifest is the canonical output for the run.
 
@@ -101,19 +102,21 @@ Each run MUST also produce a `config.resolved.json` containing the final configu
 
 ## 5. Capture categories
 
-Core categories:
+Core categories (Mandatory by schema):
 
-- run identity
+- run
 - timing
 - invocation
+- capture
+- status
 - process
-- host
-- host architecture
-- python runtime
+- host (includes host architecture)
+- python
 - packages
 - environment
-- git provenance
+- git
 - errors
+- config
 
 Optional categories:
 
@@ -123,7 +126,7 @@ Optional categories:
 - console
 - artifacts
 - determinism
-- framework plugins
+- extensions (framework plugins)
 
 Each category MUST be independently configurable.
 
@@ -185,7 +188,7 @@ The implementation MUST preserve normal console behavior as closely as practical
 
 ## 9. Completeness and redaction
 
-Each manifest section MUST report status:
+Each manifest section object MUST implement a `capture_state` property, which explicitly records the status of the capture for that category:
 
 - complete
 - partial
@@ -193,13 +196,17 @@ Each manifest section MUST report status:
 - suppressed
 - failed
 
+If a capture section partially fails, the host script MUST NOT crash. Instead, it MUST mark the section's `capture_state.status = partial` and optionally record details or warnings in the `capture_state`.
+
 The system MUST support:
 
 - redaction
 - hashing
 - allowlist / denylist control
 
-Secrets MUST NOT be captured by default.
+Secrets MUST NOT be captured by default. 
+To achieve this, the default redaction policy MUST detect and obfuscate known sensitive keys (e.g., matching regex `(?i)(password|secret|token|api_key)`).
+Redacted fields MUST NOT just omit the key; they MUST emit a standard `redacted_value` object specifying its `representation` (e.g., `redacted`, `hashed`, `suppressed`) and an optional hash.
 
 ## 10. Configuration system
 
@@ -262,9 +269,9 @@ The configuration MUST support defaults for at least:
 
 The configuration format SHOULD be human-readable, versionable, and easy to comment.
 
-A commented config format such as TOML-style or INI-style is acceptable, provided it supports a clear, maintainable default configuration file.
+TOML is the strongly recommended format, enabling structural configurations while maintaining human readability and leveraging Native Python 3.11+ `tomllib`.
 
-### 10.6 Configuration loggin
+### 10.6 Configuration logging
 The system MUST produce a resolved configuration snapshot per run and store it in the run directory.
 
 ## 11. Create-config behavior
@@ -408,6 +415,8 @@ Core APIs:
 - `start()`
 - `stop()`
 - `get_current_run()`
+- `tracked_run()` (context manager and decorator)
+- `audit_run()` (higher-level audit tracking)
 
 Optional APIs:
 
@@ -430,7 +439,6 @@ The system MUST:
 - emit a partial manifest if needed
 - record capture errors
 - degrade gracefully when optional features are unavailable
-- each run directory contains a resolved configuration snapshot
 
 ## 16. Acceptance criteria
 
