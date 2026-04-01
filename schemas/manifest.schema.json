@@ -782,6 +782,19 @@
                         "string",
                         "null"
                     ]
+                },
+                "clock_speed_mhz": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "floating_point_precision": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
                 }
             },
             "default": {}
@@ -814,6 +827,20 @@
                         "string",
                         "null"
                     ]
+                },
+                "clock_speed_mhz": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "floating_point_precision": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Information about floating point capabilities (e.g. FP32, FP64, TF32)."
                 }
             },
             "default": {}

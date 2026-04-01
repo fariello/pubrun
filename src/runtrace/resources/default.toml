@@ -1,0 +1,97 @@
+# ==========================================
+#  runtrace Configuration
+# ==========================================
+# Documentation: https://github.com/gfariello/runtrace
+#
+# This file can reside in:
+#   - ~/.config/runtrace/runtrace.toml (User defaults)
+#   - ./.runtrace.toml (Project/Local overrides)
+
+[core]
+# Master profile overriding all default behaviors if not explicitly specified.
+# Supported: "minimal", "default", "deep"
+profile = "default"
+
+# Base directory where the `runs/` folder will be created. 
+# If empty, uses the current working directory.
+output_dir = ""
+
+# If true, `import runtrace` automatically starts a tracked run 
+# without requiring an explicit `runtrace.start()` call.
+auto_start = false
+
+[console]
+# How stdout and stderr are captured by runtrace.
+#   "off"      - Console capture is disabled.
+#   "basic"    - Stores output as standard text logs (stdout.log, stderr.log).
+#   "standard" - Prepends timestamps to output lines.
+#   "deep"     - Full structured logging capture.
+capture_mode = "standard"
+
+[events]
+# If true, emits structured execution events to `events.jsonl`
+enabled = false
+
+[redaction]
+# Regex pattern used to detect sensitive keys in environment variables, arguments, or config.
+# Matching keys will have their values obfuscated.
+sensitive_keys_regex = "(?i)(password|secret|token|api_key|credentials|key)"
+
+# Supported obfuscation methods: 
+#   "redacted" (replaces with [REDACTED])
+#   "hashed"   (replaces with a one-way SHA-256 hash)
+representation = "redacted"
+
+[capture]
+# Fine-tune the depth of specific data captured in the manifest.
+# Levels usually follow: "off", "basic", "standard", "deep"
+
+[capture.environment]
+# Supported modes: "allowlist", "filtered", "full"
+mode = "filtered"
+depth = "standard"
+
+[capture.packages]
+# Supported modes: "imported-only", "top-level-installed", "full-environment"
+mode = "imported-only"
+depth = "standard"
+
+[capture.subprocesses]
+# Whether to spy on and record subprocesses spawned by the user script.
+enabled = true
+depth = "basic"
+
+[capture.process]
+depth = "standard"
+
+[capture.host]
+depth = "standard"
+
+[capture.python]
+depth = "standard"
+
+[capture.git]
+# Git repository state, branch, commit hashes, and dirty flags.
+depth = "standard"
+
+[capture.hardware]
+# Hardware details like CPU/GPU vendor, models, and cores.
+depth = "basic"
+# Explicit overrides for exact ML reproducibility (typically high-overhead system calls).
+# These require explicit enable even at depth="deep" to avoid performance impacts.
+capture_gpu_clock_speed = false
+capture_gpu_fp_precision = false
+capture_cpu_clock_speed = false
+capture_cpu_fp_precision = false
+
+[capture.resources]
+# Real-time resource usage like peak memory and CPU time.
+depth = "standard"
+
+[capture.determinism]
+# Random seeds and other entropy sources.
+depth = "off"
+
+[logging]
+# Whether to generate a human-readable `summary.txt` in the run directory.
+write_summary = true
