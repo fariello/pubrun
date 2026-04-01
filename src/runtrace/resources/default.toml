@@ -3,95 +3,185 @@
 # ==========================================
 # Documentation: https://github.com/gfariello/runtrace
 #
-# This file can reside in:
-#   - ~/.config/runtrace/runtrace.toml (User defaults)
-#   - ./.runtrace.toml (Project/Local overrides)
+# This file serves as the default policy for `runtrace`. When your script runs, 
+# `runtrace` will look for configuration files that override these defaults.
+#
+# Resolution Order (Highest to Lowest Precedence):
+#   1. Explicit API arguments (e.g., runtrace.start(profile="deep"))
+#   2. Environment variables (e.g., RUNTRACE_PROFILE="deep")
+#   3. Local project override (e.g., ./.runtrace.toml)
+#   4. User home defaults (e.g., ~/.config/runtrace/runtrace.toml)
+#   5. This default file.
 
 [core]
-# Master profile overriding all default behaviors if not explicitly specified.
-# Supported: "minimal", "default", "deep"
+# -----------------------------------------------------------------------------
+# Core behaviors dictating how runs are initialized and stored.
+# -----------------------------------------------------------------------------
+
+# The master profile dictates the default capture depth across all categories 
+# if a specific category (like [capture.packages]) doesn't specify its own depth. 
+# Supported values:
+#   "minimal" - Barebones execution logging.
+#   "default" - Standard, safe capture with no heavy overhead.
+#   "deep"    - Maximum information gathering (may include slow system calls).
 profile = "default"
 
-# Base directory where the `runs/` folder will be created. 
-# If empty, uses the current working directory.
+# The base directory where your runs will be saved. `runtrace` will automatically 
+# create uniquely named subdirectories (e.g., `runs/runtrace-script-timestamp/`)
+# inside this base path for every execution. If left empty, it naturally defaults 
+# to a `./runs` folder inside your current working directory.
 output_dir = ""
 
-# If true, `import runtrace` automatically starts a tracked run 
-# without requiring an explicit `runtrace.start()` call.
-auto_start = false
+# If set to `true`, simply inserting `import runtrace` into your Python script 
+# will automatically initialize a traced execution. If `false`, you must write 
+# `runtrace.start()` or use `@audit_run` explicitly to begin logging.
+auto_start = true
+
 
 [console]
-# How stdout and stderr are captured by runtrace.
-#   "off"      - Console capture is disabled.
-#   "basic"    - Stores output as standard text logs (stdout.log, stderr.log).
-#   "standard" - Prepends timestamps to output lines.
-#   "deep"     - Full structured logging capture.
+# -----------------------------------------------------------------------------
+# Configuration for intercepting and logging standard output and errors.
+# -----------------------------------------------------------------------------
+
+# How should `runtrace` handle print statements and error tracebacks?
+# Supported modes:
+#   "off"      - Console capture is entirely disabled; streams are untouched.
+#   "basic"    - `stdout` and `stderr` are invisibly tee'd to text files in your run directory.
+#   "standard" - Same as basic, but automatically prepends timestamps to output lines.
+#   "deep"     - Full structured JSON-based console capture.
 capture_mode = "standard"
 
+
 [events]
-# If true, emits structured execution events to `events.jsonl`
+# -----------------------------------------------------------------------------
+# Controls for the real-time `events.jsonl` stream which tracks phases and errors.
+# -----------------------------------------------------------------------------
+
+# If `true`, execution milestones (like phase starts/ends) and warnings will be 
+# streamed in real-time to an `events.jsonl` file alongside your manifest.
 enabled = false
 
+# Defines the fallback behavior when a user script calls `runtrace.annotate(...)` 
+# or `runtrace.phase(...)` but no trace has actually been started yet.
+# Supported behavioral fallbacks:
+#   "ignore" - Silently discards the annotation to prevent your script from crashing (Safest).
+#   "warn"   - Prints a visible warning to `stderr` but allows the script to continue.
+#   "error"  - Strictly raises a `RuntimeError` and crashes the program.
+on_inactive_annotate = "ignore"
+
+
 [redaction]
-# Regex pattern used to detect sensitive keys in environment variables, arguments, or config.
-# Matching keys will have their values obfuscated.
+# -----------------------------------------------------------------------------
+# Security policies to ensure secrets are never leaked into your manifest files.
+# -----------------------------------------------------------------------------
+
+# A regular expression pattern used to detect sensitive variables in your environment, 
+# CLI arguments, or runtime configurations. Matching keys will be intercepted.
 sensitive_keys_regex = "(?i)(password|secret|token|api_key|credentials|key)"
 
-# Supported obfuscation methods: 
-#   "redacted" (replaces with [REDACTED])
-#   "hashed"   (replaces with a one-way SHA-256 hash)
+# Determines how detected sensitive values are masked before being written to disk.
+# Supported methods:
+#   "redacted" - The raw value is entirely replaced with a generic [REDACTED] string.
+#   "hashed"   - The raw value is passed through a one-way secure hash (e.g., SHA-256) 
+#                so you can verify if a password changed across runs without seeing it.
 representation = "redacted"
 
+
 [capture]
-# Fine-tune the depth of specific data captured in the manifest.
-# Levels usually follow: "off", "basic", "standard", "deep"
+# -----------------------------------------------------------------------------
+# Fine-grained depth limits. These settings dictate exactly how heavily `runtrace` 
+# profiles the state of the machine. The typical depths are "off", "basic", 
+# "standard", and "deep".
+# -----------------------------------------------------------------------------
 
 [capture.environment]
-# Supported modes: "allowlist", "filtered", "full"
+# Controls how system environment variables (like PATH or CUSTOM_VAR) are recorded.
+# Supported modes:
+#   "allowlist" - Only explicitly permitted variables are tracked.
+#   "filtered"  - Captures the environment but strips out known secrets using the redaction policy.
+#   "full"      - Dumps the raw environment without filtering (Unsafe).
 mode = "filtered"
 depth = "standard"
 
 [capture.packages]
-# Supported modes: "imported-only", "top-level-installed", "full-environment"
+# Controls how Python dependency versions are analyzed and tracked.
+# Supported modes:
+#   "imported-only"       - Scans `sys.modules` to only track libraries actually used in the script.
+#   "top-level-installed" - Uses package managers (pip/conda) to record locally installed tools.
+#   "full-environment"    - Heavily audits every dependency in the entire Python virtual environment.
 mode = "imported-only"
 depth = "standard"
 
 [capture.subprocesses]
-# Whether to spy on and record subprocesses spawned by the user script.
+# Whether to spy on and secretly record subprocesses or shell commands spawned 
+# by your Python script. Very useful for tracing complex orchestration scripts.
 enabled = true
 depth = "basic"
 
 [capture.process]
+# Captures active internal OS details like parent processes, user permissions, and thread IDs.
 depth = "standard"
 
 [capture.host]
+# Captures static OS-level machine details like hostnames, kernels, and platforms.
 depth = "standard"
 
 [capture.python]
+# Captures details surrounding the Python runtime itself, including the CPython build 
+# and active Virtual Environment paths.
 depth = "standard"
 
 [capture.git]
-# Git repository state, branch, commit hashes, and dirty flags.
+# Examines the local file directory for a `.git` folder and safely extracts 
+# the active branch, commit hash, remote URL, and whether there are uncommitted changes.
 depth = "standard"
 
+
 [capture.hardware]
-# Hardware details like CPU/GPU vendor, models, and cores.
+# -----------------------------------------------------------------------------
+# Determines how much deep inspection is performed on the physical hardware.
+# -----------------------------------------------------------------------------
+
+# At the "basic" or "standard" depth, this will cleanly parse top-level CPU cores, 
+# architecture patterns, and GPU manufacturer makes and models.
 depth = "basic"
-# Explicit overrides for exact ML reproducibility (typically high-overhead system calls).
-# These require explicit enable even at depth="deep" to avoid performance impacts.
+
+# Explicit overrides for deep Machine Learning reproducibility. Reading precise 
+# execution clock speeds or exact floating-point support matrices (TF32, FP64) 
+# often requires slow, expensive system calls (e.g., querying NVML or reading `/proc`).
+# Therefore, these advanced flags require an explicit visual toggle to `true`, 
+# even if `depth` is set to "deep", ensuring users aren't surprised by overhead.
 capture_gpu_clock_speed = false
 capture_gpu_fp_precision = false
 capture_cpu_clock_speed = false
 capture_cpu_fp_precision = false
 
+
 [capture.resources]
-# Real-time resource usage like peak memory and CPU time.
+# -----------------------------------------------------------------------------
+# Configurations for the background utilization watcher.
+# -----------------------------------------------------------------------------
+
+# If enabled (e.g., standard or deep), this traces real-time usage metrics 
+# such as peak RAM and active CPU time.
 depth = "standard"
 
+# How frequently (in seconds) the background thread is allowed to wake up and 
+# sample the machine's capacity. Shorter intervals mean finer graphs but bigger 
+# overhead and larger `events.jsonl` files.
+sample_interval_seconds = 15
+
+
 [capture.determinism]
-# Random seeds and other entropy sources.
+# Attempts to track or lock pseudorandom numbers (like Python `random` or `numpy.random` seeds).
 depth = "off"
 
+
 [logging]
-# Whether to generate a human-readable `summary.txt` in the run directory.
+# -----------------------------------------------------------------------------
+# Output generation overrides.
+# -----------------------------------------------------------------------------
+
+# Whether to automatically generate a human-readable `summary.txt` in the run directory 
+# containing a quick diagnostic glance of the run layout.
 write_summary = true
