@@ -23,6 +23,82 @@ The goal is simple:
 
 ---
 
+## Vision
+
+Modern Python workflows often rely on implicit state:
+
+- environment differences
+- dependency drift
+- hidden configuration
+- machine-specific behavior
+
+`runtrace` aims to eliminate this ambiguity.
+
+The vision is a world where:
+
+- every run can be understood after the fact
+- differences between runs are transparent
+- debugging is based on facts, not guesswork
+- reproducibility is a default, not an afterthought
+
+---
+
+## Philosophy
+
+`runtrace` is built around a few core principles:
+
+### 1. Reproducibility first
+
+The primary goal is not logging or monitoring, but ensuring that a run can be understood and, as much as possible, reproduced.
+
+### 2. Minimal friction
+
+It should be easy to adopt:
+
+```python
+import runtrace
+runtrace.start()
+```
+
+No frameworks, no restructuring, no heavy setup.
+
+### 3. Manifest over logs
+
+Structured data beats unstructured logs.
+
+A run produces a machine-readable `manifest.json` that captures what matters, rather than relying on parsing console output.
+
+### 4. Non-invasive by default
+
+`runtrace` should not change program behavior.
+
+- no heavy instrumentation by default
+- no fragile hooks
+- no unexpected side effects on import
+
+### 5. Progressive depth
+
+Basic usage should be simple.
+
+Advanced capture should be available, but only when explicitly enabled.
+
+### 6. Explicit and auditable
+
+What was captured, what was not, and why must be clear.
+
+Every section includes completeness status and respects redaction policies.
+
+### 7. Built for comparison
+
+The data model is designed from the start to support:
+
+- `compare()`
+- `diff()`
+- `inspect()`
+- future `replay()` guidance
+
+---
+
 ## Key Features
 
 - Manifest-first design (`manifest.json` per run)
@@ -31,7 +107,7 @@ The goal is simple:
 - Config-driven behavior with sensible defaults
 - Run-scoped directory structure
 - Structured, comparable output
-- Designed for future `compare()`, `diff()`, and `replay()` capabilities
+- Designed for future comparison and replay tooling
 
 ---
 
@@ -156,20 +232,9 @@ schemas/manifest.schema.json
 
 ---
 
-## Design Principles
-
-- Minimal friction
-- Structured data over logs
-- Reproducibility first
-- Non-invasive by default
-- Explicit over implicit
-- Forward-compatible with comparison and replay tooling
-
----
-
 ## Status
 
-Early-stage design (Draft v0.1)
+Early-stage design (Draft v0.2)
 
 ---
 
