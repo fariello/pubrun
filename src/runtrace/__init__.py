@@ -10,18 +10,22 @@ from runtrace.tracker import Run, get_current_run
 __version__ = "0.1.0"
 
 
-def annotate(label: str, data: Any = None) -> None:
+def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
     """
-    Log a custom annotation to the active trace.
+    Explicitly document user payloads in the active events.jsonl stream.
     If no trace is active, behavior depends on the `on_inactive_annotate` config.
     """
     current_run = get_current_run()
-    if current_run:
-        # Expected in Phase 3 (Event Stream)
-        pass
+    if current_run and getattr(current_run, "event_stream", None):
+        payload = kwargs.copy()
+        current_run.event_stream.emit("annotation", name=message, payload=payload)
     else:
-        # We fail silently by default to prevent crashing host scripts
-        logging.getLogger("runtrace").debug(f"Annotation '{label}' dropped: No active runtrace.")
+        from runtrace.config import resolve_config
+        action = resolve_config().get("events", {}).get("on_inactive_annotate", "ignore")
+        if action == "error":
+            raise RuntimeError("runtrace.annotate() called but no run is active.")
+        elif action == "warn":
+            logging.getLogger("runtrace").warning(f"Annotation dropped: No active runtrace.")
 
 
 def start(**kwargs: Any) -> Run:
@@ -88,10 +92,24 @@ class phase:
     """
     def __init__(self, name: str) -> None:
         self.name = name
+        self.run_tracker = get_current_run()
 
     def __enter__(self) -> "phase":
+        if self.run_tracker and getattr(self.run_tracker, "event_stream", None):
+            self.run_tracker.event_stream.emit("phase_start", name=self.name)
+        else:
+            from runtrace.config import resolve_config
+            action = resolve_config().get("events", {}).get("on_inactive_annotate", "ignore")
+            if action == "error":
+                raise RuntimeError(f"runtrace.phase('{self.name}') called but no run is active.")
+            elif action == "warn":
+                logging.getLogger("runtrace").warning(f"Phase '{self.name}' dropped: No active runtrace.")
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        # Phase 3 hooks
-        pass
+        if self.run_tracker and getattr(self.run_tracker, "event_stream", None):
+            if exc_type is not None:
+                err_payload = {"error": exc_val.__class__.__name__}
+                self.run_tracker.event_stream.emit("phase_end", name=self.name, payload=err_payload)
+            else:
+                self.run_tracker.event_stream.emit("phase_end", name=self.name)

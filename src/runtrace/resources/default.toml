@@ -59,7 +59,7 @@ capture_mode = "standard"
 
 # If `true`, execution milestones (like phase starts/ends) and warnings will be 
 # streamed in real-time to an `events.jsonl` file alongside your manifest.
-enabled = false
+enabled = true
 
 # Defines the fallback behavior when a user script calls `runtrace.annotate(...)` 
 # or `runtrace.phase(...)` but no trace has actually been started yet.
@@ -118,6 +118,10 @@ depth = "standard"
 enabled = true
 depth = "basic"
 
+# Memory limit: stop recording if more than this many subprocesses run, 
+# preventing accidental stealth Out-Of-Memory leaks during long infinite loops.
+max_tracked_commands = 5000
+
 [capture.process]
 # Captures active internal OS details like parent processes, user permissions, and thread IDs.
 depth = "standard"
@@ -170,6 +174,10 @@ depth = "standard"
 # sample the machine's capacity. Shorter intervals mean finer graphs but bigger 
 # overhead and larger `events.jsonl` files.
 sample_interval_seconds = 15
+
+# If the OS underlying hook natively fails to deliver bytes this many times consecutively,
+# the background daemon will silently kill itself to avoid spamming CPU cycles.
+max_consecutive_failures = 3
 
 
 [capture.determinism]

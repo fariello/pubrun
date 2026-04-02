@@ -12,7 +12,9 @@ def _get_cpu_model() -> Optional[str]:
     try:
         sys_plat = sys.platform
         if sys_plat == "win32":
-            out = subprocess.check_output(["wmic", "cpu", "get", "Name"], text=True, stderr=subprocess.DEVNULL)
+            from runtrace.capture.subprocesses import disable_spy
+            with disable_spy():
+                out = subprocess.check_output(["wmic", "cpu", "get", "Name"], text=True, stderr=subprocess.DEVNULL)
             lines = [l.strip() for l in out.splitlines() if l.strip()]
             if len(lines) >= 2:
                 return lines[1]
@@ -34,7 +36,9 @@ def _get_total_memory_bytes() -> Optional[int]:
     try:
         sys_plat = sys.platform
         if sys_plat == "win32":
-            out = subprocess.check_output(["wmic", "OS", "get", "TotalVisibleMemorySize"], text=True, stderr=subprocess.DEVNULL)
+            from runtrace.capture.subprocesses import disable_spy
+            with disable_spy():
+                out = subprocess.check_output(["wmic", "OS", "get", "TotalVisibleMemorySize"], text=True, stderr=subprocess.DEVNULL)
             lines = [l.strip() for l in out.splitlines() if l.strip()]
             if len(lines) >= 2:
                 return int(lines[1]) * 1024
@@ -65,7 +69,9 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
             # Caution: clocks.max.sm is the highest SM clock. Not supported on very old GPUs.
             cmd[1] += ",clocks.max.sm"
             
-        out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+        from runtrace.capture.subprocesses import disable_spy
+        with disable_spy():
+            out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
         
         for line in out.splitlines():
             if not line.strip():
@@ -92,7 +98,9 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
         try:
             sys_plat = sys.platform
             if sys_plat == "win32":
-                out = subprocess.check_output(["wmic", "path", "win32_VideoController", "get", "Name,AdapterRAM,DriverVersion", "/format:csv"], text=True, stderr=subprocess.DEVNULL)
+                from runtrace.capture.subprocesses import disable_spy
+                with disable_spy():
+                    out = subprocess.check_output(["wmic", "path", "win32_VideoController", "get", "Name,AdapterRAM,DriverVersion", "/format:csv"], text=True, stderr=subprocess.DEVNULL)
                 lines = [l.strip() for l in out.splitlines() if l.strip()]
                 for line in lines[1:]: # Skip CSV header
                     parts = line.split(",")

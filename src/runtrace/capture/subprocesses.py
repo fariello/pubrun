@@ -1,8 +1,23 @@
 import subprocess
 import logging
 import shlex
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, List, Dict, Optional
+
+_spy_local = threading.local()
+
+@contextmanager
+def disable_spy():
+    """Context manager to bypass SubprocessSpy for internal runtrace commands."""
+    old = getattr(_spy_local, "bypass", False)
+    _spy_local.bypass = True
+    try:
+        yield
+    finally:
+        _spy_local.bypass = old
+
 
 logger = logging.getLogger("runtrace")
 
@@ -16,11 +31,15 @@ class SubprocessSpy:
     """
     _installed = False
     _records: List[Dict[str, Any]] = []
+    _max_records = 5000
+    _truncated = False
 
     @classmethod
-    def install(cls) -> None:
+    def install(cls, max_records: int = 5000) -> None:
         if not cls._installed:
+            cls._max_records = max_records
             cls._records = []
+            cls._truncated = False
             subprocess.Popen.__init__ = cls._patched_popen_init
             subprocess.Popen.wait = cls._patched_popen_wait
             cls._installed = True
@@ -49,6 +68,13 @@ class SubprocessSpy:
 
     @staticmethod
     def _patched_popen_init(self: Any, args: Any, *sys_args: Any, **kwargs: Any) -> None:
+        if getattr(_spy_local, "bypass", False):
+            return _original_popen_init(self, args, *sys_args, **kwargs)
+            
+        if len(SubprocessSpy._records) >= SubprocessSpy._max_records:
+            SubprocessSpy._truncated = True
+            return _original_popen_init(self, args, *sys_args, **kwargs)
+            
         start_time = datetime.now(timezone.utc)
         
         # Convert args to list of strings securely

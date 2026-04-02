@@ -13,6 +13,8 @@ from runtrace.capture.invocation import get_invocation
 from runtrace.capture.subprocesses import SubprocessSpy
 from runtrace.capture.console import ConsoleInterceptor
 from runtrace.capture.hardware import get_hardware
+from runtrace.events import EventStream
+from runtrace.capture.resources import ResourceWatcher
 
 
 # Define a singleton instance to manage global tracking state
@@ -47,8 +49,27 @@ class Run:
         dir_name = f"runtrace-{self.script_name}-{timestamp_str}-{self.pid}-{self.run_id}"
         self.run_dir = base_dir / dir_name
 
-        # Ensure directory is created before registering hooks
-        self.run_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure directory is created safely
+        try:
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            # GHOST MODE: 
+            # If filesystem is read-only (e.g. strict Slurm nodes), we silently abort
+            # internal serialization tracking completely so the user's ML script doesn't crash.
+            # However, we must alert the user via standard error so that Slurm logs show context.
+            print(f"runtrace WARNING: Unable to create {self.run_dir}. System running in Ghost Mode (tracking suppressed) due to: {e}", file=sys.stderr)
+            self.is_active = False
+            self._spying_subprocesses = False
+            self.event_stream = None
+            self.resource_watcher = None
+            self.writer = None
+            self.hardware_data = {}
+            self.invocation_data = {}
+            self.console_data = {}
+            self.console_interceptor = None
+            global _active_run
+            _active_run = self
+            return
         
         # State tracking (to detect crashes)
         self._outcome = "unknown"
@@ -57,9 +78,13 @@ class Run:
         # 1. Invocation canonical path extraction
         self.invocation_data = get_invocation()
         
-        # 2. Subprocess Monkey Patching
+        # 3. Hardware tracking (Must run before SubprocessSpy to avoid logging self)
+        self.hardware_data = get_hardware(self.config)
+        
+        # 4. Console & Subprocess interception setup
         if self.config.get("capture", {}).get("subprocesses", {}).get("enabled", False):
-            SubprocessSpy.install()
+            max_tracked = self.config.get("capture", {}).get("subprocesses", {}).get("max_tracked_commands", 5000)
+            SubprocessSpy.install(max_tracked)
             self._spying_subprocesses = True
         else:
             self._spying_subprocesses = False
@@ -71,8 +96,19 @@ class Run:
         
         self.console_data: Dict[str, Any] = {}
         
-        # 4. Hardware tracking
-        self.hardware_data = get_hardware(self.config)
+        # 5. Event Stream
+        self.event_stream = None
+        if self.config.get("events", {}).get("enabled", False):
+            self.event_stream = EventStream(self.run_dir)
+            
+        # 6. Background Telemetry (RAM watcher)
+        self.resource_watcher = None
+        res_cfg = self.config.get("capture", {}).get("resources", {})
+        if res_cfg.get("depth", "off") != "off":
+            interval = res_cfg.get("sample_interval_seconds", 15)
+            max_fails = res_cfg.get("max_consecutive_failures", 3)
+            self.resource_watcher = ResourceWatcher(self, interval, max_fails)
+            self.resource_watcher.start()
         # ---------------------------------------------
         
         # Wire up crash-safety
@@ -101,13 +137,18 @@ class Run:
             SubprocessSpy.finalize_all()
             SubprocessSpy.uninstall()
         self.console_data = self.console_interceptor.stop()
+        if self.resource_watcher:
+            self.resource_watcher.stop()
+        if self.event_stream:
+            self.event_stream.close()
 
     def stop(self, outcome: str = "completed") -> None:
         """Manually halt tracking, overriding the atexit hooks."""
         self._outcome = outcome
         self._finalize_state()
-        self.writer.write_artifacts()
-        
+        if getattr(self, "writer", None):
+            self.writer.write_artifacts()
+            
         global _active_run
         if _active_run is self:
             _active_run = None
@@ -144,6 +185,7 @@ class Run:
             "subprocesses": subprocess_records,
             
             "hardware": self.hardware_data,
+            "resources": self.resource_watcher.to_manifest_dict() if self.resource_watcher else {"capture_state": {"status": "suppressed"}},
             
             "capture": {
                 "output_base_dir": str(self.run_dir.parent),
