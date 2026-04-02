@@ -48,10 +48,9 @@ It should be easy to adopt:
 
 ```python
 import runtrace
-runtrace.start()
 ```
 
-No frameworks, no restructuring, no heavy setup.
+For most people, that's it. No frameworks, no restructuring, no heavy setup.
 
 ### 3. Manifest over logs
 
