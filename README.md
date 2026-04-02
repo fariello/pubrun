@@ -1,55 +1,46 @@
 # runtrace
 
-A lightweight Python library for capturing execution context to enable reproducibility, comparison, and troubleshooting of script runs.
+> **Because you have better things to do than remember what PyTorch version you used six months ago.**
 
----
+A stupidly-simple Python library that eliminates the boilerplate of documenting methodology, making it dramatically easier to publish, share, and reproduce your models and research.
 
 ## Overview
 
-`runtrace` is a provenance library designed to make reproducibility the default.
+Researchers and engineers spend countless hours manually writing down what dependencies, environment variables, hardware constraints, and configurations were used to generate a specific outcome. `runtrace` automates this burden.
 
-With minimal effort, it records:
+With a single `import runtrace`, it silently records:
 
 - how a script was invoked
 - where and when it ran
-- environment and dependency details
-- system and resource context
+- environment and dependency matrices
+- hardware constraints (GPU models, precisions, cores)
 - console output (optional)
-- configuration used for the run
+- configuration states
 
 The goal is simple:
 
-> Make every run explainable.
-
----
+> Make publishing and reproducing results effortless.
 
 ## Vision
 
-Modern Python workflows often rely on implicit state:
+Modern scientific and computational workflows often rely on implicit state, which acts as a massive barrier to publishing clean, reproducible code. When it's time to publish a paper or ship a model, researchers are forced to retroactively piece together their methodology from memory.
 
-- environment differences
-- dependency drift
-- hidden configuration
-- machine-specific behavior
-
-`runtrace` aims to eliminate this ambiguity.
+`runtrace` exists to eliminate this friction.
 
 The vision is a world where:
 
-- every run can be understood after the fact
-- differences between runs are transparent
-- debugging is based on facts, not guesswork
-- reproducibility is a default, not an afterthought
-
----
+- documenting a run's environment requires zero manual overhead
+- creating the "how to reproduce" guide for peers is entirely automated
+- differences between runs are instantly transparent via machine-readable manifests
+- reproducibility is practically free, reducing the tax on publishing
 
 ## Philosophy
 
 `runtrace` is built around a few core principles:
 
-### 1. Reproducibility first
+### 1. Built for Publishing
 
-The primary goal is not logging or monitoring, but ensuring that a run can be understood and, as much as possible, reproduced.
+The primary goal is not auditing: it's empowering researchers to painlessly verify and publish their computational methods so that others can validate and reproduce their exact work without guesswork.
 
 ### 2. Minimal friction
 
@@ -97,8 +88,6 @@ The data model is designed from the start to support:
 - `inspect()`
 - future `replay()` guidance
 
----
-
 ## Key Features
 
 - Manifest-first design (`manifest.json` per run)
@@ -109,11 +98,16 @@ The data model is designed from the start to support:
 - Structured, comparable output
 - Designed for future comparison and replay tooling
 
----
-
 ## Quick Start
 
 ### Minimal usage
+If you're a normal person running Python 3.11 or later:
+```python
+import runtrace
+```
+That's it. Nothing else.
+
+If you've changed the config file so that `auto_run` is `false`:
 
 ```python
 import runtrace
@@ -139,8 +133,6 @@ def main():
     ...
 ```
 
----
-
 ## Output Structure
 
 Each run produces a directory:
@@ -164,8 +156,6 @@ Contents may include:
 - `config.resolved.json`
 - `summary.txt`
 
----
-
 ## Configuration
 
 `runtrace` supports configuration from:
@@ -182,8 +172,6 @@ python -m runtrace --create-config
 ```
 
 This generates a fully commented config file with default values.
-
----
 
 ## Console Capture
 
@@ -204,8 +192,6 @@ Example output:
 ```
 2026-04-01T19:33:31.482Z +00.482 stdout Starting analysis
 ```
-
----
 
 ## Manifest
 
@@ -230,13 +216,9 @@ Schema available at:
 schemas/manifest.schema.json
 ```
 
----
-
 ## Status
 
 Early-stage design (Draft v0.2)
-
----
 
 ## License
 
