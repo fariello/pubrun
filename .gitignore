@@ -6,6 +6,10 @@
 # Node artifact files
 node_modules/
 dist/
+tmp/
+runs/
+__pycache__/
+*.pyc
 
 # Compiled Java class files
 *.class

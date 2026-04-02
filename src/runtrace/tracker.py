@@ -8,6 +8,13 @@ from typing import Any, Dict, Optional
 from runtrace.config import resolve_config
 from runtrace.writer import ArtifactWriter
 
+# Import our capture engines
+from runtrace.capture.invocation import get_invocation
+from runtrace.capture.subprocesses import SubprocessSpy
+from runtrace.capture.console import ConsoleInterceptor
+from runtrace.capture.hardware import get_hardware
+
+
 # Define a singleton instance to manage global tracking state
 _active_run: Optional["Run"] = None
 
@@ -46,6 +53,28 @@ class Run:
         # State tracking (to detect crashes)
         self._outcome = "unknown"
         
+        # ---- Phase 3: Bootstrap Capture Engines ----
+        # 1. Invocation canonical path extraction
+        self.invocation_data = get_invocation()
+        
+        # 2. Subprocess Monkey Patching
+        if self.config.get("capture", {}).get("subprocesses", {}).get("enabled", False):
+            SubprocessSpy.install()
+            self._spying_subprocesses = True
+        else:
+            self._spying_subprocesses = False
+            
+        # 3. Console tee hook
+        console_mode = self.config.get("capture", {}).get("console", {}).get("capture_mode", "off")
+        self.console_interceptor = ConsoleInterceptor(self.run_dir, console_mode)
+        self.console_interceptor.start()
+        
+        self.console_data: Dict[str, Any] = {}
+        
+        # 4. Hardware tracking
+        self.hardware_data = get_hardware(self.config)
+        # ---------------------------------------------
+        
         # Wire up crash-safety
         self.writer = ArtifactWriter(self)
         self.writer.register_atexit()
@@ -66,6 +95,12 @@ class Run:
                 self._outcome = "failed"
             else:
                 self._outcome = "completed"
+                
+        # Gracefully shutdown engines
+        if self._spying_subprocesses:
+            SubprocessSpy.finalize_all()
+            SubprocessSpy.uninstall()
+        self.console_data = self.console_interceptor.stop()
 
     def stop(self, outcome: str = "completed") -> None:
         """Manually halt tracking, overriding the atexit hooks."""
@@ -86,6 +121,8 @@ class Run:
         def _str_fmt(dt: datetime) -> str:
             """Formats datetime specifically to match exact JSON Schema regex pattern: Z"""
             return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+            
+        subprocess_records = SubprocessSpy.get_records() if self._spying_subprocesses else []
 
         return {
             "schema_version": "1.0",
@@ -100,15 +137,19 @@ class Run:
                 "elapsed_seconds": elapsed,
                 "capture_state": {"status": "complete"}
             },
-            "invocation": {
-                "argv": sys.argv,
-                "capture_state": {"status": "complete"}
-            },
+            
+            # Integrated Phase 3 sections
+            "invocation": self.invocation_data,
+            "console": self.console_data,
+            "subprocesses": subprocess_records,
+            
+            "hardware": self.hardware_data,
+            
             "capture": {
                 "output_base_dir": str(self.run_dir.parent),
                 "run_dir": str(self.run_dir),
                 "event_stream_enabled": self.config.get("events", {}).get("enabled", False),
-                "console_capture_mode": self.config.get("console", {}).get("capture_mode", "off"),
+                "console_capture_mode": self.config.get("capture", {}).get("console", {}).get("capture_mode", "off"),
                 "capture_state": {"status": "complete"}
             },
             "status": {
