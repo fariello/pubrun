@@ -10,22 +10,50 @@ class TqdmSafeTee:
     Tees standard outputs while stripping carriage return (\r) sequences.
     This dynamically squashes Data Science progress bars so the resulting
     text log file doesn't explode to 2 gigabytes during long training loops.
+    
+    This acts as a transparent proxy for an underlying text stream (e.g., sys.stdout),
+    forwarding all writes to both the original stream and an optional file logger.
+    
+    Example:
+        >>> with open('out.log', 'w') as f:
+        ...     tee = TqdmSafeTee(sys.stdout, f)
+        ...     sys.stdout = tee
+        ...     print("This goes to stdout and out.log")
+        ...     sys.stdout = tee.original_stream
     """
     def __init__(self, original_stream: TextIO, log_file: Optional[TextIO]):
+        """
+        Initializes the TqdmSafeTee stream wrapper.
+        
+        Args:
+            original_stream: The original output stream to pass data to (e.g., sys.stdout).
+            log_file: An optional file-like object to tee the text to. If None,
+                      data is just passed to the original stream.
+        """
         self.original_stream = original_stream
         self.log_file = log_file
         self.line_count = 0
         self._current_buffer = ""
         
     def write(self, data: str) -> int:
+        """
+        Writes data to the original stream and to the log file (safely squashing progress bars).
+        
+        Args:
+            data: The string to write.
+            
+        Returns:
+            The number of characters written to the original stream.
+        """
         # 1. Passthrough exactly what was originally sent to the user's console
         ret = self.original_stream.write(data)
         
+        # If logging is disabled or file is closed, simply return what was written
         if not self.log_file or self.log_file.closed:
             return ret
             
         try:
-            # 2. Process for log file safely (TQDM interception)
+            # 2. Process strings for log file safely (handling carriage returns aka TQDM interception)
             for char in data:
                 if char == '\r':
                     # Progress bar carriage return - dump the line buffer invisibly
@@ -42,8 +70,13 @@ class TqdmSafeTee:
         return ret
         
     def flush(self) -> None:
+        """
+        Flushes both the underlying original stream and the internal log file.
+        Any remaining characters in the line buffer are written out before flushing.
+        """
         self.original_stream.flush()
         if self.log_file and not self.log_file.closed:
+            # Dump whatever is left in the buffer on a flush
             if self._current_buffer:
                 self.log_file.write(self._current_buffer + '\n')
                 self.line_count += 1
@@ -51,11 +84,36 @@ class TqdmSafeTee:
             self.log_file.flush()
             
     def __getattr__(self, name: str) -> Any:
+        """
+        Delegates standard stream attributes and methods (like isatty, encoding)
+        to the original stream wrapper to ensure full compatibility.
+        """
         return getattr(self.original_stream, name)
 
 
 class ConsoleInterceptor:
+    """
+    Manages the interception and logging of standard streams (stdout, stderr).
+    
+    This replaces `sys.stdout` and `sys.stderr` with proxy streams that tee
+    the output into both the console and persistent log files situated in
+    the provided run directory.
+    
+    Example:
+        >>> interceptor = ConsoleInterceptor(Path('/tmp/run_dir'), 'standard')
+        >>> interceptor.start()
+        >>> print("This will be logged!")
+        >>> metrics = interceptor.stop()
+    """
     def __init__(self, run_dir: Path, mode: str):
+        """
+        Initializes the ConsoleInterceptor.
+        
+        Args:
+            run_dir: The directory path where `stdout.log` and `stderr.log` will be created.
+            mode: The capture mode (e.g., 'off', 'basic', 'standard', 'deep'). If 'off',
+                  interception is disabled.
+        """
         self.run_dir = run_dir
         self.mode = mode
         self.stdout_log = None
@@ -63,10 +121,16 @@ class ConsoleInterceptor:
         self.stdout_tee = None
         self.stderr_tee = None
         
+        # Save original streams for safe teardown later
         self.original_stdout = sys.stdout
         self.original_stderr = sys.stderr
 
     def start(self) -> None:
+        """
+        Starts intercepting sys.stdout and sys.stderr. 
+        Creates log files and patches the system streams if the mode is not 'off'.
+        If an error occurs during setup, silently reverts back to original streams.
+        """
         if self.mode == "off":
             return
             
@@ -84,7 +148,15 @@ class ConsoleInterceptor:
             self.stop() # rollback
 
     def stop(self) -> Dict[str, Any]:
-        """Tears down hooks and returns the 'console' metrics spec dict."""
+        """
+        Tears down the console hooks, closes the log files, and formats the 
+        recorded metrics for inclusion in the run manifest.
+        
+        Returns:
+            A dictionary conforming to the manifest schema for the 'console' section,
+            reporting captured files, modes, and line count statistics.
+        """
+        # 1. Revert streams immediately to prevent interception of teardown logs
         sys.stdout = self.original_stdout
         sys.stderr = self.original_stderr
         

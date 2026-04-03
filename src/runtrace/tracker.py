@@ -15,6 +15,11 @@ from runtrace.capture.console import ConsoleInterceptor
 from runtrace.capture.hardware import get_hardware
 from runtrace.events import EventStream
 from runtrace.capture.resources import ResourceWatcher
+from runtrace.capture.process import get_process_info
+from runtrace.capture.python_runtime import get_python_runtime
+from runtrace.capture.packages import get_packages
+from runtrace.capture.environment import get_environment
+from runtrace.capture.git import get_git
 
 
 # Define a singleton instance to manage global tracking state
@@ -68,6 +73,11 @@ class Run:
             self.hardware_data = {}
             self.invocation_data = {}
             self.console_data = {}
+            self.git_data = {}
+            self.process_data = {}
+            self.python_data = {}
+            self.packages_data = {}
+            self.environment_data = {}
             self.console_interceptor = None
             _active_run = self
             return
@@ -79,7 +89,16 @@ class Run:
         # 1. Invocation canonical path extraction
         self.invocation_data = get_invocation(self.config)
         
-        # 3. Hardware tracking (Must run before SubprocessSpy to avoid logging self)
+        # 2. Get Git provenance before subprocess tracking to prevent logging ourselves
+        self.git_data = get_git(self.config)
+        
+        # 3. Process, Env, and Runtime Snapshotting
+        self.process_data = get_process_info(self.config)
+        self.python_data = get_python_runtime(self.config)
+        self.packages_data = get_packages(self.config)
+        self.environment_data = get_environment(self.config)
+        
+        # 4. Hardware tracking (Must run before SubprocessSpy to avoid logging psutil tools etc)
         self.hardware_data = get_hardware(self.config)
         
         # 4. Console & Subprocess interception setup
@@ -183,6 +202,20 @@ class Run:
             "invocation": self.invocation_data,
             "console": self.console_data,
             "subprocesses": subprocess_records,
+            
+            "process": self.process_data,
+            "python": self.python_data,
+            "packages": self.packages_data,
+            "environment": self.environment_data,
+            "git": self.git_data,
+            "errors": {"records": [], "capture_state": {"status": "complete"}},
+            
+            "config": {
+                "resolved_config_path": "config.resolved.json",
+                "sources_path": None,
+                "source_files": [],
+                "capture_state": {"status": "complete"}
+            },
             
             "hardware": self.hardware_data,
             "resources": self.resource_watcher.to_manifest_dict() if self.resource_watcher else {"capture_state": {"status": "suppressed"}},

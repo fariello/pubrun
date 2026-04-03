@@ -5,23 +5,40 @@ from pathlib import Path
 from typing import Dict, Any
 
 def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
-    """
-    Captures the shell invocation, sys.argv, working directory context, 
-    and reconstructs the command used to rerun the script cleanly without syntax errors
-    using shlex.join().
+    """Capture the comprehensive shell invocation ecosystem and script context.
+    
+    This function acts as the genesis of reproducibility. It answers the question:
+    "Exactly how was this program called from the terminal, where was it called from, 
+    and what files did the user point it at?"
+
+    Args:
+        config (Dict[str, Any]): The merged and resolved `runtrace` configuration dictionary, 
+                                 used to determine dynamic heuristic policies like `capture.inputs`.
+
+    Returns:
+        Dict[str, Any]: A tightly formatted payload containing working directory stat mappings, 
+                        the exact safe command needed to rerun the script natively, and mapped 
+                        heuristics isolating input datasets/files mapped in sys.argv.
     """
     try:
         argv = sys.argv
         
-        # Working directory canonicalization
+        # ---------------------------------------------------------
+        # 1. Canonical Working Directory Extractor
+        # ---------------------------------------------------------
+        # Path.cwd().resolve() is used to guarantee we shatter any symlinks the user 
+        # might be operating behind. This ensures the literal physical disk footprint 
+        # is logged, which prevents directory relocation bugs when reviving old runs.
         cwd = Path.cwd()
         wd_data = {
             "path": str(cwd),
             "real_path": str(cwd.resolve())
         }
         
-        # Script info
-        script_data = {}
+        # ---------------------------------------------------------
+        # 2. Main Entrypoint Script Evaluator
+        # ---------------------------------------------------------
+        script_data: Dict[str, Any] = {}
         entrypoint_type = "unknown"
         
         main_file = argv[0] if argv else ""
@@ -59,12 +76,21 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
         else:
             entrypoint_type = "interactive"
         
-        # Re-run command exact replica
-        # shlex.join natively escapes quotes and spaces elegantly
+        # ---------------------------------------------------------
+        # 3. Re-run Replication Engine
+        # ---------------------------------------------------------
+        # We leverage the native `shlex` library because naive string joining of sys.argv 
+        # destroys spaces and quotes (e.g. `python script.py "model V2"` would break).
+        # `shlex.join()` reconstructs the terminal tokens exactly to Python-spec.
         escaped_args = shlex.join(argv) 
         rerun_command = f"cd {shlex.quote(str(cwd))} && python {escaped_args}"
         
-        # Process dataset inputs if configured
+        # ---------------------------------------------------------
+        # 4. sys.argv Dataset Discovery Heuristics
+        # ---------------------------------------------------------
+        # We passively sweep all CLI arguments strictly looking for datasets.
+        # This completely bridges the gap of knowing if `data.csv` changed overnight
+        # because the user ran `python train.py --data data.csv`!
         inputs_data = []
         input_cfg = config.get("capture", {}).get("inputs", {})
         if input_cfg.get("enabled", True):
@@ -73,14 +99,19 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
             for idx, arg in enumerate(argv[1:], start=1):
                 try:
                     po = Path(arg)
-                    # Heuristic false-positive guard: If it strongly resembles an option flag, skip
+                    
+                    # Heuristic Safety 1: Discard Option Flags 
+                    # If an argument is perfectly identical to `--batch-size`, we skip to avoid 
+                    # accidentally discovering a folder named `batch-size` floating in the CWD.
                     if arg.startswith("-") or arg.startswith("--"):
                         continue
                         
-                    # Ignore common extensions
+                    # Heuristic Safety 2: Discard Runtime Caches
+                    # Filter extensions designated safely ignorable by the user.
                     if po.suffix and po.suffix.lstrip(".").lower() in ignore_ext:
                         continue
                         
+                    # Target Locked: Operating System confirms it is a real file/dir!
                     if po.exists():
                         arg_data = {
                             "arg_index": idx,
@@ -90,7 +121,8 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
                         }
                         
                         try:
-                            # Safely fetch OS level changes
+                            # Safely fetch non-blocking OS level changes.
+                            # `stat()` operates purely on OS-level inodes taking microseconds.
                             st = po.stat()
                             arg_data["size"] = st.st_size
                             arg_data["mtime"] = st.st_mtime
@@ -98,11 +130,14 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
                         except Exception:
                             pass
                             
+                        # DANGER ZONE: Deep Cryptographic Hash
                         if compute_md5 and po.is_file():
                             try:
                                 import logging
                                 logger = logging.getLogger("runtrace")
                                 logger.warning(f"Computing MD5 for sys.argv[{idx}] ({arg}). This may cause startup latency.")
+                                
+                                # Iterate in 4KB chunks memory-safely so we don't blow up the RAM on 200GB H5 datasets.
                                 md5 = hashlib.md5()
                                 with open(po, "rb") as f:
                                     for chunk in iter(lambda: f.read(4096), b""):

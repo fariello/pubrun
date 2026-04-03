@@ -339,6 +339,24 @@
                                 "string",
                                 "null"
                             ]
+                        },
+                        "size": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ]
+                        },
+                        "mtime": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "ctime": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
                         }
                     },
                     "default": {}
@@ -361,6 +379,64 @@
                         }
                     },
                     "default": {}
+                },
+                "inputs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "properties": {
+                            "arg_index": {
+                                "type": [
+                                    "integer",
+                                    "null"
+                                ]
+                            },
+                            "path": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ]
+                            },
+                            "real_path": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ]
+                            },
+                            "is_dir": {
+                                "type": [
+                                    "boolean",
+                                    "null"
+                                ]
+                            },
+                            "size": {
+                                "type": [
+                                    "integer",
+                                    "null"
+                                ]
+                            },
+                            "mtime": {
+                                "type": [
+                                    "number",
+                                    "null"
+                                ]
+                            },
+                            "ctime": {
+                                "type": [
+                                    "number",
+                                    "null"
+                                ]
+                            },
+                            "md5": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ]
+                            }
+                        }
+                    },
+                    "default": []
                 },
                 "capture_state": {
                     "$ref": "#/$defs/capture_state"
