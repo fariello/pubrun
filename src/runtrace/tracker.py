@@ -32,6 +32,8 @@ class Run:
     and generating the output structures cleanly.
     """
     def __init__(self, overrides: Optional[Dict[str, Any]] = None) -> None:
+        global _active_run
+        
         self.config = resolve_config(overrides)
         self.run_id = uuid.uuid4().hex[:8]
         self.pid = os.getpid()
@@ -67,7 +69,6 @@ class Run:
             self.invocation_data = {}
             self.console_data = {}
             self.console_interceptor = None
-            global _active_run
             _active_run = self
             return
         
@@ -116,7 +117,6 @@ class Run:
         self.writer.register_atexit()
 
         # Update global reference
-        global _active_run
         _active_run = self
 
     def _finalize_state(self) -> None:

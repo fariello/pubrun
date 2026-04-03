@@ -11,9 +11,21 @@ __version__ = "0.1.0"
 
 
 def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
-    """
-    Explicitly document user payloads in the active events.jsonl stream.
-    If no trace is active, behavior depends on the `on_inactive_annotate` config.
+    """Explicitly inject an annotation event into the active JSON telemetry stream.
+    
+    This function bridges the gap between your custom ML application logic and the 
+    underlying `runtrace` tracking payload. If `runtrace` is actively watching, 
+    this will serialize your `message` along with any arbitrary keyword arguments 
+    straight into the temporal `events.jsonl` pipeline.
+
+    Examples:
+        >>> import runtrace
+        >>> runtrace.annotate("Starting GPU Allocation")
+        >>> runtrace.annotate("Model Configured", layers=50, optimizer="adamw")
+
+    Args:
+        message (Optional[str], optional): The human-readable string flag to record. Defaults to None.
+        **kwargs: Any number of JSON-serializable key=value pairs to lock into the dataset payload.
     """
     current_run = get_current_run()
     if current_run and getattr(current_run, "event_stream", None):
@@ -29,16 +41,37 @@ def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
 
 
 def start(**kwargs: Any) -> Run:
-    """
-    Start a trace. Accepts configuration overrides as kwargs.
-    Returns the active Run tracker instance.
+    """Start tracking a new execution context.
+    
+    Initializes all telemetry sub-engines (like RAM watchers and Subprocess Spies) 
+    and generates a unique `.run_dir` for artifact storage. 
+    
+    You do NOT need to call this if `auto_start = true` inside `default.toml` or `RUNTRACE_AUTO_START` is enabled.
+
+    Examples:
+        >>> import runtrace
+        >>> tracker = runtrace.start(profile="deep")
+        >>> # DO ML WORK
+        >>> tracker.stop()
+
+    Returns:
+        Run: The active synchronization engine tracking your script.
     """
     return Run(overrides=kwargs)
 
 
 def stop() -> None:
-    """
-    Manually halt the active trace, flushing the manifest.json immediately.
+    """Manually culminate the active tracking session.
+    
+    This immediately flushes all internal caches to disk locally and generates the 
+    `manifest.json` report containing complete hardware specifications, Python runtime
+    status, and dependency profiles.
+    
+    If `runtrace` auto-started via dependency hook, this is invoked automatically 
+    when the Python interpretor exits.
+
+    Examples:
+        >>> runtrace.stop()
     """
     current_run = get_current_run()
     if current_run:
@@ -46,8 +79,17 @@ def stop() -> None:
 
 
 def audit_run(func: Optional[Callable] = None, **kwargs: Any) -> Callable:
-    """
-    Decorator to wrap a function execution in a tracked run.
+    """Wrap an entire Python function execution within an isolated runtrace boundary.
+
+    This decorator initiates `runtrace` specifically as the function begins, 
+    intercepts any generic Exceptions (flagging the trace result as 'failed'), 
+    and then cleanly halts telemetry the exact moment the function ceases.
+
+    Examples:
+        >>> @runtrace.audit_run(profile="deep")
+        >>> def heavy_computation_function():
+        >>>     perform_matrix_multiplication()
+        >>>     return True
     """
     if func is None:
         def wrapper(f: Callable) -> Callable:
@@ -68,8 +110,13 @@ def audit_run(func: Optional[Callable] = None, **kwargs: Any) -> Callable:
 
 
 class tracked_run:
-    """
-    Context manager to wrap a block of code in a tracked run.
+    """Context manager to surgically inject `runtrace` over a specific code footprint.
+
+    Allows isolated and distinct profiling for an explicitly delimited sequence of Python syntax.
+
+    Examples:
+        >>> with runtrace.tracked_run(profile="minimal"):
+        >>>     model.train(epochs=5)
     """
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
@@ -87,8 +134,15 @@ class tracked_run:
 
 
 class phase:
-    """
-    Context manager to mark a temporal phase within an active trace.
+    """Wrap execution steps into temporally labeled segments within the JSON tracker.
+    
+    If you are attempting to optimize distinct elements of an ML pipeline (e.g. Data Loading 
+    vs Gradient Descent), bounding each zone in a `phase()` natively writes boundary 
+    timestamps directly to `events.jsonl`.
+
+    Examples:
+        >>> with runtrace.phase("data_ingestion"):
+        >>>     df = pd.read_csv("huge.csv")
     """
     def __init__(self, name: str) -> None:
         self.name = name
