@@ -77,7 +77,7 @@ class Run:
         
         # ---- Phase 3: Bootstrap Capture Engines ----
         # 1. Invocation canonical path extraction
-        self.invocation_data = get_invocation()
+        self.invocation_data = get_invocation(self.config)
         
         # 3. Hardware tracking (Must run before SubprocessSpy to avoid logging self)
         self.hardware_data = get_hardware(self.config)

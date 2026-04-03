@@ -141,6 +141,26 @@ depth = "standard"
 depth = "standard"
 
 
+[capture.inputs]
+# -----------------------------------------------------------------------------
+# Detects input files passed via CLI (sys.argv) to record file status natively.
+# -----------------------------------------------------------------------------
+
+# Whether to run a heuristic scanning algorithm across your command line arguments
+# checking if they map to physical files or folders on disk.
+enabled = true
+
+# A list of extensions to ignore when classifying an argument as an input file
+# (e.g. ['pyc', 'log']).
+ignore_extensions = []
+
+# DANGER: Enabling this forcibly reads and hashes all detected input files. 
+# It provides maximum reproducibility but introduces severe startup latency 
+# if your dataset relies on monolithic 5GB .csv or .h5 files. 
+# Leave as false to exclusively record fast OS-level modifications (mtime/size).
+compute_md5 = false
+
+
 [capture.hardware]
 # -----------------------------------------------------------------------------
 # Determines how much deep inspection is performed on the physical hardware.
