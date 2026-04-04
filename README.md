@@ -102,6 +102,14 @@ pubrun --create-config
 ## Replay and Prove
 Every generated directory captures heavily structured `manifest.json` files alongside configurations natively engineered to support future evaluation via `compare()` and `diff()`.
 
+## 🛡️ Security Limitations & Community Input Request
+
+**Subprocess Argument Redaction**  
+`pubrun` implements "True Destructive Redaction," safely wiping recognizable secrets (like `AWS_SECRET_KEY`) natively from captured Environment variables. However, the `SubprocessSpy` engine natively captures Python subprocess shell commands exactly as they are executed (e.g. `subprocess.run(["curl", "-H", "Authorization: Bearer 123..."])`). These process executions are currently written to the `manifest.json` **in plaintext without redaction**.
+
+We are actively polling the community: **Should `pubrun` aggressively strip subprocess arguments matching `password/bearer/key` heuristics?**  
+Aggressive regex redaction risks inevitably damaging harmless strings (e.g., `--output=password_stats.csv`). We would love the open-source community's feedback on exactly how aggressively an execution telemetry framework should override user commands. If you have an opinion, please open an Issue!
+
 ## Acknowledgements
 `pubrun` was structurally redesigned and re-written from code fragments, scripts, and ideas over almost two decades with the assistance of Google Antigravity for its official v0.1.0 release.
 
