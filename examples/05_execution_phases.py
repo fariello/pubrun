@@ -4,6 +4,8 @@ Test 05: Phase Context Partitioning.
 Executes distinct boundary markers segregating functional epochs globally.
 """
 import os
+os.environ["PUBRUN_AUTO_START"] = "false"
+import os
 import json
 import time
 import pubrun

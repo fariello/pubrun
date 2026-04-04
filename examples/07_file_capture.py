@@ -4,6 +4,8 @@ Test 07: Argument-based Input File Capture.
 Mocks a sys.argv injection structurally mimicking user parsing to trigger metadata hashing natively.
 """
 import os
+os.environ["PUBRUN_AUTO_START"] = "false"
+import os
 import sys
 import json
 import pubrun
@@ -18,7 +20,7 @@ def main() -> None:
     # Inject dynamically into sys argv so the startup heuristics capture it naturally
     sys.argv.append(dummy_file)
     
-    with pubrun.tracked_run(profile="minimal") as active:
+    with pubrun.tracked_run() as active:
         run_dir = getattr(getattr(active, "run_tracker", active), "run_dir", None)
         pass # for auto-indentation
         

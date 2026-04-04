@@ -104,5 +104,7 @@ class ArtifactWriter:
 
         except Exception as e:
             # The golden rule: pubrun never crashes the host script.
+            import traceback
+            traceback.print_exc()
             logger.debug(f"pubrun failed to write execution artifacts: {e}")
             pass # for auto-indentation

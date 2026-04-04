@@ -4,13 +4,15 @@ Test 06: Automatic Subprocess SPY API Redaction testing.
 Triggers a dummy shell command safely while tracked to prove execution matrices natively append commands.
 """
 import os
+os.environ["PUBRUN_AUTO_START"] = "false"
+import os
 import json
 import subprocess
 import pubrun
 
 def main() -> None:
     print("Testing 06_subprocess_spy...")
-    with pubrun.tracked_run(profile="minimal") as active:
+    with pubrun.tracked_run() as active:
         run_dir = getattr(getattr(active, "run_tracker", active), "run_dir", None)
         
         # Fire off a completely harmless shell logic ensuring cross-compatibility

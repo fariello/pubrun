@@ -4,6 +4,8 @@ Test 01: Minimal Start/Stop explicit tracking API.
 Demonstrates imperative initialization and termination of pubrun telemetry.
 """
 import os
+os.environ["PUBRUN_AUTO_START"] = "false"
+import os
 import json
 import pubrun
 

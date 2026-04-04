@@ -4,6 +4,8 @@ Test 08: Programmatic Footprint Differential.
 Executes two disjoint tracked matrices locally simulating semantic drift and tests the diff() engine natively.
 """
 import os
+os.environ["PUBRUN_AUTO_START"] = "false"
+import os
 import pubrun
 
 def main() -> None:

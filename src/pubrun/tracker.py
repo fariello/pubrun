@@ -70,6 +70,7 @@ class Run:
         global _active_run
         
         self.config = resolve_config(overrides)
+        self.ref_count = 1
         self.run_id = uuid.uuid4().hex[:8]
         self.pid = os.getpid()
         self.script_name = Path(sys.argv[0]).stem if sys.argv and sys.argv[0] else "interactive"
@@ -172,6 +173,59 @@ class Run:
         # Update global reference
         _active_run = self
 
+    def _merge_and_migrate(self, overrides: Dict[str, Any]) -> None:
+        """
+        Dynamically merges mid-execution configuration states cleanly. 
+        If footprint bounded directories change dynamically, applies shutil.move() safely.
+        """
+        if not overrides:
+            return
+            
+        merged = resolve_config(overrides)
+        new_base_str = merged.get("core", {}).get("output_dir", "")
+        
+        if new_base_str:
+            new_base = Path(new_base_str)
+            new_dir = new_base / self.run_dir.name
+            
+            if new_dir != self.run_dir:
+                try:
+                    import shutil
+                    new_dir.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(self.run_dir), str(new_dir))
+                    old_dir_str = str(self.run_dir)
+                    self.run_dir = new_dir
+                    
+                    if getattr(self, "event_stream", None):
+                        self.event_stream.directory = new_dir
+                        self.event_stream.emit("warning", payload={"message": f"Storage tracking directory mutated mid-execution securely from {old_dir_str} to {new_dir}"})
+                        pass # for auto-indentation
+                        
+                    if getattr(self, "console_interceptor", None) and hasattr(self.console_interceptor, "file_path"):
+                        self.console_interceptor.file_path = new_dir / "console.log"
+                        if hasattr(self.console_interceptor, "file") and self.console_interceptor.file and not self.console_interceptor.file.closed:
+                            self.console_interceptor.file.flush()
+                            self.console_interceptor.file.close()
+                            self.console_interceptor.file = open(self.console_interceptor.file_path, "a", encoding="utf-8")
+                            pass # for auto-indentation
+                        pass # for auto-indentation
+                        
+                except Exception as e:
+                    import logging
+                    logging.getLogger("pubrun").warning(f"Failed mutating runtime paths dynamically: {e}")
+                    pass # for auto-indentation
+                
+        was_spying = self._spying_subprocesses
+        will_spy = merged.get("capture", {}).get("subprocesses", {}).get("enabled", False)
+        if will_spy and not was_spying:
+            max_tracked = merged.get("capture", {}).get("subprocesses", {}).get("max_tracked_commands", 5000)
+            SubprocessSpy.install(max_tracked)
+            self._spying_subprocesses = True
+            pass # for auto-indentation
+            
+        self.config = merged
+        pass # for auto-indentation
+
     def _finalize_state(self) -> None:
         """
         Called automatically natively prior to serialization to securely detach trace hooks.
@@ -232,7 +286,14 @@ class Run:
         Example:
             >>> tracker.stop("failed")
         """
-        self._outcome = outcome
+        if self._outcome != "failed":
+            self._outcome = outcome
+            pass # for auto-indentation
+            
+        self.ref_count = getattr(self, "ref_count", 1) - 1
+        if self.ref_count > 0:
+            return  # The tracer is still referenced by another bounded wrapper natively.
+            
         self._finalize_state()
         if getattr(self, "writer", None):
             self.writer.write_artifacts()
