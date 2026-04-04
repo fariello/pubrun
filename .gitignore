@@ -10,12 +10,14 @@ tmp/
 runs/
 __pycache__/
 *.pyc
+p3*/
 
 # Compiled Java class files
 *.class
 
 # Compiled Python bytecode
 *.py[cod]
+.pytest_cache/
 
 # Log files
 *.log
