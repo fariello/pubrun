@@ -213,3 +213,11 @@ depth = "off"
 # Whether to automatically generate a human-readable `summary.txt` in the run directory 
 # containing a quick diagnostic glance of the run layout.
 write_summary = true
+
+[methods]
+# -----------------------------------------------------------------------------
+# Configuration for the academic methods generator.
+# -----------------------------------------------------------------------------
+
+# Supported output formats: "markdown", "latex"
+format = "markdown"

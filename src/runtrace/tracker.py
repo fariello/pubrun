@@ -187,6 +187,7 @@ class Run:
         return {
             "schema_version": "1.0",
             "manifest_type": "runtrace-manifest",
+            "meta_ref": self.config.get("core", {}).get("meta_ref", None),
             "run": {
                 "run_id": self.run_id,
                 "capture_state": {"status": "complete"}

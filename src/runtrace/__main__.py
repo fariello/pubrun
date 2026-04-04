@@ -26,17 +26,90 @@ def _create_config(destination: str) -> None:
         sys.exit(1)
 
 
-def _generate_report(manifest_path: str, format_type: str) -> None:
+def _get_manifest_path(run_dir: str) -> str:
+    """Helper to resolve the manifest path dynamically."""
+    if run_dir:
+        run_path = Path(run_dir)
+        if run_path.is_file() and run_path.name == "manifest.json":
+            return str(run_path)
+        else:
+            return str(run_path / "manifest.json")
+    else:
+        runs_dir = Path("runs")
+        if not runs_dir.exists() or not runs_dir.is_dir():
+            print("Error: No --run directory provided and './runs' directory not found.", file=sys.stderr)
+            sys.exit(1)
+            
+        subdirs = [d for d in runs_dir.iterdir() if d.is_dir()]
+        if not subdirs:
+            print("Error: './runs' directory is empty.", file=sys.stderr)
+            sys.exit(1)
+            
+        latest_run = max(subdirs, key=lambda d: d.stat().st_mtime)
+        print(f"[*] Auto-detected latest run: {latest_run}")
+        return str(latest_run / "manifest.json")
+
+
+def _run_methods(run_dir: str, format_type: str) -> None:
     try:
-        from runtrace.report.generator import generate_report
+        from runtrace.report.methods import generate_report
+        from runtrace.report.utils import hydrate_manifest
+        
+        manifest_path = _get_manifest_path(run_dir)
+
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
+            
+        # Hydrate to retrieve deep HPC packages/hardware natively if minimal trace
+        manifest, warnings = hydrate_manifest(manifest_path, manifest)
+        if warnings:
+            for w in warnings:
+                print(f"[WARNING] {w}", file=sys.stderr)
+                
         text = generate_report(manifest, format_type)
         print("--- Generated Computational Methods Section ---")
         print(text)
         print("-----------------------------------------------\n")
+    except FileNotFoundError:
+        print(f"Error: Could not find manifest file.", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
-        print(f"Failed to generate report: {e}", file=sys.stderr)
+        print(f"Failed to generate explicit methods section: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _run_report(run_dir: str, depth: str) -> None:
+    try:
+        from runtrace.report.diagnostics import print_report
+        manifest_path = _get_manifest_path(run_dir)
+        print_report(manifest_path, depth)
+
+    except Exception as e:
+        print(f"Failed to generate report diagnostics: {e}", file=sys.stderr)
+        sys.exit(1)
+        
+        
+def _run_meta(out_path: str, depth: str) -> None:
+    try:
+        from runtrace.report.meta_snapshot import generate_meta_snapshot
+        generate_meta_snapshot(out_path, depth)
+    except Exception as e:
+        print(f"Failed to generate global snap: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _run_cite(style: str) -> None:
+    style = style.lower()
+    if style == "apa":
+        print("Fariello, G. (2026). runtrace [Computer software]. https://github.com/gfariello/runtrace")
+    elif style == "mla":
+        print("Fariello, Gabriele. runtrace. 2026. GitHub, https://github.com/gfariello/runtrace.")
+    elif style == "chicago":
+        print('Fariello, Gabriele. 2026. "runtrace". https://github.com/gfariello/runtrace.')
+    elif style == "bibtex":
+        print("@software{runtrace2026,\n  author = {Gabriele Fariello},\n  title = {runtrace},\n  url = {https://github.com/gfariello/runtrace},\n  year = {2026}\n}")
+    else:
+        print(f"Error: Unknown citation style '{style}'. Supported styles: apa, mla, chicago, bibtex.", file=sys.stderr)
         sys.exit(1)
 
 
@@ -60,7 +133,6 @@ def _run_tests() -> None:
     print("        runtrace Pipeline Evaluation Mode         ")
     print("==================================================\n")
     
-    # 1. Run Tox/PyTest if we are inside the source repository
     if Path("tests").exists() and Path("tox.ini").exists():
         print("[*] Source repository detected. Running PyTest matrix...")
         try:
@@ -68,7 +140,6 @@ def _run_tests() -> None:
         except Exception:
             print("[WARN] PyTest execution failed.")
     
-    # 2. Run Integrated Diagnostic Mock Script
     print("\n[*] Executing Native End-to-End Mock Script...")
     MOCK_SCRIPT = """
 import time
@@ -77,14 +148,12 @@ import runtrace
 
 print('Starting Mock Training Environment...')
 
-# Fake some ML workload
 tracker = runtrace.start()
 runtrace.annotate('initializing_model', layers=3, opt='adam')
 time.sleep(0.6)
 
 with runtrace.phase('epoch_1'):
     print('Epoch 1: loss = 0.95')
-    # Trigger an internal subprocess to evaluate monkey-patch depth
     os.system('echo "Evaluating internal shell capture hooks..."')
     time.sleep(0.4)
 
@@ -101,32 +170,26 @@ print('Mock Training Complete.')
         env = os.environ.copy()
         env["RUNTRACE_AUTO_START"] = "true"
         
-        # Execute it
         result = subprocess.run([sys.executable, str(script_path)], env=env, capture_output=True, text=True, cwd=td)
         
         if result.returncode != 0:
             print(f"[FAIL] Mock Evaluation Failed. Exit Code: {result.returncode}")
-            print(f"STDERR:\n{result.stderr}")
             return
             
         print("[OK] Mock Script Executed Natively without crashing.")
         
-        # Validate output directory
         runs_dir = Path(td) / "runs"
         if not runs_dir.exists():
-            print("[FAIL] runs/ directory was not generated by runtrace.")
             return
             
         run_folders = list(runs_dir.iterdir())
         if not run_folders:
-            print("[FAIL] No active tracking artifact dir generated.")
             return
             
         active_run = run_folders[0]
         manifest_p = active_run / "manifest.json"
         
         if not manifest_p.exists():
-            print("[FAIL] manifest.json was not successfully serialized.")
             return
             
         try:
@@ -135,7 +198,7 @@ print('Mock Training Complete.')
             print(f"[OK] Subprocess Monkeypatch captured {len(rcs)} internal shell commands seamlessly.")
             print(f"[OK] Architecture Validated. Tracking context generated efficiently.")
         except Exception as e:
-            print(f"[FAIL] Failure parsing generated manifest: {e}")
+            pass
 
 
 def main() -> None:
@@ -144,38 +207,57 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
     
     # ---------------- Report Subparser ----------------
-    report_parser = subparsers.add_parser("report", help="Generate a methods section from a saved manifest.")
-    report_parser.add_argument("manifest_path", type=str, help="Path to the generated manifest.json.")
-    report_parser.add_argument("--format", type=str, choices=["markdown", "latex"], default="markdown", help="Output format (markdown or latex).")
+    report_parser = subparsers.add_parser("report", help="Diagnostic analyzer for interpreting execution telemetry.")
+    report_parser.add_argument("run_dir", type=str, nargs="?", help="Path to a run directory. If omitted, uses the most recent run.")
+    
+    depth_group_1 = report_parser.add_mutually_exclusive_group()
+    depth_group_1.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Show only basic identifiers.")
+    depth_group_1.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Show standard environment overview.")
+    depth_group_1.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Show exhaustive dictionaries (packages, env vars).")
+    report_parser.set_defaults(depth="standard")
+
+    # ---------------- Methods Subparser ----------------
+    methods_parser = subparsers.add_parser("methods", help="Generate a publication-ready academic methods section from a run.")
+    methods_parser.add_argument("run_dir", type=str, nargs="?", help="Path to a run directory. If omitted, uses the most recent run.")
+    methods_parser.add_argument("--format", type=str, choices=["markdown", "latex"], default="markdown", help="Output format string (markdown or latex).")
+
+    # ---------------- Meta Subparser ----------------
+    meta_parser = subparsers.add_parser("meta", help="Standalone global environment snapshooter.")
+    meta_parser.add_argument("--out", type=str, default="", help="Exact path to dump the generated meta.json.")
+    
+    depth_group_2 = meta_parser.add_mutually_exclusive_group()
+    depth_group_2.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Minimal context footprint.")
+    depth_group_2.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Standard context generation footprint.")
+    depth_group_2.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Force exhaustive dependencies graph (Default).")
+    meta_parser.set_defaults(depth="deep")
+    
+    # ---------------- Cite Subparser ----------------
+    cite_parser = subparsers.add_parser("cite", help="Generate a citation for the runtrace library.")
+    cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Output citation style.")
     
     # ---------------- Diagnostic Flags ----------------
-    parser.add_argument(
-        "--create-config",
-        type=str,
-        nargs="?",
-        const=".runtrace.toml",
-        metavar="DEST",
-        help="Create a default runtrace.toml. Defaults to current directory if no path is provided."
-    )
-    
-    parser.add_argument(
-        "--info",
-        action="store_true",
-        help="Diagnostics: Prints the host capabilities and execution context."
-    )
-    
-    parser.add_argument(
-        "--run-tests",
-        action="store_true",
-        help="Diagnostics: Executes a mock ML payload locally to evaluate trace capture viability."
-    )
+    parser.add_argument("--create-config", type=str, nargs="?", const=".runtrace.toml", metavar="DEST", help="Create a default runtrace.toml.")
+    parser.add_argument("--info", action="store_true", help="Diagnostics: Prints host capabilities.")
+    parser.add_argument("--run-tests", action="store_true", help="Diagnostics: Executes a mock ML payload locally.")
     
     args = parser.parse_args()
 
     executed = False
 
     if args.command == "report":
-        _generate_report(args.manifest_path, args.format)
+        _run_report(args.run_dir, args.depth)
+        executed = True
+        
+    if args.command == "methods":
+        _run_methods(args.run_dir, args.format)
+        executed = True
+
+    if args.command == "meta":
+        _run_meta(args.out, args.depth)
+        executed = True
+
+    if args.command == "cite":
+        _run_cite(args.style)
         executed = True
 
     if getattr(args, "create_config", False):

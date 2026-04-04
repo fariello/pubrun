@@ -91,6 +91,7 @@ The data model is designed from the start to support:
 
 - Manifest-first design (`manifest.json` per run)
 - **Automated Methods Generation** (Writes publication methodology summaries natively)
+- **Deep Metadata Introspection** (`runtrace meta` parser)
 - Optional event stream for deeper diagnostics
 - Tee-style console capture (`stdout` / `stderr`)
 - Config-driven behavior with sensible defaults
@@ -169,7 +170,7 @@ Contents may include:
 ### Create a default config
 
 ```bash
-python -m runtrace --create-config
+runtrace --create-config
 ```
 
 This generates a fully commented config file with default values.
@@ -177,8 +178,23 @@ This generates a fully commented config file with default values.
 ### Academic Reporting
 To generate a "Computational Methods" paragraph natively derived from a run, you can pull it out of a captured manifest into Markdown or LaTeX:
 ```bash
-python -m runtrace report ./runs/runtrace.../manifest.json --format latex
+runtrace methods ./runs/runtrace.../manifest.json --format latex
 ```
+If you omit the file path, `runtrace` will automatically look out for your most recent local execution and generate the report identically.
+
+### Diagnostics & Inspection
+If you want to debug an environment without manually reading hundreds of `JSON` properties, `runtrace` can print a beautiful, structured analysis of any run dynamically (including resolving child-parent references and detecting code-drift!):
+```bash
+runtrace report --deep
+```
+By default, if you don't provide a specific `--run` directory flag, it intelligently grabs the most recent execution from your local `./runs/` folder.
+
+### Global Snapshotting (HPC & Distributed Jobs)
+If you run thousands of Array jobs concurrently, you don't want each run wasting gigabytes logging the exact identical heavy dependency graphs. `runtrace` enables you to snap an overarching master Environment Node:
+```bash
+runtrace meta --out ./runs/meta.json --deep
+```
+Set `RUNTRACE_META_REF=meta.json` in your bash file and all lightweight child executions will beautifully hydrate the parent dependencies statically before publication dynamically!
 
 ## Console Capture
 

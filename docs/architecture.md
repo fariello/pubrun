@@ -163,7 +163,9 @@ The physical execution engine is logically divided into several key systems that
 - **Event Streamer**: Real-time structured execution events to `events.jsonl`.
 - **Console Manager**: Tee-style wrapper around standard streams.
 - **Artifact Writer**: Atomically generates the isolated Run Directory and serializes all outputs reliably.
-- **Report Generator**: A post-execution CLI and writer integration that interprets the `manifest.json` and automatically outputs a prose-based "Computational Methods" summary in Markdown or LaTeX formats.
+- **Diagnostics Analyzer**: A post-execution CLI analyzer (`runtrace report`) that parses the `manifest.json` and evaluates configuration, events, and script drift dynamically to present a human-readable stream of execution provenance.
+- **Methods Generator**: A post-execution CLI and writer integration (`runtrace methods`) that interprets the `manifest.json` and automatically outputs a prose-based "Computational Methods" summary in Markdown or LaTeX formats.
+- **Global Context Snapshooter**: A standalone CLI command (`runtrace meta`) that bypasses script-execution to natively generate deep introspective global execution context maps (e.g., full virtual environments) to act as a definitive parent node for massively parallel symmetric child arrays.
 
 ## 26. Summary
 
