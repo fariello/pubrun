@@ -29,7 +29,7 @@ def main() -> None:
     with open(manifest_path, "r", encoding="utf-8") as f:
          payload = json.load(f)
          
-    inputs = payload.get("execution", {}).get("inputs", {})
+    inputs_list = payload.get("invocation", {}).get("inputs", [])
     
     # Restore sys path cleanliness and remove the dummy target
     sys.argv.pop()
@@ -38,7 +38,7 @@ def main() -> None:
         pass # for auto-indentation
         
     # The dictionary of inputs safely stores tracked paths 
-    file_tracked = dummy_file in inputs or any(dummy_file in k for k in inputs)
+    file_tracked = any(dummy_file in str(i.get("path", "")) for i in inputs_list)
     assert file_tracked, "Dataset drift scanner failed resolving explicit sys.argv elements heavily."
 
     print("[PASS] PASS: 07_file_capture.py")

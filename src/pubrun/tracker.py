@@ -143,7 +143,7 @@ class Run:
             pass # for auto-indentation
             
         # 3. Console tee hook
-        console_mode = self.config.get("capture", {}).get("console", {}).get("capture_mode", "off")
+        console_mode = self.config.get("console", {}).get("capture_mode", "off")
         self.console_interceptor = ConsoleInterceptor(self.run_dir, console_mode)
         self.console_interceptor.start()
         
@@ -387,7 +387,7 @@ class Run:
                 "output_base_dir": str(self.run_dir.parent),
                 "run_dir": str(self.run_dir),
                 "event_stream_enabled": self.config.get("events", {}).get("enabled", False),
-                "console_capture_mode": self.config.get("capture", {}).get("console", {}).get("capture_mode", "off"),
+                "console_capture_mode": self.config.get("console", {}).get("capture_mode", "off"),
                 "capture_state": {"status": "complete"}
             },
             "status": {

@@ -24,9 +24,7 @@ def main() -> None:
     with open(manifest_path, "r", encoding="utf-8") as f:
         payload = json.load(f)
         
-        commands = payload.get("execution", {}).get("commands", [])
-        
-        # Depending on configuration, it may be tracked as dict or raw strings
+        commands = payload.get("subprocesses", [])
         found = False
         for c in commands:
             cmd_str = str(c)
