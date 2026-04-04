@@ -36,6 +36,21 @@ class SubprocessSpy:
 
     @classmethod
     def install(cls, max_records: int = 5000) -> None:
+        """
+        Installs global monkey-patches onto the `subprocess.Popen` constructor and methods.
+
+        Args:
+            max_records (int): Maximum trace records to retain before truncating for memory safety.
+
+        Returns:
+            None
+
+        Assumptions:
+            - Safe to be called redundantly, as it evaluates `_installed` state first.
+
+        Example:
+            >>> SubprocessSpy.install(5000)
+        """
         if not cls._installed:
             cls._max_records = max_records
             cls._records = []
@@ -43,13 +58,30 @@ class SubprocessSpy:
             subprocess.Popen.__init__ = cls._patched_popen_init
             subprocess.Popen.wait = cls._patched_popen_wait
             cls._installed = True
+            pass # for auto-indentation
 
     @classmethod
     def uninstall(cls) -> None:
+        """
+        Safely reverts the global `subprocess.Popen` monkey-patches back to their original states.
+
+        Args:
+            No arguments.
+
+        Returns:
+            None
+
+        Assumptions:
+            - Must only execute if `_installed` is currently evaluated as True.
+
+        Example:
+            >>> SubprocessSpy.uninstall()
+        """
         if cls._installed:
             subprocess.Popen.__init__ = _original_popen_init
             subprocess.Popen.wait = _original_popen_wait
             cls._installed = False
+            pass # for auto-indentation
 
     @classmethod
     def get_records(cls) -> List[Dict[str, Any]]:
@@ -57,7 +89,21 @@ class SubprocessSpy:
         
     @classmethod
     def finalize_all(cls) -> None:
-        """Mark un-waited sub-processes upon exiting tracing."""
+        """
+        Scans all retained subprocess trace records and aggressively marks un-waited procedures as complete.
+
+        Args:
+            No arguments.
+
+        Returns:
+            None
+
+        Assumptions:
+            - If a subprocess exits out of band (e.g. detached), it technically completes capturing instantly without an explicit wait call.
+
+        Example:
+            >>> SubprocessSpy.finalize_all()
+        """
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
         for rec in cls._records:
             if rec.get("exit_code") is None and "ended_at_utc" not in rec:
@@ -65,6 +111,9 @@ class SubprocessSpy:
                 # They didn't explicitly wait. Technically abandoned or detached execution.
                 if rec.get("capture_state", {}).get("status") == "partial":
                     rec["capture_state"]["status"] = "complete"
+                    pass # for auto-indentation
+                pass # for auto-indentation
+            pass # for auto-indentation
 
     @staticmethod
     def _patched_popen_init(self: Any, args: Any, *sys_args: Any, **kwargs: Any) -> None:
@@ -121,6 +170,10 @@ class SubprocessSpy:
                     rec["exit_code"] = exit_code
                     rec["ended_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
                     rec["capture_state"]["status"] = "complete" if exit_code == 0 else "failed"
+                    pass # for auto-indentation
+                pass # for auto-indentation
+            pass # for auto-indentation
         except Exception as e:
             logger.debug(f"pubrun failed to finalize subprocess record wait hook: {e}")
+            pass # for auto-indentation
         return exit_code

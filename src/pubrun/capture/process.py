@@ -4,16 +4,20 @@ from typing import Dict, Any
 
 def get_process_info(config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Captures information about the current operating system process.
+    Captures process-level information from the host operating system.
     
     This includes the Process ID (PID), Parent Process ID (PPID), and details 
     about the user executing the script (username, UID, GID).
     
     Args:
-        config: The fully resolved pubrun configuration dictionary.
+        config (Dict[str, Any]): The fully resolved pubrun configuration dictionary.
         
     Returns:
-        A dictionary compliant with the `process` schema section.
+        Dict[str, Any]: A dictionary compliant with the `process` schema section.
+
+    Assumptions:
+        - The `getpass.getuser()` call may fail on strictly isolated container environments, defaulting securely to "unknown".
+        - The UID and GID checks fall back cleanly to `None` on unsupported architectures like Windows.
         
     Example:
         >>> get_process_info({})
@@ -34,6 +38,7 @@ def get_process_info(config: Dict[str, Any]) -> Dict[str, Any]:
         username = getpass.getuser()
     except Exception:
         username = "unknown"
+        pass # for auto-indentation
         
     # 2. Extract UID/GID if supported by the OS (Unix/Linux/macOS)
     uid = getattr(os, 'getuid', lambda: None)()

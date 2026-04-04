@@ -5,20 +5,37 @@ from pathlib import Path
 from typing import Dict, Any
 
 def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
-    """Capture the comprehensive shell invocation ecosystem and script context.
+    """
+    Captures the comprehensive shell invocation ecosystem and script context.
     
-    This function acts as the genesis of reproducibility. It answers the question:
-    "Exactly how was this program called from the terminal, where was it called from, 
-    and what files did the user point it at?"
+    This function isolates the exact command needed to rerun the script, the canonical working directory, 
+    and actively parses `sys.argv` using heuristic discovery to trace input dataset modifications.
 
     Args:
         config (Dict[str, Any]): The merged and resolved `pubrun` configuration dictionary, 
-                                 used to determine dynamic heuristic policies like `capture.inputs`.
+                                 used to determine dynamic policies like `capture.inputs`.
 
     Returns:
-        Dict[str, Any]: A tightly formatted payload containing working directory stat mappings, 
-                        the exact safe command needed to rerun the script natively, and mapped 
-                        heuristics isolating input datasets/files mapped in sys.argv.
+        Dict[str, Any]: A tightly formatted payload containing working directory mapping, 
+                        the exact shell command to reproduce the run natively, and heuristically
+                        isolated input dataset paths with timestamps.
+
+    Assumptions:
+        - `Path.cwd().resolve()` is strictly utilized to bypass symlink aliases, correctly mapping the absolute disk footprint.
+        - String options inside `sys.argv` matching `--` flags are cleanly bypassed by default.
+        - `compute_md5` is avoided by default unless strictly enabled due to performance penalties on massive files.
+        
+    Example:
+        >>> get_invocation({})
+        {
+            'argv': ['script.py', '--data', 'data.csv'], 
+            'command_line': 'script.py --data data.csv',
+            'rerun_command': 'cd /app && python script.py --data data.csv',
+            'entrypoint_type': 'script',
+            'working_directory': {'path': '/app', 'real_path': '/app'},
+            'inputs': [],
+            'capture_state': {'status': 'complete'}
+        }
     """
     try:
         argv = sys.argv
@@ -60,7 +77,7 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
                     script_data["mtime"] = stats.st_mtime
                     script_data["ctime"] = stats.st_ctime
                 except Exception:
-                    pass
+                    pass # for auto-indentation
                 
                 # Try to hash the script file for exact reproducibility validation
                 try:
@@ -68,13 +85,18 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
                         file_hash = hashlib.sha256(f.read()).hexdigest()
                     script_data["sha256"] = file_hash
                 except Exception:
-                    pass
+                    pass # for auto-indentation
+                pass # for auto-indentation
             elif main_file == "-m":
                 entrypoint_type = "module"
+                pass # for auto-indentation
             elif main_file == "-c":
                 entrypoint_type = "interactive"
+                pass # for auto-indentation
+            pass # for auto-indentation
         else:
             entrypoint_type = "interactive"
+            pass # for auto-indentation
         
         # ---------------------------------------------------------
         # 3. Re-run Replication Engine
@@ -128,7 +150,7 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
                             arg_data["mtime"] = st.st_mtime
                             arg_data["ctime"] = st.st_ctime
                         except Exception:
-                            pass
+                            pass # for auto-indentation
                             
                         # DANGER ZONE: Deep Cryptographic Hash
                         if compute_md5 and po.is_file():
@@ -142,13 +164,18 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
                                 with open(po, "rb") as f:
                                     for chunk in iter(lambda: f.read(4096), b""):
                                         md5.update(chunk)
+                                        pass # for auto-indentation
                                 arg_data["md5"] = md5.hexdigest()
                             except Exception:
-                                pass
+                                pass # for auto-indentation
+                            pass # for auto-indentation
                                 
                         inputs_data.append(arg_data)
+                        pass # for auto-indentation
                 except Exception:
-                    pass
+                    pass # for auto-indentation
+                pass # for auto-indentation
+            pass # for auto-indentation
 
         return {
             "argv": argv,
@@ -165,3 +192,4 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
             "argv": sys.argv,
             "capture_state": {"status": "failed", "detail": str(e)}
         }
+        pass # for auto-indentation

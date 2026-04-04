@@ -23,6 +23,7 @@ def _get_rss_windows() -> int:
             return int(lines[1])
     except Exception as e:
         logger.debug(f"pubrun failed Windows RSS poll: {e}")
+        pass # for auto-indentation
     return 0
 
 
@@ -74,12 +75,27 @@ class ResourceWatcher(threading.Thread):
         return 0
 
     def run(self) -> None:
-        """Continuously watches telemetry in a 100% background manner."""
+        """
+        Continuously watches process telemetry in a background daemon thread.
+        
+        Args:
+            No arguments.
+            
+        Returns:
+            None
+            
+        Assumptions:
+            - A fast initial check is executed upon initialization to ensure brief execution runs aren't missed completely.
+            
+        Example:
+            >>> watcher.start()
+        """
         # Check instantly so we don't skip short runs
         self._update_metrics()
         
         while not self._stop_event.wait(timeout=self.interval):
             self._update_metrics()
+            pass # for auto-indentation
 
     def _update_metrics(self) -> None:
         rss = self._poll_rss()
@@ -88,26 +104,60 @@ class ResourceWatcher(threading.Thread):
             self._consecutive_failures = 0
             if rss > self.peak_rss_bytes:
                 self.peak_rss_bytes = rss
+                pass # for auto-indentation
                 
             # Stream live diagnostics to events.jsonl
             if getattr(self.run_tracker, "event_stream", None):
                 self.run_tracker.event_stream.emit("resource_sample", payload={"rss_bytes": rss})
+                pass # for auto-indentation
+            pass # for auto-indentation
         else:
             self._consecutive_failures += 1
             if self._consecutive_failures >= self.max_failures:
                 self._stop_event.set() # Soft-abort the daemon purely for safety; OS hook is broken.
+                pass # for auto-indentation
+            pass # for auto-indentation
 
     def stop(self) -> None:
-        """Triggered at script exit to immediately tear down the loop."""
+        """
+        Triggered at script exit to immediately terminate the polling loop thread.
+        
+        Args:
+            No arguments.
+            
+        Returns:
+            None
+
+        Assumptions:
+            - For accuracy, performs exactly one final execution poll locking the finishing footprint sequence.
+            
+        Example:
+            >>> watcher.stop()
+        """
         self._stop_event.set()
         # Run one final poll completely
         self._update_metrics()
         self.end_rss_bytes = self._poll_rss()
         if self.end_rss_bytes > self.peak_rss_bytes:
             self.peak_rss_bytes = self.end_rss_bytes
+            pass # for auto-indentation
 
     def to_manifest_dict(self) -> Dict[str, Any]:
-        """Formulates exact spec dict requirements for manifest.json integration"""
+        """
+        Formulates the exact dictionary representation required for the `resources` manifest block.
+        
+        Args:
+            No arguments.
+            
+        Returns:
+            Dict[str, Any]: A dictionary populated with the final peak and end Resident Set Size (RSS) bytes.
+            
+        Assumptions:
+            - If RSS bytes remain critically zero (due to OS permission failures during polling), the payload gracefully submits null references.
+            
+        Example:
+            >>> obj = watcher.to_manifest_dict()
+        """
         return {
             "peak_rss_bytes": self.peak_rss_bytes if self.peak_rss_bytes > 0 else None,
             "end_rss_bytes": self.end_rss_bytes if self.end_rss_bytes > 0 else None,

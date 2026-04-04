@@ -3,17 +3,20 @@ from typing import Dict, Any
 
 def get_python_runtime(config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Captures deep details about the active Python interpreter environment.
+    Captures deep inspection details about the active Python interpreter environment.
     
-    Extracts the executable location, exact version strings, and whether 
+    Extracts the executable location, exact version layout, and whether 
     the process is executing inside an isolated virtual environment. It also
     snapshots the `sys.path` which dictates module resolution order.
     
     Args:
-        config: The fully resolved pubrun configuration dictionary.
+        config (Dict[str, Any]): The fully resolved pubrun configuration dictionary.
         
     Returns:
-        A dictionary compliant with the `python_runtime` schema section.
+        Dict[str, Any]: A dictionary compliant with the `python_runtime` schema section.
+
+    Assumptions:
+        - Accurately detects `venv` environments by evaluating mapping discrepancies between `sys.prefix` and `sys.base_prefix`.
         
     Example:
         >>> get_python_runtime({})

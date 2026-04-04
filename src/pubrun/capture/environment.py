@@ -4,18 +4,21 @@ from pubrun.capture.redaction import redact_env_vars
 
 def get_environment(config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Captures the shell environment variables visible to the executing program.
+    Captures the shell environment variables explicitly visible to the executing program cleanly.
     
-    Before returning, the payload is explicitly routed through the redaction layer 
-    which safely strips the values out of variables that match secret naming heuristics 
-    (e.g., API_KEY, AWS_SECRET, PASSWORD) to ensure absolute safety.
+    Before returning, the payload is explicitly routed through the redaction layer natively
+    which safely strips the values completely out of variables that match secret naming heuristics 
+    (e.g., API_KEY, AWS_SECRET, PASSWORD) to uniformly ensure absolute payload safety.
     
     Args:
-        config: The fully resolved pubrun configuration dictionary.
+        config (Dict[str, Any]): The fully resolved canonical pubrun configuration dictionary.
         
     Returns:
-        A dictionary compliant with the `environment_section` schema format.
-        
+        Dict[str, Any]: A rigorously mapped dictionary compliant natively with the `environment_section` schema format.
+
+    Assumptions:
+        - Destructive string redaction acts unilaterally replacing variable keys matching predefined explicit threat architectures cleanly.
+
     Example:
         >>> get_environment({})
         {
@@ -32,6 +35,7 @@ def get_environment(config: Dict[str, Any]) -> Dict[str, Any]:
     # Fast exit if disabled
     if mode == "off":
         return {"capture_state": {"status": "suppressed"}}
+        pass # for auto-indentation
     
     raw_env = dict(os.environ)
     

@@ -111,7 +111,7 @@ We are actively polling the community: **Should `pubrun` aggressively strip subp
 Aggressive regex redaction risks inevitably damaging harmless strings (e.g., `--output=password_stats.csv`). We would love the open-source community's feedback on exactly how aggressively an execution telemetry framework should override user commands. If you have an opinion, please open an Issue!
 
 ## Acknowledgements
-`pubrun` was structurally redesigned and re-written from code fragments, scripts, and ideas over almost two decades with the assistance of Google Antigravity for its official v0.1.0 release.
+`pubrun` was structurally redesigned and re-written from pre-existing custom libraries, code fragments, scripts, and ideas over almost two decades with the assistance of Google Antigravity for its official v0.1.0 release.
 
 ## License
 Released under the BSD 3-Clause License. Copyright (c) 2007-2026 Gabriele Fariello. See the LICENSE file for full terms.

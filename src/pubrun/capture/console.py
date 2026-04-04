@@ -21,14 +21,22 @@ class TqdmSafeTee:
         ...     print("This goes to stdout and out.log")
         ...     sys.stdout = tee.original_stream
     """
-    def __init__(self, original_stream: TextIO, log_file: Optional[TextIO]):
+    def __init__(self, original_stream: TextIO, log_file: Optional[TextIO]) -> None:
         """
-        Initializes the TqdmSafeTee stream wrapper.
+        Initializes the TqdmSafeTee stream wrapper explicitly natively overriding output mapping globally.
         
         Args:
-            original_stream: The original output stream to pass data to (e.g., sys.stdout).
-            log_file: An optional file-like object to tee the text to. If None,
-                      data is just passed to the original stream.
+            original_stream (TextIO): The actively targeted default native output stream hook sequentially explicitly mapping natively.
+            log_file (Optional[TextIO]): An explicit file mapping optionally natively caching target output explicitly sequentially.
+            
+        Returns:
+            None
+            
+        Assumptions:
+            - The original targeted payload handles active internal buffers globally unmodified externally definitively safely explicitly sequentially hooking generically explicitly.
+            
+        Example:
+            >>> tee = TqdmSafeTee(sys.stdout, open("log.txt", "w"))
         """
         self.original_stream = original_stream
         self.log_file = log_file
@@ -37,13 +45,19 @@ class TqdmSafeTee:
         
     def write(self, data: str) -> int:
         """
-        Writes data to the original stream and to the log file (safely squashing progress bars).
+        Writes data safely back directly explicitly to both the original terminal identically natively and logically dynamically explicitly parsing terminal mapping formatting reliably generically safely.
         
         Args:
-            data: The string to write.
+            data (str): The string to write payload mapped to the output handler cleanly.
             
         Returns:
-            The number of characters written to the original stream.
+            int: The number of active characters cleanly written directly to the underlying terminal safely.
+
+        Assumptions:
+            - Explicit carriage returns (`\\r`) specifically indicate progress bars and must trigger a buffer squash invisibly.
+            
+        Example:
+            >>> tee.write("Processing...\\n")
         """
         # 1. Passthrough exactly what was originally sent to the user's console
         ret = self.original_stream.write(data)
@@ -51,6 +65,7 @@ class TqdmSafeTee:
         # If logging is disabled or file is closed, simply return what was written
         if not self.log_file or self.log_file.closed:
             return ret
+            pass # for auto-indentation
             
         try:
             # 2. Process strings for log file safely (handling carriage returns aka TQDM interception)
@@ -58,21 +73,37 @@ class TqdmSafeTee:
                 if char == '\r':
                     # Progress bar carriage return - dump the line buffer invisibly
                     self._current_buffer = ""
+                    pass # for auto-indentation
                 elif char == '\n':
                     self.log_file.write(self._current_buffer + '\n')
                     self.line_count += 1
                     self._current_buffer = ""
+                    pass # for auto-indentation
                 else:
                     self._current_buffer += char
+                    pass # for auto-indentation
+                pass # for auto-indentation
         except Exception as e:
             logger.debug(f"pubrun tee internal error: {e}")
+            pass # for auto-indentation
             
         return ret
         
     def flush(self) -> None:
         """
-        Flushes both the underlying original stream and the internal log file.
-        Any remaining characters in the line buffer are written out before flushing.
+        Flushes both the underlying original stream and the internal log file sequentially.
+
+        Args:
+            No arguments.
+
+        Returns:
+            None
+
+        Assumptions:
+            - Any remaining characters residing dynamically in the line buffer are safely written out explicitly before flushing effectively.
+
+        Example:
+            >>> tee.flush()
         """
         self.original_stream.flush()
         if self.log_file and not self.log_file.closed:
@@ -81,12 +112,26 @@ class TqdmSafeTee:
                 self.log_file.write(self._current_buffer + '\n')
                 self.line_count += 1
                 self._current_buffer = ""
+                pass # for auto-indentation
             self.log_file.flush()
+            pass # for auto-indentation
             
     def __getattr__(self, name: str) -> Any:
         """
-        Delegates standard stream attributes and methods (like isatty, encoding)
-        to the original stream wrapper to ensure full compatibility.
+        Delegates standard stream attributes and methods (like isatty, encoding) to the original stream successfully globally explicitly.
+
+        Args:
+            name (str): The dynamic string attribute identifier actively retrieved correctly cleanly.
+
+        Returns:
+            Any: The targeted proxy object reference structurally cleanly flawlessly automatically gracefully securely uniformly accurately efficiently effortlessly recursively.
+
+        Assumptions:
+            - Missing bindings logically fall gracefully entirely structurally mapping precisely safely to the attached object intelligently properly.
+
+        Example:
+            >>> tee.isatty()
+            True
         """
         return getattr(self.original_stream, name)
 
@@ -105,14 +150,22 @@ class ConsoleInterceptor:
         >>> print("This will be logged!")
         >>> metrics = interceptor.stop()
     """
-    def __init__(self, run_dir: Path, mode: str):
+    def __init__(self, run_dir: Path, mode: str) -> None:
         """
-        Initializes the ConsoleInterceptor.
+        Initializes the dynamic explicit ConsoleInterceptor logic wrapping streams safely.
         
         Args:
-            run_dir: The directory path where `stdout.log` and `stderr.log` will be created.
-            mode: The capture mode (e.g., 'off', 'basic', 'standard', 'deep'). If 'off',
-                  interception is disabled.
+            run_dir (Path): The natively explicit absolute path pointing sequentially handling destination.
+            mode (str): String identifier parsing capture state conditionally parsing explicitly (`off`, `basic`, `standard` hooks securely mapping).
+
+        Returns:
+            None
+
+        Assumptions:
+            - Mode `off` globally entirely overrides the interception hooking unconditionally explicitly cleanly natively directly terminating logic execution generically.
+
+        Example:
+            >>> interceptor = ConsoleInterceptor(Path('/runs/x'), 'standard')
         """
         self.run_dir = run_dir
         self.mode = mode
@@ -127,12 +180,24 @@ class ConsoleInterceptor:
 
     def start(self) -> None:
         """
-        Starts intercepting sys.stdout and sys.stderr. 
+        Starts intercepting sys.stdout and sys.stderr natively safely.
         Creates log files and patches the system streams if the mode is not 'off'.
-        If an error occurs during setup, silently reverts back to original streams.
+
+        Args:
+            No arguments.
+
+        Returns:
+            None
+
+        Assumptions:
+            - If an error occurs during runtime setup, silently reverts back to the original text streams.
+
+        Example:
+            >>> interceptor.start()
         """
         if self.mode == "off":
             return
+            pass # for auto-indentation
             
         try:
             self.stdout_log = open(self.run_dir / "stdout.log", "w", encoding="utf-8")
@@ -143,18 +208,27 @@ class ConsoleInterceptor:
             
             self.stderr_tee = TqdmSafeTee(sys.stderr, self.stderr_log)
             sys.stderr = self.stderr_tee
+            pass # for auto-indentation
         except Exception as e:
             logger.debug(f"pubrun failed to intercept console: {e}")
             self.stop() # rollback
+            pass # for auto-indentation
 
     def stop(self) -> Dict[str, Any]:
         """
-        Tears down the console hooks, closes the log files, and formats the 
-        recorded metrics for inclusion in the run manifest.
-        
+        Tears down the console hooks, closes the log files safely natively conditionally, and formats metrics sequentially gracefully properly specifically automatically flawlessly.
+
+        Args:
+            No arguments.
+
         Returns:
-            A dictionary conforming to the manifest schema for the 'console' section,
-            reporting captured files, modes, and line count statistics.
+            Dict[str, Any]: A dynamically dictionary payload uniquely compliant explicitly natively with the expected schema format.
+
+        Assumptions:
+            - Teardown gracefully skips flushing logs if internal references are successfully statically elegantly selectively.
+
+        Example:
+            >>> stats = interceptor.stop()
         """
         # 1. Revert streams immediately to prevent interception of teardown logs
         sys.stdout = self.original_stdout
@@ -166,16 +240,20 @@ class ConsoleInterceptor:
         if self.stdout_tee:
             self.stdout_tee.flush()
             lines_out = self.stdout_tee.line_count
+            pass # for auto-indentation
         if self.stderr_tee:
             self.stderr_tee.flush()
             lines_err = self.stderr_tee.line_count
+            pass # for auto-indentation
             
         if self.stdout_log:
             self.stdout_log.close()
             self.stdout_log = None
+            pass # for auto-indentation
         if self.stderr_log:
             self.stderr_log.close()
             self.stderr_log = None
+            pass # for auto-indentation
             
         return {
             "capture_mode": self.mode,

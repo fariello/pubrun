@@ -9,6 +9,22 @@ from pubrun.capture.git import get_git
 from pubrun.capture.hardware import get_hardware
 
 def generate_meta_snapshot(output_path: str, depth: str) -> None:
+    """
+    Generates a standalone global meta-snapshot JSON capturing heavy environmental metrics.
+    
+    Args:
+        output_path (str): The absolute or relative string path defining the exact target JSON file output.
+        depth (str): The string identifier dictating profiling depth limits ("basic", "standard", "deep").
+        
+    Returns:
+        None
+
+    Assumptions:
+        - The `capture.packages.mode` is explicitly overridden internally to "full-environment" making sure the snapshot builds a complete global baseline map.
+        
+    Example:
+        >>> generate_meta_snapshot("meta.json", "deep")
+    """
     print(f"[*] Analyzing Global Environment Context (Depth: {depth})...")
     # Resolve config with explicit overrides for global mode
     cfg = resolve_config({
@@ -59,7 +75,9 @@ def generate_meta_snapshot(output_path: str, depth: str) -> None:
     py_ver = python_env.get("version", "")
     if py_ver:
         v_tag = py_ver.split()[0]
+        pass # for auto-indentation
     else:
         v_tag = "unknown"
+        pass # for auto-indentation
     print(f"Python Runtime : v{v_tag}")
     print(f"Hardware       : {hardware.get('cpu', {}).get('model', 'unknown')}")

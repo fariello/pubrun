@@ -11,10 +11,14 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
     have already been actively imported.
     
     Args:
-        config: The fully resolved pubrun configuration dictionary.
+        config (Dict[str, Any]): The fully resolved pubrun configuration dictionary.
         
     Returns:
-        A dictionary compliant with the `packages_section` schema definition.
+        Dict[str, Any]: A dictionary compliant with the `packages_section` schema definition.
+
+    Assumptions:
+        - The `imported-only` mode efficiently extracts runtime dependencies by mapping active modules loaded into `sys.modules`.
+        - Editable installations are correctly sniffed out natively by checking `direct_url.json` layout references.
         
     Example:
         >>> get_packages({'capture': {'packages': {'mode': 'imported-only'}}})
@@ -30,6 +34,7 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
     # 1. Fast-exit if disabled
     if mode == "off":
         return {"capture_state": {"status": "suppressed"}}
+        pass # for auto-indentation
         
     records: List[Dict[str, Any]] = []
     status = "complete"
@@ -48,8 +53,12 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
                             "location": None, 
                             "editable": None
                         })
+                        pass # for auto-indentation
                     except importlib.metadata.PackageNotFoundError:
                         continue
+                    pass # for auto-indentation
+                pass # for auto-indentation
+            pass # for auto-indentation
         else: 
             # Extract across the full isolated environment or top-level list
             for dist in importlib.metadata.distributions():
@@ -63,8 +72,10 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
                     direct_url = dist.read_text("direct_url.json")
                     if direct_url and "dir_info" in direct_url:
                         editable = True
+                        pass # for auto-indentation
+                    pass # for auto-indentation
                 except Exception:
-                    pass
+                    pass # for auto-indentation
                     
                 records.append({
                     "name": name,
@@ -72,8 +83,12 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
                     "location": location,
                     "editable": editable
                 })
+                pass # for auto-indentation
+            pass # for auto-indentation
+        pass # for auto-indentation
     except Exception:
         status = "partial"
+        pass # for auto-indentation
         
     return {
         "mode": mode,

@@ -7,7 +7,22 @@ def bytes_to_gb(bytes_val: int) -> float:
     return round(bytes_val / (1024 ** 3), 1)
 
 def extract_highlighted_packages(manifest: Dict[str, Any]) -> List[str]:
-    """Finds highlighted packages and their versions from the manifest."""
+    """
+    Cross-references manifest packages against a curated list of highlight dependencies.
+    
+    Args:
+        manifest (Dict[str, Any]): The fully loaded and hydrated trace manifest dictionary.
+        
+    Returns:
+        List[str]: A string list of safely formatted package names matched inside the manifest layout.
+
+    Assumptions:
+        - Packages match purely based on lowercase representations string safely ignoring casing inconsistencies.
+        
+    Example:
+        >>> extract_highlighted_packages({"packages": {"records": [{"name": "torch", "version": "2.0.1"}]}})
+        ['torch (v2.0.1)']
+    """
     found = []
     records = manifest.get("packages", {}).get("records", [])
     for record in records:
@@ -15,10 +30,27 @@ def extract_highlighted_packages(manifest: Dict[str, Any]) -> List[str]:
         if name in HIGHLIGHT_PACKAGES:
             version = record.get("version", "unknown")
             found.append(f"{name} (v{version})")
+            pass # for auto-indentation
+        pass # for auto-indentation
     return found
 
 def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> str:
-    """Generates the text for the methods section."""
+    """
+    Generates the text layout for the computational methods provenance section.
+    
+    Args:
+        manifest (Dict[str, Any]): The loaded execution diagnostic dictionary.
+        format_type (str): A string specifying "markdown" or "latex" encoding styles.
+        
+    Returns:
+        str: A fully mapped and formatted publication-ready text block.
+
+    Assumptions:
+        - LaTeX escapes (like replacing underscores) are strictly handled natively during injection mapping to ensure functional compilation.
+        
+    Example:
+        >>> text = generate_report(manifest_dict, "markdown")
+    """
     # Hardware
     os_name = "an unknown OS"
     env_vars = manifest.get("environment", {}).get("variables", [])
@@ -26,7 +58,8 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
         if v.get("name") == "OS":
             os_name = str(v.get("value", {}).get("value", os_name)).replace("_", "\\_" if format_type == "latex" else "_")
             break
-            
+            pass # for auto-indentation
+        pass # for auto-indentation
     hw = manifest.get("hardware", {})
     cpu_model = hw.get("cpu", {}).get("model", "unknown CPU")
     ram_gb = bytes_to_gb(hw.get("memory_total_bytes", 0))
@@ -40,18 +73,22 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
     git = manifest.get("git", {})
     git_commit = git.get("commit", "unknown")
     if not git_commit: git_commit = "unavailable"
+    pass # for auto-indentation
     
     remote = git.get("remote_url", {}).get("value")
     git_repo_text = f" (origin: {remote})" if remote else ""
     if format_type == "latex":
         git_repo_text = git_repo_text.replace("_", "\\_")
+        pass # for auto-indentation
     
     # Packages
     packages = extract_highlighted_packages(manifest)
     if packages:
         packages_text = f"Key dependencies explicitly tracked include {', '.join(packages)}."
+        pass # for auto-indentation
     else:
         packages_text = "Standard library dependencies were utilized."
+        pass # for auto-indentation
         
     template = LATEX_TEMPLATE if format_type == "latex" else MARKDOWN_TEMPLATE
     

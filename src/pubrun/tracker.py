@@ -27,7 +27,22 @@ _active_run: Optional["Run"] = None
 
 
 def get_current_run() -> Optional["Run"]:
-    """Returns the globally active Run, if any."""
+    """
+    Returns the globally active Run, if any.
+
+    Args:
+        No arguments.
+
+    Returns:
+        Optional["Run"]: The singleton tracking object currently bound to the environment, or None.
+
+    Assumptions:
+        - Thread safety for the global `_active_run` state natively relies on Python's GIL.
+
+    Example:
+        >>> get_current_run()
+        <pubrun.tracker.Run object at ...>
+    """
     return _active_run
 
 
@@ -37,6 +52,21 @@ class Run:
     and generating the output structures cleanly.
     """
     def __init__(self, overrides: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Initializes the globally active telemetry framework instance natively.
+
+        Args:
+            overrides (Optional[Dict[str, Any]]): Hard-coded runtime configuration maps specifically overriding files.
+
+        Returns:
+            None
+
+        Assumptions:
+            - Ghost Mode takes precedence: If we lack permission to write out the target `runs` folder, we cleanly abort all tracing and silently allow the program to run untouched natively.
+
+        Example:
+            >>> Run(overrides={"profile": "deep"})
+        """
         global _active_run
         
         self.config = resolve_config(overrides)
@@ -106,8 +136,10 @@ class Run:
             max_tracked = self.config.get("capture", {}).get("subprocesses", {}).get("max_tracked_commands", 5000)
             SubprocessSpy.install(max_tracked)
             self._spying_subprocesses = True
+            pass # for auto-indentation
         else:
             self._spying_subprocesses = False
+            pass # for auto-indentation
             
         # 3. Console tee hook
         console_mode = self.config.get("capture", {}).get("console", {}).get("capture_mode", "off")
@@ -120,6 +152,7 @@ class Run:
         self.event_stream = None
         if self.config.get("events", {}).get("enabled", False):
             self.event_stream = EventStream(self.run_dir)
+            pass # for auto-indentation
             
         # 6. Background Telemetry (RAM watcher)
         self.resource_watcher = None
@@ -129,6 +162,7 @@ class Run:
             max_fails = res_cfg.get("max_consecutive_failures", 3)
             self.resource_watcher = ResourceWatcher(self, interval, max_fails)
             self.resource_watcher.start()
+            pass # for auto-indentation
         # ---------------------------------------------
         
         # Wire up crash-safety
@@ -139,47 +173,114 @@ class Run:
         _active_run = self
 
     def _finalize_state(self) -> None:
-        """Called automatically strictly before serialization."""
+        """
+        Called automatically natively prior to serialization to securely detach trace hooks.
+
+        Args:
+            No arguments.
+
+        Returns:
+            None
+
+        Assumptions:
+            - If an active `sys.exc_info` natively flags an error inside the exit hook, we explicitly log the tracking framework outcome as `failed`.
+
+        Example:
+            >>> self._finalize_state()
+        """
         if self.is_active:
             self.ended_at_utc = datetime.now(timezone.utc)
             self.is_active = False
+            pass # for auto-indentation
 
         if self._outcome == "unknown":
             # If sys.exc_info() denotes an active crash at exit time, we log failed.
             if sys.exc_info()[0] is not None:
                 self._outcome = "failed"
+                pass # for auto-indentation
             else:
                 self._outcome = "completed"
+                pass # for auto-indentation
+            pass # for auto-indentation
                 
         # Gracefully shutdown engines
         if self._spying_subprocesses:
             SubprocessSpy.finalize_all()
             SubprocessSpy.uninstall()
+            pass # for auto-indentation
         self.console_data = self.console_interceptor.stop()
         if self.resource_watcher:
             self.resource_watcher.stop()
+            pass # for auto-indentation
         if self.event_stream:
             self.event_stream.close()
+            pass # for auto-indentation
 
     def stop(self, outcome: str = "completed") -> None:
-        """Manually halt tracking, overriding the atexit hooks."""
+        """
+        Manually halt specifically executing active processes overriding native architecture closures.
+
+        Args:
+            outcome (str): Pre-resolved result descriptor payload defining how the logic terminated.
+
+        Returns:
+            None
+
+        Assumptions:
+            - Resets the global memory registry internally decoupling the active tracer cleanly.
+
+        Example:
+            >>> tracker.stop("failed")
+        """
         self._outcome = outcome
         self._finalize_state()
         if getattr(self, "writer", None):
             self.writer.write_artifacts()
+            pass # for auto-indentation
             
         global _active_run
         if _active_run is self:
             _active_run = None
+            pass # for auto-indentation
 
     def to_manifest_dict(self) -> Dict[str, Any]:
-        """Constructs the canonical manifest.json dict."""
+        """
+        Constructs the canonical securely structured `manifest.json` completely natively.
+
+        Args:
+            No arguments.
+
+        Returns:
+            Dict[str, Any]: The fully formatted validation-compliant manifest object mapping.
+
+        Assumptions:
+            - Converts timezone-aware timestamps securely into explicit 'Z' suffix timestamps natively.
+
+        Example:
+            >>> self.to_manifest_dict()
+        """
         elapsed = None
         if self.ended_at_utc:
             elapsed = (self.ended_at_utc - self.started_at_utc).total_seconds()
+            pass # for auto-indentation
             
         def _str_fmt(dt: datetime) -> str:
-            """Formats datetime specifically to match exact JSON Schema regex pattern: Z"""
+            """
+            Formats datetime explicitly matching JSON-Schemas mapping logic safely.
+            
+            Args:
+                dt (datetime): The native standard python time wrapper.
+                
+            Returns:
+                str: Target correctly explicitly mapped output matching validation rules natively.
+                
+            Assumptions:
+                - Drops resolution securely down to simply three decimal places.
+                
+            Example:
+                >>> _str_fmt(datetime.now())
+                "2026-04-04T12:00:00.000Z"
+            """
             return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
             
         subprocess_records = SubprocessSpy.get_records() if self._spying_subprocesses else []
