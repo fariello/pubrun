@@ -5,21 +5,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from runtrace.config import resolve_config
-from runtrace.writer import ArtifactWriter
+from pubrun.config import resolve_config
+from pubrun.writer import ArtifactWriter
 
 # Import our capture engines
-from runtrace.capture.invocation import get_invocation
-from runtrace.capture.subprocesses import SubprocessSpy
-from runtrace.capture.console import ConsoleInterceptor
-from runtrace.capture.hardware import get_hardware
-from runtrace.events import EventStream
-from runtrace.capture.resources import ResourceWatcher
-from runtrace.capture.process import get_process_info
-from runtrace.capture.python_runtime import get_python_runtime
-from runtrace.capture.packages import get_packages
-from runtrace.capture.environment import get_environment
-from runtrace.capture.git import get_git
+from pubrun.capture.invocation import get_invocation
+from pubrun.capture.subprocesses import SubprocessSpy
+from pubrun.capture.console import ConsoleInterceptor
+from pubrun.capture.hardware import get_hardware
+from pubrun.events import EventStream
+from pubrun.capture.resources import ResourceWatcher
+from pubrun.capture.process import get_process_info
+from pubrun.capture.python_runtime import get_python_runtime
+from pubrun.capture.packages import get_packages
+from pubrun.capture.environment import get_environment
+from pubrun.capture.git import get_git
 
 
 # Define a singleton instance to manage global tracking state
@@ -53,7 +53,7 @@ class Run:
         base_dir_str = self.config.get("core", {}).get("output_dir", "")
         base_dir = Path(base_dir_str) if base_dir_str else Path.cwd() / "runs"
         timestamp_str = self.started_at_utc.strftime("%Y%m%dT%H%M%SZ")
-        dir_name = f"runtrace-{self.script_name}-{timestamp_str}-{self.pid}-{self.run_id}"
+        dir_name = f"pubrun-{self.script_name}-{timestamp_str}-{self.pid}-{self.run_id}"
         self.run_dir = base_dir / dir_name
 
         # Ensure directory is created safely
@@ -64,7 +64,7 @@ class Run:
             # If filesystem is read-only (e.g. strict Slurm nodes), we silently abort
             # internal serialization tracking completely so the user's ML script doesn't crash.
             # However, we must alert the user via standard error so that Slurm logs show context.
-            print(f"runtrace WARNING: Unable to create {self.run_dir}. System running in Ghost Mode (tracking suppressed) due to: {e}", file=sys.stderr)
+            print(f"pubrun WARNING: Unable to create {self.run_dir}. System running in Ghost Mode (tracking suppressed) due to: {e}", file=sys.stderr)
             self.is_active = False
             self._spying_subprocesses = False
             self.event_stream = None
@@ -186,7 +186,7 @@ class Run:
 
         return {
             "schema_version": "1.0",
-            "manifest_type": "runtrace-manifest",
+            "manifest_type": "pubrun-manifest",
             "meta_ref": self.config.get("core", {}).get("meta_ref", None),
             "run": {
                 "run_id": self.run_id,

@@ -4,7 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from runtrace import start, get_current_run
+from pubrun import start, get_current_run
 
 def test_invocation_capture(tmp_path, monkeypatch):
     monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
@@ -39,7 +39,7 @@ def test_subprocess_interceptor(tmp_path, monkeypatch):
     tracker = start(**overrides)
     
     # 1. Spawn a waited trivial process
-    subprocess.run([sys.executable, "-c", "print('hello runtrace')"])
+    subprocess.run([sys.executable, "-c", "print('hello pubrun')"])
     
     # 2. Spawn a detached one that doesn't wait
     p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.1)"])

@@ -5,14 +5,14 @@ import subprocess
 import logging
 from typing import Dict, Any, List, Optional
 
-logger = logging.getLogger("runtrace")
+logger = logging.getLogger("pubrun")
 
 
 def _get_cpu_model() -> Optional[str]:
     try:
         sys_plat = sys.platform
         if sys_plat == "win32":
-            from runtrace.capture.subprocesses import disable_spy
+            from pubrun.capture.subprocesses import disable_spy
             with disable_spy():
                 out = subprocess.check_output(["wmic", "cpu", "get", "Name"], text=True, stderr=subprocess.DEVNULL)
             lines = [l.strip() for l in out.splitlines() if l.strip()]
@@ -28,7 +28,7 @@ def _get_cpu_model() -> Optional[str]:
                         if line.startswith("model name"):
                             return line.split(":", 1)[1].strip()
     except Exception as e:
-        logger.debug(f"runtrace failed to fetch CPU model: {e}")
+        logger.debug(f"pubrun failed to fetch CPU model: {e}")
     return None
 
 
@@ -36,7 +36,7 @@ def _get_total_memory_bytes() -> Optional[int]:
     try:
         sys_plat = sys.platform
         if sys_plat == "win32":
-            from runtrace.capture.subprocesses import disable_spy
+            from pubrun.capture.subprocesses import disable_spy
             with disable_spy():
                 out = subprocess.check_output(["wmic", "OS", "get", "TotalVisibleMemorySize"], text=True, stderr=subprocess.DEVNULL)
             lines = [l.strip() for l in out.splitlines() if l.strip()]
@@ -54,7 +54,7 @@ def _get_total_memory_bytes() -> Optional[int]:
                             if len(parts) >= 2:
                                 return int(parts[1]) * 1024
     except Exception as e:
-        logger.debug(f"runtrace failed to fetch Total RAM: {e}")
+        logger.debug(f"pubrun failed to fetch Total RAM: {e}")
     return None
 
 
@@ -69,7 +69,7 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
             # Caution: clocks.max.sm is the highest SM clock. Not supported on very old GPUs.
             cmd[1] += ",clocks.max.sm"
             
-        from runtrace.capture.subprocesses import disable_spy
+        from pubrun.capture.subprocesses import disable_spy
         with disable_spy():
             out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
         
@@ -90,7 +90,7 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
             
     except Exception as e:
         # Will naturally trigger if nvidia-smi doesn't exist on PATH (meaning AMD/Intel/Apple)
-        logger.debug(f"runtrace nvidia-smi failed or not found: {e}")
+        logger.debug(f"pubrun nvidia-smi failed or not found: {e}")
         
     # If NVIDIA SMI yielded nothing, attempt generic OS fallback.
     # Essential for researchers running models on M-series Macbooks or generic Intel/AMD laptops.
@@ -98,7 +98,7 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
         try:
             sys_plat = sys.platform
             if sys_plat == "win32":
-                from runtrace.capture.subprocesses import disable_spy
+                from pubrun.capture.subprocesses import disable_spy
                 with disable_spy():
                     out = subprocess.check_output(["wmic", "path", "win32_VideoController", "get", "Name,AdapterRAM,DriverVersion", "/format:csv"], text=True, stderr=subprocess.DEVNULL)
                 lines = [l.strip() for l in out.splitlines() if l.strip()]
@@ -129,7 +129,7 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
                 if "model" in gpu_rec:
                     gpus.append(gpu_rec)
         except Exception as e:
-            logger.debug(f"runtrace generic GPU fallback failed: {e}")
+            logger.debug(f"pubrun generic GPU fallback failed: {e}")
             
     return gpus
 
@@ -166,7 +166,7 @@ def get_hardware(config: Dict[str, Any]) -> Dict[str, Any]:
             "capture_state": {"status": "complete"}
         }
     except Exception as e:
-        logger.debug(f"runtrace generic hardware failure: {e}")
+        logger.debug(f"pubrun generic hardware failure: {e}")
         return {
             "capture_state": {"status": "failed", "detail": str(e)}
         }

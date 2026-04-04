@@ -2,8 +2,8 @@ import json
 import logging
 from pathlib import Path
 
-from runtrace import start, annotate, phase
-import runtrace
+from pubrun import start, annotate, phase
+import pubrun
 
 def test_event_stream_creates_jsonl(tmp_path, monkeypatch):
     monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
@@ -63,9 +63,9 @@ def test_event_stream_creates_jsonl(tmp_path, monkeypatch):
     assert ev5["payload"]["error"] == "ValueError"
 
 def test_inactive_event_stream_warns(caplog):
-    caplog.set_level(logging.WARNING, logger="runtrace")
+    caplog.set_level(logging.WARNING, logger="pubrun")
     
-    import runtrace.config
+    import pubrun.config
     
     # Should not crash
     annotate("Should be silently ignored because default is ignore")

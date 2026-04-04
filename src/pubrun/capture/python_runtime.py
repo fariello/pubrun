@@ -10,7 +10,7 @@ def get_python_runtime(config: Dict[str, Any]) -> Dict[str, Any]:
     snapshots the `sys.path` which dictates module resolution order.
     
     Args:
-        config: The fully resolved runtrace configuration dictionary.
+        config: The fully resolved pubrun configuration dictionary.
         
     Returns:
         A dictionary compliant with the `python_runtime` schema section.

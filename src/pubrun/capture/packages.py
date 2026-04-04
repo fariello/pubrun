@@ -11,7 +11,7 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
     have already been actively imported.
     
     Args:
-        config: The fully resolved runtrace configuration dictionary.
+        config: The fully resolved pubrun configuration dictionary.
         
     Returns:
         A dictionary compliant with the `packages_section` schema definition.

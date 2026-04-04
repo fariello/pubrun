@@ -1,4 +1,4 @@
-# runtrace Functional Specification
+# pubrun Functional Specification
 
 > Status: Draft v0.1
 > Purpose: Defines functional requirements aligned with architecture.
@@ -6,18 +6,18 @@
 
 ## 1. Purpose
 
-`runtrace` captures execution context for reproducibility, troubleshooting, and comparison of Python runs.
+`pubrun` captures execution context for reproducibility, troubleshooting, and comparison of Python runs.
 
 The library must support a very low-friction user model. It should be usable in multiple ways, including:
 
 ```python
-import runtrace
+import pubrun
 ```
 
 or:
 
 ```python
-from runtrace import start
+from pubrun import start
 ```
 
 The product goal is that a user can get useful behavior with minimal ceremony, while still allowing deeper, explicit control when desired.
@@ -37,22 +37,22 @@ The product goal is that a user can get useful behavior with minimal ceremony, w
 The package MUST support standard Python import patterns, including:
 
 ```python
-import runtrace
+import pubrun
 ```
 
 and:
 
 ```python
-from runtrace import start
-from runtrace import tracked_run
-from runtrace import audit_run
+from pubrun import start
+from pubrun import tracked_run
+from pubrun import audit_run
 ```
 
 ### 3.2 Lightweight import requirement
 
 A plain import MUST be lightweight and safe.
 
-Importing `runtrace` MUST NOT:
+Importing `pubrun` MUST NOT:
 
 - significantly slow startup
 - fail if optional dependencies are unavailable
@@ -64,7 +64,7 @@ Importing `runtrace` MUST NOT:
 The library SHOULD support configuration-driven auto-start behavior so that a simple:
 
 ```python
-import runtrace
+import pubrun
 ```
 
 can provide useful automatic capture when enabled by policy or configuration.
@@ -76,14 +76,14 @@ This behavior MUST be configurable and easy to disable.
 The library MUST also support explicit activation via APIs such as:
 
 ```python
-import runtrace
-runtrace.start()
+import pubrun
+pubrun.start()
 ```
 
 and:
 
 ```python
-from runtrace import tracked_run
+from pubrun import tracked_run
 
 with tracked_run():
     ...
@@ -213,7 +213,7 @@ By default, to prevent rainbow table brute-force attacks, the redaction engine M
 
 ### 10.1 Purpose
 
-`runtrace` MUST support a configuration system that allows users to define default behavior without modifying every script.
+`pubrun` MUST support a configuration system that allows users to define default behavior without modifying every script.
 
 ### 10.2 Configuration discovery
 
@@ -221,17 +221,17 @@ The library MUST look for configuration in standard locations.
 
 At minimum, it MUST support:
 
-- `~/.config/runtrace/`
-- a runtrace config file in the user's home configuration area
-- a `.runtrace`-style config file in the directory from which the program was started
+- `~/.config/pubrun/`
+- a pubrun config file in the user's home configuration area
+- a `.pubrun`-style config file in the directory from which the program was started
 
 Examples of acceptable supported paths include:
 
-- `~/.config/runtrace/config.toml`
-- `~/.config/runtrace/runtrace.toml`
-- `~/.runtrace`
-- `<start_working_directory>/.runtrace`
-- `<start_working_directory>/.runtrace.toml`
+- `~/.config/pubrun/config.toml`
+- `~/.config/pubrun/pubrun.toml`
+- `~/.pubrun`
+- `<start_working_directory>/.pubrun`
+- `<start_working_directory>/.pubrun.toml`
 
 The exact supported set may be defined more precisely later, but the product MUST support both:
 
@@ -279,10 +279,10 @@ The system MUST produce a resolved configuration snapshot per run and store it i
 
 ### 11.1 Config Generation (`--create-config`)
 
-When invoked via the terminal, `runtrace` MUST support a config-generation command such as:
+When invoked via the terminal, `pubrun` MUST support a config-generation command such as:
 
 ```bash
-runtrace --create-config
+pubrun --create-config
 ```
 
 A direct CLI entry point may also support the same behavior.
@@ -320,20 +320,20 @@ Silent destructive overwrite is NOT allowed.
 ### 11.5 Global Context Generation (`meta`)
 The CLI MUST support capturing a massive, independent environment snapshot intended to act as the overarching metadata parent to symmetric distributed compute jobs.
 Command format:
-`runtrace meta [--out PATH] [--depth basic|standard|deep]`
-By default, the command ignores local `.runtrace` minimal restrictions, captures full virtual environments natively without wrapping a script execution, outputs `meta.json` in `./runs/`, and intelligently formats the JSON snapshot dynamically to the terminal.
+`pubrun meta [--out PATH] [--depth basic|standard|deep]`
+By default, the command ignores local `.pubrun` minimal restrictions, captures full virtual environments natively without wrapping a script execution, outputs `meta.json` in `./runs/`, and intelligently formats the JSON snapshot dynamically to the terminal.
 
 ### 11.6 Run Diagnostics (`report`)
 The CLI MUST support compiling execution metrics into a human-readable diagnostics text stream natively for verification and troubleshooting.
 Command format:
-`runtrace report [RUN_DIR] [--depth basic|standard|deep]`
+`pubrun report [RUN_DIR] [--depth basic|standard|deep]`
 To provide a holistic summary, the command MUST aggregate data across multiple artifacts (specifically ingesting `manifest.json`, `config.resolved.json`, and `events.jsonl`). 
 It MUST also support dynamic Parent-Child manifest hydration. If the local run indicates an active `"meta_ref"`, the orchestrator natively merges the parent context. Furthermore, it MUST detect and compute structural environment drift by validating fast script `stat` anchors (`size` and `mtime`) captured natively in child traces, dynamically throwing warnings if the target script was modified after the parent `meta.json` snap.
 
 ### 11.7 Academic Methodology Exporter (`methods`)
 The CLI MUST support compiling execution provenance into a publication-ready "Computational Methods" text block natively. 
 Command format:
-`runtrace methods [RUN_DIR] [--format markdown|latex]`
+`pubrun methods [RUN_DIR] [--format markdown|latex]`
 Crucially, this compilation requires a completely resolved overarching context. The orchestrator MUST ingest the local `manifest.json` and explicitly hydrate it with any linked parent `meta.json` in order to formulate the comprehensive hardware, Python, and package details required for academic accuracy. If the `RUN_DIR` is omitted, the tool MUST auto-detect and default to the most recent run in the local `./runs/` directory based on the directory timestamps. Configuration fallbacks MUST honor the `methods.format` definitions dynamically.
 
 ## 12. Run directory (revised)
@@ -343,13 +343,13 @@ Each run MUST be stored in a dedicated, uniquely named run directory.
 ### Default structure
 
 ```text
-<base_dir>/runs/runtrace-<script>-<timestamp>-<pid>-<run_id>/
+<base_dir>/runs/pubrun-<script>-<timestamp>-<pid>-<run_id>/
 ```
 
 Example:
 
 ```text
-<base_dir>/runs/runtrace-myscript-20260401T193331Z-12345-4f2a91c3/
+<base_dir>/runs/pubrun-myscript-20260401T193331Z-12345-4f2a91c3/
 ```
 
 ### Requirements
@@ -394,7 +394,7 @@ The resolved configuration MUST:
 - represent the actual behavior used during execution
 - be sufficient to understand how capture behavior was determined
 
-If original config files were used (e.g., ~/.config/runtrace/..., .runtrace), the system MAY also:
+If original config files were used (e.g., ~/.config/pubrun/..., .pubrun), the system MAY also:
 
 - record their paths
 - include hashes
@@ -465,11 +465,11 @@ The system MUST:
 
 A valid v1 implementation must satisfy all of the following:
 
-1. `import runtrace` works cleanly
-2. `from runtrace import start` works cleanly
+1. `import pubrun` works cleanly
+2. `from pubrun import start` works cleanly
 3. plain import is lightweight and safe
 4. configuration is discovered from home and local locations
-5. `python -m runtrace --create-config` creates a fully commented default config
+5. `python -m pubrun --create-config` creates a fully commented default config
 6. one-line explicit usage works
 7. a manifest is produced for tracked runs
 8. failures are captured without breaking the host script
@@ -478,6 +478,6 @@ A valid v1 implementation must satisfy all of the following:
 
 ## 17. Summary
 
-`runtrace` provides structured, low-friction run provenance with optional depth and extensibility.
+`pubrun` provides structured, low-friction run provenance with optional depth and extensibility.
 
 It must support both explicit activation and configuration-driven low-friction behavior, including standard import patterns, discoverable configuration files, and generation of a fully commented default configuration file for users who want to set default policy once and reuse it across scripts.

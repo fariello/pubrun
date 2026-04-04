@@ -1,8 +1,8 @@
 import time
 import json
 import pytest
-from runtrace import start
-from runtrace.capture.resources import _get_rss_windows
+from pubrun import start
+from pubrun.capture.resources import _get_rss_windows
 
 def test_resources_watcher_threads(tmp_path, monkeypatch):
     monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)

@@ -1,6 +1,6 @@
 import math
 from typing import Dict, Any, List, Optional
-from runtrace.report.templates import MARKDOWN_TEMPLATE, LATEX_TEMPLATE, HIGHLIGHT_PACKAGES
+from pubrun.report.templates import MARKDOWN_TEMPLATE, LATEX_TEMPLATE, HIGHLIGHT_PACKAGES
 
 def bytes_to_gb(bytes_val: int) -> float:
     if not bytes_val: return 0.0

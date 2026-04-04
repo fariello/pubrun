@@ -2,7 +2,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from runtrace.report.utils import hydrate_manifest
+from pubrun.report.utils import hydrate_manifest
 
 def bytes_to_gb(bytes_val: int) -> float:
     if not bytes_val: return 0.0
@@ -23,7 +23,7 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
     manifest, warnings = hydrate_manifest(manifest_path, manifest)
     
     print(f"\n=================================================")
-    print(f"            RUNTRACE DIAGNOSTICS                 ")
+    print(f"            PUBRUN DIAGNOSTICS                 ")
     print(f"=================================================")
     print(f"Source : {manifest_path}")
     

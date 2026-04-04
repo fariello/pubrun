@@ -1,5 +1,5 @@
 import pytest
-from runtrace.config import _deep_merge, load_default_config, resolve_config
+from pubrun.config import _deep_merge, load_default_config, resolve_config
 
 def test_deep_merge():
     a = {"core": {"profile": "default", "auto_start": False}, "events": {"enabled": False}}
@@ -17,8 +17,8 @@ def test_load_default_config():
 
 def test_resolve_config_with_overrides(monkeypatch):
     # Ensure local config and user config don't interfere
-    monkeypatch.setattr("runtrace.config.load_user_config", lambda: None)
-    monkeypatch.setattr("runtrace.config.load_local_config", lambda start_dir=None: None)
+    monkeypatch.setattr("pubrun.config.load_user_config", lambda: None)
+    monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: None)
     
     overrides = {"core": {"profile": "deep"}}
     resolved = resolve_config(overrides)

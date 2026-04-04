@@ -1,12 +1,12 @@
 import json
 from pathlib import Path
 from datetime import datetime, timezone
-from runtrace.config import resolve_config
-from runtrace.capture.python_runtime import get_python_runtime
-from runtrace.capture.packages import get_packages
-from runtrace.capture.environment import get_environment
-from runtrace.capture.git import get_git
-from runtrace.capture.hardware import get_hardware
+from pubrun.config import resolve_config
+from pubrun.capture.python_runtime import get_python_runtime
+from pubrun.capture.packages import get_packages
+from pubrun.capture.environment import get_environment
+from pubrun.capture.git import get_git
+from pubrun.capture.hardware import get_hardware
 
 def generate_meta_snapshot(output_path: str, depth: str) -> None:
     print(f"[*] Analyzing Global Environment Context (Depth: {depth})...")
@@ -30,7 +30,7 @@ def generate_meta_snapshot(output_path: str, depth: str) -> None:
     now = datetime.now(timezone.utc)
     
     meta_json = {
-        "manifest_type": "runtrace-meta-snapshot",
+        "manifest_type": "pubrun-meta-snapshot",
         "timing": {
             "started_at_utc": _str_fmt(now)
         },

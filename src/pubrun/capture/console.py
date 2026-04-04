@@ -3,7 +3,7 @@ import logging
 from typing import TextIO, Dict, Any, Optional
 from pathlib import Path
 
-logger = logging.getLogger("runtrace")
+logger = logging.getLogger("pubrun")
 
 class TqdmSafeTee:
     """
@@ -65,7 +65,7 @@ class TqdmSafeTee:
                 else:
                     self._current_buffer += char
         except Exception as e:
-            logger.debug(f"runtrace tee internal error: {e}")
+            logger.debug(f"pubrun tee internal error: {e}")
             
         return ret
         
@@ -144,7 +144,7 @@ class ConsoleInterceptor:
             self.stderr_tee = TqdmSafeTee(sys.stderr, self.stderr_log)
             sys.stderr = self.stderr_tee
         except Exception as e:
-            logger.debug(f"runtrace failed to intercept console: {e}")
+            logger.debug(f"pubrun failed to intercept console: {e}")
             self.stop() # rollback
 
     def stop(self) -> Dict[str, Any]:

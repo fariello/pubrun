@@ -1,16 +1,16 @@
 # ==========================================
-#  runtrace Configuration
+#  pubrun Configuration
 # ==========================================
-# Documentation: https://github.com/gfariello/runtrace
+# Documentation: https://github.com/gfariello/pubrun
 #
-# This file serves as the default policy for `runtrace`. When your script runs, 
-# `runtrace` will look for configuration files that override these defaults.
+# This file serves as the default policy for `pubrun`. When your script runs, 
+# `pubrun` will look for configuration files that override these defaults.
 #
 # Resolution Order (Highest to Lowest Precedence):
-#   1. Explicit API arguments (e.g., runtrace.start(profile="deep"))
-#   2. Environment variables (e.g., RUNTRACE_PROFILE="deep")
-#   3. Local project override (e.g., ./.runtrace.toml)
-#   4. User home defaults (e.g., ~/.config/runtrace/runtrace.toml)
+#   1. Explicit API arguments (e.g., pubrun.start(profile="deep"))
+#   2. Environment variables (e.g., PUBRUN_PROFILE="deep")
+#   3. Local project override (e.g., ./.pubrun.toml)
+#   4. User home defaults (e.g., ~/.config/pubrun/pubrun.toml)
 #   5. This default file.
 
 [core]
@@ -26,15 +26,15 @@
 #   "deep"    - Maximum information gathering (may include slow system calls).
 profile = "default"
 
-# The base directory where your runs will be saved. `runtrace` will automatically 
-# create uniquely named subdirectories (e.g., `runs/runtrace-script-timestamp/`)
+# The base directory where your runs will be saved. `pubrun` will automatically 
+# create uniquely named subdirectories (e.g., `runs/pubrun-script-timestamp/`)
 # inside this base path for every execution. If left empty, it naturally defaults 
 # to a `./runs` folder inside your current working directory.
 output_dir = ""
 
-# If set to `true`, simply inserting `import runtrace` into your Python script 
+# If set to `true`, simply inserting `import pubrun` into your Python script 
 # will automatically initialize a traced execution. If `false`, you must write 
-# `runtrace.start()` or use `@audit_run` explicitly to begin logging.
+# `pubrun.start()` or use `@audit_run` explicitly to begin logging.
 auto_start = true
 
 
@@ -43,7 +43,7 @@ auto_start = true
 # Configuration for intercepting and logging standard output and errors.
 # -----------------------------------------------------------------------------
 
-# How should `runtrace` handle print statements and error tracebacks?
+# How should `pubrun` handle print statements and error tracebacks?
 # Supported modes:
 #   "off"      - Console capture is entirely disabled; streams are untouched.
 #   "basic"    - `stdout` and `stderr` are invisibly tee'd to text files in your run directory.
@@ -61,8 +61,8 @@ capture_mode = "standard"
 # streamed in real-time to an `events.jsonl` file alongside your manifest.
 enabled = true
 
-# Defines the fallback behavior when a user script calls `runtrace.annotate(...)` 
-# or `runtrace.phase(...)` but no trace has actually been started yet.
+# Defines the fallback behavior when a user script calls `pubrun.annotate(...)` 
+# or `pubrun.phase(...)` but no trace has actually been started yet.
 # Supported behavioral fallbacks:
 #   "ignore" - Silently discards the annotation to prevent your script from crashing (Safest).
 #   "warn"   - Prints a visible warning to `stderr` but allows the script to continue.
@@ -89,7 +89,7 @@ representation = "redacted"
 
 [capture]
 # -----------------------------------------------------------------------------
-# Fine-grained depth limits. These settings dictate exactly how heavily `runtrace` 
+# Fine-grained depth limits. These settings dictate exactly how heavily `pubrun` 
 # profiles the state of the machine. The typical depths are "off", "basic", 
 # "standard", and "deep".
 # -----------------------------------------------------------------------------

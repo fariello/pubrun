@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from datetime import datetime
 
-logger = logging.getLogger("runtrace")
+logger = logging.getLogger("pubrun")
 
 def hydrate_manifest(manifest_path: str, manifest: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     """

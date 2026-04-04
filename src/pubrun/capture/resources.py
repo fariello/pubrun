@@ -4,7 +4,7 @@ import threading
 import logging
 from typing import Any, Dict
 
-logger = logging.getLogger("runtrace")
+logger = logging.getLogger("pubrun")
 
 # Removed ctypes in favor of reliable OS wmic command for Python compatibility across Win10/11
 
@@ -12,7 +12,7 @@ logger = logging.getLogger("runtrace")
 def _get_rss_windows() -> int:
     try:
         import subprocess
-        from runtrace.capture.subprocesses import disable_spy
+        from pubrun.capture.subprocesses import disable_spy
         with disable_spy():
             out = subprocess.check_output(
                 ["wmic", "process", "where", f"processid={os.getpid()}", "get", "WorkingSetSize"],
@@ -22,7 +22,7 @@ def _get_rss_windows() -> int:
         if len(lines) >= 2 and lines[1].isdigit():
             return int(lines[1])
     except Exception as e:
-        logger.debug(f"runtrace failed Windows RSS poll: {e}")
+        logger.debug(f"pubrun failed Windows RSS poll: {e}")
     return 0
 
 
@@ -34,20 +34,20 @@ def _get_rss_linux() -> int:
             # SC_PAGE_SIZE maps to physical RAM bytes
             return pages * os.sysconf("SC_PAGE_SIZE")
     except Exception as e:
-        logger.debug(f"runtrace failed Linux RSS poll: {e}")
+        logger.debug(f"pubrun failed Linux RSS poll: {e}")
         return 0
 
 
 def _get_rss_darwin() -> int:
     try:
         import subprocess
-        from runtrace.capture.subprocesses import disable_spy
+        from pubrun.capture.subprocesses import disable_spy
         with disable_spy():
             # Invoke Mac built-in command precisely for target Process ID
             out = subprocess.check_output(['ps', '-o', 'rss=', '-p', str(os.getpid())], text=True, stderr=subprocess.DEVNULL)
         return int(out.strip()) * 1024 # PS output is native to KB
     except Exception as e:
-        logger.debug(f"runtrace failed Mac RSS poll: {e}")
+        logger.debug(f"pubrun failed Mac RSS poll: {e}")
         return 0
 
 

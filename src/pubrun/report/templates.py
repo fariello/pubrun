@@ -21,10 +21,10 @@ Computational experiments were executed on a machine running {os_name} equipped 
 
 {packages_text}
 
-To guarantee computational reproducibility, the exact state of the source code was archived at Git commit `{git_commit}`{git_repo_text}. Environment and execution provenance were natively tracked using the `runtrace` library [1].
+To guarantee computational reproducibility, the exact state of the source code was archived at Git commit `{git_commit}`{git_repo_text}. Environment and execution provenance were natively tracked using the `pubrun` library [1].
 
 **References:**
-[1] Fariello, G. (2026). *runtrace: Lightweight native execution provenance and reproducibility tracking*. https://bitbucket.org/gfariello/runtrace
+[1] Fariello, G. (2026). *pubrun: Lightweight native execution provenance and reproducibility tracking*. https://bitbucket.org/gfariello/pubrun
 """
 
 LATEX_TEMPLATE = """
@@ -34,13 +34,13 @@ Computational experiments were executed on a machine running {os_name} equipped 
 
 {packages_text}
 
-To guarantee computational reproducibility, the exact state of the source code was archived at Git commit \\texttt{{{git_commit}}}{git_repo_text}. Environment and execution provenance were natively tracked using the \\texttt{{runtrace}} library \\cite{{fariello_runtrace_2026}}.
+To guarantee computational reproducibility, the exact state of the source code was archived at Git commit \\texttt{{{git_commit}}}{git_repo_text}. Environment and execution provenance were natively tracked using the \\texttt{{pubrun}} library \\cite{{fariello_pubrun_2026}}.
 
 %% Ensure you add the following to your .bib file:
-%% @software{{fariello_runtrace_2026,
+%% @software{{fariello_pubrun_2026,
 %%   author = {{Fariello, Gabriel}},
-%%   title = {{runtrace: Lightweight native execution provenance and reproducibility tracking}},
+%%   title = {{pubrun: Lightweight native execution provenance and reproducibility tracking}},
 %%   year = {{2026}},
-%%   url = {{https://bitbucket.org/gfariello/runtrace}}
+%%   url = {{https://bitbucket.org/gfariello/pubrun}}
 %% }}
 """

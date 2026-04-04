@@ -10,7 +10,7 @@ def get_process_info(config: Dict[str, Any]) -> Dict[str, Any]:
     about the user executing the script (username, UID, GID).
     
     Args:
-        config: The fully resolved runtrace configuration dictionary.
+        config: The fully resolved pubrun configuration dictionary.
         
     Returns:
         A dictionary compliant with the `process` schema section.

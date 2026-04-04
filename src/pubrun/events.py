@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 from datetime import datetime, timezone
 from pathlib import Path
 
-logger = logging.getLogger("runtrace")
+logger = logging.getLogger("pubrun")
 
 class EventStream:
     """
@@ -21,7 +21,7 @@ class EventStream:
             # typical in machine learning epochs.
             self._file = open(self.stream_path, "a", encoding="utf-8")
         except Exception as e:
-            logger.debug(f"runtrace failed to open event stream: {e}")
+            logger.debug(f"pubrun failed to open event stream: {e}")
             self._file = None
 
     def emit(self, event_type: str, name: Optional[str] = None, payload: Optional[Dict[str, Any]] = None) -> None:
@@ -43,7 +43,7 @@ class EventStream:
                 self._file.write(json.dumps(record) + "\n")
                 self._file.flush()
         except Exception as e:
-            logger.debug(f"runtrace event write failed: {e}")
+            logger.debug(f"pubrun event write failed: {e}")
 
     def close(self) -> None:
         if self._file:
