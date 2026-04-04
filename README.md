@@ -1,8 +1,8 @@
 # pubrun
 
-> **Let your code write its own Methods section while you go to the pub.**
+> **Let your code monitor itself and write its own Methods section while you go to the pub.**
 
-`pubrun` is a stupidly simple, zero-dependency Python library designed to eliminate the boilerplate of documenting methodology, making it dramatically easier to publish, share, and reproduce your models and research. Alternatively, if you're lame, you can think of "publication-ready runner" as an alternative meaning.
+This does so much with so little. `pubrun` is a stupidly simple, zero-dependency Python library designed to eliminate the boilerplate of documenting methodology, tracking versions, recording inputs, and monitoring resources thereby making it dramatically easier to publish, share, and reproduce your models and research. Alternatively, if you're lame, you can think of "publication-ready runner" as the meaning of the name.
 
 ## The Problem
 Modern scientific workflows rely on implicit state. When it's time to publish a paper or ship a model, researchers are forced to retroactively piece together their methodology (PyTorch versions, OS constraints, Hardware parameters) from memory.
@@ -20,7 +20,7 @@ For absolute simplicity:
 
 ```python
 import pubrun
-# Do your actual ML/Compute work here
+# Do your actual work here
 ```
 
 That’s it. There are no frameworks, no heavy integrations, and no syntax hijacking. 
