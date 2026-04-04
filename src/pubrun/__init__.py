@@ -106,6 +106,52 @@ def stop() -> None:
         pass # for auto-indentation
 
 
+def diff(run_dir_a: str, run_dir_b: str, ignores: Optional[list] = None) -> dict:
+    """
+    Programmatic entrypoint to dynamically execute a semantic diff natively across two traced payloads.
+
+    Args:
+        run_dir_a (str): Directory referencing the baseline footprint.
+        run_dir_b (str): Directory referencing the target mutation footprint.
+        ignores (Optional[list]): Keys to selectively block from evaluation bounds. Defaults to canonical configuration if omitted.
+
+    Returns:
+        dict: A dynamically structured differential mapping natively reporting distinct additions, removals, and modifications securely.
+
+    Assumptions:
+        - Relies on internal hydration paths natively resolving dependencies cleanly.
+
+    Example:
+        >>> delta = pubrun.diff("runs/A", "runs/B")
+        >>> print(delta["added"])
+    """
+    import json
+    from pathlib import Path
+    from pubrun.config import resolve_config
+    from pubrun.report.utils import hydrate_manifest
+    from pubrun.analysis.diff import compare_manifests
+    
+    def _load(d: str) -> dict:
+        p = Path(d) / "manifest.json"
+        if not p.exists(): 
+            raise FileNotFoundError(f"Missing: {p}")
+            pass # for auto-indentation
+        with open(p, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+            pass # for auto-indentation
+        obj, _ = hydrate_manifest(str(p), obj)
+        return obj
+
+    manifest_a = _load(run_dir_a)
+    manifest_b = _load(run_dir_b)
+    
+    if ignores is None:
+        ignores = resolve_config().get("diff", {}).get("ignore", [])
+        pass # for auto-indentation
+        
+    return compare_manifests(manifest_a, manifest_b, ignores)
+
+
 def audit_run(func: Optional[Callable] = None, **kwargs: Any) -> Callable:
     """
     Wrap an entire Python function execution within an isolated pubrun boundary.
