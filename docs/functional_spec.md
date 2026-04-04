@@ -205,8 +205,9 @@ The system MUST support:
 - allowlist / denylist control
 
 Secrets MUST NOT be captured by default. 
-To achieve this, the default redaction policy MUST detect and obfuscate known sensitive keys (e.g., matching regex `(?i)(password|secret|token|api_key)`).
-Redacted fields MUST NOT just omit the key; they MUST emit a standard `redacted_value` object specifying its `representation` (e.g., `redacted`, `hashed`, `suppressed`) and an optional hash.
+To achieve this, the default redaction policy MUST detect and obfuscate known sensitive keys (e.g., matching regex `(?i)(password|secret|token|api_key|auth|cred)`).
+Redacted fields MUST NOT just omit the key; they MUST emit a standard `redacted_value` object specifying its `representation` (e.g., `redacted`, `suppressed`).
+By default, to prevent rainbow table brute-force attacks, the redaction engine MUST employ strictly destructive redaction. Unsalted hashes MUST NOT be computed for secrets unless explicitly overridden by a securely salted configuration.
 
 ## 10. Configuration system
 
@@ -274,9 +275,9 @@ TOML is the strongly recommended format, enabling structural configurations whil
 ### 10.6 Configuration logging
 The system MUST produce a resolved configuration snapshot per run and store it in the run directory.
 
-## 11. Create-config behavior
+## 11. CLI Tools
 
-### 11.1 CLI support
+### 11.1 Config Generation (`--create-config`)
 
 When invoked via Python as a command-line entry point, `runtrace` MUST support a config-generation command such as:
 
@@ -316,6 +317,11 @@ If a config file already exists, the command MUST either:
 
 Silent destructive overwrite is NOT allowed.
 
+### 11.5 Automated Report Generation (`report`)
+The CLI MUST support compiling the `manifest.json` into a publication-ready "Computational Methods" text block natively.
+Command format:
+`python -m runtrace report <manifest_path> --format [markdown|latex]`
+
 ## 12. Run directory (revised)
 
 Each run MUST be stored in a dedicated, uniquely named run directory.
@@ -348,11 +354,12 @@ Example:
 
 Each run directory contents MUST include:
 
-- `manifest.json`
-- `config.resolved.json`
+- `manifest.json` (required)
+- `config.resolved.json` (required)
 
 Optional contents may include:
 
+- `methods.md` (Automated subset of manifest rendered for publication)
 - `stdout.log`
 - `stderr.log`
 - `events.jsonl`
