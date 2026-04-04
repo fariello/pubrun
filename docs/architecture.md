@@ -1,12 +1,12 @@
-# runtrace Architecture
+# pubrun Architecture
 
 > Status: Draft v0.1  
-> Purpose: Defines architectural principles and constraints for runtrace.  
+> Purpose: Defines architectural principles and constraints for pubrun.  
 > Audience: Developers and contributors.
 
 ## 1. Overview
 
-`runtrace` is a lightweight Python library that captures execution context for a run to support:
+`pubrun` is a lightweight Python library that captures execution context for a run to support:
 
 - reproducibility (primary)
 - troubleshooting (secondary)
@@ -16,7 +16,7 @@ The library is designed for minimal friction. A user should be able to include i
 
 ## 2. Core architectural model
 
-runtrace uses a hybrid snapshot + event model.
+pubrun uses a hybrid snapshot + event model.
 
 ### Snapshot (canonical)
 Each run produces a manifest that represents the run as a whole.
@@ -52,7 +52,7 @@ Example top-level structure:
 ```
 {
   "schema_version": "1.0",
-  "manifest_type": "runtrace-manifest",
+  "manifest_type": "pubrun-manifest",
   "run": {},
   "timing": {},
   "invocation": {},
@@ -163,10 +163,10 @@ The physical execution engine is logically divided into several key systems that
 - **Event Streamer**: Real-time structured execution events to `events.jsonl`.
 - **Console Manager**: Tee-style wrapper around standard streams.
 - **Artifact Writer**: Atomically generates the isolated Run Directory and serializes all outputs reliably.
-- **Diagnostics Analyzer**: A post-execution CLI analyzer (`runtrace report`) that parses the `manifest.json` and evaluates configuration, events, and script drift dynamically to present a human-readable stream of execution provenance.
-- **Methods Generator**: A post-execution CLI and writer integration (`runtrace methods`) that interprets the `manifest.json` and automatically outputs a prose-based "Computational Methods" summary in Markdown or LaTeX formats.
-- **Global Context Snapshooter**: A standalone CLI command (`runtrace meta`) that bypasses script-execution to natively generate deep introspective global execution context maps (e.g., full virtual environments) to act as a definitive parent node for massively parallel symmetric child arrays.
+- **Diagnostics Analyzer**: A post-execution CLI analyzer (`pubrun report`) that parses the `manifest.json` and evaluates configuration, events, and script drift dynamically to present a human-readable stream of execution provenance.
+- **Methods Generator**: A post-execution CLI and writer integration (`pubrun methods`) that interprets the `manifest.json` and automatically outputs a prose-based "Computational Methods" summary in Markdown or LaTeX formats.
+- **Global Context Snapshooter**: A standalone CLI command (`pubrun meta`) that bypasses script-execution to natively generate deep introspective global execution context maps (e.g., full virtual environments) to act as a definitive parent node for massively parallel symmetric child arrays.
 
 ## 26. Summary
 
-runtrace is a low-friction provenance layer for Python execution.
+pubrun is a low-friction provenance layer for Python execution.

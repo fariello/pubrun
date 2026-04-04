@@ -10,7 +10,7 @@ def get_git(config: Dict[str, Any]) -> Dict[str, Any]:
     whether there are uncommitted changes, and the upstream remote URL.
     
     Args:
-        config: The fully resolved runtrace configuration dictionary.
+        config: The fully resolved pubrun configuration dictionary.
         
     Returns:
         A schema-compliant `git_section` dictionary containing the provenance.

@@ -10,7 +10,7 @@ from pathlib import Path
 
 def _create_config(destination: str) -> None:
     try:
-        resource_path = importlib.resources.files("runtrace").joinpath("resources", "default.toml")
+        resource_path = importlib.resources.files("pubrun").joinpath("resources", "default.toml")
         content = resource_path.read_text(encoding="utf-8")
         
         target_path = Path(destination).resolve()
@@ -52,8 +52,8 @@ def _get_manifest_path(run_dir: str) -> str:
 
 def _run_methods(run_dir: str, format_type: str) -> None:
     try:
-        from runtrace.report.methods import generate_report
-        from runtrace.report.utils import hydrate_manifest
+        from pubrun.report.methods import generate_report
+        from pubrun.report.utils import hydrate_manifest
         
         manifest_path = _get_manifest_path(run_dir)
 
@@ -80,7 +80,7 @@ def _run_methods(run_dir: str, format_type: str) -> None:
 
 def _run_report(run_dir: str, depth: str) -> None:
     try:
-        from runtrace.report.diagnostics import print_report
+        from pubrun.report.diagnostics import print_report
         manifest_path = _get_manifest_path(run_dir)
         print_report(manifest_path, depth)
 
@@ -91,7 +91,7 @@ def _run_report(run_dir: str, depth: str) -> None:
         
 def _run_meta(out_path: str, depth: str) -> None:
     try:
-        from runtrace.report.meta_snapshot import generate_meta_snapshot
+        from pubrun.report.meta_snapshot import generate_meta_snapshot
         generate_meta_snapshot(out_path, depth)
     except Exception as e:
         print(f"Failed to generate global snap: {e}", file=sys.stderr)
@@ -101,24 +101,24 @@ def _run_meta(out_path: str, depth: str) -> None:
 def _run_cite(style: str) -> None:
     style = style.lower()
     if style == "apa":
-        print("Fariello, G. (2026). runtrace [Computer software]. https://github.com/gfariello/runtrace")
+        print("Fariello, G. (2026). pubrun [Computer software]. https://github.com/gfariello/pubrun")
     elif style == "mla":
-        print("Fariello, Gabriele. runtrace. 2026. GitHub, https://github.com/gfariello/runtrace.")
+        print("Fariello, Gabriele. pubrun. 2026. GitHub, https://github.com/gfariello/pubrun.")
     elif style == "chicago":
-        print('Fariello, Gabriele. 2026. "runtrace". https://github.com/gfariello/runtrace.')
+        print('Fariello, Gabriele. 2026. "pubrun". https://github.com/gfariello/pubrun.')
     elif style == "bibtex":
-        print("@software{runtrace2026,\n  author = {Gabriele Fariello},\n  title = {runtrace},\n  url = {https://github.com/gfariello/runtrace},\n  year = {2026}\n}")
+        print("@software{pubrun2026,\n  author = {Gabriele Fariello},\n  title = {pubrun},\n  url = {https://github.com/gfariello/pubrun},\n  year = {2026}\n}")
     else:
         print(f"Error: Unknown citation style '{style}'. Supported styles: apa, mla, chicago, bibtex.", file=sys.stderr)
         sys.exit(1)
 
 
 def _show_info() -> None:
-    from runtrace.capture.hardware import get_hardware
-    from runtrace.capture.invocation import get_invocation
+    from pubrun.capture.hardware import get_hardware
+    from pubrun.capture.invocation import get_invocation
     
     print("==================================================")
-    print("          runtrace Hardware Diagnostics           ")
+    print("          pubrun Hardware Diagnostics           ")
     print("==================================================\n")
     
     print("--- [ Invocation Details ] ---")
@@ -130,7 +130,7 @@ def _show_info() -> None:
 
 def _run_tests() -> None:
     print("==================================================")
-    print("        runtrace Pipeline Evaluation Mode         ")
+    print("        pubrun Pipeline Evaluation Mode         ")
     print("==================================================\n")
     
     if Path("tests").exists() and Path("tox.ini").exists():
@@ -144,20 +144,20 @@ def _run_tests() -> None:
     MOCK_SCRIPT = """
 import time
 import os
-import runtrace
+import pubrun
 
 print('Starting Mock Training Environment...')
 
-tracker = runtrace.start()
-runtrace.annotate('initializing_model', layers=3, opt='adam')
+tracker = pubrun.start()
+pubrun.annotate('initializing_model', layers=3, opt='adam')
 time.sleep(0.6)
 
-with runtrace.phase('epoch_1'):
+with pubrun.phase('epoch_1'):
     print('Epoch 1: loss = 0.95')
     os.system('echo "Evaluating internal shell capture hooks..."')
     time.sleep(0.4)
 
-with runtrace.phase('epoch_2'):
+with pubrun.phase('epoch_2'):
     print('Epoch 2: loss = 0.45')
     time.sleep(0.4)
 
@@ -168,7 +168,7 @@ print('Mock Training Complete.')
         script_path.write_text(MOCK_SCRIPT.strip(), encoding="utf-8")
         
         env = os.environ.copy()
-        env["RUNTRACE_AUTO_START"] = "true"
+        env["PUBRUN_AUTO_START"] = "true"
         
         result = subprocess.run([sys.executable, str(script_path)], env=env, capture_output=True, text=True, cwd=td)
         
@@ -202,7 +202,7 @@ print('Mock Training Complete.')
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="runtrace context capture utility.")
+    parser = argparse.ArgumentParser(description="pubrun context capture utility.")
     
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
     
@@ -232,11 +232,14 @@ def main() -> None:
     meta_parser.set_defaults(depth="deep")
     
     # ---------------- Cite Subparser ----------------
-    cite_parser = subparsers.add_parser("cite", help="Generate a citation for the runtrace library.")
+    cite_parser = subparsers.add_parser("cite", help="Generate a citation for the pubrun library.")
     cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Output citation style.")
     
+    # ---------------- Easter Egg ----------------
+    pbr_parser = subparsers.add_parser("pbr", help=argparse.SUPPRESS)
+    
     # ---------------- Diagnostic Flags ----------------
-    parser.add_argument("--create-config", type=str, nargs="?", const=".runtrace.toml", metavar="DEST", help="Create a default runtrace.toml.")
+    parser.add_argument("--create-config", type=str, nargs="?", const=".pubrun.toml", metavar="DEST", help="Create a default pubrun.toml.")
     parser.add_argument("--info", action="store_true", help="Diagnostics: Prints host capabilities.")
     parser.add_argument("--run-tests", action="store_true", help="Diagnostics: Executes a mock ML payload locally.")
     
@@ -258,6 +261,10 @@ def main() -> None:
 
     if args.command == "cite":
         _run_cite(args.style)
+        executed = True
+
+    if args.command == "pbr":
+        print("me asap")
         executed = True
 
     if getattr(args, "create_config", False):

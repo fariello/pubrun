@@ -1,6 +1,6 @@
 import os
 from typing import Dict, Any
-from runtrace.capture.redaction import redact_env_vars
+from pubrun.capture.redaction import redact_env_vars
 
 def get_environment(config: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -11,7 +11,7 @@ def get_environment(config: Dict[str, Any]) -> Dict[str, Any]:
     (e.g., API_KEY, AWS_SECRET, PASSWORD) to ensure absolute safety.
     
     Args:
-        config: The fully resolved runtrace configuration dictionary.
+        config: The fully resolved pubrun configuration dictionary.
         
     Returns:
         A dictionary compliant with the `environment_section` schema format.

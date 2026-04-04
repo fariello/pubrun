@@ -1,7 +1,7 @@
 import json
 import pytest
 from pathlib import Path
-from runtrace import start, get_current_run
+from pubrun import start, get_current_run
 
 def test_tracker_lifecycle_and_writer(tmp_path, monkeypatch):
     """Verifies that start() creates a directory and stop() dumps the manifest properly."""
@@ -38,7 +38,7 @@ def test_tracker_lifecycle_and_writer(tmp_path, monkeypatch):
     assert config_path.exists()
 
 def test_audit_run_decorator(tmp_path, monkeypatch):
-    from runtrace import audit_run
+    from pubrun import audit_run
     monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
     
     @audit_run(profile="deep")

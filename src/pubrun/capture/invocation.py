@@ -12,7 +12,7 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
     and what files did the user point it at?"
 
     Args:
-        config (Dict[str, Any]): The merged and resolved `runtrace` configuration dictionary, 
+        config (Dict[str, Any]): The merged and resolved `pubrun` configuration dictionary, 
                                  used to determine dynamic heuristic policies like `capture.inputs`.
 
     Returns:
@@ -134,7 +134,7 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
                         if compute_md5 and po.is_file():
                             try:
                                 import logging
-                                logger = logging.getLogger("runtrace")
+                                logger = logging.getLogger("pubrun")
                                 logger.warning(f"Computing MD5 for sys.argv[{idx}] ({arg}). This may cause startup latency.")
                                 
                                 # Iterate in 4KB chunks memory-safely so we don't blow up the RAM on 200GB H5 datasets.

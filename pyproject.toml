@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "runtrace"
+name = "pubrun"
 version = "0.1.0"
 description = "A lightweight Python library for capturing execution context."
 readme = "README.md"
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-runtrace = "runtrace.__main__:main"
+pubrun = "pubrun.__main__:main"
 
 [project.optional-dependencies]
 dev = [
@@ -27,7 +27,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/runtrace"]
+packages = ["src/pubrun"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

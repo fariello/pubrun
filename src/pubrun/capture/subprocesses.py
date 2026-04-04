@@ -10,7 +10,7 @@ _spy_local = threading.local()
 
 @contextmanager
 def disable_spy():
-    """Context manager to bypass SubprocessSpy for internal runtrace commands."""
+    """Context manager to bypass SubprocessSpy for internal pubrun commands."""
     old = getattr(_spy_local, "bypass", False)
     _spy_local.bypass = True
     try:
@@ -19,7 +19,7 @@ def disable_spy():
         _spy_local.bypass = old
 
 
-logger = logging.getLogger("runtrace")
+logger = logging.getLogger("pubrun")
 
 _original_popen_init = subprocess.Popen.__init__
 _original_popen_wait = subprocess.Popen.wait
@@ -101,7 +101,7 @@ class SubprocessSpy:
             raise
             
         # Hook our tracker into this specific Popen instance
-        self._runtrace_idx = len(SubprocessSpy._records)
+        self._pubrun_idx = len(SubprocessSpy._records)
         SubprocessSpy._records.append({
             "argv": argv_list,
             "started_at_utc": start_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
@@ -114,7 +114,7 @@ class SubprocessSpy:
     def _patched_popen_wait(self: Any, *args: Any, **kwargs: Any) -> int:
         exit_code = _original_popen_wait(self, *args, **kwargs)
         try:
-            idx = getattr(self, "_runtrace_idx", None)
+            idx = getattr(self, "_pubrun_idx", None)
             if idx is not None and idx < len(SubprocessSpy._records):
                 rec = SubprocessSpy._records[idx]
                 if rec.get("exit_code") is None: 
@@ -122,5 +122,5 @@ class SubprocessSpy:
                     rec["ended_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
                     rec["capture_state"]["status"] = "complete" if exit_code == 0 else "failed"
         except Exception as e:
-            logger.debug(f"runtrace failed to finalize subprocess record wait hook: {e}")
+            logger.debug(f"pubrun failed to finalize subprocess record wait hook: {e}")
         return exit_code

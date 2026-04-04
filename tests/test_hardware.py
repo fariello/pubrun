@@ -4,8 +4,8 @@ import sys
 import json
 from pathlib import Path
 
-from runtrace import start
-from runtrace.capture.hardware import _get_cpu_model, _get_total_memory_bytes, get_hardware
+from pubrun import start
+from pubrun.capture.hardware import _get_cpu_model, _get_total_memory_bytes, get_hardware
 
 def test_hardware_poller_does_not_crash():
     # If this runs on a CI machine, we don't know what it will output,

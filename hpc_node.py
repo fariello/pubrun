@@ -1,11 +1,11 @@
 import os
-import runtrace
+import pubrun
 
 # Mock the environment variable a Slurm array would set
-os.environ["RUNTRACE_META_REF"] = "meta.json"
+os.environ["PUBRUN_META_REF"] = "meta.json"
 
 print("Starting node...")
-tracker = runtrace.start(overrides={"core":{"profile":"minimal"}})
+tracker = pubrun.start(overrides={"core":{"profile":"minimal"}})
 print("Doing work...")
-runtrace.annotate("work", iterations=100)
+pubrun.annotate("work", iterations=100)
 print("Finished!")

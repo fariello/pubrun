@@ -4,7 +4,7 @@ import atexit
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger("runtrace")
+logger = logging.getLogger("pubrun")
 
 
 class ArtifactWriter:
@@ -44,7 +44,7 @@ class ArtifactWriter:
 
             # 4. Write methods.md or methods.tex (Automated publication generation)
             try:
-                from runtrace.report.generator import generate_report
+                from pubrun.report.generator import generate_report
                 
                 methods_format = self.run.config.get("methods", {}).get("format", "markdown")
                 ext = "tex" if methods_format == "latex" else "md"
@@ -55,5 +55,5 @@ class ArtifactWriter:
                 logger.debug(f"Methods generation failed: {report_err}")
 
         except Exception as e:
-            # The golden rule: runtrace never crashes the host script.
-            logger.debug(f"runtrace failed to write execution artifacts: {e}")
+            # The golden rule: pubrun never crashes the host script.
+            logger.debug(f"pubrun failed to write execution artifacts: {e}")

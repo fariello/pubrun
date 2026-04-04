@@ -1,8 +1,8 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://example.org/runtrace/manifest.schema.json",
-    "title": "runtrace Manifest",
-    "description": "Schema for a runtrace execution manifest.",
+    "$id": "https://example.org/pubrun/manifest.schema.json",
+    "title": "pubrun Manifest",
+    "description": "Schema for a pubrun execution manifest.",
     "type": "object",
     "additionalProperties": false,
     "required": [
@@ -22,7 +22,7 @@
         },
         "manifest_type": {
             "type": "string",
-            "const": "runtrace-manifest"
+            "const": "pubrun-manifest"
         },
         "run": {
             "$ref": "#/$defs/run"
