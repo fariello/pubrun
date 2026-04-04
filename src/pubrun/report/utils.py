@@ -25,6 +25,11 @@ def hydrate_manifest(manifest_path: str, manifest: Dict[str, Any]) -> Tuple[Dict
         # Resolve it securely
         meta_path = meta_path.resolve()
         
+        # Sandbox constraint to prevent Arbitrary File Read attempts
+        if not meta_path.name.endswith(".json"):
+            warnings.append(f"Security Sandbox Triggered: meta_ref '{meta_ref}' does not point to a valid .json snapshot file.")
+            return manifest, warnings
+        
         if not meta_path.exists():
             warnings.append(f"Linked Parent Meta Snapshot '{meta_ref}' not found at {meta_path}. The diagnostic output will lack deep dependencies.")
             return manifest, warnings
