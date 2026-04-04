@@ -221,3 +221,15 @@ write_summary = true
 
 # Supported output formats: "markdown", "latex"
 format = "markdown"
+
+[diff]
+# -----------------------------------------------------------------------------
+# Configuration for the native differential engine (pubrun diff).
+# -----------------------------------------------------------------------------
+
+# A list of specific keys or payload namespaces that diff should completely ignore to prevent raw terminal noise.
+ignore = ["timing", "run.run_id", "process.pid", "hardware.memory_total_bytes"]
+
+# The structural format dictating how pubrun diff exports to visual GUI tools when `--export` is utilized.
+# Supported formats: "txt" (fully flattened mapping), "json" (structurally clean dict tree).
+export_format = "txt"

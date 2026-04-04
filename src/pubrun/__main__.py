@@ -183,6 +183,83 @@ def _run_rerun(run_dir: str) -> None:
         pass # for auto-indentation
 
 
+def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool) -> None:
+    """
+    Executes the semantic differential engine comparing two unique execution traces linearly.
+
+    Args:
+        run_dir_a (str): Directory referencing the baseline footprint.
+        run_dir_b (str): Directory referencing the target mutation footprint.
+        export_format (str): Dictates structural layout output if exporting ("txt", "json").
+        no_color (bool): Overrides internal color printing capabilities if True.
+
+    Returns:
+        None
+
+    Assumptions:
+        - We assume the directories exist and manifest paths resolve.
+
+    Example:
+        >>> _run_diff("runs/A", "runs/B", None, False)
+    """
+    try:
+        from pubrun.report.utils import hydrate_manifest
+        from pubrun.config import resolve_config
+        from pubrun.analysis.diff import compare_manifests, export_manifest
+        from pubrun.analysis.render import print_diff
+
+        manifest_path_a = _get_manifest_path(run_dir_a)
+        manifest_path_b = _get_manifest_path(run_dir_b)
+
+        with open(manifest_path_a, "r", encoding="utf-8") as f:
+            manifest_a = json.load(f)
+            pass # for auto-indentation
+
+        with open(manifest_path_b, "r", encoding="utf-8") as f:
+            manifest_b = json.load(f)
+            pass # for auto-indentation
+
+        manifest_a, warn_a = hydrate_manifest(manifest_path_a, manifest_a)
+        manifest_b, warn_b = hydrate_manifest(manifest_path_b, manifest_b)
+
+        for w in (warn_a or []) + (warn_b or []):
+            print(f"[WARNING] {w}", file=sys.stderr)
+            pass # for auto-indentation
+
+        conf = resolve_config().get("diff", {})
+        ignores = conf.get("ignore", [])
+
+        if export_format:
+            fmt = export_format if export_format is not True else conf.get("export_format", "txt")
+            fmt = fmt.lower()
+            if fmt not in ["txt", "json"]:
+                print(f"Error: Unsupported export format '{fmt}'. Use 'txt' or 'json'.", file=sys.stderr)
+                sys.exit(1)
+                pass # for auto-indentation
+
+            name_a = Path(manifest_path_a).parent.name
+            name_b = Path(manifest_path_b).parent.name
+            
+            out_a = f".pubrun_diff_A_{name_a}_clean.{fmt}"
+            out_b = f".pubrun_diff_B_{name_b}_clean.{fmt}"
+
+            Path(out_a).write_text(export_manifest(manifest_a, ignores, fmt), encoding="utf-8")
+            Path(out_b).write_text(export_manifest(manifest_b, ignores, fmt), encoding="utf-8")
+
+            print(f"[OK] Successfully exported semantic baseline A to: {out_a}")
+            print(f"[OK] Successfully exported semantic target B to: {out_b}")
+            pass # for auto-indentation
+        else:
+            diff_report = compare_manifests(manifest_a, manifest_b, ignores)
+            print_diff(diff_report, no_color)
+            pass # for auto-indentation
+
+    except Exception as e:
+        print(f"Failed to generate differential report: {e}", file=sys.stderr)
+        sys.exit(1)
+        pass # for auto-indentation
+
+
 def _run_report(run_dir: str, depth: str) -> None:
     """
     Executes the report generator natively rendering terminal-based diagnostic outputs.
@@ -442,6 +519,13 @@ def main() -> None:
     rerun_parser = subparsers.add_parser("rerun", help="Fetch and print the exact shell command required to replicate a run natively.", description="Fetch and print the exact shell command required to replicate a run natively.")
     rerun_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
 
+    # ---------------- Diff Subparser ----------------
+    diff_parser = subparsers.add_parser("diff", help="Executes a high-signal semantic differential mapping between two execution traces.", description="Executes a high-signal semantic differential mapping between two execution traces.")
+    diff_parser.add_argument("run_dir_a", type=str, help="First trace artifact directory (Baseline).")
+    diff_parser.add_argument("run_dir_b", type=str, help="Second trace artifact directory (Target Mutation).")
+    diff_parser.add_argument("--export", type=str, nargs="?", const=True, help="Export parsed datasets by flattening the dictionary mappings ('txt' or 'json').")
+    diff_parser.add_argument("--no-color", action="store_true", help="Disables standard ANSI output.")
+
     # ---------------- Meta Subparser ----------------
     meta_parser = subparsers.add_parser("meta", help="Generate a localized 'meta.json' environment snapshot. Useful for massive HPC array payloads.", description="Generate a localized 'meta.json' environment snapshot. Useful for massive HPC array payloads.")
     meta_parser.add_argument("--out", type=str, default="", help="Provide an explicit filepath destination to dump the generated snapshot (defaults to stdout if empty).")
@@ -480,6 +564,11 @@ def main() -> None:
 
     if args.command == "rerun":
         _run_rerun(args.run_dir)
+        executed = True
+        pass # for auto-indentation
+
+    if args.command == "diff":
+        _run_diff(args.run_dir_a, args.run_dir_b, args.export, args.no_color)
         executed = True
         pass # for auto-indentation
 
