@@ -424,7 +424,6 @@ Capturing the resolved configuration ensures that each run is fully explainable 
 
 The manifest MUST support:
 
-- `pubrun.compare()`
 - `pubrun.diff()`
 - `pubrun rerun`
 - `replay()` guidance

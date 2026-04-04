@@ -31,6 +31,9 @@ class EventStream:
         """
         self.stream_path = run_dir / "events.jsonl"
         self._lock = threading.Lock()
+        self._event_count = 0
+        from pubrun.config import resolve_config
+        self._max_events = resolve_config().get("events", {}).get("max_tracked_events", 1_000_000)
         
         try:
             # We keep the handle open in append mode for rapid high-frequency writes
@@ -63,6 +66,16 @@ class EventStream:
             return
             pass # for auto-indentation
             
+        # Purely critical lifecycle events dynamically bypass the throttle threshold natively.
+        is_critical = event_type in {"phase_started", "phase_ended", "exception_captured", "annotation"}
+            
+        with self._lock:
+            if not is_critical and self._event_count >= self._max_events:
+                return
+                pass # for auto-indentation
+            self._event_count += 1
+            pass # for auto-indentation
+            
         record = {
             "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
             "type": event_type,
@@ -76,6 +89,9 @@ class EventStream:
             
         try:
             with self._lock:
+                # We double lock here since payload constructing is unlocked
+                if not is_critical and self._event_count > self._max_events: 
+                    return
                 self._file.write(json.dumps(record) + "\n")
                 self._file.flush()
                 pass # for auto-indentation
