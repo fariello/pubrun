@@ -90,6 +90,7 @@ The data model is designed from the start to support:
 ## Key Features
 
 - Manifest-first design (`manifest.json` per run)
+- **Automated Methods Generation** (Writes publication methodology summaries natively)
 - Optional event stream for deeper diagnostics
 - Tee-style console capture (`stdout` / `stderr`)
 - Config-driven behavior with sensible defaults
@@ -149,10 +150,11 @@ runs/runtrace-myscript-20260401T193331Z-12345-4f2a91c3/
 Contents may include:
 
 - `manifest.json` (required)
+- `config.resolved.json`
+- `methods.md` (Auto-generated computational methods text for publication)
 - `stdout.log`
 - `stderr.log`
 - `events.jsonl`
-- `config.resolved.json`
 - `summary.txt`
 
 ## Configuration
@@ -171,6 +173,12 @@ python -m runtrace --create-config
 ```
 
 This generates a fully commented config file with default values.
+
+### Academic Reporting
+To generate a "Computational Methods" paragraph natively derived from a run, you can pull it out of a captured manifest into Markdown or LaTeX:
+```bash
+python -m runtrace report ./runs/runtrace.../manifest.json --format latex
+```
 
 ## Console Capture
 
@@ -218,6 +226,14 @@ schemas/manifest.schema.json
 ## Status
 
 Early-stage design (Draft v0.2)
+
+## Remaining Work (v1 Roadmap)
+
+While the Core Capture engines are fully functional out of the box, `runtrace` is still under active development to reach v1 complete status. Things left to do:
+- **Comparison Tooling:** Implement the `runtrace.diff()` and `compare()` APIs to natively evaluate variance between two separate `manifest.json` runs.
+- **Event Streaming Phase:** Full implementation of `events.jsonl` output parsing for internal phase tracking.
+- **Configuration Hierarchy Engine:** Finish mapping `.runtrace.toml` ingestion from home directory logic and cascading overrides.
+- **JOSS Submission:** Finalize documentation targeting the Journal of Open Source Software.
 
 ## License
 
