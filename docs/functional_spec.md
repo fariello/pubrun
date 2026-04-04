@@ -336,6 +336,20 @@ Command format:
 `pubrun methods [RUN_DIR] [--format markdown|latex]`
 Crucially, this compilation requires a completely resolved overarching context. The orchestrator MUST ingest the local `manifest.json` and explicitly hydrate it with any linked parent `meta.json` in order to formulate the comprehensive hardware, Python, and package details required for academic accuracy. If the `RUN_DIR` is omitted, the tool MUST auto-detect and default to the most recent run in the local `./runs/` directory based on the directory timestamps. Configuration fallbacks MUST honor the `methods.format` definitions dynamically.
 
+### 11.8 Reproducibility Fetcher (`rerun`)
+The CLI MUST support extracting the exact shell command required to re-execute a recorded trace natively.
+Command format:
+`pubrun rerun [RUN_DIR]`
+The implementation MUST natively evaluate `invocation.rerun_command` from the target manifest and print it directly to `stdout`. Internal engine logs (e.g., auto-detecting latest run text) MUST be correctly piped strictly to `stderr` to ensure robust, clean bash pipelining constructs (e.g., `$(pubrun rerun)` natively executes safely).
+
+### 11.9 Semantic Differ (`diff`)
+The CLI MUST support providing high-signal telemetry deltas comparing two completely separated execution blocks.
+Command format:
+`pubrun diff RUN_DIR_A RUN_DIR_B [--export json|txt] [--no-color]`
+The `diff` engine MUST filter volatile execution jitter natively (e.g., timestamps, memory peak drift, standard Process IDs) relying exclusively on configuration-driven `[diff]` ignore strings in `.pubrun.toml`.
+If outputting to terminal, the system SHOULD conditionally attempt to load `rich` for side-by-side matrices, otherwise gracefully defaulting to explicit inline rendering utilizing text mappings correctly.
+If `--export` is utilized, the UI engine MUST be entirely bypassed, natively splitting dictionary hierarchies into cleanly sorted output representations allowing IDE GUI differs (`vscode`, `meld`) to accurately evaluate exact structural deviation paths optimally.
+
 ## 12. Run directory (revised)
 
 Each run MUST be stored in a dedicated, uniquely named run directory.
@@ -408,10 +422,11 @@ Capturing the resolved configuration ensures that each run is fully explainable 
 
 ## 13. Replay / compare readiness
 
-The manifest MUST support future:
+The manifest MUST support:
 
-- `compare()`
-- `diff()`
+- `pubrun.compare()`
+- `pubrun.diff()`
+- `pubrun rerun`
 - `replay()` guidance
 
 To support this, it MUST include structured and normalized information about:
