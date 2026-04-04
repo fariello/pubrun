@@ -4,6 +4,8 @@ Test 10: Deep Hardware Introspection Validation.
 Initiates expensive mathematical simulations forcefully inflating memory usage proving RAM monitoring correctly samples footprint matrices.
 """
 import os
+os.environ["PUBRUN_AUTO_START"] = "false"
+import os
 import json
 import pubrun
 

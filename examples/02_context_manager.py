@@ -4,6 +4,8 @@ Test 02: Context Manager bounding behavior.
 Proves that tracking strictly adheres to Python's width-based indentation structures.
 """
 import os
+os.environ["PUBRUN_AUTO_START"] = "false"
+import os
 import json
 import pubrun
 

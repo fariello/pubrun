@@ -4,6 +4,8 @@ Test 03: The Function Audit Decorator.
 Verifies programmatic telemetry bound structurally to pure functional components automatically.
 """
 import os
+os.environ["PUBRUN_AUTO_START"] = "false"
+import os
 import json
 import pubrun
 from pubrun.tracker import get_current_run

@@ -26,6 +26,19 @@ import pubrun
 That’s it. There are no frameworks, no heavy integrations, and no syntax hijacking. 
 When the script exits, `pubrun` silently generates a highly structured and lightweight footprint in your local `./runs/` directory.
 
+### Lazy Initialization (Explicit Tracking)
+By default, simply importing `pubrun` immediately spins up an invisible tracer safely. If you want to import `pubrun` harmlessly across multiple scripts *without* instantly generating a footprint until you explicitly call `pubrun.start()`, simply inject this environment flag structurally *before* the module is evaluated:
+
+```python
+import os
+os.environ["PUBRUN_AUTO_START"] = "false" # <--- The explicit "Wait" signal!
+
+import pubrun
+# No directory is generated implicitly.
+
+pubrun.start(output_dir="./custom_storage", profile="deep")
+```
+
 Now that your script has executed, instantly extract your method paragraph for research publication natively from your terminal:
 
 ```bash

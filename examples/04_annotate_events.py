@@ -4,6 +4,8 @@ Test 04: Arbitrary Custom Diagnostics.
 Shows users dropping distinct localized keys strictly bounded inside events telemetry.
 """
 import os
+os.environ["PUBRUN_AUTO_START"] = "false"
+import os
 import json
 import pubrun
 

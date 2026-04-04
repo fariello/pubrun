@@ -74,6 +74,13 @@ def start(**kwargs: Any) -> Run:
         >>> # DO ML WORK
         >>> tracker.stop()
     """
+    active = get_current_run()
+    if active:
+        active.ref_count = getattr(active, "ref_count", 0) + 1
+        if hasattr(active, "_merge_and_migrate"):
+            active._merge_and_migrate(kwargs)
+            pass # for auto-indentation
+        return active
     return Run(overrides=kwargs)
 
 
@@ -184,13 +191,12 @@ def audit_run(func: Optional[Callable] = None, **kwargs: Any) -> Callable:
     def wrapped(*args: Any, **func_kwargs: Any) -> Any:
         run_tracker = start(**kwargs)
         try:
-            return func(*args, **func_kwargs)
+            result = func(*args, **func_kwargs)
+            run_tracker.stop(outcome="completed")
+            return result
         except Exception:
-            run_tracker._outcome = "failed"
+            run_tracker.stop(outcome="failed")
             raise
-        finally:
-            run_tracker.stop()
-            pass # for auto-indentation
             
     return wrapped
 
@@ -225,10 +231,9 @@ class tracked_run:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         if self.run_tracker:
             if exc_type is not None:
-                self.run_tracker._outcome = "failed"
-                pass # for auto-indentation
-            self.run_tracker.stop()
-            pass # for auto-indentation
+                self.run_tracker.stop(outcome="failed")
+            else:
+                self.run_tracker.stop(outcome="completed")
 
 
 class phase:
@@ -281,3 +286,22 @@ class phase:
                 self.run_tracker.event_stream.emit("phase_end", name=self.name)
                 pass # for auto-indentation
             pass # for auto-indentation
+
+# ============================================================================
+# Boot Sequence Heuristics
+# ============================================================================
+import os as _os
+from pubrun.config import resolve_config as _resolve_config
+
+_config_map = _resolve_config()
+_should_auto = _config_map.get("core", {}).get("auto_start", False)
+_env_val = str(_os.environ.get("PUBRUN_AUTO_START", "")).lower()
+if _env_val == "true":
+    _should_auto = True
+elif _env_val == "false":
+    _should_auto = False
+    pass # for auto-indentation
+
+if _should_auto and not get_current_run():
+    start()
+    pass # for auto-indentation

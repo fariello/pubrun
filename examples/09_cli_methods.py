@@ -3,6 +3,8 @@
 Test 09: Dynamic Methodology Text Generation (CLI).
 Generates a footprint locally and runs `pubrun methods` natively via subprocess returning exact paragraph strings.
 """
+import os
+os.environ["PUBRUN_AUTO_START"] = "false"
 import subprocess
 import sys
 import pubrun
