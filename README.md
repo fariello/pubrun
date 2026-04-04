@@ -1,260 +1,109 @@
 # pubrun
 
-> **Because you have better things to do than remember what PyTorch version you used six months ago.**
+> **Let your code write its own Methods section while you go to the pub.**
 
-A stupidly-simple Python library that eliminates the boilerplate of documenting methodology, making it dramatically easier to publish, share, and reproduce your models and research.
+`pubrun` is a stupidly simple, zero-dependency Python library designed to eliminate the boilerplate of documenting methodology, making it dramatically easier to publish, share, and reproduce your models and research. Alternatively, if you're lame, you can think of "publication-ready runner" as an alternative meaning.
 
-## Overview
+## The Problem
+Modern scientific workflows rely on implicit state. When it's time to publish a paper or ship a model, researchers are forced to retroactively piece together their methodology (PyTorch versions, OS constraints, Hardware parameters) from memory.
 
-Researchers and engineers spend countless hours manually writing down what dependencies, environment variables, hardware constraints, and configurations were used to generate a specific outcome. `pubrun` automates this burden.
+## The Solution
+`pubrun` permanently terminates this friction. 
 
-With a single `import pubrun`, it silently records:
+With a single `import pubrun`, the framework quietly traces your script execution, hashes your environment dependencies, detects codebase drift, and natively compiles publication-ready **Computational Methodology** LaTeX/Markdown blocks so your run is instantly citable.
 
-- how a script was invoked
-- where and when it ran
-- environment and dependency matrices
-- hardware constraints (GPU models, precisions, cores)
-- console output (optional)
-- configuration states
+---
 
-The goal is simple:
+## ⚡⚡⚡ The "Stupid Simple" Quick Start⚡⚡⚡
 
-> Make publishing and reproducing results effortless.
-
-## Vision
-
-Modern scientific and computational workflows often rely on implicit state, which acts as a massive barrier to publishing clean, reproducible code. When it's time to publish a paper or ship a model, researchers are forced to retroactively piece together their methodology from memory.
-
-`pubrun` exists to eliminate this friction.
-
-The vision is a world where:
-
-- documenting a run's environment requires zero manual overhead
-- creating the "how to reproduce" guide for peers is entirely automated
-- differences between runs are instantly transparent via machine-readable manifests
-- reproducibility is practically free, reducing the tax on publishing
-
-## Philosophy
-
-`pubrun` is built around a few core principles:
-
-### 1. Built for Publishing
-
-The primary goal is not auditing: it's empowering researchers to painlessly verify and publish their computational methods so that others can validate and reproduce their exact work without guesswork.
-
-### 2. Minimal friction
-
-It should be easy to adopt:
+For absolute simplicity:
 
 ```python
 import pubrun
+# Do your actual ML/Compute work here
 ```
 
-For most people, that's it. No frameworks, no restructuring, no heavy setup.
+That’s it. There are no frameworks, no heavy integrations, and no syntax hijacking. 
+When the script exits, `pubrun` silently generates a highly structured and lightweight footprint in your local `./runs/` directory.
 
-### 3. Manifest over logs
+Now that your script has executed, instantly extract your method paragraph for research publication natively from your terminal:
 
-Structured data beats unstructured logs.
-
-A run produces a machine-readable `manifest.json` that captures what matters, rather than relying on parsing console output.
-
-### 4. Non-invasive by default
-
-`pubrun` should not change program behavior.
-
-- no heavy instrumentation by default
-- no fragile hooks
-- no unexpected side effects on import
-
-### 5. Progressive depth
-
-Basic usage should be simple.
-
-Advanced capture should be available, but only when explicitly enabled.
-
-### 6. Explicit and auditable
-
-What was captured, what was not, and why must be clear.
-
-Every section includes completeness status and respects redaction policies.
-
-### 7. Built for comparison
-
-The data model is designed from the start to support:
-
-- `compare()`
-- `diff()`
-- `inspect()`
-- future `replay()` guidance
-
-## Key Features
-
-- Manifest-first design (`manifest.json` per run)
-- **Automated Methods Generation** (Writes publication methodology summaries natively)
-- **Deep Metadata Introspection** (`pubrun meta` parser)
-- Optional event stream for deeper diagnostics
-- Tee-style console capture (`stdout` / `stderr`)
-- Config-driven behavior with sensible defaults
-- Run-scoped directory structure
-- Structured, comparable output
-- Designed for future comparison and replay tooling
-
-## Quick Start
-
-### Minimal usage
-If you're a normal person running Python 3.11 or later:
-```python
-import pubrun
-```
-That's it. Nothing else.
-
-If you've changed the config file so that `auto_run` is `false`:
-
-```python
-import pubrun
-pubrun.start()
+```bash
+pubrun methods --format latex
 ```
 
-### Context manager
+### Proved Output:
+> Computational experiments were executed on a machine running Windows_NT equipped with an AMD Ryzen 7 3700X 8-Core Processor and 64 GB of RAM. The execution environment relied on Python 3.14.3 (Cpython). Key dependencies explicitly tracked include torch (v2.0.1) and numpy (v1.24.1). To guarantee computational reproducibility, the exact state of the source code was anchored at Git commit `c5d1ad8b`. Environment and execution provenance were natively tracked using the `pubrun` library [1].
 
-```python
-from pubrun import tracked_run
+---
 
-with tracked_run():
-    ...
+## The Core Command Reference
+
+The `pubrun` decoupled CLI consists of four highly-targeted commands built to support solo-developers on laptops as beautifully as massively parallelized Slurm Array HPC workflows.
+
+### 1. `pubrun cite`
+Instantly spits out the specific bibliographic citation you need if you use this library to capture your methodology.
+```bash
+pubrun cite --style bibtex
 ```
 
-### Decorator
-
-```python
-from pubrun import audit_run
-
-@audit_run
-def main():
-    ...
+### 2. `pubrun methods`
+Your automated paper-writer. It translates the raw JSON diagnostic payloads into beautifully formatted publication methodology paragraphs. It automatically detects your most recent local execution by default.
+```bash
+pubrun methods [RUN_DIR] --format markdown|latex
 ```
 
-## Output Structure
-
-Each run produces a directory:
-
-```
-<base_dir>/runs/pubrun-<script>-<timestamp>-<pid>-<run_id>/
+### 3. `pubrun report`
+A diagnostic timeline visualizer. This detects dynamic code-drift and visualizes exact dependencies and explicitly targeted environment variables without requiring you to manually read hundreds of lines of JSON.
+```bash
+pubrun report --deep
 ```
 
-Example:
+---
 
+##  🚀 Advanced HPC Ecosystems (Global Hydration)
+
+If you run thousands of Array jobs concurrently across massive clusters, you do *not* want each child run wasting gigabytes logging identically heavy dependency graphs. `pubrun` supports a highly advanced **Global Parent-Child Dependency Hydration Ecosystem**.
+
+#### Step 1: Snap the Parent Cluster
+On the head node, physically snap the global state of the entire environment using:
+```bash
+pubrun meta --out ./runs/meta.json --deep
 ```
-runs/pubrun-myscript-20260401T193331Z-12345-4f2a91c3/
+This bypasses script-execution and natively generates an introspective metadata map of the hardware, environment variables, and deeply nested Python graphs directly into `meta.json`.
+
+#### Step 2: Hydrate Children
+Inside your Slurm script or batch runner, simply define the reference variable:
+```bash
+export PUBRUN_META_REF=meta.json
+# python minimal_script.py
 ```
 
-Contents may include:
+`pubrun` respects the HPC environment natively. Child scripts will bypass heavy footprint tracking automatically. 
 
-- `manifest.json` (required)
-- `config.resolved.json`
-- `methods.md` (Auto-generated computational methods text for publication)
-- `stdout.log`
-- `stderr.log`
-- `events.jsonl`
-- `summary.txt`
+When it comes time to run `pubrun report` or `pubrun methods`, the orchestrator detects the `PUBRUN_META_REF`, dynamically pulls in the massive `meta.json` context you froze in Step 1, and mathematically stitches all hardware and dependency matrices perfectly back together for your paper. It even strictly compares your target python file anchor against the original `meta.json` timestamps and warns you natively if environmental **Drift has been detected**.
 
-## Configuration
+---
 
-`pubrun` supports configuration from:
+## Configuration Philosophy
 
-- user config: `~/.config/pubrun/`
-- local project config: `.pubrun` or `.pubrun.toml`
-- environment variables
-- runtime arguments
+`pubrun` supports configurations intelligently via:
+* Local configurations `.pubrun.toml`
+* System-wide variables (`PUBRUN_AUTO_START=true`)
+* Decorators (`@pubrun.audit_run()`)
+* Context managers (`with pubrun.tracked_run()`)
 
-### Create a default config
-
+### Create the Default Engine Architecture
+Generate a fully commented architecture right inside your active directory without ever leaving the terminal:
 ```bash
 pubrun --create-config
 ```
 
-This generates a fully commented config file with default values.
+## Replay and Prove
+Every generated directory captures heavily structured `manifest.json` files alongside configurations natively engineered to support future evaluation via `compare()` and `diff()`.
 
-### Academic Reporting
-To generate a "Computational Methods" paragraph natively derived from a run, you can pull it out of a captured manifest into Markdown or LaTeX:
-```bash
-pubrun methods ./runs/pubrun.../manifest.json --format latex
-```
-If you omit the file path, `pubrun` will automatically look out for your most recent local execution and generate the report identically.
-
-### Diagnostics & Inspection
-If you want to debug an environment without manually reading hundreds of `JSON` properties, `pubrun` can print a beautiful, structured analysis of any run dynamically (including resolving child-parent references and detecting code-drift!):
-```bash
-pubrun report --deep
-```
-By default, if you don't provide a specific `--run` directory flag, it intelligently grabs the most recent execution from your local `./runs/` folder.
-
-### Global Snapshotting (HPC & Distributed Jobs)
-If you run thousands of Array jobs concurrently, you don't want each run wasting gigabytes logging the exact identical heavy dependency graphs. `pubrun` enables you to snap an overarching master Environment Node:
-```bash
-pubrun meta --out ./runs/meta.json --deep
-```
-Set `PUBRUN_META_REF=meta.json` in your bash file and all lightweight child executions will beautifully hydrate the parent dependencies statically before publication dynamically!
-
-## Console Capture
-
-Optional tee-style capture of:
-
-- `stdout`
-- `stderr`
-
-Modes:
-
-- off
-- basic
-- standard (with timestamps)
-- deep
-
-Example output:
-
-```
-2026-04-01T19:33:31.482Z +00.482 stdout Starting analysis
-```
-
-## Manifest
-
-Each run produces a structured `manifest.json` describing:
-
-- invocation details
-- environment and dependencies
-- timing and outcome
-- system information
-- configuration used
-- artifact references
-
-The manifest is:
-
-- machine-readable
-- versioned
-- designed for comparison across runs
-
-Schema available at:
-
-```
-schemas/manifest.schema.json
-```
-
-## Status
-
-Early-stage design (Draft v0.2)
-
-## Remaining Work (v1 Roadmap)
-
-While the Core Capture engines are fully functional out of the box, `pubrun` is still under active development to reach v1 complete status. Things left to do:
-- **Comparison Tooling:** Implement the `pubrun.diff()` and `compare()` APIs to natively evaluate variance between two separate `manifest.json` runs.
-- **Event Streaming Phase:** Full implementation of `events.jsonl` output parsing for internal phase tracking.
-- **Configuration Hierarchy Engine:** Finish mapping `.pubrun.toml` ingestion from home directory logic and cascading overrides.
-- **JOSS Submission:** Finalize documentation targeting the Journal of Open Source Software.
+## Acknowledgements
+`pubrun` was structurally redesigned and re-written from code fragments, scripts, and ideas over almost two decades with the assistance of Google Antigravity for its official v0.1.0 release.
 
 ## License
-
-Released under the BSD 3-Clause License.
-
-Copyright (c) 2007-2026 Gabriele Fariello
-
-See the LICENSE file for full terms.
+Released under the BSD 3-Clause License. Copyright (c) 2007-2026 Gabriele Fariello. See the LICENSE file for full terms.
