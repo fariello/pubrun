@@ -279,10 +279,10 @@ The system MUST produce a resolved configuration snapshot per run and store it i
 
 ### 11.1 Config Generation (`--create-config`)
 
-When invoked via Python as a command-line entry point, `runtrace` MUST support a config-generation command such as:
+When invoked via the terminal, `runtrace` MUST support a config-generation command such as:
 
 ```bash
-python -m runtrace --create-config
+runtrace --create-config
 ```
 
 A direct CLI entry point may also support the same behavior.
@@ -317,10 +317,24 @@ If a config file already exists, the command MUST either:
 
 Silent destructive overwrite is NOT allowed.
 
-### 11.5 Automated Report Generation (`report`)
-The CLI MUST support compiling the `manifest.json` into a publication-ready "Computational Methods" text block natively.
+### 11.5 Global Context Generation (`meta`)
+The CLI MUST support capturing a massive, independent environment snapshot intended to act as the overarching metadata parent to symmetric distributed compute jobs.
 Command format:
-`python -m runtrace report <manifest_path> --format [markdown|latex]`
+`runtrace meta [--out PATH] [--depth basic|standard|deep]`
+By default, the command ignores local `.runtrace` minimal restrictions, captures full virtual environments natively without wrapping a script execution, outputs `meta.json` in `./runs/`, and intelligently formats the JSON snapshot dynamically to the terminal.
+
+### 11.6 Run Diagnostics (`report`)
+The CLI MUST support compiling execution metrics into a human-readable diagnostics text stream natively for verification and troubleshooting.
+Command format:
+`runtrace report [RUN_DIR] [--depth basic|standard|deep]`
+To provide a holistic summary, the command MUST aggregate data across multiple artifacts (specifically ingesting `manifest.json`, `config.resolved.json`, and `events.jsonl`). 
+It MUST also support dynamic Parent-Child manifest hydration. If the local run indicates an active `"meta_ref"`, the orchestrator natively merges the parent context. Furthermore, it MUST detect and compute structural environment drift by validating fast script `stat` anchors (`size` and `mtime`) captured natively in child traces, dynamically throwing warnings if the target script was modified after the parent `meta.json` snap.
+
+### 11.7 Academic Methodology Exporter (`methods`)
+The CLI MUST support compiling execution provenance into a publication-ready "Computational Methods" text block natively. 
+Command format:
+`runtrace methods [RUN_DIR] [--format markdown|latex]`
+Crucially, this compilation requires a completely resolved overarching context. The orchestrator MUST ingest the local `manifest.json` and explicitly hydrate it with any linked parent `meta.json` in order to formulate the comprehensive hardware, Python, and package details required for academic accuracy. If the `RUN_DIR` is omitted, the tool MUST auto-detect and default to the most recent run in the local `./runs/` directory based on the directory timestamps. Configuration fallbacks MUST honor the `methods.format` definitions dynamically.
 
 ## 12. Run directory (revised)
 

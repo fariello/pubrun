@@ -42,12 +42,15 @@ class ArtifactWriter:
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(self.run.config, f, indent=2)
 
-            # 4. Write methods.md (Automated publication generation)
+            # 4. Write methods.md or methods.tex (Automated publication generation)
             try:
                 from runtrace.report.generator import generate_report
-                methods_path = out_dir / "methods.md"
+                
+                methods_format = self.run.config.get("methods", {}).get("format", "markdown")
+                ext = "tex" if methods_format == "latex" else "md"
+                methods_path = out_dir / f"methods.{ext}"
                 with open(methods_path, "w", encoding="utf-8") as f:
-                    f.write(generate_report(self.run.to_manifest_dict(), "markdown"))
+                    f.write(generate_report(self.run.to_manifest_dict(), methods_format))
             except Exception as report_err:
                 logger.debug(f"Methods generation failed: {report_err}")
 
