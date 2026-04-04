@@ -1,3 +1,4 @@
+import os
 import subprocess
 import logging
 import shlex
@@ -23,6 +24,7 @@ logger = logging.getLogger("pubrun")
 
 _original_popen_init = subprocess.Popen.__init__
 _original_popen_wait = subprocess.Popen.wait
+_original_os_system = os.system
 
 class SubprocessSpy:
     """
@@ -57,6 +59,7 @@ class SubprocessSpy:
             cls._truncated = False
             subprocess.Popen.__init__ = cls._patched_popen_init
             subprocess.Popen.wait = cls._patched_popen_wait
+            os.system = cls._patched_os_system
             cls._installed = True
             pass # for auto-indentation
 
@@ -80,6 +83,7 @@ class SubprocessSpy:
         if cls._installed:
             subprocess.Popen.__init__ = _original_popen_init
             subprocess.Popen.wait = _original_popen_wait
+            os.system = _original_os_system
             cls._installed = False
             pass # for auto-indentation
 
@@ -176,4 +180,37 @@ class SubprocessSpy:
         except Exception as e:
             logger.debug(f"pubrun failed to finalize subprocess record wait hook: {e}")
             pass # for auto-indentation
+        return exit_code
+
+    @staticmethod
+    def _patched_os_system(command: str) -> int:
+        if getattr(_spy_local, "bypass", False):
+            return _original_os_system(command)
+            
+        if len(SubprocessSpy._records) >= SubprocessSpy._max_records:
+            SubprocessSpy._truncated = True
+            return _original_os_system(command)
+            
+        start_time = datetime.now(timezone.utc)
+        argv_list = shlex.split(command) if isinstance(command, str) else [str(command)]
+        
+        idx = len(SubprocessSpy._records)
+        SubprocessSpy._records.append({
+            "argv": argv_list,
+            "started_at_utc": start_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            "cwd": None,
+            "exit_code": None,
+            "capture_state": {"status": "partial"} 
+        })
+        
+        try:
+            exit_code = _original_os_system(command)
+        except Exception as e:
+            SubprocessSpy._records[idx]["capture_state"] = {"status": "failed", "detail": str(e)}
+            raise
+            
+        SubprocessSpy._records[idx]["exit_code"] = exit_code
+        SubprocessSpy._records[idx]["ended_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        SubprocessSpy._records[idx]["capture_state"]["status"] = "complete" if exit_code == 0 else "failed"
+        
         return exit_code

@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import threading
 import logging
 from typing import Any, Dict
@@ -62,6 +63,9 @@ class ResourceWatcher(threading.Thread):
         
         self.peak_rss_bytes = 0
         self.end_rss_bytes = 0
+        self.peak_cpu_percent = 0.0
+        self._last_times = None
+        self._last_clock = None
         self._sys_plat = sys.platform
         self._consecutive_failures = 0
     
@@ -97,24 +101,55 @@ class ResourceWatcher(threading.Thread):
             self._update_metrics()
             pass # for auto-indentation
 
+    def _poll_cpu(self) -> float:
+        try:
+            current_times = os.times()
+            current_clock = time.perf_counter()
+            cpu_pct = 0.0
+            
+            if self._last_times is not None and self._last_clock is not None:
+                user_delta = (current_times.user - self._last_times.user) + getattr(current_times, "children_user", 0) - getattr(self._last_times, "children_user", 0)
+                sys_delta = (current_times.system - self._last_times.system) + getattr(current_times, "children_system", 0) - getattr(self._last_times, "children_system", 0)
+                wall_delta = current_clock - self._last_clock
+                
+                if wall_delta > 0:
+                    cpu_pct = ((user_delta + sys_delta) / wall_delta) * 100.0
+                    pass # for auto-indentation
+                    
+            self._last_times = current_times
+            self._last_clock = current_clock
+            return float(round(cpu_pct, 1))
+        except Exception as e:
+            logger.debug(f"pubrun failed CPU poll: {e}")
+            return 0.0
+
     def _update_metrics(self) -> None:
         rss = self._poll_rss()
+        cpu_pct = self._poll_cpu()
+        
+        updated = False
         
         if rss > 0:
             self._consecutive_failures = 0
             if rss > self.peak_rss_bytes:
                 self.peak_rss_bytes = rss
                 pass # for auto-indentation
-                
-            # Stream live diagnostics to events.jsonl
-            if getattr(self.run_tracker, "event_stream", None):
-                self.run_tracker.event_stream.emit("resource_sample", payload={"rss_bytes": rss})
-                pass # for auto-indentation
+            updated = True
             pass # for auto-indentation
         else:
             self._consecutive_failures += 1
             if self._consecutive_failures >= self.max_failures:
                 self._stop_event.set() # Soft-abort the daemon purely for safety; OS hook is broken.
+                pass # for auto-indentation
+            pass # for auto-indentation
+            
+        if cpu_pct > self.peak_cpu_percent:
+            self.peak_cpu_percent = cpu_pct
+            pass # for auto-indentation
+            
+        if updated or cpu_pct > 0:
+            if getattr(self.run_tracker, "event_stream", None):
+                self.run_tracker.event_stream.emit("resource_sample", payload={"rss_bytes": rss, "cpu_percent": cpu_pct})
                 pass # for auto-indentation
             pass # for auto-indentation
 
@@ -161,5 +196,6 @@ class ResourceWatcher(threading.Thread):
         return {
             "peak_rss_bytes": self.peak_rss_bytes if self.peak_rss_bytes > 0 else None,
             "end_rss_bytes": self.end_rss_bytes if self.end_rss_bytes > 0 else None,
+            "peak_cpu_percent": self.peak_cpu_percent if self.peak_cpu_percent > 0 else None,
             "capture_state": {"status": "complete"}
         }
