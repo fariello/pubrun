@@ -42,6 +42,15 @@ class ArtifactWriter:
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(self.run.config, f, indent=2)
 
+            # 4. Write methods.md (Automated publication generation)
+            try:
+                from runtrace.report.generator import generate_report
+                methods_path = out_dir / "methods.md"
+                with open(methods_path, "w", encoding="utf-8") as f:
+                    f.write(generate_report(self.run.to_manifest_dict(), "markdown"))
+            except Exception as report_err:
+                logger.debug(f"Methods generation failed: {report_err}")
+
         except Exception as e:
             # The golden rule: runtrace never crashes the host script.
             logger.debug(f"runtrace failed to write execution artifacts: {e}")

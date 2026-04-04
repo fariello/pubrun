@@ -26,6 +26,20 @@ def _create_config(destination: str) -> None:
         sys.exit(1)
 
 
+def _generate_report(manifest_path: str, format_type: str) -> None:
+    try:
+        from runtrace.report.generator import generate_report
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+        text = generate_report(manifest, format_type)
+        print("--- Generated Computational Methods Section ---")
+        print(text)
+        print("-----------------------------------------------\n")
+    except Exception as e:
+        print(f"Failed to generate report: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def _show_info() -> None:
     from runtrace.capture.hardware import get_hardware
     from runtrace.capture.invocation import get_invocation
@@ -127,6 +141,14 @@ print('Mock Training Complete.')
 def main() -> None:
     parser = argparse.ArgumentParser(description="runtrace context capture utility.")
     
+    subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
+    
+    # ---------------- Report Subparser ----------------
+    report_parser = subparsers.add_parser("report", help="Generate a methods section from a saved manifest.")
+    report_parser.add_argument("manifest_path", type=str, help="Path to the generated manifest.json.")
+    report_parser.add_argument("--format", type=str, choices=["markdown", "latex"], default="markdown", help="Output format (markdown or latex).")
+    
+    # ---------------- Diagnostic Flags ----------------
     parser.add_argument(
         "--create-config",
         type=str,
@@ -152,15 +174,19 @@ def main() -> None:
 
     executed = False
 
-    if args.create_config:
+    if args.command == "report":
+        _generate_report(args.manifest_path, args.format)
+        executed = True
+
+    if getattr(args, "create_config", False):
         _create_config(args.create_config)
         executed = True
         
-    if args.info:
+    if getattr(args, "info", False):
         _show_info()
         executed = True
         
-    if args.run_tests:
+    if getattr(args, "run_tests", False):
         _run_tests()
         executed = True
 

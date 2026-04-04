@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite it."
+authors:
+  - family-names: "Fariello"
+    given-names: "Gabriel"
+    # orcid: "https://orcid.org/0000-0000-0000-0000" # Uncomment and add your ORCID if you have one
+title: "runtrace: Lightweight native execution provenance and reproducibility tracking"
+version: 0.1.0
+date-released: 2026-04-03
+url: "https://bitbucket.org/gfariello/runtrace"
+repository-code: "https://bitbucket.org/gfariello/runtrace"
+abstract: >-
+  runtrace is a zero-dependency, manifest-first Python framework for natively tracking computational provenance, environment state, and execution metadata without requiring complex virtualization overhead.
+keywords:
+  - reproducibility
+  - provenance
+  - metadata
+  - research-software
+license: "MIT"
