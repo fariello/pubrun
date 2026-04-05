@@ -12,6 +12,7 @@ import pubrun
 def main() -> None:
     print("Testing 04_annotate_events...")
     tracker = pubrun.start(profile="minimal")
+    print(f'Simulating active tracked output strictly inside {__file__} natively.')
     run_dir = getattr(tracker, "run_dir", getattr(tracker, "_run_dir", None))
     
     pubrun.annotate("Matrix Instantiated", dimensions="1024x1024", simulated_device="cpu")

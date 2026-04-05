@@ -13,6 +13,7 @@ import pubrun
 def main() -> None:
     print("Testing 05_execution_phases...")
     tracker = pubrun.start(profile="minimal")
+    print(f'Simulating active tracked output strictly inside {__file__} natively.')
     run_dir = getattr(tracker, "run_dir", getattr(tracker, "_run_dir", None))
     
     with pubrun.phase("Dataset Initialization"):

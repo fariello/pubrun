@@ -1,8 +1,8 @@
 import json
 import logging
 import threading
+import time
 from typing import Any, Dict, Optional
-from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger("pubrun")
@@ -77,7 +77,7 @@ class EventStream:
             pass # for auto-indentation
             
         record = {
-            "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            "timestamp_utc": time.time(),
             "type": event_type,
         }
         if name is not None:

@@ -21,6 +21,7 @@ def main() -> None:
     sys.argv.append(dummy_file)
     
     with pubrun.tracked_run() as active:
+        print("Simulating active tracked output strictly inside 07_file_capture.py natively.")
         run_dir = getattr(getattr(active, "run_tracker", active), "run_dir", None)
         pass # for auto-indentation
         

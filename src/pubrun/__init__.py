@@ -303,5 +303,12 @@ elif _env_val == "false":
     pass # for auto-indentation
 
 if _should_auto and not get_current_run():
-    start()
-    pass # for auto-indentation
+    import sys as _sys
+    _sys0 = _os.path.basename(_sys.argv[0]) if _sys.argv else ""
+    if _sys0 in ("pubrun", "pubrun.exe", "__main__.py", "-m"):
+        _should_auto = False
+        pass # for auto-indentation
+        
+    if _should_auto:
+        start()
+        pass # for auto-indentation

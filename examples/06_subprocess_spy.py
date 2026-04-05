@@ -13,6 +13,7 @@ import pubrun
 def main() -> None:
     print("Testing 06_subprocess_spy...")
     with pubrun.tracked_run() as active:
+        print("Simulating active tracked output strictly inside 06_subprocess_spy.py natively.")
         run_dir = getattr(getattr(active, "run_tracker", active), "run_dir", None)
         
         # Fire off a completely harmless shell logic ensuring cross-compatibility

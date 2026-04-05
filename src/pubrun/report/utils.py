@@ -62,12 +62,9 @@ def hydrate_manifest(manifest_path: str, manifest: Dict[str, Any]) -> Tuple[Dict
         
         if child_script_mtime and parent_snap_started:
             try:
-                # Handle strictly conforming "Z" suffix representing UTC
-                pt_str = parent_snap_started.replace("Z", "+00:00")
-                pt_dt = datetime.fromisoformat(pt_str)
-                # If script was modified AFTER the snapshot was finalized
-                if child_script_mtime > pt_dt.timestamp():
-                    warnings.append(f"Drift Detected: The script was modified after the parent meta.json snapshot was generated on {parent_snap_started}. Deep dependencies may be severely out of sync.")
+                # Direct float comparison for Epoch offsets
+                if child_script_mtime > parent_snap_started:
+                    warnings.append(f"Drift Detected: The script was modified after the parent meta.json snapshot was tracking structurally. Deep dependencies may be severely out of sync.")
                     pass # for auto-indentation
             except Exception as e:
                 logger.debug(f"Failed to parse datetime for drift resolution: {e}")

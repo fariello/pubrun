@@ -14,6 +14,7 @@ def main() -> None:
     
     # Ensure locally tracked context is structurally guaranteed 
     tracker = pubrun.start(profile="minimal")
+    print("Simulating active tracked output strictly inside footprint generator.")
     tracker.stop()
     
     # Evaluate CLI native functionality generating text outputs dynamically

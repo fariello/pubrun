@@ -3,8 +3,8 @@ import subprocess
 import logging
 import shlex
 import threading
+import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from typing import Any, List, Dict, Optional
 
 _spy_local = threading.local()
@@ -108,10 +108,10 @@ class SubprocessSpy:
         Example:
             >>> SubprocessSpy.finalize_all()
         """
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        now_ts = time.time()
         for rec in cls._records:
             if rec.get("exit_code") is None and "ended_at_utc" not in rec:
-                rec["ended_at_utc"] = now_str
+                rec["ended_at_utc"] = now_ts
                 # They didn't explicitly wait. Technically abandoned or detached execution.
                 if rec.get("capture_state", {}).get("status") == "partial":
                     rec["capture_state"]["status"] = "complete"
@@ -128,7 +128,7 @@ class SubprocessSpy:
             SubprocessSpy._truncated = True
             return _original_popen_init(self, args, *sys_args, **kwargs)
             
-        start_time = datetime.now(timezone.utc)
+        start_time = time.time()
         
         # Convert args to list of strings securely
         if isinstance(args, str):
@@ -147,7 +147,7 @@ class SubprocessSpy:
             # Failed to construct the subprocess completely (e.g. binary not found)
             SubprocessSpy._records.append({
                 "argv": argv_list,
-                "started_at_utc": start_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+                "started_at_utc": start_time,
                 "cwd": cwd_str,
                 "capture_state": {"status": "failed", "detail": str(e)}
             })
@@ -157,7 +157,7 @@ class SubprocessSpy:
         self._pubrun_idx = len(SubprocessSpy._records)
         SubprocessSpy._records.append({
             "argv": argv_list,
-            "started_at_utc": start_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            "started_at_utc": start_time,
             "cwd": cwd_str,
             "exit_code": None,
             "capture_state": {"status": "partial"} # Partial because it hasn't exited yet
@@ -172,7 +172,7 @@ class SubprocessSpy:
                 rec = SubprocessSpy._records[idx]
                 if rec.get("exit_code") is None: 
                     rec["exit_code"] = exit_code
-                    rec["ended_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+                    rec["ended_at_utc"] = time.time()
                     rec["capture_state"]["status"] = "complete" if exit_code == 0 else "failed"
                     pass # for auto-indentation
                 pass # for auto-indentation
@@ -191,13 +191,13 @@ class SubprocessSpy:
             SubprocessSpy._truncated = True
             return _original_os_system(command)
             
-        start_time = datetime.now(timezone.utc)
+        start_time = time.time()
         argv_list = shlex.split(command) if isinstance(command, str) else [str(command)]
         
         idx = len(SubprocessSpy._records)
         SubprocessSpy._records.append({
             "argv": argv_list,
-            "started_at_utc": start_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            "started_at_utc": start_time,
             "cwd": None,
             "exit_code": None,
             "capture_state": {"status": "partial"} 
@@ -210,7 +210,7 @@ class SubprocessSpy:
             raise
             
         SubprocessSpy._records[idx]["exit_code"] = exit_code
-        SubprocessSpy._records[idx]["ended_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        SubprocessSpy._records[idx]["ended_at_utc"] = time.time()
         SubprocessSpy._records[idx]["capture_state"]["status"] = "complete" if exit_code == 0 else "failed"
         
         return exit_code

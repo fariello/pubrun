@@ -12,6 +12,7 @@ import pubrun
 def main() -> None:
     print("Testing 10_hardware_probe...")
     with pubrun.tracked_run(profile="deep") as active:
+        print("Simulating active tracked output strictly inside 10 natively.")
         run_dir = getattr(getattr(active, "run_tracker", active), "run_dir", None)
         
         # Arbitrarily inflating structural memory mapping block seamlessly

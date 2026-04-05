@@ -15,12 +15,14 @@ def main() -> None:
     # Generate Environment Baseline
     os.environ["PUBRUN_DUMMY_VAR"] = "BASELINE"
     tracker1 = pubrun.start(profile="minimal")
+    print(f'Simulating active tracked output strictly inside {__file__} natively.')
     run_dir_a = getattr(tracker1, "run_dir", getattr(tracker1, "_run_dir", None))
     pubrun.stop()
     
     # Generate Mutated Execution Context
     os.environ["PUBRUN_DUMMY_VAR"] = "MUTATED"
     tracker2 = pubrun.start(profile="minimal")
+    print("Simulating active tracked output strictly inside tracker2 cleanly.")
     run_dir_b = getattr(tracker2, "run_dir", getattr(tracker2, "_run_dir", None))
     pubrun.stop()
     
