@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from datetime import datetime, timezone
 from pubrun.report.utils import hydrate_manifest
 
 def bytes_to_gb(bytes_val: int) -> float:
@@ -64,7 +65,9 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
     print(f"Run ID      : {run.get('run_id')}")
     print(f"Script      : {script_name}")
     print(f"Status      : {status.get('outcome')}")
-    print(f"Started     : {timing.get('started_at_utc')}")
+    start_ts = timing.get('started_at_utc')
+    start_str = datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat() if start_ts else "unknown"
+    print(f"Started     : {start_str}")
     if timing.get("elapsed_seconds"):
         print(f"Elapsed     : {timing.get('elapsed_seconds')}s")
         pass # for auto-indentation
@@ -74,12 +77,40 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
     if events_path.exists():
         print("\n--- Event Timeline ---")
         try:
+            from collections import deque
             with open(events_path, "r", encoding="utf-8") as ef:
+                first_events = []
+                last_events = deque(maxlen=20)
+                total_events = 0
                 for line in ef:
-                    e = json.loads(line)
-                    print(f"  [{e.get('timestamp')}] {e.get('type')}: {e.get('name', '')} {e.get('payload', '')}")
+                    total_events += 1
+                    if total_events <= 20:
+                        first_events.append(line)
+                    else:
+                        last_events.append(line)
+                        pass # for auto-indentation
+                        pass # for auto-indentation
+                        
+                def _print_ev(raw_line: str) -> None:
+                    e = json.loads(raw_line)
+                    ts = e.get('timestamp_utc', 0.0)
+                    ts_str = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+                    print(f"  [{ts_str}] {e.get('type')}: {e.get('name', '')} {e.get('payload', '')}")
+                    
+                for line in first_events:
+                    _print_ev(line)
                     pass # for auto-indentation
-                pass # for auto-indentation
+                    
+                if total_events > 40:
+                    print(f"  ... [ {total_events - 40} events logically truncated ] ...")
+                    pass # for auto-indentation
+                    
+                if total_events > 20:
+                    # Render the remaining tail natively
+                    for line in last_events:
+                        _print_ev(line)
+                        pass # for auto-indentation
+                    pass # for auto-indentation
         except Exception:
             print("  (Events file corrupt or unreadable)")
             pass # for auto-indentation

@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,7 @@ from pubrun.capture.python_runtime import get_python_runtime
 from pubrun.capture.packages import get_packages
 from pubrun.capture.environment import get_environment
 from pubrun.capture.git import get_git
+from pubrun.capture.host import get_host
 
 
 # Define a singleton instance to manage global tracking state
@@ -75,15 +77,18 @@ class Run:
         self.pid = os.getpid()
         self.script_name = Path(sys.argv[0]).stem if sys.argv and sys.argv[0] else "interactive"
         
-        # Timing state (explicit UTC timezone requirement)
-        self.started_at_utc = datetime.now(timezone.utc)
-        self.ended_at_utc: Optional[datetime] = None
+        # Timing state (explicit epoch performance requirement)
+        self.started_at_utc = time.time()
+        self.ended_at_utc: Optional[float] = None
         self.is_active = True
         
         # Establish the unique run directory name
         base_dir_str = self.config.get("core", {}).get("output_dir", "")
         base_dir = Path(base_dir_str) if base_dir_str else Path.cwd() / "runs"
-        timestamp_str = self.started_at_utc.strftime("%Y%m%dT%H%M%SZ")
+        
+        # Hydrate timezone string exclusively dynamically for directory legibility
+        dt = datetime.fromtimestamp(self.started_at_utc, tz=timezone.utc)
+        timestamp_str = dt.strftime("%Y%m%dT%H%M%SZ")
         dir_name = f"pubrun-{self.script_name}-{timestamp_str}-{self.pid}-{self.run_id}"
         self.run_dir = base_dir / dir_name
 
@@ -109,6 +114,7 @@ class Run:
             self.python_data = {}
             self.packages_data = {}
             self.environment_data = {}
+            self.host_data = {}
             self.console_interceptor = None
             _active_run = self
             return
@@ -131,6 +137,7 @@ class Run:
         
         # 4. Hardware tracking (Must run before SubprocessSpy to avoid logging psutil tools etc)
         self.hardware_data = get_hardware(self.config)
+        self.host_data = get_host(self.config)
         
         # 4. Console & Subprocess interception setup
         if self.config.get("capture", {}).get("subprocesses", {}).get("enabled", False):
@@ -243,7 +250,7 @@ class Run:
             >>> self._finalize_state()
         """
         if self.is_active:
-            self.ended_at_utc = datetime.now(timezone.utc)
+            self.ended_at_utc = time.time()
             self.is_active = False
             pass # for auto-indentation
 
@@ -322,28 +329,10 @@ class Run:
         """
         elapsed = None
         if self.ended_at_utc:
-            elapsed = (self.ended_at_utc - self.started_at_utc).total_seconds()
+            elapsed = self.ended_at_utc - self.started_at_utc
             pass # for auto-indentation
             
-        def _str_fmt(dt: datetime) -> str:
-            """
-            Formats datetime explicitly matching JSON-Schemas mapping logic safely.
-            
-            Args:
-                dt (datetime): The native standard python time wrapper.
-                
-            Returns:
-                str: Target correctly explicitly mapped output matching validation rules natively.
-                
-            Assumptions:
-                - Drops resolution securely down to simply three decimal places.
-                
-            Example:
-                >>> _str_fmt(datetime.now())
-                "2026-04-04T12:00:00.000Z"
-            """
-            return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-            
+            pass # removed local string formatter hook
         subprocess_records = SubprocessSpy.get_records() if self._spying_subprocesses else []
 
         return {
@@ -355,8 +344,8 @@ class Run:
                 "capture_state": {"status": "complete"}
             },
             "timing": {
-                "started_at_utc": _str_fmt(self.started_at_utc),
-                "ended_at_utc": _str_fmt(self.ended_at_utc) if self.ended_at_utc else None,
+                "started_at_utc": self.started_at_utc,
+                "ended_at_utc": self.ended_at_utc,
                 "elapsed_seconds": elapsed,
                 "capture_state": {"status": "complete"}
             },
@@ -381,6 +370,7 @@ class Run:
             },
             
             "hardware": self.hardware_data,
+            "host": self.host_data,
             "resources": self.resource_watcher.to_manifest_dict() if self.resource_watcher else {"capture_state": {"status": "suppressed"}},
             
             "capture": {

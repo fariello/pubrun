@@ -7,6 +7,7 @@ from pubrun.capture.packages import get_packages
 from pubrun.capture.environment import get_environment
 from pubrun.capture.git import get_git
 from pubrun.capture.hardware import get_hardware
+from pubrun.capture.host import get_host
 
 def generate_meta_snapshot(output_path: str, depth: str) -> None:
     """
@@ -38,23 +39,23 @@ def generate_meta_snapshot(output_path: str, depth: str) -> None:
     packages = get_packages(cfg)
     git_track = get_git(cfg)
     sys_env = get_environment(cfg)
+    host_env = get_host(cfg)
     
     # Construct Parent Map
-    def _str_fmt(dt: datetime) -> str:
-        return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-        
-    now = datetime.now(timezone.utc)
+    import time
+    now_ts = time.time()
     
     meta_json = {
         "manifest_type": "pubrun-meta-snapshot",
         "timing": {
-            "started_at_utc": _str_fmt(now)
+            "started_at_utc": now_ts
         },
         "hardware": hardware,
         "python": python_env,
         "packages": packages,
         "git": git_track,
-        "environment": sys_env
+        "environment": sys_env,
+        "host": host_env
     }
     
     # Drop to file
