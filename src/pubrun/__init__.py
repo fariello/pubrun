@@ -1,13 +1,74 @@
 """
-pubrun - A lightweight Python library for capturing execution context.
+pubrun - Zero-dependency Python execution and telemetry capture engine.
+
+## Backstory
+-----
+
+Over the years, I ended up rewriting the same kinds of execution wrappers again and again across different projects, scripts, and research work.
+
+Some were quick one-offs. Others turned into full object-oriented frameworks. But they all tried to solve the same problem:  
+how do you run something and *actually know what happened* afterward?
+
+- What environment was it running in?  
+- What dependencies were installed?  
+- What code version produced this result?  
+- What exactly ran, and in what order?  
+
+Those answers were always scattered, inconsistent, or missing entirely.
+
+`pubrun` is an attempt to finally consolidate that work into one place. It pulls together the pieces that kept proving useful and strips away everything else.
+
+The goal is simple:  
+run any Python script and automatically capture enough context to make that run reproducible and inspectable later, without forcing you to restructure your code.
+
+Usage
+-----
+The engine is constructed for immediate zero-configuration deployment alongside 
+a robust explicit Python API for deep structural tracing.
+
+1. CLI Orchestration (Zero Code Changes):
+   Run any script passively under the evaluation umbrella:
+   $ python -m pubrun my_script.py --args
+
+2. Explicit Python API:
+   Manually initialize and delimit granular boundaries structurally.
+   
+   import pubrun
+   
+   # Explicitly initialize tracking overrides
+   tracker = pubrun.start(profile="deep")
+   
+   # Log specific custom telemetry directly into the event stream
+   pubrun.annotate("loading_datasets", batches=400, mode="lazy")
+   
+   # Delimit specific execution phases for temporal performance monitoring
+   with pubrun.phase("gradient_descent"):
+       train_model()
+       
+   # Forcefully serialize the configuration and manifest natively to disk
+   tracker.stop()
+
+3. Synchronous Block Validation:
+   Use context managers or decorators strictly restricting evaluation scope.
+   
+   import pubrun
+   
+   @pubrun.audit_run(profile="basic")
+   def evaluate_node():
+       # Exception handling and telemetry bounds are auto-managed here.
+       pass
 """
 import logging
 from typing import Any, Callable, Optional
 
 from pubrun.tracker import Run, get_current_run
 
-# Version of the pubrun package
+# Metadata
 __version__ = "0.1.0"
+__author__ = "Gabriele Fariello"
+__license__ = "BSD-3-Clause"
+__credit__ = "Gabriele Fariello"
+__copyright__ = "Copyright 2026 Gabriele Fariello"
 
 
 def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
