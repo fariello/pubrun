@@ -13,6 +13,7 @@ import pubrun
 # Your code automatically tracks here.
 print("Running execution telemetry...")
 ```
+*Important Note:* By default, `pubrun` will capture `print()` output and writes to `sys.stdout` and `sys.stderr`. You can turn this off by setting `capture_mode = "off"` in the config file or explicitly mapping the structural parameter inside Python via `pubrun.start(console={"capture_mode": "off"})`. This may be the preferred behavior if you or the scripts you use like to output a lot of text to the console. It also by default captures any writes to a `logging.Logger` instance. You can turn this off globally by creating or editing your `~/.config/pubrun/config.toml` file  (see `pubrun --help`, `pubrun --show-config`, or  `pubrun --create-config`).
 
 ### 1a. Preventing Auto-Start
 To safely evaluate the module strictly without instantly writing artifact directories (e.g. across heavy monolithic packages), physically override the OS mapping before evaluating the module:
