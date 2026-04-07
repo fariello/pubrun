@@ -32,6 +32,8 @@ def _create_config(destination: str) -> None:
         content = resource_path.read_text(encoding="utf-8")
         
         target_path = Path(destination).resolve()
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        
         if target_path.exists():
             print(f"Error: '{target_path}' already exists. Refusing to overwrite.", file=sys.stderr)
             sys.exit(1)
@@ -585,7 +587,7 @@ def main() -> None:
     cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Filter the output citation by standard academic grammar.")
     
     # ---------------- Diagnostic Flags ----------------
-    parser.add_argument("--create-config", type=str, nargs="?", const=".pubrun.toml", metavar="DEST", help="Bootstrap a heavily annotated `.pubrun.toml` file natively into your ecosystem for configuration modifications.")
+    parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Bootstrap a heavily annotated `.pubrun.toml` file natively into your ecosystem for configuration modifications.")
     parser.add_argument("--info", action="store_true", help="Launch a raw system capabilities assessment to verify pubrun hardware telemetry hooks are functioning properly in this environment.")
     parser.add_argument("--run-tests", action="store_true", help="Execute an aggressive end-to-end sandbox deployment and run standard architectural tests.")
     
@@ -639,7 +641,34 @@ def main() -> None:
         pass # for auto-indentation
 
     if getattr(args, "create_config", False):
-        _create_config(args.create_config)
+        dest = args.create_config
+        if dest == "PROMPT":
+            print("\nWhere would you like to install the default configuration?")
+            print("  [1] Locally (./.pubrun.toml)")
+            import sys
+            global_hint = "Global AppData" if sys.platform == "win32" else "Global (~/.config/pubrun/config.toml)"
+            print(f"  [2] {global_hint}")
+            
+            try:
+                choice = input("Select an option [1/2] (Default: 1): ").strip()
+            except KeyboardInterrupt:
+                print("\nConfiguration abandoned.", file=sys.stderr)
+                sys.exit(1)
+                
+            if choice == "2":
+                from pubrun.config import get_global_config_dir
+                dest = str(get_global_config_dir() / "config.toml")
+                pass # for auto-indentation
+            elif choice in ["1", ""]:
+                dest = ".pubrun.toml"
+                pass # for auto-indentation
+            else:
+                print("Invalid selection. Exiting.", file=sys.stderr)
+                sys.exit(1)
+                pass # for auto-indentation
+            pass # for auto-indentation
+            
+        _create_config(dest)
         executed = True
         pass # for auto-indentation
         
