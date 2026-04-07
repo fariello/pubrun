@@ -67,9 +67,21 @@ pubrun methods [RUN_DIR] --format markdown|latex
 ```
 
 ### 3. `pubrun report`
-A diagnostic timeline visualizer. This detects dynamic code-drift and visualizes exact dependencies and explicitly targeted environment variables without requiring you to manually read hundreds of lines of JSON.
+A diagnostic timeline visualizer. This detects dynamic code-drift and visualizes exact dependencies and explicitly targeted environment variables without requiring you to manually read hundreds of lines of JSON. Pass multiple directory footprints to evaluate them sequentially!
 ```bash
-pubrun report --deep
+pubrun report ./runs/pubrun-A ./runs/pubrun-B --deep
+```
+
+### 4. `pubrun rerun`
+A native cross-platform reproducibility script extractor that safely queries a footprint's initialization mapping and structurally streams the identical terminal initialization logic globally across Linux and Windows effortlessly natively.
+```bash
+pubrun rerun ./runs/pubrun-A
+```
+
+### 5. `pubrun diff`
+A semantic analyzer generating native structural side-by-side diagnostic payloads cleanly masking missing footprint properties natively.
+```bash
+pubrun diff ./runs/pubrun-A ./runs/pubrun-B --same --basic --wrap
 ```
 
 ---
@@ -118,10 +130,9 @@ Every generated directory captures heavily structured `manifest.json` files alon
 ## 🛡️ Security Limitations & Community Input Request
 
 **Subprocess Argument Redaction**  
-`pubrun` implements "True Destructive Redaction," safely wiping recognizable secrets (like `AWS_SECRET_KEY`) natively from captured Environment variables. However, the `SubprocessSpy` engine natively captures Python subprocess shell commands exactly as they are executed (e.g. `subprocess.run(["curl", "-H", "Authorization: Bearer 123..."])`). These process executions are currently written to the `manifest.json` **in plaintext without redaction**.
+Currently, the `SubprocessSpy` engine effectively intercepts `subprocess.run(["curl", "-H", "Authorization: Bearer 123..."])` but blindly documents it in plaintext directly into the `manifest.json`.
 
-We are actively polling the community: **Should `pubrun` aggressively strip subprocess arguments matching `password/bearer/key` heuristics?**  
-Aggressive regex redaction risks inevitably damaging harmless strings (e.g., `--output=password_stats.csv`). We would love the open-source community's feedback on exactly how aggressively an execution telemetry framework should override user commands. If you have an opinion, please open an Issue!
+We are actively polling the community regarding how restrictively an execution telemetry framework should override user commands via Regex redaction without accidentally destroying clean scientific outputs. Please see `TODO.md` in this repository for full details!
 
 ## Acknowledgements
 `pubrun` was structurally redesigned and re-written from pre-existing custom libraries, code fragments, scripts, and ideas over almost two decades with the assistance of Google Antigravity for its official v0.1.0 release.
