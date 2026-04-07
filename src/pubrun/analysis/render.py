@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 from typing import Any, Dict
 
 # Standard ANSI Fallback
@@ -76,7 +77,7 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool) -> None:
         pass # for auto-indentation
 
 
-def print_diff(diff_report: Dict[str, Any], no_color: bool = False) -> None:
+def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool = False, max_length: int = 300) -> None:
     """
     Master UI router attempting to aggressively load `rich` for side-by-side matrices cleanly,
     silently catching `ImportError` gracefully down into pure inline terminal text formatting safely.
@@ -84,6 +85,8 @@ def print_diff(diff_report: Dict[str, Any], no_color: bool = False) -> None:
     Args:
         diff_report (Dict[str, Any]): The semantic diff block perfectly matching JSON constraints.
         no_color (bool): Overrides internal color printing capabilities cleanly if True.
+        wrap (bool): If True, folds large columns smoothly; if False truncates with ellipsis.
+        max_length (int): Absolute ceiling for string layouts before manual truncation occurs.
         
     Returns:
         None
@@ -101,6 +104,7 @@ def print_diff(diff_report: Dict[str, Any], no_color: bool = False) -> None:
         from rich.table import Table
         from rich.panel import Panel
         from rich.text import Text
+        from rich import box
         pass # for auto-indentation
     except ImportError:
         print("\nNote: For beautiful side-by-side matrix comparisons, execute `pip install rich`.")
@@ -111,19 +115,35 @@ def print_diff(diff_report: Dict[str, Any], no_color: bool = False) -> None:
     # Standard Rich Layout Configuration
     console = Console(force_terminal=True, color_system=("standard" if has_colors else None))
     
-    table = Table(show_header=True, header_style="bold magenta", expand=True)
+    table = Table(
+        title="Pubrun Execution Difference", 
+        title_style="bold blue",
+        show_header=True, 
+        header_style="bold magenta", 
+        expand=True,
+        box=box.HEAVY,
+        row_styles=["none", "on grey15"]
+    )
+    
+    overflow_mode = "fold" if wrap else "ellipsis"
     table.add_column("Key / Target Metric")
-    table.add_column("Baseline (Run 1)")
-    table.add_column("Resulting (Run 2)")
+    table.add_column("Baseline (Run 1)", overflow=overflow_mode)
+    table.add_column("Resulting (Run 2)", overflow=overflow_mode)
+    
+    def _fmt(val: Any) -> str:
+        s = json.dumps(val, indent=2) if isinstance(val, (dict, list)) else str(val)
+        if len(s) > max_length:
+            return s[:max_length] + " ... [TRUNCATED]"
+        return s
     
     # Additions
     for k, v in sorted(diff_report["added"].items()):
-        table.add_row(f"[bold green]+ {k}[/]", "", f"[green]{v}[/]")
+        table.add_row(f"[bold green]+ {k}[/]", "", f"[green]{_fmt(v)}[/]")
         pass # for auto-indentation
         
     # Removals
     for k, v in sorted(diff_report["removed"].items()):
-        table.add_row(f"[bold red]- {k}[/]", f"[red]{v}[/]", "")
+        table.add_row(f"[bold red]- {k}[/]", f"[red]{_fmt(v)}[/]", "")
         pass # for auto-indentation
         
     # Changes
@@ -131,18 +151,24 @@ def print_diff(diff_report: Dict[str, Any], no_color: bool = False) -> None:
         if mod["type"] == "path_split":
             left_strs = []
             right_strs = []
-            for pA in mod.get("removed", []): left_strs.append(f"[red]- {pA}[/]")
-            for pB in mod.get("added", []): right_strs.append(f"[green]+ {pB}[/]")
+            for pA in mod.get("removed", []): left_strs.append(f"[yellow]- {_fmt(pA)}[/]")
+            for pB in mod.get("added", []): right_strs.append(f"[yellow]+ {_fmt(pB)}[/]")
             left_col = "\n".join(left_strs) if left_strs else "[dim]No removals[/]"
             right_col = "\n".join(right_strs) if right_strs else "[dim]No additions[/]"
             table.add_row(f"[bold yellow]~ {k}[/]", left_col, right_col)
             pass # for auto-indentation
         else:
-            old_str = f"[red]{mod.get('old', '')}[/]"
-            new_str = f"[green]{mod.get('new', '')}[/]"
+            old_str = f"[yellow]{_fmt(mod.get('old', ''))}[/]"
+            new_str = f"[yellow]{_fmt(mod.get('new', ''))}[/]"
             table.add_row(f"[bold yellow]~ {k}[/]", old_str, new_str)
             pass # for auto-indentation
         pass # for auto-indentation
         
-    console.print(Panel(table, title="Pubrun Execution Difference", border_style="blue"))
+    # Same
+    for k, v in sorted(diff_report.get("same", {}).items()):
+        formatted_val = f"[dim]{_fmt(v)}[/]"
+        table.add_row(f"[dim white]= {k}[/]", formatted_val, formatted_val)
+        pass # for auto-indentation
+        
+    console.print(table)
     pass # for auto-indentation

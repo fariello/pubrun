@@ -227,9 +227,28 @@ format = "markdown"
 # Configuration for the native differential engine (pubrun diff).
 # -----------------------------------------------------------------------------
 
-# A list of specific keys or payload namespaces that diff should completely ignore to prevent raw terminal noise.
-ignore = ["timing", "run.run_id", "process.pid", "hardware.memory_total_bytes"]
+# A contextual list of specific keys or payload namespaces completely ignored to prevent terminal noise heavily natively.
+ignore_basic = [
+    "timing", "run", "process", "hardware", "resources", "capture", "environment"
+]
+
+ignore_standard = [
+    "timing", "run.run_id", "process.pid", "hardware.memory_total_bytes",
+    "resources.end_rss_bytes", "resources.peak_cpu_percent", "resources.peak_rss_bytes",
+    "process.ppid", "invocation.script.size", "invocation.script.path", "capture.run_dir"
+]
+
+ignore_deep = []
+
+# Show unchanged identically mapped parameters structurally if forced natively dynamically.
+show_same = false
 
 # The structural format dictating how pubrun diff exports to visual GUI tools when `--export` is utilized.
 # Supported formats: "txt" (fully flattened mapping), "json" (structurally clean dict tree).
 export_format = "txt"
+
+# Default rendering boundaries. If false, long dictionary outputs natively compress via ellipsis.
+wrap = true
+
+# The maximum character threshold for any given payload string rendering strictly in the console difference engine.
+max_string_length = 300

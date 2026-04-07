@@ -132,7 +132,7 @@ def unflatten_manifest(flat_dict: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: List[str] = []) -> Dict[str, Any]:
+def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: List[str] = [], show_same: bool = False) -> Dict[str, Any]:
     """
     Compares two raw JSON manifestations, identifying precise additions, removals, and modifications.
     
@@ -140,16 +140,17 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Lis
         raw_a (Dict[str, Any]): The baseline payload mapping footprint.
         raw_b (Dict[str, Any]): The newly evaluated target payload footprint.
         ignores (List[str]): Prefix constraints filtering out volatile jitter keys.
+        show_same (bool): If True, conditionally populates strings matching perfectly across both arrays.
         
     Returns:
-        Dict[str, Any]: Structure defining precisely what was "added", "removed", or "modified".
+        Dict[str, Any]: Structure defining precisely what was "added", "removed", "modified", or "same".
         
     Assumptions:
         - If an attribute matches an OS boundary path constraint exactly, it routes to a path-splitting algorithm.
         
     Example:
         >>> compare_manifests(m1, m2, ignores=["timing"])
-        {"added": {}, "removed": {}, "modified": {}}
+        {"added": {}, "removed": {}, "modified": {}, "same": {}}
     """
     flat_a = _normalize_manifest(raw_a, ignores)
     flat_b = _normalize_manifest(raw_b, ignores)
@@ -158,6 +159,7 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Lis
         "added": {},    # Exists in B, missing from A
         "removed": {},  # Exists in A, missing from B
         "modified": {}, # Shared key, but value changed
+        "same": {},     # Absolute identical matches structurally
     }
     
     all_keys = set(flat_a.keys()).union(set(flat_b.keys()))
@@ -191,6 +193,11 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Lis
                     "new": val_b
                 }
                 pass # for auto-indentation
+        else:
+            if show_same:
+                diff_report["same"][k] = val_a
+                pass # for auto-indentation
+            pass # for auto-indentation
         pass # for auto-indentation
         
     return diff_report

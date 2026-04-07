@@ -171,6 +171,9 @@ def _run_rerun(run_dir: str) -> None:
         rerun_cmd = inv.get("rerun_command")
         
         if rerun_cmd:
+            if sys.platform == "win32" and "&& python " in rerun_cmd:
+                rerun_cmd = rerun_cmd.replace(" && python ", "\npython ").replace("'", '"')
+                pass # for auto-indentation
             print(rerun_cmd)
             pass # for auto-indentation
         else:
@@ -183,7 +186,7 @@ def _run_rerun(run_dir: str) -> None:
         pass # for auto-indentation
 
 
-def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool) -> None:
+def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool, wrap_config: Optional[bool] = None, max_length: Optional[int] = None, depth: str = "basic", show_same: Optional[bool] = None) -> None:
     """
     Executes the semantic differential engine comparing two unique execution traces linearly.
 
@@ -192,6 +195,10 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
         run_dir_b (str): Directory referencing the target mutation footprint.
         export_format (str): Dictates structural layout output if exporting ("txt", "json").
         no_color (bool): Overrides internal color printing capabilities if True.
+        wrap_config (bool | None): Explicitly overrides wrapped formats if boolean is forced.
+        max_length (int | None): Maximum payload length limit for rendering.
+        depth (str): Structural ignore depth tier ("basic", "standard", "deep").
+        show_same (bool | None): Explicitly forces rendering of matched key arrays if present.
 
     Returns:
         None
@@ -227,7 +234,18 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
             pass # for auto-indentation
 
         conf = resolve_config().get("diff", {})
-        ignores = conf.get("ignore", [])
+        
+        if depth == "basic":
+            ignores = conf.get("ignore_basic", [])
+            pass # for auto-indentation
+        elif depth == "standard":
+            ignores = conf.get("ignore_standard", [])
+            pass # for auto-indentation
+        else:
+            ignores = conf.get("ignore_deep", [])
+            pass # for auto-indentation
+            
+        ss_target = show_same if show_same is not None else conf.get("show_same", False)
 
         if export_format:
             fmt = export_format if export_format is not True else conf.get("export_format", "txt")
@@ -250,8 +268,10 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
             print(f"[OK] Successfully exported semantic target B to: {out_b}")
             pass # for auto-indentation
         else:
-            diff_report = compare_manifests(manifest_a, manifest_b, ignores)
-            print_diff(diff_report, no_color)
+            diff_report = compare_manifests(manifest_a, manifest_b, ignores, show_same=ss_target)
+            wrap_target = wrap_config if wrap_config is not None else conf.get("wrap", True)
+            mlen_target = max_length if max_length is not None else conf.get("max_string_length", 300)
+            print_diff(diff_report, no_color=no_color, wrap=wrap_target, max_length=mlen_target)
             pass # for auto-indentation
 
     except Exception as e:
@@ -493,6 +513,11 @@ def main() -> None:
     Example:
         >>> main()
     """
+    if len(sys.argv) >= 2 and sys.argv[1] == "pbr":
+        print("me asap")
+        sys.exit(0)
+        pass # for auto-indentation
+        
     parser = argparse.ArgumentParser(
         description="pubrun: Zero-dependency execution telemetry and publication engine.",
         epilog="Use 'pubrun <command> --help' for detailed information on a specific tool."
@@ -502,7 +527,7 @@ def main() -> None:
     
     # ---------------- Report Subparser ----------------
     report_parser = subparsers.add_parser("report", help="Analyze and display diagnostic telemetry from a specific run.", description="Analyze and display diagnostic telemetry from a specific run.")
-    report_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact folder (e.g., runs/pubrun-XYZ). If omitted, the system automatically discovers and evaluates the most recently completed run in the ./runs directory.")
+    report_parser.add_argument("run_dirs", type=str, nargs="*", help="Directory path to one or more existing pubrun artifact folders (e.g., runs/pubrun-XYZ). If omitted, the system automatically discovers and evaluates the most recently completed run in the ./runs directory.")
     
     depth_group_1 = report_parser.add_mutually_exclusive_group()
     depth_group_1.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Display only high-level identifiers (Architecture, Timing, Outcome).")
@@ -525,7 +550,26 @@ def main() -> None:
     diff_parser.add_argument("run_dir_b", type=str, help="Second trace artifact directory (Target Mutation).")
     diff_parser.add_argument("--export", type=str, nargs="?", const=True, help="Export parsed datasets by flattening the dictionary mappings ('txt' or 'json').")
     diff_parser.add_argument("--no-color", action="store_true", help="Disables standard ANSI output.")
+    
+    # Wrap config logic
+    wrap_group = diff_parser.add_mutually_exclusive_group()
+    wrap_group.add_argument("--wrap", action="store_true", default=None, help="Wrap long strings across multiple lines natively instead of explicit ellipsis truncation.")
+    wrap_group.add_argument("--no-wrap", action="store_false", dest="wrap", default=None, help="Explicitly force ellipsis truncation, explicitly ignoring config overrides.")
+    
+    diff_parser.add_argument("--max-length", type=int, default=None, help="Maximum length allowable for inline string rendering before truncation ellipsis engages.")
 
+    # Depth logic
+    diff_depth = diff_parser.add_mutually_exclusive_group()
+    diff_depth.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Ignore vast bulk metric data to analyze strictly structural changes (Default).")
+    diff_depth.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Evaluate standard telemetry payloads strictly ignoring jitter metrics.")
+    diff_depth.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Run unfiltered differential comparisons logging virtually everything globally.")
+    diff_parser.set_defaults(depth="basic")
+
+    # Identical keys logic
+    diff_same = diff_parser.add_mutually_exclusive_group()
+    diff_same.add_argument("--same", action="store_true", default=None, help="Force UI stringification of values matching perfectly globally.")
+    diff_same.add_argument("--no-same", action="store_false", dest="same", default=None, help="Aggressively mute unchanged variables strictly forcing semantic mappings.")
+    
     # ---------------- Meta Subparser ----------------
     meta_parser = subparsers.add_parser("meta", help="Generate a localized 'meta.json' environment snapshot. Useful for massive HPC array payloads.", description="Generate a localized 'meta.json' environment snapshot. Useful for massive HPC array payloads.")
     meta_parser.add_argument("--out", type=str, default="", help="Provide an explicit filepath destination to dump the generated snapshot (defaults to stdout if empty).")
@@ -540,9 +584,6 @@ def main() -> None:
     cite_parser = subparsers.add_parser("cite", help="Instantly generate formatted academic citations crediting the pubrun library framework.", description="Instantly generate formatted academic citations crediting the pubrun library framework.")
     cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Filter the output citation by standard academic grammar.")
     
-    # ---------------- Easter Egg ----------------
-    pbr_parser = subparsers.add_parser("pbr", help=argparse.SUPPRESS)
-    
     # ---------------- Diagnostic Flags ----------------
     parser.add_argument("--create-config", type=str, nargs="?", const=".pubrun.toml", metavar="DEST", help="Bootstrap a heavily annotated `.pubrun.toml` file natively into your ecosystem for configuration modifications.")
     parser.add_argument("--info", action="store_true", help="Launch a raw system capabilities assessment to verify pubrun hardware telemetry hooks are functioning properly in this environment.")
@@ -553,7 +594,13 @@ def main() -> None:
     executed = False
 
     if args.command == "report":
-        _run_report(args.run_dir, args.depth)
+        runs = args.run_dirs if getattr(args, "run_dirs", None) else [None]
+        for idx, rd in enumerate(runs):
+            if idx > 0:
+                print("\n")
+                pass # for auto-indentation
+            _run_report(rd, args.depth)
+            pass # for auto-indentation
         executed = True
         pass # for auto-indentation
         
@@ -568,7 +615,16 @@ def main() -> None:
         pass # for auto-indentation
 
     if args.command == "diff":
-        _run_diff(args.run_dir_a, args.run_dir_b, args.export, args.no_color)
+        _run_diff(
+            args.run_dir_a, 
+            args.run_dir_b, 
+            args.export, 
+            args.no_color, 
+            getattr(args, "wrap", None), 
+            getattr(args, "max_length", None),
+            getattr(args, "depth", "basic"),
+            getattr(args, "same", None)
+        )
         executed = True
         pass # for auto-indentation
 
@@ -579,11 +635,6 @@ def main() -> None:
 
     if args.command == "cite":
         _run_cite(args.style)
-        executed = True
-        pass # for auto-indentation
-
-    if args.command == "pbr":
-        print("me asap")
         executed = True
         pass # for auto-indentation
 
