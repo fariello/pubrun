@@ -89,3 +89,24 @@ When finalizing your manuscript, intelligently export the exact framework credit
 ```bash
 pubrun cite [--style apa|mla|chicago|bibtex]
 ```
+
+---
+
+## 7. Diagnostics & Discovery
+`pubrun` intentionally bundles a fully documented, highly scalable, natively nested configuration TOML schema inside the library containing the rules for everything (Subprocess parameters, Diff wrapping, Hardware overrides). 
+
+To ensure this knowledge is incredibly easy to access without going to GitHub, use these flags natively:
+
+**[A] Instantly Display Settings (Without Creating Anything):**
+If you just want to quickly remember exactly what variables to put inside your Python script or how `[console]` tracking operates natively, evaluate:
+```bash
+pubrun --show-config
+```
+*If you have `rich` installed via your virtual environment, this command will beautifully highlight the entire TOML string directly into standard output natively!*
+
+**[B] Bootstrapping a Local `.pubrun.toml`:**
+When you are ready to construct your settings, let the CLI build it for you natively formatted without rewriting rules identically!
+```bash
+pubrun --create-config
+```
+*If no directory path is manually passed (e.g. `pubrun --create-config ~/.pubrun.toml`), an interactive terminal CLI will natively ask if you'd like it safely deployed Locally (in the current directory) or Globally into your OS constraints!*
