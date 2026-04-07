@@ -4,6 +4,28 @@
 
 This does so much with so little. `pubrun` is a stupidly simple, zero-dependency Python library designed to eliminate the boilerplate of documenting methodology, tracking versions, recording inputs, and monitoring resources thereby making it dramatically easier to publish, share, and reproduce your models and research. Alternatively, if you're lame, you can think of "publication-ready runner" as the meaning of the name.
 
+## Quick Start
+
+```python
+import pubrun
+```
+or
+```bash
+pubrun -h
+```
+For more info.
+
+See [CLI.md](docs/CLI.md) and [API.md](docs/API.md) for more information.
+
+## Features
+
+- **Automatic Execution Tracing**: Captures environment variables, hardware specs, and dependency graphs without manual configuration.
+- **Codebase Drift Detection**: Compares current code state against the execution snapshot to highlight unauthorized changes.
+- **Publication-Ready Output**: Generates LaTeX/Markdown methodology blocks ready for academic papers.
+- **Cross-Platform Reproducibility**: Extracts initialization logic for seamless environment replication on Linux/Windows.
+- **Semantic Diffing**: Compares multiple execution footprints to identify subtle but critical differences.
+- **HPC Optimized**: Supports global parent-child hydration to minimize overhead on massive clusters.
+
 ## The Problem
 Modern scientific workflows rely on implicit state. When it's time to publish a paper or ship a model, researchers are forced to retroactively piece together their methodology (PyTorch versions, OS constraints, Hardware parameters) from memory.
 
@@ -14,7 +36,7 @@ With a single `import pubrun`, the framework quietly traces your script executio
 
 ---
 
-## ⚡⚡⚡ The "Stupid Simple" Quick Start⚡⚡⚡
+## ⚡The "Stupid Simple" Quick Start⚡
 
 For absolute simplicity:
 
@@ -86,7 +108,7 @@ pubrun diff ./runs/pubrun-A ./runs/pubrun-B --same --basic --wrap
 
 ---
 
-##  🚀 Advanced HPC Ecosystems (Global Hydration)
+## Advanced HPC Ecosystems (Global Hydration)
 
 If you run thousands of Array jobs concurrently across massive clusters, you do *not* want each child run wasting gigabytes logging identically heavy dependency graphs. `pubrun` supports a highly advanced **Global Parent-Child Dependency Hydration Ecosystem**.
 
@@ -127,7 +149,7 @@ pubrun --create-config
 ## Replay and Prove
 Every generated directory captures heavily structured `manifest.json` files alongside configurations natively engineered to support future evaluation via `compare()` and `diff()`.
 
-## 🛡️ Security Limitations & Community Input Request
+## Security Limitations & Community Input Request
 
 **Subprocess Argument Redaction**  
 Currently, the `SubprocessSpy` engine effectively intercepts `subprocess.run(["curl", "-H", "Authorization: Bearer 123..."])` but blindly documents it in plaintext directly into the `manifest.json`.
