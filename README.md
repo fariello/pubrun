@@ -7,13 +7,14 @@ This does so much with so little. `pubrun` is a stupidly simple, zero-dependency
 ## Quick Start
 
 ```python
-import pubrun
+import pubrun # That's it 90% of the time!
 ```
 or
 ```bash
-pubrun -h
+pubrun -h # Lots of info here.
 ```
-For more info.
+That’s it. There are no frameworks, no heavy integrations, and no syntax hijacking. 
+When the script exits, `pubrun` silently generates a highly structured and lightweight footprint in your local `./runs/` directory.
 
 See [CLI.md](docs/CLI.md) and [API.md](docs/API.md) for more information.
 
@@ -33,20 +34,6 @@ Modern scientific workflows rely on implicit state. When it's time to publish a 
 `pubrun` permanently terminates this friction. 
 
 With a single `import pubrun`, the framework quietly traces your script execution, hashes your environment dependencies, detects codebase drift, and natively compiles publication-ready **Computational Methodology** LaTeX/Markdown blocks so your run is instantly citable.
-
----
-
-## ⚡The "Stupid Simple" Quick Start⚡
-
-For absolute simplicity:
-
-```python
-import pubrun
-# Do your actual work here
-```
-
-That’s it. There are no frameworks, no heavy integrations, and no syntax hijacking. 
-When the script exits, `pubrun` silently generates a highly structured and lightweight footprint in your local `./runs/` directory.
 
 ### Lazy Initialization (Explicit Tracking)
 By default, simply importing `pubrun` immediately spins up an invisible tracer safely. If you want to import `pubrun` harmlessly across multiple scripts *without* instantly generating a footprint until you explicitly call `pubrun.start()`, simply inject this environment flag structurally *before* the module is evaluated:
