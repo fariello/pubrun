@@ -228,9 +228,7 @@ At minimum, it MUST support:
 Examples of acceptable supported paths include:
 
 - `~/.config/pubrun/config.toml`
-- `~/.config/pubrun/pubrun.toml`
-- `~/.pubrun`
-- `<start_working_directory>/.pubrun`
+- `<start_working_directory>/.config/pubrun/config.toml`
 - `<start_working_directory>/.pubrun.toml`
 
 The exact supported set may be defined more precisely later, but the product MUST support both:
@@ -244,9 +242,9 @@ Configuration precedence SHOULD be:
 
 1. explicit runtime arguments and API arguments
 2. environment-variable overrides
-3. local project / current-start-directory config
-4. user home config
-5. built-in defaults
+3. local project configuration (e.g. `./.pubrun.toml` overriding `./.config/pubrun/config.toml`)
+4. user home config (`~/.config/pubrun/config.toml`)
+5. built-in defaults (`default.toml`)
 
 This precedence order MUST be documented.
 

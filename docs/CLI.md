@@ -58,7 +58,11 @@ Isolates a generated trace natively fetching the explicit cross-platform CLI str
 pubrun rerun [RUN_DIR]
 ```
 
-It guarantees safe structural pipeline commands safely returning: 
+It guarantees safe structural pipeline commands safely returning (Linux/Mac):
+```bash
+cd 'C:\directory' && python 'run.py'
+```
+or (Windows):
 ```powershell
 cd 'C:\directory' 
 python 'run.py'
@@ -79,7 +83,7 @@ Use this exclusively to generate a "Parent footprint" inside massive Array compu
 ---
 
 ## 6. `cite` - Automatic Academic Citations
-When finalizing your manuscript, intelligently export the exact framework credit citation cleanly.
+When finalizing your manuscript, intelligently export the exact framework credit citation cleanly for the version of `pubrun` used.
 
 **Usage:**
 ```bash

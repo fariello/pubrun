@@ -25,6 +25,12 @@ import pubrun
 # Nothing executes dynamically until pubrun.start() is directly evaluated!
 ```
 
+**Configuration Path Alternative:** You don't actually need to pollute your python scripts with `os.environ` hacks. A much cleaner approach is generating a `.pubrun.toml` file in your root directory and explicitly disabling the core feature natively (see `pubrun --help` and `pubrun --create-config`):
+```toml
+[core]
+auto_start = false
+```
+
 ---
 
 ## 2. Explicit Structural Control
@@ -33,13 +39,21 @@ When `PUBRUN_AUTO_START` is disabled natively, manually configure tracking layer
 ```python
 import pubrun
 
-# Inject overriding configuration boundaries natively without touching toml
+# Inject overriding configuration boundaries natively mapping python variables!
+# These API parameters ALWAYS aggressively override `./.pubrun.toml` variables.
 tracer = pubrun.start(profile="deep", output_dir="./custom_storage")
 
 # ... Do Work ...
 
 # Forcefully flush serialization buffers physically closing footprint paths.
 pubrun.stop()
+```
+
+**Configuration Path Alternative:** If you want your script to remain entirely agnostic to *where* logs are stored or *how deep* to profile, simply invoke `pubrun.start()` empty, and let the `.pubrun.toml` gracefully dictate the logic behind the scenes (see `pubrun --help` and `pubrun --create-config`):
+```toml
+[core]
+profile = "deep"
+output_dir = "./runs/"
 ```
 
 ---
@@ -53,6 +67,17 @@ import pubrun
 def process_chunk(matrix):
     # Log native array constraints dynamically
     pubrun.annotate("chunk_evaluation", shape=str(matrix.shape), loss=0.54)
+```
+
+**Configuration Path Context:** What happens if `process_chunk` is evaluated but `pubrun` is strictly disabled or hasn't started? By default, `pubrun` fails gracefully and ignores the call. You can dictate this exact behavior inside `.pubrun.toml` (see `pubrun --help` and `pubrun --create-config`):
+```toml
+[events]
+# Safely toggle custom telemetry streams cleanly
+enabled = true
+
+# Dictate exactly what happens if `annotate` is called out-of-bounds:
+# Valid options: "ignore" (safest), "warn", "error" (crashes script)
+on_inactive_annotate = "ignore" 
 ```
 
 ---
@@ -80,3 +105,5 @@ def entrypoint_function():
     # Only evaluates basic footprint arrays strictly mapping outcomes inherently!
     execute_logic()
 ```
+
+**Configuration Path Context:** Similar to `pubrun.start()`, the decorator safely falls back to your `.pubrun.toml` defaults globally if you simply use `@pubrun.audit_run()`. Specifying `profile="basic"` in the code acts as a hardcoded API override mathematically trumping your local or user global TOML constraints! (see `pubrun --help` and `pubrun --create-config`)

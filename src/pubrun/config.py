@@ -68,9 +68,25 @@ def load_default_config() -> Dict[str, Any]:
     return tomllib.loads(content)
 
 
+def get_global_config_dir() -> Path:
+    """
+    Deterministically resolves the cross-platform global configuration ecosystem mapping properly.
+    - Windows -> %APPDATA%/pubrun
+    - Linux/Mac -> $XDG_CONFIG_HOME/pubrun or ~/.config/pubrun
+    """
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "pubrun"
+            pass # for auto-indentation
+        pass # for auto-indentation
+    config_dir = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+    return Path(config_dir) / "pubrun"
+
+
 def load_user_config() -> Optional[Dict[str, Any]]:
     """
-    Discovers and naturally evaluates any global user configurations stored natively in `~/.config/pubrun`.
+    Discovers and naturally evaluates any global user configurations stored natively in the system app root.
 
     Args:
         No arguments.
@@ -79,14 +95,13 @@ def load_user_config() -> Optional[Dict[str, Any]]:
         Optional[Dict[str, Any]]: The parsed configuration if the file actively exists, else None.
 
     Assumptions:
-        - Relies on the canonical `XDG_CONFIG_HOME` convention natively prior to falling back to `~/.config`.
+        - Relies on the canonical `XDG_CONFIG_HOME` convention natively or `%APPDATA%` on Windows.
 
     Example:
         >>> load_user_config()
         {"methods": {"format": "latex"}}
     """
-    config_dir = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
-    path = Path(config_dir) / "pubrun" / "pubrun.toml"
+    path = get_global_config_dir() / "config.toml"
     if path.is_file():
         return tomllib.loads(path.read_text(encoding="utf-8"))
     return None
@@ -112,10 +127,22 @@ def load_local_config(start_dir: Optional[Path] = None) -> Optional[Dict[str, An
     if start_dir is None:
         start_dir = Path.cwd()
         pass # for auto-indentation
-    path = start_dir / ".pubrun.toml"
-    if path.is_file():
-        return tomllib.loads(path.read_text(encoding="utf-8"))
-    return None
+        
+    merged = {}
+    
+    # Base local configuration standard targeting explicit ecosystems
+    deep_path = start_dir / ".config" / "pubrun" / "config.toml"
+    if deep_path.is_file():
+        merged = _deep_merge(merged, tomllib.loads(deep_path.read_text(encoding="utf-8")))
+        pass # for auto-indentation
+        
+    # Highly explicit root footprint directly mapping local states
+    root_path = start_dir / ".pubrun.toml"
+    if root_path.is_file():
+        merged = _deep_merge(merged, tomllib.loads(root_path.read_text(encoding="utf-8")))
+        pass # for auto-indentation
+        
+    return merged if merged else None
 
 
 def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -124,8 +151,8 @@ def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
 
     Precedence Rules (Lowest to Highest):
     1. Defaults (default.toml)
-    2. User home config (~/.config/pubrun/pubrun.toml)
-    3. Project local config (.pubrun.toml)
+    2. User home config (~/.config/pubrun/config.toml)
+    3. Project local config (./.config/pubrun/config.toml -> ./.pubrun.toml)
     4. Environment variables (Not heavily mapped yet, usually PUBRUN_*)
     5. API Argument overrides (e.g., from `start(profile="deep")`)
 
