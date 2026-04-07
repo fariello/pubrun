@@ -25,7 +25,7 @@ import pubrun
 # Nothing executes dynamically until pubrun.start() is directly evaluated!
 ```
 
-**Configuration Path Alternative:** You don't actually need to pollute your python scripts with `os.environ` hacks. A much cleaner approach is generating a `.pubrun.toml` file in your root directory and explicitly disabling the core feature natively (see `pubrun --help` and `pubrun --create-config`):
+**Configuration Path Alternative:** You don't actually need to pollute your python scripts with `os.environ` hacks. A much cleaner approach is generating a `.pubrun.toml` file in your root directory and explicitly disabling the core feature natively (see `pubrun --help`, `pubrun --show-config`, or  `pubrun --create-config`):
 ```toml
 [core]
 auto_start = false
@@ -49,7 +49,7 @@ tracer = pubrun.start(profile="deep", output_dir="./custom_storage")
 pubrun.stop()
 ```
 
-**Configuration Path Alternative:** If you want your script to remain entirely agnostic to *where* logs are stored or *how deep* to profile, simply invoke `pubrun.start()` empty, and let the `.pubrun.toml` gracefully dictate the logic behind the scenes (see `pubrun --help` and `pubrun --create-config`):
+**Configuration Path Alternative:** If you want your script to remain entirely agnostic to *where* logs are stored or *how deep* to profile, simply invoke `pubrun.start()` empty, and let the `.pubrun.toml` gracefully dictate the logic behind the scenes (see `pubrun --help`, `pubrun --show-config`, or  `pubrun --create-config`):
 ```toml
 [core]
 profile = "deep"
@@ -69,7 +69,7 @@ def process_chunk(matrix):
     pubrun.annotate("chunk_evaluation", shape=str(matrix.shape), loss=0.54)
 ```
 
-**Configuration Path Context:** What happens if `process_chunk` is evaluated but `pubrun` is strictly disabled or hasn't started? By default, `pubrun` fails gracefully and ignores the call. You can dictate this exact behavior inside `.pubrun.toml` (see `pubrun --help` and `pubrun --create-config`):
+**Configuration Path Context:** What happens if `process_chunk` is evaluated but `pubrun` is strictly disabled or hasn't started? By default, `pubrun` fails gracefully and ignores the call. You can dictate this exact behavior inside `.pubrun.toml` (see `pubrun --help`, `pubrun --show-config`, or  `pubrun --create-config`):
 ```toml
 [events]
 # Safely toggle custom telemetry streams cleanly
@@ -106,4 +106,4 @@ def entrypoint_function():
     execute_logic()
 ```
 
-**Configuration Path Context:** Similar to `pubrun.start()`, the decorator safely falls back to your `.pubrun.toml` defaults globally if you simply use `@pubrun.audit_run()`. Specifying `profile="basic"` in the code acts as a hardcoded API override mathematically trumping your local or user global TOML constraints! (see `pubrun --help` and `pubrun --create-config`)
+**Configuration Path Context:** Similar to `pubrun.start()`, the decorator safely falls back to your `.pubrun.toml` defaults globally if you simply use `@pubrun.audit_run()`. Specifying `profile="basic"` in the code acts as a hardcoded API override mathematically trumping your local or user global TOML constraints! (see `pubrun --help`, `pubrun --show-config`, or  `pubrun --create-config`)

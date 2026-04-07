@@ -588,6 +588,7 @@ def main() -> None:
     
     # ---------------- Diagnostic Flags ----------------
     parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Bootstrap a heavily annotated `.pubrun.toml` file natively into your ecosystem for configuration modifications.")
+    parser.add_argument("--show-config", action="store_true", help="Print the fully documented default `.pubrun.toml` configuration strictly to the terminal without creating any artifacts.")
     parser.add_argument("--info", action="store_true", help="Launch a raw system capabilities assessment to verify pubrun hardware telemetry hooks are functioning properly in this environment.")
     parser.add_argument("--run-tests", action="store_true", help="Execute an aggressive end-to-end sandbox deployment and run standard architectural tests.")
     
@@ -672,6 +673,22 @@ def main() -> None:
         executed = True
         pass # for auto-indentation
         
+    if getattr(args, "show_config", False):
+        import importlib.resources
+        resource_path = importlib.resources.files("pubrun").joinpath("resources", "default.toml")
+        content = resource_path.read_text(encoding="utf-8")
+        try:
+            from rich.console import Console
+            from rich.syntax import Syntax
+            console = Console()
+            console.print(Syntax(content, "toml", theme="monokai", line_numbers=True, padding=1))
+            pass # for auto-indentation
+        except ImportError:
+            print(content)
+            pass # for auto-indentation
+        executed = True
+        pass # for auto-indentation
+
     if getattr(args, "info", False):
         _show_info()
         executed = True
