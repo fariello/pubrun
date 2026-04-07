@@ -262,6 +262,7 @@ The configuration MUST support defaults for at least:
 - environment capture settings
 - package capture settings
 - subprocess capture settings
+- diff engine configuration (ignore tiers `ignore_basic`, `ignore_standard`, default wrap limits `wrap`, `max_string_length`, and `show_same`)
 - artifact behavior
 - auto-start behavior
 - logging / summary behavior
@@ -326,8 +327,8 @@ By default, the command ignores local `.pubrun` minimal restrictions, captures f
 ### 11.6 Run Diagnostics (`report`)
 The CLI MUST support compiling execution metrics into a human-readable diagnostics text stream natively for verification and troubleshooting.
 Command format:
-`pubrun report [RUN_DIR] [--depth basic|standard|deep]`
-To provide a holistic summary, the command MUST aggregate data across multiple artifacts (specifically ingesting `manifest.json`, `config.resolved.json`, and `events.jsonl`). 
+`pubrun report [RUN_DIR_A] [RUN_DIR_B...] [--depth basic|standard|deep]`
+To provide a holistic summary, the command MUST aggregate data across multiple artifacts (specifically ingesting `manifest.json`, `config.resolved.json`, and `events.jsonl`). The Engine MUST sequentially loop if multiple independent directories are invoked via `nargs="*"`, separating console output visually.
 It MUST also support dynamic Parent-Child manifest hydration. If the local run indicates an active `"meta_ref"`, the orchestrator natively merges the parent context. Furthermore, it MUST detect and compute structural environment drift by validating fast script `stat` anchors (`size` and `mtime`) captured natively in child traces, dynamically throwing warnings if the target script was modified after the parent `meta.json` snap.
 
 ### 11.7 Academic Methodology Exporter (`methods`)
@@ -340,14 +341,15 @@ Crucially, this compilation requires a completely resolved overarching context. 
 The CLI MUST support extracting the exact shell command required to re-execute a recorded trace natively.
 Command format:
 `pubrun rerun [RUN_DIR]`
-The implementation MUST natively evaluate `invocation.rerun_command` from the target manifest and print it directly to `stdout`. Internal engine logs (e.g., auto-detecting latest run text) MUST be correctly piped strictly to `stderr` to ensure robust, clean bash pipelining constructs (e.g., `$(pubrun rerun)` natively executes safely).
+The implementation MUST natively evaluate `invocation.rerun_command` from the target manifest and print it directly to `stdout`. The string output natively replaces legacy POSIX `&&` sequentially translating to cross-platform safe bounds dynamically for Windows `\n` blocks. Internal engine logs (e.g., auto-detecting latest run text) MUST be correctly piped strictly to `stderr` to ensure robust, clean pipelining constructs.
 
 ### 11.9 Semantic Differ (`diff`)
 The CLI MUST support providing high-signal telemetry deltas comparing two completely separated execution blocks.
 Command format:
-`pubrun diff RUN_DIR_A RUN_DIR_B [--export json|txt] [--no-color]`
-The `diff` engine MUST filter volatile execution jitter natively (e.g., timestamps, memory peak drift, standard Process IDs) relying exclusively on configuration-driven `[diff]` ignore strings in `.pubrun.toml`.
-If outputting to terminal, the system SHOULD conditionally attempt to load `rich` for side-by-side matrices, otherwise gracefully defaulting to explicit inline rendering utilizing text mappings correctly.
+`pubrun diff [RUN_DIR_A] [RUN_DIR_B] [--depth basic|standard|deep] [--same|--no-same] [--wrap|--no-wrap] [--export]`
+The `diff` engine MUST filter volatile execution jitter natively (e.g., timestamps, memory peak drift, standard Process IDs) relying exclusively on dynamic depth-specific `[diff]` configuration constraints (`ignore_basic`, `ignore_standard`, `ignore_deep`) located in `.pubrun.toml`.
+It MUST seamlessly map exact value identically natively if `--same` (or `show_same = true`) is manually queried.
+If outputting to terminal, the system SHOULD conditionally attempt to load `rich` for side-by-side semantic zebra-striping matrices, otherwise gracefully defaulting to explicit inline rendering.
 If `--export` is utilized, the UI engine MUST be entirely bypassed, natively splitting dictionary hierarchies into cleanly sorted output representations allowing IDE GUI differs (`vscode`, `meld`) to accurately evaluate exact structural deviation paths optimally.
 
 ## 12. Run directory (revised)

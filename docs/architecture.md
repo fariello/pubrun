@@ -100,7 +100,10 @@ Modular and configurable.
 
 ## 11. Progressive depth model
 
-off, basic, standard, deep
+- `off`: Telemetry scope entirely disabled safely.
+- `basic`: Extremely fast constraint bypassing dynamic package traces and hardware trees statically.
+- `standard`: The default telemetry layer comprehensively executing environment variable, package dependency, and timing metrics without overhead.
+- `deep`: Massively comprehensive tree capture aggressively serializing explicit ecosystem configurations natively.
 
 ## 12. Console capture model
 
@@ -163,9 +166,11 @@ The physical execution engine is logically divided into several key systems that
 - **Event Streamer**: Real-time structured execution events to `events.jsonl`.
 - **Console Manager**: Tee-style wrapper around standard streams.
 - **Artifact Writer**: Atomically generates the isolated Run Directory and serializes all outputs reliably.
-- **Diagnostics Analyzer**: A post-execution CLI analyzer (`pubrun report`) that parses the `manifest.json` and evaluates configuration, events, and script drift dynamically to present a human-readable stream of execution provenance.
+- **Diagnostics Analyzer**: A post-execution CLI analyzer (`pubrun report`) that iteratively evaluates arrays of configurations dynamically across inputs (`args.run_dirs`).
 - **Methods Generator**: A post-execution CLI and writer integration (`pubrun methods`) that interprets the `manifest.json` and automatically outputs a prose-based "Computational Methods" summary in Markdown or LaTeX formats.
 - **Global Context Snapshooter**: A standalone CLI command (`pubrun meta`) that bypasses script-execution to natively generate deep introspective global execution context maps (e.g., full virtual environments) to act as a definitive parent node for massively parallel symmetric child arrays.
+- **Diff Semantic Analyzer**: A post-execution structural evaluator (`pubrun diff`) conditionally generating side-by-side matrices (via `rich`) natively omitting matching noise via configurable depth tiers (`--basic/standard/deep`).
+- **Reproducibility Extractor**: A native CLI interpreter (`pubrun rerun`) evaluating historical payloads and formatting cross-platform terminal instructions guaranteeing deterministic local replay mappings.
 
 ## 26. Summary
 
