@@ -101,11 +101,19 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
         # ---------------------------------------------------------
         # 3. Re-run Replication Engine
         # ---------------------------------------------------------
-        # We leverage the native `shlex` library because naive string joining of sys.argv 
-        # destroys spaces and quotes (e.g. `python script.py "model V2"` would break).
-        # `shlex.join()` reconstructs the terminal tokens exactly to Python-spec.
-        escaped_args = shlex.join(argv) 
-        rerun_command = f"cd {shlex.quote(str(cwd))} && python {escaped_args}"
+        # We branch explicitly between OS architectures. Windows cmd explicitly chokes on POSIX 
+        # single quotes (via shlex), and PowerShell pre-v7 natively crashes on `&&`.
+        if sys.platform == "win32":
+            import subprocess
+            escaped_args = subprocess.list2cmdline(argv)
+            cwd_str = subprocess.list2cmdline([str(cwd)])
+            # Multiline string perfectly bypasses all operator (&, &&, ;) ecosystem inconsistencies on Windows
+            rerun_command = f"cd {cwd_str}\npython {escaped_args}"
+            pass # for auto-indentation
+        else:
+            escaped_args = shlex.join(argv) 
+            rerun_command = f"cd {shlex.quote(str(cwd))} && python {escaped_args}"
+            pass # for auto-indentation
         
         # ---------------------------------------------------------
         # 4. sys.argv Dataset Discovery Heuristics
