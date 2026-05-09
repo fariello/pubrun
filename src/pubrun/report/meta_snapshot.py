@@ -55,7 +55,7 @@ def generate_meta_snapshot(output_path: str, depth: str) -> None:
     with open(out_target, "w", encoding="utf-8") as f:
         json.dump(meta_json, f, indent=2)
         
-    print(f"[OK] Global meta snapshot generated perfectly: {out_target}")
+    print(f"[OK] Meta snapshot saved to: {out_target}")
     
     # Print a brief summary to console
     print("\n--- Snapshot Brief ---")

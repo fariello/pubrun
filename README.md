@@ -18,6 +18,9 @@ pubrun -h  # Lots of info here.
 That's it. No frameworks, no heavy integrations, no syntax hijacking.
 When the script exits, `pubrun` silently generates a structured, lightweight footprint in your local `./runs/` directory.
 
+> [!NOTE]
+> **Console capture**: By default, `pubrun` tees `stdout` and `stderr` to log files in the run directory. Your terminal output is unchanged, but a copy is saved alongside the manifest. If your script produces very high output volume, you can disable this with `capture_mode = "off"` in `.pubrun.toml` or via `pubrun.start(console={"capture_mode": "off"})`. See [Configuration](docs/configuration.md) for details.
+
 See [CLI Reference](docs/cli.md) and [API Reference](docs/api.md) for full details.
 
 ## Features
@@ -69,7 +72,7 @@ pubrun methods --format latex
 
 ### Sample Output
 
-> Computational experiments were executed on a machine running Linux (5.15.0-91-generic) equipped with an Intel(R) Core(TM) i7-12700H and 32.0 GB of RAM. The execution environment relied on Python 3.10.12 (CPython). Key dependencies explicitly tracked include torch (v2.0.1) and numpy (v1.24.3). To guarantee computational reproducibility, the exact state of the source code was anchored at Git commit `a1b2c3d4`. Environment and execution provenance were tracked using the `pubrun` library [1].
+> Computational experiments were executed on a machine running Linux (5.15.0-91-generic) equipped with an Intel(R) Core(TM) i7-12700H and 32.0 GB of RAM. The execution environment relied on Python 3.10.12 (CPython). Key dependencies tracked include torch (v2.0.1) and numpy (v1.24.3). To guarantee computational reproducibility, the exact state of the source code was anchored at Git commit `a1b2c3d4`. Environment and execution provenance were tracked using the `pubrun` library [1].
 
 > [!NOTE]
 > **Windows support**: `pubrun` works on Windows, but some capture engines have reduced functionality. Process `uid`/`gid` fields are not available, and `os.system` interception uses shell-string parsing rather than structured argument lists. All other features work identically.

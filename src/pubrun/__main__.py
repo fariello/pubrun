@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from pubrun import __version__
+
 
 def _create_config(destination: str) -> None:
     """Create a default ``.pubrun.toml`` at the given path. Refuses to overwrite."""
@@ -168,7 +170,7 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
             print_diff(diff_report, no_color=no_color, wrap=wrap_target, max_length=mlen_target)
 
     except Exception as e:
-        print(f"Failed to generate differential report: {e}", file=sys.stderr)
+        print(f"Error: Failed to generate diff report: {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -180,7 +182,7 @@ def _run_report(run_dir: str, depth: str) -> None:
         print_report(manifest_path, depth)
 
     except Exception as e:
-        print(f"Failed to generate report diagnostics: {e}", file=sys.stderr)
+        print(f"Error: Failed to generate diagnostic report: {e}", file=sys.stderr)
         sys.exit(1)
         
         
@@ -190,7 +192,7 @@ def _run_meta(out_path: str, depth: str) -> None:
         from pubrun.report.meta_snapshot import generate_meta_snapshot
         generate_meta_snapshot(out_path, depth)
     except Exception as e:
-        print(f"Failed to generate global snap: {e}", file=sys.stderr)
+        print(f"Error: Failed to generate meta snapshot: {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -294,8 +296,8 @@ print('Mock Training Complete.')
         try:
             manifest_data = json.loads(manifest_p.read_text(encoding="utf-8"))
             rcs = manifest_data.get("subprocesses", [])
-            print(f"[OK] Subprocess Monkeypatch captured {len(rcs)} internal shell commands seamlessly.")
-            print(f"[OK] Architecture Validated. Tracking context generated efficiently.")
+            print(f"[OK] Subprocess spy captured {len(rcs)} shell commands.")
+            print(f"[OK] Validation complete.")
         except Exception as e:
             pass
 
@@ -307,26 +309,28 @@ def main() -> None:
         sys.exit(0)
         
     parser = argparse.ArgumentParser(
+        prog="pubrun",
         description="pubrun: Zero-dependency execution telemetry and publication engine.",
-        epilog="Use 'pubrun <command> --help' for detailed information on a specific tool."
+        epilog="Use 'pubrun <command> --help' for detailed information on a specific command."
     )
+    parser.add_argument("--version", action="version", version=f"pubrun {__version__}")
     
     subparsers = parser.add_subparsers(dest="command", title="Available core commands", metavar="<command>")
     
     # ---------------- Report Subparser ----------------
     report_parser = subparsers.add_parser("report", help="Analyze and display diagnostic telemetry from a specific run.", description="Analyze and display diagnostic telemetry from a specific run.")
-    report_parser.add_argument("run_dirs", type=str, nargs="*", help="Directory path to one or more existing pubrun artifact folders (e.g., runs/pubrun-XYZ). If omitted, the system automatically discovers and evaluates the most recently completed run in the ./runs directory.")
+    report_parser.add_argument("run_dirs", type=str, nargs="*", help="One or more run directories (e.g., runs/pubrun-XYZ). Defaults to the most recent run in ./runs/.")
     
     depth_group_1 = report_parser.add_mutually_exclusive_group()
-    depth_group_1.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Display only high-level identifiers (Architecture, Timing, Outcome).")
-    depth_group_1.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Display a standard summary including OS constraints, Hardware info, and Git provenance (Default).")
-    depth_group_1.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Force the renderer to dump out heavily exhaustive dependency graphs (every pip package and env var).")
+    depth_group_1.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Timing and outcome only.")
+    depth_group_1.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Hardware, Git, Python, and dependency summary (default).")
+    depth_group_1.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Full environment variables and complete package list.")
     report_parser.set_defaults(depth="standard")
 
     # ---------------- Methods Subparser ----------------
-    methods_parser = subparsers.add_parser("methods", help="Autogenerate publication-ready 'Computational Methods' paragraphs for academic papers.", description="Autogenerate publication-ready 'Computational Methods' paragraphs for academic papers.")
+    methods_parser = subparsers.add_parser("methods", help="Generate publication-ready 'Computational Methods' paragraphs.", description="Generate publication-ready 'Computational Methods' paragraphs.")
     methods_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
-    methods_parser.add_argument("--format", type=str, choices=["markdown", "latex"], default="markdown", help="Specify the structured language (markdown or latex) the methodology section should be compiled into.")
+    methods_parser.add_argument("--format", type=str, choices=["markdown", "latex"], default="markdown", help="Output format: markdown or latex.")
 
     # ---------------- Rerun Subparser ----------------
     rerun_parser = subparsers.add_parser("rerun", help="Print the shell command needed to replicate a run.", description="Print the shell command needed to replicate a run.")
@@ -334,21 +338,21 @@ def main() -> None:
 
     # ---------------- Diff Subparser ----------------
     diff_parser = subparsers.add_parser("diff", help="Compare two execution traces and highlight differences.", description="Compare two execution traces and highlight differences.")
-    diff_parser.add_argument("run_dir_a", type=str, help="First trace artifact directory (Baseline).")
-    diff_parser.add_argument("run_dir_b", type=str, help="Second trace artifact directory (Target Mutation).")
-    diff_parser.add_argument("--export", type=str, nargs="?", const=True, help="Export parsed datasets by flattening the dictionary mappings ('txt' or 'json').")
-    diff_parser.add_argument("--no-color", action="store_true", help="Disables standard ANSI output.")
+    diff_parser.add_argument("run_dir_a", type=str, help="First run directory (baseline).")
+    diff_parser.add_argument("run_dir_b", type=str, help="Second run directory (comparison).")
+    diff_parser.add_argument("--export", type=str, nargs="?", const=True, help="Export flattened manifests to files ('txt' or 'json').")
+    diff_parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output.")
     
     # Wrap config logic
     wrap_group = diff_parser.add_mutually_exclusive_group()
     wrap_group.add_argument("--wrap", action="store_true", default=None, help="Wrap long strings across multiple lines instead of truncating.")
     wrap_group.add_argument("--no-wrap", action="store_false", dest="wrap", default=None, help="Force ellipsis truncation for long values.")
     
-    diff_parser.add_argument("--max-length", type=int, default=None, help="Maximum length allowable for inline string rendering before truncation ellipsis engages.")
+    diff_parser.add_argument("--max-length", type=int, default=None, help="Max characters per value before truncation.")
 
     # Depth logic
     diff_depth = diff_parser.add_mutually_exclusive_group()
-    diff_depth.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Ignore vast bulk metric data to analyze strictly structural changes (Default).")
+    diff_depth.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Structural changes only, filtering most metrics (default).")
     diff_depth.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Include standard telemetry, ignoring jitter metrics.")
     diff_depth.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Unfiltered comparison of all captured data.")
     diff_parser.set_defaults(depth="basic")
@@ -359,24 +363,24 @@ def main() -> None:
     diff_same.add_argument("--no-same", action="store_false", dest="same", default=None, help="Hide keys that are identical between both runs.")
     
     # ---------------- Meta Subparser ----------------
-    meta_parser = subparsers.add_parser("meta", help="Generate a localized 'meta.json' environment snapshot. Useful for massive HPC array payloads.", description="Generate a localized 'meta.json' environment snapshot. Useful for massive HPC array payloads.")
-    meta_parser.add_argument("--out", type=str, default="", help="Provide an explicit filepath destination to dump the generated snapshot (defaults to stdout if empty).")
+    meta_parser = subparsers.add_parser("meta", help="Generate a standalone meta.json environment snapshot.", description="Generate a standalone meta.json environment snapshot for HPC parent-child hydration.")
+    meta_parser.add_argument("--out", type=str, default="", help="Output file path. Defaults to ./runs/meta.json.")
     
     depth_group_2 = meta_parser.add_mutually_exclusive_group()
-    depth_group_2.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Capture a minimal ecosystem footprint (fastest runtime).")
-    depth_group_2.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Capture standard environment factors.")
-    depth_group_2.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Force exhaustive evaluation of the complete underlying system hardware, git branches, and pip dependency trees (Default).")
+    depth_group_2.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Minimal footprint (fastest).")
+    depth_group_2.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Standard environment factors.")
+    depth_group_2.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Full hardware, git, and pip dependency snapshot (default).")
     meta_parser.set_defaults(depth="deep")
     
     # ---------------- Cite Subparser ----------------
     cite_parser = subparsers.add_parser("cite", help="Generate a formatted academic citation for pubrun.", description="Generate a formatted academic citation for pubrun.")
-    cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Filter the output citation by standard academic grammar.")
+    cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Citation format (default: apa).")
     
     # ---------------- Diagnostic Flags ----------------
     parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Create an annotated `.pubrun.toml` configuration file.")
-    parser.add_argument("--show-config", action="store_true", help="Print the fully documented default `.pubrun.toml` configuration strictly to the terminal without creating any artifacts.")
-    parser.add_argument("--info", action="store_true", help="Launch a raw system capabilities assessment to verify pubrun hardware telemetry hooks are functioning properly in this environment.")
-    parser.add_argument("--run-tests", action="store_true", help="Execute an aggressive end-to-end sandbox deployment and run standard architectural tests.")
+    parser.add_argument("--show-config", action="store_true", help="Print the default configuration to the terminal.")
+    parser.add_argument("--info", action="store_true", help="Display system capabilities and pubrun version info.")
+    parser.add_argument("--run-tests", action="store_true", help="Run the built-in test suite and a mock end-to-end script.")
     
     args = parser.parse_args()
 

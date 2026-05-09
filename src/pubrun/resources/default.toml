@@ -3,191 +3,168 @@
 # ==========================================
 # Documentation: https://github.com/gfariello/pubrun
 #
-# This file serves as the default policy for `pubrun`. When your script runs, 
-# `pubrun` will look for configuration files that override these defaults.
+# This file contains the default configuration for pubrun. When your script
+# runs, pubrun looks for user and project config files that override these.
 #
-# Resolution Order (Highest to Lowest Precedence):
+# Resolution Order (highest to lowest precedence):
 #   1. Explicit API arguments (e.g., pubrun.start(profile="deep"))
 #   2. Environment variables (e.g., PUBRUN_PROFILE="deep")
-#   3. Local project override (e.g., ./.pubrun.toml)
-#   4. User home defaults (e.g., ~/.config/pubrun/pubrun.toml)
+#   3. Local project override (./.pubrun.toml)
+#   4. User home defaults (~/.config/pubrun/config.toml)
 #   5. This default file.
 
 [core]
 # -----------------------------------------------------------------------------
-# Core behaviors dictating how runs are initialized and stored.
+# Core behaviors for run initialization and storage.
 # -----------------------------------------------------------------------------
 
-# The master profile dictates the default capture depth across all categories 
-# if a specific category (like [capture.packages]) doesn't specify its own depth. 
-# Supported values:
-#   "minimal" - Barebones execution logging.
-#   "default" - Standard, safe capture with no heavy overhead.
-#   "deep"    - Maximum information gathering (may include slow system calls).
+# Master profile controlling capture depth across all categories, unless a
+# specific category overrides it.
+# Values: "minimal", "default", "deep"
 profile = "default"
 
-# The base directory where your runs will be saved. `pubrun` will automatically 
-# create uniquely named subdirectories (e.g., `runs/pubrun-script-timestamp/`)
-# inside this base path for every execution. If left empty, it naturally defaults 
-# to a `./runs` folder inside your current working directory.
+# Base directory for run output. pubrun creates timestamped subdirectories
+# inside this path for each run. Empty string defaults to ./runs/.
 output_dir = ""
 
-# If set to `true`, simply inserting `import pubrun` into your Python script 
-# will automatically initialize a traced execution. If `false`, you must write 
-# `pubrun.start()` or use `@audit_run` explicitly to begin logging.
+# If true, `import pubrun` starts a trace automatically. If false, you must
+# call pubrun.start() or use @audit_run to begin tracking.
 auto_start = true
 
 
 [console]
 # -----------------------------------------------------------------------------
-# Configuration for intercepting and logging standard output and errors.
+# Interception and logging of stdout/stderr.
 # -----------------------------------------------------------------------------
 
-# How should `pubrun` handle print statements and error tracebacks?
-# Supported modes:
-#   "off"      - Console capture is entirely disabled; streams are untouched.
-#   "basic"    - `stdout` and `stderr` are invisibly tee'd to text files in your run directory.
-#   "standard" - Same as basic, but automatically prepends timestamps to output lines.
-#   "deep"     - Full structured JSON-based console capture.
+# How pubrun handles print output and error tracebacks.
+# Values:
+#   "off"      - No capture; streams are untouched.
+#   "basic"    - Tee stdout/stderr to text files in the run directory.
+#   "standard" - Same as basic, with timestamps prepended.
+#   "deep"     - Full structured JSON console capture.
 capture_mode = "standard"
 
 
 [events]
 # -----------------------------------------------------------------------------
-# Controls for the real-time `events.jsonl` stream which tracks phases and errors.
+# Controls the real-time events.jsonl stream (phases, annotations, errors).
 # -----------------------------------------------------------------------------
 
-# If `true`, execution milestones (like phase starts/ends) and warnings will be 
-# streamed in real-time to an `events.jsonl` file alongside your manifest.
+# Whether to write events to events.jsonl during the run.
 enabled = true
 
-# Defines the fallback behavior when a user script calls `pubrun.annotate(...)` 
-# or `pubrun.phase(...)` but no trace has actually been started yet.
-# Supported behavioral fallbacks:
-#   "ignore" - Silently discards the annotation to prevent your script from crashing (Safest).
-#   "warn"   - Prints a visible warning to `stderr` but allows the script to continue.
-#   "error"  - Strictly raises a `RuntimeError` and crashes the program.
+# Behavior when pubrun.annotate() or pubrun.phase() is called with no
+# active run.
+# Values: "ignore" (default, safest), "warn", "error" (raises RuntimeError)
 on_inactive_annotate = "ignore"
 
 
 [redaction]
 # -----------------------------------------------------------------------------
-# Security policies to ensure secrets are never leaked into your manifest files.
+# Security policies to prevent secrets from leaking into manifest files.
 # -----------------------------------------------------------------------------
 
-# A regular expression pattern used to detect sensitive variables in your environment,
-# CLI arguments, or runtime configurations. Matching keys will be intercepted.
+# Regex pattern for detecting sensitive variable names in environment variables,
+# CLI arguments, and runtime configuration. Matching values are masked.
 # Covers: passwords, secrets, tokens, API keys, auth credentials, private keys,
-# database connection strings (DATABASE_URL, DSN, CONN_STR), bearer tokens,
-# and signing keys.
+# database connection strings, bearer tokens, and signing keys.
 sensitive_keys_regex = "(?i)(password|secret|token|api_key|key|auth|cred|private|conn_str|connection_string|database_url|dsn|signing|bearer)"
 
-# Determines how detected sensitive values are masked before being written to disk.
-# Supported methods:
-#   "redacted" - The raw value is entirely replaced with a generic [REDACTED] string.
-#   "hashed"   - The raw value is passed through a one-way secure hash (e.g., SHA-256)
-#                so you can verify if a password changed across runs without seeing it.
+# How detected sensitive values are masked before writing to disk.
+# Values:
+#   "redacted" - Value replaced with a generic [REDACTED] marker (default).
+#   "hashed"   - Value replaced with a SHA-256 hash, allowing change detection
+#                across runs without exposing the raw value.
 representation = "redacted"
 
 # Whether to redact matching environment variable values in the manifest.
-# Set to false if you need full environment visibility and accept the risk.
 env_enabled = true
 
-# Whether to redact matching CLI argument values in sys.argv and subprocess argv
-# records stored in the manifest. Applies to both --flag=value and --flag VALUE
-# patterns where the flag name matches the sensitive_keys_regex.
-# Set to false if you need exact command reproducibility and accept the risk.
+# Whether to redact matching CLI argument values in sys.argv and subprocess
+# argv records. Applies to both --flag=value and --flag VALUE patterns where
+# the flag name matches the sensitive_keys_regex.
 argv_enabled = true
 
 
 [capture]
 # -----------------------------------------------------------------------------
-# Fine-grained depth limits. These settings dictate exactly how heavily `pubrun` 
-# profiles the state of the machine. The typical depths are "off", "basic", 
-# "standard", and "deep".
+# Per-category depth controls. Values: "off", "basic", "standard", "deep".
+# Each category can override the master profile.
 # -----------------------------------------------------------------------------
 
 [capture.environment]
-# Controls how system environment variables (like PATH or CUSTOM_VAR) are recorded.
-# Supported modes:
-#   "allowlist" - Only explicitly permitted variables are tracked.
-#   "filtered"  - Captures the environment but strips out known secrets using the redaction policy.
-#   "full"      - Dumps the raw environment without filtering (Unsafe).
+# How system environment variables are recorded.
+# Values:
+#   "allowlist" - Only explicitly permitted variables.
+#   "filtered"  - All variables, with secret redaction applied.
+#   "full"      - Raw dump without filtering (unsafe).
 mode = "filtered"
 depth = "standard"
 
 [capture.packages]
-# Controls how Python dependency versions are analyzed and tracked.
-# Supported modes:
-#   "imported-only"       - Scans `sys.modules` to only track libraries actually used in the script.
-#   "top-level-installed" - Uses package managers (pip/conda) to record locally installed tools.
-#   "full-environment"    - Heavily audits every dependency in the entire Python virtual environment.
+# How Python dependency versions are tracked.
+# Values:
+#   "imported-only"       - Scan sys.modules for libraries used by the script.
+#   "top-level-installed" - List packages from pip/conda.
+#   "full-environment"    - Every dependency in the virtual environment.
 mode = "imported-only"
 depth = "standard"
 
 [capture.subprocesses]
-# Whether to spy on and secretly record subprocesses or shell commands spawned 
-# by your Python script. Very useful for tracing complex orchestration scripts.
+# Whether to intercept subprocess.Popen and os.system calls to record
+# spawned processes.
 enabled = true
 depth = "basic"
 
-# Memory limit: stop recording if more than this many subprocesses run, 
-# preventing accidental stealth Out-Of-Memory leaks during long infinite loops.
+# Stop recording after this many subprocesses to prevent runaway memory usage.
 max_tracked_commands = 5000
 
 [capture.process]
-# Captures active internal OS details like parent processes, user permissions, and thread IDs.
+# OS-level process details: PID, parent PID, user, thread IDs.
 depth = "standard"
 
 [capture.host]
-# Captures static OS-level machine details like hostnames, kernels, and platforms.
+# Static machine details: hostname, kernel, platform.
 depth = "standard"
 
 [capture.python]
-# Captures details surrounding the Python runtime itself, including the CPython build 
-# and active Virtual Environment paths.
+# Python runtime: CPython version, virtual environment paths.
 depth = "standard"
 
 [capture.git]
-# Examines the local file directory for a `.git` folder and safely extracts 
-# the active branch, commit hash, remote URL, and whether there are uncommitted changes.
+# Git repository state: branch, commit hash, remote URL, dirty status.
 depth = "standard"
 
 
 [capture.inputs]
 # -----------------------------------------------------------------------------
-# Detects input files passed via CLI (sys.argv) to record file status natively.
+# Detects input files passed via CLI (sys.argv).
 # -----------------------------------------------------------------------------
 
-# Whether to run a heuristic scanning algorithm across your command line arguments
-# checking if they map to physical files or folders on disk.
+# Whether to scan sys.argv for file paths.
 enabled = true
 
-# A list of extensions to ignore when classifying an argument as an input file
-# (e.g. ['pyc', 'log']).
+# File extensions to skip (e.g., ["pyc", "log"]).
 ignore_extensions = []
 
-# DANGER: Enabling this forcibly reads and hashes all detected input files. 
-# It provides maximum reproducibility but introduces severe startup latency 
-# if your dataset relies on monolithic 5GB .csv or .h5 files. 
-# Leave as false to exclusively record fast OS-level modifications (mtime/size).
+# If true, compute MD5 hashes of all detected input files. Provides maximum
+# reproducibility but is slow for large files. If false, records only
+# mtime and size.
 compute_md5 = false
 
 
 [capture.hardware]
 # -----------------------------------------------------------------------------
-# Determines how much deep inspection is performed on the physical hardware.
+# Physical hardware inspection depth.
 # -----------------------------------------------------------------------------
 
-# At the "basic" or "standard" depth, this will cleanly parse top-level CPU cores, 
-# architecture patterns, and GPU manufacturer makes and models.
+# At "basic" or "standard" depth, captures CPU model, core count, architecture,
+# and GPU make/model.
 depth = "basic"
 
-# Explicit overrides for deep Machine Learning reproducibility. Reading precise 
-# execution clock speeds or exact floating-point support matrices (TF32, FP64) 
-# often requires slow, expensive system calls (e.g., querying NVML or reading `/proc`).
-# Therefore, these advanced flags require an explicit visual toggle to `true`, 
-# even if `depth` is set to "deep", ensuring users aren't surprised by overhead.
+# Advanced flags for ML reproducibility. These require slow system calls
+# (NVML queries, /proc reads) and are opt-in even when depth is "deep".
 capture_gpu_clock_speed = false
 capture_gpu_fp_precision = false
 capture_cpu_clock_speed = false
@@ -196,51 +173,48 @@ capture_cpu_fp_precision = false
 
 [capture.resources]
 # -----------------------------------------------------------------------------
-# Configurations for the background utilization watcher.
+# Background resource utilization sampling.
 # -----------------------------------------------------------------------------
 
-# If enabled (e.g., standard or deep), this traces real-time usage metrics 
-# such as peak RAM and active CPU time.
+# When enabled, a background thread samples CPU and memory usage.
 depth = "standard"
 
-# How frequently (in seconds) the background thread is allowed to wake up and 
-# sample the machine's capacity. Shorter intervals mean finer graphs but bigger 
-# overhead and larger `events.jsonl` files.
+# Sampling interval in seconds. Shorter intervals give finer data but increase
+# overhead and events.jsonl size.
 sample_interval_seconds = 15
 
-# If the OS underlying hook natively fails to deliver bytes this many times consecutively,
-# the background daemon will silently kill itself to avoid spamming CPU cycles.
+# Kill the background thread after this many consecutive read failures.
 max_consecutive_failures = 3
 
 
 [capture.determinism]
-# Attempts to track or lock pseudorandom numbers (like Python `random` or `numpy.random` seeds).
+# Track or lock pseudorandom seeds (Python random, numpy.random).
 depth = "off"
 
 
 [logging]
 # -----------------------------------------------------------------------------
-# Output generation overrides.
+# Output generation.
 # -----------------------------------------------------------------------------
 
-# Whether to automatically generate a human-readable `summary.txt` in the run directory 
-# containing a quick diagnostic glance of the run layout.
+# Whether to write a human-readable summary.txt in the run directory.
 write_summary = true
 
 [methods]
 # -----------------------------------------------------------------------------
-# Configuration for the academic methods generator.
+# Academic methods paragraph generator.
 # -----------------------------------------------------------------------------
 
-# Supported output formats: "markdown", "latex"
+# Default output format for `pubrun methods`.
+# Values: "markdown", "latex"
 format = "markdown"
 
 [diff]
 # -----------------------------------------------------------------------------
-# Configuration for the native differential engine (pubrun diff).
+# Semantic diff engine (pubrun diff).
 # -----------------------------------------------------------------------------
 
-# A contextual list of specific keys or payload namespaces completely ignored to prevent terminal noise heavily natively.
+# Keys excluded at each depth level to reduce noise.
 ignore_basic = [
     "timing", "run", "process", "hardware", "resources", "capture", "environment"
 ]
@@ -253,15 +227,15 @@ ignore_standard = [
 
 ignore_deep = []
 
-# Show unchanged identically mapped parameters structurally if forced natively dynamically.
+# Whether to display unchanged values in diff output.
 show_same = false
 
-# The structural format dictating how pubrun diff exports to visual GUI tools when `--export` is utilized.
-# Supported formats: "txt" (fully flattened mapping), "json" (structurally clean dict tree).
+# Output format for --export: "txt" (flattened key=value) or "json" (nested).
 export_format = "txt"
 
-# Default rendering boundaries. If false, long dictionary outputs natively compress via ellipsis.
+# If true, wrap long values across multiple lines. If false, truncate with
+# ellipsis.
 wrap = true
 
-# The maximum character threshold for any given payload string rendering strictly in the console difference engine.
+# Max characters per value before wrapping or truncation.
 max_string_length = 300
