@@ -70,8 +70,11 @@ class EventStream:
         if not self._file:
             return
 
-        # Purely critical lifecycle events dynamically bypass the throttle threshold natively.
-        is_critical = event_type in {"phase_started", "phase_ended", "exception_captured", "annotation"}
+        # Critical lifecycle events bypass the throttle threshold so they are
+        # never silently dropped.  The names here MUST match the event_type
+        # strings passed to emit() elsewhere (phase_start / phase_end /
+        # annotation).
+        is_critical = event_type in {"phase_start", "phase_end", "annotation"}
 
         record = {
             "timestamp_utc": time.time(),

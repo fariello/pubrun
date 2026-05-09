@@ -156,8 +156,10 @@ def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         Dict[str, Any]: The finalized configuration map guaranteed to possess the complete schema definition natively.
 
     Assumptions:
-        - The resolution hierarchy natively enforces the explicit rule that explicit code overrides implicitly trump everything, whereas system variables trump local models, which trump global structures.
-        - Environment variable injection is currently heavily stubbed out natively.
+        - The resolution hierarchy enforces that explicit API overrides trump everything,
+          environment variables trump config files, and local config trumps global.
+        - Environment variable support: PUBRUN_AUTO_START (in boot sequence) and
+          PUBRUN_META_REF (injected here as core.meta_ref).
 
     Example:
         >>> resolve_config({"capture": {"subprocesses": {"enabled": False}}})
@@ -173,7 +175,10 @@ def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     if local_conf:
         config = _deep_merge(config, local_conf)
         
-    # Later: Environment variables injection goes here explicitly natively
+    # Environment variable overrides (between local config and API overrides)
+    env_meta_ref = os.environ.get("PUBRUN_META_REF")
+    if env_meta_ref:
+        config = _deep_merge(config, {"core": {"meta_ref": env_meta_ref}})
     
     if overrides:
         config = _deep_merge(config, overrides)

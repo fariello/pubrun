@@ -194,6 +194,10 @@ See [Configuration Reference](docs/configuration.md) for the full redaction poli
 2. **Subprocess argv redaction refinement** — The current regex-based approach may over-match legitimate scientific arguments (e.g., `--output=secret_findings.csv`). Community input welcome on the best policy.
 3. **Coverage reporting** — Integrate `pytest-cov` into CI for coverage tracking.
 4. **Plugin / extension model** — Formal extension points for custom capture engines.
+5. **Artifact registration API** — `register_artifact()` for tracking user-produced output files.
+6. **Custom metadata API** — `register_metadata()` for injecting structured data into the manifest.
+7. **Determinism tracking** — `register_seed()` and the `[capture.determinism]` engine for recording pseudorandom seeds.
+8. **Combined console log** — Interleaved `combined.log` output alongside `stdout.log` and `stderr.log`.
 
 ---
 

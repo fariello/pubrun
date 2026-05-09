@@ -3,512 +3,687 @@
 # pubrun Functional Specification
 
 > Status: v0.1.1
-> Purpose: Defines functional requirements aligned with architecture.
+> Purpose: Defines functional requirements aligned with implementation.
 > Audience: Developers and contributors.
 
-## 1. Purpose
+---
+
+## 1. Purpose and Scope
 
 `pubrun` captures execution context for reproducibility, troubleshooting, and comparison of Python runs.
 
-The library must support a very low-friction user model. It should be usable in multiple ways, including:
+The library supports a low-friction user model. Useful behavior is available with minimal ceremony:
 
 ```python
 import pubrun
 ```
 
-or:
+Deeper, explicit control is available when desired:
 
 ```python
-from pubrun import start
+from pubrun import start, tracked_run, audit_run
 ```
 
-The product goal is that a user can get useful behavior with minimal ceremony, while still allowing deeper, explicit control when desired.
+### 1.1 Non-Goals
 
-## 2. Core model
+pubrun is not:
 
-- manifest-first design
-- optional event stream
-- optional console capture
-- configurable defaults from config files
-- explicit APIs for deeper control
+- A workflow engine or DAG scheduler
+- An experiment tracking platform (no server, no dashboard)
+- A data versioning tool
+- A replacement for proper version control
 
-## 3. Import and activation model
+---
 
-### 3.1 Import compatibility
+## 2. Core Model
 
-The package MUST support standard Python import patterns, including:
+- **Manifest-first design**: Each run produces a `manifest.json` as its canonical output.
+- **Optional event stream**: Structured JSONL events may be written to `events.jsonl`.
+- **Optional console capture**: Tee-style interception of stdout/stderr.
+- **Hierarchical configuration**: Defaults composed from built-in, user, local, environment, and API sources.
+- **Explicit APIs**: `start()`, `stop()`, `annotate()`, `phase()`, `tracked_run()`, `audit_run()`, `diff()`.
+
+---
+
+## 3. Import and Activation Model
+
+### 3.1 Import Compatibility
+
+The package MUST support standard Python import patterns:
 
 ```python
 import pubrun
+from pubrun import start, stop, annotate, phase, tracked_run, audit_run, diff
+from pubrun import get_current_run
 ```
 
-and:
-
-```python
-from pubrun import start
-from pubrun import tracked_run
-from pubrun import audit_run
-```
-
-### 3.2 Lightweight import requirement
-
-A plain import MUST be lightweight and safe.
+### 3.2 Lightweight Import Requirement
 
 Importing `pubrun` MUST NOT:
 
 - significantly slow startup
 - fail if optional dependencies are unavailable
-- unexpectedly wrap `stdout` or `stderr` unless configured to do so
-- unexpectedly write output unless configured to do so
+- wrap stdout/stderr unless configured to do so
+- write output unless configured to do so
 
-### 3.3 Auto-start support
+The boot sequence is wrapped in `try/except`. If configuration resolution fails (e.g., corrupt TOML), the import succeeds silently with auto-start disabled.
 
-The library SHOULD support configuration-driven auto-start behavior so that a simple:
+### 3.3 Auto-Start Behavior
 
-```python
-import pubrun
-```
+When `auto_start = true` (the default), `import pubrun` automatically calls `start()`. This is suppressed when:
 
-can provide useful automatic capture when enabled by policy or configuration.
+- The `PUBRUN_AUTO_START` environment variable is set to `"false"`.
+- The process is running the `pubrun` CLI itself (detected by checking `sys.argv[0]`).
 
-This behavior MUST be configurable and easy to disable.
+### 3.4 Explicit Activation
 
-### 3.4 Explicit activation support
-
-The library MUST also support explicit activation via APIs such as:
+The library MUST support explicit activation via:
 
 ```python
-import pubrun
-pubrun.start()
-```
-
-and:
-
-```python
-from pubrun import tracked_run
-
-with tracked_run():
+pubrun.start()                        # Manual start
+with pubrun.tracked_run():            # Context manager
     ...
+@pubrun.audit_run(profile="deep")     # Decorator
+def my_func(): ...
 ```
 
-## 4. Required artifacts
+---
 
-Each run MUST produce a `manifest.json` containing structured metadata about the run.
-The data model for this manifest MUST strictly adhere to the formal JSON Schema defined in `schemas/manifest.schema.json`.
+## 4. Required Artifacts
 
-The manifest is the canonical output for the run.
+Each run MUST produce:
 
-It MUST be usable without requiring event replay.
+- `manifest.json` — The canonical structured metadata record. Schema version `"1.0"`.
+- `config.resolved.json` — The fully resolved configuration used for the run.
 
-### 4.1 Timestamp format
+The manifest MUST be usable without requiring event replay. It MUST strictly adhere to the JSON Schema defined in `schemas/manifest.schema.json`.
 
-All timestamps in the manifest, event stream, and subprocess records MUST be stored as POSIX epoch floats (`time.time()`). ISO 8601 strings MUST NOT be used for timestamps.
+### 4.1 Timestamp Format
+
+All timestamps in the manifest, event stream, and subprocess records MUST be stored as **POSIX epoch floats** (`time.time()`). ISO 8601 strings MUST NOT be used.
 
 Rationale:
 
 - Sub-second precision via IEEE 754 without truncation.
 - Timezone-agnostic: eliminates locale-dependent formatting and parsing.
 - Trivial elapsed-time arithmetic (`ended_at - started_at`).
-- Native compatibility with `time.time()`, `os.stat().st_mtime`, and similar system calls.
-- Compact and deterministic serialization (no string formatting jitter).
-Each run MUST also produce a `config.resolved.json` containing the final configuration used for the run.
+- Native compatibility with `time.time()`, `os.stat().st_mtime`, etc.
+- Compact and deterministic serialization.
 
-## 5. Capture categories
+### 4.2 Optional Artifacts
 
-Core categories (Mandatory by schema):
+Depending on configuration, a run may also produce:
 
-- run
-- timing
-- invocation
-- capture
-- status
-- process
-- host (includes host architecture)
-- python
-- packages
-- environment
-- git
-- errors
-- config
+- `stdout.log` — Captured standard output (if console capture enabled)
+- `stderr.log` — Captured standard error (if console capture enabled)
+- `events.jsonl` — Structured event stream (if events enabled)
+- `methods.md` or `methods.tex` — Auto-generated methodology paragraph
+- `summary.txt` — Human-readable diagnostic glance (if `write_summary = true`)
 
-Optional categories:
+---
 
-- hardware
-- resources
-- subprocesses
-- console
-- artifacts
-- determinism
-- extensions (framework plugins)
+## 5. Capture Categories
+
+### 5.1 Implemented Categories
+
+Each category corresponds to a modular capture engine and a top-level manifest section.
+
+| Category | Manifest Key | Config Section | Modes / Depth |
+|---|---|---|---|
+| Run identity | `run` | — | Always captured |
+| Timing | `timing` | — | Always captured |
+| Invocation | `invocation` | `[capture.inputs]` | `enabled`, `compute_md5` |
+| Console | `console` | `[console]` | `off`, `basic`, `standard`, `deep` |
+| Subprocesses | `subprocesses` | `[capture.subprocesses]` | `enabled = true/false` |
+| Process | `process` | `[capture.process]` | depth-based |
+| Host | `host` | `[capture.host]` | depth-based |
+| Python | `python` | `[capture.python]` | depth-based |
+| Packages | `packages` | `[capture.packages]` | `imported-only`, `top-level-installed`, `full-environment` |
+| Environment | `environment` | `[capture.environment]` | `allowlist`, `filtered`, `full` |
+| Git | `git` | `[capture.git]` | depth-based |
+| Hardware | `hardware` | `[capture.hardware]` | depth-based, explicit GPU/CPU flags |
+| Resources | `resources` | `[capture.resources]` | depth-based, background thread |
+| Errors | `errors` | — | Always captured |
+| Config | `config` | — | Always captured |
+| Capture metadata | `capture` | — | Always captured |
+| Status | `status` | — | Always captured |
+
+### 5.2 Configured but Not Yet Implemented
+
+| Category | Config Section | Status |
+|---|---|---|
+| Determinism | `[capture.determinism]` | Config key exists (`depth = "off"`). No capture engine implemented. |
+
+### 5.3 Deferred (Future Work)
+
+The following categories are planned but have no code or config:
+
+- **Extensions** — Framework plugin model for custom capture engines.
+- **Artifacts** — User-registered output file tracking.
+- **Combined console log** — Interleaved stdout+stderr in a single `combined.log`.
 
 Each category MUST be independently configurable.
 
+---
+
 ## 6. Profiles
 
-Built-in profiles:
+Built-in profile values (set via `[core].profile`):
 
-- minimal
-- default
-- deep
+- `minimal`
+- `default`
+- `deep`
 
-Each profile controls capture depth.
+Profiles control the default capture depth across all categories. Individual categories may override the profile via per-category `depth` settings:
 
-Categories SHOULD also support per-category depth controls such as:
+- `off` — Category entirely disabled.
+- `basic` — Fast, lightweight capture.
+- `standard` — Comprehensive capture without significant overhead.
+- `deep` — Maximum information gathering (may include slow system calls).
 
-- off
-- basic
-- standard
-- deep
+**Implementation note**: Profiles currently serve as a semantic hint. Per-category depth settings in `default.toml` define the actual capture behavior. The profile value is stored in the resolved config but does not programmatically map to specific depth combinations.
+
+---
 
 ## 7. Events
 
-Optional JSONL event stream with structured events.
+Optional JSONL event stream written to `events.jsonl`.
 
-Minimum event types:
+### 7.1 Implemented Event Types
 
-- `phase_start`
-- `phase_end`
-- `annotation`
+- `phase_start` — Emitted when entering a `pubrun.phase()` context.
+- `phase_end` — Emitted when exiting a `pubrun.phase()` context. Includes error type in payload if an exception occurred.
+- `annotation` — Emitted by `pubrun.annotate()`.
 
-Optional event types may include:
+### 7.2 Event Record Format
 
-- subprocess events
-- console events
-- resource samples
-- custom annotations
+```json
+{
+  "timestamp_utc": 1715290800.123,
+  "type": "annotation",
+  "name": "checkpoint",
+  "payload": {"loss": 0.54}
+}
+```
 
-## 8. Console capture
+`name` and `payload` are optional fields.
 
-Supports tee-style capture of `stdout` and `stderr`.
+### 7.3 Throttling
 
-Modes:
+Events are subject to a configurable budget (`max_tracked_events`, default 1,000,000). When the budget is exhausted, non-critical events are silently dropped.
 
-- off
-- basic
-- standard
-- deep
+**Critical events** (`phase_start`, `phase_end`, `annotation`) bypass throttling and are always written.
 
-Produces:
+### 7.4 Thread Safety
 
-- `stdout.log`
-- `stderr.log`
+Event writes are protected by a single `threading.Lock` covering both the budget check and the file I/O, preventing out-of-order writes and count overruns.
 
-Optional:
+---
 
-- `combined.log`
+## 8. Console Capture
 
-The implementation MUST preserve normal console behavior as closely as practical.
+Supports tee-style capture of `stdout` and `stderr` via `TqdmSafeTee`.
 
-## 9. Completeness and redaction
+Modes: `off`, `basic`, `standard`, `deep`.
 
-Each manifest section object MUST implement a `capture_state` property, which explicitly records the status of the capture for that category:
+Produces: `stdout.log` and `stderr.log`.
 
-- complete
-- partial
-- unavailable
-- suppressed
-- failed
+### 8.1 Carriage Return Squashing
 
-If a capture section partially fails, the host script MUST NOT crash. Instead, it MUST mark the section's `capture_state.status = partial` and optionally record details or warnings in the `capture_state`.
+The tee implementation detects carriage return (`\r`) sequences — common in progress bars (tqdm, rich) — and squashes redraws, keeping only the final state of each line. This prevents log files from growing to gigabytes during long training loops.
+
+### 8.2 Behavioral Guarantee
+
+Console capture MUST preserve normal console behavior. The user MUST see the same output they would see without pubrun installed.
+
+---
+
+## 9. Completeness, Redaction, and Security
+
+### 9.1 Capture State
+
+Each manifest section MUST include a `capture_state` object recording the status:
+
+- `complete` — Data captured successfully.
+- `partial` — Some data captured, errors occurred.
+- `unavailable` — Data source not accessible (e.g., no git repo).
+- `suppressed` — Capture disabled by configuration or profile.
+- `failed` — Capture attempted but failed entirely.
+
+If a capture section partially fails, the host script MUST NOT crash.
+
+### 9.2 Redaction Engine
 
 The system MUST support:
 
-- redaction
-- hashing
-- allowlist / denylist control
+- **Regex-based detection** of sensitive variable names.
+- **Destructive redaction** (default): values replaced with `{"representation": "redacted"}`.
+- **Hashed redaction** (opt-in): values replaced with `{"representation": "hashed", "hash_algorithm": "sha256", "hash_value": "..."}`.
 
-Secrets MUST NOT be captured by default. 
-To achieve this, the default redaction policy MUST detect and obfuscate known sensitive keys (e.g., matching regex `(?i)(password|secret|token|api_key|key|auth|cred|private|conn_str|connection_string|database_url|dsn|signing|bearer)`).
-Redaction applies to both environment variable values and CLI argument values. Both are independently configurable via `[redaction].env_enabled` and `[redaction].argv_enabled`.
-Redacted fields MUST NOT just omit the key; they MUST emit a standard `redacted_value` object specifying its `representation` (e.g., `redacted`, `suppressed`).
-By default, to prevent rainbow table brute-force attacks, the redaction engine MUST employ strictly destructive redaction. Unsalted hashes MUST NOT be computed for secrets unless explicitly overridden by a securely salted configuration.
+Default sensitive key regex:
+```
+(?i)(password|secret|token|api_key|key|auth|cred|private|conn_str|connection_string|database_url|dsn|signing|bearer)
+```
 
-## 10. Configuration system
+### 9.3 Redaction Targets
+
+Redaction applies to two independently configurable targets:
+
+| Target | Config Key | Default | Mechanism |
+|---|---|---|---|
+| Environment variables | `[redaction].env_enabled` | `true` | Values of matching env var names are redacted |
+| CLI arguments | `[redaction].argv_enabled` | `true` | `--flag=value` and `--flag VALUE` patterns where the flag name matches |
+
+### 9.4 Security Requirements
+
+- Secrets MUST NOT be captured by default.
+- Unsalted hashes MUST NOT be computed unless explicitly configured.
+- Redacted fields MUST emit a standard `redacted_value` object, not simply omit the key.
+
+---
+
+## 10. Configuration System
 
 ### 10.1 Purpose
 
-`pubrun` MUST support a configuration system that allows users to define default behavior without modifying every script.
+Users MUST be able to define default behavior without modifying every script.
 
-### 10.2 Configuration discovery
+### 10.2 Configuration Discovery
 
-The library MUST look for configuration in standard locations.
+Supported locations, applied in precedence order (lowest to highest):
 
-At minimum, it MUST support:
+| Priority | Source | Path |
+|---|---|---|
+| 1 (lowest) | Built-in defaults | `default.toml` (shipped with the library) |
+| 2 | User home config | `~/.config/pubrun/config.toml` (or `%APPDATA%/pubrun/config.toml` on Windows) |
+| 3 | Local deep config | `./.config/pubrun/config.toml` |
+| 4 | Local root config | `./.pubrun.toml` |
+| 5 | Environment variables | `PUBRUN_AUTO_START`, `PUBRUN_META_REF` |
+| 6 (highest) | API overrides | `pubrun.start(profile="deep")` |
 
-- `~/.config/pubrun/`
-- a pubrun config file in the user's home configuration area
-- a `.pubrun`-style config file in the directory from which the program was started
+When both `.pubrun.toml` and `.config/pubrun/config.toml` exist in the same directory, `.pubrun.toml` takes precedence (it is applied last).
 
-Examples of acceptable supported paths include:
+### 10.3 Supported Environment Variables
 
-- `~/.config/pubrun/config.toml`
-- `<start_working_directory>/.config/pubrun/config.toml`
-- `<start_working_directory>/.pubrun.toml`
+| Variable | Effect |
+|---|---|
+| `PUBRUN_AUTO_START` | Overrides `[core].auto_start`. Consumed in the boot sequence (not in `resolve_config`). |
+| `PUBRUN_META_REF` | Sets `[core].meta_ref`. Consumed in `resolve_config()` between local config and API overrides. |
 
-The exact supported set may be defined more precisely later, but the product MUST support both:
+### 10.4 Configuration Contents
 
-- user-level defaults in the home directory
-- per-project or per-run-directory defaults in the directory from which the process was launched
+The configuration MUST support defaults for:
 
-### 10.3 Configuration precedence
+- Profile / capture depth (`[core]`)
+- Output base directory (`[core]`)
+- Auto-start behavior (`[core]`)
+- Console capture mode (`[console]`)
+- Event capture enablement (`[events]`)
+- Redaction policy (`[redaction]`)
+- All capture category settings (`[capture.*]`)
+- Diff engine configuration (`[diff]`)
+- Methods format (`[methods]`)
+- Logging / summary behavior (`[logging]`)
 
-Configuration precedence SHOULD be:
+### 10.5 Configuration Format
 
-1. explicit runtime arguments and API arguments
-2. environment-variable overrides
-3. local project configuration (e.g. `./.pubrun.toml` overriding `./.config/pubrun/config.toml`)
-4. user home config (`~/.config/pubrun/config.toml`)
-5. built-in defaults (`default.toml`)
+TOML is the required format, leveraging Python 3.11+ `tomllib` (with `tomli` fallback for 3.10).
 
-This precedence order MUST be documented.
+### 10.6 Configuration Logging
 
-### 10.4 Configuration contents
+Each run MUST produce a `config.resolved.json` containing the fully resolved configuration snapshot.
 
-The configuration MUST support defaults for at least:
+### 10.7 Deep Merge Semantics
 
-- profile / capture depth
-- output base directory
-- console capture mode
-- event capture enablement
-- redaction policy
-- environment capture settings
-- package capture settings
-- subprocess capture settings
-- diff engine configuration (ignore tiers `ignore_basic`, `ignore_standard`, default wrap limits `wrap`, `max_string_length`, and `show_same`)
-- artifact behavior
-- auto-start behavior
-- logging / summary behavior
+Configuration layers are merged recursively. Dictionary values are deeply merged; non-dictionary values (including lists) are overwritten by higher-precedence sources. The merge function uses `copy.deepcopy()` to prevent reference sharing.
 
-### 10.5 Configuration format
-
-The configuration format SHOULD be human-readable, versionable, and easy to comment.
-
-TOML is the strongly recommended format, enabling structural configurations while maintaining human readability and leveraging Native Python 3.11+ `tomllib`.
-
-### 10.6 Configuration logging
-The system MUST produce a resolved configuration snapshot per run and store it in the run directory.
+---
 
 ## 11. CLI Tools
 
+The CLI is accessible via `pubrun <command>` or `python -m pubrun <command>`.
+
 ### 11.1 Config Generation (`--create-config`)
 
-When invoked via the terminal, `pubrun` MUST support a config-generation command such as:
+Bootstraps a fully commented `.pubrun.toml` file.
 
-```bash
-pubrun --create-config
-```
+Requirements:
+- MUST include all major configurable options with default values already set.
+- MUST be suitable for immediate user editing.
+- MUST refuse to overwrite an existing file.
+- If no destination is specified, an interactive prompt offers Local (`./.pubrun.toml`) or Global (`~/.config/pubrun/config.toml`).
 
-A direct CLI entry point may also support the same behavior.
+### 11.2 Config Display (`--show-config`)
 
-### 11.2 Generated config requirements
+Prints the complete default configuration to the terminal. If `rich` is installed, output is syntax-highlighted with line numbers.
 
-The generated config file MUST:
+### 11.3 System Info (`--info`)
 
-- be fully commented
-- include all major configurable options
-- show the default values already set
-- be suitable for immediate user editing
-- be written to a clearly defined location
-- avoid overwriting an existing config unless explicitly told to do so
+Displays system capabilities, pubrun version, and environment details.
 
-### 11.3 Target location
+### 11.4 Self-Test (`--run-tests`)
 
-The command SHOULD support generating:
-
-- a user-level config
-- a local config in the current directory
-
-If no target is specified, the default location and behavior MUST be documented clearly.
-
-### 11.4 Safety
-
-If a config file already exists, the command MUST either:
-
-- refuse to overwrite it by default, or
-- create a uniquely named alternative, or
-- require an explicit overwrite flag
-
-Silent destructive overwrite is NOT allowed.
+Executes the built-in pytest test suite to verify the installation.
 
 ### 11.5 Global Context Generation (`meta`)
-The CLI MUST support capturing a massive, independent environment snapshot intended to act as the overarching metadata parent to symmetric distributed compute jobs.
-Command format:
-`pubrun meta [--out PATH] [--depth basic|standard|deep]`
-By default, the command ignores local `.pubrun` minimal restrictions, captures full virtual environments natively without wrapping a script execution, outputs `meta.json` in `./runs/`, and intelligently formats the JSON snapshot dynamically to the terminal.
+
+Captures a standalone environment snapshot for HPC parent-child hydration.
+
+```
+pubrun meta [--out PATH] [--basic|--standard|--deep]
+```
+
+- Default depth is `--deep` (captures full virtual environment).
+- If `--out` is omitted, writes to the file path; if empty, defaults to stdout.
+- Generates a JSON snapshot with `manifest_type = "pubrun-meta-snapshot"`.
 
 ### 11.6 Run Diagnostics (`report`)
-The CLI MUST support compiling execution metrics into a human-readable diagnostics text stream natively for verification and troubleshooting.
-Command format:
-`pubrun report [RUN_DIR_A] [RUN_DIR_B...] [--depth basic|standard|deep]`
-To provide a holistic summary, the command MUST aggregate data across multiple artifacts (specifically ingesting `manifest.json`, `config.resolved.json`, and `events.jsonl`). The Engine MUST sequentially loop if multiple independent directories are invoked via `nargs="*"`, separating console output visually.
-It MUST also support dynamic Parent-Child manifest hydration. If the local run indicates an active `"meta_ref"`, the orchestrator natively merges the parent context. Furthermore, it MUST detect and compute structural environment drift by validating fast script `stat` anchors (`size` and `mtime`) captured natively in child traces, dynamically throwing warnings if the target script was modified after the parent `meta.json` snap.
+
+Compiles execution metrics into a human-readable diagnostic summary.
+
+```
+pubrun report [RUN_DIR ...] [--basic|--standard|--deep]
+```
+
+- Accepts multiple run directories; processes them sequentially with visual separation.
+- If no directory is given, auto-detects the most recent run in `./runs/`.
+- Supports parent-child manifest hydration: if the manifest has a `meta_ref`, the parent context is merged.
+- Detects environmental drift by comparing child script `mtime` against the parent snapshot timestamp.
 
 ### 11.7 Academic Methodology Exporter (`methods`)
-The CLI MUST support compiling execution provenance into a publication-ready "Computational Methods" text block natively. 
-Command format:
-`pubrun methods [RUN_DIR] [--format markdown|latex]`
-Crucially, this compilation requires a completely resolved overarching context. The orchestrator MUST ingest the local `manifest.json` and explicitly hydrate it with any linked parent `meta.json` in order to formulate the comprehensive hardware, Python, and package details required for academic accuracy. If the `RUN_DIR` is omitted, the tool MUST auto-detect and default to the most recent run in the local `./runs/` directory based on the directory timestamps. Configuration fallbacks MUST honor the `methods.format` definitions dynamically.
+
+Compiles execution provenance into a publication-ready "Computational Methods" paragraph.
+
+```
+pubrun methods [RUN_DIR] [--format markdown|latex]
+```
+
+- Hydrates the manifest with any linked parent `meta.json` before generating output.
+- If `RUN_DIR` is omitted, auto-detects the most recent run.
+- Default format honors `[methods].format` from configuration.
 
 ### 11.8 Reproducibility Fetcher (`rerun`)
-The CLI MUST support extracting the exact shell command required to re-execute a recorded trace natively.
-Command format:
-`pubrun rerun [RUN_DIR]`
-The implementation MUST natively evaluate `invocation.rerun_command` from the target manifest and print it directly to `stdout`. The string output natively replaces legacy POSIX `&&` sequentially translating to cross-platform safe bounds dynamically for Windows `\n` blocks. Internal engine logs (e.g., auto-detecting latest run text) MUST be correctly piped strictly to `stderr` to ensure robust, clean pipelining constructs.
+
+Extracts the shell command needed to re-execute a recorded run.
+
+```
+pubrun rerun [RUN_DIR]
+```
+
+- Reads `invocation.rerun_command` from the manifest and prints it to stdout.
+- Internal log messages go to stderr to support clean piping (`pubrun rerun | bash`).
 
 ### 11.9 Semantic Differ (`diff`)
-The CLI MUST support providing high-signal telemetry deltas comparing two completely separated execution blocks.
-Command format:
-`pubrun diff [RUN_DIR_A] [RUN_DIR_B] [--depth basic|standard|deep] [--same|--no-same] [--wrap|--no-wrap] [--export]`
-The `diff` engine MUST filter volatile execution jitter natively (e.g., timestamps, memory peak drift, standard Process IDs) relying exclusively on dynamic depth-specific `[diff]` configuration constraints (`ignore_basic`, `ignore_standard`, `ignore_deep`) located in `.pubrun.toml`.
-It MUST seamlessly map exact value identically natively if `--same` (or `show_same = true`) is manually queried.
-If outputting to terminal, the system SHOULD conditionally attempt to load `rich` for side-by-side semantic zebra-striping matrices, otherwise gracefully defaulting to explicit inline rendering.
-If `--export` is utilized, the UI engine MUST be entirely bypassed, natively splitting dictionary hierarchies into cleanly sorted output representations allowing IDE GUI differs (`vscode`, `meld`) to accurately evaluate exact structural deviation paths optimally.
 
-## 12. Run directory (revised)
+Generates a structural comparison between two execution traces.
 
-Each run MUST be stored in a dedicated, uniquely named run directory.
+```
+pubrun diff RUN_DIR_A RUN_DIR_B [OPTIONS]
+```
 
-### Default structure
+Options:
+- `--basic` (default) / `--standard` / `--deep` — Controls filtering via `[diff].ignore_*` lists.
+- `--same` / `--no-same` — Show or hide unchanged values.
+- `--wrap` / `--no-wrap` — Wrap long strings or truncate with ellipsis.
+- `--max-length N` — Maximum character length before truncation.
+- `--no-color` — Disable ANSI color output.
+- `--export [txt|json]` — Export flattened output for external diff tools.
 
-```text
+If `rich` is available, the terminal output uses side-by-side semantic rendering; otherwise falls back to inline rendering.
+
+### 11.10 Academic Citation (`cite`)
+
+Generates a formatted citation for crediting `pubrun`.
+
+```
+pubrun cite [--style apa|mla|chicago|bibtex]
+```
+
+---
+
+## 12. Run Directory
+
+### 12.1 Naming Convention
+
+```
 <base_dir>/runs/pubrun-<script>-<timestamp>-<pid>-<run_id>/
 ```
 
 Example:
-
-```text
-<base_dir>/runs/pubrun-myscript-20260401T193331Z-12345-4f2a91c3/
+```
+./runs/pubrun-train-20260509T120000Z-12345-a1b2c3d4/
 ```
 
-### Requirements
+### 12.2 Requirements
 
-- A `runs/` subdirectory SHOULD be used by default to avoid cluttering the base directory.
-- Each run directory name MUST:
-  - include a UTC timestamp
-  - include a script or entry-point identifier
-  - include the process ID (PID)
-  - include a short unique run identifier
-- Directory creation MUST be race-safe.
+- Each run directory name MUST include a UTC timestamp, script identifier, PID, and 8-character hex run ID.
+- Directory creation MUST be race-safe (uses `mkdir(parents=True, exist_ok=True)`).
 - Run directory names MUST be globally unique within the base directory.
-- The naming scheme MUST be deterministic and machine-parsable.
 
-### Contents
+### 12.3 Contents
 
-Each run directory contents MUST include:
+Required: `manifest.json`, `config.resolved.json`.
 
-- `manifest.json` (required)
-- `config.resolved.json` (required)
+Optional: `stdout.log`, `stderr.log`, `events.jsonl`, `methods.md`/`methods.tex`, `summary.txt`.
 
-Optional contents may include:
+---
 
-- `methods.md` (Automated subset of manifest rendered for publication)
-- `stdout.log`
-- `stderr.log`
-- `events.jsonl`
-- `summary.txt`
-
-### Configuration capture
-
-Each run directory MUST include a representation of the effective configuration used for that run.
-
-Recommended:
-
-- config.resolved.json (fully resolved, machine-readable)
-- optionally config.sources.json (describing config provenance)
-
-The resolved configuration MUST:
-
-- reflect all defaults, overrides, and runtime parameters
-- represent the actual behavior used during execution
-- be sufficient to understand how capture behavior was determined
-
-If original config files were used (e.g., ~/.config/pubrun/..., .pubrun), the system MAY also:
-
-- record their paths
-- include hashes
-- optionally snapshot them (configurable)
-
-### Rationale
-
-The run directory provides namespace isolation for all artifacts associated with a run. This allows internal filenames to remain simple and stable while guaranteeing uniqueness.
-
-Capturing the resolved configuration ensures that each run is fully explainable and reproducible, even when configuration is composed from multiple sources or changed between runs.
-
-## 13. Replay / compare readiness
+## 13. Replay and Comparison
 
 The manifest MUST support:
 
-- `pubrun.diff()`
-- `pubrun rerun`
-- `replay()` guidance
+- `pubrun diff` — Semantic comparison between two run manifests.
+- `pubrun rerun` — Extraction of the exact replay command.
 
-To support this, it MUST include structured and normalized information about:
+To support this, the manifest MUST include structured and normalized information about: command line, working directory, Python executable, package versions, environment hints, git state, and output locations.
 
-- command line
-- working directory
-- Python executable
-- package versions
-- environment hints
-- git state
-- artifacts
-- output locations
+Replay is **advisory, not guaranteed**. Environment differences between the original and replay machine may cause divergent behavior.
 
-Replay is advisory, not guaranteed.
+---
 
-The resolved configuration stored in the run directory MUST be structured and normalized to support comparison across runs.
+## 14. Public API
 
-## 14. API
+### 14.1 Implemented Functions
 
-Core APIs:
+| Function | Signature | Behavior |
+|---|---|---|
+| `start(**overrides)` | Returns `Run` | Begins tracking. If a run is already active, increments `ref_count` and merges overrides (re-entrant). |
+| `stop()` | Returns `None` | Finalizes the active run. Decrements `ref_count`; only writes artifacts when count reaches zero. Safe to call with no active run. |
+| `get_current_run()` | Returns `Run \| None` | Returns the active singleton tracker, or `None`. |
+| `annotate(message, **kwargs)` | Returns `None` | Emits an `annotation` event. Behavior with no active run is configurable: `ignore` (default), `warn`, or `error`. |
+| `phase(name)` | Context manager | Emits `phase_start`/`phase_end` events with timing. Records error type in payload if an exception occurs. |
+| `tracked_run(**overrides)` | Context manager | Wraps `start()`/`stop()`. Sets outcome to `"failed"` on exception. |
+| `audit_run(**overrides)` | Decorator | Wraps a function in `start()`/`stop()`. Preserves return value. Sets outcome to `"failed"` on exception, then re-raises. |
+| `diff(a, b, ignores)` | Returns `dict` | Compares two run directories. Returns `{"added": ..., "removed": ..., "modified": ..., "same": ...}`. |
 
-- `start()`
-- `stop()`
-- `get_current_run()`
-- `tracked_run()` (context manager and decorator)
-- `audit_run()` (higher-level audit tracking)
+### 14.2 Re-Entrant Start Behavior
 
-Optional APIs:
+If `start()` is called while a run is already active:
+1. The existing run's `ref_count` is incremented.
+2. If the override includes a new `output_dir`, the run directory is migrated via `shutil.move()`.
+3. The existing `Run` instance is returned (not a new one).
 
-- `register_artifact()`
-- `register_metadata()`
-- `register_seed()`
-- `mark_phase()`
+### 14.3 Deferred APIs (Future Work)
 
-Convenience interfaces SHOULD include:
+The following APIs are planned but not implemented:
 
-- decorator support
-- context-manager support
-- import-safe top-level exports
+- `register_artifact()` — Track user-produced output files.
+- `register_metadata()` — Inject structured metadata into the manifest.
+- `register_seed()` — Record pseudorandom seeds for determinism tracking.
 
-## 15. Failure behavior
+---
+
+## 15. Subprocess Spy
+
+### 15.1 Mechanism
+
+`SubprocessSpy` monkey-patches `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` to transparently record spawned process metadata.
+
+### 15.2 Recorded Fields
+
+Each subprocess record includes: `argv`, `started_at_utc`, `ended_at_utc`, `cwd`, `exit_code`.
+
+### 15.3 Memory Safety
+
+Recording stops after `max_tracked_commands` (default 5000) to prevent OOM in long-running loops.
+
+### 15.4 Thread Safety
+
+Record mutations are protected by `threading.Lock`.
+
+### 15.5 Internal Bypass
+
+Internal `pubrun` subprocess calls (e.g., `git` queries) use the `disable_spy()` context manager to prevent circular logging.
+
+### 15.6 Argv Redaction
+
+If `[redaction].argv_enabled = true`, subprocess argument values matching the sensitive key regex are replaced with `[REDACTED]` before recording.
+
+### 15.7 OS System Interception
+
+`os.system(cmd)` calls are intercepted. The command string is parsed via `shlex.split()` with a fallback for unterminated quotes.
+
+**Windows limitation**: `os.system` interception uses shell-string parsing rather than structured argument lists.
+
+---
+
+## 16. Resource Watcher
+
+### 16.1 Mechanism
+
+`ResourceWatcher` is a daemon thread that periodically samples process memory (RSS) and CPU utilization.
+
+### 16.2 Configuration
+
+- `sample_interval_seconds` (default 15): How often the thread wakes to sample.
+- `max_consecutive_failures` (default 3): The thread self-terminates after this many consecutive read failures.
+
+### 16.3 Platform Support
+
+| Platform | RSS Source |
+|---|---|
+| Linux | `/proc/self/statm` |
+| macOS | `ps -o rss= -p <pid>` |
+| Windows | `wmic process get WorkingSetSize` |
+
+### 16.4 Output
+
+The `resources` manifest section contains: `peak_rss_bytes`, `end_rss_bytes`, `peak_cpu_percent`.
+
+---
+
+## 17. Ghost Mode
+
+If the run directory cannot be created (e.g., read-only filesystem on strict HPC nodes):
+
+1. A warning is printed to stderr.
+2. All capture is suppressed — the tracker becomes a silent no-op.
+3. The run outcome is set to `"ghost"`.
+4. The host script continues execution unaffected.
+
+Ghost mode MUST never crash the host script.
+
+---
+
+## 18. HPC Parent-Child Hydration
+
+### 18.1 Purpose
+
+In large cluster deployments, child runs can skip heavy capture (packages, hardware, environment) and inherit it from a shared parent snapshot.
+
+### 18.2 Workflow
+
+1. **Parent**: `pubrun meta --out ./shared/meta.json --deep`
+2. **Children**: `export PUBRUN_META_REF=meta.json && python script.py`
+
+### 18.3 Hydration Rules
+
+When `meta_ref` is set and a report/methods command is invoked:
+
+- The hydrator loads the referenced `meta.json`.
+- For each section in `[hardware, process, python, packages, environment, git]`: if the child section is missing or has `capture_state.status` in `[suppressed, off, unavailable, unknown, partial]`, it is replaced with the parent section.
+- Hydrated sections are marked with `is_hydrated = true`.
+
+### 18.4 Drift Detection
+
+The hydrator compares the child script's `mtime` against the parent snapshot's `started_at_utc`. If the script was modified after the parent snapshot, a drift warning is emitted.
+
+### 18.5 Security
+
+The `meta_ref` path MUST end with `.json`. If it resolves outside the run directory, a warning is emitted (but the operation is not blocked, since HPC workflows legitimately reference shared files).
+
+---
+
+## 19. Writer and Finalization
+
+### 19.1 Artifact Writer
+
+The `ArtifactWriter` is responsible for serializing the run state to disk.
+
+Artifacts written:
+1. `manifest.json` — via `Run.to_manifest_dict()`.
+2. `config.resolved.json` — the resolved configuration dictionary.
+3. `methods.md` or `methods.tex` — auto-generated methodology paragraph (failure is non-fatal).
+
+### 19.2 Finalization Lifecycle
+
+1. `stop()` sets the outcome, decrements `ref_count`, and calls `_finalize_state()`.
+2. `_finalize_state()` is **idempotent** (guarded by `_finalized` flag). It:
+   - Records `ended_at_utc`.
+   - Determines outcome (`completed` or `failed` based on `sys.exc_info()`).
+   - Uninstalls the subprocess spy.
+   - Stops the console interceptor.
+   - Stops the resource watcher.
+   - Closes the event stream.
+3. `write_artifacts()` serializes to disk.
+4. The `atexit` handler calls `write_artifacts()` as a safety net.
+
+### 19.3 Golden Rule
+
+The writer MUST catch all exceptions. pubrun MUST NEVER crash the host script due to serialization failure.
+
+---
+
+## 20. Failure Behavior
 
 The system MUST:
 
-- never crash the host script due solely to capture failure
-- emit a partial manifest if needed
-- record capture errors
-- degrade gracefully when optional features are unavailable
+- Never crash the host script due solely to capture failure.
+- Emit a partial manifest if needed.
+- Record capture errors in the `errors` section.
+- Degrade gracefully when optional features are unavailable.
 
-## 16. Acceptance criteria
+---
 
-A valid v1 implementation must satisfy all of the following:
+## 21. Acceptance Criteria
 
-1. `import pubrun` works cleanly
-2. `from pubrun import start` works cleanly
-3. plain import is lightweight and safe
-4. configuration is discovered from home and local locations
-5. `python -m pubrun --create-config` creates a fully commented default config
-6. one-line explicit usage works
-7. a manifest is produced for tracked runs
-8. failures are captured without breaking the host script
-9. console teeing is configurable
-10. output is deterministic enough for comparison tooling
+A valid implementation must satisfy all of the following:
 
-## 17. Summary
+1. `import pubrun` works cleanly.
+2. `from pubrun import start` works cleanly.
+3. Plain import is lightweight and safe (boot failure does not crash).
+4. Configuration is discovered from home and local locations.
+5. `pubrun --create-config` creates a fully commented default config.
+6. `pubrun --show-config` displays the default config.
+7. `pubrun --info` displays system capabilities.
+8. `pubrun --run-tests` executes the self-test suite.
+9. One-line explicit usage (`pubrun.start()` / `pubrun.stop()`) works.
+10. A manifest is produced for tracked runs.
+11. Failures are captured without breaking the host script.
+12. Console teeing is configurable and preserves normal output.
+13. Output is deterministic enough for comparison tooling.
+14. Sensitive values are redacted by default.
+15. Environment variable `PUBRUN_META_REF` sets `core.meta_ref`.
+16. Environment variable `PUBRUN_AUTO_START` overrides auto-start.
+17. Phase and annotation events bypass event throttling.
+
+---
+
+## 22. Summary
 
 `pubrun` provides structured, low-friction run provenance with optional depth and extensibility.
 
-It must support both explicit activation and configuration-driven low-friction behavior, including standard import patterns, discoverable configuration files, and generation of a fully commented default configuration file for users who want to set default policy once and reuse it across scripts.
+It supports both explicit activation and configuration-driven automatic behavior, including standard import patterns, discoverable configuration files, and generation of a fully commented default configuration file.
 
 ---
 

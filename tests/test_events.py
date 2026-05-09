@@ -72,14 +72,32 @@ class TestEventStreamThrottling:
         for i in range(5):
             stream.emit("metric", name=f"step_{i}")
 
-        # Critical events should still be accepted
+        # Critical events should still be accepted after budget is exhausted
         stream.emit("annotation", name="important")
-        stream.emit("phase_started", name="critical_phase")
+        stream.emit("phase_start", name="critical_phase")
+        stream.emit("phase_end", name="critical_phase")
         stream.close()
 
         lines = (tmp_path / "events.jsonl").read_text("utf-8").strip().splitlines()
-        # 3 regular + 2 critical = 5
-        assert len(lines) == 5
+        # 3 regular + 3 critical = 6
+        assert len(lines) == 6
+
+    def test_phase_events_bypass_throttle(self, tmp_path):
+        """Regression: phase_start/phase_end must bypass throttle (was broken when
+        bypass set used old names phase_started/phase_ended)."""
+        config = {"events": {"enabled": True, "max_tracked_events": 0}}
+        stream = EventStream(tmp_path, config=config)
+
+        # Budget is 0 — only critical events should be written
+        stream.emit("metric", name="blocked")
+        stream.emit("phase_start", name="training")
+        stream.emit("phase_end", name="training")
+        stream.close()
+
+        lines = (tmp_path / "events.jsonl").read_text("utf-8").strip().splitlines()
+        assert len(lines) == 2
+        assert json.loads(lines[0])["type"] == "phase_start"
+        assert json.loads(lines[1])["type"] == "phase_end"
 
     def test_zero_max_events(self, tmp_path):
         config = {"events": {"enabled": True, "max_tracked_events": 0}}
