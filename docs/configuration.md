@@ -1,0 +1,222 @@
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md)
+
+# pubrun Configuration Reference
+
+`pubrun` uses a hierarchical TOML configuration system. Every setting has a sensible default — you only need a config file if you want to change something.
+
+---
+
+## Configuration Discovery
+
+`pubrun` looks for configuration in these locations, applied in this precedence order (highest to lowest):
+
+| Priority | Source | Example |
+|---|---|---|
+| 1 (highest) | API overrides | `pubrun.start(profile="deep")` |
+| 2 | Environment variables | `PUBRUN_AUTO_START=false` |
+| 3 | Local project `.pubrun.toml` | `./.pubrun.toml` |
+| 4 | Local project deep config | `./.config/pubrun/config.toml` |
+| 5 | User home config | `~/.config/pubrun/config.toml` |
+| 6 (lowest) | Built-in defaults | `default.toml` (shipped with the library) |
+
+When both `.pubrun.toml` and `.config/pubrun/config.toml` exist in the same directory, `.pubrun.toml` takes precedence (it is applied last).
+
+### Generating a Configuration File
+
+```bash
+pubrun --create-config                    # Interactive prompt
+pubrun --create-config .pubrun.toml       # Write to specific path
+```
+
+### Viewing the Default Configuration
+
+```bash
+pubrun --show-config
+```
+
+---
+
+## Configuration Sections
+
+### `[core]`
+
+Core behaviors governing run initialization and storage.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `profile` | string | `"default"` | Master capture depth: `"minimal"`, `"default"`, or `"deep"`. Controls default depth for all categories unless overridden. |
+| `output_dir` | string | `""` | Base directory for run output. Empty string defaults to `./runs/` in the current working directory. |
+| `auto_start` | bool | `true` | If `true`, `import pubrun` automatically starts a trace. If `false`, you must call `pubrun.start()` explicitly. |
+
+### `[console]`
+
+Controls interception and logging of stdout/stderr.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `capture_mode` | string | `"standard"` | `"off"` — no capture; `"basic"` — tee to files; `"standard"` — tee with timestamps; `"deep"` — structured JSON capture. |
+
+### `[events]`
+
+Controls the real-time `events.jsonl` stream.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Whether to write events (phases, annotations) to `events.jsonl`. |
+| `on_inactive_annotate` | string | `"ignore"` | Behavior when `annotate()` is called with no active run: `"ignore"`, `"warn"`, or `"error"`. |
+
+### `[redaction]`
+
+Security policies for preventing secret leakage into manifest files.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `sensitive_keys_regex` | string | *(see below)* | Regex pattern for detecting sensitive variable names. |
+| `representation` | string | `"redacted"` | How detected secrets are masked: `"redacted"` (destructive) or `"hashed"` (SHA-256). |
+| `env_enabled` | bool | `true` | Whether to redact matching environment variable values. |
+| `argv_enabled` | bool | `true` | Whether to redact matching CLI argument values in `sys.argv` and subprocess records. |
+
+**Default sensitive_keys_regex:**
+```
+(?i)(password|secret|token|api_key|key|auth|cred|private|conn_str|connection_string|database_url|dsn|signing|bearer)
+```
+
+> [!IMPORTANT]
+> Redaction is **destructive by default**. Raw values are replaced with `{"representation": "redacted"}` and no hashes are generated, to prevent brute-force rainbow table attacks. Switch to `representation = "hashed"` only if you need to verify whether a secret changed across runs.
+
+---
+
+### `[capture.environment]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `mode` | string | `"filtered"` | `"allowlist"` — only permitted vars; `"filtered"` — all vars with secret redaction; `"full"` — raw dump (unsafe). |
+| `depth` | string | `"standard"` | Capture depth for this category. |
+
+### `[capture.packages]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `mode` | string | `"imported-only"` | `"imported-only"` — scan `sys.modules`; `"top-level-installed"` — pip/conda list; `"full-environment"` — every dependency in the virtualenv. |
+| `depth` | string | `"standard"` | Capture depth for this category. |
+
+### `[capture.subprocesses]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Whether to intercept `subprocess.Popen` and `os.system` calls. |
+| `depth` | string | `"basic"` | Capture depth for this category. |
+| `max_tracked_commands` | int | `5000` | Stop recording after this many subprocesses to prevent OOM. |
+
+### `[capture.process]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `depth` | string | `"standard"` | Capture depth for process metadata (PID, user, etc.). |
+
+### `[capture.host]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `depth` | string | `"standard"` | Capture depth for OS-level machine details. |
+
+### `[capture.python]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `depth` | string | `"standard"` | Capture depth for Python runtime details. |
+
+### `[capture.git]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `depth` | string | `"standard"` | Capture depth for Git repository state. |
+
+### `[capture.inputs]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Whether to scan `sys.argv` for input file paths. |
+| `ignore_extensions` | list | `[]` | File extensions to skip (e.g., `["pyc", "log"]`). |
+| `compute_md5` | bool | `false` | If `true`, hash all detected input files (slow for large files). If `false`, record only mtime/size. |
+
+### `[capture.hardware]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `depth` | string | `"basic"` | Capture depth for hardware introspection. |
+| `capture_gpu_clock_speed` | bool | `false` | Query GPU clock speeds (requires NVML; slow). |
+| `capture_gpu_fp_precision` | bool | `false` | Query GPU floating-point precision support. |
+| `capture_cpu_clock_speed` | bool | `false` | Query CPU clock speeds (reads `/proc`). |
+| `capture_cpu_fp_precision` | bool | `false` | Query CPU floating-point precision support. |
+
+### `[capture.resources]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `depth` | string | `"standard"` | Capture depth for background resource monitoring. |
+| `sample_interval_seconds` | int | `15` | How often the background thread samples CPU/memory. |
+| `max_consecutive_failures` | int | `3` | Kill the background thread after this many consecutive read failures. |
+
+### `[capture.determinism]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `depth` | string | `"off"` | Track/lock pseudorandom seeds (Python `random`, numpy). Currently off by default. |
+
+---
+
+### `[logging]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `write_summary` | bool | `true` | Generate a `summary.txt` in the run directory. |
+
+### `[methods]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `format` | string | `"markdown"` | Default output format for `pubrun methods`: `"markdown"` or `"latex"`. |
+
+### `[diff]`
+
+Configuration for the `pubrun diff` engine.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `ignore_basic` | list | `["timing", "run", "process", ...]` | Keys ignored at `--basic` depth. |
+| `ignore_standard` | list | `["timing", "run.run_id", ...]` | Keys ignored at `--standard` depth. |
+| `ignore_deep` | list | `[]` | Keys ignored at `--deep` depth (none by default). |
+| `show_same` | bool | `false` | Show unchanged values in diff output. |
+| `export_format` | string | `"txt"` | Output format for `--export`: `"txt"` or `"json"`. |
+| `wrap` | bool | `true` | Wrap long strings instead of truncating with ellipsis. |
+| `max_string_length` | int | `300` | Maximum characters per value before wrapping/truncation. |
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|---|---|
+| `PUBRUN_AUTO_START` | Override `[core].auto_start`. Set to `"false"` to prevent import-time activation. |
+| `PUBRUN_META_REF` | Path to a parent `meta.json` for HPC hydration. Child runs will reference this. |
+
+---
+
+## Example: Minimal `.pubrun.toml`
+
+```toml
+[core]
+auto_start = false
+profile = "deep"
+
+[console]
+capture_mode = "off"
+
+[events]
+enabled = true
+```
+
+---
+
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md)

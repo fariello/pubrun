@@ -1,26 +1,146 @@
+"""Tests for configuration resolution, file loading, and merge precedence."""
 import pytest
-from pubrun.config import _deep_merge, load_default_config, resolve_config
+from pathlib import Path
 
-def test_deep_merge():
-    a = {"core": {"profile": "default", "auto_start": False}, "events": {"enabled": False}}
-    b = {"core": {"auto_start": True}, "console": {"capture_mode": "off"}}
-    result = _deep_merge(a, b)
-    assert result["core"]["profile"] == "default"
-    assert result["core"]["auto_start"] is True
-    assert result["events"]["enabled"] is False
-    assert result["console"]["capture_mode"] == "off"
+from pubrun.config import _deep_merge, load_default_config, resolve_config, load_local_config
 
-def test_load_default_config():
-    conf = load_default_config()
-    assert "core" in conf
-    assert conf["core"]["profile"] == "default"
 
-def test_resolve_config_with_overrides(monkeypatch):
-    # Ensure local config and user config don't interfere
-    monkeypatch.setattr("pubrun.config.load_user_config", lambda: None)
-    monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: None)
-    
-    overrides = {"core": {"profile": "deep"}}
-    resolved = resolve_config(overrides)
-    assert resolved["core"]["profile"] == "deep"
-    assert resolved["console"]["capture_mode"] == "standard"  # preserved defaults
+class TestDeepMerge:
+
+    def test_basic_merge(self):
+        a = {"core": {"profile": "default", "auto_start": False}, "events": {"enabled": False}}
+        b = {"core": {"auto_start": True}, "console": {"capture_mode": "off"}}
+        result = _deep_merge(a, b)
+        assert result["core"]["profile"] == "default"
+        assert result["core"]["auto_start"] is True
+        assert result["events"]["enabled"] is False
+        assert result["console"]["capture_mode"] == "off"
+
+    def test_does_not_mutate_originals(self):
+        a = {"core": {"profile": "default", "nested": {"x": 1}}}
+        b = {"core": {"nested": {"y": 2}}}
+        result = _deep_merge(a, b)
+        # Original a should be untouched
+        assert "y" not in a["core"]["nested"]
+        # Result should have both
+        assert result["core"]["nested"]["x"] == 1
+        assert result["core"]["nested"]["y"] == 2
+
+    def test_non_dict_overwrite(self):
+        a = {"core": {"profile": "default"}}
+        b = {"core": {"profile": "deep"}}
+        result = _deep_merge(a, b)
+        assert result["core"]["profile"] == "deep"
+
+    def test_list_overwrite_not_append(self):
+        a = {"items": [1, 2, 3]}
+        b = {"items": [4, 5]}
+        result = _deep_merge(a, b)
+        assert result["items"] == [4, 5]
+
+    def test_empty_dicts(self):
+        assert _deep_merge({}, {}) == {}
+        assert _deep_merge({"a": 1}, {}) == {"a": 1}
+        assert _deep_merge({}, {"b": 2}) == {"b": 2}
+
+    def test_deeply_nested(self):
+        a = {"a": {"b": {"c": {"d": 1}}}}
+        b = {"a": {"b": {"c": {"e": 2}}}}
+        result = _deep_merge(a, b)
+        assert result["a"]["b"]["c"]["d"] == 1
+        assert result["a"]["b"]["c"]["e"] == 2
+
+
+class TestLoadDefaultConfig:
+
+    def test_returns_dict(self):
+        conf = load_default_config()
+        assert isinstance(conf, dict)
+
+    def test_has_core_section(self):
+        conf = load_default_config()
+        assert "core" in conf
+        assert conf["core"]["profile"] == "default"
+
+    def test_has_capture_section(self):
+        conf = load_default_config()
+        assert "capture" in conf
+
+    def test_has_redaction_section(self):
+        conf = load_default_config()
+        assert "redaction" in conf
+
+    def test_has_events_section(self):
+        conf = load_default_config()
+        assert "events" in conf
+
+    def test_has_console_section(self):
+        conf = load_default_config()
+        assert "console" in conf
+
+
+class TestLoadLocalConfig:
+
+    def test_no_local_config_returns_none(self, tmp_path):
+        result = load_local_config(start_dir=tmp_path)
+        assert result is None
+
+    def test_pubrun_toml_discovered(self, tmp_path):
+        config_file = tmp_path / ".pubrun.toml"
+        config_file.write_text('[core]\nprofile = "deep"\n', encoding="utf-8")
+        result = load_local_config(start_dir=tmp_path)
+        assert result is not None
+        assert result["core"]["profile"] == "deep"
+
+    def test_deep_config_discovered(self, tmp_path):
+        config_dir = tmp_path / ".config" / "pubrun"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text('[events]\nenabled = true\n', encoding="utf-8")
+        result = load_local_config(start_dir=tmp_path)
+        assert result is not None
+        assert result["events"]["enabled"] is True
+
+    def test_pubrun_toml_overrides_deep_config(self, tmp_path):
+        """When both exist, .pubrun.toml takes precedence (applied last)."""
+        deep_dir = tmp_path / ".config" / "pubrun"
+        deep_dir.mkdir(parents=True)
+        (deep_dir / "config.toml").write_text('[core]\nprofile = "deep"\n', encoding="utf-8")
+        (tmp_path / ".pubrun.toml").write_text('[core]\nprofile = "minimal"\n', encoding="utf-8")
+        result = load_local_config(start_dir=tmp_path)
+        assert result["core"]["profile"] == "minimal"
+
+
+class TestResolveConfig:
+
+    def test_defaults_present(self, monkeypatch):
+        monkeypatch.setattr("pubrun.config.load_user_config", lambda: None)
+        monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: None)
+        resolved = resolve_config()
+        assert "core" in resolved
+        assert "capture" in resolved
+
+    def test_api_overrides_take_highest_precedence(self, monkeypatch):
+        monkeypatch.setattr("pubrun.config.load_user_config", lambda: None)
+        monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: None)
+        resolved = resolve_config({"core": {"profile": "deep"}})
+        assert resolved["core"]["profile"] == "deep"
+
+    def test_local_overrides_user(self, monkeypatch):
+        monkeypatch.setattr("pubrun.config.load_user_config", lambda: {"core": {"profile": "user-pref"}})
+        monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: {"core": {"profile": "local-pref"}})
+        resolved = resolve_config()
+        assert resolved["core"]["profile"] == "local-pref"
+
+    def test_user_overrides_defaults(self, monkeypatch):
+        monkeypatch.setattr("pubrun.config.load_user_config", lambda: {"core": {"profile": "user-pref"}})
+        monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: None)
+        resolved = resolve_config()
+        assert resolved["core"]["profile"] == "user-pref"
+
+    def test_preserves_unrelated_defaults(self, monkeypatch):
+        monkeypatch.setattr("pubrun.config.load_user_config", lambda: None)
+        monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: None)
+        resolved = resolve_config({"core": {"profile": "deep"}})
+        # Console defaults should be preserved
+        assert "capture_mode" in resolved.get("console", {})

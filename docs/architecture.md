@@ -1,9 +1,9 @@
-[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](API.md) | [CLI](CLI.md)
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md)
 
 # pubrun Architecture
 
-> Status: Draft v0.1  
-> Purpose: Defines architectural principles and constraints for pubrun.  
+> Status: v0.1.1
+> Purpose: Defines architectural principles and constraints for pubrun.
 > Audience: Developers and contributors.
 
 ## 1. Overview
@@ -12,179 +12,243 @@
 
 - reproducibility (primary)
 - troubleshooting (secondary)
-- comparison and inspection (future)
+- comparison and inspection (secondary)
 
 The library is designed for minimal friction. A user should be able to include it with one line and immediately gain meaningful, structured provenance data.
 
-## 2. Core architectural model
+## 2. Core Architectural Model
 
 pubrun uses a hybrid snapshot + event model.
 
 ### Snapshot (canonical)
-Each run produces a manifest that represents the run as a whole.
+Each run produces a `manifest.json` that represents the run as a whole. This is the canonical output.
 
 ### Events (optional)
-Structured events may be emitted during execution.
+Structured events may be emitted during execution to `events.jsonl`, providing a time-series record of phases, annotations, and errors.
 
-## 3. Run lifecycle
+## 3. Run Lifecycle
 
 ### Initialization
-Capture early metadata and assign run ID.
+Capture early metadata (invocation, environment, packages) and assign a run ID. Create the run directory.
 
-### Active capture
-Collect events and update summary fields.
+### Active Capture
+Collect events, subprocess records, and console output. Update summary fields.
 
 ### Finalization
-Write manifest and finalize outputs.
+Write `manifest.json` and `config.resolved.json`. Close console tees and event streams. Mark the run as complete.
 
-### Abnormal termination
-Best-effort partial capture.
+### Abnormal Termination
+Best-effort partial capture. The `_finalize_state()` method is idempotent, so it can safely be called from both `stop()` and `atexit` handlers without double-writing.
 
-## 4. Data model principles
+## 4. Data Model Principles
 
-- Structured
-- Versioned
-- Partially sparse
-- Semantically stable
+- **Structured**: All output is JSON with defined schemas.
+- **Versioned**: The manifest includes a `schema_version` field (`"1.0"`).
+- **Partially sparse**: Sections may be suppressed or unavailable. Every section carries a `capture_state` indicating its status.
+- **Semantically stable**: Field names and types do not change within a schema version.
 
-## 5. Manifest design
+## 5. Manifest Design
 
-Example top-level structure:
+The manifest is the canonical record for every run. Its top-level structure:
 
-```
+```json
 {
   "schema_version": "1.0",
   "manifest_type": "pubrun-manifest",
+  "meta_ref": null,
   "run": {},
   "timing": {},
   "invocation": {},
-  "capture": {},
-  "status": {},
+  "console": {},
+  "subprocesses": [],
   "process": {},
-  "host": {},
-  "hardware": {},
   "python": {},
   "packages": {},
   "environment": {},
   "git": {},
-  "resources": {},
-  "console": {},
-  "subprocesses": [],
-  "artifacts": [],
-  "determinism": {},
+  "errors": {},
   "config": {},
-  "errors": {}
+  "hardware": {},
+  "host": {},
+  "resources": {},
+  "capture": {},
+  "status": {}
 }
 ```
 
-## 6. Event model
+See [Manifest Reference](manifest.md) for field-level details.
 
-Events include type, timestamp, run ID, and payload.
+## 6. Event Model
 
-## 7. Immutable vs mutable
+Events are optional, structured JSONL records written to `events.jsonl`. Each event contains:
 
-- Mutable during run
-- Immutable after finalization
+- `type` — `annotation`, `phase_start`, `phase_end`
+- `timestamp_utc` — POSIX epoch float
+- `name` — Human-readable label
+- `payload` — Optional key-value data
 
-## 8. Normalization rules
+Events are subject to throttling via `max_tracked_events` to prevent runaway disk usage.
+
+## 7. Immutable vs Mutable
+
+- **Mutable during run**: The manifest is built incrementally while the run is active.
+- **Immutable after finalization**: Once `stop()` is called, the manifest is written and not modified.
+
+## 8. Normalization Rules
 
 - UTC timestamps as POSIX epoch floats (see below)
-- deterministic ordering
-- consistent naming
+- Deterministic key ordering in JSON output
+- Consistent naming (snake_case throughout)
 
-### Timestamp format
+### Timestamp Format
 
 All timestamps in the manifest and event stream are stored as **POSIX epoch floats** (`time.time()`), not ISO 8601 strings. This is a deliberate design choice:
 
-- **Precision**: IEEE 754 floats provide sub-second / microsecond resolution natively.
+- **Precision**: IEEE 754 floats provide sub-second / microsecond resolution.
 - **Timezone agnostic**: No locale-dependent formatting or parsing ambiguity.
 - **Arithmetic simplicity**: Elapsed time is `ended_at - started_at` with no datetime conversion.
 - **Native production**: Directly matches `time.time()`, `os.stat().st_mtime`, and similar system calls.
 - **Deterministic**: No string formatting jitter across platforms or Python versions.
 - **Compact**: A float is smaller and faster to serialize than an ISO 8601 string.
 
-## 9. Observed vs derived vs inferred
+## 9. Observed vs Derived vs Inferred
 
-Clear distinction between data types.
+The manifest distinguishes between:
 
-## 10. Capture categories
+- **Observed** — directly read from the system (e.g., `os.uname()`, `sys.version`)
+- **Derived** — computed from observed data (e.g., `elapsed_seconds = ended_at - started_at`)
+- **Inferred** — heuristically determined (e.g., input file detection from `sys.argv`)
 
-Modular and configurable.
+## 10. Capture Categories
 
-## 11. Progressive depth model
+Each capture category is a modular sub-engine responsible for one section of the manifest. Categories are independently configurable.
 
-- `off`: Telemetry scope entirely disabled safely.
-- `basic`: Extremely fast constraint bypassing dynamic package traces and hardware trees statically.
-- `standard`: The default telemetry layer comprehensively executing environment variable, package dependency, and timing metrics without overhead.
-- `deep`: Massively comprehensive tree capture aggressively serializing explicit ecosystem configurations natively.
+| Category | Manifest Key | Configurable Modes |
+|---|---|---|
+| Environment | `environment` | `allowlist`, `filtered`, `full` |
+| Packages | `packages` | `imported-only`, `top-level-installed`, `full-environment` |
+| Subprocesses | `subprocesses` | `enabled = true/false` |
+| Console | `console` | `off`, `basic`, `standard`, `deep` |
+| Git | `git` | depth-based |
+| Hardware | `hardware` | depth-based |
+| Host | `host` | depth-based |
+| Process | `process` | depth-based |
+| Python | `python` | depth-based |
+| Resources | `resources` | depth-based |
+| Inputs | `invocation.inputs` | `enabled = true/false` |
 
-## 12. Console capture model
+## 11. Progressive Depth Model
 
-Supports tee of stdout/stderr with optional timestamps.
+- `off` — Category entirely disabled.
+- `basic` — Fast, lightweight capture. Skips expensive system calls.
+- `standard` — Default. Comprehensive capture without significant overhead.
+- `deep` — Maximum information gathering. May include slow system calls (e.g., GPU clock speed queries).
 
-## 13. Run directory model
+## 12. Console Capture Model
 
-Each run gets its own directory.
+Console capture uses a tee-style wrapper around `sys.stdout` and `sys.stderr`. Output is preserved for the user while being simultaneously written to log files.
 
-## 14. Race safety and durability
+The `TqdmSafeTee` implementation squashes carriage-return redraws (common with progress bars) to prevent log bloat, keeping only the final state of each redrawn line.
 
-Use atomic creation and avoid exists-based naming.
+## 13. Run Directory Model
 
-## 15. Console metadata
+Each run gets its own uniquely named directory:
 
-Console logs linked in manifest.
+```
+<base_dir>/runs/pubrun-<script>-<timestamp>-<pid>-<run_id>/
+```
 
-## 16. Subprocess model
+Example:
+```
+./runs/pubrun-train-20260509T120000Z-12345-a1b2c3d4/
+```
 
-Separate from console capture.
+Contents:
+- `manifest.json` (required)
+- `config.resolved.json` (required)
+- `stdout.log` (if console capture enabled)
+- `stderr.log` (if console capture enabled)
+- `events.jsonl` (if event stream enabled)
+- `methods.md` or `methods.tex` (if methods generation enabled)
 
-## 17. Public API
+## 14. Race Safety and Durability
 
-Core primitives: start, stop, annotate, etc.
+- Directory names include timestamp, PID, and random hex ID to prevent collisions.
+- Directory creation uses `mkdir()` rather than exists-check + create.
+- The finalization method is idempotent to handle both explicit `stop()` and `atexit` cleanup.
 
-## 18. Plugin model
+## 15. Subprocess Model
 
-Optional, isolated extensions.
+The `SubprocessSpy` transparently monkey-patches `subprocess.Popen` and `os.system` to capture spawned process metadata (argv, timing, exit codes). Access is thread-safe via `threading.Lock`.
 
-## 19. Schema extensibility
+Internal library subprocess calls (e.g., `git` queries) use the `disable_spy()` context manager to prevent circular logging.
 
-Versioned and forward-compatible.
+## 16. Public API
 
-## 20. Failure model
+Core primitives exposed at module level:
 
-Best-effort capture under failure.
+| Function | Purpose |
+|---|---|
+| `start()` | Begin tracking. Returns the `Run` tracker. |
+| `stop()` | Finalize the active run. |
+| `get_current_run()` | Access the active `Run` instance. |
+| `annotate()` | Inject custom key-value events. |
+| `phase()` | Context manager for timing named phases. |
+| `tracked_run()` | Context manager for full run lifecycle. |
+| `audit_run()` | Decorator for full run lifecycle. |
+| `diff()` | Compare two run directories. |
 
-## 21. Activation model
+## 17. Schema Extensibility
 
-Explicit start preferred.
+The manifest schema is versioned (`schema_version: "1.0"`). New sections can be added without breaking existing consumers. The `capture_state` pattern ensures forward compatibility — unknown sections can be skipped safely.
 
-## 22. Non-goals
+## 18. Failure Model
 
-Not a workflow engine or experiment platform.
+The system must:
 
-## 23. Design constraints
+- Never crash the host script due to capture failure.
+- Emit a partial manifest if needed.
+- Record capture errors in the `errors` section.
+- Degrade gracefully when optional features are unavailable.
 
-Manifest is canonical, modular capture, normalization required.
+"Ghost mode" activates automatically when filesystem operations fail (e.g., read-only filesystem). In ghost mode, all capture methods become silent no-ops.
 
-## 24. Redaction 
+## 19. Redaction Model
 
-Data model layers handle secrets via the `redacted_value` object. Sensitive strings are intercepted, and their raw values are swapped with a representation indicating they were `"redacted"` or `"suppressed"`. By default, this is strictly a destructive behavior—unsalted hashes are not explicitly generated for matched secrets in order to eliminate the risk of brute-force rainbow table attacks on common passwords or API keys, unless explicitly overridden by securely salted configuration.
+Sensitive strings (passwords, tokens, API keys) are detected via configurable regex patterns and destructively replaced with `{"representation": "redacted"}`. By default, no hashes are generated to eliminate brute-force rainbow table risk.
 
-## 25. System Components
+Redaction applies to:
+- Environment variables (configurable via `[redaction].env_enabled`)
+- CLI arguments in `sys.argv` and subprocess records (configurable via `[redaction].argv_enabled`)
 
-The physical execution engine is logically divided into several key systems that adhere to the principles above:
+## 20. Non-Goals
 
-- **Configuration Resolver**: Responsible for merging and applying configuration settings from various sources (API > Env Vars > Local Config > Defaults).
-- **Capture Engine**: The orchestrator that manages individual data collection routines and operates gracefully under partial failures.
-- **Event Streamer**: Real-time structured execution events to `events.jsonl`.
-- **Console Manager**: Tee-style wrapper around standard streams.
-- **Artifact Writer**: Atomically generates the isolated Run Directory and serializes all outputs reliably.
-- **Diagnostics Analyzer**: A post-execution CLI analyzer (`pubrun report`) that iteratively evaluates arrays of configurations dynamically across inputs (`args.run_dirs`).
-- **Methods Generator**: A post-execution CLI and writer integration (`pubrun methods`) that interprets the `manifest.json` and automatically outputs a prose-based "Computational Methods" summary in Markdown or LaTeX formats.
-- **Global Context Snapshooter**: A standalone CLI command (`pubrun meta`) that bypasses script-execution to natively generate deep introspective global execution context maps (e.g., full virtual environments) to act as a definitive parent node for massively parallel symmetric child arrays.
-- **Diff Semantic Analyzer**: A post-execution structural evaluator (`pubrun diff`) conditionally generating side-by-side matrices (via `rich`) natively omitting matching noise via configurable depth tiers (`--basic/standard/deep`).
-- **Reproducibility Extractor**: A native CLI interpreter (`pubrun rerun`) evaluating historical payloads and formatting cross-platform terminal instructions guaranteeing deterministic local replay mappings.
+pubrun is not:
 
-## 26. Summary
+- A workflow engine or DAG scheduler
+- An experiment tracking platform (no server, no dashboard)
+- A data versioning tool
+- A replacement for proper version control
 
-pubrun is a low-friction provenance layer for Python execution.
+## 21. System Components
+
+The execution engine is divided into these key systems:
+
+- **Configuration Resolver** — Merges and applies settings from API > env vars > local config > user config > defaults.
+- **Capture Engine** — Orchestrates individual data collection routines, operating gracefully under partial failures.
+- **Event Streamer** — Writes structured execution events to `events.jsonl` with throttling.
+- **Console Manager** — Tee-style wrapper around standard streams with tqdm-safe carriage return squashing.
+- **Artifact Writer** — Creates the run directory and serializes all outputs.
+- **Diagnostics Analyzer** (`pubrun report`) — Evaluates and renders execution metrics from manifests.
+- **Methods Generator** (`pubrun methods`) — Compiles manifest data into prose methodology paragraphs.
+- **Global Context Snapshotter** (`pubrun meta`) — Generates standalone environment snapshots for HPC hydration.
+- **Diff Semantic Analyzer** (`pubrun diff`) — Generates side-by-side structural comparisons with configurable depth filtering.
+- **Reproducibility Extractor** (`pubrun rerun`) — Extracts cross-platform replay commands from historical manifests.
+
+## 22. Summary
+
+pubrun is a low-friction provenance layer for Python execution. It captures what you ran, where you ran it, and what changed — so you can prove it, reproduce it, or publish it without thinking twice.
+
+---
+
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md)
