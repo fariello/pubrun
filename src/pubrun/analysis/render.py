@@ -19,23 +19,7 @@ def _has_color(no_color_flag: bool) -> bool:
 
 
 def _render_inline(diff_report: Dict[str, Any], use_color: bool) -> None:
-    """
-    Renders pure text line-by-line diff mappings cleanly using standard python logging structures.
-    Uses basic `+` and `-` formatting mimicking raw `git diff`.
-    
-    Args:
-        diff_report (Dict[str, Any]): The structured diagnostic mapping payload.
-        use_color (bool): Indicates if standard ANSI terminal colors should be actively injected.
-        
-    Returns:
-        None
-        
-    Assumptions:
-        - Defaults exactly to standard stdout.
-        
-    Example:
-        >>> _render_inline(report, True)
-    """
+    """Print a plain-text diff using +/- prefixes (git-style)."""
     grn = Colors.GREEN if use_color else ""
     red = Colors.RED if use_color else ""
     yel = Colors.YELLOW if use_color else ""
@@ -56,7 +40,7 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool) -> None:
         print(f"\n{yel}~ [CHANGED] {k}:{rst}")
         
         if mod["type"] == "path_split":
-            # Heuristically split PATH layout natively
+            # PATH-style: show added/removed path segments
             for p_add in mod.get("added", []):
                 print(f"    {grn}+ {p_add}{rst}")
             for p_sub in mod.get("removed", []):
@@ -69,24 +53,13 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool) -> None:
 
 
 def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool = False, max_length: int = 300) -> None:
-    """
-    Master UI router attempting to aggressively load `rich` for side-by-side matrices cleanly,
-    silently catching `ImportError` gracefully down into pure inline terminal text formatting safely.
-    
+    """Render a diff report. Uses ``rich`` tables if available, falls back to inline text.
+
     Args:
-        diff_report (Dict[str, Any]): The semantic diff block perfectly matching JSON constraints.
-        no_color (bool): Overrides internal color printing capabilities cleanly if True.
-        wrap (bool): If True, folds large columns smoothly; if False truncates with ellipsis.
-        max_length (int): Absolute ceiling for string layouts before manual truncation occurs.
-        
-    Returns:
-        None
-        
-    Assumptions:
-        - `rich` is an entirely optional pip overlay.
-        
-    Example:
-        >>> print_diff(report, False)
+        diff_report: Structured diff from ``compare_manifests()``.
+        no_color: Suppress ANSI color output.
+        wrap: Wrap long values instead of truncating.
+        max_length: Max characters before truncation.
     """
     has_colors = _has_color(no_color)
     

@@ -4,47 +4,19 @@ from typing import Any, Dict, List, Tuple
 
 
 def _is_path_var(key_path: str) -> bool:
-    """
-    Evaluates if a key heuristically targets a PATH-like environment variable requiring split rendering.
-    
-    Args:
-        key_path (str): The flattened diagnostic key strictly mapped to the manifest.
-        
-    Returns:
-        bool: True if it natively maps to an OS path boundary variable, else False.
-        
-    Assumptions:
-        - Relies on case-sensitive or standard environment naming norms containing "PATH".
-        
-    Example:
-        >>> _is_path_var("environment.PATH")
-        True
-    """
+    """Return True if the key looks like a PATH-style variable."""
     return "PATH" in key_path.upper()
 
 
 def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str]) -> Dict[str, Any]:
-    """
-    Transforms the raw manifest hierarchy into a 1-dimensional dictionary suitable for exact semantic diffing.
-    
-    Args:
-        manifest (Dict[str, Any]): The loaded diagnostic mapping payload.
-        ignores (List[str]): A list of string prefixes blocking matching volatile variables from evaluation.
-        
-    Returns:
-        Dict[str, Any]: The flattened standard baseline ready for direct line matching.
-        
-    Assumptions:
-        - The `environment` block is fully dismantled into root keys (e.g., `environment.VAR = VALUE`).
-        - The `packages` array is broken into root keys (e.g., `packages.PKG = VERSION`).
-        
-    Example:
-        >>> _normalize_manifest(raw, [])
-        {"environment.PATH": "/bin", "packages.torch": "2.0.1"}
+    """Flatten a manifest into a one-dimensional dict suitable for diffing.
+
+    Environment variables and packages are expanded into individual keys.
+    Keys matching any prefix in ``ignores`` are excluded.
     """
     flat = {}
     
-    # 1. Environment Variables natively expanded
+    # 1. Environment variables expanded into individual keys
     env_vars = manifest.get("environment", {}).get("variables", [])
     for var in env_vars:
         name = var.get("name")
@@ -56,7 +28,7 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str]) -> Dict[st
         if not any(full_key.startswith(ig) for ig in ignores):
             flat[full_key] = str(val) if val is not None else ""
 
-    # 2. Package array explicitly mapped smoothly
+    # 2. Packages expanded into individual keys
     pkgs = manifest.get("packages", {}).get("records", [])
     for p in pkgs:
         name = p.get("name")
@@ -65,11 +37,11 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str]) -> Dict[st
         if not any(full_key.startswith(ig) for ig in ignores):
             flat[full_key] = ver
 
-    # 3. Everything Else natively drilled
+    # 3. Everything else recursively flattened
     def _recruit(d: Dict[str, Any], prefix: str = "") -> None:
         for k, v in d.items():
             if k in ["environment", "packages"] and prefix == "": 
-                continue # Block already mapped explicitly above
+                continue # Already handled above
                 
             full_key = f"{prefix}{k}"
             if any(full_key.startswith(ig) for ig in ignores):
@@ -90,22 +62,7 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str]) -> Dict[st
 
 
 def unflatten_manifest(flat_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Reconstructs a hierarchical nested dictionary block from a purely flattened key map.
-    
-    Args:
-        flat_dict (Dict[str, Any]): The simplified one-dimensional footprint.
-        
-    Returns:
-        Dict[str, Any]: Structured recursive object dictionary suitable for IDE visualization.
-        
-    Assumptions:
-        - Keys exclusively utilize dots "." as boundary markers between nesting levels.
-        
-    Example:
-        >>> unflatten_manifest({"core.id": 5})
-        {"core": {"id": 5}}
-    """
+    """Reconstruct a nested dict from dot-separated flat keys."""
     result = {}
     for k, v in flat_dict.items():
         parts = k.split('.')
@@ -119,24 +76,13 @@ def unflatten_manifest(flat_dict: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: List[str] = [], show_same: bool = False) -> Dict[str, Any]:
-    """
-    Compares two raw JSON manifestations, identifying precise additions, removals, and modifications.
-    
+    """Compare two manifests and return added, removed, modified, and same keys.
+
     Args:
-        raw_a (Dict[str, Any]): The baseline payload mapping footprint.
-        raw_b (Dict[str, Any]): The newly evaluated target payload footprint.
-        ignores (List[str]): Prefix constraints filtering out volatile jitter keys.
-        show_same (bool): If True, conditionally populates strings matching perfectly across both arrays.
-        
-    Returns:
-        Dict[str, Any]: Structure defining precisely what was "added", "removed", "modified", or "same".
-        
-    Assumptions:
-        - If an attribute matches an OS boundary path constraint exactly, it routes to a path-splitting algorithm.
-        
-    Example:
-        >>> compare_manifests(m1, m2, ignores=["timing"])
-        {"added": {}, "removed": {}, "modified": {}, "same": {}}
+        raw_a: Baseline manifest.
+        raw_b: Comparison manifest.
+        ignores: Key prefixes to exclude from diffing.
+        show_same: If True, populate the ``"same"`` bucket.
     """
     flat_a = _normalize_manifest(raw_a, ignores)
     flat_b = _normalize_manifest(raw_b, ignores)
@@ -159,7 +105,7 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Lis
         elif k in flat_a and k not in flat_b:
             diff_report["removed"][k] = val_a
         elif val_a != val_b:
-            # The famous PATH Heuristic securely triggers here effectively
+            # PATH-style variable: split on OS path separator
             if _is_path_var(k) and isinstance(val_a, str) and isinstance(val_b, str):
                 parts_a = set(val_a.split(os.pathsep)) if val_a else set()
                 parts_b = set(val_b.split(os.pathsep)) if val_b else set()
@@ -182,28 +128,17 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Lis
     return diff_report
 
 
-def export_manifest(raw: Dict[str, Any], ignores: List[str], format_type: str) -> str:
-    """
-    Extracts explicitly flattened footprint values into formatted string blocks.
-    
+def export_manifest(raw: Dict[str, Any], ignores: List[str], fmt: str = "txt") -> str:
+    """Export a flattened manifest as a text or JSON string.
+
     Args:
-        raw (Dict[str, Any]): The explicitly loaded internal manifestation architecture payload.
-        ignores (List[str]): Ignore filters matching paths to exclude.
-        format_type (str): Dictates structural layout output ("txt", "json").
-        
-    Returns:
-        str: Flattened fully constructed target string formatted correctly for the requested output type.
-        
-    Assumptions:
-        - "txt" cleanly enforces identically uniform string line mappings.
-        - "json" reverses the flattening operation internally to provide valid JSON schemas.
-        
-    Example:
-        >>> s = export_manifest({}, ["timing"], "txt")
+        raw: Loaded manifest dictionary.
+        ignores: Key prefixes to exclude.
+        fmt: Output format (``"txt"`` or ``"json"``).
     """
     flat = _normalize_manifest(raw, ignores)
     
-    if format_type.lower() == "json":
+    if fmt.lower() == "json":
         nested = unflatten_manifest(flat)
         return json.dumps(nested, indent=2, sort_keys=True)
     

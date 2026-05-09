@@ -6,18 +6,10 @@ from typing import Dict, Any
 logger = logging.getLogger("pubrun")
 
 def get_host(config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Constructs the standard host telemetry footprint capturing OS parameters.
-    
+    """Capture OS-level host details (name, version, hostname).
+
     Args:
-        config (Dict[str, Any]): The globally resolved configuration mapping.
-        
-    Returns:
-        Dict[str, Any]: A dictionary structurally matching the internal schema.
-        
-    Example:
-        >>> get_host({})
-        {'os_name': 'Windows', 'os_version': '10', 'hostname': 'workstation-X', ...}
+        config: Resolved pubrun configuration.
     """
     host_config = config.get("capture", {}).get("host", {})
     if host_config.get("enabled", True) is False:

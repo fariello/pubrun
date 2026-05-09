@@ -5,37 +5,14 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 def get_invocation(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    Captures the comprehensive shell invocation ecosystem and script context.
-    
-    This function isolates the exact command needed to rerun the script, the canonical working directory, 
-    and actively parses `sys.argv` using heuristic discovery to trace input dataset modifications.
+    """Capture invocation context: argv, working directory, script metadata, and input files.
+
+    Builds the ``rerun_command`` needed to reproduce the run and heuristically
+    discovers input file paths from ``sys.argv``.
 
     Args:
-        config (Dict[str, Any]): The merged and resolved `pubrun` configuration dictionary, 
-                                 used to determine dynamic policies like `capture.inputs`.
-
-    Returns:
-        Dict[str, Any]: A tightly formatted payload containing working directory mapping, 
-                        the exact shell command to reproduce the run natively, and heuristically
-                        isolated input dataset paths with timestamps.
-
-    Assumptions:
-        - `Path.cwd().resolve()` is strictly utilized to bypass symlink aliases, correctly mapping the absolute disk footprint.
-        - String options inside `sys.argv` matching `--` flags are cleanly bypassed by default.
-        - `compute_md5` is avoided by default unless strictly enabled due to performance penalties on massive files.
-        
-    Example:
-        >>> get_invocation({})
-        {
-            'argv': ['script.py', '--data', 'data.csv'], 
-            'command_line': 'script.py --data data.csv',
-            'rerun_command': 'cd /app && python script.py --data data.csv',
-            'entrypoint_type': 'script',
-            'working_directory': {'path': '/app', 'real_path': '/app'},
-            'inputs': [],
-            'capture_state': {'status': 'complete'}
-        }
+        config: Resolved pubrun configuration. Controls input-file scanning
+            and MD5 hashing behavior.
     """
     if config is None:
         config = {}
@@ -100,8 +77,8 @@ def get_invocation(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         # ---------------------------------------------------------
         # 3. Re-run Replication Engine
         # ---------------------------------------------------------
-        # We branch explicitly between OS architectures. Windows cmd explicitly chokes on POSIX 
-        # single quotes (via shlex), and PowerShell pre-v7 natively crashes on `&&`.
+        # Windows cmd chokes on POSIX single quotes (via shlex),
+        # and PowerShell pre-v7 crashes on `&&`.
         if sys.platform == "win32":
             import subprocess
             escaped_args = subprocess.list2cmdline(argv)

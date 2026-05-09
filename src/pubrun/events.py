@@ -8,28 +8,14 @@ from pathlib import Path
 logger = logging.getLogger("pubrun")
 
 class EventStream:
-    """
-    Manages the `events.jsonl` output cleanly, safely flushing every event natively
-    to disk rapidly so context isn't lost if the host script crashes or is OOM-killed.
-    """
+    """Manages the ``events.jsonl`` output, flushing each event immediately
+    to disk so context is preserved if the host script crashes."""
     def __init__(self, run_dir: Path, config: Optional[Dict[str, Any]] = None) -> None:
-        """
-        Initializes the synchronous lock and opens the native file stream handle.
+        """Open the event stream file for writing.
 
         Args:
-            run_dir (Path): The natively resolved absolute path to the active run directory.
-            config (Optional[Dict[str, Any]]): The resolved pubrun configuration dictionary.
-                If None, resolves config internally (backwards-compatible fallback).
-
-        Returns:
-            None
-
-        Assumptions:
-            - The file is deliberately held open in append mode for rapid high-frequency writes (typical in ML gradients).
-            - Safely swallows stream-init exceptions cleanly in ghost mode to avoid tracking crashes.
-
-        Example:
-            >>> stream = EventStream(Path("/runs/pubrun-XYZ"), config)
+            run_dir: Path to the active run directory.
+            config: Resolved pubrun config. If None, resolves internally.
         """
         self.stream_path = run_dir / "events.jsonl"
         self._lock = threading.Lock()
@@ -49,23 +35,12 @@ class EventStream:
             self._file = None
 
     def emit(self, event_type: str, name: Optional[str] = None, payload: Optional[Dict[str, Any]] = None) -> None:
-        """
-        Immediately formats and natively flushes a JSON-Lines record straight to disk.
+        """Write one JSON-Lines record to disk.
 
         Args:
-            event_type (str): Explicit categorization identifier ('annotation', 'phase_start', etc).
-            name (Optional[str]): Semantic user-defined marker.
-            payload (Optional[Dict[str, Any]]): Arbitrary keyword map explicitly tracked in-line.
-
-        Returns:
-            None
-
-        Assumptions:
-            - A single lock acquisition covers both the count check and the file write,
-              preventing out-of-order writes and count-budget overruns.
-
-        Example:
-            >>> stream.emit("annotation", "Step 1", {"loss": 0.5})
+            event_type: Category string (e.g. ``"annotation"``, ``"phase_start"``).
+            name: Optional semantic label.
+            payload: Optional key-value data attached to the event.
         """
         if not self._file:
             return
@@ -96,21 +71,7 @@ class EventStream:
             logger.debug(f"pubrun event write failed: {e}")
 
     def close(self) -> None:
-        """
-        Securely finalizes and actively closes the temporal stream.
-
-        Args:
-            No arguments.
-
-        Returns:
-            None
-
-        Assumptions:
-            - Safely ignores closing if the handle was already closed dynamically.
-
-        Example:
-            >>> stream.close()
-        """
+        """Flush and close the event stream file. Safe to call multiple times."""
         if self._file:
             try:
                 with self._lock:

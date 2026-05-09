@@ -10,23 +10,7 @@ from typing import Optional
 
 
 def _create_config(destination: str) -> None:
-    """
-    Creates a default configuration file for the pubrun repository natively at the target destination.
-
-    Args:
-        destination (str): The filepath representing where the `.pubrun.toml` file should be physically written.
-
-    Returns:
-        None
-
-    Assumptions:
-        - We assume the destination directory exists and is natively writable by the user.
-        - If the target file already exists, we will intentionally crash to prevent overwriting user-customized configurations.
-
-    Example:
-        >>> _create_config(".pubrun.toml")
-        [OK] Successfully created configuration at: /home/user/project/.pubrun.toml
-    """
+    """Create a default ``.pubrun.toml`` at the given path. Refuses to overwrite."""
     try:
         # Resolve the package-native default architecture
         resource_path = importlib.resources.files("pubrun").joinpath("resources", "default.toml")
@@ -48,24 +32,7 @@ def _create_config(destination: str) -> None:
 
 
 def _get_manifest_path(run_dir: str) -> str:
-    """
-    Identifies the canonical absolute filepath to the target `manifest.json`.
-
-    Args:
-        run_dir (str): A string path provided natively by the user. If None, the system evaluates the default `./runs` structure.
-
-    Returns:
-        str: The fully resolved path directly to the target diagnostic `manifest.json`.
-
-    Assumptions:
-        - If the user provides an empty `run_dir`, we assume they want to evaluate the *most recently modified* directory strictly within `./runs`.
-        - The payload assumes `./runs` is explicitly executing in the Host's local CWD.
-
-    Example:
-        >>> _get_manifest_path(None)
-        [*] Auto-detected latest run: runs/pubrun-training-20260404T120000Z
-        'runs/pubrun-training-20260404T120000Z/manifest.json'
-    """
+    """Resolve the path to a manifest.json, auto-detecting the latest run if needed."""
     if run_dir:
         run_path = Path(run_dir)
         if run_path.is_file() and run_path.name == "manifest.json":
@@ -78,38 +45,20 @@ def _get_manifest_path(run_dir: str) -> str:
             print("Error: No --run directory provided and './runs' directory not found.", file=sys.stderr)
             sys.exit(1)
             
-        # Discover dynamically generated cache footprints natively
+        # Discover the most recent run directory
         subdirs = [d for d in runs_dir.iterdir() if d.is_dir()]
         if not subdirs:
             print("Error: './runs' directory is empty.", file=sys.stderr)
             sys.exit(1)
             
-        # Identify the most recent payload execution by inspecting native filesystem anchors
+        # Pick the most recently modified run
         latest_run = max(subdirs, key=lambda d: d.stat().st_mtime)
         print(f"[*] Auto-detected latest run: {latest_run}", file=sys.stderr)
         return str(latest_run / "manifest.json")
 
 
 def _run_methods(run_dir: str, format_type: str) -> None:
-    """
-    Executes the methodologies generator natively converting traces into formatted academic syntax blocks.
-
-    Args:
-        run_dir (str): The specific path to evaluate, or None to evaluate the latest trace automatically.
-        format_type (str): The specific formatting grammar (markdown or latex) to compile.
-
-    Returns:
-        None
-
-    Assumptions:
-        - The `methods` reporter assumes the underlying `manifest.json` structure matches canonical parsing conventions natively.
-        - Assuming dependencies print appropriately if hydrated.
-
-    Example:
-        >>> _run_methods(None, "latex")
-        --- Generated Computational Methods Section ---
-        Computational experiments were executed on ...
-    """
+    """Generate and print an academic 'Computational Methods' paragraph."""
     try:
         from pubrun.report.methods import generate_report
         from pubrun.report.utils import hydrate_manifest
@@ -119,7 +68,7 @@ def _run_methods(run_dir: str, format_type: str) -> None:
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
             
-        # Hydrate to retrieve deep HPC packages/hardware natively if minimal trace
+        # Hydrate to merge parent HPC context if available
         manifest, warnings = hydrate_manifest(manifest_path, manifest)
         if warnings:
             for w in warnings:
@@ -134,28 +83,12 @@ def _run_methods(run_dir: str, format_type: str) -> None:
         print(f"Error: Could not find manifest file.", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"Failed to generate explicit methods section: {e}", file=sys.stderr)
+        print(f"Failed to generate methods section: {e}", file=sys.stderr)
         sys.exit(1)
 
 
 def _run_rerun(run_dir: str) -> None:
-    """
-    Extracts and prints the exact shell command needed to natively reproduce the target execution block.
-
-    Args:
-        run_dir (str): The specific trace payload directory to evaluate.
-
-    Returns:
-        None
-
-    Assumptions:
-        - The payload expects the underlying `manifest.json` invocation block has natively saved `rerun_command`.
-        - Prints the exact command to stdout so it can be cleanly piped or executed directly in bash contexts.
-
-    Example:
-        >>> _run_rerun(None)
-        cd /app/data && python script.py --epochs 10
-    """
+    """Print the shell command needed to reproduce a recorded run."""
     try:
         manifest_path = _get_manifest_path(run_dir)
         with open(manifest_path, "r", encoding="utf-8") as f:
@@ -172,33 +105,12 @@ def _run_rerun(run_dir: str) -> None:
             print("Error: Target manifest does not contain a valid 'rerun_command' payload.", file=sys.stderr)
             sys.exit(1)
     except Exception as e:
-        print(f"Failed to fetch rerun command natively: {e}", file=sys.stderr)
+        print(f"Failed to fetch rerun command: {e}", file=sys.stderr)
         sys.exit(1)
 
 
 def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool, wrap_config: Optional[bool] = None, max_length: Optional[int] = None, depth: str = "basic", show_same: Optional[bool] = None) -> None:
-    """
-    Executes the semantic differential engine comparing two unique execution traces linearly.
-
-    Args:
-        run_dir_a (str): Directory referencing the baseline footprint.
-        run_dir_b (str): Directory referencing the target mutation footprint.
-        export_format (str): Dictates structural layout output if exporting ("txt", "json").
-        no_color (bool): Overrides internal color printing capabilities if True.
-        wrap_config (bool | None): Explicitly overrides wrapped formats if boolean is forced.
-        max_length (int | None): Maximum payload length limit for rendering.
-        depth (str): Structural ignore depth tier ("basic", "standard", "deep").
-        show_same (bool | None): Explicitly forces rendering of matched key arrays if present.
-
-    Returns:
-        None
-
-    Assumptions:
-        - We assume the directories exist and manifest paths resolve.
-
-    Example:
-        >>> _run_diff("runs/A", "runs/B", None, False)
-    """
+    """Run the semantic diff engine comparing two execution traces."""
     try:
         from pubrun.report.utils import hydrate_manifest
         from pubrun.config import resolve_config
@@ -261,23 +173,7 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
 
 
 def _run_report(run_dir: str, depth: str) -> None:
-    """
-    Executes the report generator natively rendering terminal-based diagnostic outputs.
-
-    Args:
-        run_dir (str): The specific path to evaluate, or None to evaluate the latest trace automatically.
-        depth (str): The verbosity flag evaluating how deep the report tree generates (e.g. basic, standard, deep).
-
-    Returns:
-        None
-
-    Assumptions:
-        - The target directory contains a valid `manifest.json`.
-
-    Example:
-        >>> _run_report(None, "deep")
-        [Target Profile loaded...]
-    """
+    """Print a human-readable diagnostic report for a recorded run."""
     try:
         from pubrun.report.diagnostics import print_report
         manifest_path = _get_manifest_path(run_dir)
@@ -289,23 +185,7 @@ def _run_report(run_dir: str, depth: str) -> None:
         
         
 def _run_meta(out_path: str, depth: str) -> None:
-    """
-    Invokes the standalone global snapshooter, dumping the entire ecosystem state directly.
-
-    Args:
-        out_path (str): The exact filepath to dump the serialized JSON payload.
-        depth (str): Verbosity explicitly directing the snapshot algorithms behavior.
-
-    Returns:
-        None
-
-    Assumptions:
-        - Generating meta profiles requires the application architecture to spin up explicitly without a target script context.
-        - Assuming `out_path` is natively writable.
-
-    Example:
-        >>> _run_meta("./meta.json", "deep")
-    """
+    """Generate a standalone environment snapshot for HPC parent-child hydration."""
     try:
         from pubrun.report.meta_snapshot import generate_meta_snapshot
         generate_meta_snapshot(out_path, depth)
@@ -315,22 +195,7 @@ def _run_meta(out_path: str, depth: str) -> None:
 
 
 def _run_cite(style: str) -> None:
-    """
-    Generates and prints formatted academic citations based on the requested grammar.
-
-    Args:
-        style (str): The formatting definition required (apa, mla, chicago, bibtex).
-
-    Returns:
-        None
-
-    Assumptions:
-        - Assuming standard bibliographic architectures.
-
-    Example:
-        >>> _run_cite("apa")
-        Fariello, G. (2026)...
-    """
+    """Print a formatted academic citation for pubrun."""
     style = style.lower()
     if style == "apa":
         print("Fariello, G. (2026). pubrun [Computer software]. https://github.com/gfariello/pubrun")
@@ -346,22 +211,7 @@ def _run_cite(style: str) -> None:
 
 
 def _show_info() -> None:
-    """
-    Generates raw environment context mapping directly inside the terminal to validate engine hook availability.
-
-    Args:
-        No arguments.
-
-    Returns:
-        None
-
-    Assumptions:
-        - Safely resolves permissions before fetching hardware natively.
-
-    Example:
-        >>> _show_info()
-        --- [ Invocation Details ] ---
-    """
+    """Print hardware and invocation diagnostics for debugging."""
     from pubrun.capture.hardware import get_hardware
     from pubrun.capture.invocation import get_invocation
     
@@ -373,26 +223,11 @@ def _show_info() -> None:
     data = {"invocation": get_invocation({}), "hardware": get_hardware({})}
     print(json.dumps(data, indent=2))
     print("\nIf GPU logs are missing here, your active Python environment")
-    print("may not have permission to query `nvidia-smi` or NVML natively.")
+    print("may not have permission to query `nvidia-smi` or NVML.")
 
 
 def _run_tests() -> None:
-    """
-    Executes an extensive local end-to-end framework validation payload simulating an execution phase.
-
-    Args:
-        No arguments.
-
-    Returns:
-        None
-
-    Assumptions:
-        - Evaluates `.tox.ini` specifically to check if the user is operating out of the source tree.
-
-    Example:
-        >>> _run_tests()
-        [*] Source repository detected...
-    """
+    """Run the test suite and an end-to-end mock script for validation."""
     print("==================================================")
     print("        pubrun Pipeline Evaluation Mode         ")
     print("==================================================\n")
@@ -440,7 +275,7 @@ print('Mock Training Complete.')
             print(f"[FAIL] Mock Evaluation Failed. Exit Code: {result.returncode}")
             return
             
-        print("[OK] Mock Script Executed Natively without crashing.")
+        print("[OK] Mock script executed without crashing.")
         
         runs_dir = Path(td) / "runs"
         if not runs_dir.exists():
@@ -466,21 +301,7 @@ print('Mock Training Complete.')
 
 
 def main() -> None:
-    """
-    The orchestrator handling the terminal invocation payload for the pubrun namespace.
-
-    Args:
-        No arguments.
-
-    Returns:
-        None
-
-    Assumptions:
-        - We assume `sys.argv` arguments are provided reliably by the OS or the pip abstraction wrapper.
-
-    Example:
-        >>> main()
-    """
+    """CLI entrypoint for the ``pubrun`` command."""
     if len(sys.argv) >= 2 and sys.argv[1] == "pbr":
         print("me asap")
         sys.exit(0)
@@ -508,11 +329,11 @@ def main() -> None:
     methods_parser.add_argument("--format", type=str, choices=["markdown", "latex"], default="markdown", help="Specify the structured language (markdown or latex) the methodology section should be compiled into.")
 
     # ---------------- Rerun Subparser ----------------
-    rerun_parser = subparsers.add_parser("rerun", help="Fetch and print the exact shell command required to replicate a run natively.", description="Fetch and print the exact shell command required to replicate a run natively.")
+    rerun_parser = subparsers.add_parser("rerun", help="Print the shell command needed to replicate a run.", description="Print the shell command needed to replicate a run.")
     rerun_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
 
     # ---------------- Diff Subparser ----------------
-    diff_parser = subparsers.add_parser("diff", help="Executes a high-signal semantic differential mapping between two execution traces.", description="Executes a high-signal semantic differential mapping between two execution traces.")
+    diff_parser = subparsers.add_parser("diff", help="Compare two execution traces and highlight differences.", description="Compare two execution traces and highlight differences.")
     diff_parser.add_argument("run_dir_a", type=str, help="First trace artifact directory (Baseline).")
     diff_parser.add_argument("run_dir_b", type=str, help="Second trace artifact directory (Target Mutation).")
     diff_parser.add_argument("--export", type=str, nargs="?", const=True, help="Export parsed datasets by flattening the dictionary mappings ('txt' or 'json').")
@@ -520,22 +341,22 @@ def main() -> None:
     
     # Wrap config logic
     wrap_group = diff_parser.add_mutually_exclusive_group()
-    wrap_group.add_argument("--wrap", action="store_true", default=None, help="Wrap long strings across multiple lines natively instead of explicit ellipsis truncation.")
-    wrap_group.add_argument("--no-wrap", action="store_false", dest="wrap", default=None, help="Explicitly force ellipsis truncation, explicitly ignoring config overrides.")
+    wrap_group.add_argument("--wrap", action="store_true", default=None, help="Wrap long strings across multiple lines instead of truncating.")
+    wrap_group.add_argument("--no-wrap", action="store_false", dest="wrap", default=None, help="Force ellipsis truncation for long values.")
     
     diff_parser.add_argument("--max-length", type=int, default=None, help="Maximum length allowable for inline string rendering before truncation ellipsis engages.")
 
     # Depth logic
     diff_depth = diff_parser.add_mutually_exclusive_group()
     diff_depth.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Ignore vast bulk metric data to analyze strictly structural changes (Default).")
-    diff_depth.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Evaluate standard telemetry payloads strictly ignoring jitter metrics.")
-    diff_depth.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Run unfiltered differential comparisons logging virtually everything globally.")
+    diff_depth.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Include standard telemetry, ignoring jitter metrics.")
+    diff_depth.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Unfiltered comparison of all captured data.")
     diff_parser.set_defaults(depth="basic")
 
     # Identical keys logic
     diff_same = diff_parser.add_mutually_exclusive_group()
-    diff_same.add_argument("--same", action="store_true", default=None, help="Force UI stringification of values matching perfectly globally.")
-    diff_same.add_argument("--no-same", action="store_false", dest="same", default=None, help="Aggressively mute unchanged variables strictly forcing semantic mappings.")
+    diff_same.add_argument("--same", action="store_true", default=None, help="Show keys that are identical between both runs.")
+    diff_same.add_argument("--no-same", action="store_false", dest="same", default=None, help="Hide keys that are identical between both runs.")
     
     # ---------------- Meta Subparser ----------------
     meta_parser = subparsers.add_parser("meta", help="Generate a localized 'meta.json' environment snapshot. Useful for massive HPC array payloads.", description="Generate a localized 'meta.json' environment snapshot. Useful for massive HPC array payloads.")
@@ -543,16 +364,16 @@ def main() -> None:
     
     depth_group_2 = meta_parser.add_mutually_exclusive_group()
     depth_group_2.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Capture a minimal ecosystem footprint (fastest runtime).")
-    depth_group_2.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Capture standard environment factors natively.")
+    depth_group_2.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Capture standard environment factors.")
     depth_group_2.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Force exhaustive evaluation of the complete underlying system hardware, git branches, and pip dependency trees (Default).")
     meta_parser.set_defaults(depth="deep")
     
     # ---------------- Cite Subparser ----------------
-    cite_parser = subparsers.add_parser("cite", help="Instantly generate formatted academic citations crediting the pubrun library framework.", description="Instantly generate formatted academic citations crediting the pubrun library framework.")
+    cite_parser = subparsers.add_parser("cite", help="Generate a formatted academic citation for pubrun.", description="Generate a formatted academic citation for pubrun.")
     cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Filter the output citation by standard academic grammar.")
     
     # ---------------- Diagnostic Flags ----------------
-    parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Bootstrap a heavily annotated `.pubrun.toml` file natively into your ecosystem for configuration modifications.")
+    parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Create an annotated `.pubrun.toml` configuration file.")
     parser.add_argument("--show-config", action="store_true", help="Print the fully documented default `.pubrun.toml` configuration strictly to the terminal without creating any artifacts.")
     parser.add_argument("--info", action="store_true", help="Launch a raw system capabilities assessment to verify pubrun hardware telemetry hooks are functioning properly in this environment.")
     parser.add_argument("--run-tests", action="store_true", help="Execute an aggressive end-to-end sandbox deployment and run standard architectural tests.")

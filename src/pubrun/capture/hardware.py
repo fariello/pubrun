@@ -135,29 +135,13 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def get_hardware(config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Constructs the hardware telemetry block synchronously using standard Python standard 
-    libraries and OS system queries.
-    
-    Args:
-        config (Dict[str, Any]): The fully resolved pubrun configuration dictionary.
-        
-    Returns:
-        Dict[str, Any]: A dictionary compliant with the `hardware` schema section, capturing CPU model, RAM, and GPU specs.
+    """Capture hardware details: CPU model, RAM, and GPU specs.
 
-    Assumptions:
-        - The `capture.hardware.depth` config defaults to "basic" tracking. If set to "off", it exits immediately.
-        - Nvidia GPUs are captured precisely using `nvidia-smi` if available.
-        - Generic/Apple GPUs are probed using `wmic` on Windows and `system_profiler` on MacOS as functional fallbacks.
-        
-    Example:
-        >>> get_hardware({})
-        {
-            'cpu': {'model': 'Intel Core i9', 'architecture': 'AMD64', 'logical_cores': 16},
-            'memory_total_bytes': 34359738368,
-            'gpus': [{'vendor': 'NVIDIA', 'model': 'RTX 3080', 'memory_total_bytes': 10737418240}],
-            'capture_state': {'status': 'complete'}
-        }
+    GPU detection uses nvidia-smi (NVIDIA), wmic (Windows), or
+    system_profiler (macOS).  Set ``depth = "off"`` to skip entirely.
+
+    Args:
+        config: Resolved pubrun configuration.
     """
     hw_config_root = config.get("capture", {}).get("hardware", {})
     depth = hw_config_root.get("depth", "basic")

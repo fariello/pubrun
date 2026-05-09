@@ -7,22 +7,7 @@ def bytes_to_gb(bytes_val: int) -> float:
     return round(bytes_val / (1024 ** 3), 1)
 
 def extract_highlighted_packages(manifest: Dict[str, Any]) -> List[str]:
-    """
-    Cross-references manifest packages against a curated list of highlight dependencies.
-    
-    Args:
-        manifest (Dict[str, Any]): The fully loaded and hydrated trace manifest dictionary.
-        
-    Returns:
-        List[str]: A string list of safely formatted package names matched inside the manifest layout.
-
-    Assumptions:
-        - Packages match purely based on lowercase representations string safely ignoring casing inconsistencies.
-        
-    Example:
-        >>> extract_highlighted_packages({"packages": {"records": [{"name": "torch", "version": "2.0.1"}]}})
-        ['torch (v2.0.1)']
-    """
+    """Return formatted strings for notable packages found in the manifest."""
     found = []
     records = manifest.get("packages", {}).get("records", [])
     for record in records:
@@ -33,21 +18,11 @@ def extract_highlighted_packages(manifest: Dict[str, Any]) -> List[str]:
     return found
 
 def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> str:
-    """
-    Generates the text layout for the computational methods provenance section.
-    
-    Args:
-        manifest (Dict[str, Any]): The loaded execution diagnostic dictionary.
-        format_type (str): A string specifying "markdown" or "latex" encoding styles.
-        
-    Returns:
-        str: A fully mapped and formatted publication-ready text block.
+    """Generate a publication-ready 'Computational Methods' paragraph.
 
-    Assumptions:
-        - LaTeX escapes (like replacing underscores) are strictly handled natively during injection mapping to ensure functional compilation.
-        
-    Example:
-        >>> text = generate_report(manifest_dict, "markdown")
+    Args:
+        manifest: Hydrated manifest dictionary.
+        format_type: Output format (``"markdown"`` or ``"latex"``).
     """
     # Hardware
     # OS name — use the host capture data, not the Windows-only OS env var
@@ -77,7 +52,7 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
     # Packages
     packages = extract_highlighted_packages(manifest)
     if packages:
-        packages_text = f"Key dependencies explicitly tracked include {', '.join(packages)}."
+        packages_text = f"Key dependencies tracked include {', '.join(packages)}."
     else:
         packages_text = "Standard library dependencies were utilized."
         
