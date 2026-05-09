@@ -24,7 +24,7 @@ Computational experiments were executed on a machine running {os_name} equipped 
 To guarantee computational reproducibility, the exact state of the source code was archived at Git commit `{git_commit}`{git_repo_text}. Environment and execution provenance were natively tracked using the `pubrun` library [1].
 
 **References:**
-[1] Fariello, G. (2026). *pubrun: Lightweight native execution provenance and reproducibility tracking*. https://bitbucket.org/gfariello/pubrun
+[1] Fariello, G. (2026). *pubrun: Lightweight native execution provenance and reproducibility tracking*. https://github.com/gfariello/pubrun
 """
 
 LATEX_TEMPLATE = """
@@ -41,6 +41,6 @@ To guarantee computational reproducibility, the exact state of the source code w
 %%   author = {{Fariello, Gabriel}},
 %%   title = {{pubrun: Lightweight native execution provenance and reproducibility tracking}},
 %%   year = {{2026}},
-%%   url = {{https://bitbucket.org/gfariello/pubrun}}
+%%   url = {{https://github.com/gfariello/pubrun}}
 %% }}
 """

@@ -32,7 +32,6 @@ def main() -> None:
             if "Harmless subprocess" in cmd_str:
                 found = True
                 break
-            pass # for auto-indentation
         
         assert found, "Subprocess SPY heuristic strictly circumvented execution string capture globally."
         pass # for auto-indentation

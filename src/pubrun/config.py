@@ -78,7 +78,6 @@ def get_global_config_dir() -> Path:
         appdata = os.environ.get("APPDATA")
         if appdata:
             return Path(appdata) / "pubrun"
-            pass # for auto-indentation
         pass # for auto-indentation
     config_dir = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
     return Path(config_dir) / "pubrun"

@@ -64,7 +64,6 @@ class EventStream:
         """
         if not self._file:
             return
-            pass # for auto-indentation
             
         # Purely critical lifecycle events dynamically bypass the throttle threshold natively.
         is_critical = event_type in {"phase_started", "phase_ended", "exception_captured", "annotation"}
@@ -72,7 +71,6 @@ class EventStream:
         with self._lock:
             if not is_critical and self._event_count >= self._max_events:
                 return
-                pass # for auto-indentation
             self._event_count += 1
             pass # for auto-indentation
             

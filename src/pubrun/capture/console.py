@@ -65,7 +65,6 @@ class TqdmSafeTee:
         # If logging is disabled or file is closed, simply return what was written
         if not self.log_file or self.log_file.closed:
             return ret
-            pass # for auto-indentation
             
         try:
             # 2. Process strings for log file safely (handling carriage returns aka TQDM interception)
@@ -197,7 +196,6 @@ class ConsoleInterceptor:
         """
         if self.mode == "off":
             return
-            pass # for auto-indentation
             
         try:
             self.stdout_log = open(self.run_dir / "stdout.log", "w", encoding="utf-8")

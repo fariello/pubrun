@@ -1,3 +1,5 @@
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](API.md) | [CLI](CLI.md)
+
 # pubrun Functional Specification
 
 > Status: Draft v0.1
@@ -98,6 +100,17 @@ The manifest is the canonical output for the run.
 
 It MUST be usable without requiring event replay.
 
+### 4.1 Timestamp format
+
+All timestamps in the manifest, event stream, and subprocess records MUST be stored as POSIX epoch floats (`time.time()`). ISO 8601 strings MUST NOT be used for timestamps.
+
+Rationale:
+
+- Sub-second precision via IEEE 754 without truncation.
+- Timezone-agnostic: eliminates locale-dependent formatting and parsing.
+- Trivial elapsed-time arithmetic (`ended_at - started_at`).
+- Native compatibility with `time.time()`, `os.stat().st_mtime`, and similar system calls.
+- Compact and deterministic serialization (no string formatting jitter).
 Each run MUST also produce a `config.resolved.json` containing the final configuration used for the run.
 
 ## 5. Capture categories

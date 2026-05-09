@@ -89,6 +89,13 @@
         "errors": {
             "$ref": "#/$defs/errors_section"
         },
+        "meta_ref": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "Optional path to a parent meta.json snapshot for HPC parent-child manifest hydration."
+        },
         "extensions": {
             "type": "object",
             "description": "Optional namespaced extension sections contributed by plugins.",
@@ -133,9 +140,8 @@
             }
         },
         "utc_datetime": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "Z$"
+            "type": "number",
+            "description": "POSIX epoch float (time.time()). Stored as floats for sub-second precision, timezone-agnostic storage, trivial arithmetic, and deterministic serialization."
         },
         "path_string": {
             "type": "string",

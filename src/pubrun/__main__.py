@@ -6,6 +6,7 @@ import importlib.resources
 import tempfile
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 
 def _create_config(destination: str) -> None:
@@ -37,7 +38,6 @@ def _create_config(destination: str) -> None:
         if target_path.exists():
             print(f"Error: '{target_path}' already exists. Refusing to overwrite.", file=sys.stderr)
             sys.exit(1)
-            pass # for auto-indentation
             
         target_path.write_text(content, encoding="utf-8")
         print(f"[OK] Successfully created configuration at: {target_path}")
@@ -45,7 +45,6 @@ def _create_config(destination: str) -> None:
     except Exception as e:
         print(f"Failed to create config: {e}", file=sys.stderr)
         sys.exit(1)
-        pass # for auto-indentation
 
 
 def _get_manifest_path(run_dir: str) -> str:
@@ -78,14 +77,12 @@ def _get_manifest_path(run_dir: str) -> str:
         if not runs_dir.exists() or not runs_dir.is_dir():
             print("Error: No --run directory provided and './runs' directory not found.", file=sys.stderr)
             sys.exit(1)
-            pass # for auto-indentation
             
         # Discover dynamically generated cache footprints natively
         subdirs = [d for d in runs_dir.iterdir() if d.is_dir()]
         if not subdirs:
             print("Error: './runs' directory is empty.", file=sys.stderr)
             sys.exit(1)
-            pass # for auto-indentation
             
         # Identify the most recent payload execution by inspecting native filesystem anchors
         latest_run = max(subdirs, key=lambda d: d.stat().st_mtime)
@@ -138,11 +135,9 @@ def _run_methods(run_dir: str, format_type: str) -> None:
     except FileNotFoundError:
         print(f"Error: Could not find manifest file.", file=sys.stderr)
         sys.exit(1)
-        pass # for auto-indentation
     except Exception as e:
         print(f"Failed to generate explicit methods section: {e}", file=sys.stderr)
         sys.exit(1)
-        pass # for auto-indentation
 
 
 def _run_rerun(run_dir: str) -> None:
@@ -181,11 +176,9 @@ def _run_rerun(run_dir: str) -> None:
         else:
             print("Error: Target manifest does not contain a valid 'rerun_command' payload.", file=sys.stderr)
             sys.exit(1)
-            pass # for auto-indentation
     except Exception as e:
         print(f"Failed to fetch rerun command natively: {e}", file=sys.stderr)
         sys.exit(1)
-        pass # for auto-indentation
 
 
 def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool, wrap_config: Optional[bool] = None, max_length: Optional[int] = None, depth: str = "basic", show_same: Optional[bool] = None) -> None:
@@ -255,7 +248,6 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
             if fmt not in ["txt", "json"]:
                 print(f"Error: Unsupported export format '{fmt}'. Use 'txt' or 'json'.", file=sys.stderr)
                 sys.exit(1)
-                pass # for auto-indentation
 
             name_a = Path(manifest_path_a).parent.name
             name_b = Path(manifest_path_b).parent.name
@@ -279,7 +271,6 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
     except Exception as e:
         print(f"Failed to generate differential report: {e}", file=sys.stderr)
         sys.exit(1)
-        pass # for auto-indentation
 
 
 def _run_report(run_dir: str, depth: str) -> None:
@@ -308,7 +299,6 @@ def _run_report(run_dir: str, depth: str) -> None:
     except Exception as e:
         print(f"Failed to generate report diagnostics: {e}", file=sys.stderr)
         sys.exit(1)
-        pass # for auto-indentation
         
         
 def _run_meta(out_path: str, depth: str) -> None:
@@ -335,7 +325,6 @@ def _run_meta(out_path: str, depth: str) -> None:
     except Exception as e:
         print(f"Failed to generate global snap: {e}", file=sys.stderr)
         sys.exit(1)
-        pass # for auto-indentation
 
 
 def _run_cite(style: str) -> None:
@@ -371,7 +360,6 @@ def _run_cite(style: str) -> None:
     else:
         print(f"Error: Unknown citation style '{style}'. Supported styles: apa, mla, chicago, bibtex.", file=sys.stderr)
         sys.exit(1)
-        pass # for auto-indentation
 
 
 def _show_info() -> None:
@@ -469,26 +457,22 @@ print('Mock Training Complete.')
         if result.returncode != 0:
             print(f"[FAIL] Mock Evaluation Failed. Exit Code: {result.returncode}")
             return
-            pass # for auto-indentation
             
         print("[OK] Mock Script Executed Natively without crashing.")
         
         runs_dir = Path(td) / "runs"
         if not runs_dir.exists():
             return
-            pass # for auto-indentation
             
         run_folders = list(runs_dir.iterdir())
         if not run_folders:
             return
-            pass # for auto-indentation
             
         active_run = run_folders[0]
         manifest_p = active_run / "manifest.json"
         
         if not manifest_p.exists():
             return
-            pass # for auto-indentation
             
         try:
             manifest_data = json.loads(manifest_p.read_text(encoding="utf-8"))
@@ -518,7 +502,6 @@ def main() -> None:
     if len(sys.argv) >= 2 and sys.argv[1] == "pbr":
         print("me asap")
         sys.exit(0)
-        pass # for auto-indentation
         
     parser = argparse.ArgumentParser(
         description="pubrun: Zero-dependency execution telemetry and publication engine.",
@@ -605,19 +588,16 @@ def main() -> None:
             _run_report(rd, args.depth)
             pass # for auto-indentation
         executed = True
-        pass # for auto-indentation
-        
-    if args.command == "methods":
+
+    elif args.command == "methods":
         _run_methods(args.run_dir, args.format)
         executed = True
-        pass # for auto-indentation
 
-    if args.command == "rerun":
+    elif args.command == "rerun":
         _run_rerun(args.run_dir)
         executed = True
-        pass # for auto-indentation
 
-    if args.command == "diff":
+    elif args.command == "diff":
         _run_diff(
             args.run_dir_a, 
             args.run_dir_b, 
@@ -629,24 +609,20 @@ def main() -> None:
             getattr(args, "same", None)
         )
         executed = True
-        pass # for auto-indentation
 
-    if args.command == "meta":
+    elif args.command == "meta":
         _run_meta(args.out, args.depth)
         executed = True
-        pass # for auto-indentation
 
-    if args.command == "cite":
+    elif args.command == "cite":
         _run_cite(args.style)
         executed = True
-        pass # for auto-indentation
 
     if getattr(args, "create_config", False):
         dest = args.create_config
         if dest == "PROMPT":
             print("\nWhere would you like to install the default configuration?")
             print("  [1] Locally (./.pubrun.toml)")
-            import sys
             global_hint = "Global AppData" if sys.platform == "win32" else "Global (~/.config/pubrun/config.toml)"
             print(f"  [2] {global_hint}")
             
@@ -666,7 +642,6 @@ def main() -> None:
             else:
                 print("Invalid selection. Exiting.", file=sys.stderr)
                 sys.exit(1)
-                pass # for auto-indentation
             pass # for auto-indentation
             
         _create_config(dest)

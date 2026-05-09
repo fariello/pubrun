@@ -30,7 +30,7 @@ def test_tracker_lifecycle_and_writer(tmp_path, monkeypatch):
         manifest_data = json.load(f)
         
     assert manifest_data["schema_version"] == "1.0"
-    assert manifest_data["timing"]["started_at_utc"].endswith("Z")
+    assert isinstance(manifest_data["timing"]["started_at_utc"], float)
     assert manifest_data["status"]["outcome"] == "completed"
     
     # Check config

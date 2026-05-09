@@ -13,10 +13,8 @@ class Colors:
 def _has_color(no_color_flag: bool) -> bool:
     if no_color_flag:
         return False
-        pass # for auto-indentation
     if os.environ.get("NO_COLOR", ""):
         return False
-        pass # for auto-indentation
     return True
 
 
@@ -110,7 +108,6 @@ def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool =
         print("\nNote: For beautiful side-by-side matrix comparisons, execute `pip install rich`.")
         _render_inline(diff_report, has_colors)
         return
-        pass # for auto-indentation
         
     # Standard Rich Layout Configuration
     console = Console(force_terminal=True, color_system=("standard" if has_colors else None))

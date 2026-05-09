@@ -67,9 +67,7 @@ def test_console_interceptor_tqdm(tmp_path, monkeypatch):
     
     # Simulate basic capture mode via overrides
     overrides = {
-        "capture": {
-            "console": {"capture_mode": "basic"}
-        }
+        "console": {"capture_mode": "basic"}
     }
     tracker = start(**overrides)
     

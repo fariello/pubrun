@@ -77,7 +77,13 @@ class Run:
         self.pid = os.getpid()
         self.script_name = Path(sys.argv[0]).stem if sys.argv and sys.argv[0] else "interactive"
         
-        # Timing state (explicit epoch performance requirement)
+        # Timing state -- stored as POSIX epoch floats (time.time()), not ISO 8601
+        # strings. This is a deliberate design choice:
+        #   - Sub-second / microsecond precision via IEEE 754.
+        #   - Timezone-agnostic: no locale-dependent formatting or parsing.
+        #   - Trivial arithmetic: elapsed = ended_at - started_at.
+        #   - Natively produced by time.time(), os.stat().st_mtime, etc.
+        #   - Compact and deterministic (no string formatting jitter).
         self.started_at_utc = time.time()
         self.ended_at_utc: Optional[float] = None
         self.is_active = True

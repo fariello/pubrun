@@ -58,7 +58,6 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
         if v.get("name") == "OS":
             os_name = str(v.get("value", {}).get("value", os_name)).replace("_", "\\_" if format_type == "latex" else "_")
             break
-            pass # for auto-indentation
         pass # for auto-indentation
     hw = manifest.get("hardware", {})
     cpu_model = hw.get("cpu", {}).get("model", "unknown CPU")
