@@ -10,21 +10,11 @@ def bytes_to_gb(bytes_val: int) -> float:
     return round(bytes_val / (1024 ** 3), 1)
 
 def print_report(manifest_path: str, depth: str = "standard") -> None:
-    """
-    Parses and formats a recorded run manifest into a human-readable diagnostic report printed to standard output.
-    
-    Args:
-        manifest_path (str): The absolute or relative string path pointing to the target manifest JSON file.
-        depth (str): A string indicating the diagnostic verbosity ("basic", "standard", or "deep").
-        
-    Returns:
-        None
+    """Print a human-readable diagnostic summary of a recorded run.
 
-    Assumptions:
-        - Safely exits the interpreter with status code 1 if parsing fails or corruption is detected.
-        
-    Example:
-        >>> print_report("runs/123/manifest.json", depth="deep")
+    Args:
+        manifest_path: Path to the manifest.json file.
+        depth: Verbosity level (``"basic"``, ``"standard"``, or ``"deep"``).
     """
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
@@ -99,7 +89,7 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
                     print(f"  ... [ {total_events - 40} events logically truncated ] ...")
                     
                 if total_events > 20:
-                    # Render the remaining tail natively
+                    # Render the remaining tail
                     for line in last_events:
                         _print_ev(line)
         except Exception:
@@ -140,7 +130,7 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
         print("Git Commit  : Not found or un-tracked")
         
     print(f"Packages    : {len(pkgs)} recorded")
-    print(f"Env Vars    : {len(envs)} explicitly captured")
+    print(f"Env Vars    : {len(envs)} captured")
     
     if depth == "standard":
         print()

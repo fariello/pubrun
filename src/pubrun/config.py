@@ -17,23 +17,9 @@ else:
 
 
 def _deep_merge(dict1: Dict[str, Any], dict2: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Recursively deep-merges two configuration dictionaries cleanly.
-
-    Args:
-        dict1 (Dict[str, Any]): The strictly foundational base dictionary.
-        dict2 (Dict[str, Any]): The explicit overriding dictionary payload.
-
-    Returns:
-        Dict[str, Any]: A newly instantiated dictionary with safely resolved nesting.
-
-    Assumptions:
-        - Dictionaries are deeply merged recursively.
-        - Non-dictionary types (like Lists) are strictly overwritten by `dict2`, not appended.
-
-    Example:
-        >>> _deep_merge({"core": {"a": 1}}, {"core": {"b": 2}})
-        {"core": {"a": 1, "b": 2}}
+    """Recursively merge two config dicts. Values in dict2 override dict1.
+    Non-dict values (including lists) are overwritten, not appended.
+    Returns a new dict; originals are not mutated.
     """
     result = copy.deepcopy(dict1)
     for key, value in dict2.items():
@@ -45,32 +31,17 @@ def _deep_merge(dict1: Dict[str, Any], dict2: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def load_default_config() -> Dict[str, Any]:
-    """
-    Loads the native foundational TOML configuration securely embedded inside `pubrun`.
-
-    Args:
-        No arguments.
-
-    Returns:
-        Dict[str, Any]: The fully parsed canonical configuration map.
-
-    Assumptions:
-        - We assume the pip installation naturally retains the `resources/default.toml` structure natively.
-
-    Example:
-        >>> load_default_config()
-        {"core": {"cache_size": 10}, "capture": {"subprocesses": { ... }}}
-    """
+    """Load the built-in ``default.toml`` shipped with the package."""
     resource_path = importlib.resources.files("pubrun").joinpath("resources", "default.toml")
     content = resource_path.read_text(encoding="utf-8")
     return tomllib.loads(content)
 
 
 def get_global_config_dir() -> Path:
-    """
-    Deterministically resolves the cross-platform global configuration ecosystem mapping properly.
-    - Windows -> %APPDATA%/pubrun
-    - Linux/Mac -> $XDG_CONFIG_HOME/pubrun or ~/.config/pubrun
+    """Return the platform-specific global config directory for pubrun.
+
+    - Windows: ``%APPDATA%/pubrun``
+    - Linux/Mac: ``$XDG_CONFIG_HOME/pubrun`` or ``~/.config/pubrun``
     """
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
@@ -81,22 +52,7 @@ def get_global_config_dir() -> Path:
 
 
 def load_user_config() -> Optional[Dict[str, Any]]:
-    """
-    Discovers and naturally evaluates any global user configurations stored natively in the system app root.
-
-    Args:
-        No arguments.
-
-    Returns:
-        Optional[Dict[str, Any]]: The parsed configuration if the file actively exists, else None.
-
-    Assumptions:
-        - Relies on the canonical `XDG_CONFIG_HOME` convention natively or `%APPDATA%` on Windows.
-
-    Example:
-        >>> load_user_config()
-        {"methods": {"format": "latex"}}
-    """
+    """Load the user-level config from the global config directory, if it exists."""
     path = get_global_config_dir() / "config.toml"
     if path.is_file():
         return tomllib.loads(path.read_text(encoding="utf-8"))
@@ -104,21 +60,12 @@ def load_user_config() -> Optional[Dict[str, Any]]:
 
 
 def load_local_config(start_dir: Optional[Path] = None) -> Optional[Dict[str, Any]]:
-    """
-    Surgically explicitly isolates project-specific overrides via local `.pubrun.toml` detection.
+    """Load project-level config from ``.pubrun.toml`` and/or ``.config/pubrun/config.toml``.
+
+    If both files exist, ``.pubrun.toml`` takes precedence (applied last).
 
     Args:
-        start_dir (Optional[Path]): The explicit origin directory to search natively. If None, relies exclusively on the current working directory.
-
-    Returns:
-        Optional[Dict[str, Any]]: The cleanly mapped override dictionary natively returned if present.
-
-    Assumptions:
-        - We explicitly evaluate `.pubrun.toml` in the target directory without recursively jumping up trees automatically.
-
-    Example:
-        >>> load_local_config()
-        None
+        start_dir: Directory to search. Defaults to the current working directory.
     """
     if start_dir is None:
         start_dir = Path.cwd()
@@ -139,31 +86,17 @@ def load_local_config(start_dir: Optional[Path] = None) -> Optional[Dict[str, An
 
 
 def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    Algorithmically compiles and strictly flattens configuration overrides natively using rigorous hierarchical inheritance.
+    """Build the final configuration by merging all sources.
 
-    Precedence Rules (Lowest to Highest):
-    1. Defaults (default.toml)
-    2. User home config (~/.config/pubrun/config.toml)
-    3. Project local config (./.config/pubrun/config.toml -> ./.pubrun.toml)
-    4. Environment variables (Not heavily mapped yet, usually PUBRUN_*)
-    5. API Argument overrides (e.g., from `start(profile="deep")`)
+    Precedence (lowest to highest):
+    1. Built-in defaults (``default.toml``)
+    2. User home config (``~/.config/pubrun/config.toml``)
+    3. Local project config (``.config/pubrun/config.toml`` then ``.pubrun.toml``)
+    4. Environment variables (``PUBRUN_META_REF``)
+    5. API overrides (this function's ``overrides`` argument)
 
     Args:
-        overrides (Optional[Dict[str, Any]]): Absolute, hard-overrides provided natively via python instantiation (e.g., `pubrun.start(profile="minimal")`).
-
-    Returns:
-        Dict[str, Any]: The finalized configuration map guaranteed to possess the complete schema definition natively.
-
-    Assumptions:
-        - The resolution hierarchy enforces that explicit API overrides trump everything,
-          environment variables trump config files, and local config trumps global.
-        - Environment variable support: PUBRUN_AUTO_START (in boot sequence) and
-          PUBRUN_META_REF (injected here as core.meta_ref).
-
-    Example:
-        >>> resolve_config({"capture": {"subprocesses": {"enabled": False}}})
-        {'core': {...}, 'capture': {'subprocesses': {'enabled': False}}}
+        overrides: Dict of config keys to merge at highest priority.
     """
     config = load_default_config()
     

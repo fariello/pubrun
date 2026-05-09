@@ -3,30 +3,15 @@ import importlib.metadata
 from typing import Dict, Any, List
 
 def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Sniffs installed packages in the current Python environment using `importlib.metadata`.
-    
-    Based on the configuration "mode", this will either capture all top-level installed 
-    distributions (the default behavior) or strictly limit the scan to packages that 
-    have already been actively imported.
-    
-    Args:
-        config (Dict[str, Any]): The fully resolved pubrun configuration dictionary.
-        
-    Returns:
-        Dict[str, Any]: A dictionary compliant with the `packages_section` schema definition.
+    """Capture installed Python packages via ``importlib.metadata``.
 
-    Assumptions:
-        - The `imported-only` mode efficiently extracts runtime dependencies by mapping active modules loaded into `sys.modules`.
-        - Editable installations are correctly sniffed out natively by checking `direct_url.json` layout references.
-        
-    Example:
-        >>> get_packages({'capture': {'packages': {'mode': 'imported-only'}}})
-        {
-            'mode': 'imported-only',
-            'records': [{'name': 'json', 'version': '2.0.9', 'location': None, 'editable': None}],
-            'capture_state': {'status': 'complete'}
-        }
+    Modes:
+    - ``imported-only``: Only packages already loaded in ``sys.modules``.
+    - ``top-level-installed``: All top-level pip distributions.
+    - ``full-environment``: Every distribution in the environment.
+
+    Args:
+        config: Resolved pubrun configuration.
     """
     cfg = config.get("capture", {}).get("packages", {})
     mode = cfg.get("mode", "full-environment")

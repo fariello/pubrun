@@ -2,34 +2,10 @@ import sys
 from typing import Dict, Any
 
 def get_python_runtime(config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Captures deep inspection details about the active Python interpreter environment.
-    
-    Extracts the executable location, exact version layout, and whether 
-    the process is executing inside an isolated virtual environment. It also
-    snapshots the `sys.path` which dictates module resolution order.
-    
-    Args:
-        config (Dict[str, Any]): The fully resolved pubrun configuration dictionary.
-        
-    Returns:
-        Dict[str, Any]: A dictionary compliant with the `python_runtime` schema section.
+    """Capture Python interpreter details: executable, version, venv status, sys.path.
 
-    Assumptions:
-        - Accurately detects `venv` environments by evaluating mapping discrepancies between `sys.prefix` and `sys.base_prefix`.
-        
-    Example:
-        >>> get_python_runtime({})
-        {
-            'executable': '/usr/bin/python3', 
-            'version': '3.11.4 ...', 
-            'implementation': 'cpython',
-            'prefix': '/usr',
-            'base_prefix': '/usr',
-            'virtual_env': None,
-            'sys_path': ['/app', '/usr/lib/python3.11'],
-            'capture_state': {'status': 'complete'}
-        }
+    Args:
+        config: Resolved pubrun configuration.
     """
     
     # Determine virual_env presence by checking if prefix differs from base_prefix

@@ -8,65 +8,23 @@ logger = logging.getLogger("pubrun")
 
 
 class ArtifactWriter:
-    """
-    Responsibilities:
-    Atomically serializes the active Run state to disk globally at script exit.
-    This module must never crash the host script.
-    """
+    """Serializes the active Run state to disk at script exit.
+    Must never crash the host script."""
     def __init__(self, run_instance: Any) -> None:
-        """
-        Initializes the dedicated writer instance strongly linking to the active Run cleanly.
-
-        Args:
-            run_instance (Any): The actively recording `pubrun.tracker.Run` singleton context natively mapped.
-
-        Returns:
-            None
-
-        Assumptions:
-            - The provided `run_instance` natively manages its own temporal tracking.
-
-        Example:
-            >>> writer = ArtifactWriter(tracker)
-        """
+        """Bind this writer to the given Run instance."""
         self.run = run_instance
         self._registered = False
 
     def register_atexit(self) -> None:
-        """
-        Registers the explicit finalizer strictly to run precisely when Python natively shuts down.
-
-        Args:
-            No arguments.
-
-        Returns:
-            None
-
-        Assumptions:
-            - Operates safely across multiple redundant calls natively as it enforces single-registration via the `_registered` boolean flag.
-
-        Example:
-            >>> writer.register_atexit()
-        """
+        """Register ``write_artifacts`` as a Python atexit handler (once only)."""
         if not self._registered:
             atexit.register(self.write_artifacts)
             self._registered = True
 
     def write_artifacts(self) -> None:
-        """
-        Recursively natively compiles memory architectures explicitly down to disk inside the targeted unique `./runs/pubrun-XYZ` payload.
+        """Write manifest.json, config.resolved.json, and methods report to disk.
 
-        Args:
-            No arguments.
-
-        Returns:
-            None
-
-        Assumptions:
-            - The Golden Rule: This serialization method exclusively natively catches ALL exceptions generically to explicitly ensure `pubrun` NEVER crashes the host Machine Learning script.
-
-        Example:
-            >>> writer.write_artifacts()
+        Catches all exceptions — pubrun must never crash the host script.
         """
         try:
             # Finalize has already been called by stop() — the _finalized guard

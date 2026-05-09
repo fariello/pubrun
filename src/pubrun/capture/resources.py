@@ -78,21 +78,7 @@ class ResourceWatcher(threading.Thread):
         return 0
 
     def run(self) -> None:
-        """
-        Continuously watches process telemetry in a background daemon thread.
-        
-        Args:
-            No arguments.
-            
-        Returns:
-            None
-            
-        Assumptions:
-            - A fast initial check is executed upon initialization to ensure brief execution runs aren't missed completely.
-            
-        Example:
-            >>> watcher.start()
-        """
+        """Background polling loop. Samples immediately, then at each interval."""
         # Check instantly so we don't skip short runs
         self._update_metrics()
         
@@ -144,21 +130,7 @@ class ResourceWatcher(threading.Thread):
                 self.run_tracker.event_stream.emit("resource_sample", payload={"rss_bytes": rss, "cpu_percent": cpu_pct})
 
     def stop(self) -> None:
-        """
-        Triggered at script exit to immediately terminate the polling loop thread.
-        
-        Args:
-            No arguments.
-            
-        Returns:
-            None
-
-        Assumptions:
-            - For accuracy, performs exactly one final execution poll locking the finishing footprint sequence.
-            
-        Example:
-            >>> watcher.stop()
-        """
+        """Signal the polling thread to stop and take one final measurement."""
         self._stop_event.set()
         # Run one final poll completely
         self._update_metrics()
@@ -167,21 +139,7 @@ class ResourceWatcher(threading.Thread):
             self.peak_rss_bytes = self.end_rss_bytes
 
     def to_manifest_dict(self) -> Dict[str, Any]:
-        """
-        Formulates the exact dictionary representation required for the `resources` manifest block.
-        
-        Args:
-            No arguments.
-            
-        Returns:
-            Dict[str, Any]: A dictionary populated with the final peak and end Resident Set Size (RSS) bytes.
-            
-        Assumptions:
-            - If RSS bytes remain critically zero (due to OS permission failures during polling), the payload gracefully submits null references.
-            
-        Example:
-            >>> obj = watcher.to_manifest_dict()
-        """
+        """Build the ``resources`` manifest section dict."""
         return {
             "peak_rss_bytes": self.peak_rss_bytes if self.peak_rss_bytes > 0 else None,
             "end_rss_bytes": self.end_rss_bytes if self.end_rss_bytes > 0 else None,

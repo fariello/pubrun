@@ -10,21 +10,11 @@ from pubrun.capture.hardware import get_hardware
 from pubrun.capture.host import get_host
 
 def generate_meta_snapshot(output_path: str, depth: str) -> None:
-    """
-    Generates a standalone global meta-snapshot JSON capturing heavy environmental metrics.
-    
-    Args:
-        output_path (str): The absolute or relative string path defining the exact target JSON file output.
-        depth (str): The string identifier dictating profiling depth limits ("basic", "standard", "deep").
-        
-    Returns:
-        None
+    """Generate a standalone environment snapshot for HPC parent-child hydration.
 
-    Assumptions:
-        - The `capture.packages.mode` is explicitly overridden internally to "full-environment" making sure the snapshot builds a complete global baseline map.
-        
-    Example:
-        >>> generate_meta_snapshot("meta.json", "deep")
+    Args:
+        output_path: Target JSON file path.
+        depth: Profiling depth (``"basic"``, ``"standard"``, ``"deep"``).
     """
     print(f"[*] Analyzing Global Environment Context (Depth: {depth})...")
     # Resolve config with explicit overrides for global mode
@@ -67,7 +57,7 @@ def generate_meta_snapshot(output_path: str, depth: str) -> None:
         
     print(f"[OK] Global meta snapshot generated perfectly: {out_target}")
     
-    # Print a tiny brief to console natively
+    # Print a brief summary to console
     print("\n--- Snapshot Brief ---")
     pkgs = packages.get("records", [])
     print(f"Packages       : {len(pkgs)} recorded dependencies (Pip/Conda)")

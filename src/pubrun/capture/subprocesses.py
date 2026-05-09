@@ -27,10 +27,7 @@ _original_popen_wait = subprocess.Popen.wait
 _original_os_system = os.system
 
 class SubprocessSpy:
-    """
-    Globally patches subprocess.Popen to actively record executed shell scripts
-    while completely transparent to the user code.
-    """
+    """Patches subprocess.Popen and os.system to record spawned processes transparently."""
     _installed = False
     _records: List[Dict[str, Any]] = []
     _max_records = 5000
@@ -40,21 +37,11 @@ class SubprocessSpy:
 
     @classmethod
     def install(cls, max_records: int = 5000, config: Optional[Dict[str, Any]] = None) -> None:
-        """
-        Installs global monkey-patches onto the `subprocess.Popen` constructor and methods.
+        """Install monkey-patches on subprocess.Popen and os.system.
 
         Args:
-            max_records (int): Maximum trace records to retain before truncating for memory safety.
-            config (Optional[Dict[str, Any]]): The resolved pubrun config, used for argv redaction.
-
-        Returns:
-            None
-
-        Assumptions:
-            - Safe to be called redundantly, as it evaluates `_installed` state first.
-
-        Example:
-            >>> SubprocessSpy.install(5000)
+            max_records: Stop recording after this many entries (memory safety).
+            config: Resolved config, used for argv redaction.
         """
         if not cls._installed:
             cls._max_records = max_records
@@ -68,21 +55,7 @@ class SubprocessSpy:
 
     @classmethod
     def uninstall(cls) -> None:
-        """
-        Safely reverts the global `subprocess.Popen` monkey-patches back to their original states.
-
-        Args:
-            No arguments.
-
-        Returns:
-            None
-
-        Assumptions:
-            - Must only execute if `_installed` is currently evaluated as True.
-
-        Example:
-            >>> SubprocessSpy.uninstall()
-        """
+        """Revert monkey-patches to their original implementations."""
         if cls._installed:
             subprocess.Popen.__init__ = _original_popen_init
             subprocess.Popen.wait = _original_popen_wait
@@ -95,21 +68,7 @@ class SubprocessSpy:
         
     @classmethod
     def finalize_all(cls) -> None:
-        """
-        Scans all retained subprocess trace records and aggressively marks un-waited procedures as complete.
-
-        Args:
-            No arguments.
-
-        Returns:
-            None
-
-        Assumptions:
-            - If a subprocess exits out of band (e.g. detached), it technically completes capturing instantly without an explicit wait call.
-
-        Example:
-            >>> SubprocessSpy.finalize_all()
-        """
+        """Mark any un-waited subprocess records as complete."""
         now_ts = time.time()
         with cls._lock:
             for rec in cls._records:

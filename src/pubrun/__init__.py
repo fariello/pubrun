@@ -45,7 +45,7 @@ a robust explicit Python API for deep structural tracing.
    with pubrun.phase("gradient_descent"):
        train_model()
        
-   # Forcefully serialize the configuration and manifest natively to disk
+   # Serialize the configuration and manifest to disk
    tracker.stop()
 
 3. Synchronous Block Validation:
@@ -71,27 +71,35 @@ __credit__ = "Gabriele Fariello"
 __copyright__ = "Copyright 2026 Gabriele Fariello"
 
 
-def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
-    """
-    Explicitly inject an annotation event into the active JSON telemetry stream.
-    
-    This function bridges the gap between your custom ML application logic and the 
-    underlying `pubrun` tracking payload. If `pubrun` is actively watching, 
-    this will serialize your `message` along with any arbitrary keyword arguments 
-    straight into the temporal `events.jsonl` pipeline.
+def _handle_inactive(context: str) -> None:
+    """Check the on_inactive_annotate policy and raise/warn/ignore accordingly.
+
+    Called when annotate() or phase() is used with no active run.
 
     Args:
-        message (Optional[str], optional): The human-readable string flag to record. Defaults to None.
-        **kwargs: Any number of JSON-serializable key=value pairs to lock into the dataset payload.
+        context: Human-readable label for the error/warning message
+            (e.g. "pubrun.annotate()" or "pubrun.phase('training')").
+    """
+    from pubrun.config import resolve_config
+    action = resolve_config().get("events", {}).get("on_inactive_annotate", "ignore")
+    if action == "error":
+        raise RuntimeError(f"{context} called but no run is active.")
+    elif action == "warn":
+        logging.getLogger("pubrun").warning(f"{context} dropped: No active run.")
 
-    Returns:
-        None
 
-    Assumptions:
-        - If `pubrun` is largely disabled via ghost mode, annotations will simply be dropped silently unless configuration explicitly warns the user otherwise.
+def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
+    """Inject an annotation event into the active event stream.
+
+    If a run is active, the message and keyword arguments are written to
+    ``events.jsonl``.  If no run is active, behavior depends on the
+    ``[events].on_inactive_annotate`` config key ("ignore", "warn", or "error").
+
+    Args:
+        message: Optional human-readable label for the annotation.
+        **kwargs: Arbitrary JSON-serializable key-value pairs.
 
     Example:
-        >>> import pubrun
         >>> pubrun.annotate("Starting GPU Allocation")
         >>> pubrun.annotate("Model Configured", layers=50, optimizer="adamw")
     """
@@ -100,36 +108,26 @@ def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
         payload = kwargs.copy()
         current_run.event_stream.emit("annotation", name=message, payload=payload)
     else:
-        from pubrun.config import resolve_config
-        action = resolve_config().get("events", {}).get("on_inactive_annotate", "ignore")
-        if action == "error":
-            raise RuntimeError("pubrun.annotate() called but no run is active.")
-        elif action == "warn":
-            logging.getLogger("pubrun").warning(f"Annotation dropped: No active pubrun.")
+        _handle_inactive("pubrun.annotate()")
 
 
 def start(**kwargs: Any) -> Run:
-    """
-    Start tracking a new execution context.
-    
-    Initializes all telemetry sub-engines (like RAM watchers and Subprocess Spies) 
-    and generates a unique `.run_dir` for artifact storage. 
-    
-    You do NOT need to call this if `auto_start = true` inside `default.toml` or `PUBRUN_AUTO_START` is enabled.
+    """Start tracking a new execution context.
+
+    Creates a unique run directory and initializes all configured capture
+    engines.  Not needed when ``auto_start = true`` (the default).
+
+    If a run is already active, increments its reference count and merges
+    the new overrides into the existing configuration.
 
     Args:
-        **kwargs: Configuration overrides matching the pubrun configuration schema.
+        **kwargs: Configuration overrides (same keys as ``.pubrun.toml``).
 
     Returns:
-        Run: The active synchronization engine tracking your script natively.
-
-    Assumptions:
-        - Assuming filesystem write-access to create `./runs` locally.
+        The active ``Run`` instance.
 
     Example:
-        >>> import pubrun
         >>> tracker = pubrun.start(profile="deep")
-        >>> # DO ML WORK
         >>> tracker.stop()
     """
     active = get_current_run()
@@ -142,27 +140,11 @@ def start(**kwargs: Any) -> Run:
 
 
 def stop() -> None:
-    """
-    Manually culminate the active tracking session.
-    
-    This immediately flushes all internal caches to disk locally and generates the 
-    `manifest.json` report containing complete hardware specifications, Python runtime
-    status, and dependency profiles.
-    
-    If `pubrun` auto-started via dependency hook, this is invoked automatically 
-    when the Python interpretor exits.
+    """Stop the active tracking session and write artifacts to disk.
 
-    Args:
-        No arguments.
-
-    Returns:
-        None
-
-    Assumptions:
-        - Assuming a run was previously initialized and is currently active.
-
-    Example:
-        >>> pubrun.stop()
+    Flushes all capture engines, writes ``manifest.json`` and
+    ``config.resolved.json``.  Called automatically at interpreter exit
+    if auto-start is enabled.  Safe to call when no run is active.
     """
     current_run = get_current_run()
     if current_run:
@@ -170,19 +152,16 @@ def stop() -> None:
 
 
 def diff(run_dir_a: str, run_dir_b: str, ignores: Optional[list] = None) -> dict:
-    """
-    Programmatic entrypoint to dynamically execute a semantic diff natively across two traced payloads.
+    """Compare two run manifests and return a structured diff.
 
     Args:
-        run_dir_a (str): Directory referencing the baseline footprint.
-        run_dir_b (str): Directory referencing the target mutation footprint.
-        ignores (Optional[list]): Keys to selectively block from evaluation bounds. Defaults to canonical configuration if omitted.
+        run_dir_a: Path to the baseline run directory.
+        run_dir_b: Path to the comparison run directory.
+        ignores: Manifest keys to exclude from comparison.
+            Defaults to the ``[diff].ignore`` config list.
 
     Returns:
-        dict: A dynamically structured differential mapping natively reporting distinct additions, removals, and modifications securely.
-
-    Assumptions:
-        - Relies on internal hydration paths natively resolving dependencies cleanly.
+        Dict with ``added``, ``removed``, ``modified``, and ``same`` keys.
 
     Example:
         >>> delta = pubrun.diff("runs/A", "runs/B")
@@ -213,28 +192,20 @@ def diff(run_dir_a: str, run_dir_b: str, ignores: Optional[list] = None) -> dict
 
 
 def audit_run(func: Optional[Callable] = None, **kwargs: Any) -> Callable:
-    """
-    Wrap an entire Python function execution within an isolated pubrun boundary.
+    """Decorator that wraps a function in a pubrun tracking session.
 
-    This decorator initiates `pubrun` specifically as the function begins, 
-    intercepts any generic Exceptions (flagging the trace result as 'failed'), 
-    and then cleanly halts telemetry the exact moment the function ceases.
+    Starts a run before the function executes and stops it afterward.
+    If the function raises, the outcome is set to ``"failed"`` and the
+    exception is re-raised.
 
     Args:
-        func (Optional[Callable]): The function being wrapped natively by the decorator.
-        **kwargs: Runtime overrides modifying configuration states locally.
-
-    Returns:
-        Callable: The wrapped function mapping seamlessly into standard execution contexts.
-
-    Assumptions:
-        - We assume exceptions generated natively inside the wrapped block bubble up safely after the capture engine evaluates them.
+        func: The function to wrap (supplied automatically by Python).
+        **kwargs: Configuration overrides forwarded to ``start()``.
 
     Example:
         >>> @pubrun.audit_run(profile="deep")
-        >>> def heavy_computation_function():
-        >>>     perform_matrix_multiplication()
-        >>>     return True
+        ... def train():
+        ...     model.fit()
     """
     if func is None:
         def wrapper(f: Callable) -> Callable:
@@ -255,23 +226,14 @@ def audit_run(func: Optional[Callable] = None, **kwargs: Any) -> Callable:
 
 
 class tracked_run:
-    """
-    Context manager to surgically inject `pubrun` over a specific code footprint.
-
-    Allows isolated and distinct profiling for an explicitly delimited sequence of Python syntax.
+    """Context manager that wraps a code block in a pubrun tracking session.
 
     Args:
-        **kwargs: Natively forwarded runtime parameters mapped to the `pubrun` core engine.
-
-    Returns:
-        tracked_run: Safely returning the tracked iteration state inside `__enter__`.
-
-    Assumptions:
-        - Errors inside the Context Manager explicitly force a failed trace outcome before cleanly bubbling identically upward.
+        **kwargs: Configuration overrides forwarded to ``start()``.
 
     Example:
         >>> with pubrun.tracked_run(profile="minimal"):
-        >>>     model.train(epochs=5)
+        ...     model.train(epochs=5)
     """
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
@@ -290,25 +252,18 @@ class tracked_run:
 
 
 class phase:
-    """
-    Wrap execution steps into temporally labeled segments within the JSON tracker.
-    
-    If you are attempting to optimize distinct elements of an ML pipeline (e.g. Data Loading 
-    vs Gradient Descent), bounding each zone in a `phase()` natively writes boundary 
-    timestamps directly to `events.jsonl`.
+    """Context manager that emits ``phase_start``/``phase_end`` events.
+
+    Useful for timing distinct pipeline stages (e.g. data loading vs training).
+    Requires an active run to log events; behavior with no active run is
+    controlled by ``[events].on_inactive_annotate``.
 
     Args:
-        name (str): The specific semantic flag declaring explicitly what this phase is computing.
-
-    Returns:
-        phase: Natively yielded context manager structure for localized execution logic.
-
-    Assumptions:
-        - Requires an active `start()` tracker upstream to accurately log events.
+        name: Label for this phase (written to ``events.jsonl``).
 
     Example:
         >>> with pubrun.phase("data_ingestion"):
-        >>>     df = pd.read_csv("huge.csv")
+        ...     df = pd.read_csv("huge.csv")
     """
     def __init__(self, name: str) -> None:
         self.name = name
@@ -318,12 +273,7 @@ class phase:
         if self.run_tracker and getattr(self.run_tracker, "event_stream", None):
             self.run_tracker.event_stream.emit("phase_start", name=self.name)
         else:
-            from pubrun.config import resolve_config
-            action = resolve_config().get("events", {}).get("on_inactive_annotate", "ignore")
-            if action == "error":
-                raise RuntimeError(f"pubrun.phase('{self.name}') called but no run is active.")
-            elif action == "warn":
-                logging.getLogger("pubrun").warning(f"Phase '{self.name}' dropped: No active pubrun.")
+            _handle_inactive(f"pubrun.phase('{self.name}')")
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:

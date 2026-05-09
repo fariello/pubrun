@@ -29,45 +29,21 @@ _active_run: Optional["Run"] = None
 
 
 def get_current_run() -> Optional["Run"]:
-    """
-    Returns the globally active Run, if any.
-
-    Args:
-        No arguments.
-
-    Returns:
-        Optional["Run"]: The singleton tracking object currently bound to the environment, or None.
-
-    Assumptions:
-        - Thread safety for the global `_active_run` state natively relies on Python's GIL.
-
-    Example:
-        >>> get_current_run()
-        <pubrun.tracker.Run object at ...>
-    """
+    """Return the globally active Run instance, or None."""
     return _active_run
 
 
 class Run:
-    """
-    The core tracking object. Responsible for gathering mandatory base sections 
-    and generating the output structures cleanly.
-    """
+    """Core tracking object. Gathers capture data and produces manifest output."""
     def __init__(self, overrides: Optional[Dict[str, Any]] = None) -> None:
-        """
-        Initializes the globally active telemetry framework instance natively.
+        """Initialize and register the active run.
 
         Args:
-            overrides (Optional[Dict[str, Any]]): Hard-coded runtime configuration maps specifically overriding files.
+            overrides: Configuration overrides merged on top of resolved config.
 
-        Returns:
-            None
-
-        Assumptions:
-            - Ghost Mode takes precedence: If we lack permission to write out the target `runs` folder, we cleanly abort all tracing and silently allow the program to run untouched natively.
-
-        Example:
-            >>> Run(overrides={"profile": "deep"})
+        If the run directory cannot be created (e.g. read-only filesystem),
+        enters Ghost Mode: all capture is suppressed and the host script
+        continues unaffected.
         """
         global _active_run
         
@@ -92,7 +68,7 @@ class Run:
         base_dir_str = self.config.get("core", {}).get("output_dir", "")
         base_dir = Path(base_dir_str) if base_dir_str else Path.cwd() / "runs"
         
-        # Hydrate timezone string exclusively dynamically for directory legibility
+        # Format timezone for human-readable directory names
         dt = datetime.fromtimestamp(self.started_at_utc, tz=timezone.utc)
         timestamp_str = dt.strftime("%Y%m%dT%H%M%SZ")
         dir_name = f"pubrun-{self.script_name}-{timestamp_str}-{self.pid}-{self.run_id}"
@@ -186,10 +162,8 @@ class Run:
         _active_run = self
 
     def _merge_and_migrate(self, overrides: Dict[str, Any]) -> None:
-        """
-        Dynamically merges mid-execution configuration states cleanly. 
-        If footprint bounded directories change dynamically, applies shutil.move() safely.
-        """
+        """Merge new overrides into a running config. Migrates the run directory
+        if the output_dir changes."""
         if not overrides:
             return
             
@@ -210,7 +184,7 @@ class Run:
                     
                     if getattr(self, "event_stream", None):
                         self.event_stream.directory = new_dir
-                        self.event_stream.emit("warning", payload={"message": f"Storage tracking directory mutated mid-execution securely from {old_dir_str} to {new_dir}"})
+                        self.event_stream.emit("warning", payload={"message": f"Storage directory changed mid-execution from {old_dir_str} to {new_dir}"})
                         
                     if getattr(self, "console_interceptor", None) and hasattr(self.console_interceptor, "file_path"):
                         self.console_interceptor.file_path = new_dir / "console.log"
@@ -221,7 +195,7 @@ class Run:
                         
                 except Exception as e:
                     import logging
-                    logging.getLogger("pubrun").warning(f"Failed mutating runtime paths dynamically: {e}")
+                    logging.getLogger("pubrun").warning(f"Failed migrating runtime paths: {e}")
                 
         was_spying = self._spying_subprocesses
         will_spy = merged.get("capture", {}).get("subprocesses", {}).get("enabled", False)
@@ -233,21 +207,11 @@ class Run:
         self.config = merged
 
     def _finalize_state(self) -> None:
-        """
-        Called automatically natively prior to serialization to securely detach trace hooks.
+        """Shut down all capture engines and record the final outcome.
 
-        Args:
-            No arguments.
-
-        Returns:
-            None
-
-        Assumptions:
-            - If an active `sys.exc_info` natively flags an error inside the exit hook, we explicitly log the tracking framework outcome as `failed`.
-            - Idempotent: safe to call multiple times (guarded by _finalized flag).
-
-        Example:
-            >>> self._finalize_state()
+        Idempotent — safe to call multiple times (guarded by ``_finalized``).
+        If ``sys.exc_info()`` indicates an active exception, outcome is set
+        to ``"failed"``.
         """
         if self._finalized:
             return
@@ -276,27 +240,21 @@ class Run:
             self.event_stream.close()
 
     def stop(self, outcome: str = "completed") -> None:
-        """
-        Manually halt specifically executing active processes overriding native architecture closures.
+        """Stop tracking, finalize engines, and write artifacts.
 
         Args:
-            outcome (str): Pre-resolved result descriptor payload defining how the logic terminated.
+            outcome: Result label (``"completed"`` or ``"failed"``).
+                A ``"failed"`` outcome is sticky and cannot be overwritten.
 
-        Returns:
-            None
-
-        Assumptions:
-            - Resets the global memory registry internally decoupling the active tracer cleanly.
-
-        Example:
-            >>> tracker.stop("failed")
+        Decrements the reference count. Artifacts are written only when the
+        count reaches zero.
         """
         if self._outcome != "failed":
             self._outcome = outcome
             
         self.ref_count = getattr(self, "ref_count", 1) - 1
         if self.ref_count > 0:
-            return  # The tracer is still referenced by another bounded wrapper natively.
+            return  # Still referenced by an outer wrapper.
             
         self._finalize_state()
         if getattr(self, "writer", None):
@@ -307,21 +265,7 @@ class Run:
             _active_run = None
 
     def to_manifest_dict(self) -> Dict[str, Any]:
-        """
-        Constructs the canonical securely structured `manifest.json` completely natively.
-
-        Args:
-            No arguments.
-
-        Returns:
-            Dict[str, Any]: The fully formatted validation-compliant manifest object mapping.
-
-        Assumptions:
-            - Converts timezone-aware timestamps securely into explicit 'Z' suffix timestamps natively.
-
-        Example:
-            >>> self.to_manifest_dict()
-        """
+        """Build and return the complete ``manifest.json`` dictionary."""
         elapsed = None
         if self.ended_at_utc:
             elapsed = self.ended_at_utc - self.started_at_utc
