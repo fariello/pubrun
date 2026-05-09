@@ -51,13 +51,10 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str]) -> Dict[st
         val = var.get("value")
         if isinstance(val, dict): 
             val = val.get("value")
-            pass # for auto-indentation
             
         full_key = f"environment.{name}"
         if not any(full_key.startswith(ig) for ig in ignores):
             flat[full_key] = str(val) if val is not None else ""
-            pass # for auto-indentation
-        pass # for auto-indentation
 
     # 2. Package array explicitly mapped smoothly
     pkgs = manifest.get("packages", {}).get("records", [])
@@ -67,8 +64,6 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str]) -> Dict[st
         full_key = f"packages.{name}"
         if not any(full_key.startswith(ig) for ig in ignores):
             flat[full_key] = ver
-            pass # for auto-indentation
-        pass # for auto-indentation
 
     # 3. Everything Else natively drilled
     def _recruit(d: Dict[str, Any], prefix: str = "") -> None:
@@ -82,19 +77,13 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str]) -> Dict[st
                 
             if isinstance(v, dict):
                 _recruit(v, f"{full_key}.")
-                pass # for auto-indentation
             elif isinstance(v, list):
                 if not v:
                     flat[full_key] = "[]"
-                    pass # for auto-indentation
                 else:
                     flat[full_key] = str(v)
-                    pass # for auto-indentation
-                pass # for auto-indentation
             else:
                 flat[full_key] = v
-                pass # for auto-indentation
-            pass # for auto-indentation
 
     _recruit(manifest)
     return flat
@@ -124,11 +113,8 @@ def unflatten_manifest(flat_dict: Dict[str, Any]) -> Dict[str, Any]:
         for part in parts[:-1]:
             if part not in d:
                 d[part] = {}
-                pass # for auto-indentation
             d = d[part]
-            pass # for auto-indentation
         d[parts[-1]] = v
-        pass # for auto-indentation
     return result
 
 
@@ -170,10 +156,8 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Lis
         
         if k not in flat_a and k in flat_b:
             diff_report["added"][k] = val_b
-            pass # for auto-indentation
         elif k in flat_a and k not in flat_b:
             diff_report["removed"][k] = val_a
-            pass # for auto-indentation
         elif val_a != val_b:
             # The famous PATH Heuristic securely triggers here effectively
             if _is_path_var(k) and isinstance(val_a, str) and isinstance(val_b, str):
@@ -185,20 +169,15 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Lis
                     "added": sorted(list(parts_b - parts_a)),
                     "removed": sorted(list(parts_a - parts_b))
                 }
-                pass # for auto-indentation
             else:
                 diff_report["modified"][k] = {
                     "type": "standard",
                     "old": val_a,
                     "new": val_b
                 }
-                pass # for auto-indentation
         else:
             if show_same:
                 diff_report["same"][k] = val_a
-                pass # for auto-indentation
-            pass # for auto-indentation
-        pass # for auto-indentation
         
     return diff_report
 
@@ -232,5 +211,4 @@ def export_manifest(raw: Dict[str, Any], ignores: List[str], format_type: str) -
     lines = []
     for k in sorted(flat.keys()):
         lines.append(f"{k} = {flat[k]}")
-        pass # for auto-indentation
     return "\n".join(lines)

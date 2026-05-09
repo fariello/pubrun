@@ -2,9 +2,9 @@ import sys
 import shlex
 import hashlib
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
-def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
+def get_invocation(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Captures the comprehensive shell invocation ecosystem and script context.
     
@@ -37,6 +37,8 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
             'capture_state': {'status': 'complete'}
         }
     """
+    if config is None:
+        config = {}
     try:
         argv = sys.argv
         
@@ -77,26 +79,23 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
                     script_data["mtime"] = stats.st_mtime
                     script_data["ctime"] = stats.st_ctime
                 except Exception:
-                    pass # for auto-indentation
+                    pass
                 
                 # Try to hash the script file for exact reproducibility validation
                 try:
+                    sha = hashlib.sha256()
                     with open(real_path, "rb") as f:
-                        file_hash = hashlib.sha256(f.read()).hexdigest()
-                    script_data["sha256"] = file_hash
+                        for chunk in iter(lambda: f.read(8192), b""):
+                            sha.update(chunk)
+                    script_data["sha256"] = sha.hexdigest()
                 except Exception:
-                    pass # for auto-indentation
-                pass # for auto-indentation
+                    pass
             elif main_file == "-m":
                 entrypoint_type = "module"
-                pass # for auto-indentation
             elif main_file == "-c":
                 entrypoint_type = "interactive"
-                pass # for auto-indentation
-            pass # for auto-indentation
         else:
             entrypoint_type = "interactive"
-            pass # for auto-indentation
         
         # ---------------------------------------------------------
         # 3. Re-run Replication Engine
@@ -109,11 +108,9 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
             cwd_str = subprocess.list2cmdline([str(cwd)])
             # Multiline string perfectly bypasses all operator (&, &&, ;) ecosystem inconsistencies on Windows
             rerun_command = f"cd {cwd_str}\npython {escaped_args}"
-            pass # for auto-indentation
         else:
             escaped_args = shlex.join(argv) 
             rerun_command = f"cd {shlex.quote(str(cwd))} && python {escaped_args}"
-            pass # for auto-indentation
         
         # ---------------------------------------------------------
         # 4. sys.argv Dataset Discovery Heuristics
@@ -158,7 +155,7 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
                             arg_data["mtime"] = st.st_mtime
                             arg_data["ctime"] = st.st_ctime
                         except Exception:
-                            pass # for auto-indentation
+                            pass
                             
                         # DANGER ZONE: Deep Cryptographic Hash
                         if compute_md5 and po.is_file():
@@ -172,23 +169,31 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
                                 with open(po, "rb") as f:
                                     for chunk in iter(lambda: f.read(4096), b""):
                                         md5.update(chunk)
-                                        pass # for auto-indentation
                                 arg_data["md5"] = md5.hexdigest()
                             except Exception:
-                                pass # for auto-indentation
-                            pass # for auto-indentation
+                                pass
                                 
                         inputs_data.append(arg_data)
-                        pass # for auto-indentation
                 except Exception:
-                    pass # for auto-indentation
-                pass # for auto-indentation
-            pass # for auto-indentation
+                    pass
+
+        # Apply argv redaction before storing in the manifest
+        from pubrun.capture.redaction import redact_argv
+        redacted_argv = redact_argv(argv, config)
+
+        # Rebuild command_line and rerun_command from redacted argv
+        if sys.platform == "win32":
+            import subprocess as _sp
+            redacted_cmdline = _sp.list2cmdline(redacted_argv)
+            redacted_rerun = f"cd {_sp.list2cmdline([str(cwd)]) }\npython {redacted_cmdline}"
+        else:
+            redacted_cmdline = shlex.join(redacted_argv)
+            redacted_rerun = f"cd {shlex.quote(str(cwd))} && python {redacted_cmdline}"
 
         return {
-            "argv": argv,
-            "command_line": escaped_args,
-            "rerun_command": rerun_command,
+            "argv": redacted_argv,
+            "command_line": redacted_cmdline,
+            "rerun_command": redacted_rerun,
             "entrypoint_type": entrypoint_type,
             "script": script_data,
             "working_directory": wd_data,
@@ -200,4 +205,3 @@ def get_invocation(config: Dict[str, Any] = {}) -> Dict[str, Any]:
             "argv": sys.argv,
             "capture_state": {"status": "failed", "detail": str(e)}
         }
-        pass # for auto-indentation

@@ -51,18 +51,20 @@ def get_git(config: Dict[str, Any]) -> Dict[str, Any]:
             >>> _run_git(["status"])
         """
         try:
-            res = subprocess.run(
-                ["git"] + args, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE, 
-                timeout=1, 
-                text=True
-            )
+            from pubrun.capture.subprocesses import disable_spy
+            with disable_spy():
+                res = subprocess.run(
+                    ["git"] + args, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE, 
+                    timeout=1, 
+                    text=True
+                )
             if res.returncode == 0:
                 return res.stdout.strip()
         except Exception:
             # Gracefully silently fail on missing executable, permissions issues, or timeouts
-            pass # for auto-indentation
+            pass
         return None
 
     # 1. Establish we are genuinely operating inside a valid Git repository
@@ -74,7 +76,6 @@ def get_git(config: Dict[str, Any]) -> Dict[str, Any]:
                 "detail": "Not a git repository or git binary not installed"
             }
         }
-        pass # for auto-indentation
         
     # 2. Extract commit hash and symbolic reference (branch)
     commit = _run_git(["rev-parse", "HEAD"])

@@ -39,7 +39,7 @@ def get_environment(config: Dict[str, Any]) -> Dict[str, Any]:
     raw_env = dict(os.environ)
     
     # Send through the engine to destructively redact matching keys
-    variables = redact_env_vars(raw_env)
+    variables = redact_env_vars(raw_env, config)
     
     return {
         "mode": mode,

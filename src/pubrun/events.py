@@ -9,15 +9,17 @@ logger = logging.getLogger("pubrun")
 
 class EventStream:
     """
-    Manages the `events.jsonl` output cleanly, safely flushing every event natively 
+    Manages the `events.jsonl` output cleanly, safely flushing every event natively
     to disk rapidly so context isn't lost if the host script crashes or is OOM-killed.
     """
-    def __init__(self, run_dir: Path) -> None:
+    def __init__(self, run_dir: Path, config: Optional[Dict[str, Any]] = None) -> None:
         """
         Initializes the synchronous lock and opens the native file stream handle.
 
         Args:
             run_dir (Path): The natively resolved absolute path to the active run directory.
+            config (Optional[Dict[str, Any]]): The resolved pubrun configuration dictionary.
+                If None, resolves config internally (backwards-compatible fallback).
 
         Returns:
             None
@@ -27,14 +29,17 @@ class EventStream:
             - Safely swallows stream-init exceptions cleanly in ghost mode to avoid tracking crashes.
 
         Example:
-            >>> stream = EventStream(Path("/runs/pubrun-XYZ"))
+            >>> stream = EventStream(Path("/runs/pubrun-XYZ"), config)
         """
         self.stream_path = run_dir / "events.jsonl"
         self._lock = threading.Lock()
         self._event_count = 0
-        from pubrun.config import resolve_config
-        self._max_events = resolve_config().get("events", {}).get("max_tracked_events", 1_000_000)
-        
+
+        if config is None:
+            from pubrun.config import resolve_config
+            config = resolve_config()
+        self._max_events = config.get("events", {}).get("max_tracked_events", 1_000_000)
+
         try:
             # We keep the handle open in append mode for rapid high-frequency writes
             # typical in machine learning epochs.
@@ -42,7 +47,6 @@ class EventStream:
         except Exception as e:
             logger.debug(f"pubrun failed to open event stream: {e}")
             self._file = None
-            pass # for auto-indentation
 
     def emit(self, event_type: str, name: Optional[str] = None, payload: Optional[Dict[str, Any]] = None) -> None:
         """
@@ -57,45 +61,36 @@ class EventStream:
             None
 
         Assumptions:
-            - A thread lock prevents corruption during massively parallelized ML payloads.
+            - A single lock acquisition covers both the count check and the file write,
+              preventing out-of-order writes and count-budget overruns.
 
         Example:
             >>> stream.emit("annotation", "Step 1", {"loss": 0.5})
         """
         if not self._file:
             return
-            
+
         # Purely critical lifecycle events dynamically bypass the throttle threshold natively.
         is_critical = event_type in {"phase_started", "phase_ended", "exception_captured", "annotation"}
-            
-        with self._lock:
-            if not is_critical and self._event_count >= self._max_events:
-                return
-            self._event_count += 1
-            pass # for auto-indentation
-            
+
         record = {
             "timestamp_utc": time.time(),
             "type": event_type,
         }
         if name is not None:
             record["name"] = name
-            pass # for auto-indentation
         if payload is not None:
             record["payload"] = payload
-            pass # for auto-indentation
-            
+
         try:
             with self._lock:
-                # We double lock here since payload constructing is unlocked
-                if not is_critical and self._event_count > self._max_events: 
+                if not is_critical and self._event_count >= self._max_events:
                     return
+                self._event_count += 1
                 self._file.write(json.dumps(record) + "\n")
                 self._file.flush()
-                pass # for auto-indentation
         except Exception as e:
             logger.debug(f"pubrun event write failed: {e}")
-            pass # for auto-indentation
 
     def close(self) -> None:
         """
@@ -118,8 +113,6 @@ class EventStream:
                 with self._lock:
                     self._file.flush()
                     self._file.close()
-                    pass # for auto-indentation
             except Exception:
-                pass # for auto-indentation
+                pass
             self._file = None
-            pass # for auto-indentation

@@ -46,12 +46,10 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool) -> None:
     # ADDED
     for k, v in sorted(diff_report["added"].items()):
         print(f"{grn}+ [ADDED] {k}: {v}{rst}")
-        pass # for auto-indentation
 
     # REMOVED
     for k, v in sorted(diff_report["removed"].items()):
         print(f"{red}- [REMOVED] {k}: {v}{rst}")
-        pass # for auto-indentation
 
     # MODIFIED
     for k, mod in sorted(diff_report["modified"].items()):
@@ -61,18 +59,13 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool) -> None:
             # Heuristically split PATH layout natively
             for p_add in mod.get("added", []):
                 print(f"    {grn}+ {p_add}{rst}")
-                pass # for auto-indentation
             for p_sub in mod.get("removed", []):
                 print(f"    {red}- {p_sub}{rst}")
-                pass # for auto-indentation
-            pass # for auto-indentation
         else:
             old_val = mod.get("old", "")
             new_val = mod.get("new", "")
             print(f"    {red}- {old_val}{rst}")
             print(f"    {grn}+ {new_val}{rst}")
-            pass # for auto-indentation
-        pass # for auto-indentation
 
 
 def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool = False, max_length: int = 300) -> None:
@@ -103,7 +96,6 @@ def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool =
         from rich.panel import Panel
         from rich.text import Text
         from rich import box
-        pass # for auto-indentation
     except ImportError:
         print("\nNote: For beautiful side-by-side matrix comparisons, execute `pip install rich`.")
         _render_inline(diff_report, has_colors)
@@ -136,12 +128,10 @@ def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool =
     # Additions
     for k, v in sorted(diff_report["added"].items()):
         table.add_row(f"[bold green]+ {k}[/]", "", f"[green]{_fmt(v)}[/]")
-        pass # for auto-indentation
         
     # Removals
     for k, v in sorted(diff_report["removed"].items()):
         table.add_row(f"[bold red]- {k}[/]", f"[red]{_fmt(v)}[/]", "")
-        pass # for auto-indentation
         
     # Changes
     for k, mod in sorted(diff_report["modified"].items()):
@@ -153,19 +143,14 @@ def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool =
             left_col = "\n".join(left_strs) if left_strs else "[dim]No removals[/]"
             right_col = "\n".join(right_strs) if right_strs else "[dim]No additions[/]"
             table.add_row(f"[bold yellow]~ {k}[/]", left_col, right_col)
-            pass # for auto-indentation
         else:
             old_str = f"[yellow]{_fmt(mod.get('old', ''))}[/]"
             new_str = f"[yellow]{_fmt(mod.get('new', ''))}[/]"
             table.add_row(f"[bold yellow]~ {k}[/]", old_str, new_str)
-            pass # for auto-indentation
-        pass # for auto-indentation
         
     # Same
     for k, v in sorted(diff_report.get("same", {}).items()):
         formatted_val = f"[dim]{_fmt(v)}[/]"
         table.add_row(f"[dim white]= {k}[/]", formatted_val, formatted_val)
-        pass # for auto-indentation
         
     console.print(table)
-    pass # for auto-indentation

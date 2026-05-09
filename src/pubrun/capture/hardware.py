@@ -18,7 +18,6 @@ def _get_cpu_model() -> Optional[str]:
             lines = [l.strip() for l in out.splitlines() if l.strip()]
             if len(lines) >= 2:
                 return lines[1]
-            pass # for auto-indentation
         elif sys_plat == "darwin":
             out = subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"], text=True, stderr=subprocess.DEVNULL)
             return out.strip()
@@ -28,10 +27,6 @@ def _get_cpu_model() -> Optional[str]:
                     for line in f:
                         if line.startswith("model name"):
                             return line.split(":", 1)[1].strip()
-                        pass # for auto-indentation
-                    pass # for auto-indentation
-                pass # for auto-indentation
-            pass # for auto-indentation
     except Exception as e:
         logger.debug(f"pubrun failed to fetch CPU model: {e}")
     return None
@@ -47,7 +42,6 @@ def _get_total_memory_bytes() -> Optional[int]:
             lines = [l.strip() for l in out.splitlines() if l.strip()]
             if len(lines) >= 2:
                 return int(lines[1]) * 1024
-            pass # for auto-indentation
         elif sys_plat == "darwin":
             out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True, stderr=subprocess.DEVNULL)
             return int(out.strip())
@@ -59,14 +53,8 @@ def _get_total_memory_bytes() -> Optional[int]:
                             parts = line.split()
                             if len(parts) >= 2:
                                 return int(parts[1]) * 1024
-                            pass # for auto-indentation
-                        pass # for auto-indentation
-                    pass # for auto-indentation
-                pass # for auto-indentation
-            pass # for auto-indentation
     except Exception as e:
         logger.debug(f"pubrun failed to fetch Total RAM: {e}")
-        pass # for auto-indentation
     return None
 
 
@@ -97,10 +85,8 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
             }
             if len(parts) > 3 and parts[3].isdigit():
                 gpu_record["clock_speed_mhz"] = int(parts[3])
-                pass # for auto-indentation
                 
             gpus.append(gpu_record)
-            pass # for auto-indentation
             
     except Exception as e:
         # Will naturally trigger if nvidia-smi doesn't exist on PATH (meaning AMD/Intel/Apple)
@@ -124,17 +110,12 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
                             mem = int(parts[1])
                             if mem < 0:
                                 mem = mem & 0xFFFFFFFF # wmic sometimes overflows to negative int32
-                                pass # for auto-indentation
-                            pass # for auto-indentation
                         gpus.append({
                             "vendor": "Generic",      # Hard to reliably map Name to vendor without heuristic mapping
                             "model": parts[3],
                             "memory_total_bytes": mem,
                             "driver_version": parts[2]
                         })
-                        pass # for auto-indentation
-                    pass # for auto-indentation
-                pass # for auto-indentation
             elif sys_plat == "darwin":
                 # system_profiler SPDisplaysDataType provides Apple Silicon GPU core counts basically
                 out = subprocess.check_output(["system_profiler", "SPDisplaysDataType"], text=True, stderr=subprocess.DEVNULL)
@@ -143,19 +124,12 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
                     line = line.strip()
                     if line.startswith("Chipset Model:"):
                         gpu_rec["model"] = line.split(":")[1].strip()
-                        pass # for auto-indentation
                     elif line.startswith("VRAM (Total):"):
                         gpu_rec["memory_total_bytes"] = None # M-series shares with main memory
-                        pass # for auto-indentation
-                    pass # for auto-indentation
                 if "model" in gpu_rec:
                     gpus.append(gpu_rec)
-                    pass # for auto-indentation
-                pass # for auto-indentation
-            pass # for auto-indentation
         except Exception as e:
             logger.debug(f"pubrun generic GPU fallback failed: {e}")
-            pass # for auto-indentation
             
     return gpus
 
@@ -192,7 +166,6 @@ def get_hardware(config: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "capture_state": {"status": "suppressed", "detail": "Hardware depth set to off."}
         }
-        pass # for auto-indentation
         
     try:
         # Standard fast extractions
@@ -216,4 +189,3 @@ def get_hardware(config: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "capture_state": {"status": "failed", "detail": str(e)}
         }
-        pass # for auto-indentation

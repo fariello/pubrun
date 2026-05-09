@@ -38,7 +38,6 @@ def get_process_info(config: Dict[str, Any]) -> Dict[str, Any]:
         username = getpass.getuser()
     except Exception:
         username = "unknown"
-        pass # for auto-indentation
         
     # 2. Extract UID/GID if supported by the OS (Unix/Linux/macOS)
     uid = getattr(os, 'getuid', lambda: None)()

@@ -47,11 +47,9 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
     meta_ref = manifest.get("meta_ref")
     if meta_ref:
         print(f"Parent : {meta_ref}")
-        pass # for auto-indentation
         
     for w in warnings:
         print(f"\n[WARNING] {w}")
-        pass # for auto-indentation
     
     print("\n--- Basic Information ---")
     run = manifest.get("run", {})
@@ -70,7 +68,6 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
     print(f"Started     : {start_str}")
     if timing.get("elapsed_seconds"):
         print(f"Elapsed     : {timing.get('elapsed_seconds')}s")
-        pass # for auto-indentation
         
     # Read Events if available
     events_path = Path(manifest_path).parent / "events.jsonl"
@@ -88,8 +85,6 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
                         first_events.append(line)
                     else:
                         last_events.append(line)
-                        pass # for auto-indentation
-                        pass # for auto-indentation
                         
                 def _print_ev(raw_line: str) -> None:
                     e = json.loads(raw_line)
@@ -99,22 +94,16 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
                     
                 for line in first_events:
                     _print_ev(line)
-                    pass # for auto-indentation
                     
                 if total_events > 40:
                     print(f"  ... [ {total_events - 40} events logically truncated ] ...")
-                    pass # for auto-indentation
                     
                 if total_events > 20:
                     # Render the remaining tail natively
                     for line in last_events:
                         _print_ev(line)
-                        pass # for auto-indentation
-                    pass # for auto-indentation
         except Exception:
             print("  (Events file corrupt or unreadable)")
-            pass # for auto-indentation
-        pass # for auto-indentation
         
     if depth == "basic":
         print()
@@ -137,10 +126,8 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
     py_ver = python.get("version", "")
     if py_ver:
         v_tag = py_ver.split()[0]
-        pass # for auto-indentation
     else:
         v_tag = "unknown"
-        pass # for auto-indentation
     print(f"Python      : {python.get('executable')} (v{v_tag})")
     
     print(f"Host        : {host.get('os_name')} {host.get('os_version')} ({cpu_model}, {ram_gb} GB RAM)")
@@ -149,10 +136,8 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
     if commit:
         remote = git.get("remote_url", {}).get("value", "unknown origin")
         print(f"Git Commit  : {commit[:8]} ({remote})")
-        pass # for auto-indentation
     else:
         print("Git Commit  : Not found or un-tracked")
-        pass # for auto-indentation
         
     print(f"Packages    : {len(pkgs)} recorded")
     print(f"Env Vars    : {len(envs)} explicitly captured")
@@ -170,39 +155,30 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
         try:
             with open(cfg_path, "r", encoding="utf-8") as cf:
                 cfg = json.load(cf)
-                pass # for auto-indentation
             print("\n[ Overridden Configurations ]")
             print(f"  Profile: {cfg.get('core', {}).get('profile')}")
             print(f"  Inputs Mode: {cfg.get('capture', {}).get('inputs', {}).get('enabled')}")
             print(f"  Packages Mode: {cfg.get('capture', {}).get('packages', {}).get('mode')}")
         except Exception:
-            pass # for auto-indentation
-        pass # for auto-indentation
+            pass
 
     print("\n[ Environment Variables ]")
     if not envs:
         print("  (None captured)")
-        pass # for auto-indentation
     for var in envs:
         name = var.get("name")
         val_obj = var.get("value", {})
         if isinstance(val_obj, dict) and "representation" in val_obj:
             if val_obj["representation"] == "plain":
                 print(f"  {name}={val_obj.get('value', '')}")
-                pass # for auto-indentation
             else:
                 print(f"  {name}=<{val_obj['representation'].upper()}>")
-                pass # for auto-indentation
-            pass # for auto-indentation
         else:
             print(f"  {name}={val_obj}")
-            pass # for auto-indentation
-        pass # for auto-indentation
             
     print("\n[ Packages ]")
     if not pkgs:
         print("  (None captured)")
-        pass # for auto-indentation
     
     for i, p in enumerate(pkgs):
         name = p.get('name')
@@ -210,25 +186,24 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
         print(f"{name}=={ver}".ljust(30), end="")
         if (i + 1) % 3 == 0:
             print()
-            pass # for auto-indentation
-        pass # for auto-indentation
     if len(pkgs) % 3 != 0:
         print()
-        pass # for auto-indentation
         
     subprocs = manifest.get("subprocesses", [])
     print(f"\n[ Subprocesses ] ({len(subprocs)} executed)")
     for sp in subprocs:
-        cmd = sp.get("command", [])
+        cmd = sp.get("argv", [])
         if isinstance(cmd, list):
             cmd_str = " ".join(str(c) for c in cmd)
-            pass # for auto-indentation
         else:
             cmd_str = str(cmd)
-            pass # for auto-indentation
-        rc = sp.get("return_code")
-        elapsed = sp.get("timing", {}).get("elapsed_seconds")
-        print(f"  [{rc}] {cmd_str} ({elapsed}s)")
-        pass # for auto-indentation
+        rc = sp.get("exit_code")
+        started = sp.get("started_at_utc")
+        ended = sp.get("ended_at_utc")
+        if started and ended:
+            elapsed = round(ended - started, 3)
+            print(f"  [{rc}] {cmd_str} ({elapsed}s)")
+        else:
+            print(f"  [{rc}] {cmd_str}")
         
     print()

@@ -30,8 +30,6 @@ def extract_highlighted_packages(manifest: Dict[str, Any]) -> List[str]:
         if name in HIGHLIGHT_PACKAGES:
             version = record.get("version", "unknown")
             found.append(f"{name} (v{version})")
-            pass # for auto-indentation
-        pass # for auto-indentation
     return found
 
 def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> str:
@@ -52,13 +50,11 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
         >>> text = generate_report(manifest_dict, "markdown")
     """
     # Hardware
-    os_name = "an unknown OS"
-    env_vars = manifest.get("environment", {}).get("variables", [])
-    for v in env_vars:
-        if v.get("name") == "OS":
-            os_name = str(v.get("value", {}).get("value", os_name)).replace("_", "\\_" if format_type == "latex" else "_")
-            break
-        pass # for auto-indentation
+    # OS name — use the host capture data, not the Windows-only OS env var
+    host = manifest.get("host", {})
+    os_name = host.get("os_name", "an unknown OS")
+    if format_type == "latex":
+        os_name = os_name.replace("_", "\\_")
     hw = manifest.get("hardware", {})
     cpu_model = hw.get("cpu", {}).get("model", "unknown CPU")
     ram_gb = bytes_to_gb(hw.get("memory_total_bytes", 0))
@@ -72,22 +68,18 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
     git = manifest.get("git", {})
     git_commit = git.get("commit", "unknown")
     if not git_commit: git_commit = "unavailable"
-    pass # for auto-indentation
     
     remote = git.get("remote_url", {}).get("value")
     git_repo_text = f" (origin: {remote})" if remote else ""
     if format_type == "latex":
         git_repo_text = git_repo_text.replace("_", "\\_")
-        pass # for auto-indentation
     
     # Packages
     packages = extract_highlighted_packages(manifest)
     if packages:
         packages_text = f"Key dependencies explicitly tracked include {', '.join(packages)}."
-        pass # for auto-indentation
     else:
         packages_text = "Standard library dependencies were utilized."
-        pass # for auto-indentation
         
     template = LATEX_TEMPLATE if format_type == "latex" else MARKDOWN_TEMPLATE
     

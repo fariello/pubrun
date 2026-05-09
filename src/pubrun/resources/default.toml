@@ -75,16 +75,29 @@ on_inactive_annotate = "ignore"
 # Security policies to ensure secrets are never leaked into your manifest files.
 # -----------------------------------------------------------------------------
 
-# A regular expression pattern used to detect sensitive variables in your environment, 
+# A regular expression pattern used to detect sensitive variables in your environment,
 # CLI arguments, or runtime configurations. Matching keys will be intercepted.
-sensitive_keys_regex = "(?i)(password|secret|token|api_key|credentials|key)"
+# Covers: passwords, secrets, tokens, API keys, auth credentials, private keys,
+# database connection strings (DATABASE_URL, DSN, CONN_STR), bearer tokens,
+# and signing keys.
+sensitive_keys_regex = "(?i)(password|secret|token|api_key|key|auth|cred|private|conn_str|connection_string|database_url|dsn|signing|bearer)"
 
 # Determines how detected sensitive values are masked before being written to disk.
 # Supported methods:
 #   "redacted" - The raw value is entirely replaced with a generic [REDACTED] string.
-#   "hashed"   - The raw value is passed through a one-way secure hash (e.g., SHA-256) 
+#   "hashed"   - The raw value is passed through a one-way secure hash (e.g., SHA-256)
 #                so you can verify if a password changed across runs without seeing it.
 representation = "redacted"
+
+# Whether to redact matching environment variable values in the manifest.
+# Set to false if you need full environment visibility and accept the risk.
+env_enabled = true
+
+# Whether to redact matching CLI argument values in sys.argv and subprocess argv
+# records stored in the manifest. Applies to both --flag=value and --flag VALUE
+# patterns where the flag name matches the sensitive_keys_regex.
+# Set to false if you need exact command reproducibility and accept the risk.
+argv_enabled = true
 
 
 [capture]
