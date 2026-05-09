@@ -40,10 +40,18 @@ def hydrate_manifest(manifest_path: str, manifest: Dict[str, Any]) -> Tuple[Dict
         # Resolve it securely
         meta_path = meta_path.resolve()
         
-        # Sandbox constraint to prevent Arbitrary File Read attempts
+        # Sandbox check: warn (but don't block) if meta_ref points outside the manifest dir.
+        # HPC workflows legitimately reference shared parent meta.json files.
         if not meta_path.name.endswith(".json"):
             warnings.append(f"Security Sandbox Triggered: meta_ref '{meta_ref}' does not point to a valid .json snapshot file.")
             return manifest, warnings
+
+        try:
+            if not meta_path.is_relative_to(manifest_dir.resolve()):
+                warnings.append(f"meta_ref '{meta_ref}' resolves outside the run directory to '{meta_path}'. Verify this is intentional.")
+        except (TypeError, AttributeError):
+            # is_relative_to not available before Python 3.9; skip check
+            pass
         
         if not meta_path.exists():
             warnings.append(f"Linked Parent Meta Snapshot '{meta_ref}' not found at {meta_path}. The diagnostic output will lack deep dependencies.")
@@ -51,7 +59,6 @@ def hydrate_manifest(manifest_path: str, manifest: Dict[str, Any]) -> Tuple[Dict
             
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
-            pass # for auto-indentation
             
         # 1. Evaluate Drift (Script MTime vs Meta Generation Time)
         child_script_mtime = manifest.get("invocation", {}).get("script", {}).get("mtime")
@@ -62,11 +69,8 @@ def hydrate_manifest(manifest_path: str, manifest: Dict[str, Any]) -> Tuple[Dict
                 # Direct float comparison for Epoch offsets
                 if child_script_mtime > parent_snap_started:
                     warnings.append(f"Drift Detected: The script was modified after the parent meta.json snapshot was tracking structurally. Deep dependencies may be severely out of sync.")
-                    pass # for auto-indentation
             except Exception as e:
                 logger.debug(f"Failed to parse datetime for drift resolution: {e}")
-                pass # for auto-indentation
-            pass # for auto-indentation
                 
         # 2. Dynamic Hydration
         # We natively merge heavy global context blocks ONLY if the child run suppressed them.
@@ -78,9 +82,6 @@ def hydrate_manifest(manifest_path: str, manifest: Dict[str, Any]) -> Tuple[Dict
                     manifest[sec] = meta[sec]
                     # Decorate the manifest node to visually indicate it was sourced from the parent
                     manifest[sec]["is_hydrated"] = True
-                    pass # for auto-indentation
-                pass # for auto-indentation
-            pass # for auto-indentation
                     
         return manifest, warnings
             

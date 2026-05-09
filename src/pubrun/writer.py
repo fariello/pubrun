@@ -51,7 +51,6 @@ class ArtifactWriter:
         if not self._registered:
             atexit.register(self.write_artifacts)
             self._registered = True
-            pass # for auto-indentation
 
     def write_artifacts(self) -> None:
         """
@@ -70,7 +69,8 @@ class ArtifactWriter:
             >>> writer.write_artifacts()
         """
         try:
-            # 1. Finalize temporal state (end time, outcome)
+            # Finalize has already been called by stop() — the _finalized guard
+            # makes this safe even if atexit triggers write_artifacts directly.
             self.run._finalize_state()
 
             out_dir: Path = self.run.run_dir
@@ -80,13 +80,11 @@ class ArtifactWriter:
             manifest_path = out_dir / "manifest.json"
             with open(manifest_path, "w", encoding="utf-8") as f:
                 json.dump(self.run.to_manifest_dict(), f, indent=2)
-                pass # for auto-indentation
 
             # 3. Write config.resolved.json
             config_path = out_dir / "config.resolved.json"
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(self.run.config, f, indent=2)
-                pass # for auto-indentation
 
             # 4. Write methods.md or methods.tex (Automated publication generation)
             try:
@@ -97,14 +95,11 @@ class ArtifactWriter:
                 methods_path = out_dir / f"methods.{ext}"
                 with open(methods_path, "w", encoding="utf-8") as f:
                     f.write(generate_report(self.run.to_manifest_dict(), methods_format))
-                    pass # for auto-indentation
             except Exception as report_err:
                 logger.debug(f"Methods generation failed: {report_err}")
-                pass # for auto-indentation
 
         except Exception as e:
             # The golden rule: pubrun never crashes the host script.
             import traceback
             traceback.print_exc()
             logger.debug(f"pubrun failed to write execution artifacts: {e}")
-            pass # for auto-indentation

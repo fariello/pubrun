@@ -68,23 +68,23 @@ class TqdmSafeTee:
             
         try:
             # 2. Process strings for log file safely (handling carriage returns aka TQDM interception)
-            for char in data:
-                if char == '\r':
-                    # Progress bar carriage return - dump the line buffer invisibly
+            # Split on \r first to squash progress bar redraws, then process \n for line breaks.
+            segments = data.split('\r')
+            for i, segment in enumerate(segments):
+                if i > 0:
+                    # A \r was encountered — discard the current buffer (progress bar redraw)
                     self._current_buffer = ""
-                    pass # for auto-indentation
-                elif char == '\n':
-                    self.log_file.write(self._current_buffer + '\n')
-                    self.line_count += 1
-                    self._current_buffer = ""
-                    pass # for auto-indentation
-                else:
-                    self._current_buffer += char
-                    pass # for auto-indentation
-                pass # for auto-indentation
+                lines = segment.split('\n')
+                # All but the last piece end with \n
+                for j, line in enumerate(lines):
+                    if j < len(lines) - 1:
+                        self.log_file.write(self._current_buffer + line + '\n')
+                        self.line_count += 1
+                        self._current_buffer = ""
+                    else:
+                        self._current_buffer += line
         except Exception as e:
             logger.debug(f"pubrun tee internal error: {e}")
-            pass # for auto-indentation
             
         return ret
         
@@ -111,9 +111,7 @@ class TqdmSafeTee:
                 self.log_file.write(self._current_buffer + '\n')
                 self.line_count += 1
                 self._current_buffer = ""
-                pass # for auto-indentation
             self.log_file.flush()
-            pass # for auto-indentation
             
     def __getattr__(self, name: str) -> Any:
         """
@@ -206,11 +204,9 @@ class ConsoleInterceptor:
             
             self.stderr_tee = TqdmSafeTee(sys.stderr, self.stderr_log)
             sys.stderr = self.stderr_tee
-            pass # for auto-indentation
         except Exception as e:
             logger.debug(f"pubrun failed to intercept console: {e}")
             self.stop() # rollback
-            pass # for auto-indentation
 
     def stop(self) -> Dict[str, Any]:
         """
@@ -238,20 +234,16 @@ class ConsoleInterceptor:
         if self.stdout_tee:
             self.stdout_tee.flush()
             lines_out = self.stdout_tee.line_count
-            pass # for auto-indentation
         if self.stderr_tee:
             self.stderr_tee.flush()
             lines_err = self.stderr_tee.line_count
-            pass # for auto-indentation
             
         if self.stdout_log:
             self.stdout_log.close()
             self.stdout_log = None
-            pass # for auto-indentation
         if self.stderr_log:
             self.stderr_log.close()
             self.stderr_log = None
-            pass # for auto-indentation
             
         return {
             "capture_mode": self.mode,

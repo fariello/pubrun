@@ -52,12 +52,8 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
                             "location": None, 
                             "editable": None
                         })
-                        pass # for auto-indentation
                     except importlib.metadata.PackageNotFoundError:
                         continue
-                    pass # for auto-indentation
-                pass # for auto-indentation
-            pass # for auto-indentation
         else: 
             # Extract across the full isolated environment or top-level list
             for dist in importlib.metadata.distributions():
@@ -71,10 +67,8 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
                     direct_url = dist.read_text("direct_url.json")
                     if direct_url and "dir_info" in direct_url:
                         editable = True
-                        pass # for auto-indentation
-                    pass # for auto-indentation
                 except Exception:
-                    pass # for auto-indentation
+                    pass
                     
                 records.append({
                     "name": name,
@@ -82,12 +76,8 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
                     "location": location,
                     "editable": editable
                 })
-                pass # for auto-indentation
-            pass # for auto-indentation
-        pass # for auto-indentation
     except Exception:
         status = "partial"
-        pass # for auto-indentation
         
     return {
         "mode": mode,

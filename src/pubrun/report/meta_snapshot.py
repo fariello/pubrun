@@ -76,9 +76,7 @@ def generate_meta_snapshot(output_path: str, depth: str) -> None:
     py_ver = python_env.get("version", "")
     if py_ver:
         v_tag = py_ver.split()[0]
-        pass # for auto-indentation
     else:
         v_tag = "unknown"
-        pass # for auto-indentation
     print(f"Python Runtime : v{v_tag}")
     print(f"Hardware       : {hardware.get('cpu', {}).get('model', 'unknown')}")

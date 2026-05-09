@@ -118,14 +118,12 @@ def _run_methods(run_dir: str, format_type: str) -> None:
 
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
-            pass # for auto-indentation
             
         # Hydrate to retrieve deep HPC packages/hardware natively if minimal trace
         manifest, warnings = hydrate_manifest(manifest_path, manifest)
         if warnings:
             for w in warnings:
                 print(f"[WARNING] {w}", file=sys.stderr)
-                pass # for auto-indentation
         
         # Dispatch to structural compilers
         text = generate_report(manifest, format_type)
@@ -162,7 +160,6 @@ def _run_rerun(run_dir: str) -> None:
         manifest_path = _get_manifest_path(run_dir)
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
-            pass # for auto-indentation
             
         inv = manifest.get("invocation", {})
         rerun_cmd = inv.get("rerun_command")
@@ -170,9 +167,7 @@ def _run_rerun(run_dir: str) -> None:
         if rerun_cmd:
             if sys.platform == "win32" and "&& python " in rerun_cmd:
                 rerun_cmd = rerun_cmd.replace(" && python ", "\npython ").replace("'", '"')
-                pass # for auto-indentation
             print(rerun_cmd)
-            pass # for auto-indentation
         else:
             print("Error: Target manifest does not contain a valid 'rerun_command' payload.", file=sys.stderr)
             sys.exit(1)
@@ -215,30 +210,24 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
 
         with open(manifest_path_a, "r", encoding="utf-8") as f:
             manifest_a = json.load(f)
-            pass # for auto-indentation
 
         with open(manifest_path_b, "r", encoding="utf-8") as f:
             manifest_b = json.load(f)
-            pass # for auto-indentation
 
         manifest_a, warn_a = hydrate_manifest(manifest_path_a, manifest_a)
         manifest_b, warn_b = hydrate_manifest(manifest_path_b, manifest_b)
 
         for w in (warn_a or []) + (warn_b or []):
             print(f"[WARNING] {w}", file=sys.stderr)
-            pass # for auto-indentation
 
         conf = resolve_config().get("diff", {})
         
         if depth == "basic":
             ignores = conf.get("ignore_basic", [])
-            pass # for auto-indentation
         elif depth == "standard":
             ignores = conf.get("ignore_standard", [])
-            pass # for auto-indentation
         else:
             ignores = conf.get("ignore_deep", [])
-            pass # for auto-indentation
             
         ss_target = show_same if show_same is not None else conf.get("show_same", False)
 
@@ -260,13 +249,11 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
 
             print(f"[OK] Successfully exported semantic baseline A to: {out_a}")
             print(f"[OK] Successfully exported semantic target B to: {out_b}")
-            pass # for auto-indentation
         else:
             diff_report = compare_manifests(manifest_a, manifest_b, ignores, show_same=ss_target)
             wrap_target = wrap_config if wrap_config is not None else conf.get("wrap", True)
             mlen_target = max_length if max_length is not None else conf.get("max_string_length", 300)
             print_diff(diff_report, no_color=no_color, wrap=wrap_target, max_length=mlen_target)
-            pass # for auto-indentation
 
     except Exception as e:
         print(f"Failed to generate differential report: {e}", file=sys.stderr)
@@ -347,16 +334,12 @@ def _run_cite(style: str) -> None:
     style = style.lower()
     if style == "apa":
         print("Fariello, G. (2026). pubrun [Computer software]. https://github.com/gfariello/pubrun")
-        pass # for auto-indentation
     elif style == "mla":
         print("Fariello, Gabriele. pubrun. 2026. GitHub, https://github.com/gfariello/pubrun.")
-        pass # for auto-indentation
     elif style == "chicago":
         print('Fariello, Gabriele. 2026. "pubrun". https://github.com/gfariello/pubrun.')
-        pass # for auto-indentation
     elif style == "bibtex":
         print("@software{pubrun2026,\n  author = {Gabriele Fariello},\n  title = {pubrun},\n  url = {https://github.com/gfariello/pubrun},\n  year = {2026}\n}")
-        pass # for auto-indentation
     else:
         print(f"Error: Unknown citation style '{style}'. Supported styles: apa, mla, chicago, bibtex.", file=sys.stderr)
         sys.exit(1)
@@ -420,7 +403,6 @@ def _run_tests() -> None:
             subprocess.run(["python", "-m", "pytest", "tests/", "-q"])
         except Exception:
             print("[WARN] PyTest execution failed.")
-            pass # for auto-indentation
             
     print("\n[*] Executing Native End-to-End Mock Script...")
     MOCK_SCRIPT = """
@@ -480,7 +462,7 @@ print('Mock Training Complete.')
             print(f"[OK] Subprocess Monkeypatch captured {len(rcs)} internal shell commands seamlessly.")
             print(f"[OK] Architecture Validated. Tracking context generated efficiently.")
         except Exception as e:
-            pass # for auto-indentation
+            pass
 
 
 def main() -> None:
@@ -584,9 +566,7 @@ def main() -> None:
         for idx, rd in enumerate(runs):
             if idx > 0:
                 print("\n")
-                pass # for auto-indentation
             _run_report(rd, args.depth)
-            pass # for auto-indentation
         executed = True
 
     elif args.command == "methods":
@@ -635,18 +615,14 @@ def main() -> None:
             if choice == "2":
                 from pubrun.config import get_global_config_dir
                 dest = str(get_global_config_dir() / "config.toml")
-                pass # for auto-indentation
             elif choice in ["1", ""]:
                 dest = ".pubrun.toml"
-                pass # for auto-indentation
             else:
                 print("Invalid selection. Exiting.", file=sys.stderr)
                 sys.exit(1)
-            pass # for auto-indentation
             
         _create_config(dest)
         executed = True
-        pass # for auto-indentation
         
     if getattr(args, "show_config", False):
         import importlib.resources
@@ -657,28 +633,21 @@ def main() -> None:
             from rich.syntax import Syntax
             console = Console()
             console.print(Syntax(content, "toml", theme="monokai", line_numbers=True, padding=1))
-            pass # for auto-indentation
         except ImportError:
             print(content)
-            pass # for auto-indentation
         executed = True
-        pass # for auto-indentation
 
     if getattr(args, "info", False):
         _show_info()
         executed = True
-        pass # for auto-indentation
         
     if getattr(args, "run_tests", False):
         _run_tests()
         executed = True
-        pass # for auto-indentation
 
     if not executed:
         parser.print_help()
-        pass # for auto-indentation
 
 
 if __name__ == "__main__":
     main()
-    pass # for auto-indentation

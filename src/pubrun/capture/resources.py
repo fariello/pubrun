@@ -24,7 +24,6 @@ def _get_rss_windows() -> int:
             return int(lines[1])
     except Exception as e:
         logger.debug(f"pubrun failed Windows RSS poll: {e}")
-        pass # for auto-indentation
     return 0
 
 
@@ -99,7 +98,6 @@ class ResourceWatcher(threading.Thread):
         
         while not self._stop_event.wait(timeout=self.interval):
             self._update_metrics()
-            pass # for auto-indentation
 
     def _poll_cpu(self) -> float:
         try:
@@ -114,7 +112,6 @@ class ResourceWatcher(threading.Thread):
                 
                 if wall_delta > 0:
                     cpu_pct = ((user_delta + sys_delta) / wall_delta) * 100.0
-                    pass # for auto-indentation
                     
             self._last_times = current_times
             self._last_clock = current_clock
@@ -133,25 +130,18 @@ class ResourceWatcher(threading.Thread):
             self._consecutive_failures = 0
             if rss > self.peak_rss_bytes:
                 self.peak_rss_bytes = rss
-                pass # for auto-indentation
             updated = True
-            pass # for auto-indentation
         else:
             self._consecutive_failures += 1
             if self._consecutive_failures >= self.max_failures:
                 self._stop_event.set() # Soft-abort the daemon purely for safety; OS hook is broken.
-                pass # for auto-indentation
-            pass # for auto-indentation
             
         if cpu_pct > self.peak_cpu_percent:
             self.peak_cpu_percent = cpu_pct
-            pass # for auto-indentation
             
         if updated or cpu_pct > 0:
             if getattr(self.run_tracker, "event_stream", None):
                 self.run_tracker.event_stream.emit("resource_sample", payload={"rss_bytes": rss, "cpu_percent": cpu_pct})
-                pass # for auto-indentation
-            pass # for auto-indentation
 
     def stop(self) -> None:
         """
@@ -175,7 +165,6 @@ class ResourceWatcher(threading.Thread):
         self.end_rss_bytes = self._poll_rss()
         if self.end_rss_bytes > self.peak_rss_bytes:
             self.peak_rss_bytes = self.end_rss_bytes
-            pass # for auto-indentation
 
     def to_manifest_dict(self) -> Dict[str, Any]:
         """

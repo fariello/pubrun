@@ -1,3 +1,4 @@
+import copy
 import os
 import sys
 from pathlib import Path
@@ -34,15 +35,12 @@ def _deep_merge(dict1: Dict[str, Any], dict2: Dict[str, Any]) -> Dict[str, Any]:
         >>> _deep_merge({"core": {"a": 1}}, {"core": {"b": 2}})
         {"core": {"a": 1, "b": 2}}
     """
-    result = dict1.copy()
+    result = copy.deepcopy(dict1)
     for key, value in dict2.items():
         if isinstance(value, dict) and key in result and isinstance(result[key], dict):
             result[key] = _deep_merge(result[key], value)
-            pass # for auto-indentation
         else:
             result[key] = value
-            pass # for auto-indentation
-        pass # for auto-indentation
     return result
 
 
@@ -78,7 +76,6 @@ def get_global_config_dir() -> Path:
         appdata = os.environ.get("APPDATA")
         if appdata:
             return Path(appdata) / "pubrun"
-        pass # for auto-indentation
     config_dir = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
     return Path(config_dir) / "pubrun"
 
@@ -125,7 +122,6 @@ def load_local_config(start_dir: Optional[Path] = None) -> Optional[Dict[str, An
     """
     if start_dir is None:
         start_dir = Path.cwd()
-        pass # for auto-indentation
         
     merged = {}
     
@@ -133,13 +129,11 @@ def load_local_config(start_dir: Optional[Path] = None) -> Optional[Dict[str, An
     deep_path = start_dir / ".config" / "pubrun" / "config.toml"
     if deep_path.is_file():
         merged = _deep_merge(merged, tomllib.loads(deep_path.read_text(encoding="utf-8")))
-        pass # for auto-indentation
         
     # Highly explicit root footprint directly mapping local states
     root_path = start_dir / ".pubrun.toml"
     if root_path.is_file():
         merged = _deep_merge(merged, tomllib.loads(root_path.read_text(encoding="utf-8")))
-        pass # for auto-indentation
         
     return merged if merged else None
 
@@ -174,17 +168,14 @@ def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     user_conf = load_user_config()
     if user_conf:
         config = _deep_merge(config, user_conf)
-        pass # for auto-indentation
         
     local_conf = load_local_config()
     if local_conf:
         config = _deep_merge(config, local_conf)
-        pass # for auto-indentation
         
     # Later: Environment variables injection goes here explicitly natively
     
     if overrides:
         config = _deep_merge(config, overrides)
-        pass # for auto-indentation
         
     return config

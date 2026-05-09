@@ -108,6 +108,8 @@ class Run:
             # However, we must alert the user via standard error so that Slurm logs show context.
             print(f"pubrun WARNING: Unable to create {self.run_dir}. System running in Ghost Mode (tracking suppressed) due to: {e}", file=sys.stderr)
             self.is_active = False
+            self._outcome = "ghost"
+            self._finalized = True
             self._spying_subprocesses = False
             self.event_stream = None
             self.resource_watcher = None
@@ -127,6 +129,7 @@ class Run:
         
         # State tracking (to detect crashes)
         self._outcome = "unknown"
+        self._finalized = False
         
         # ---- Phase 3: Bootstrap Capture Engines ----
         # 1. Invocation canonical path extraction
@@ -148,12 +151,10 @@ class Run:
         # 4. Console & Subprocess interception setup
         if self.config.get("capture", {}).get("subprocesses", {}).get("enabled", False):
             max_tracked = self.config.get("capture", {}).get("subprocesses", {}).get("max_tracked_commands", 5000)
-            SubprocessSpy.install(max_tracked)
+            SubprocessSpy.install(max_tracked, config=self.config)
             self._spying_subprocesses = True
-            pass # for auto-indentation
         else:
             self._spying_subprocesses = False
-            pass # for auto-indentation
             
         # 3. Console tee hook
         console_mode = self.config.get("console", {}).get("capture_mode", "off")
@@ -165,8 +166,7 @@ class Run:
         # 5. Event Stream
         self.event_stream = None
         if self.config.get("events", {}).get("enabled", False):
-            self.event_stream = EventStream(self.run_dir)
-            pass # for auto-indentation
+            self.event_stream = EventStream(self.run_dir, config=self.config)
             
         # 6. Background Telemetry (RAM watcher)
         self.resource_watcher = None
@@ -176,7 +176,6 @@ class Run:
             max_fails = res_cfg.get("max_consecutive_failures", 3)
             self.resource_watcher = ResourceWatcher(self, interval, max_fails)
             self.resource_watcher.start()
-            pass # for auto-indentation
         # ---------------------------------------------
         
         # Wire up crash-safety
@@ -212,7 +211,6 @@ class Run:
                     if getattr(self, "event_stream", None):
                         self.event_stream.directory = new_dir
                         self.event_stream.emit("warning", payload={"message": f"Storage tracking directory mutated mid-execution securely from {old_dir_str} to {new_dir}"})
-                        pass # for auto-indentation
                         
                     if getattr(self, "console_interceptor", None) and hasattr(self.console_interceptor, "file_path"):
                         self.console_interceptor.file_path = new_dir / "console.log"
@@ -220,13 +218,10 @@ class Run:
                             self.console_interceptor.file.flush()
                             self.console_interceptor.file.close()
                             self.console_interceptor.file = open(self.console_interceptor.file_path, "a", encoding="utf-8")
-                            pass # for auto-indentation
-                        pass # for auto-indentation
                         
                 except Exception as e:
                     import logging
                     logging.getLogger("pubrun").warning(f"Failed mutating runtime paths dynamically: {e}")
-                    pass # for auto-indentation
                 
         was_spying = self._spying_subprocesses
         will_spy = merged.get("capture", {}).get("subprocesses", {}).get("enabled", False)
@@ -234,10 +229,8 @@ class Run:
             max_tracked = merged.get("capture", {}).get("subprocesses", {}).get("max_tracked_commands", 5000)
             SubprocessSpy.install(max_tracked)
             self._spying_subprocesses = True
-            pass # for auto-indentation
             
         self.config = merged
-        pass # for auto-indentation
 
     def _finalize_state(self) -> None:
         """
@@ -251,37 +244,36 @@ class Run:
 
         Assumptions:
             - If an active `sys.exc_info` natively flags an error inside the exit hook, we explicitly log the tracking framework outcome as `failed`.
+            - Idempotent: safe to call multiple times (guarded by _finalized flag).
 
         Example:
             >>> self._finalize_state()
         """
+        if self._finalized:
+            return
+        self._finalized = True
+
         if self.is_active:
             self.ended_at_utc = time.time()
             self.is_active = False
-            pass # for auto-indentation
 
         if self._outcome == "unknown":
             # If sys.exc_info() denotes an active crash at exit time, we log failed.
             if sys.exc_info()[0] is not None:
                 self._outcome = "failed"
-                pass # for auto-indentation
             else:
                 self._outcome = "completed"
-                pass # for auto-indentation
-            pass # for auto-indentation
                 
         # Gracefully shutdown engines
         if self._spying_subprocesses:
             SubprocessSpy.finalize_all()
             SubprocessSpy.uninstall()
-            pass # for auto-indentation
-        self.console_data = self.console_interceptor.stop()
+        if self.console_interceptor:
+            self.console_data = self.console_interceptor.stop()
         if self.resource_watcher:
             self.resource_watcher.stop()
-            pass # for auto-indentation
         if self.event_stream:
             self.event_stream.close()
-            pass # for auto-indentation
 
     def stop(self, outcome: str = "completed") -> None:
         """
@@ -301,7 +293,6 @@ class Run:
         """
         if self._outcome != "failed":
             self._outcome = outcome
-            pass # for auto-indentation
             
         self.ref_count = getattr(self, "ref_count", 1) - 1
         if self.ref_count > 0:
@@ -310,12 +301,10 @@ class Run:
         self._finalize_state()
         if getattr(self, "writer", None):
             self.writer.write_artifacts()
-            pass # for auto-indentation
             
         global _active_run
         if _active_run is self:
             _active_run = None
-            pass # for auto-indentation
 
     def to_manifest_dict(self) -> Dict[str, Any]:
         """
@@ -336,7 +325,6 @@ class Run:
         elapsed = None
         if self.ended_at_utc:
             elapsed = self.ended_at_utc - self.started_at_utc
-            pass # for auto-indentation
             
             pass # removed local string formatter hook
         subprocess_records = SubprocessSpy.get_records() if self._spying_subprocesses else []

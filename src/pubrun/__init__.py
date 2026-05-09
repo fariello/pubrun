@@ -99,7 +99,6 @@ def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
     if current_run and getattr(current_run, "event_stream", None):
         payload = kwargs.copy()
         current_run.event_stream.emit("annotation", name=message, payload=payload)
-        pass # for auto-indentation
     else:
         from pubrun.config import resolve_config
         action = resolve_config().get("events", {}).get("on_inactive_annotate", "ignore")
@@ -107,8 +106,6 @@ def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
             raise RuntimeError("pubrun.annotate() called but no run is active.")
         elif action == "warn":
             logging.getLogger("pubrun").warning(f"Annotation dropped: No active pubrun.")
-            pass # for auto-indentation
-        pass # for auto-indentation
 
 
 def start(**kwargs: Any) -> Run:
@@ -140,7 +137,6 @@ def start(**kwargs: Any) -> Run:
         active.ref_count = getattr(active, "ref_count", 0) + 1
         if hasattr(active, "_merge_and_migrate"):
             active._merge_and_migrate(kwargs)
-            pass # for auto-indentation
         return active
     return Run(overrides=kwargs)
 
@@ -171,7 +167,6 @@ def stop() -> None:
     current_run = get_current_run()
     if current_run:
         current_run.stop()
-        pass # for auto-indentation
 
 
 def diff(run_dir_a: str, run_dir_b: str, ignores: Optional[list] = None) -> dict:
@@ -205,7 +200,6 @@ def diff(run_dir_a: str, run_dir_b: str, ignores: Optional[list] = None) -> dict
             raise FileNotFoundError(f"Missing: {p}")
         with open(p, "r", encoding="utf-8") as f:
             obj = json.load(f)
-            pass # for auto-indentation
         obj, _ = hydrate_manifest(str(p), obj)
         return obj
 
@@ -214,7 +208,6 @@ def diff(run_dir_a: str, run_dir_b: str, ignores: Optional[list] = None) -> dict
     
     if ignores is None:
         ignores = resolve_config().get("diff", {}).get("ignore", [])
-        pass # for auto-indentation
         
     return compare_manifests(manifest_a, manifest_b, ignores)
 
@@ -324,7 +317,6 @@ class phase:
     def __enter__(self) -> "phase":
         if self.run_tracker and getattr(self.run_tracker, "event_stream", None):
             self.run_tracker.event_stream.emit("phase_start", name=self.name)
-            pass # for auto-indentation
         else:
             from pubrun.config import resolve_config
             action = resolve_config().get("events", {}).get("on_inactive_annotate", "ignore")
@@ -332,8 +324,6 @@ class phase:
                 raise RuntimeError(f"pubrun.phase('{self.name}') called but no run is active.")
             elif action == "warn":
                 logging.getLogger("pubrun").warning(f"Phase '{self.name}' dropped: No active pubrun.")
-                pass # for auto-indentation
-            pass # for auto-indentation
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
@@ -341,34 +331,37 @@ class phase:
             if exc_type is not None:
                 err_payload = {"error": exc_val.__class__.__name__}
                 self.run_tracker.event_stream.emit("phase_end", name=self.name, payload=err_payload)
-                pass # for auto-indentation
             else:
                 self.run_tracker.event_stream.emit("phase_end", name=self.name)
-                pass # for auto-indentation
-            pass # for auto-indentation
 
 # ============================================================================
 # Boot Sequence Heuristics
 # ============================================================================
 import os as _os
-from pubrun.config import resolve_config as _resolve_config
+import logging as _logging
 
-_config_map = _resolve_config()
-_should_auto = _config_map.get("core", {}).get("auto_start", False)
-_env_val = str(_os.environ.get("PUBRUN_AUTO_START", "")).lower()
-if _env_val == "true":
-    _should_auto = True
-elif _env_val == "false":
+_should_auto = False
+try:
+    from pubrun.config import resolve_config as _resolve_config
+    _config_map = _resolve_config()
+    _should_auto = _config_map.get("core", {}).get("auto_start", False)
+    _env_val = str(_os.environ.get("PUBRUN_AUTO_START", "")).lower()
+    if _env_val == "true":
+        _should_auto = True
+    elif _env_val == "false":
+        _should_auto = False
+except Exception as _boot_err:
+    _logging.getLogger("pubrun").warning(
+        f"pubrun boot sequence failed (tracking disabled): {_boot_err}"
+    )
     _should_auto = False
-    pass # for auto-indentation
 
 if _should_auto and not get_current_run():
     import sys as _sys
     _sys0 = _os.path.basename(_sys.argv[0]) if _sys.argv else ""
     if _sys0 in ("pubrun", "pubrun.exe", "__main__.py", "-m"):
         _should_auto = False
-        pass # for auto-indentation
         
     if _should_auto:
         start()
-        pass # for auto-indentation
+

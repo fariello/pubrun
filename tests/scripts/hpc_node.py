@@ -5,7 +5,7 @@ import pubrun
 os.environ["PUBRUN_META_REF"] = "meta.json"
 
 print("Starting node...")
-tracker = pubrun.start(overrides={"core":{"profile":"minimal"}})
+tracker = pubrun.start(core={"profile": "minimal"})
 print("Doing work...")
 pubrun.annotate("work", iterations=100)
 print("Finished!")
