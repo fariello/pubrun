@@ -64,7 +64,7 @@ from typing import Any, Callable, Optional
 from pubrun.tracker import Run, get_current_run
 
 # Metadata
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __author__ = "Gabriele Fariello"
 __license__ = "BSD-3-Clause"
 __credit__ = "Gabriele Fariello"

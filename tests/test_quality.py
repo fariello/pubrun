@@ -1,19 +1,13 @@
 """Tests for ghost mode, double-stop, and diff engine (T2, T3, T4)."""
 import json
 import pytest
-from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 from pubrun import start, get_current_run
-import pubrun.tracker
-from pubrun.analysis.diff import compare_manifests, export_manifest, unflatten_manifest
-
-
-@pytest.fixture(autouse=True)
-def _clear_active_run():
-    """Ensure _active_run is reset after each test to prevent cross-test pollution."""
-    yield
-    pubrun.tracker._active_run = None
+from pubrun.analysis.diff import (
+    compare_manifests, export_manifest, unflatten_manifest,
+    _normalize_manifest, _is_path_var
+)
 
 
 class TestGhostMode:
@@ -156,3 +150,104 @@ class TestDiffEngine:
         nested = unflatten_manifest(flat)
         assert nested["core"]["profile"] == "deep"
         assert nested["core"]["auto_start"] is True
+
+
+class TestDiffNormalization:
+    """Layer 5: Tests for _normalize_manifest internals."""
+
+    def test_env_vars_flatten(self):
+        manifest = {
+            "environment": {
+                "variables": [
+                    {"name": "HOME", "value": {"representation": "plain", "value": "/home/user"}},
+                    {"name": "API_KEY", "value": {"representation": "redacted"}}
+                ]
+            }
+        }
+        flat = _normalize_manifest(manifest, [])
+        assert flat["environment.HOME"] == "/home/user"
+        # Redacted values don't have a "value" key, so the value is None → ""
+        assert "environment.API_KEY" in flat
+
+    def test_packages_flatten(self):
+        manifest = {
+            "packages": {
+                "records": [
+                    {"name": "numpy", "version": "1.24.3"},
+                    {"name": "torch", "version": "2.0.1"}
+                ]
+            }
+        }
+        flat = _normalize_manifest(manifest, [])
+        assert flat["packages.numpy"] == "1.24.3"
+        assert flat["packages.torch"] == "2.0.1"
+
+    def test_ignores_filter_prefix(self):
+        manifest = {
+            "timing": {"started": 100, "elapsed": 5.0},
+            "host": {"os_name": "Linux"}
+        }
+        flat = _normalize_manifest(manifest, ["timing"])
+        assert "timing.started" not in flat
+        assert "timing.elapsed" not in flat
+        assert "host.os_name" in flat
+
+    def test_nested_dict_flattens(self):
+        manifest = {"hardware": {"cpu": {"model": "i7", "cores": 8}}}
+        flat = _normalize_manifest(manifest, [])
+        assert flat["hardware.cpu.model"] == "i7"
+        assert flat["hardware.cpu.cores"] == 8
+
+    def test_empty_list_renders_as_brackets(self):
+        manifest = {"errors": {"records": []}}
+        flat = _normalize_manifest(manifest, [])
+        assert flat["errors.records"] == "[]"
+
+
+class TestIsPathVar:
+    """Layer 5: Tests for the PATH variable heuristic."""
+
+    def test_detects_path(self):
+        assert _is_path_var("environment.PATH") is True
+
+    def test_detects_ld_library_path(self):
+        assert _is_path_var("environment.LD_LIBRARY_PATH") is True
+
+    def test_detects_pythonpath(self):
+        assert _is_path_var("environment.PYTHONPATH") is True
+
+    def test_rejects_non_path(self):
+        assert _is_path_var("environment.HOME") is False
+
+    def test_rejects_hostname(self):
+        assert _is_path_var("host.hostname") is False
+
+
+class TestPathSplitDiff:
+    """Layer 5: Tests for PATH variable splitting in compare_manifests."""
+
+    def test_path_split_detects_additions(self):
+        a = {"environment": {"variables": [
+            {"name": "PATH", "value": {"representation": "plain", "value": "/usr/bin:/bin"}}
+        ]}}
+        b = {"environment": {"variables": [
+            {"name": "PATH", "value": {"representation": "plain", "value": "/usr/bin:/bin:/usr/local/bin"}}
+        ]}}
+        result = compare_manifests(a, b)
+        mod = result["modified"].get("environment.PATH", {})
+        assert mod.get("type") == "path_split"
+        assert "/usr/local/bin" in mod["added"]
+        assert len(mod["removed"]) == 0
+
+    def test_path_split_detects_removals(self):
+        a = {"environment": {"variables": [
+            {"name": "PATH", "value": {"representation": "plain", "value": "/usr/bin:/bin:/opt/bin"}}
+        ]}}
+        b = {"environment": {"variables": [
+            {"name": "PATH", "value": {"representation": "plain", "value": "/usr/bin:/bin"}}
+        ]}}
+        result = compare_manifests(a, b)
+        mod = result["modified"].get("environment.PATH", {})
+        assert mod.get("type") == "path_split"
+        assert "/opt/bin" in mod["removed"]
+

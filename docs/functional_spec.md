@@ -1,8 +1,8 @@
-[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](API.md) | [CLI](CLI.md)
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md)
 
 # pubrun Functional Specification
 
-> Status: Draft v0.1
+> Status: v0.1.1
 > Purpose: Defines functional requirements aligned with architecture.
 > Audience: Developers and contributors.
 
@@ -166,9 +166,9 @@ Optional JSONL event stream with structured events.
 
 Minimum event types:
 
-- `phase_started`
-- `phase_ended`
-- `exception_captured`
+- `phase_start`
+- `phase_end`
+- `annotation`
 
 Optional event types may include:
 
@@ -218,7 +218,8 @@ The system MUST support:
 - allowlist / denylist control
 
 Secrets MUST NOT be captured by default. 
-To achieve this, the default redaction policy MUST detect and obfuscate known sensitive keys (e.g., matching regex `(?i)(password|secret|token|api_key|auth|cred)`).
+To achieve this, the default redaction policy MUST detect and obfuscate known sensitive keys (e.g., matching regex `(?i)(password|secret|token|api_key|key|auth|cred|private|conn_str|connection_string|database_url|dsn|signing|bearer)`).
+Redaction applies to both environment variable values and CLI argument values. Both are independently configurable via `[redaction].env_enabled` and `[redaction].argv_enabled`.
 Redacted fields MUST NOT just omit the key; they MUST emit a standard `redacted_value` object specifying its `representation` (e.g., `redacted`, `suppressed`).
 By default, to prevent rainbow table brute-force attacks, the redaction engine MUST employ strictly destructive redaction. Unsalted hashes MUST NOT be computed for secrets unless explicitly overridden by a securely salted configuration.
 
@@ -508,3 +509,7 @@ A valid v1 implementation must satisfy all of the following:
 `pubrun` provides structured, low-friction run provenance with optional depth and extensibility.
 
 It must support both explicit activation and configuration-driven low-friction behavior, including standard import patterns, discoverable configuration files, and generation of a fully commented default configuration file for users who want to set default policy once and reuse it across scripts.
+
+---
+
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md)
