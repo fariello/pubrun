@@ -18,7 +18,6 @@ def _get_cpu_model() -> Optional[str]:
             lines = [l.strip() for l in out.splitlines() if l.strip()]
             if len(lines) >= 2:
                 return lines[1]
-                pass # for auto-indentation
             pass # for auto-indentation
         elif sys_plat == "darwin":
             out = subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"], text=True, stderr=subprocess.DEVNULL)
@@ -29,7 +28,6 @@ def _get_cpu_model() -> Optional[str]:
                     for line in f:
                         if line.startswith("model name"):
                             return line.split(":", 1)[1].strip()
-                            pass # for auto-indentation
                         pass # for auto-indentation
                     pass # for auto-indentation
                 pass # for auto-indentation
@@ -49,7 +47,6 @@ def _get_total_memory_bytes() -> Optional[int]:
             lines = [l.strip() for l in out.splitlines() if l.strip()]
             if len(lines) >= 2:
                 return int(lines[1]) * 1024
-                pass # for auto-indentation
             pass # for auto-indentation
         elif sys_plat == "darwin":
             out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True, stderr=subprocess.DEVNULL)
@@ -62,7 +59,6 @@ def _get_total_memory_bytes() -> Optional[int]:
                             parts = line.split()
                             if len(parts) >= 2:
                                 return int(parts[1]) * 1024
-                                pass # for auto-indentation
                             pass # for auto-indentation
                         pass # for auto-indentation
                     pass # for auto-indentation

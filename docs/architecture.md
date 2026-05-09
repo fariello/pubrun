@@ -1,3 +1,5 @@
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](API.md) | [CLI](CLI.md)
+
 # pubrun Architecture
 
 > Status: Draft v0.1  
@@ -86,9 +88,20 @@ Events include type, timestamp, run ID, and payload.
 
 ## 8. Normalization rules
 
-- UTC timestamps
+- UTC timestamps as POSIX epoch floats (see below)
 - deterministic ordering
 - consistent naming
+
+### Timestamp format
+
+All timestamps in the manifest and event stream are stored as **POSIX epoch floats** (`time.time()`), not ISO 8601 strings. This is a deliberate design choice:
+
+- **Precision**: IEEE 754 floats provide sub-second / microsecond resolution natively.
+- **Timezone agnostic**: No locale-dependent formatting or parsing ambiguity.
+- **Arithmetic simplicity**: Elapsed time is `ended_at - started_at` with no datetime conversion.
+- **Native production**: Directly matches `time.time()`, `os.stat().st_mtime`, and similar system calls.
+- **Deterministic**: No string formatting jitter across platforms or Python versions.
+- **Compact**: A float is smaller and faster to serialize than an ISO 8601 string.
 
 ## 9. Observed vs derived vs inferred
 

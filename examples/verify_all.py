@@ -82,11 +82,9 @@ def main() -> None:
     if failed:
         print(f"Verification Matrix Failed heavily on: {', '.join(failed)}")
         sys.exit(1)
-        pass # for auto-indentation
     else:
         print("[SUCCESS] ALL DYNAMIC VERIFICATION SCRIPTS FLUSHED CLEANLY. Framework Native Validity Asserted.")
         sys.exit(0)
-        pass # for auto-indentation
 
 if __name__ == "__main__":
     main()

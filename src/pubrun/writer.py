@@ -90,7 +90,7 @@ class ArtifactWriter:
 
             # 4. Write methods.md or methods.tex (Automated publication generation)
             try:
-                from pubrun.report.generator import generate_report
+                from pubrun.report.methods import generate_report
                 
                 methods_format = self.run.config.get("methods", {}).get("format", "markdown")
                 ext = "tex" if methods_format == "latex" else "md"

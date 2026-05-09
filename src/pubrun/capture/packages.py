@@ -34,7 +34,6 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
     # 1. Fast-exit if disabled
     if mode == "off":
         return {"capture_state": {"status": "suppressed"}}
-        pass # for auto-indentation
         
     records: List[Dict[str, Any]] = []
     status = "complete"

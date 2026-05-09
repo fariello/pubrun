@@ -1,3 +1,5 @@
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](API.md) | [CLI](CLI.md)
+
 # Pubrun Python API
 
 Beyond passive execution capturing natively performed via standard terminal scripts, `pubrun` defines a minimal, structural python instrumentation API enabling intelligent semantic telemetry dynamically across your codebase.

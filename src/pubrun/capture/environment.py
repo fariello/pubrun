@@ -35,7 +35,6 @@ def get_environment(config: Dict[str, Any]) -> Dict[str, Any]:
     # Fast exit if disabled
     if mode == "off":
         return {"capture_state": {"status": "suppressed"}}
-        pass # for auto-indentation
     
     raw_env = dict(os.environ)
     

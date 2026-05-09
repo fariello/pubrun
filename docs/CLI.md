@@ -1,3 +1,5 @@
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](API.md) | [CLI](CLI.md)
+
 # Pubrun Command Line Interface (CLI)
 
 The `pubrun` CLI is a zero-dependency orchestrator that bridges the gap between raw execution footprints and human-readable, publication-ready intelligence. It provides six deeply isolated, cross-platform subsystems natively accessible via `python -m pubrun <command>` or `pubrun <command>`.

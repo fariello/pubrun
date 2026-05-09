@@ -203,7 +203,6 @@ def diff(run_dir_a: str, run_dir_b: str, ignores: Optional[list] = None) -> dict
         p = Path(d) / "manifest.json"
         if not p.exists(): 
             raise FileNotFoundError(f"Missing: {p}")
-            pass # for auto-indentation
         with open(p, "r", encoding="utf-8") as f:
             obj = json.load(f)
             pass # for auto-indentation

@@ -32,7 +32,6 @@ def hydrate_manifest(manifest_path: str, manifest: Dict[str, Any]) -> Tuple[Dict
     meta_ref = manifest.get("meta_ref")
     if not meta_ref:
         return manifest, warnings
-        pass # for auto-indentation
         
     try:
         manifest_dir = Path(manifest_path).parent
@@ -45,12 +44,10 @@ def hydrate_manifest(manifest_path: str, manifest: Dict[str, Any]) -> Tuple[Dict
         if not meta_path.name.endswith(".json"):
             warnings.append(f"Security Sandbox Triggered: meta_ref '{meta_ref}' does not point to a valid .json snapshot file.")
             return manifest, warnings
-            pass # for auto-indentation
         
         if not meta_path.exists():
             warnings.append(f"Linked Parent Meta Snapshot '{meta_ref}' not found at {meta_path}. The diagnostic output will lack deep dependencies.")
             return manifest, warnings
-            pass # for auto-indentation
             
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
@@ -90,4 +87,3 @@ def hydrate_manifest(manifest_path: str, manifest: Dict[str, Any]) -> Tuple[Dict
     except Exception as e:
         warnings.append(f"Failed to hydrate meta_ref: {e}")
         return manifest, warnings
-        pass # for auto-indentation
