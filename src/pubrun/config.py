@@ -109,6 +109,10 @@ def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         config = _deep_merge(config, local_conf)
         
     # Environment variable overrides (between local config and API overrides)
+    env_profile = os.environ.get("PUBRUN_PROFILE")
+    if env_profile:
+        config = _deep_merge(config, {"core": {"profile": env_profile}})
+
     env_meta_ref = os.environ.get("PUBRUN_META_REF")
     if env_meta_ref:
         config = _deep_merge(config, {"core": {"meta_ref": env_meta_ref}})

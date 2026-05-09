@@ -198,6 +198,7 @@ Configuration for the `pubrun diff` engine.
 
 | Variable | Description |
 |---|---|
+| `PUBRUN_PROFILE` | Override `[core].profile`. Set to `"minimal"`, `"default"`, or `"deep"`. |
 | `PUBRUN_AUTO_START` | Override `[core].auto_start`. Set to `"false"` to prevent import-time activation. |
 | `PUBRUN_META_REF` | Path to a parent `meta.json` for HPC hydration. Child runs will reference this. |
 

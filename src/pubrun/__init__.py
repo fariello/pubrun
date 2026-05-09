@@ -1,74 +1,61 @@
 """
-pubrun - Zero-dependency Python execution and telemetry capture engine.
-
-## Backstory
------
-
-Over the years, I ended up rewriting the same kinds of execution wrappers again and again across different projects, scripts, and research work.
-
-Some were quick one-offs. Others turned into full object-oriented frameworks. But they all tried to solve the same problem:  
-how do you run something and *actually know what happened* afterward?
-
-- What environment was it running in?  
-- What dependencies were installed?  
-- What code version produced this result?  
-- What exactly ran, and in what order?  
-
-Those answers were always scattered, inconsistent, or missing entirely.
-
-`pubrun` is an attempt to finally consolidate that work into one place. It pulls together the pieces that kept proving useful and strips away everything else.
-
-The goal is simple:  
-run any Python script and automatically capture enough context to make that run reproducible and inspectable later, without forcing you to restructure your code.
+pubrun - Zero-dependency Python execution provenance and telemetry capture.
 
 Usage
 -----
-The engine is constructed for immediate zero-configuration deployment alongside 
-a robust explicit Python API for deep structural tracing.
+1. Auto-start (default)::
 
-1. CLI Orchestration (Zero Code Changes):
-   Run any script passively under the evaluation umbrella:
-   $ python -m pubrun my_script.py --args
+    import pubrun  # Tracking begins on import.
 
-2. Explicit Python API:
-   Manually initialize and delimit granular boundaries structurally.
-   
-   import pubrun
-   
-   # Explicitly initialize tracking overrides
-   tracker = pubrun.start(profile="deep")
-   
-   # Log specific custom telemetry directly into the event stream
-   pubrun.annotate("loading_datasets", batches=400, mode="lazy")
-   
-   # Delimit specific execution phases for temporal performance monitoring
-   with pubrun.phase("gradient_descent"):
-       train_model()
-       
-   # Serialize the configuration and manifest to disk
-   tracker.stop()
+2. Explicit control::
 
-3. Synchronous Block Validation:
-   Use context managers or decorators strictly restricting evaluation scope.
-   
-   import pubrun
-   
-   @pubrun.audit_run(profile="basic")
-   def evaluate_node():
-       # Exception handling and telemetry bounds are auto-managed here.
-       pass
+    import pubrun
+
+    tracker = pubrun.start(profile="deep")
+    pubrun.annotate("loading_datasets", batches=400, mode="lazy")
+
+    with pubrun.phase("gradient_descent"):
+        train_model()
+
+    tracker.stop()
+
+3. Decorator::
+
+    @pubrun.audit_run(profile="basic")
+    def evaluate_node():
+        ...
 """
 import logging
+import sys
 from typing import Any, Callable, Optional
 
 from pubrun.tracker import Run, get_current_run
 
-# Metadata
-__version__ = "0.1.1"
+# -- Metadata ----------------------------------------------------------------
+try:
+    if sys.version_info >= (3, 8):
+        from importlib.metadata import version as _pkg_version
+    else:
+        from importlib_metadata import version as _pkg_version
+    __version__ = _pkg_version("pubrun")
+except Exception:
+    __version__ = "0.1.1"  # fallback for editable installs / dev
+
 __author__ = "Gabriele Fariello"
 __license__ = "BSD-3-Clause"
-__credit__ = "Gabriele Fariello"
 __copyright__ = "Copyright 2026 Gabriele Fariello"
+
+__all__ = [
+    "start",
+    "stop",
+    "annotate",
+    "phase",
+    "diff",
+    "audit_run",
+    "tracked_run",
+    "get_current_run",
+    "__version__",
+]
 
 
 def _handle_inactive(context: str) -> None:
