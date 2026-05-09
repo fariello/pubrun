@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use this software in your research, please cite it."
 authors:
   - family-names: "Fariello"
-    given-names: "Gabriel"
-    # orcid: "https://orcid.org/0000-0000-0000-0000" # Uncomment and add your ORCID if you have one
+    given-names: "Gabriele"
+    orcid: "https://orcid.org/0000-0002-0326-4752"
 title: "pubrun: Lightweight native execution provenance and reproducibility tracking"
 version: 0.1.0
 date-released: 2026-04-03
