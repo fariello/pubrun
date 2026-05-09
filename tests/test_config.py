@@ -144,3 +144,34 @@ class TestResolveConfig:
         resolved = resolve_config({"core": {"profile": "deep"}})
         # Console defaults should be preserved
         assert "capture_mode" in resolved.get("console", {})
+
+
+class TestMetaRefEnvVar:
+
+    def test_pubrun_meta_ref_sets_core_meta_ref(self, monkeypatch):
+        monkeypatch.setenv("PUBRUN_META_REF", "parent_meta.json")
+        monkeypatch.setattr("pubrun.config.load_user_config", lambda: None)
+        monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: None)
+        resolved = resolve_config()
+        assert resolved["core"]["meta_ref"] == "parent_meta.json"
+
+    def test_pubrun_meta_ref_absent_means_none(self, monkeypatch):
+        monkeypatch.delenv("PUBRUN_META_REF", raising=False)
+        monkeypatch.setattr("pubrun.config.load_user_config", lambda: None)
+        monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: None)
+        resolved = resolve_config()
+        assert resolved["core"].get("meta_ref") is None
+
+    def test_api_override_trumps_env_var(self, monkeypatch):
+        monkeypatch.setenv("PUBRUN_META_REF", "env_meta.json")
+        monkeypatch.setattr("pubrun.config.load_user_config", lambda: None)
+        monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: None)
+        resolved = resolve_config({"core": {"meta_ref": "api_meta.json"}})
+        assert resolved["core"]["meta_ref"] == "api_meta.json"
+
+    def test_env_var_trumps_config_file(self, monkeypatch):
+        monkeypatch.setenv("PUBRUN_META_REF", "env_meta.json")
+        monkeypatch.setattr("pubrun.config.load_user_config", lambda: None)
+        monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: {"core": {"meta_ref": "local_meta.json"}})
+        resolved = resolve_config()
+        assert resolved["core"]["meta_ref"] == "env_meta.json"
