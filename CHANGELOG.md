@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **`--version` CLI flag**: `pubrun --version` now prints the installed version.
+- **`PUBRUN_PROFILE` environment variable**: Overrides `[core].profile` at runtime without a config file.
+- **`__all__` declaration**: `__init__.py` now declares a formal public API surface.
+- **Console tee documentation**: README Quick Start now documents the stdout/stderr tee behavior and how to disable it for high-output scripts.
+
+### Changed
+
+- **Single-source versioning**: `__version__` is now read from installed package metadata via `importlib.metadata` instead of being hard-coded.
+- **CLI `prog` name**: Help output now shows `pubrun` instead of `__main__.py`.
+- **CLI help text**: All help strings rewritten for conciseness. Removed verbose and non-technical phrasing.
+- **Error messages**: Standardized CLI error messages to use consistent `Error: Failed to ...` format.
+- **`default.toml` comments**: Full rewrite. All configuration comments now use concise, technical phrasing.
+- **Module docstring**: `__init__.py` docstring rewritten for clarity.
+- **`CITATION.cff`**: Version bumped to 0.1.1; abstract cleaned.
+
+### Improved
+
+- **Docstring audit**: All docstrings and inline comments across 24 source files cleaned to remove non-technical prose.
+- **`_handle_inactive()` extraction**: Duplicate inactive-run handling from `annotate()` and `phase.__enter__()` consolidated into a shared helper.
+
 ## [0.1.1] - 2026-05-09
 
 ### Security

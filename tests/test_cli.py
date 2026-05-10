@@ -56,6 +56,17 @@ class TestCliHelp:
         result = run_pubrun("cite", "--help")
         assert result.returncode == 0
 
+    def test_version_exits_zero(self):
+        result = run_pubrun("--version")
+        assert result.returncode == 0
+
+    def test_version_prints_version_string(self):
+        result = run_pubrun("--version")
+        assert "pubrun" in result.stdout.lower()
+        # Should contain a version-like pattern (digits and dots)
+        import re
+        assert re.search(r"\d+\.\d+", result.stdout)
+
 
 class TestCliInfo:
 
