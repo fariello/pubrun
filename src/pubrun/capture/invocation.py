@@ -83,7 +83,7 @@ def get_invocation(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
             import subprocess
             escaped_args = subprocess.list2cmdline(argv)
             cwd_str = subprocess.list2cmdline([str(cwd)])
-            # Multiline string perfectly bypasses all operator (&, &&, ;) ecosystem inconsistencies on Windows
+            # Multiline command avoids operator (&, &&, ;) inconsistencies on Windows
             rerun_command = f"cd {cwd_str}\npython {escaped_args}"
         else:
             escaped_args = shlex.join(argv) 
@@ -92,9 +92,9 @@ def get_invocation(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         # ---------------------------------------------------------
         # 4. sys.argv Dataset Discovery Heuristics
         # ---------------------------------------------------------
-        # We passively sweep all CLI arguments strictly looking for datasets.
-        # This completely bridges the gap of knowing if `data.csv` changed overnight
-        # because the user ran `python train.py --data data.csv`!
+        # Scan CLI arguments for file paths that look like input datasets.
+        # Bridges the gap of knowing if `data.csv` changed between runs
+        # when the user ran `python train.py --data data.csv`.
         inputs_data = []
         input_cfg = config.get("capture", {}).get("inputs", {})
         if input_cfg.get("enabled", True):
@@ -104,9 +104,9 @@ def get_invocation(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
                 try:
                     po = Path(arg)
                     
-                    # Heuristic Safety 1: Discard Option Flags 
-                    # If an argument is perfectly identical to `--batch-size`, we skip to avoid 
-                    # accidentally discovering a folder named `batch-size` floating in the CWD.
+                    # Heuristic Safety 1: Discard Option Flags
+                    # If an argument looks like `--batch-size`, skip it to avoid
+                    # accidentally treating a same-named directory as an input.
                     if arg.startswith("-") or arg.startswith("--"):
                         continue
                         
