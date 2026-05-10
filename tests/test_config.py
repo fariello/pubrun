@@ -175,3 +175,34 @@ class TestMetaRefEnvVar:
         monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: {"core": {"meta_ref": "local_meta.json"}})
         resolved = resolve_config()
         assert resolved["core"]["meta_ref"] == "env_meta.json"
+
+
+class TestProfileEnvVar:
+
+    def test_pubrun_profile_sets_core_profile(self, monkeypatch):
+        monkeypatch.setenv("PUBRUN_PROFILE", "deep")
+        monkeypatch.setattr("pubrun.config.load_user_config", lambda: None)
+        monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: None)
+        resolved = resolve_config()
+        assert resolved["core"]["profile"] == "deep"
+
+    def test_pubrun_profile_absent_uses_default(self, monkeypatch):
+        monkeypatch.delenv("PUBRUN_PROFILE", raising=False)
+        monkeypatch.setattr("pubrun.config.load_user_config", lambda: None)
+        monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: None)
+        resolved = resolve_config()
+        assert resolved["core"]["profile"] == "default"
+
+    def test_api_override_trumps_profile_env_var(self, monkeypatch):
+        monkeypatch.setenv("PUBRUN_PROFILE", "minimal")
+        monkeypatch.setattr("pubrun.config.load_user_config", lambda: None)
+        monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: None)
+        resolved = resolve_config({"core": {"profile": "deep"}})
+        assert resolved["core"]["profile"] == "deep"
+
+    def test_profile_env_var_trumps_config_file(self, monkeypatch):
+        monkeypatch.setenv("PUBRUN_PROFILE", "minimal")
+        monkeypatch.setattr("pubrun.config.load_user_config", lambda: None)
+        monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: {"core": {"profile": "deep"}})
+        resolved = resolve_config()
+        assert resolved["core"]["profile"] == "minimal"

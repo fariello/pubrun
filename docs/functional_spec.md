@@ -298,7 +298,7 @@ Supported locations, applied in precedence order (lowest to highest):
 | 2 | User home config | `~/.config/pubrun/config.toml` (or `%APPDATA%/pubrun/config.toml` on Windows) |
 | 3 | Local deep config | `./.config/pubrun/config.toml` |
 | 4 | Local root config | `./.pubrun.toml` |
-| 5 | Environment variables | `PUBRUN_AUTO_START`, `PUBRUN_META_REF` |
+| 5 | Environment variables | `PUBRUN_PROFILE`, `PUBRUN_AUTO_START`, `PUBRUN_META_REF` |
 | 6 (highest) | API overrides | `pubrun.start(profile="deep")` |
 
 When both `.pubrun.toml` and `.config/pubrun/config.toml` exist in the same directory, `.pubrun.toml` takes precedence (it is applied last).
@@ -307,6 +307,7 @@ When both `.pubrun.toml` and `.config/pubrun/config.toml` exist in the same dire
 
 | Variable | Effect |
 |---|---|
+| `PUBRUN_PROFILE` | Overrides `[core].profile`. Consumed in `resolve_config()` between local config and API overrides. |
 | `PUBRUN_AUTO_START` | Overrides `[core].auto_start`. Consumed in the boot sequence (not in `resolve_config`). |
 | `PUBRUN_META_REF` | Sets `[core].meta_ref`. Consumed in `resolve_config()` between local config and API overrides. |
 
@@ -675,7 +676,8 @@ A valid implementation must satisfy all of the following:
 14. Sensitive values are redacted by default.
 15. Environment variable `PUBRUN_META_REF` sets `core.meta_ref`.
 16. Environment variable `PUBRUN_AUTO_START` overrides auto-start.
-17. Phase and annotation events bypass event throttling.
+17. Environment variable `PUBRUN_PROFILE` overrides `core.profile`.
+18. Phase and annotation events bypass event throttling.
 
 ---
 

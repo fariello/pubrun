@@ -128,6 +128,14 @@ pubrun cite --style bibtex
 
 These flags can be used independently of any subcommand.
 
+### `--version`
+
+Prints the installed pubrun version and exits.
+
+```bash
+pubrun --version
+```
+
 ### `--create-config [DEST]`
 
 Bootstraps a fully commented `.pubrun.toml` configuration file.
