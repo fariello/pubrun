@@ -18,7 +18,6 @@ def main() -> None:
         
         assert run_dir is not None, "Context tracker dynamically lost mapping."
         print(f"Tracking temporarily locked inside {run_dir}")
-        pass # for auto-indentation
 
     # Validation natively runs cleanly outside the context block
     manifest_path = os.path.join(run_dir, "manifest.json")
@@ -31,4 +30,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    pass # for auto-indentation

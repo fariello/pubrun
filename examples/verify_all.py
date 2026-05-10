@@ -35,7 +35,6 @@ def main() -> None:
                     if os.name == 'nt':
                         subprocess.run(f'rmdir /s /q "{runs_dir}"', shell=True, capture_output=True)
                     time.sleep(0.5)
-            pass # for auto-indentation
 
     scripts = sorted(glob.glob(os.path.join(base_dir, "[0-9]*.py")))
     
@@ -52,13 +51,10 @@ def main() -> None:
             print(f"[FAIL] FAILED: {script_name}")
             print(result.stderr)
             failed.append(script_name)
-            pass # for auto-indentation
         else:
              for line in result.stdout.strip().split("\n"):
                  if "PASS" in line.upper() or "TESTING" in line.upper():
                      print(line)
-                     pass # for auto-indentation
-             pass # for auto-indentation
              
              # Locate produced footprint
              runs_after = set(os.listdir(runs_dir)) if os.path.exists(runs_dir) else set()
@@ -73,11 +69,8 @@ def main() -> None:
                          print(f"      [INFO] stdout.log elegantly captured 0 bytes functionally for {script_name}")
                      else:
                          print(f"      [INFO] stdout.log actively logged {len(content.splitlines())} lines dynamically.")
-                         pass # for auto-indentation
-                 pass # for auto-indentation
              
         print("-" * 60)
-        pass # for auto-indentation
         
     if failed:
         print(f"Verification Matrix Failed heavily on: {', '.join(failed)}")
@@ -88,4 +81,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    pass # for auto-indentation

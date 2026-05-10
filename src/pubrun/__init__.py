@@ -44,6 +44,7 @@ except Exception:
 __author__ = "Gabriele Fariello"
 __license__ = "BSD-3-Clause"
 __copyright__ = "Copyright 2026 Gabriele Fariello"
+__credit__ = __author__  # backward-compatible alias
 
 __all__ = [
     "start",

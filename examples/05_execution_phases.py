@@ -18,11 +18,9 @@ def main() -> None:
     
     with pubrun.phase("Dataset Initialization"):
         time.sleep(0.01)  # Simulate I/O bound wait
-        pass # for auto-indentation
         
     with pubrun.phase("Epoch Optimization Block"):
         time.sleep(0.01)  # Simulate math bounding
-        pass # for auto-indentation
         
     pubrun.stop()
     
@@ -38,11 +36,9 @@ def main() -> None:
                 opened += 1
             elif obj.get("type") == "phase_end":
                 closed += 1
-            pass # for auto-indentation
             
     assert opened == 2 and closed == 2, "Phase epoch boundary tracking natively failed writing sequence timestamps."
     print("[PASS] PASS: 05_execution_phases.py")
 
 if __name__ == "__main__":
     main()
-    pass # for auto-indentation

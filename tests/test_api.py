@@ -300,3 +300,18 @@ class TestManifestSchema:
         with open(manifest_path, "r") as f:
             manifest = json.load(f)
         assert manifest["status"]["outcome"] == "completed"
+
+
+class TestModuleExports:
+    """Regression test: __all__ must match actual module exports."""
+
+    def test_all_symbols_exist(self):
+        for name in pubrun.__all__:
+            assert hasattr(pubrun, name), f"__all__ declares '{name}' but it does not exist on the module"
+
+    def test_all_contains_expected_api(self):
+        expected = {"start", "stop", "annotate", "phase", "diff", "audit_run", "tracked_run", "get_current_run", "__version__"}
+        actual = set(pubrun.__all__)
+        missing = expected - actual
+        assert missing == set(), f"Expected public API symbols missing from __all__: {missing}"
+

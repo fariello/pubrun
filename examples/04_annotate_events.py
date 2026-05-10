@@ -31,11 +31,9 @@ def main() -> None:
                 targets_located += 1
                 if obj.get("name") == "Matrix Instantiated":
                     assert obj.get("payload", {}).get("simulated_device") == "cpu", "Structurally losing keyword dictionaries."
-            pass # for auto-indentation
             
     assert targets_located == 2, f"Failed matching 2 explicit custom events cleanly."
     print("[PASS] PASS: 04_annotate_events.py")
 
 if __name__ == "__main__":
     main()
-    pass # for auto-indentation
