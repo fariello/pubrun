@@ -29,10 +29,8 @@ def main() -> None:
     # Revert natively cleanly
     if original_var is None:
         del os.environ["PUBRUN_DUMMY_VAR"]
-        pass # for auto-indentation
     else:
         os.environ["PUBRUN_DUMMY_VAR"] = original_var
-        pass # for auto-indentation
     
     # Execute semantic differential mapping structurally across both directories
     delta = pubrun.diff(run_dir_a, run_dir_b)
@@ -46,4 +44,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    pass # for auto-indentation

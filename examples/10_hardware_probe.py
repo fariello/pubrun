@@ -17,7 +17,6 @@ def main() -> None:
         
         # Arbitrarily inflating structural memory mapping block seamlessly
         _ = [list(range(5000)) for _ in range(500)]
-        pass # for auto-indentation
         
     manifest_path = os.path.join(run_dir, "manifest.json")
     with open(manifest_path, "r", encoding="utf-8") as f:
@@ -33,4 +32,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    pass # for auto-indentation

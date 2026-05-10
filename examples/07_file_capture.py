@@ -15,7 +15,6 @@ def main() -> None:
     dummy_file = "dummy_input_dataset.csv"
     with open(dummy_file, "w") as f:
         f.write("col1,col2\n1,2")
-        pass # for auto-indentation
         
     # Inject dynamically into sys argv so the startup heuristics capture it naturally
     sys.argv.append(dummy_file)
@@ -23,7 +22,6 @@ def main() -> None:
     with pubrun.tracked_run() as active:
         print("Simulating active tracked output strictly inside 07_file_capture.py natively.")
         run_dir = getattr(getattr(active, "run_tracker", active), "run_dir", None)
-        pass # for auto-indentation
         
     # Validation step cleanly pulls out inputs schema
     manifest_path = os.path.join(run_dir, "manifest.json")
@@ -36,7 +34,6 @@ def main() -> None:
     sys.argv.pop()
     if os.path.exists(dummy_file):
         os.remove(dummy_file)
-        pass # for auto-indentation
         
     # The dictionary of inputs safely stores tracked paths 
     file_tracked = any(dummy_file in str(i.get("path", "")) for i in inputs_list)
@@ -46,4 +43,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    pass # for auto-indentation
