@@ -91,24 +91,38 @@ class TestRenderInline:
         assert "Pubrun Diagnostic Difference" in output
 
 
-class TestPrintDiffFallback:
-    """Test that print_diff falls back to _render_inline when rich is unavailable."""
+class TestPrintDiff:
+    """Test that print_diff renders correctly."""
 
-    def test_falls_back_without_rich(self, capsys, monkeypatch):
-        """When rich cannot be imported, print_diff uses inline rendering."""
-        # Force ImportError for rich modules
-        import builtins
-        original_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            if name.startswith("rich"):
-                raise ImportError("mocked: rich not installed")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", mock_import)
-
+    def test_print_diff_renders_inline(self, capsys):
+        """print_diff produces inline ANSI output."""
         diff = {"added": {"test.key": "value"}, "removed": {}, "modified": {}, "same": {}}
         print_diff(diff, no_color=True)
         output = capsys.readouterr().out
-        assert "pip install rich" in output
         assert "[ADDED] test.key: value" in output
+
+    def test_print_diff_truncates_long_values(self, capsys):
+        """Long values are truncated with [TRUNCATED] when wrap=False."""
+        long_value = "x" * 500
+        diff = {"added": {"key": long_value}, "removed": {}, "modified": {}, "same": {}}
+        print_diff(diff, no_color=True, max_length=50, wrap=False)
+        output = capsys.readouterr().out
+        assert "[TRUNCATED]" in output
+        assert "x" * 500 not in output
+
+    def test_print_diff_wrap_preserves_full_value(self, capsys):
+        """Long values are NOT truncated when wrap=True."""
+        long_value = "x" * 500
+        diff = {"added": {"key": long_value}, "removed": {}, "modified": {}, "same": {}}
+        print_diff(diff, no_color=True, max_length=50, wrap=True)
+        output = capsys.readouterr().out
+        assert "[TRUNCATED]" not in output
+        assert "x" * 500 in output
+
+    def test_print_diff_shows_same_section(self, capsys):
+        """The 'same' bucket is rendered when present."""
+        diff = {"added": {}, "removed": {}, "modified": {}, "same": {"host.os": "Linux"}}
+        print_diff(diff, no_color=True)
+        output = capsys.readouterr().out
+        assert "Unchanged" in output
+        assert "host.os" in output
