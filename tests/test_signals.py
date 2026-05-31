@@ -234,6 +234,43 @@ class TestExcepthookCapture:
         assert sys.excepthook is original
 
 
+class TestSignalOutcomeDetermination:
+    """Tests that received signals affect the run outcome."""
+
+    def test_sigint_sets_outcome_interrupted(self):
+        """A run that received SIGINT is marked 'interrupted' not 'completed'."""
+        if sys.platform == "win32":
+            pytest.skip("SIGUSR1 not available on Windows")
+
+        from pubrun.tracker import Run
+
+        run = Run()
+        # Simulate receiving SIGINT (caught by user code so process survives)
+        try:
+            os.kill(os.getpid(), signal.SIGINT)
+        except KeyboardInterrupt:
+            pass  # User caught it
+
+        run.stop()
+
+        # Outcome should be "interrupted", not "completed"
+        assert run._outcome == "interrupted"
+
+        # Manifest should reflect this
+        import json
+        with open(run.run_dir / "manifest.json") as f:
+            manifest = json.load(f)
+        assert manifest["status"]["outcome"] == "interrupted"
+
+    def test_no_signal_stays_completed(self):
+        """A run with no signals received stays 'completed'."""
+        from pubrun.tracker import Run
+
+        run = Run()
+        run.stop()
+        assert run._outcome == "completed"
+
+
 class TestSignalCaptureConfig:
     """Tests that signal capture respects the config toggle."""
 

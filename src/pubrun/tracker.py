@@ -310,9 +310,25 @@ class Run:
         if self._outcome == "unknown":
             # If sys.exc_info() denotes an active crash at exit time, we log failed.
             if sys.exc_info()[0] is not None:
-                self._outcome = "failed"
+                exc_type = sys.exc_info()[0]
+                if exc_type is KeyboardInterrupt:
+                    self._outcome = "interrupted"
+                else:
+                    self._outcome = "failed"
             else:
                 self._outcome = "completed"
+
+        # If the outcome is nominally "completed" but we received termination
+        # signals (SIGINT, SIGTERM, SIGHUP), upgrade to "interrupted".
+        # This handles the common case where user code catches KeyboardInterrupt
+        # and exits cleanly -- the signal was still received.
+        if self._outcome == "completed" and self.signal_capture:
+            records = self.signal_capture.get_records()
+            interruption_signals = {"SIGINT", "SIGTERM", "SIGHUP"}
+            for sig in records.get("signals_received", []):
+                if sig.get("signal_name") in interruption_signals:
+                    self._outcome = "interrupted"
+                    break
 
         # Capture the exit code.  At atexit time we can inspect whether a
         # SystemExit was the cause.  For a clean exit, code is 0.
