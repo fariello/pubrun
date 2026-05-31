@@ -306,3 +306,55 @@ class TestCliNoCommand:
         # Should print help and exit 0 (no error)
         assert result.returncode == 0
         assert "pubrun" in result.stdout.lower() or "usage" in result.stdout.lower()
+
+
+class TestCliErrorExitCodes:
+    """Test that CLI commands exit 1 on error conditions."""
+
+    def test_methods_missing_manifest_exits_1(self, tmp_path):
+        """pubrun methods with non-existent run dir exits 1."""
+        result = run_pubrun("methods", str(tmp_path / "nonexistent"), cwd=str(tmp_path))
+        assert result.returncode == 1
+
+    def test_rerun_missing_manifest_exits_1(self, tmp_path):
+        """pubrun rerun with non-existent run dir exits 1."""
+        result = run_pubrun("rerun", str(tmp_path / "nonexistent"), cwd=str(tmp_path))
+        assert result.returncode == 1
+
+    def test_rerun_manifest_without_rerun_command_exits_1(self, tmp_path):
+        """pubrun rerun with a manifest lacking rerun_command exits 1."""
+        run_dir = tmp_path / "runs" / "pubrun-test"
+        run_dir.mkdir(parents=True)
+        manifest = {"invocation": {"rerun_command": None}}
+        (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        result = run_pubrun("rerun", str(run_dir), cwd=str(tmp_path))
+        assert result.returncode == 1
+
+    def test_diff_export_bad_format_exits_1(self, tmp_path):
+        """pubrun diff --export badformat exits 1."""
+        # Need two valid run dirs with manifests for diff to get to format check
+        for name in ("a", "b"):
+            d = tmp_path / name
+            d.mkdir()
+            (d / "manifest.json").write_text(json.dumps({
+                "schema_version": "1.0", "manifest_type": "pubrun-manifest",
+                "status": {"outcome": "completed"}
+            }), encoding="utf-8")
+
+        result = run_pubrun("diff", str(tmp_path / "a"), str(tmp_path / "b"),
+                           "--export", "yaml", cwd=str(tmp_path))
+        assert result.returncode == 1
+        assert "unsupported" in result.stderr.lower() or "error" in result.stderr.lower()
+
+    def test_status_nonexistent_run_id_exits_1(self, tmp_path):
+        """pubrun status <nonexistent_id> exits 1."""
+        result = run_pubrun("status", "zzzznonexistent", "--dir", str(tmp_path),
+                           cwd=str(tmp_path))
+        assert result.returncode == 1
+        assert "no run found" in result.stderr.lower() or "error" in result.stderr.lower()
+
+    def test_cite_unknown_style_exits_1(self, tmp_path):
+        """pubrun cite --style unknown exits 1."""
+        result = run_pubrun("cite", "--style", "unknown_style", cwd=str(tmp_path))
+        # argparse rejects unknown choices with exit code 2
+        assert result.returncode != 0

@@ -48,3 +48,44 @@ def test_resources_watcher_threads(tmp_path, monkeypatch):
     assert len(samples) >= 1
     assert "rss_bytes" in samples[0]["payload"]
     assert samples[0]["payload"]["rss_bytes"] >= 0
+
+
+def test_resource_watcher_failure_threshold(tmp_path, monkeypatch):
+    """ResourceWatcher stops itself after max_consecutive_failures."""
+    from pubrun.capture.resources import ResourceWatcher
+    from pubrun import start
+
+    monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+
+    tracker = start(capture={"resources": {"depth": "standard", "sample_interval_seconds": 0.02}})
+
+    watcher = tracker.resource_watcher
+    assert watcher is not None
+
+    # Force _poll_rss to always return 0 (simulating failure)
+    monkeypatch.setattr(watcher, "_poll_rss", lambda: 0)
+
+    # Wait enough time for max_failures consecutive failures (default 3)
+    # At 20ms interval, 3 failures = ~60ms. Give generous margin.
+    time.sleep(0.3)
+
+    # The watcher should have auto-stopped itself
+    assert watcher._stop_event.is_set()
+
+    tracker.stop()
+
+
+def test_resource_watcher_to_manifest_dict_zeros():
+    """to_manifest_dict returns None for zero-value peaks."""
+    from pubrun.capture.resources import ResourceWatcher
+
+    class FakeTracker:
+        event_stream = None
+
+    watcher = ResourceWatcher(FakeTracker(), interval_seconds=1, max_failures=3)
+    # Don't start the thread -- just test the dict builder
+    result = watcher.to_manifest_dict()
+    assert result["peak_rss_bytes"] is None
+    assert result["end_rss_bytes"] is None
+    assert result["peak_cpu_percent"] is None
+    assert result["capture_state"]["status"] == "complete"

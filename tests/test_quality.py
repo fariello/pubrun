@@ -151,6 +151,35 @@ class TestDiffEngine:
         assert nested["core"]["profile"] == "deep"
         assert nested["core"]["auto_start"] is True
 
+    def test_two_empty_manifests(self):
+        """Comparing two empty manifests produces no diffs."""
+        result = compare_manifests({}, {})
+        assert result["added"] == {}
+        assert result["removed"] == {}
+        assert result["modified"] == {}
+
+    def test_two_identical_manifests(self):
+        """Comparing identical manifests has nothing in added/removed/modified."""
+        m = {"host": {"os_name": "Linux"}, "timing": {"elapsed_seconds": 5.0}}
+        result = compare_manifests(m, m)
+        assert result["added"] == {}
+        assert result["removed"] == {}
+        assert result["modified"] == {}
+
+    def test_identical_manifests_show_same(self):
+        """With show_same=True, identical keys appear in the 'same' bucket."""
+        m = {"host": {"os_name": "Linux"}}
+        result = compare_manifests(m, m, show_same=True)
+        assert "host.os_name" in result.get("same", {})
+
+    def test_completely_different_manifests(self):
+        """Two manifests with no overlapping keys."""
+        a = {"foo": {"x": 1}}
+        b = {"bar": {"y": 2}}
+        result = compare_manifests(a, b)
+        assert "foo.x" in result["removed"]
+        assert "bar.y" in result["added"]
+
 
 class TestDiffNormalization:
     """Layer 5: Tests for _normalize_manifest internals."""

@@ -316,6 +316,63 @@ class TestModuleExports:
         assert missing == set(), f"Expected public API symbols missing from __all__: {missing}"
 
 
+class TestAutoStartBootSequence:
+    """Tests for the import-time auto-start mechanism."""
+
+    def test_auto_start_true_creates_run(self, tmp_path):
+        """PUBRUN_AUTO_START=true triggers a run on import."""
+        import subprocess
+        import sys
+
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+os.environ['PUBRUN_AUTO_START'] = 'true'
+# Force reimport by clearing the module
+for mod in list(sys.modules.keys()):
+    if 'pubrun' in mod:
+        del sys.modules[mod]
+import pubrun
+run = pubrun.get_current_run()
+print(json.dumps({{"active": run is not None, "run_dir": str(run.run_dir) if run else None}}))
+if run:
+    run.stop()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, timeout=15,
+            env={**__import__("os").environ, "PUBRUN_AUTO_START": "true"}
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["active"] is True
+
+    def test_auto_start_false_no_run(self, tmp_path):
+        """PUBRUN_AUTO_START=false suppresses auto-start."""
+        import subprocess
+        import sys
+
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+os.environ['PUBRUN_AUTO_START'] = 'false'
+for mod in list(sys.modules.keys()):
+    if 'pubrun' in mod:
+        del sys.modules[mod]
+import pubrun
+run = pubrun.get_current_run()
+print(json.dumps({{"active": run is not None}}))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, timeout=15,
+            env={**__import__("os").environ, "PUBRUN_AUTO_START": "false"}
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["active"] is False
+
+
 class TestAuditRunMetadata:
     """Test that audit_run preserves function metadata via functools.wraps."""
 
@@ -334,4 +391,70 @@ class TestAuditRunMetadata:
             pass
 
         assert "another_function" in another_function.__qualname__
+
+
+class TestHandleInactivePolicy:
+    """Test on_inactive_annotate policy enforcement."""
+
+    def test_error_policy_raises_runtime_error(self, monkeypatch):
+        """on_inactive_annotate='error' raises RuntimeError with no active run."""
+        from pubrun import config as config_module
+
+        original_resolve = config_module.resolve_config
+
+        def mock_resolve(overrides=None):
+            cfg = original_resolve(overrides)
+            cfg.setdefault("events", {})["on_inactive_annotate"] = "error"
+            return cfg
+
+        monkeypatch.setattr(config_module, "resolve_config", mock_resolve)
+
+        assert get_current_run() is None
+        with pytest.raises(RuntimeError, match="no run is active"):
+            annotate("should raise")
+
+    def test_warn_policy_logs_warning(self, monkeypatch, caplog):
+        """on_inactive_annotate='warn' logs a warning with no active run."""
+        import logging
+        from pubrun import config as config_module
+
+        original_resolve = config_module.resolve_config
+
+        def mock_resolve(overrides=None):
+            cfg = original_resolve(overrides)
+            cfg.setdefault("events", {})["on_inactive_annotate"] = "warn"
+            return cfg
+
+        monkeypatch.setattr(config_module, "resolve_config", mock_resolve)
+
+        assert get_current_run() is None
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            annotate("should warn")
+
+        assert any("dropped" in r.message.lower() or "no active run" in r.message.lower()
+                   for r in caplog.records)
+
+    def test_ignore_policy_is_silent(self):
+        """on_inactive_annotate='ignore' (default) does nothing."""
+        assert get_current_run() is None
+        # Should not raise, should not log (just return silently)
+        annotate("silently dropped")
+
+    def test_phase_error_policy_raises(self, monkeypatch):
+        """on_inactive_annotate='error' also affects phase()."""
+        from pubrun import config as config_module
+
+        original_resolve = config_module.resolve_config
+
+        def mock_resolve(overrides=None):
+            cfg = original_resolve(overrides)
+            cfg.setdefault("events", {})["on_inactive_annotate"] = "error"
+            return cfg
+
+        monkeypatch.setattr(config_module, "resolve_config", mock_resolve)
+
+        assert get_current_run() is None
+        with pytest.raises(RuntimeError, match="no run is active"):
+            with phase("should_raise"):
+                pass
 
