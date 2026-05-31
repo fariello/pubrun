@@ -239,3 +239,151 @@ class TestStatusCli:
         )
         assert result.returncode == 0
         assert "No runs found" in result.stdout
+
+
+class TestCleanRuns:
+    """Tests for the pubrun clean functionality."""
+
+    def test_clean_deletes_completed_runs(self):
+        """clean_runs with yes=True deletes completed runs."""
+        from pubrun.status import clean_runs
+
+        # Create a run, stop it (completed)
+        run = Run()
+        run_dir = run.run_dir
+        output_dir = str(run_dir.parent)
+        run.stop()
+
+        assert run_dir.exists()
+        deleted = clean_runs(output_dir=output_dir, yes=True)
+        assert deleted == 1
+        assert not run_dir.exists()
+
+    def test_clean_does_not_delete_running(self):
+        """clean_runs never deletes running runs."""
+        from pubrun.status import clean_runs
+
+        run = Run()
+        run_dir = run.run_dir
+        output_dir = str(run_dir.parent)
+
+        # Don't stop -- it's "running"
+        deleted = clean_runs(output_dir=output_dir, yes=True)
+        assert deleted == 0
+        assert run_dir.exists()
+
+        # Clean up
+        run.stop()
+
+    def test_clean_older_than_filter(self):
+        """clean_runs with older_than_days filters out recent runs."""
+        from pubrun.status import clean_runs
+
+        run = Run()
+        run_dir = run.run_dir
+        output_dir = str(run_dir.parent)
+        run.stop()
+
+        # Run just created -- should not match "older than 1 day"
+        deleted = clean_runs(output_dir=output_dir, older_than_days=1.0, yes=True)
+        assert deleted == 0
+        assert run_dir.exists()
+
+    def test_clean_status_filter(self):
+        """clean_runs with status_filter only deletes matching statuses."""
+        from pubrun.status import clean_runs
+
+        run = Run()
+        run_dir = run.run_dir
+        output_dir = str(run_dir.parent)
+        run.stop()  # outcome = "completed"
+
+        # Filter for "failed" only -- should not delete our "completed" run
+        deleted = clean_runs(output_dir=output_dir, status_filter=["failed"], yes=True)
+        assert deleted == 0
+        assert run_dir.exists()
+
+        # Now filter for "completed" -- should delete it
+        deleted = clean_runs(output_dir=output_dir, status_filter=["completed"], yes=True)
+        assert deleted == 1
+        assert not run_dir.exists()
+
+    def test_clean_dry_run_does_not_delete(self):
+        """clean_runs with dry_run=True does not delete anything."""
+        from pubrun.status import clean_runs
+
+        run = Run()
+        run_dir = run.run_dir
+        output_dir = str(run_dir.parent)
+        run.stop()
+
+        deleted = clean_runs(output_dir=output_dir, yes=True, dry_run=True)
+        assert deleted == 0
+        assert run_dir.exists()  # Still exists
+
+    def test_clean_no_candidates(self, tmp_path):
+        """clean_runs with empty directory returns 0."""
+        from pubrun.status import clean_runs
+
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        deleted = clean_runs(output_dir=str(runs_dir), yes=True)
+        assert deleted == 0
+
+    def test_clean_multiple_runs(self):
+        """clean_runs deletes multiple completed runs."""
+        from pubrun.status import clean_runs
+
+        runs = []
+        for _ in range(3):
+            r = Run()
+            runs.append(r)
+            r.stop()
+
+        output_dir = str(runs[0].run_dir.parent)
+        deleted = clean_runs(output_dir=output_dir, yes=True)
+        assert deleted == 3
+        for r in runs:
+            assert not r.run_dir.exists()
+
+    def test_clean_running_filter_stripped(self):
+        """Even if 'running' is in status_filter, running runs are not deleted."""
+        from pubrun.status import clean_runs
+
+        run = Run()
+        run_dir = run.run_dir
+        output_dir = str(run_dir.parent)
+
+        # Explicitly include "running" in the filter
+        deleted = clean_runs(output_dir=output_dir, status_filter=["running", "completed"], yes=True)
+        assert deleted == 0
+        assert run_dir.exists()
+
+        run.stop()
+
+
+class TestCleanCli:
+    """Tests for the pubrun clean CLI command."""
+
+    def test_clean_help(self):
+        """pubrun clean --help exits 0."""
+        import subprocess
+        result = subprocess.run(
+            ["python", "-m", "pubrun", "clean", "--help"],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0
+        assert "clean" in result.stdout.lower()
+        assert "older-than" in result.stdout
+
+    def test_clean_dry_run_cli(self, tmp_path):
+        """pubrun clean --dry-run --dir <empty> shows no candidates."""
+        import subprocess
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        result = subprocess.run(
+            ["python", "-m", "pubrun", "clean", "--dir", str(runs_dir), "--dry-run"],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0
+        assert "No runs match" in result.stdout
