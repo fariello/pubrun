@@ -545,6 +545,37 @@ def _format_age(seconds: Optional[float]) -> str:
         return f"{days} days ago"
 
 
+def _parse_selection(response: str, candidates: List[Any]) -> List[Any]:
+    """Parse a selection string like '1-3,5,7-9' into a list of items.
+
+    Supports individual numbers, comma-separated numbers, and ranges.
+    Invalid indices are silently skipped.
+    """
+    selected: List[Any] = []
+    parts = [p.strip() for p in response.replace(" ", "").split(",")]
+    for part in parts:
+        if "-" in part and not part.startswith("-"):
+            # Range: "1-3"
+            try:
+                start_s, end_s = part.split("-", 1)
+                start_i = int(start_s) - 1
+                end_i = int(end_s) - 1
+                for idx in range(start_i, end_i + 1):
+                    if 0 <= idx < len(candidates):
+                        selected.append(candidates[idx])
+            except (ValueError, IndexError):
+                continue
+        else:
+            # Single number
+            try:
+                idx = int(part) - 1
+                if 0 <= idx < len(candidates):
+                    selected.append(candidates[idx])
+            except (ValueError, IndexError):
+                continue
+    return selected
+
+
 def clean_runs(
     output_dir: Optional[str] = None,
     older_than_days: Optional[float] = None,
@@ -590,29 +621,58 @@ def clean_runs(
         print("No runs match the cleanup criteria.")
         return 0
 
-    # Display candidates
-    print(f"\n{'#':<4}{'RUN ID':<10}{'SCRIPT':<24}{'STATUS':<12}{'AGE':<14}{'SIZE':<10}")
-    print("-" * 74)
+    # Display candidates with terminal-width-adaptive columns
+    term_width = _get_terminal_width()
+    # Fixed columns: #(4) + RUN_ID(10) + STATUS(13) + EXIT(6) + AGE(14) + SIZE(10) = 57
+    fixed_cols = 4 + 10 + 13 + 6 + 14 + 10
+    script_max = max(8, min(term_width - fixed_cols, int(term_width * 0.4)))
+
+    hdr = (
+        f"{'#':<4}"
+        f"{'RUN ID':<10}"
+        f"{'SCRIPT':<{script_max}}"
+        f"{'STATUS':<13}"
+        f"{'EXIT':<6}"
+        f"{'AGE':<14}"
+        f"{'SIZE':<10}"
+    )
+    print(f"\n{hdr}")
+    print("-" * min(len(hdr), term_width))
     for i, r in enumerate(candidates, 1):
         run_id = (r.run_id or "-")[:8]
-        script = _truncate(r.script or "-", 22)
+        # Show script + args if space permits
+        script_name = r.script or "-"
+        if r.args:
+            script_with_args = f"{script_name} {r.args}"
+        else:
+            script_with_args = script_name
+        script = _truncate(script_with_args, script_max - 2)
         status = r.status
+        exit_code = str(r.exit_code) if r.exit_code is not None else "-"
         age_seconds = (now - r.started_at_utc) if r.started_at_utc else None
         age = _format_age(age_seconds)
         size = _format_bytes(_dir_size(r.run_dir))
-        print(f"{i:<4}{run_id:<10}{script:<24}{status:<12}{age:<14}{size:<10}")
+        print(
+            f"{i:<4}"
+            f"{run_id:<10}"
+            f"{script:<{script_max}}"
+            f"{status:<13}"
+            f"{exit_code:<6}"
+            f"{age:<14}"
+            f"{size:<10}"
+        )
 
-    print(f"\n{len(candidates)} run(s) selected for removal.")
+    print(f"\n{len(candidates)} run(s) eligible for removal.")
 
     if dry_run:
         print("[dry run] No files were deleted.")
         return 0
 
-    # Confirmation
+    # Confirmation -- nothing is selected by default, requires explicit choice
     if not yes:
         try:
-            prompt = "\nDelete these runs? [y/N/select numbers] "
-            response = input(prompt).strip().lower()
+            prompt = "\nSelect runs to delete [numbers/ranges (e.g. 1-3,5), 'all', or Enter to cancel]: "
+            response = input(prompt).strip()
         except (KeyboardInterrupt, EOFError):
             print("\nCleanup cancelled.")
             return 0
@@ -620,22 +680,27 @@ def clean_runs(
         if response == "":
             print("Cleanup cancelled.")
             return 0
-        elif response in ("y", "yes"):
-            to_delete = candidates
-        elif response in ("n", "no"):
+        elif response.lower() in ("n", "no", "none"):
             print("Cleanup cancelled.")
             return 0
+        elif response.lower() == "all":
+            to_delete = candidates
         else:
-            # Try to parse as comma-separated numbers
-            try:
-                indices = [int(x.strip()) - 1 for x in response.split(",")]
-                to_delete = [candidates[i] for i in indices if 0 <= i < len(candidates)]
-                if not to_delete:
-                    print("No valid selections. Cleanup cancelled.")
-                    return 0
-            except (ValueError, IndexError):
-                print("Invalid input. Cleanup cancelled.")
+            # Parse comma-separated numbers and ranges (e.g. "1-3,5,7-9")
+            to_delete = _parse_selection(response, candidates)
+            if not to_delete:
+                print("No valid selections. Cleanup cancelled.")
                 return 0
+
+        # Always confirm before deleting
+        try:
+            confirm = input(f"Confirm: permanently delete {len(to_delete)} run(s)? [y/N] ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print("\nCleanup cancelled.")
+            return 0
+        if confirm not in ("y", "yes"):
+            print("Cleanup cancelled.")
+            return 0
     else:
         to_delete = candidates
 
