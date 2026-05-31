@@ -110,6 +110,25 @@ class TestLoadLocalConfig:
         result = load_local_config(start_dir=tmp_path)
         assert result["core"]["profile"] == "minimal"
 
+    def test_non_overlapping_keys_merge_from_both_files(self, tmp_path):
+        """Non-overlapping sections from both files are merged together."""
+        deep_dir = tmp_path / ".config" / "pubrun"
+        deep_dir.mkdir(parents=True)
+        # Deep config has [capture.resources]
+        (deep_dir / "config.toml").write_text(
+            '[capture.resources]\ndepth = "deep"\n',
+            encoding="utf-8"
+        )
+        # .pubrun.toml has [events]
+        (tmp_path / ".pubrun.toml").write_text(
+            '[events]\nenabled = false\n',
+            encoding="utf-8"
+        )
+        result = load_local_config(start_dir=tmp_path)
+        # Both sections should be present
+        assert result["capture"]["resources"]["depth"] == "deep"
+        assert result["events"]["enabled"] is False
+
 
 class TestResolveConfig:
 
