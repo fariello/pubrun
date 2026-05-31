@@ -692,9 +692,43 @@ def clean_runs(
                 print("No valid selections. Cleanup cancelled.")
                 return 0
 
-        # Always confirm before deleting
+        # Show what will be deleted
+        print(f"\nThe following {len(to_delete)} run(s) will be permanently deleted:\n")
+        print(
+            f"{'#':<4}"
+            f"{'RUN ID':<10}"
+            f"{'SCRIPT':<{script_max}}"
+            f"{'STATUS':<13}"
+            f"{'EXIT':<6}"
+            f"{'AGE':<14}"
+            f"{'SIZE':<10}"
+        )
+        print("-" * min(term_width, 4 + 10 + script_max + 13 + 6 + 14 + 10))
+        for i, r in enumerate(to_delete, 1):
+            run_id = (r.run_id or "-")[:8]
+            script_name = r.script or "-"
+            if r.args:
+                script_with_args = f"{script_name} {r.args}"
+            else:
+                script_with_args = script_name
+            script_d = _truncate(script_with_args, script_max - 2)
+            status_d = r.status
+            exit_d = str(r.exit_code) if r.exit_code is not None else "-"
+            age_s = (now - r.started_at_utc) if r.started_at_utc else None
+            age_d = _format_age(age_s)
+            size_d = _format_bytes(_dir_size(r.run_dir))
+            print(
+                f"{i:<4}"
+                f"{run_id:<10}"
+                f"{script_d:<{script_max}}"
+                f"{status_d:<13}"
+                f"{exit_d:<6}"
+                f"{age_d:<14}"
+                f"{size_d:<10}"
+            )
+
         try:
-            confirm = input(f"Confirm: permanently delete {len(to_delete)} run(s)? [y/N] ").strip().lower()
+            confirm = input(f"\nConfirm: permanently delete {len(to_delete)} run(s)? [y/N] ").strip().lower()
         except (KeyboardInterrupt, EOFError):
             print("\nCleanup cancelled.")
             return 0
