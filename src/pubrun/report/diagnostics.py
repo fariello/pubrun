@@ -120,7 +120,8 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
         v_tag = "unknown"
     print(f"Python      : {python.get('executable')} (v{v_tag})")
     
-    print(f"Host        : {host.get('os_name')} {host.get('os_version')} ({cpu_model}, {ram_gb} GB RAM)")
+    hostname = host.get("hostname", "unknown")
+    print(f"Host        : {hostname} — {host.get('os_name')} {host.get('os_version')} ({cpu_model}, {ram_gb} GB RAM)")
     
     commit = git.get("commit")
     if commit:
