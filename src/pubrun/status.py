@@ -155,6 +155,11 @@ class RunInfo:
             self.git_commit = data.get("git_commit")
             self.cwd = data.get("cwd")
 
+            # Command-line arguments from lock file
+            argv = data.get("argv", [])
+            if argv:
+                self.args = " ".join(argv)
+
             # Determine if the process is still alive
             current_host = get_hostname()
             if self.hostname and self.hostname != current_host:
