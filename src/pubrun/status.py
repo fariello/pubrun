@@ -41,6 +41,7 @@ class RunInfo:
         self.run_dir = run_dir
         self.run_id: Optional[str] = None
         self.script: Optional[str] = None
+        self.args: Optional[str] = None  # Command-line arguments (after script name)
         self.status: str = STATUS_CRASHED  # default until proven otherwise
         self.exit_code: Optional[int] = None
         self.started_at_utc: Optional[float] = None
@@ -108,6 +109,11 @@ class RunInfo:
             elif invocation.get("argv"):
                 # Fallback: use first argv element (e.g. "-c", "train.py")
                 self.script = Path(invocation["argv"][0]).stem
+
+            # Command-line arguments (everything after the script name)
+            argv = invocation.get("argv", [])
+            if len(argv) > 1:
+                self.args = " ".join(argv[1:])
 
             # Signals/exit
             signals = data.get("signals", {})
@@ -364,7 +370,13 @@ def render_short_list(runs: List[RunInfo]) -> str:
 
     for r in runs:
         run_id = (r.run_id or "-")[:8]
-        script = _truncate(r.script or "-", script_max - 2)
+        # Show script name + args if there's enough space
+        script_name = r.script or "-"
+        if r.args:
+            script_with_args = f"{script_name} {r.args}"
+        else:
+            script_with_args = script_name
+        script = _truncate(script_with_args, script_max - 2)
         commit = (r.git_commit or "-")[:7]
         started = _format_timestamp(r.started_at_utc)
         status = _status_marker(r.status)
