@@ -376,7 +376,7 @@ pubrun meta [--out PATH] [--basic|--standard|--deep]
 ```
 
 - Default depth is `--deep` (captures full virtual environment).
-- If `--out` is omitted, writes to the file path; if empty, defaults to stdout.
+- If `--out` is omitted, defaults to `./runs/meta.json`.
 - Generates a JSON snapshot with `manifest_type = "pubrun-meta-snapshot"`.
 
 ### 11.6 Run Diagnostics (`report`)

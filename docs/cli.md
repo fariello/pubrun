@@ -2,7 +2,7 @@
 
 # pubrun CLI Reference
 
-The `pubrun` CLI is accessible via `pubrun <command>` or `python -m pubrun <command>`. It provides seven commands for post-execution analysis and four diagnostic flags.
+The `pubrun` CLI is accessible via `pubrun <command>` or `python -m pubrun <command>`. It provides seven commands for post-execution analysis and diagnostic flags.
 
 ---
 

@@ -4,7 +4,9 @@
 
 > **Let your code monitor itself and write its own Methods section while you go to the pub.**
 
-`pubrun` is a stupidly simple, zero-dependency Python library that eliminates the boilerplate of documenting methodology, tracking versions, recording inputs, and monitoring resources — making it dramatically easier to publish, share, and reproduce your models and research. If you're feeling formal, you can think of "publication-ready runner" as the meaning of the name.
+`pubrun` is a stupidly simple, zero-dependency[^1] Python library that eliminates the boilerplate of documenting methodology, tracking versions, recording inputs, and monitoring resources — making it dramatically easier to publish, share, and reproduce your models and research. If you're feeling formal, you can think of "publication-ready runner" as the meaning of the name.
+
+[^1]: On Python 3.11+, pubrun uses only the standard library. On Python 3.8–3.10, the sole runtime dependency is `tomli` (a backport of the standard-library `tomllib`).
 
 ## Quick Start
 
@@ -81,7 +83,7 @@ pubrun methods --format latex
 
 ## CLI Reference
 
-The `pubrun` CLI provides seven commands and four diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
+The `pubrun` CLI provides seven commands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
 
 ### `pubrun cite`
 Generates the bibliographic citation for crediting this library in your paper.
@@ -132,6 +134,7 @@ pubrun status --dir /path  # Scan a non-default output directory
 
 | Flag | Description |
 |---|---|
+| `--version` | Print the installed pubrun version and exit |
 | `--create-config` | Bootstrap a fully commented `.pubrun.toml` file |
 | `--show-config` | Print the default configuration to the terminal |
 | `--info` | Display system capabilities and pubrun version |
@@ -157,6 +160,7 @@ If a process is killed (`SIGKILL`, OOM, power loss), the lock file persists. `pu
 | **failed** | Manifest exists, outcome is "failed" |
 | **running** | Lock file present, process is alive |
 | **crashed** | Lock file present, process is dead |
+| **ghost** | Run entered ghost mode (filesystem write failure at init) |
 
 ### Signal and Exit Code Capture
 

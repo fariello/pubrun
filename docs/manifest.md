@@ -185,6 +185,7 @@ Git repository state.
 
 | Field | Type | Description |
 |---|---|---|
+| `repo_root` | string | Absolute path to the git repository root directory. |
 | `commit` | string | Full 40-character SHA-1 commit hash. |
 | `branch` | string | Active branch name (e.g., `"main"`). |
 | `dirty` | bool | Whether there are uncommitted changes. |
@@ -312,7 +313,7 @@ Run outcome.
 
 | Field | Type | Description |
 |---|---|---|
-| `outcome` | string | `"completed"`, `"failed"`, or `"interrupted"`. |
+| `outcome` | string | `"completed"`, `"failed"`, `"ghost"`, or `"unknown"`. |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
 ---
