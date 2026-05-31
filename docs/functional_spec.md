@@ -441,6 +441,33 @@ Generates a formatted citation for crediting `pubrun`.
 pubrun cite [--style apa|mla|chicago|bibtex]
 ```
 
+### 11.11 Run Monitoring (`status`)
+
+Lists all runs with their current status or inspects a specific run in detail.
+
+```
+pubrun status [RUN_ID] [--dir PATH] [-v|--verbose]
+```
+
+- Detects running, completed, failed, crashed, and ghost runs via lock-file PID liveness checks.
+- Shows script name with command-line arguments when terminal width permits.
+- Verbose mode (`-v`) includes PID, hostname, RSS, CPU, events, and signals.
+- Inspect mode (`pubrun status <id>`) shows full detail for a single run.
+
+### 11.12 Run Cleanup (`clean`)
+
+Interactively delete old run directories.
+
+```
+pubrun clean [--dir PATH] [--older-than AGE] [--status STATUS] [-y|--yes] [--dry-run]
+```
+
+- Lists candidates with age and size before prompting for confirmation.
+- Interactive mode: accepts `y` (all), `n` (cancel), or comma-separated numbers (e.g. `1,3,5`).
+- Running processes are never deleted regardless of filters.
+- `--older-than` accepts days (`7d`), hours (`24h`), or bare numbers (days).
+- `--status` accepts comma-separated values (e.g. `completed,failed`). Default: all non-running.
+
 ---
 
 ## 12. Run Directory

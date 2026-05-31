@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`pubrun status` CLI command**: List all runs with a compact table (`pubrun status`), verbose detail (`pubrun status -v`), or inspect a specific run (`pubrun status <run-id>`). Shows status (completed/running/crashed/failed), exit code, elapsed time, git commit, command-line arguments, and live RSS/CPU for running processes. Script column width adapts to terminal width; command-line args are displayed when space permits.
 - **Run lock file**: A `.pubrun.lock` file is written at run start and removed at finalization. Enables external tools to detect active, crashed, or orphaned runs via PID liveness checks with start-time verification to handle PID recycling.
 - **Cross-platform process liveness** (`capture/liveness.py`): PID alive check, process start time, RSS memory, and CPU usage queries for Linux (`/proc`), macOS (`ps`), and Windows (`ctypes`/`wmic`). All stdlib, zero dependencies.
+- **`pubrun clean` CLI command**: Interactively delete old run directories. Lists candidates with age and size, prompts for confirmation (numbered selection or `y`/`n`). Supports `--older-than` (e.g. `7d`, `24h`), `--status` filter, `--yes` (non-interactive), and `--dry-run`. Running processes are never deleted.
 
 ### Security
 
@@ -43,10 +44,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Documentation
 
-- **README.md**: Added footnote clarifying `tomli` dependency on Python <3.11. Added `--version` to diagnostic flags table. Added `ghost` status to the Monitoring Runs table. Dropped diagnostic flag count (avoids drift).
-- **`docs/cli.md`**: Dropped diagnostic flag count from intro line.
+- **README.md**: Added footnote clarifying `tomli` dependency on Python <3.11. Added `--version` to diagnostic flags table. Added `ghost` status to the Monitoring Runs table. Added `pubrun clean` command reference.
+- **`docs/cli.md`**: Added full `clean` command reference with all options and interactive mode documentation. Updated command count to eight.
 - **`docs/manifest.md`**: Added missing `git.repo_root` field. Corrected `status.outcome` enum: replaced `"interrupted"` (never produced) with `"ghost"` and `"unknown"`.
-- **`docs/functional_spec.md`**: Corrected `meta --out` default behavior description.
+- **`docs/functional_spec.md`**: Corrected `meta --out` default behavior description. Added `clean` command to the CLI subcommands specification.
 
 ## [0.1.1] - 2026-05-09
 
