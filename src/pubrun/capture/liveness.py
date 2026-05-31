@@ -210,9 +210,9 @@ def _get_start_time_macos(pid: int) -> Optional[float]:
         )
         if result.returncode != 0 or not result.stdout.strip():
             return None
-        # Output format: "Thu May 31 14:02:17 2026"
+        # Output format: "Thu May 31 14:02:17 2026" (locale-independent format)
         from datetime import datetime
-        dt = datetime.strptime(result.stdout.strip(), "%c")
+        dt = datetime.strptime(result.stdout.strip(), "%a %b %d %H:%M:%S %Y")
         return dt.timestamp()
     except (subprocess.TimeoutExpired, ValueError, OSError):
         return None

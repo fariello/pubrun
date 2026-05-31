@@ -356,6 +356,44 @@ class TestMetaRefSecurity:
         assert not any("Security" in w for w in warnings)
 
 
+class TestConsoleRestoreSafety:
+    """Test that console interceptor doesn't clobber third-party stream wrappers."""
+
+    def test_stop_preserves_third_party_wrapper(self):
+        """If another library wraps stdout after pubrun, stop() doesn't clobber it."""
+        import sys
+        from pubrun.capture.console import ConsoleInterceptor
+        from pathlib import Path
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = Path(td)
+            interceptor = ConsoleInterceptor(run_dir, "basic")
+            interceptor.start()
+
+            # Simulate a third-party library wrapping stdout AFTER pubrun
+            class ThirdPartyWrapper:
+                def __init__(self, inner):
+                    self.inner = inner
+                def write(self, s):
+                    return self.inner.write(s)
+                def flush(self):
+                    return self.inner.flush()
+
+            third_party = ThirdPartyWrapper(sys.stdout)
+            sys.stdout = third_party
+
+            # Stop the interceptor -- should NOT replace sys.stdout since
+            # it's no longer our tee.
+            interceptor.stop()
+
+            # sys.stdout should still be the third-party wrapper
+            assert sys.stdout is third_party
+
+            # Clean up
+            sys.stdout = interceptor.original_stdout
+
+
 class TestRunDirPermissions:
     """Test that run directories are created with restrictive permissions."""
 

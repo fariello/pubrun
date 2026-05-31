@@ -361,10 +361,12 @@ class Run:
         """
         if self._outcome != "failed":
             self._outcome = outcome
-            
-        self.ref_count = getattr(self, "ref_count", 1) - 1
-        if self.ref_count > 0:
-            return  # Still referenced by an outer wrapper.
+
+        from pubrun import _run_lock
+        with _run_lock:
+            self.ref_count = getattr(self, "ref_count", 1) - 1
+            if self.ref_count > 0:
+                return  # Still referenced by an outer wrapper.
             
         self._finalize_state()
         if getattr(self, "writer", None):
