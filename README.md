@@ -122,7 +122,7 @@ pubrun meta --out ./runs/meta.json --deep
 ```
 
 ### `pubrun status`
-Lists all runs with their current status (completed, running, crashed, failed), or inspects a specific run in detail. Detects active processes via cross-platform PID liveness checks.
+Lists all runs with their current status (completed, failed, interrupted, running, crashed, ghost), or inspects a specific run in detail. Detects active processes via cross-platform PID liveness checks.
 ```bash
 pubrun status              # Compact table of all runs
 pubrun status -v           # Verbose listing with PID, RSS, CPU, events
