@@ -1,4 +1,6 @@
+import json
 import os
+import platform
 import sys
 import time
 import uuid
@@ -115,6 +117,9 @@ class Run:
         
         # 2. Get Git provenance before subprocess tracking to prevent logging ourselves
         self.git_data = get_git(self.config)
+
+        # Write lock file early so external tools can detect this run is active.
+        self._write_lock_file()
         
         # 3. Process, Env, and Runtime Snapshotting
         self.process_data = get_process_info(self.config)
@@ -166,6 +171,44 @@ class Run:
 
         # Update global reference
         _active_run = self
+
+    # ------------------------------------------------------------------
+    # Lock file (enables external status queries)
+    # ------------------------------------------------------------------
+
+    LOCK_FILENAME = ".pubrun.lock"
+
+    def _write_lock_file(self) -> None:
+        """Write a lock file to the run directory so external tools can detect
+        this run is active.  Contains PID, start time, hostname, and git commit
+        for status queries.  Best-effort -- never crashes the host script."""
+        try:
+            git_commit = None
+            if isinstance(self.git_data, dict):
+                git_commit = self.git_data.get("commit_sha")
+            lock_data = {
+                "pid": self.pid,
+                "started_at_utc": self.started_at_utc,
+                "script": self.script_name,
+                "run_id": self.run_id,
+                "hostname": platform.node(),
+                "git_commit": git_commit,
+                "cwd": str(Path.cwd()),
+            }
+            lock_path = self.run_dir / self.LOCK_FILENAME
+            with open(lock_path, "w", encoding="utf-8") as f:
+                json.dump(lock_data, f, indent=2)
+        except Exception:
+            pass  # Best-effort: pubrun must never crash the host script.
+
+    def _remove_lock_file(self) -> None:
+        """Remove the lock file after finalization.  Best-effort."""
+        try:
+            lock_path = self.run_dir / self.LOCK_FILENAME
+            if lock_path.exists():
+                lock_path.unlink()
+        except Exception:
+            pass
 
     def _merge_and_migrate(self, overrides: Dict[str, Any]) -> None:
         """Merge new overrides into a running config. Migrates the run directory
@@ -265,6 +308,9 @@ class Run:
         # Restore original signal handlers so pubrun leaves no footprint
         if self.signal_capture:
             self.signal_capture.uninstall()
+
+        # Remove the lock file -- this run is no longer active.
+        self._remove_lock_file()
 
     def stop(self, outcome: str = "completed") -> None:
         """Stop tracking, finalize engines, and write artifacts.

@@ -212,6 +212,32 @@ def _run_cite(style: str) -> None:
         sys.exit(1)
 
 
+def _run_status(run_id: Optional[str], output_dir: Optional[str], verbose: bool) -> None:
+    """List runs or inspect a specific run."""
+    from pubrun.status import (
+        find_run,
+        render_inspect,
+        render_short_list,
+        render_verbose_list,
+        scan_runs,
+    )
+
+    if run_id:
+        # Inspect a specific run
+        run_info = find_run(run_id, output_dir)
+        if run_info is None:
+            print(f"Error: No run found matching '{run_id}'.", file=sys.stderr)
+            sys.exit(1)
+        print(render_inspect(run_info))
+    else:
+        # List all runs
+        runs = scan_runs(output_dir)
+        if verbose:
+            print(render_verbose_list(runs))
+        else:
+            print(render_short_list(runs))
+
+
 def _show_info() -> None:
     """Print hardware and invocation diagnostics for debugging."""
     from pubrun.capture.hardware import get_hardware
@@ -372,6 +398,12 @@ def main() -> None:
     depth_group_2.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Full hardware, git, and pip dependency snapshot (default).")
     meta_parser.set_defaults(depth="deep")
     
+    # ---------------- Status Subparser ----------------
+    status_parser = subparsers.add_parser("status", help="List runs and their status, or inspect a specific run.", description="List runs and their status, or inspect a specific run.")
+    status_parser.add_argument("run_id", type=str, nargs="?", help="Run ID (or prefix) to inspect in detail. If omitted, lists all runs.")
+    status_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
+    status_parser.add_argument("-v", "--verbose", action="store_true", help="Show detailed information for each run in the listing.")
+
     # ---------------- Cite Subparser ----------------
     cite_parser = subparsers.add_parser("cite", help="Generate a formatted academic citation for pubrun.", description="Generate a formatted academic citation for pubrun.")
     cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Citation format (default: apa).")
@@ -421,6 +453,14 @@ def main() -> None:
 
     elif args.command == "cite":
         _run_cite(args.style)
+        executed = True
+
+    elif args.command == "status":
+        _run_status(
+            getattr(args, "run_id", None),
+            getattr(args, "dir", None),
+            getattr(args, "verbose", False),
+        )
         executed = True
 
     if getattr(args, "create_config", False):
