@@ -343,11 +343,12 @@ def render_short_list(runs: List[RunInfo]) -> str:
 
     term_width = _get_terminal_width()
 
-    # Calculate script column width: at least 8, flexible based on terminal
-    # Fixed columns take ~65 chars. Rest goes to script name.
+    # Calculate script column width: at least 8, flexible based on terminal.
+    # Fixed columns take ~69 chars. Remaining space goes to script name,
+    # capped at 40% of terminal width to keep the table balanced.
     fixed_width = 10 + 9 + 18 + 12 + 6 + 8 + 6  # spacers between columns
-    script_max = max(8, term_width - fixed_width)
-    script_max = min(script_max, 24)  # cap at 24
+    available = term_width - fixed_width
+    script_max = max(8, min(available, int(term_width * 0.4)))
 
     # Header
     hdr = (
