@@ -158,6 +158,12 @@ Security policies for preventing secret leakage into manifest files.
 | `sample_interval_seconds` | int | `15` | How often the background thread samples CPU/memory. |
 | `max_consecutive_failures` | int | `3` | Kill the background thread after this many consecutive read failures. |
 
+### `[capture.signals]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Install non-intrusive signal handlers (`SIGINT`, `SIGTERM`, `SIGHUP`, `SIGUSR1`, `SIGUSR2`, `SIGBREAK` where available) that record received signals and the process exit code. Handlers chain to any pre-existing handlers without disrupting the importing script. Disable to skip the `"signals"` manifest section entirely. |
+
 ### `[capture.determinism]`
 
 | Key | Type | Default | Description |

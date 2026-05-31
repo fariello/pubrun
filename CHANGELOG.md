@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Schema validation**: Added `signals` property and `signals_section` definition to `manifest.schema.json`. Added `ghost` to the `outcome` enum. Manifests now validate correctly.
 - **`pubrun status` field extraction**: Fixed incorrect manifest field lookups (`git.commit_sha` → `git.commit`; `invocation.script_name` → `invocation.script.basename` with argv fallback).
 - **`docs/manifest.md`**: Corrected `is_dirty` → `dirty` to match the actual manifest field name.
+- **`docs/configuration.md`**: Added missing `[capture.signals]` section to match the actual config schema in `default.toml`.
 
 ### Tests
 
