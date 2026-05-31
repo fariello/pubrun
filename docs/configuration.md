@@ -172,6 +172,17 @@ Security policies for preventing secret leakage into manifest files.
 
 ---
 
+### `[report]`
+
+Controls for `pubrun report` and `pubrun methods` manifest hydration.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `allow_external_meta_ref` | bool | `false` | When hydrating a manifest via `meta_ref`, allow the referenced file to live outside the manifest's parent directory. When `false` (default), external paths are rejected to prevent arbitrary file reads from tampered manifests. |
+| `meta_ref_allowed_dirs` | list | `[]` | Allowlist of absolute directory paths permitted as sources for `meta_ref` files. Only consulted when `allow_external_meta_ref` is `false`. Example: `["/scratch/projects/myproject"]`. |
+
+---
+
 ### `[logging]`
 
 | Key | Type | Default | Description |

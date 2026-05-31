@@ -77,9 +77,13 @@ class Run:
         dir_name = f"pubrun-{self.script_name}-{timestamp_str}-{self.pid}-{self.run_id}"
         self.run_dir = base_dir / dir_name
 
-        # Ensure directory is created safely
+        # Ensure directory is created safely with restrictive permissions
         try:
             self.run_dir.mkdir(parents=True, exist_ok=True)
+            # Restrict to owner-only on POSIX to prevent other users on shared
+            # systems from reading captured environment data.
+            if sys.platform != "win32":
+                os.chmod(self.run_dir, 0o700)
         except Exception as e:
             # GHOST MODE: 
             # If filesystem is read-only (e.g. strict Slurm nodes), we silently abort

@@ -220,6 +220,23 @@ write_summary = true
 # Values: "markdown", "latex"
 format = "markdown"
 
+[report]
+# -----------------------------------------------------------------------------
+# Controls for pubrun report / methods hydration behavior.
+# -----------------------------------------------------------------------------
+
+# When hydrating a manifest via meta_ref, reject paths that resolve outside
+# the manifest's parent directory by default. Set to true to allow any path
+# (use with caution on shared filesystems).
+allow_external_meta_ref = false
+
+# Allowlist of absolute directory paths that are permitted sources for
+# meta_ref files. Paths must resolve under at least one of these prefixes
+# to be accepted. Only consulted when allow_external_meta_ref is false.
+# Example: ["/scratch/projects/myproject", "/shared/pubrun-meta"]
+meta_ref_allowed_dirs = []
+
+
 [diff]
 # -----------------------------------------------------------------------------
 # Semantic diff engine (pubrun diff).

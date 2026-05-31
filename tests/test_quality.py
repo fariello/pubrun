@@ -251,3 +251,122 @@ class TestPathSplitDiff:
         assert mod.get("type") == "path_split"
         assert "/opt/bin" in mod["removed"]
 
+
+class TestMetaRefSecurity:
+    """Security tests for meta_ref path traversal prevention."""
+
+    def test_meta_ref_outside_manifest_dir_rejected(self, tmp_path):
+        """meta_ref pointing outside manifest dir is rejected by default."""
+        from pubrun.report.utils import hydrate_manifest
+
+        # Create a manifest that references a file outside its directory
+        run_dir = tmp_path / "runs" / "pubrun-test"
+        run_dir.mkdir(parents=True)
+
+        # Create a "secret" file outside the run directory
+        secret = tmp_path / "secret.json"
+        secret.write_text('{"evil": true}', encoding="utf-8")
+
+        manifest_path = str(run_dir / "manifest.json")
+        manifest = {"meta_ref": "../../secret.json"}
+
+        hydrated, warnings = hydrate_manifest(manifest_path, manifest)
+
+        # Should be rejected -- secret content NOT merged
+        assert "evil" not in hydrated
+        assert any("Security" in w for w in warnings)
+        assert any("outside" in w.lower() for w in warnings)
+
+    def test_meta_ref_inside_manifest_dir_accepted(self, tmp_path):
+        """meta_ref pointing inside manifest dir is accepted."""
+        from pubrun.report.utils import hydrate_manifest
+
+        run_dir = tmp_path / "runs" / "pubrun-test"
+        run_dir.mkdir(parents=True)
+
+        # Create a valid meta.json inside the run dir
+        meta = {"hardware": {"cpu_model": "test", "capture_state": {"status": "complete"}}}
+        meta_path = run_dir / "meta.json"
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+        manifest_path = str(run_dir / "manifest.json")
+        manifest = {"meta_ref": "meta.json"}
+
+        hydrated, warnings = hydrate_manifest(manifest_path, manifest)
+        # Should be accepted -- no security warnings
+        assert not any("Security" in w for w in warnings)
+
+    def test_meta_ref_allowlist_permits_explicit_dir(self, tmp_path, monkeypatch):
+        """Allowlist permits meta_ref from explicitly listed directories."""
+        from pubrun.report.utils import hydrate_manifest
+
+        # Set up directories
+        run_dir = tmp_path / "runs" / "pubrun-test"
+        run_dir.mkdir(parents=True)
+        shared_dir = tmp_path / "shared"
+        shared_dir.mkdir()
+
+        meta = {"hardware": {"cpu_model": "shared-hw", "capture_state": {"status": "complete"}}}
+        meta_path = shared_dir / "meta.json"
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+        # Mock config to include the shared dir in allowlist
+        from pubrun import config as config_module
+        original_resolve = config_module.resolve_config
+
+        def mock_resolve(overrides=None):
+            cfg = original_resolve(overrides)
+            cfg.setdefault("report", {})["meta_ref_allowed_dirs"] = [str(shared_dir)]
+            return cfg
+
+        monkeypatch.setattr(config_module, "resolve_config", mock_resolve)
+
+        manifest_path = str(run_dir / "manifest.json")
+        manifest = {"meta_ref": "../../shared/meta.json"}
+
+        hydrated, warnings = hydrate_manifest(manifest_path, manifest)
+        assert not any("Security" in w for w in warnings)
+
+    def test_meta_ref_allow_external_escape_hatch(self, tmp_path, monkeypatch):
+        """allow_external_meta_ref = true permits any path."""
+        from pubrun.report.utils import hydrate_manifest
+        from pubrun import config as config_module
+
+        run_dir = tmp_path / "runs" / "pubrun-test"
+        run_dir.mkdir(parents=True)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+
+        meta = {"hardware": {"cpu_model": "external", "capture_state": {"status": "complete"}}}
+        (outside / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+        original_resolve = config_module.resolve_config
+
+        def mock_resolve(overrides=None):
+            cfg = original_resolve(overrides)
+            cfg.setdefault("report", {})["allow_external_meta_ref"] = True
+            return cfg
+
+        monkeypatch.setattr(config_module, "resolve_config", mock_resolve)
+
+        manifest_path = str(run_dir / "manifest.json")
+        manifest = {"meta_ref": "../../outside/meta.json"}
+
+        hydrated, warnings = hydrate_manifest(manifest_path, manifest)
+        assert not any("Security" in w for w in warnings)
+
+
+class TestRunDirPermissions:
+    """Test that run directories are created with restrictive permissions."""
+
+    @pytest.mark.skipif(__import__("sys").platform == "win32", reason="POSIX-only")
+    def test_run_dir_mode_700(self):
+        """Run directory is created with mode 0o700 on POSIX."""
+        import stat
+        from pubrun.tracker import Run
+
+        run = Run()
+        mode = run.run_dir.stat().st_mode & 0o777
+        assert mode == 0o700, f"Expected 0o700, got {oct(mode)}"
+        run.stop()
+
