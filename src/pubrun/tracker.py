@@ -162,8 +162,10 @@ class Run:
         # ---------------------------------------------
         
         # 7. Signal and exit-code capture (non-intrusive, chains to user handlers)
-        self.signal_capture = SignalExitCapture()
-        self.signal_capture.install()
+        self.signal_capture = None
+        if self.config.get("capture", {}).get("signals", {}).get("enabled", True):
+            self.signal_capture = SignalExitCapture()
+            self.signal_capture.install()
 
         # Wire up crash-safety
         self.writer = ArtifactWriter(self)

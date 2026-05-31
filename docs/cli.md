@@ -2,7 +2,7 @@
 
 # pubrun CLI Reference
 
-The `pubrun` CLI is accessible via `pubrun <command>` or `python -m pubrun <command>`. It provides six commands for post-execution analysis and four diagnostic flags.
+The `pubrun` CLI is accessible via `pubrun <command>` or `python -m pubrun <command>`. It provides seven commands for post-execution analysis and four diagnostic flags.
 
 ---
 
@@ -106,6 +106,51 @@ pubrun meta [--out PATH] [--basic|--standard|--deep]
 ```bash
 pubrun meta --out ./shared/meta.json --deep
 ```
+
+---
+
+### `status` — Run Monitoring
+
+Lists all runs in the output directory with their current status, or inspects a specific run in detail. Detects running, completed, failed, and crashed runs via lock-file PID liveness checks.
+
+```bash
+pubrun status [RUN_ID] [--dir PATH] [-v|--verbose]
+```
+
+**Modes:**
+
+| Usage | Description |
+|---|---|
+| `pubrun status` | Compact table listing all runs (ID, script, commit, started, status, exit code, elapsed) |
+| `pubrun status -v` | Verbose listing with PID, hostname, RSS, CPU, events, signals, and directory |
+| `pubrun status <run-id>` | Detailed inspection of a single run (supports prefix matching) |
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--dir PATH` | Override the output directory to scan (default: configured `output_dir` or `./runs`) |
+| `-v`, `--verbose` | Show detailed information for each run in the listing |
+
+**Status Values:**
+
+| Status | Meaning |
+|---|---|
+| `completed` | Run finished successfully (manifest exists, outcome is "completed") |
+| `failed` | Run finished with an error (manifest exists, outcome is "failed") |
+| `running` | Lock file exists and the process is still alive |
+| `crashed` | Lock file exists but the process is dead (killed without cleanup) |
+| `ghost` | Run entered ghost mode (filesystem write failure) |
+
+**Example:**
+```bash
+pubrun status                    # List all runs
+pubrun status -v                 # Detailed listing
+pubrun status a3f9               # Inspect run by ID prefix
+pubrun status --dir /shared/runs # Scan a different directory
+```
+
+For running processes, the inspect view also shows live RSS memory and CPU usage (cross-platform: Linux, macOS, Windows).
 
 ---
 

@@ -187,7 +187,7 @@ Git repository state.
 |---|---|---|
 | `commit` | string | Full 40-character SHA-1 commit hash. |
 | `branch` | string | Active branch name (e.g., `"main"`). |
-| `is_dirty` | bool | Whether there are uncommitted changes. |
+| `dirty` | bool | Whether there are uncommitted changes. |
 | `remote_url` | object | A `redacted_value` object containing the remote URL. |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
@@ -201,6 +201,33 @@ Captured errors during the run.
 |---|---|---|
 | `records` | list[object] | Error records. Empty if no errors occurred. |
 | `capture_state` | object | See [Capture State](#capture-state). |
+
+---
+
+## `signals`
+
+OS signals received during execution and the process exit code. This section is populated by the signal capture engine, which installs non-intrusive shim handlers that chain to any pre-existing handlers without disrupting the importing script's behavior.
+
+| Field | Type | Description |
+|---|---|---|
+| `signals_received` | list[object] | Signals received during execution. Each entry has `signal` (int), `signal_name` (string), and `timestamp_utc` (float). |
+| `exit_code` | int \| null | Process exit code at finalization. `0` for clean exit, `1` for unhandled exception, or the `SystemExit` code. Null if unknown. |
+| `exit_exception` | string \| null | String representation of the exit-causing exception (e.g., `"SystemExit(42)"`), or null. |
+| `capture_state` | object | See [Capture State](#capture-state). |
+
+**Example:**
+```json
+{
+  "signals_received": [
+    {"signal": 2, "signal_name": "SIGINT", "timestamp_utc": 1780250544.068}
+  ],
+  "exit_code": 0,
+  "exit_exception": null,
+  "capture_state": {"status": "complete"}
+}
+```
+
+Configurable via `[capture.signals].enabled` in `.pubrun.toml`. When disabled, the manifest contains `{"capture_state": {"status": "suppressed"}}`.
 
 ---
 

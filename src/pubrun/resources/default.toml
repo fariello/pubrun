@@ -187,6 +187,17 @@ sample_interval_seconds = 15
 max_consecutive_failures = 3
 
 
+[capture.signals]
+# -----------------------------------------------------------------------------
+# OS signal and exit-code capture.
+# -----------------------------------------------------------------------------
+
+# When enabled, pubrun installs thin shim signal handlers that record received
+# signals (SIGINT, SIGTERM, SIGHUP, etc.) and chain to the previous handler
+# without disrupting the importing script. Also captures the process exit code.
+enabled = true
+
+
 [capture.determinism]
 # Track or lock pseudorandom seeds (Python random, numpy.random).
 depth = "off"

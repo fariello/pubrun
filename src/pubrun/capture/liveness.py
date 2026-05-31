@@ -56,14 +56,18 @@ def get_process_start_time(pid: int) -> Optional[float]:
     return None
 
 
-def is_same_process(pid: int, expected_start_utc: float, tolerance: float = 2.0) -> bool:
+def is_same_process(pid: int, expected_start_utc: float, tolerance: float = 60.0) -> bool:
     """Check if a PID is alive AND matches the expected start time.
 
     Args:
         pid: Process ID to check.
         expected_start_utc: POSIX timestamp when the run originally started.
-        tolerance: Seconds of allowed clock skew between recorded start and
-            actual process creation time.
+            Note: this is the run start time, not the process creation time.
+            The process may have been alive for some time before the run
+            started (import time, setup, etc.), so tolerance must be generous.
+        tolerance: Seconds of allowed difference between recorded start and
+            actual process creation time.  Default is 60s to account for
+            import overhead and slow startup.
 
     Returns:
         True if the process is alive and was created within ``tolerance``

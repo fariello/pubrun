@@ -98,11 +98,16 @@ class RunInfo:
 
             # Git
             git = data.get("git", {})
-            self.git_commit = git.get("commit_sha")
+            self.git_commit = git.get("commit")
 
             # Invocation
             invocation = data.get("invocation", {})
-            self.script = invocation.get("script_name")
+            script_data = invocation.get("script", {})
+            if isinstance(script_data, dict) and script_data.get("basename"):
+                self.script = script_data["basename"]
+            elif invocation.get("argv"):
+                # Fallback: use first argv element (e.g. "-c", "train.py")
+                self.script = Path(invocation["argv"][0]).stem
 
             # Signals/exit
             signals = data.get("signals", {})

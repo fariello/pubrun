@@ -89,6 +89,9 @@
         "errors": {
             "$ref": "#/$defs/errors_section"
         },
+        "signals": {
+            "$ref": "#/$defs/signals_section"
+        },
         "meta_ref": {
             "type": [
                 "string",
@@ -504,7 +507,8 @@
                         "failed",
                         "interrupted",
                         "partial",
-                        "unknown"
+                        "unknown",
+                        "ghost"
                     ]
                 },
                 "exit_code": {
@@ -1296,6 +1300,50 @@
                         "$ref": "#/$defs/error_record"
                     },
                     "default": []
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "signals_section": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "capture_state"
+            ],
+            "properties": {
+                "signals_received": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "signal": {
+                                "type": "integer",
+                                "description": "Signal number (e.g. 2 for SIGINT)."
+                            },
+                            "signal_name": {
+                                "type": "string",
+                                "description": "Symbolic signal name (e.g. 'SIGINT')."
+                            },
+                            "timestamp_utc": {
+                                "type": "number",
+                                "description": "POSIX epoch timestamp when the signal was received."
+                            }
+                        },
+                        "required": ["signal", "signal_name", "timestamp_utc"],
+                        "additionalProperties": false
+                    },
+                    "default": [],
+                    "description": "List of OS signals received during execution."
+                },
+                "exit_code": {
+                    "type": ["integer", "null"],
+                    "description": "Process exit code captured at finalization. Null if unknown."
+                },
+                "exit_exception": {
+                    "type": ["string", "null"],
+                    "description": "String representation of the exit-causing exception, if any."
                 },
                 "capture_state": {
                     "$ref": "#/$defs/capture_state"
