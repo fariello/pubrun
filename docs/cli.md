@@ -111,7 +111,7 @@ pubrun meta --out ./shared/meta.json --deep
 
 ### `status` — Run Monitoring
 
-Lists all runs in the output directory with their current status, or inspects a specific run in detail. Detects running, completed, failed, and crashed runs via lock-file PID liveness checks.
+Lists all runs in the output directory with their current status, or inspects a specific run in detail. Classifies runs as completed, failed, interrupted, running, crashed, or ghost via lock-file PID liveness checks.
 
 ```bash
 pubrun status [RUN_ID] [--dir PATH] [-v|--verbose]

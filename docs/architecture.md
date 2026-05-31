@@ -246,6 +246,8 @@ The execution engine is divided into these key systems:
 - **Global Context Snapshotter** (`pubrun meta`) — Generates standalone environment snapshots for HPC hydration.
 - **Diff Semantic Analyzer** (`pubrun diff`) — Generates side-by-side structural comparisons with configurable depth filtering.
 - **Reproducibility Extractor** (`pubrun rerun`) — Extracts cross-platform replay commands from historical manifests.
+- **Run Monitor** (`pubrun status`) — Lists and inspects runs with live PID liveness checking, signal detection, and resource usage queries.
+- **Run Cleanup** (`pubrun clean`) — Interactive deletion of old run directories with safety constraints and explicit confirmation.
 
 ## 22. Summary
 
