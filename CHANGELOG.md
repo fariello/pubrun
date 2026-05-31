@@ -35,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **macOS liveness parsing**: Replaced locale-dependent `%c` datetime format with explicit `"%a %b %d %H:%M:%S %Y"`.
 - **Console stream restore safety**: `stop()` now only restores `sys.stdout`/`sys.stderr` if they still point to pubrun's tees. If a third-party wrapper was installed after pubrun, streams are left alone.
 - **`pubrun status` script column**: Removed hard cap of 24 characters on the script column. Width now scales proportionally with terminal width (up to 40% of available columns).
+- **`interrupted` outcome**: Runs that received SIGINT, SIGTERM, or SIGHUP are now marked as `"interrupted"` rather than `"completed"`. This applies even when user code catches `KeyboardInterrupt` -- the signal was still received and recorded. Displayed in magenta in `pubrun status`.
 
 ### Tests
 

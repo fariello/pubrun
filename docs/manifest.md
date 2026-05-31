@@ -313,7 +313,7 @@ Run outcome.
 
 | Field | Type | Description |
 |---|---|---|
-| `outcome` | string | `"completed"`, `"failed"`, `"ghost"`, or `"unknown"`. |
+| `outcome` | string | `"completed"`, `"failed"`, `"interrupted"`, `"ghost"`, or `"unknown"`. `"interrupted"` indicates the run received a termination signal (SIGINT, SIGTERM, or SIGHUP). |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
 ---
