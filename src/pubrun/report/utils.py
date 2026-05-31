@@ -6,6 +6,47 @@ from datetime import datetime
 
 logger = logging.getLogger("pubrun")
 
+
+def _is_meta_ref_allowed(meta_path: Path, manifest_dir: Path) -> bool:
+    """Check if a resolved meta_ref path is allowed by configuration.
+
+    By default, meta_ref must resolve within the manifest's parent directory.
+    The ``[report].allow_external_meta_ref`` and ``[report].meta_ref_allowed_dirs``
+    config keys can relax this constraint for HPC workflows.
+
+    Returns True if the path is permitted, False otherwise.
+    """
+    from pubrun.config import resolve_config
+    config = resolve_config()
+    report_cfg = config.get("report", {})
+
+    # Escape hatch: allow all external refs
+    if report_cfg.get("allow_external_meta_ref", False):
+        return True
+
+    resolved_manifest_dir = manifest_dir.resolve()
+    resolved_meta = meta_path.resolve()
+
+    # Check if meta_path is inside the manifest directory tree
+    try:
+        resolved_meta.relative_to(resolved_manifest_dir)
+        return True
+    except ValueError:
+        pass
+
+    # Check against the explicit allowlist
+    allowed_dirs = report_cfg.get("meta_ref_allowed_dirs", [])
+    for allowed in allowed_dirs:
+        allowed_path = Path(allowed).resolve()
+        try:
+            resolved_meta.relative_to(allowed_path)
+            return True
+        except ValueError:
+            continue
+
+    return False
+
+
 def hydrate_manifest(manifest_path: str, manifest: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     """Merge parent meta.json context into a child manifest.
 
@@ -35,18 +76,19 @@ def hydrate_manifest(manifest_path: str, manifest: Dict[str, Any]) -> Tuple[Dict
         # Resolve the meta_ref path
         meta_path = meta_path.resolve()
         
-        # Sandbox check: warn (but don't block) if meta_ref points outside the manifest dir.
-        # HPC workflows legitimately reference shared parent meta.json files.
+        # Sandbox check: reject if meta_ref does not point to a .json file.
         if not meta_path.name.endswith(".json"):
-            warnings.append(f"Security Sandbox Triggered: meta_ref '{meta_ref}' does not point to a valid .json snapshot file.")
+            warnings.append(f"Security: meta_ref '{meta_ref}' does not point to a .json file. Rejected.")
             return manifest, warnings
 
-        try:
-            if not meta_path.is_relative_to(manifest_dir.resolve()):
-                warnings.append(f"meta_ref '{meta_ref}' resolves outside the run directory to '{meta_path}'. Verify this is intentional.")
-        except (TypeError, AttributeError):
-            # is_relative_to not available before Python 3.9; skip check
-            pass
+        # Security: reject meta_ref paths outside allowed directories.
+        if not _is_meta_ref_allowed(meta_path, manifest_dir):
+            warnings.append(
+                f"Security: meta_ref '{meta_ref}' resolves to '{meta_path}' which is outside "
+                f"the allowed directories. Set [report].allow_external_meta_ref = true or add "
+                f"the parent directory to [report].meta_ref_allowed_dirs to permit this."
+            )
+            return manifest, warnings
         
         if not meta_path.exists():
             warnings.append(f"Linked Parent Meta Snapshot '{meta_ref}' not found at {meta_path}. The diagnostic output will lack deep dependencies.")

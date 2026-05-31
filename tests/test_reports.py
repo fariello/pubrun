@@ -131,7 +131,7 @@ class TestHydrateManifest:
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         result, warnings = hydrate_manifest(str(manifest_path), manifest)
         assert len(warnings) >= 1
-        assert "not found" in warnings[0].lower() or "missing" in warnings[0].lower() or "Sandbox" in warnings[0]
+        assert "not found" in warnings[0].lower() or "missing" in warnings[0].lower() or "Security" in warnings[0]
 
     def test_warns_on_non_json_meta_ref(self, tmp_path):
         manifest_path = tmp_path / "manifest.json"
@@ -139,7 +139,7 @@ class TestHydrateManifest:
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         result, warnings = hydrate_manifest(str(manifest_path), manifest)
         assert len(warnings) >= 1
-        assert "Sandbox" in warnings[0] or "sandbox" in warnings[0].lower()
+        assert "Security" in warnings[0] or "security" in warnings[0].lower()
 
     def test_hydrates_from_valid_parent(self, tmp_path):
         # Create parent meta with hardware data
