@@ -50,3 +50,39 @@ def test_audit_run_decorator(tmp_path, monkeypatch):
     res = my_logic()
     assert res == 42
     assert get_current_run() is None # cleaned up automatically after run
+
+
+def test_engine_crash_promotes_to_ghost(tmp_path, monkeypatch):
+    """If a capture engine raises during init, the run enters ghost mode."""
+    from pubrun.tracker import Run
+    monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+
+    # Make get_invocation raise to simulate an engine crash
+    def broken_invocation(config):
+        raise RuntimeError("simulated engine failure")
+
+    monkeypatch.setattr("pubrun.tracker.get_invocation", broken_invocation)
+
+    run = Run()
+    assert run._outcome == "ghost"
+    assert run.is_active is False
+    assert run._finalized is True
+
+
+def test_atomic_manifest_write(tmp_path, monkeypatch):
+    """manifest.json is written atomically (no .tmp file left behind)."""
+    monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+
+    tracker = start()
+    tracker.stop()
+
+    # manifest.json exists, no .tmp file remains
+    manifest = tracker.run_dir / "manifest.json"
+    tmp_file = tracker.run_dir / "manifest.json.tmp"
+    assert manifest.exists()
+    assert not tmp_file.exists()
+
+    # Manifest is valid JSON
+    with open(manifest) as f:
+        data = json.load(f)
+    assert data["status"]["outcome"] == "completed"
