@@ -540,13 +540,7 @@ def main() -> None:
         import importlib.resources
         resource_path = importlib.resources.files("pubrun").joinpath("resources", "default.toml")
         content = resource_path.read_text(encoding="utf-8")
-        try:
-            from rich.console import Console
-            from rich.syntax import Syntax
-            console = Console()
-            console.print(Syntax(content, "toml", theme="monokai", line_numbers=True, padding=1))
-        except ImportError:
-            print(content)
+        print(content)
         executed = True
 
     if getattr(args, "info", False):

@@ -71,6 +71,7 @@ class TestAnnotate:
 
     def test_annotate_with_active_run(self):
         tracker = start(events={"enabled": True})
+        assert tracker.event_stream is not None, "Event stream not initialized (ghost mode?)"
         annotate("test checkpoint", loss=0.5)
         tracker.stop()
         # Event should have been written
@@ -89,6 +90,7 @@ class TestAnnotate:
 
     def test_annotate_message_only(self):
         tracker = start(events={"enabled": True})
+        assert tracker.event_stream is not None, "Event stream not initialized (ghost mode?)"
         annotate("just a message")
         tracker.stop()
         events_path = tracker.run_dir / "events.jsonl"
@@ -98,6 +100,7 @@ class TestAnnotate:
 
     def test_annotate_payload_only(self):
         tracker = start(events={"enabled": True})
+        assert tracker.event_stream is not None, "Event stream not initialized (ghost mode?)"
         annotate(epoch=5, loss=0.123)
         tracker.stop()
         events_path = tracker.run_dir / "events.jsonl"

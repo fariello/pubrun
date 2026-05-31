@@ -36,6 +36,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **macOS liveness parsing**: Replaced locale-dependent `%c` datetime format with explicit `"%a %b %d %H:%M:%S %Y"`.
 - **Console stream restore safety**: `stop()` now only restores `sys.stdout`/`sys.stderr` if they still point to pubrun's tees. If a third-party wrapper was installed after pubrun, streams are left alone.
 - **`pubrun status` script column**: Removed hard cap of 24 characters on the script column. Width now scales proportionally with terminal width (up to 40% of available columns).
+- **Removed `rich` dependency**: Dropped the optional `rich` integration from `pubrun diff` and `pubrun --show-config`. All output now uses the built-in ANSI renderer, which supports color, truncation, wrapping, and path-split diffs natively. Eliminates the "pip install rich" suggestion and the risk of runtime errors from broken rich installations.
 
 ### Tests
 
@@ -44,7 +45,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added 41 additional tests in second improvement pass: `generate_report()` with degraded manifests (missing git, empty python, no hardware, no packages, LaTeX escaping), `generate_meta_snapshot()` unit tests (JSON structure, required keys, default path), `_render_inline()` fallback rendering and `NO_COLOR` env var, `print_report()` at each depth level, `SubprocessSpy.finalize_all()` state transitions and `_max_records` overflow, `disable_spy()` nesting, `TqdmSafeTee` multi-CR handling and `line_count` accuracy and `__getattr__` delegation, `EventStream` constructor failure path, config non-overlapping merge from both local files.
 - Added 10 tests for `pubrun clean`: deletion, running-process safety, `--older-than` filter, `--status` filter, `--dry-run`, batch deletion, CLI help and dry-run.
 - Added 9 tests for `_parse_selection`: single numbers, comma-separated, ranges, mixed, out-of-bounds, invalid input, spaces, empty string.
-- Added 2 tests for `interrupted` outcome: SIGINT sets outcome; no-signal stays completed. Total: 394 tests.
+- Added 2 tests for `interrupted` outcome: SIGINT sets outcome; no-signal stays completed.
+- Added defensive assertions in flaky annotate tests (fast-fail on ghost mode).
+- Updated render tests for rich removal (truncation, wrap, same section). Total: 397 tests.
 
 ### Documentation
 
