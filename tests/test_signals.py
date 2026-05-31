@@ -254,3 +254,59 @@ class TestSignalCaptureConfig:
         manifest = run.to_manifest_dict()
         assert manifest["signals"]["capture_state"]["status"] == "complete"
         run.stop()
+
+
+class TestSignalHandlerReinstallation:
+    """Tests for handler re-installation after SIG_DFL chain."""
+
+    def test_handler_reinstalled_after_sigint_caught(self):
+        """After SIGINT raises KeyboardInterrupt (caught), handler is still active."""
+        if sys.platform == "win32":
+            pytest.skip("Signal behavior differs on Windows")
+
+        cap = SignalExitCapture()
+        cap.install()
+
+        try:
+            # First SIGINT -- caught by user
+            try:
+                os.kill(os.getpid(), signal.SIGINT)
+            except KeyboardInterrupt:
+                pass
+
+            # Handler should still be installed -- second signal should be recorded
+            try:
+                os.kill(os.getpid(), signal.SIGINT)
+            except KeyboardInterrupt:
+                pass
+
+            records = cap.get_records()
+            assert len(records["signals_received"]) == 2
+            assert records["signals_received"][0]["signal_name"] == "SIGINT"
+            assert records["signals_received"][1]["signal_name"] == "SIGINT"
+        finally:
+            cap.uninstall()
+
+
+class TestSignalNonMainThread:
+    """Tests for non-main-thread signal registration warning."""
+
+    def test_warns_on_non_main_thread(self, caplog, monkeypatch):
+        """Installing from a non-main thread logs a warning when signal.signal raises."""
+        import logging
+
+        cap = SignalExitCapture()
+
+        # Force signal.signal to always raise ValueError (simulating non-main thread)
+        def mock_signal_signal(signum, handler):
+            raise ValueError("signal only works in main thread of the main interpreter")
+
+        monkeypatch.setattr(signal, "signal", mock_signal_signal)
+
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            cap.install()
+
+        # No handlers should have been installed
+        assert len(cap._previous_handlers) == 0
+        # Warning should have been emitted
+        assert any("signal capture unavailable" in r.message for r in caplog.records)

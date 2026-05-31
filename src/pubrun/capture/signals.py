@@ -95,6 +95,8 @@ class SignalExitCapture:
 
     def _install_signal_handlers(self) -> None:
         """Register shim handlers for all target signals available on this platform."""
+        import logging
+        skipped_all = True
         for sig_name in _TARGET_SIGNALS:
             signum = getattr(signal, sig_name, None)
             if signum is None:
@@ -102,12 +104,22 @@ class SignalExitCapture:
 
             try:
                 previous = signal.getsignal(signum)
-                self._previous_handlers[signum] = previous
                 signal.signal(signum, self._make_handler(signum, previous))
+                # Only record the previous handler if signal.signal() succeeded.
+                self._previous_handlers[signum] = previous
+                skipped_all = False
             except (OSError, ValueError):
                 # Cannot set handler (e.g. not main thread, or signal not
-                # settable).  Silently skip -- pubrun must never disrupt.
+                # settable).  Skip but track for warning below.
                 pass
+
+        # If ALL signals were skipped (typically because we're not on the main
+        # thread), emit a single warning so users know why signal data is missing.
+        if skipped_all and not self._previous_handlers:
+            logging.getLogger("pubrun").warning(
+                "pubrun: signal capture unavailable (not running on the main thread). "
+                "Signal and exit-code data will not be recorded for this run."
+            )
 
     def _restore_signal_handlers(self) -> None:
         """Put back the original handlers we displaced."""
@@ -141,6 +153,10 @@ class SignalExitCapture:
                 # re-send the signal to ourselves.
                 signal.signal(sig, signal.SIG_DFL)
                 os.kill(os.getpid(), sig)
+                # If we survive (e.g., SIGINT raised KeyboardInterrupt which was
+                # caught by user code), re-install our shim so subsequent signals
+                # are still recorded.
+                signal.signal(sig, _handler)
             elif previous_handler is signal.SIG_IGN:
                 # The previous disposition was to ignore.  Respect that.
                 pass
