@@ -9,10 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **Signal and exit-code capture**: New `capture/signals.py` engine non-intrusively records OS signals (`SIGINT`, `SIGTERM`, `SIGHUP`, `SIGUSR1`, `SIGUSR2`, `SIGBREAK`) and the process exit code. Chains to any pre-existing signal handlers so importing scripts are never disrupted. Manifest now includes a `"signals"` section with `signals_received`, `exit_code`, and `exit_exception` fields. Configurable via `[capture.signals].enabled` in `.pubrun.toml`.
-- **`pubrun status` CLI command**: List all runs with a compact table (`pubrun status`), verbose detail (`pubrun status -v`), or inspect a specific run (`pubrun status <run-id>`). Shows status (completed/running/crashed/failed), exit code, elapsed time, git commit, command-line arguments, and live RSS/CPU for running processes. Script column width adapts to terminal width; command-line args are displayed when space permits.
+- **`pubrun status` CLI command**: List all runs with a compact table (`pubrun status`), verbose detail (`pubrun status -v`), or inspect a specific run (`pubrun status <run-id>`). Shows status (completed/running/interrupted/crashed/failed), exit code, elapsed time, git commit, command-line arguments, and live RSS/CPU for running processes. Script column width adapts to terminal width; command-line args are displayed when space permits.
 - **Run lock file**: A `.pubrun.lock` file is written at run start and removed at finalization. Enables external tools to detect active, crashed, or orphaned runs via PID liveness checks with start-time verification to handle PID recycling.
 - **Cross-platform process liveness** (`capture/liveness.py`): PID alive check, process start time, RSS memory, and CPU usage queries for Linux (`/proc`), macOS (`ps`), and Windows (`ctypes`/`wmic`). All stdlib, zero dependencies.
 - **`pubrun clean` CLI command**: Interactively delete old run directories. Lists candidates with age and size, prompts for confirmation (numbered selection or `y`/`n`). Supports `--older-than` (e.g. `7d`, `24h`), `--status` filter, `--yes` (non-interactive), and `--dry-run`. Running processes are never deleted.
+- **`interrupted` outcome**: Runs that received SIGINT, SIGTERM, or SIGHUP are now marked as `"interrupted"` rather than `"completed"`. This applies even when user code catches `KeyboardInterrupt` — the signal was still received and recorded. Displayed in magenta in `pubrun status`.
 
 ### Security
 
@@ -35,20 +36,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **macOS liveness parsing**: Replaced locale-dependent `%c` datetime format with explicit `"%a %b %d %H:%M:%S %Y"`.
 - **Console stream restore safety**: `stop()` now only restores `sys.stdout`/`sys.stderr` if they still point to pubrun's tees. If a third-party wrapper was installed after pubrun, streams are left alone.
 - **`pubrun status` script column**: Removed hard cap of 24 characters on the script column. Width now scales proportionally with terminal width (up to 40% of available columns).
-- **`interrupted` outcome**: Runs that received SIGINT, SIGTERM, or SIGHUP are now marked as `"interrupted"` rather than `"completed"`. This applies even when user code catches `KeyboardInterrupt` -- the signal was still received and recorded. Displayed in magenta in `pubrun status`.
 
 ### Tests
 
 - Added 47 new tests across 3 test files: `test_signals.py` (signal capture lifecycle, chaining, excepthook, config toggle), `test_liveness.py` (PID liveness, start time, RSS, CPU, hostname), `test_status.py` (lock file lifecycle, status scanning, classification, rendering, CLI dispatch).
 - Added 28 additional tests covering: `_merge_and_migrate()` (directory moves, file preservation, failure resilience), CLI error exit codes (6 paths), `_handle_inactive` policy enforcement (`error`/`warn`/`ignore`), `_bootstrap_engines` multi-failure ghost mode, diff engine edge cases (empty/identical/disjoint manifests), ResourceWatcher failure threshold and `to_manifest_dict` edge cases, auto-start boot sequence (`PUBRUN_AUTO_START=true/false`).
-- Added 41 additional tests in second improvement pass: `generate_report()` with degraded manifests (missing git, empty python, no hardware, no packages, LaTeX escaping), `generate_meta_snapshot()` unit tests (JSON structure, required keys, default path), `_render_inline()` fallback rendering and `NO_COLOR` env var, `print_report()` at each depth level, `SubprocessSpy.finalize_all()` state transitions and `_max_records` overflow, `disable_spy()` nesting, `TqdmSafeTee` multi-CR handling and `line_count` accuracy and `__getattr__` delegation, `EventStream` constructor failure path, config non-overlapping merge from both local files. Total: 373 tests.
+- Added 41 additional tests in second improvement pass: `generate_report()` with degraded manifests (missing git, empty python, no hardware, no packages, LaTeX escaping), `generate_meta_snapshot()` unit tests (JSON structure, required keys, default path), `_render_inline()` fallback rendering and `NO_COLOR` env var, `print_report()` at each depth level, `SubprocessSpy.finalize_all()` state transitions and `_max_records` overflow, `disable_spy()` nesting, `TqdmSafeTee` multi-CR handling and `line_count` accuracy and `__getattr__` delegation, `EventStream` constructor failure path, config non-overlapping merge from both local files.
+- Added 10 tests for `pubrun clean`: deletion, running-process safety, `--older-than` filter, `--status` filter, `--dry-run`, batch deletion, CLI help and dry-run.
+- Added 2 tests for `interrupted` outcome: SIGINT sets outcome; no-signal stays completed. Total: 385 tests.
 
 ### Documentation
 
-- **README.md**: Added footnote clarifying `tomli` dependency on Python <3.11. Added `--version` to diagnostic flags table. Added `ghost` status to the Monitoring Runs table. Added `pubrun clean` command reference.
-- **`docs/cli.md`**: Added full `clean` command reference with all options and interactive mode documentation. Updated command count to eight.
-- **`docs/manifest.md`**: Added missing `git.repo_root` field. Corrected `status.outcome` enum: replaced `"interrupted"` (never produced) with `"ghost"` and `"unknown"`.
-- **`docs/functional_spec.md`**: Corrected `meta --out` default behavior description. Added `clean` command to the CLI subcommands specification.
+- **README.md**: Added footnote clarifying `tomli` dependency on Python <3.11. Added `--version` to diagnostic flags table. Added `ghost` and `interrupted` statuses to the Monitoring Runs table. Added `pubrun clean` command reference.
+- **`docs/cli.md`**: Added full `clean` command reference with all options and interactive mode documentation. Added `interrupted` status. Updated command count to eight.
+- **`docs/manifest.md`**: Added missing `git.repo_root` field. Corrected `status.outcome` enum to include all actual values: `"completed"`, `"failed"`, `"interrupted"`, `"ghost"`, `"unknown"`.
+- **`docs/functional_spec.md`**: Corrected `meta --out` default behavior description. Added `status` and `clean` commands to the CLI subcommands specification.
 
 ## [0.1.1] - 2026-05-09
 
