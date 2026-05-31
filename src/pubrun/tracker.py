@@ -169,7 +169,7 @@ class Run:
         try:
             git_commit = None
             if isinstance(self.git_data, dict):
-                git_commit = self.git_data.get("commit_sha")
+                git_commit = self.git_data.get("commit")
             lock_data = {
                 "pid": self.pid,
                 "started_at_utc": self.started_at_utc,
@@ -178,6 +178,7 @@ class Run:
                 "hostname": platform.node(),
                 "git_commit": git_commit,
                 "cwd": str(Path.cwd()),
+                "argv": sys.argv[1:] if len(sys.argv) > 1 else [],
             }
             lock_path = self.run_dir / self.LOCK_FILENAME
             with open(lock_path, "w", encoding="utf-8") as f:
