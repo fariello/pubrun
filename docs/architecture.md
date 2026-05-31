@@ -72,6 +72,7 @@ The manifest is the canonical record for every run. Its top-level structure:
   "host": {},
   "resources": {},
   "capture": {},
+  "signals": {},
   "status": {}
 }
 ```
@@ -135,6 +136,7 @@ Each capture category is a modular sub-engine responsible for one section of the
 | Process | `process` | depth-based |
 | Python | `python` | depth-based |
 | Resources | `resources` | depth-based |
+| Signals | `signals` | `enabled = true/false` |
 | Inputs | `invocation.inputs` | `enabled = true/false` |
 
 ## 11. Progressive Depth Model

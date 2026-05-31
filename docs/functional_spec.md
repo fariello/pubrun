@@ -143,6 +143,7 @@ Each category corresponds to a modular capture engine and a top-level manifest s
 | Git | `git` | `[capture.git]` | depth-based |
 | Hardware | `hardware` | `[capture.hardware]` | depth-based, explicit GPU/CPU flags |
 | Resources | `resources` | `[capture.resources]` | depth-based, background thread |
+| Signals | `signals` | `[capture.signals]` | `enabled = true/false` |
 | Errors | `errors` | — | Always captured |
 | Config | `config` | — | Always captured |
 | Capture metadata | `capture` | — | Always captured |

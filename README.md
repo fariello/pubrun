@@ -81,7 +81,7 @@ pubrun methods --format latex
 
 ## CLI Reference
 
-The `pubrun` CLI provides six commands and four diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
+The `pubrun` CLI provides seven commands and four diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
 
 ### `pubrun cite`
 Generates the bibliographic citation for crediting this library in your paper.
@@ -119,6 +119,15 @@ Generates a standalone environment snapshot for HPC parent-child hydration.
 pubrun meta --out ./runs/meta.json --deep
 ```
 
+### `pubrun status`
+Lists all runs with their current status (completed, running, crashed, failed), or inspects a specific run in detail. Detects active processes via cross-platform PID liveness checks.
+```bash
+pubrun status              # Compact table of all runs
+pubrun status -v           # Verbose listing with PID, RSS, CPU, events
+pubrun status a3f9         # Inspect a specific run by ID prefix
+pubrun status --dir /path  # Scan a non-default output directory
+```
+
 ### Diagnostic Flags
 
 | Flag | Description |
@@ -129,6 +138,52 @@ pubrun meta --out ./runs/meta.json --deep
 | `--run-tests` | Execute the built-in self-test suite |
 
 See [CLI Reference](docs/cli.md) for full details and examples.
+
+---
+
+## Monitoring Runs
+
+`pubrun` tracks the lifecycle of every run from start to finish, enabling real-time and post-hoc inspection of execution state.
+
+### Lock Files and Liveness Detection
+
+When a run starts, `pubrun` writes a `.pubrun.lock` file to the run directory containing the PID, start timestamp, hostname, and git commit. This file is removed when the run finalizes normally.
+
+If a process is killed (`SIGKILL`, OOM, power loss), the lock file persists. `pubrun status` detects these orphaned runs by checking whether the recorded PID is still alive and whether its start time matches (to handle PID recycling). Runs are classified as:
+
+| Status | Meaning |
+|---|---|
+| **completed** | Manifest exists, outcome is "completed" |
+| **failed** | Manifest exists, outcome is "failed" |
+| **running** | Lock file present, process is alive |
+| **crashed** | Lock file present, process is dead |
+
+### Signal and Exit Code Capture
+
+`pubrun` installs non-intrusive signal handlers that record OS signals (`SIGINT`, `SIGTERM`, `SIGHUP`, etc.) received during execution. These handlers **chain to any pre-existing handlers** — if the importing script has its own `SIGINT` handler, it is called normally after `pubrun` records the signal.
+
+The process exit code is also captured at finalization. All signal and exit data appears in the `"signals"` section of the manifest:
+
+```json
+{
+  "signals_received": [
+    {"signal": 2, "signal_name": "SIGINT", "timestamp_utc": 1780250544.068}
+  ],
+  "exit_code": 0,
+  "exit_exception": null
+}
+```
+
+Signal capture is configurable via `[capture.signals].enabled` in `.pubrun.toml`.
+
+### Live Process Inspection
+
+For running processes, `pubrun status <run-id>` shows live resource usage (RSS memory and CPU percent) queried cross-platform:
+- **Linux**: reads from `/proc/<pid>/status` and `/proc/<pid>/stat`
+- **macOS**: queries via `ps`
+- **Windows**: uses `ctypes` (`kernel32`/`psapi`) and `wmic`
+
+No external dependencies are required.
 
 ---
 
