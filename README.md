@@ -83,7 +83,7 @@ pubrun methods --format latex
 
 ## CLI Reference
 
-The `pubrun` CLI provides seven commands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
+The `pubrun` CLI provides eight commands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
 
 ### `pubrun cite`
 Generates the bibliographic citation for crediting this library in your paper.
@@ -128,6 +128,15 @@ pubrun status              # Compact table of all runs
 pubrun status -v           # Verbose listing with PID, RSS, CPU, events
 pubrun status a3f9         # Inspect a specific run by ID prefix
 pubrun status --dir /path  # Scan a non-default output directory
+```
+
+### `pubrun clean`
+Interactively delete old run directories. Lists candidates with age and size, then prompts for confirmation.
+```bash
+pubrun clean                        # Interactive: list and confirm
+pubrun clean --older-than 7d --yes  # Non-interactive: delete all completed runs older than 7 days
+pubrun clean --status crashed --yes # Delete all crashed runs
+pubrun clean --dry-run              # Preview what would be deleted
 ```
 
 ### Diagnostic Flags
