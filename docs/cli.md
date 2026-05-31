@@ -175,7 +175,7 @@ pubrun clean [--dir PATH] [--older-than AGE] [--status STATUS] [-y|--yes] [--dry
 
 Running processes are never deleted, even if explicitly included in `--status`.
 
-**Interactive mode** (default): displays a numbered list and accepts `y` (delete all), `n` (cancel), or comma-separated numbers to select specific runs (e.g. `1,3,5`).
+**Interactive mode** (default): displays a numbered list with exit codes, args, age, and size. The user must explicitly select runs by number, range (e.g. `1-3,5`), or type `all`. The selected runs are then displayed in a confirmation table before a final `y/N` prompt. Nothing is deleted without explicit confirmation.
 
 **Example:**
 ```bash
