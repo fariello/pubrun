@@ -387,3 +387,52 @@ class TestCleanCli:
         )
         assert result.returncode == 0
         assert "No runs match" in result.stdout
+
+
+class TestParseSelection:
+    """Tests for the _parse_selection helper used by pubrun clean."""
+
+    def test_single_number(self):
+        from pubrun.status import _parse_selection
+        items = ["a", "b", "c", "d", "e"]
+        assert _parse_selection("3", items) == ["c"]
+
+    def test_comma_separated(self):
+        from pubrun.status import _parse_selection
+        items = ["a", "b", "c", "d", "e"]
+        assert _parse_selection("1,3,5", items) == ["a", "c", "e"]
+
+    def test_range(self):
+        from pubrun.status import _parse_selection
+        items = ["a", "b", "c", "d", "e"]
+        assert _parse_selection("2-4", items) == ["b", "c", "d"]
+
+    def test_mixed_ranges_and_numbers(self):
+        from pubrun.status import _parse_selection
+        items = ["a", "b", "c", "d", "e"]
+        assert _parse_selection("1-2,4", items) == ["a", "b", "d"]
+
+    def test_out_of_bounds_skipped(self):
+        from pubrun.status import _parse_selection
+        items = ["a", "b", "c"]
+        assert _parse_selection("1,99,2", items) == ["a", "b"]
+
+    def test_invalid_input_returns_empty(self):
+        from pubrun.status import _parse_selection
+        items = ["a", "b", "c"]
+        assert _parse_selection("xyz", items) == []
+
+    def test_spaces_in_input(self):
+        from pubrun.status import _parse_selection
+        items = ["a", "b", "c", "d", "e"]
+        assert _parse_selection("1, 3, 5", items) == ["a", "c", "e"]
+
+    def test_empty_string(self):
+        from pubrun.status import _parse_selection
+        items = ["a", "b", "c"]
+        assert _parse_selection("", items) == []
+
+    def test_full_range(self):
+        from pubrun.status import _parse_selection
+        items = ["a", "b", "c", "d"]
+        assert _parse_selection("1-4", items) == ["a", "b", "c", "d"]
