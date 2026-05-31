@@ -2,7 +2,7 @@
 
 # pubrun CLI Reference
 
-The `pubrun` CLI is accessible via `pubrun <command>` or `python -m pubrun <command>`. It provides seven commands for post-execution analysis and diagnostic flags.
+The `pubrun` CLI is accessible via `pubrun <command>` or `python -m pubrun <command>`. It provides eight commands for post-execution analysis and diagnostic flags.
 
 ---
 
@@ -151,6 +151,38 @@ pubrun status --dir /shared/runs # Scan a different directory
 ```
 
 For running processes, the inspect view also shows live RSS memory and CPU usage (cross-platform: Linux, macOS, Windows).
+
+---
+
+### `clean` — Run Cleanup
+
+Interactively delete old run directories. Lists candidates with their age and size, then prompts for confirmation before removal.
+
+```bash
+pubrun clean [--dir PATH] [--older-than AGE] [--status STATUS] [-y|--yes] [--dry-run]
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--dir PATH` | Override the output directory to scan |
+| `--older-than AGE` | Only consider runs older than AGE (e.g. `7d`, `24h`, `30` for 30 days) |
+| `--status STATUS` | Comma-separated status filter (e.g. `completed,failed`). Default: all non-running statuses |
+| `-y`, `--yes` | Skip confirmation prompt (non-interactive mode) |
+| `--dry-run` | Show what would be deleted without actually deleting |
+
+Running processes are never deleted, even if explicitly included in `--status`.
+
+**Interactive mode** (default): displays a numbered list and accepts `y` (delete all), `n` (cancel), or comma-separated numbers to select specific runs (e.g. `1,3,5`).
+
+**Example:**
+```bash
+pubrun clean                              # Interactive: list and confirm
+pubrun clean --older-than 7d --yes        # Non-interactive: delete completed runs > 7 days
+pubrun clean --status crashed,ghost --yes # Delete all crashed/ghost runs
+pubrun clean --dry-run                    # Preview without deleting
+```
 
 ---
 

@@ -238,6 +238,35 @@ def _run_status(run_id: Optional[str], output_dir: Optional[str], verbose: bool)
             print(render_short_list(runs))
 
 
+def _run_clean(output_dir: Optional[str], older_than: Optional[str], status: Optional[str], yes: bool, dry_run: bool) -> None:
+    """Interactive or automatic cleanup of old run directories."""
+    from pubrun.status import clean_runs
+
+    # Parse --older-than value (e.g. "7d", "24h", "30")
+    older_than_days: Optional[float] = None
+    if older_than:
+        val = older_than.strip().lower()
+        if val.endswith("d"):
+            older_than_days = float(val[:-1])
+        elif val.endswith("h"):
+            older_than_days = float(val[:-1]) / 24.0
+        else:
+            older_than_days = float(val)  # assume days
+
+    # Parse status filter
+    status_filter = None
+    if status:
+        status_filter = [s.strip() for s in status.split(",")]
+
+    clean_runs(
+        output_dir=output_dir,
+        older_than_days=older_than_days,
+        status_filter=status_filter,
+        yes=yes,
+        dry_run=dry_run,
+    )
+
+
 def _show_info() -> None:
     """Print hardware and invocation diagnostics for debugging."""
     from pubrun.capture.hardware import get_hardware
@@ -404,6 +433,14 @@ def main() -> None:
     status_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
     status_parser.add_argument("-v", "--verbose", action="store_true", help="Show detailed information for each run in the listing.")
 
+    # ---------------- Clean Subparser ----------------
+    clean_parser = subparsers.add_parser("clean", help="Interactively delete old run directories.", description="Interactively delete old run directories. By default, lists candidates and prompts for confirmation.")
+    clean_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan.")
+    clean_parser.add_argument("--older-than", type=str, default=None, metavar="AGE", help="Only consider runs older than AGE (e.g. '7d', '24h', '30' for 30 days).")
+    clean_parser.add_argument("--status", type=str, default=None, metavar="STATUS", help="Comma-separated status filter (e.g. 'completed,failed'). Default: completed,failed,crashed,ghost.")
+    clean_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt (delete all matching runs).")
+    clean_parser.add_argument("--dry-run", action="store_true", help="Show what would be deleted without actually deleting.")
+
     # ---------------- Cite Subparser ----------------
     cite_parser = subparsers.add_parser("cite", help="Generate a formatted academic citation for pubrun.", description="Generate a formatted academic citation for pubrun.")
     cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Citation format (default: apa).")
@@ -460,6 +497,16 @@ def main() -> None:
             getattr(args, "run_id", None),
             getattr(args, "dir", None),
             getattr(args, "verbose", False),
+        )
+        executed = True
+
+    elif args.command == "clean":
+        _run_clean(
+            getattr(args, "dir", None),
+            getattr(args, "older_than", None),
+            getattr(args, "status", None),
+            getattr(args, "yes", False),
+            getattr(args, "dry_run", False),
         )
         executed = True
 

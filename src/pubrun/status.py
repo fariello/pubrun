@@ -7,6 +7,7 @@ as completed/running/crashed, and renders tables or detailed views.
 import json
 import os
 import shutil
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -421,9 +422,12 @@ def render_verbose_list(runs: List[RunInfo]) -> str:
         sig_count = str(len(r.signals_received)) if r.signals_received else "0"
         events = str(r.event_count) if r.event_count is not None else "-"
 
+        args = r.args or "-"
+
         lines.append(
             f"  Run ID:    {run_id}\n"
             f"  Script:    {script}\n"
+            f"  Args:      {args}\n"
             f"  Commit:    {commit}\n"
             f"  Status:    {status}\n"
             f"  Started:   {started}\n"
@@ -452,6 +456,8 @@ def render_inspect(run_info: RunInfo) -> str:
 
     # Core info
     lines.append(f"  Script:        {run_info.script or '-'}")
+    if run_info.args:
+        lines.append(f"  Arguments:     {run_info.args}")
     lines.append(f"  Status:        {_status_marker(run_info.status)}")
     lines.append(f"  Started:       {_format_timestamp(run_info.started_at_utc)}")
     if run_info.ended_at_utc:
@@ -501,3 +507,142 @@ def render_inspect(run_info: RunInfo) -> str:
     lines.append("")
 
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
+# Cleanup
+# --------------------------------------------------------------------------
+
+def _dir_size(path: Path) -> int:
+    """Calculate total size of a directory in bytes."""
+    total = 0
+    try:
+        for f in path.rglob("*"):
+            if f.is_file():
+                total += f.stat().st_size
+    except OSError:
+        pass
+    return total
+
+
+def _format_age(seconds: Optional[float]) -> str:
+    """Format age in human-friendly terms."""
+    if seconds is None:
+        return "unknown"
+    days = int(seconds // 86400)
+    if days == 0:
+        hours = int(seconds // 3600)
+        if hours == 0:
+            return f"{int(seconds // 60)}m ago"
+        return f"{hours}h ago"
+    elif days == 1:
+        return "1 day ago"
+    else:
+        return f"{days} days ago"
+
+
+def clean_runs(
+    output_dir: Optional[str] = None,
+    older_than_days: Optional[float] = None,
+    status_filter: Optional[List[str]] = None,
+    yes: bool = False,
+    dry_run: bool = False,
+) -> int:
+    """Interactively or automatically clean up old run directories.
+
+    Args:
+        output_dir: Override the configured output directory.
+        older_than_days: Only consider runs older than this many days.
+            If None, all non-running runs are candidates.
+        status_filter: Only consider runs with these statuses.
+            Defaults to ["completed", "failed", "crashed", "ghost"].
+        yes: Skip confirmation prompt (non-interactive mode).
+        dry_run: Show what would be deleted without deleting.
+
+    Returns:
+        Number of run directories deleted.
+    """
+    all_runs = scan_runs(output_dir)
+
+    # Never delete running runs
+    if status_filter is None:
+        status_filter = [STATUS_COMPLETED, STATUS_FAILED, STATUS_CRASHED, STATUS_GHOST]
+
+    # Filter out running runs even if explicitly requested
+    safe_filter = [s for s in status_filter if s != STATUS_RUNNING]
+
+    now = time.time()
+    candidates: List[RunInfo] = []
+    for r in all_runs:
+        if r.status not in safe_filter:
+            continue
+        if older_than_days is not None and r.started_at_utc is not None:
+            age_days = (now - r.started_at_utc) / 86400
+            if age_days < older_than_days:
+                continue
+        candidates.append(r)
+
+    if not candidates:
+        print("No runs match the cleanup criteria.")
+        return 0
+
+    # Display candidates
+    print(f"\n{'#':<4}{'RUN ID':<10}{'SCRIPT':<24}{'STATUS':<12}{'AGE':<14}{'SIZE':<10}")
+    print("-" * 74)
+    for i, r in enumerate(candidates, 1):
+        run_id = (r.run_id or "-")[:8]
+        script = _truncate(r.script or "-", 22)
+        status = r.status
+        age_seconds = (now - r.started_at_utc) if r.started_at_utc else None
+        age = _format_age(age_seconds)
+        size = _format_bytes(_dir_size(r.run_dir))
+        print(f"{i:<4}{run_id:<10}{script:<24}{status:<12}{age:<14}{size:<10}")
+
+    print(f"\n{len(candidates)} run(s) selected for removal.")
+
+    if dry_run:
+        print("[dry run] No files were deleted.")
+        return 0
+
+    # Confirmation
+    if not yes:
+        try:
+            prompt = "\nDelete these runs? [y/N/select numbers] "
+            response = input(prompt).strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print("\nCleanup cancelled.")
+            return 0
+
+        if response == "":
+            print("Cleanup cancelled.")
+            return 0
+        elif response in ("y", "yes"):
+            to_delete = candidates
+        elif response in ("n", "no"):
+            print("Cleanup cancelled.")
+            return 0
+        else:
+            # Try to parse as comma-separated numbers
+            try:
+                indices = [int(x.strip()) - 1 for x in response.split(",")]
+                to_delete = [candidates[i] for i in indices if 0 <= i < len(candidates)]
+                if not to_delete:
+                    print("No valid selections. Cleanup cancelled.")
+                    return 0
+            except (ValueError, IndexError):
+                print("Invalid input. Cleanup cancelled.")
+                return 0
+    else:
+        to_delete = candidates
+
+    # Delete
+    deleted = 0
+    for r in to_delete:
+        try:
+            shutil.rmtree(r.run_dir)
+            deleted += 1
+        except OSError as e:
+            print(f"  Failed to remove {r.run_dir.name}: {e}", file=sys.stderr)
+
+    print(f"\nDeleted {deleted} run(s).")
+    return deleted
