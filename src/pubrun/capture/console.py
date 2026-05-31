@@ -112,9 +112,13 @@ class ConsoleInterceptor:
 
     def stop(self) -> Dict[str, Any]:
         """Restore original streams, close log files, and return capture metrics."""
-        # 1. Revert streams immediately to prevent interception of teardown logs
-        sys.stdout = self.original_stdout
-        sys.stderr = self.original_stderr
+        # 1. Revert streams only if they still point to our tees.
+        # If a third-party library wrapped over our tee after start(), leave
+        # the streams alone to avoid breaking that library's wrapper.
+        if sys.stdout is self.stdout_tee:
+            sys.stdout = self.original_stdout
+        if sys.stderr is self.stderr_tee:
+            sys.stderr = self.original_stderr
         
         lines_out = 0
         lines_err = 0

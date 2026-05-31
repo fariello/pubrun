@@ -315,3 +315,23 @@ class TestModuleExports:
         missing = expected - actual
         assert missing == set(), f"Expected public API symbols missing from __all__: {missing}"
 
+
+class TestAuditRunMetadata:
+    """Test that audit_run preserves function metadata via functools.wraps."""
+
+    def test_preserves_name(self):
+        @audit_run
+        def my_training_function():
+            """Docstring for training."""
+            pass
+
+        assert my_training_function.__name__ == "my_training_function"
+        assert my_training_function.__doc__ == "Docstring for training."
+
+    def test_preserves_qualname(self):
+        @audit_run(profile="basic")
+        def another_function():
+            pass
+
+        assert "another_function" in another_function.__qualname__
+

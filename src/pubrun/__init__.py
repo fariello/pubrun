@@ -25,6 +25,7 @@ Usage
     def evaluate_node():
         ...
 """
+import functools
 import logging
 import sys
 from typing import Any, Callable, Optional
@@ -99,6 +100,10 @@ def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
         _handle_inactive("pubrun.annotate()")
 
 
+import threading as _threading
+_run_lock = _threading.Lock()
+
+
 def start(**kwargs: Any) -> Run:
     """Start tracking a new execution context.
 
@@ -107,6 +112,12 @@ def start(**kwargs: Any) -> Run:
 
     If a run is already active, increments its reference count and merges
     the new overrides into the existing configuration.
+
+    .. note:: Threading model
+
+       ``start()`` and ``stop()`` should be called from the **main thread**.
+       ``annotate()``, ``phase()``, and ``get_current_run()`` are safe to
+       call from any thread.  Signal capture requires main-thread installation.
 
     Args:
         **kwargs: Configuration overrides (same keys as ``.pubrun.toml``).
@@ -120,7 +131,8 @@ def start(**kwargs: Any) -> Run:
     """
     active = get_current_run()
     if active:
-        active.ref_count = getattr(active, "ref_count", 0) + 1
+        with _run_lock:
+            active.ref_count = getattr(active, "ref_count", 0) + 1
         if hasattr(active, "_merge_and_migrate"):
             active._merge_and_migrate(kwargs)
         return active
@@ -200,6 +212,7 @@ def audit_run(func: Optional[Callable] = None, **kwargs: Any) -> Callable:
             return audit_run(f, **kwargs)
         return wrapper
 
+    @functools.wraps(func)
     def wrapped(*args: Any, **func_kwargs: Any) -> Any:
         run_tracker = start(**kwargs)
         try:

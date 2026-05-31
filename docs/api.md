@@ -189,4 +189,23 @@ for key, detail in result["modified"].items():
 
 ---
 
+## Threading Model
+
+`pubrun` is designed for single-threaded lifecycle control with safe multi-threaded data capture.
+
+| Function | Thread safety |
+|---|---|
+| `start()` | **Main thread only.** Creates the run and installs signal handlers (which require the main thread). |
+| `stop()` | **Main thread only.** Finalizes engines and writes artifacts. |
+| `annotate()` | Safe from any thread. |
+| `phase()` | Safe from any thread. |
+| `get_current_run()` | Safe from any thread (read-only). |
+| `tracked_run` / `audit_run` | Should wrap main-thread code. |
+
+Signal capture (`SIGINT`, `SIGTERM`, etc.) requires main-thread installation. If `start()` is called from a non-main thread, signal handlers cannot be registered and a warning is emitted. All other capture engines (subprocess spy, console tee, resource watcher, event stream) function normally regardless of which thread calls `start()`.
+
+Internal state mutations (`ref_count`) are protected by a lock to prevent corruption from accidental concurrent `start()`/`stop()` calls.
+
+---
+
 [README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md)

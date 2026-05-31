@@ -13,12 +13,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Run lock file**: A `.pubrun.lock` file is written at run start and removed at finalization. Enables external tools to detect active, crashed, or orphaned runs via PID liveness checks with start-time verification to handle PID recycling.
 - **Cross-platform process liveness** (`capture/liveness.py`): PID alive check, process start time, RSS memory, and CPU usage queries for Linux (`/proc`), macOS (`ps`), and Windows (`ctypes`/`wmic`). All stdlib, zero dependencies.
 
+### Security
+
+- **`meta_ref` path traversal**: External `meta_ref` paths that resolve outside the manifest's parent directory are now rejected by default. Controlled by new `[report].allow_external_meta_ref` (bool) and `[report].meta_ref_allowed_dirs` (list) config keys.
+- **Run directory permissions**: Run directories are now created with mode `0o700` on POSIX to prevent other users on shared systems from reading captured environment data.
+
 ### Fixed
 
 - **Schema validation**: Added `signals` property and `signals_section` definition to `manifest.schema.json`. Added `ghost` to the `outcome` enum. Manifests now validate correctly.
 - **`pubrun status` field extraction**: Fixed incorrect manifest field lookups (`git.commit_sha` → `git.commit`; `invocation.script_name` → `invocation.script.basename` with argv fallback).
 - **`docs/manifest.md`**: Corrected `is_dirty` → `dirty` to match the actual manifest field name.
 - **`docs/configuration.md`**: Added missing `[capture.signals]` section to match the actual config schema in `default.toml`.
+- **Atomic manifest writes**: `manifest.json` and `config.resolved.json` are now written via temp file + `os.replace()` to prevent readers from seeing partially written files.
+- **Engine crash isolation**: If any capture engine raises during initialization, the run promotes to ghost mode rather than propagating the exception to the host script.
+- **Signal handler re-installation**: After SIG_DFL re-delivery, the shim handler is re-installed so subsequent signals are still recorded if the process survives.
+- **Signal handler ordering**: `_previous_handlers` now only records entries after `signal.signal()` succeeds, preventing stale entries on failure.
+- **Non-main-thread warning**: A WARNING is logged when signal capture is unavailable due to non-main-thread execution.
+- **`audit_run` metadata**: Decorated functions now preserve `__name__`, `__doc__`, and `__qualname__` via `functools.wraps`.
+- **`ref_count` atomicity**: Increment/decrement of `ref_count` in `start()`/`stop()` is now protected by a lock.
+- **macOS liveness parsing**: Replaced locale-dependent `%c` datetime format with explicit `"%a %b %d %H:%M:%S %Y"`.
+- **Console stream restore safety**: `stop()` now only restores `sys.stdout`/`sys.stderr` if they still point to pubrun's tees. If a third-party wrapper was installed after pubrun, streams are left alone.
 
 ### Tests
 
