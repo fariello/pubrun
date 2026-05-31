@@ -164,3 +164,163 @@ class TestConsoleInterceptor:
         assert lines[0] == "line1"
         assert lines[1] == "line2"
         assert lines[2] == "line3"
+
+
+# ==========================================================================
+# SubprocessSpy unit tests: finalize_all, overflow, Popen failure, disable_spy nesting
+# ==========================================================================
+
+class TestFinalizeAll:
+    """Unit tests for SubprocessSpy.finalize_all() state transitions."""
+
+    def test_upgrades_partial_to_complete(self):
+        """finalize_all() upgrades records with status 'partial' to 'complete'."""
+        SubprocessSpy._records = [
+            {"argv": ["cmd1"], "exit_code": None, "capture_state": {"status": "partial"}},
+            {"argv": ["cmd2"], "exit_code": None, "capture_state": {"status": "partial"}},
+        ]
+        SubprocessSpy.finalize_all()
+        for rec in SubprocessSpy._records:
+            assert rec["capture_state"]["status"] == "complete"
+            assert "ended_at_utc" in rec
+
+    def test_does_not_modify_completed_records(self):
+        """finalize_all() leaves records with exit_code already set untouched."""
+        original_time = 12345.0
+        SubprocessSpy._records = [
+            {"argv": ["done"], "exit_code": 0, "ended_at_utc": original_time,
+             "capture_state": {"status": "complete"}},
+        ]
+        SubprocessSpy.finalize_all()
+        assert SubprocessSpy._records[0]["ended_at_utc"] == original_time
+
+    def test_does_not_modify_failed_records_with_exit_code(self):
+        """Records that already have exit_code != None are left alone."""
+        SubprocessSpy._records = [
+            {"argv": ["fail"], "exit_code": 1, "capture_state": {"status": "failed"}},
+        ]
+        SubprocessSpy.finalize_all()
+        assert SubprocessSpy._records[0]["capture_state"]["status"] == "failed"
+
+
+class TestSubprocessSpyOverflow:
+    """Tests for the _max_records overflow mechanism."""
+
+    def test_max_records_limits_capture(self):
+        """After max_records, new subprocesses are not recorded."""
+        SubprocessSpy.install(max_records=2)
+        try:
+            # Trigger 4 subprocess calls
+            for _ in range(4):
+                subprocess.run([sys.executable, "-c", "pass"])
+            records = SubprocessSpy.get_records()
+            assert len(records) == 2
+            assert SubprocessSpy._truncated is True
+        finally:
+            SubprocessSpy.uninstall()
+            SubprocessSpy._records = []
+            SubprocessSpy._truncated = False
+
+
+class TestDisableSpyNesting:
+    """Tests for nested disable_spy() context managers."""
+
+    def test_nested_disable_spy(self):
+        """Nested disable_spy() maintains bypass through both levels."""
+        SubprocessSpy.install(max_records=100)
+        try:
+            with disable_spy():
+                subprocess.run([sys.executable, "-c", "pass"])
+                with disable_spy():
+                    subprocess.run([sys.executable, "-c", "pass"])
+                # Still bypassed after inner exits
+                subprocess.run([sys.executable, "-c", "pass"])
+            # After outer exits, spy is active again
+            subprocess.run([sys.executable, "-c", "pass"])
+            records = SubprocessSpy.get_records()
+            # Only the last one (after outer exits) should be captured
+            assert len(records) == 1
+        finally:
+            SubprocessSpy.uninstall()
+            SubprocessSpy._records = []
+
+
+# ==========================================================================
+# TqdmSafeTee advanced tests: multi-CR, line_count, __getattr__
+# ==========================================================================
+
+class TestTqdmSafeTeeAdvanced:
+    """Advanced tests for TqdmSafeTee edge cases."""
+
+    def test_multiple_cr_in_single_write(self):
+        """Multiple \\r in one write() call correctly squashes intermediate buffers."""
+        import io
+        from pubrun.capture.console import TqdmSafeTee
+
+        original = io.StringIO()
+        log_file = io.StringIO()
+        tee = TqdmSafeTee(original, log_file)
+
+        # Simulate tqdm: "10%\r50%\r100%\n"
+        tee.write("10%\r50%\r100%\n")
+
+        log_content = log_file.getvalue()
+        # Only the final line after the last \r should be logged
+        assert "100%" in log_content
+        # Intermediate progress should be squashed
+        assert "10%" not in log_content
+        assert "50%" not in log_content
+
+    def test_line_count_after_flush(self):
+        """flush() with pending buffer increments line_count."""
+        import io
+        from pubrun.capture.console import TqdmSafeTee
+
+        original = io.StringIO()
+        log_file = io.StringIO()
+        tee = TqdmSafeTee(original, log_file)
+
+        tee.write("partial data without newline")
+        assert tee.line_count == 0  # No newline yet
+
+        tee.flush()
+        assert tee.line_count == 1  # Flush writes pending buffer as a line
+
+    def test_line_count_accuracy_with_newlines(self):
+        """line_count accurately counts newline-terminated lines."""
+        import io
+        from pubrun.capture.console import TqdmSafeTee
+
+        original = io.StringIO()
+        log_file = io.StringIO()
+        tee = TqdmSafeTee(original, log_file)
+
+        tee.write("line1\nline2\nline3\n")
+        assert tee.line_count == 3
+
+    def test_getattr_delegation(self):
+        """__getattr__ delegates to the original stream."""
+        import io
+        from pubrun.capture.console import TqdmSafeTee
+
+        original = io.StringIO()
+        log_file = io.StringIO()
+        tee = TqdmSafeTee(original, log_file)
+
+        # StringIO has these attributes
+        assert hasattr(tee, "getvalue")  # delegated from original
+        assert tee.closed is False  # delegated
+
+    def test_write_to_closed_log_file(self):
+        """Writing when log_file is closed still passes through to original."""
+        import io
+        from pubrun.capture.console import TqdmSafeTee
+
+        original = io.StringIO()
+        log_file = io.StringIO()
+        tee = TqdmSafeTee(original, log_file)
+
+        log_file.close()
+        # Should not raise
+        tee.write("after log closed\n")
+        assert "after log closed" in original.getvalue()

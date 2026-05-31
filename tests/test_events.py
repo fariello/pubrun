@@ -150,3 +150,41 @@ class TestEventStreamFormat:
         lines = (tmp_path / "events.jsonl").read_text("utf-8").strip().splitlines()
         record = json.loads(lines[0])
         assert "payload" not in record
+
+
+class TestEventStreamConstructorFailure:
+    """Tests for EventStream when file creation fails."""
+
+    def test_open_failure_sets_file_to_none(self, tmp_path, monkeypatch):
+        """If open() fails during construction, _file is None."""
+        import builtins
+        original_open = builtins.open
+
+        def failing_open(path, *args, **kwargs):
+            if "events.jsonl" in str(path):
+                raise PermissionError("read-only filesystem")
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", failing_open)
+
+        config = {"events": {"enabled": True, "max_tracked_events": 100}}
+        stream = EventStream(tmp_path, config=config)
+        assert stream._file is None
+
+    def test_emit_after_open_failure_is_silent(self, tmp_path, monkeypatch):
+        """emit() does not raise when _file is None (failed open)."""
+        import builtins
+        original_open = builtins.open
+
+        def failing_open(path, *args, **kwargs):
+            if "events.jsonl" in str(path):
+                raise PermissionError("read-only filesystem")
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", failing_open)
+
+        config = {"events": {"enabled": True, "max_tracked_events": 100}}
+        stream = EventStream(tmp_path, config=config)
+        # Should not raise
+        stream.emit("annotation", name="lost_event", payload={"key": "value"})
+        stream.close()  # Also should not raise
