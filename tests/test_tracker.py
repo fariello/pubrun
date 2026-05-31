@@ -86,3 +86,155 @@ def test_atomic_manifest_write(tmp_path, monkeypatch):
     with open(manifest) as f:
         data = json.load(f)
     assert data["status"]["outcome"] == "completed"
+
+
+# ==========================================================================
+# _merge_and_migrate tests
+# ==========================================================================
+
+class TestMergeAndMigrate:
+    """Tests for the _merge_and_migrate directory migration mechanism."""
+
+    def test_migrate_moves_directory(self, tmp_path, monkeypatch):
+        """Changing output_dir mid-run moves the run directory."""
+        from pubrun.tracker import Run
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+
+        run = Run()
+        original_dir = run.run_dir
+        assert original_dir.exists()
+
+        # Migrate to a new output directory
+        new_output = tmp_path / "new_output"
+        run._merge_and_migrate({"core": {"output_dir": str(new_output)}})
+
+        # Old directory should be gone, new one should exist
+        assert not original_dir.exists()
+        expected_new = new_output / original_dir.name
+        assert expected_new.exists()
+        assert run.run_dir == expected_new
+
+        run.stop()
+
+    def test_migrate_preserves_files(self, tmp_path, monkeypatch):
+        """Files created in the run directory survive migration."""
+        from pubrun.tracker import Run
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+
+        run = Run()
+        # Create a test file in the run dir
+        test_file = run.run_dir / "test_artifact.txt"
+        test_file.write_text("hello", encoding="utf-8")
+
+        new_output = tmp_path / "migrated"
+        run._merge_and_migrate({"core": {"output_dir": str(new_output)}})
+
+        # File should exist in new location
+        migrated_file = run.run_dir / "test_artifact.txt"
+        assert migrated_file.exists()
+        assert migrated_file.read_text(encoding="utf-8") == "hello"
+
+        run.stop()
+
+    def test_migrate_empty_overrides_is_noop(self, tmp_path, monkeypatch):
+        """Empty overrides dict does nothing."""
+        from pubrun.tracker import Run
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+
+        run = Run()
+        original_dir = run.run_dir
+        run._merge_and_migrate({})
+        assert run.run_dir == original_dir
+        run.stop()
+
+    def test_migrate_same_dir_is_noop(self, tmp_path, monkeypatch):
+        """If output_dir resolves to the same location, no move happens."""
+        from pubrun.tracker import Run
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+
+        run = Run()
+        original_dir = run.run_dir
+        # Point to the same base dir (./runs)
+        run._merge_and_migrate({"core": {"output_dir": str(original_dir.parent)}})
+        assert run.run_dir == original_dir
+        assert original_dir.exists()
+        run.stop()
+
+    def test_migrate_enables_subprocess_spy(self, tmp_path, monkeypatch):
+        """Enabling subprocess spy mid-run via _merge_and_migrate works."""
+        from pubrun.tracker import Run
+        from pubrun.capture.subprocesses import SubprocessSpy
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+
+        run = Run(overrides={"capture": {"subprocesses": {"enabled": False}}})
+        assert run._spying_subprocesses is False
+
+        run._merge_and_migrate({"capture": {"subprocesses": {"enabled": True}}})
+        assert run._spying_subprocesses is True
+
+        run.stop()
+
+    def test_migrate_failure_does_not_crash(self, tmp_path, monkeypatch):
+        """If shutil.move fails, migration logs a warning but doesn't crash."""
+        from pubrun.tracker import Run
+        import shutil
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+
+        run = Run()
+        original_dir = run.run_dir
+
+        # Make shutil.move fail
+        def failing_move(src, dst):
+            raise PermissionError("cannot move")
+
+        monkeypatch.setattr(shutil, "move", failing_move)
+
+        new_output = tmp_path / "nope"
+        run._merge_and_migrate({"core": {"output_dir": str(new_output)}})
+
+        # Should NOT crash; run_dir stays at the original
+        assert run.run_dir == original_dir
+        assert original_dir.exists()
+        run.stop()
+
+
+# ==========================================================================
+# _bootstrap_engines multi-failure tests
+# ==========================================================================
+
+class TestBootstrapEnginesFailures:
+    """Test that each engine failure individually promotes to ghost mode."""
+
+    def test_git_failure_ghost_mode(self, tmp_path, monkeypatch):
+        """get_git raising promotes to ghost mode."""
+        from pubrun.tracker import Run
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+        monkeypatch.setattr("pubrun.tracker.get_git", lambda c: (_ for _ in ()).throw(RuntimeError("git broken")))
+        run = Run()
+        assert run._outcome == "ghost"
+
+    def test_hardware_failure_ghost_mode(self, tmp_path, monkeypatch):
+        """get_hardware raising promotes to ghost mode."""
+        from pubrun.tracker import Run
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+        monkeypatch.setattr("pubrun.tracker.get_hardware", lambda c: (_ for _ in ()).throw(RuntimeError("hw broken")))
+        run = Run()
+        assert run._outcome == "ghost"
+
+    def test_environment_failure_ghost_mode(self, tmp_path, monkeypatch):
+        """get_environment raising promotes to ghost mode."""
+        from pubrun.tracker import Run
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+        monkeypatch.setattr("pubrun.tracker.get_environment", lambda c: (_ for _ in ()).throw(RuntimeError("env broken")))
+        run = Run()
+        assert run._outcome == "ghost"
+
+    def test_ghost_run_stop_is_safe(self, tmp_path, monkeypatch):
+        """A ghost-mode run can be stopped without error."""
+        from pubrun.tracker import Run
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+        monkeypatch.setattr("pubrun.tracker.get_invocation", lambda c: (_ for _ in ()).throw(RuntimeError("fail")))
+        run = Run()
+        assert run._outcome == "ghost"
+        # stop() should not raise
+        run.stop()
