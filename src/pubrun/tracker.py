@@ -22,6 +22,7 @@ from pubrun.capture.packages import get_packages
 from pubrun.capture.environment import get_environment
 from pubrun.capture.git import get_git
 from pubrun.capture.host import get_host
+from pubrun.capture.signals import SignalExitCapture
 
 
 # Define a singleton instance to manage global tracking state
@@ -100,6 +101,7 @@ class Run:
             self.environment_data = {}
             self.host_data = {}
             self.console_interceptor = None
+            self.signal_capture = None
             _active_run = self
             return
         
@@ -154,6 +156,10 @@ class Run:
             self.resource_watcher.start()
         # ---------------------------------------------
         
+        # 7. Signal and exit-code capture (non-intrusive, chains to user handlers)
+        self.signal_capture = SignalExitCapture()
+        self.signal_capture.install()
+
         # Wire up crash-safety
         self.writer = ArtifactWriter(self)
         self.writer.register_atexit()
@@ -227,7 +233,25 @@ class Run:
                 self._outcome = "failed"
             else:
                 self._outcome = "completed"
-                
+
+        # Capture the exit code.  At atexit time we can inspect whether a
+        # SystemExit was the cause.  For a clean exit, code is 0.
+        if self.signal_capture:
+            exc_info = sys.exc_info()
+            if exc_info[1] is not None and isinstance(exc_info[1], SystemExit):
+                code = exc_info[1].code
+                if isinstance(code, int):
+                    self.signal_capture.record_exit_code(code)
+                elif code is None:
+                    self.signal_capture.record_exit_code(0)
+                else:
+                    self.signal_capture.record_exit_code(1)
+            elif self._outcome == "completed":
+                self.signal_capture.record_exit_code(0)
+            elif self._outcome == "failed":
+                # Unhandled exception -- exit code will be 1
+                self.signal_capture.record_exit_code(1)
+
         # Gracefully shutdown engines
         if self._spying_subprocesses:
             SubprocessSpy.finalize_all()
@@ -238,6 +262,9 @@ class Run:
             self.resource_watcher.stop()
         if self.event_stream:
             self.event_stream.close()
+        # Restore original signal handlers so pubrun leaves no footprint
+        if self.signal_capture:
+            self.signal_capture.uninstall()
 
     def stop(self, outcome: str = "completed") -> None:
         """Stop tracking, finalize engines, and write artifacts.
@@ -318,6 +345,8 @@ class Run:
                 "console_capture_mode": self.config.get("console", {}).get("capture_mode", "off"),
                 "capture_state": {"status": "complete"}
             },
+            "signals": self.signal_capture.get_records() if self.signal_capture else {"capture_state": {"status": "suppressed"}},
+
             "status": {
                 "outcome": self._outcome,
                 "capture_state": {"status": "complete"}
