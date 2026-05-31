@@ -114,62 +114,40 @@ class Run:
         # State tracking (to detect crashes)
         self._outcome = "unknown"
         self._finalized = False
-        
-        # ---- Phase 3: Bootstrap Capture Engines ----
-        # 1. Invocation canonical path extraction
-        self.invocation_data = get_invocation(self.config)
-        
-        # 2. Get Git provenance before subprocess tracking to prevent logging ourselves
-        self.git_data = get_git(self.config)
 
-        # Write lock file early so external tools can detect this run is active.
-        self._write_lock_file()
-        
-        # 3. Process, Env, and Runtime Snapshotting
-        self.process_data = get_process_info(self.config)
-        self.python_data = get_python_runtime(self.config)
-        self.packages_data = get_packages(self.config)
-        self.environment_data = get_environment(self.config)
-        
-        # 4. Hardware tracking (Must run before SubprocessSpy to avoid logging psutil tools etc)
-        self.hardware_data = get_hardware(self.config)
-        self.host_data = get_host(self.config)
-        
-        # 4. Console & Subprocess interception setup
-        if self.config.get("capture", {}).get("subprocesses", {}).get("enabled", False):
-            max_tracked = self.config.get("capture", {}).get("subprocesses", {}).get("max_tracked_commands", 5000)
-            SubprocessSpy.install(max_tracked, config=self.config)
-            self._spying_subprocesses = True
-        else:
-            self._spying_subprocesses = False
-            
-        # 3. Console tee hook
-        console_mode = self.config.get("console", {}).get("capture_mode", "off")
-        self.console_interceptor = ConsoleInterceptor(self.run_dir, console_mode)
-        self.console_interceptor.start()
-        
+        # Initialize all capture data to safe defaults so that a partial
+        # init failure never leaves the object in an undefined state.
+        self.invocation_data: Dict[str, Any] = {}
+        self.git_data: Dict[str, Any] = {}
+        self.process_data: Dict[str, Any] = {}
+        self.python_data: Dict[str, Any] = {}
+        self.packages_data: Dict[str, Any] = {}
+        self.environment_data: Dict[str, Any] = {}
+        self.hardware_data: Dict[str, Any] = {}
+        self.host_data: Dict[str, Any] = {}
         self.console_data: Dict[str, Any] = {}
-        
-        # 5. Event Stream
+        self._spying_subprocesses = False
+        self.console_interceptor = None
         self.event_stream = None
-        if self.config.get("events", {}).get("enabled", False):
-            self.event_stream = EventStream(self.run_dir, config=self.config)
-            
-        # 6. Background Telemetry (RAM watcher)
         self.resource_watcher = None
-        res_cfg = self.config.get("capture", {}).get("resources", {})
-        if res_cfg.get("depth", "off") != "off":
-            interval = res_cfg.get("sample_interval_seconds", 15)
-            max_fails = res_cfg.get("max_consecutive_failures", 3)
-            self.resource_watcher = ResourceWatcher(self, interval, max_fails)
-            self.resource_watcher.start()
-        # ---------------------------------------------
-        
-        # 7. Signal and exit-code capture (non-intrusive, chains to user handlers)
         self.signal_capture = None
-        if self.config.get("capture", {}).get("signals", {}).get("enabled", True):
-            self.signal_capture = SignalExitCapture()
-            self.signal_capture.install()
+
+        # ---- Phase 3: Bootstrap Capture Engines ----
+        # Wrapped in a broad try/except so that a crash in any single engine
+        # promotes the run to ghost mode rather than crashing the host script.
+        try:
+            self._bootstrap_engines()
+        except Exception as engine_err:
+            import logging as _logging
+            _logging.getLogger("pubrun").warning(
+                f"pubrun: capture engine init failed, entering ghost mode: {engine_err}"
+            )
+            self.is_active = False
+            self._outcome = "ghost"
+            self._finalized = True
+            _active_run = self
+            return
+        # ---------------------------------------------
 
         # Wire up crash-safety
         self.writer = ArtifactWriter(self)
@@ -215,6 +193,59 @@ class Run:
                 lock_path.unlink()
         except Exception:
             pass
+
+    def _bootstrap_engines(self) -> None:
+        """Initialize all capture engines.
+
+        Called from ``__init__``.  If this method raises, the run promotes
+        itself to ghost mode (handled by the caller).
+        """
+        # 1. Invocation canonical path extraction
+        self.invocation_data = get_invocation(self.config)
+
+        # 2. Get Git provenance before subprocess tracking to prevent logging ourselves
+        self.git_data = get_git(self.config)
+
+        # Write lock file early so external tools can detect this run is active.
+        self._write_lock_file()
+
+        # 3. Process, Env, and Runtime Snapshotting
+        self.process_data = get_process_info(self.config)
+        self.python_data = get_python_runtime(self.config)
+        self.packages_data = get_packages(self.config)
+        self.environment_data = get_environment(self.config)
+
+        # 4. Hardware tracking (Must run before SubprocessSpy to avoid logging psutil tools etc)
+        self.hardware_data = get_hardware(self.config)
+        self.host_data = get_host(self.config)
+
+        # 5. Console & Subprocess interception setup
+        if self.config.get("capture", {}).get("subprocesses", {}).get("enabled", False):
+            max_tracked = self.config.get("capture", {}).get("subprocesses", {}).get("max_tracked_commands", 5000)
+            SubprocessSpy.install(max_tracked, config=self.config)
+            self._spying_subprocesses = True
+
+        # 6. Console tee hook
+        console_mode = self.config.get("console", {}).get("capture_mode", "off")
+        self.console_interceptor = ConsoleInterceptor(self.run_dir, console_mode)
+        self.console_interceptor.start()
+
+        # 7. Event Stream
+        if self.config.get("events", {}).get("enabled", False):
+            self.event_stream = EventStream(self.run_dir, config=self.config)
+
+        # 8. Background Telemetry (RAM watcher)
+        res_cfg = self.config.get("capture", {}).get("resources", {})
+        if res_cfg.get("depth", "off") != "off":
+            interval = res_cfg.get("sample_interval_seconds", 15)
+            max_fails = res_cfg.get("max_consecutive_failures", 3)
+            self.resource_watcher = ResourceWatcher(self, interval, max_fails)
+            self.resource_watcher.start()
+
+        # 9. Signal and exit-code capture (non-intrusive, chains to user handlers)
+        if self.config.get("capture", {}).get("signals", {}).get("enabled", True):
+            self.signal_capture = SignalExitCapture()
+            self.signal_capture.install()
 
     def _merge_and_migrate(self, overrides: Dict[str, Any]) -> None:
         """Merge new overrides into a running config. Migrates the run directory
