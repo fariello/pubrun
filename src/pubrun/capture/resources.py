@@ -132,8 +132,9 @@ class ResourceWatcher(threading.Thread):
     def stop(self) -> None:
         """Signal the polling thread to stop, wait for it, and take one final measurement."""
         self._stop_event.set()
-        # Wait for the daemon thread to finish its current cycle
-        self.join(timeout=self.interval + 1)
+        # Wait for the daemon thread to finish its current cycle.
+        # Cap at 5s to prevent long hangs if OS polling is stuck.
+        self.join(timeout=min(self.interval + 1, 5))
         # Run one final poll completely (thread is now stopped)
         self._update_metrics()
         self.end_rss_bytes = self._poll_rss()
