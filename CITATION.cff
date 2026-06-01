@@ -7,8 +7,8 @@ authors:
 title: "pubrun: Lightweight native execution provenance and reproducibility tracking"
 version: 0.2.0
 date-released: 2026-05-31
-url: "https://github.com/gfariello/pubrun"
-repository-code: "https://github.com/gfariello/pubrun"
+url: "https://github.com/fariello/pubrun"
+repository-code: "https://github.com/fariello/pubrun"
 abstract: >-
   pubrun is a zero-dependency, manifest-first Python framework for tracking
   computational provenance, environment state, and execution metadata without

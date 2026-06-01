@@ -328,7 +328,7 @@ The configuration MUST support defaults for:
 
 ### 10.5 Configuration Format
 
-TOML is the required format, leveraging Python 3.11+ `tomllib` (with `tomli` fallback for 3.10).
+TOML is the required format, leveraging Python 3.11+ `tomllib` (with `tomli` fallback for Python 3.8–3.10).
 
 ### 10.6 Configuration Logging
 
