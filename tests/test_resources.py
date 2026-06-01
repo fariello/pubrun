@@ -1,3 +1,4 @@
+import sys
 import time
 import json
 import pytest
@@ -34,7 +35,9 @@ def test_resources_watcher_threads(tmp_path, monkeypatch):
     assert "peak_rss_bytes" in res
     assert "end_rss_bytes" in res
     assert res["capture_state"]["status"] == "complete"
-    assert res["peak_rss_bytes"] is not None
+    # On Windows, wmic may be unavailable on newer runners; RSS may be None
+    if sys.platform != "win32":
+        assert res["peak_rss_bytes"] is not None
     
     # Ensure background thread streamed ticks
     events_path = tracker.run_dir / "events.jsonl"

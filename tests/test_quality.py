@@ -1,5 +1,6 @@
 """Tests for ghost mode, double-stop, and diff engine (T2, T3, T4)."""
 import json
+import os
 import pytest
 from pathlib import Path
 
@@ -256,11 +257,12 @@ class TestPathSplitDiff:
     """Layer 5: Tests for PATH variable splitting in compare_manifests."""
 
     def test_path_split_detects_additions(self):
+        sep = os.pathsep  # ':' on Unix, ';' on Windows
         a = {"environment": {"variables": [
-            {"name": "PATH", "value": {"representation": "plain", "value": "/usr/bin:/bin"}}
+            {"name": "PATH", "value": {"representation": "plain", "value": f"/usr/bin{sep}/bin"}}
         ]}}
         b = {"environment": {"variables": [
-            {"name": "PATH", "value": {"representation": "plain", "value": "/usr/bin:/bin:/usr/local/bin"}}
+            {"name": "PATH", "value": {"representation": "plain", "value": f"/usr/bin{sep}/bin{sep}/usr/local/bin"}}
         ]}}
         result = compare_manifests(a, b)
         mod = result["modified"].get("environment.PATH", {})
@@ -269,11 +271,12 @@ class TestPathSplitDiff:
         assert len(mod["removed"]) == 0
 
     def test_path_split_detects_removals(self):
+        sep = os.pathsep
         a = {"environment": {"variables": [
-            {"name": "PATH", "value": {"representation": "plain", "value": "/usr/bin:/bin:/opt/bin"}}
+            {"name": "PATH", "value": {"representation": "plain", "value": f"/usr/bin{sep}/bin{sep}/opt/bin"}}
         ]}}
         b = {"environment": {"variables": [
-            {"name": "PATH", "value": {"representation": "plain", "value": "/usr/bin:/bin"}}
+            {"name": "PATH", "value": {"representation": "plain", "value": f"/usr/bin{sep}/bin"}}
         ]}}
         result = compare_manifests(a, b)
         mod = result["modified"].get("environment.PATH", {})
