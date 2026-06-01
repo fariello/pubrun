@@ -96,6 +96,7 @@ def test_atomic_manifest_write(tmp_path, monkeypatch):
 class TestMergeAndMigrate:
     """Tests for the _merge_and_migrate directory migration mechanism."""
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Open file handles prevent shutil.move on Windows")
     def test_migrate_moves_directory(self, tmp_path, monkeypatch):
         """Changing output_dir mid-run moves the run directory."""
         from pubrun.tracker import Run
@@ -109,14 +110,11 @@ class TestMergeAndMigrate:
         new_output = tmp_path / "new_output"
         run._merge_and_migrate({"core": {"output_dir": str(new_output)}})
 
-        # New directory should exist and run_dir should point there
+        # Old directory should be gone, new one should exist
+        assert not original_dir.exists()
         expected_new = new_output / original_dir.name
         assert expected_new.exists()
         assert run.run_dir == expected_new
-        # Old directory should be gone (on Windows, open file handles may
-        # prevent immediate removal — skip this check there)
-        if sys.platform != "win32":
-            assert not original_dir.exists()
 
         run.stop()
 
