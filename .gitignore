@@ -17,6 +17,8 @@ p3*/
 
 # Compiled Python bytecode
 *.py[cod]
+*.egg-info/
+build/
 .pytest_cache/
 
 # Log files

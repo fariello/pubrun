@@ -5,8 +5,8 @@ authors:
     given-names: "Gabriele"
     orcid: "https://orcid.org/0000-0002-0326-4752"
 title: "pubrun: Lightweight native execution provenance and reproducibility tracking"
-version: 0.1.1
-date-released: 2026-04-03
+version: 0.2.0
+date-released: 2026-05-31
 url: "https://github.com/gfariello/pubrun"
 repository-code: "https://github.com/gfariello/pubrun"
 abstract: >-
