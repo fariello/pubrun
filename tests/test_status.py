@@ -1,6 +1,7 @@
 """Tests for pubrun.status and lock file mechanism."""
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -51,6 +52,7 @@ class TestLockFile:
         # Clean up
         run.stop()
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="chmod 0o444 does not prevent writes on Windows")
     def test_ghost_mode_no_lock_file(self, monkeypatch, tmp_path):
         """Ghost mode does not create a lock file."""
         # Make the directory creation fail
