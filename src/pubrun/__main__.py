@@ -2,7 +2,6 @@ import argparse
 import sys
 import os
 import json
-import importlib.resources
 import tempfile
 import subprocess
 from pathlib import Path
@@ -15,8 +14,8 @@ def _create_config(destination: str) -> None:
     """Create a default ``.pubrun.toml`` at the given path. Refuses to overwrite."""
     try:
         # Resolve the package-native default architecture
-        resource_path = importlib.resources.files("pubrun").joinpath("resources", "default.toml")
-        content = resource_path.read_text(encoding="utf-8")
+        from pubrun.config import _read_package_resource
+        content = _read_package_resource("pubrun.resources", "default.toml")
         
         target_path = Path(destination).resolve()
         target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -533,9 +532,8 @@ def main() -> None:
         executed = True
         
     if getattr(args, "show_config", False):
-        import importlib.resources
-        resource_path = importlib.resources.files("pubrun").joinpath("resources", "default.toml")
-        content = resource_path.read_text(encoding="utf-8")
+        from pubrun.config import _read_package_resource
+        content = _read_package_resource("pubrun.resources", "default.toml")
         print(content)
         executed = True
 

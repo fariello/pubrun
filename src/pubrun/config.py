@@ -30,10 +30,19 @@ def _deep_merge(dict1: Dict[str, Any], dict2: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _read_package_resource(package: str, resource: str) -> str:
+    """Read a text resource from a package, compatible with Python 3.8+."""
+    if sys.version_info >= (3, 9):
+        resource_path = importlib.resources.files(package).joinpath(resource)
+        return resource_path.read_text(encoding="utf-8")
+    else:
+        # Python 3.8: use the legacy API
+        return importlib.resources.read_text(package, resource, encoding="utf-8")
+
+
 def load_default_config() -> Dict[str, Any]:
     """Load the built-in ``default.toml`` shipped with the package."""
-    resource_path = importlib.resources.files("pubrun").joinpath("resources", "default.toml")
-    content = resource_path.read_text(encoding="utf-8")
+    content = _read_package_resource("pubrun.resources", "default.toml")
     return tomllib.loads(content)
 
 
