@@ -52,7 +52,7 @@ def test_resources_watcher_threads(tmp_path, monkeypatch):
         # At least initial tick and maybe one scheduled tick
         assert len(samples) >= 1
         assert "rss_bytes" in samples[0]["payload"]
-    assert samples[0]["payload"]["rss_bytes"] >= 0
+        assert samples[0]["payload"]["rss_bytes"] >= 0
 
 
 def test_resource_watcher_failure_threshold(tmp_path, monkeypatch):
