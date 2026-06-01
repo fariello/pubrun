@@ -225,3 +225,37 @@ class TestProfileEnvVar:
         monkeypatch.setattr("pubrun.config.load_local_config", lambda start_dir=None: {"core": {"profile": "deep"}})
         resolved = resolve_config()
         assert resolved["core"]["profile"] == "minimal"
+
+
+class TestKwargFlattening:
+    """P6-R7/R8: Regression tests for convenience kwarg flattening."""
+
+    def test_flat_profile_sets_core_profile(self):
+        """P6-R8: start(profile='deep') correctly sets config['core']['profile']."""
+        resolved = resolve_config({"profile": "deep"})
+        assert resolved["core"]["profile"] == "deep"
+
+    def test_flat_output_dir_sets_core_output_dir(self):
+        """Flat output_dir kwarg is nested under core."""
+        resolved = resolve_config({"output_dir": "/tmp/runs"})
+        assert resolved["core"]["output_dir"] == "/tmp/runs"
+
+    def test_flat_meta_ref_sets_core_meta_ref(self):
+        """Flat meta_ref kwarg is nested under core."""
+        resolved = resolve_config({"meta_ref": "meta.json"})
+        assert resolved["core"]["meta_ref"] == "meta.json"
+
+    def test_resolve_config_does_not_mutate_caller_dict(self):
+        """P6-R7: resolve_config must not mutate the caller's overrides dict."""
+        overrides = {"profile": "deep", "events": {"enabled": False}}
+        original_keys = set(overrides.keys())
+        resolve_config(overrides)
+        # Caller's dict must be unchanged
+        assert set(overrides.keys()) == original_keys
+        assert overrides["profile"] == "deep"
+
+    def test_nested_core_still_works(self):
+        """Nested core dict syntax still works alongside flat kwargs."""
+        resolved = resolve_config({"core": {"output_dir": "/x"}, "profile": "deep"})
+        assert resolved["core"]["profile"] == "deep"
+        assert resolved["core"]["output_dir"] == "/x"

@@ -120,6 +120,8 @@ def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     if overrides:
         # Convenience flattening: allow start(profile="deep", output_dir="./x")
         # as shorthand for start(core={"profile": "deep", "output_dir": "./x"}).
+        # Copy to avoid mutating the caller's dict.
+        overrides = dict(overrides)
         _CORE_SHORTCUTS = {"profile", "output_dir", "auto_start", "meta_ref"}
         flat_core = {k: overrides.pop(k) for k in list(overrides) if k in _CORE_SHORTCUTS}
         if flat_core:
