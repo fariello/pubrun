@@ -37,3 +37,53 @@ Known issues and deferred improvements for future releases.
 - **TOCTOU on `_max_records` check in SubprocessSpy** (Low / Benign)
   - `subprocesses.py:99,157`: The length check is outside the lock. In concurrent scenarios, `_max_records` can be exceeded by at most `N_threads - 1` extra records. This is a soft safety cap, not a security boundary.
   - Recommendation: Accept as benign or move the check inside the lock (minor perf cost).
+
+---
+
+## Test Coverage Gaps (from P3 Review)
+
+Tests marked **(done)** were implemented in `d3f4b45`. The rest are deferred.
+
+### Implemented
+
+- **P3-T4** (done): Auto-start failure doesn't crash `import pubrun`
+- **P3-T6** (done): `resolve_config()` failure falls back to defaults
+- **P3-R2** (done): `_finalize_active_run()` calls `write_artifacts()`
+- **P3-R5** (done): Ghost outcome preserved after `stop()`
+
+### Missing Unit Tests — Modules
+
+- **P3-T1**: `writer.py` — no dedicated unit tests. Atomic write, temp-file cleanup, error paths untested in isolation. (Medium)
+- **P3-T2**: `report/templates.py` — no dedicated tests. Template substitution/escaping only verified indirectly. (Low)
+
+### Missing Unit Tests — Functions
+
+- **P3-T3**: `status.py` private formatting helpers — `_format_elapsed`, `_format_timestamp`, `_format_bytes`, `_truncate`, `_format_age`, `_status_marker`, `_dir_size`. Edge cases (zero, negative, GB-range, wide terminal) untested. (Low-Medium)
+
+### Missing Regression Tests — Recent Fixes
+
+- **P3-T5**: SIGTERM/SIGHUP finalization — no test verifies a lethal signal triggers `run.stop()` before process death. Requires subprocess-based test. (Medium)
+- **P3-T7**: Critical-event secondary cap — no test emits >10,000 critical events to verify the 10x cap fires. (Low)
+- **P3-T8**: `disable_spy()` on macOS hardware calls — no test verifies subprocess calls are wrapped. Monkeypatch-based test possible. (Low)
+- **P3-T9**: `ResourceWatcher.join()` — no test verifies the thread is joined before final poll. (Low)
+- **P3-T10**: `clean` interactive TTY selection — only programmatic API tested, not real stdin prompting. (Low)
+
+### Missing Regression Tests — Existing Behavior
+
+- **P3-R1**: Auto-start crash protection — covered by P3-T4 (done).
+- **P3-R3**: Config fallback — covered by P3-T6 (done).
+- **P3-R4**: Critical event cap with `max_events=0` — indirectly covered by existing `test_phase_events_bypass_throttle` and `test_zero_max_events`. (Low)
+- **P3-R6**: `EventStream.directory` dead assignment — untested; document-only until the bug is fixed. (Low)
+
+### Brittle Tests (Consider Refactoring)
+
+- **P3-T11**: `test_resources_watcher_threads` — `time.sleep(0.15)` timing-dependent; may flake on slow CI.
+- **P3-T12**: `test_resource_watcher_failure_threshold` — `time.sleep(0.3)` timing-dependent.
+- **P3-T13**: `test_sigint_sets_outcome_interrupted` — sends real SIGINT to test process.
+- **P3-T14**: `test_captures_sigint_as_keyboard_interrupt` — sends real SIGINT to test process.
+- **P3-T15**: `test_run_tests_exits_zero` — recursively invokes test suite; latent CI time bomb.
+
+### Infrastructure
+
+- No GitHub Actions CI workflow (tox matrix exists but is manual-only).
+- `pytest-cov` is in dev deps but coverage is not configured or enforced.
