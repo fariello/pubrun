@@ -347,3 +347,32 @@ class TestSignalNonMainThread:
         assert len(cap._previous_handlers) == 0
         # Warning should have been emitted
         assert any("signal capture unavailable" in r.message for r in caplog.records)
+
+
+class TestFinalizeActiveRun:
+    """P3-R2: Regression test -- _finalize_active_run() must call write_artifacts."""
+
+    def test_finalize_active_run_calls_write_artifacts(self, tmp_path, monkeypatch):
+        """_finalize_active_run() calls writer.write_artifacts() on the active run."""
+        from pubrun.capture.signals import _finalize_active_run
+        from pubrun.tracker import Run
+
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+        run = Run()
+
+        # Track whether write_artifacts was called
+        called = []
+        original_write = run.writer.write_artifacts
+        run.writer.write_artifacts = lambda: called.append(True) or original_write()
+
+        _finalize_active_run()
+        assert len(called) == 1
+        run.stop()
+
+    def test_finalize_active_run_no_crash_without_active_run(self, monkeypatch):
+        """_finalize_active_run() does not crash when no run is active."""
+        from pubrun.capture.signals import _finalize_active_run
+        import pubrun.tracker
+        monkeypatch.setattr(pubrun.tracker, "_active_run", None)
+        # Must not raise
+        _finalize_active_run()

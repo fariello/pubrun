@@ -238,3 +238,48 @@ class TestBootstrapEnginesFailures:
         assert run._outcome == "ghost"
         # stop() should not raise
         run.stop()
+
+    def test_ghost_outcome_preserved_after_stop(self, tmp_path, monkeypatch):
+        """P3-R5: Ghost outcome must not be overwritten to 'completed' by stop()."""
+        from pubrun.tracker import Run
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+        monkeypatch.setattr("pubrun.tracker.get_invocation", lambda c: (_ for _ in ()).throw(RuntimeError("fail")))
+        run = Run()
+        assert run._outcome == "ghost"
+        run.stop()
+        assert run._outcome == "ghost"  # Must remain ghost, not overwritten
+
+
+# ==========================================================================
+# P3-T6: resolve_config failure fallback
+# ==========================================================================
+
+class TestResolveConfigFallback:
+    """P3-T6: Regression test -- broken resolve_config must not crash Run()."""
+
+    def test_resolve_config_failure_falls_back_to_defaults(self, tmp_path, monkeypatch):
+        """If resolve_config() raises, Run() uses default config and proceeds."""
+        from pubrun.tracker import Run
+        from pubrun.config import load_default_config
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+        monkeypatch.setattr("pubrun.tracker.resolve_config", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("TOML parse error")))
+
+        run = Run()
+        # Should not crash -- should use defaults
+        assert run.is_active is True
+        expected_defaults = load_default_config()
+        assert run.config == expected_defaults
+        run.stop()
+
+    def test_resolve_config_failure_logs_warning(self, tmp_path, monkeypatch, caplog):
+        """A failing resolve_config emits a warning log."""
+        import logging
+        from pubrun.tracker import Run
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+        monkeypatch.setattr("pubrun.tracker.resolve_config", lambda *a, **k: (_ for _ in ()).throw(ValueError("bad config")))
+
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            run = Run()
+
+        assert any("config resolution failed" in r.message for r in caplog.records)
+        run.stop()
