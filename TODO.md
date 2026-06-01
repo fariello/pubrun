@@ -87,3 +87,98 @@ Tests marked **(done)** were implemented in `d3f4b45`. The rest are deferred.
 
 - No GitHub Actions CI workflow (tox matrix exists but is manual-only).
 - `pytest-cov` is in dev deps but coverage is not configured or enforced.
+
+---
+
+## Feature Plans
+
+### P5-F1: Timestamped Console Capture (`standard` mode)
+
+Currently all non-`"off"` console modes produce identical plain-text tee output. The
+`standard` mode should prepend ISO 8601 timestamps to each line written to the log
+files (terminal output remains unchanged):
+
+```
+[2026-05-31T12:00:01.234Z] Training epoch 1...
+[2026-05-31T12:00:03.891Z] Loss: 0.542
+```
+
+Implementation plan:
+1. Add a `timestamped` flag to `TqdmSafeTee` (enabled when mode is `"standard"` or `"deep"`).
+2. In `_write_to_log()`, prepend `f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "` to each line before writing to the log file.
+3. Terminal output remains untouched (timestamps only go to the file).
+4. `"deep"` mode remains reserved for future structured JSON capture.
+5. Tests: verify timestamps appear in log files when mode is `"standard"`, do not appear when `"basic"`.
+
+This is a prerequisite for `pubrun combined` (below).
+
+### P5-F5: `pubrun combined` Command
+
+Post-F1 command that interleaves stdout and stderr from one or more runs using the
+log-line timestamps written by `standard` mode.
+
+```
+pubrun combined [RUN_ID ...] [--dir PATH] [--output FILE]
+```
+
+Design:
+- Accepts one or more run IDs (prefix-matched like `pubrun status`).
+- Reads `stdout.log` and `stderr.log` from each run directory.
+- Parses the ISO 8601 timestamps prepended by `standard` mode.
+- Merges all lines across streams and runs into timestamp order.
+- Prefixes each line with stream origin: `[stdout]` or `[stderr]` (and run ID if multiple runs).
+- Outputs to stdout by default (pipeable), or to a file with `--output`.
+- **Size warning**: If combined file size exceeds 250 MB, prints a warning to stderr
+  and prompts for confirmation (skipped with `--yes`). At 500 MB, refuses unless
+  `--force` is passed.
+- If logs lack timestamps (captured with `"basic"` mode), falls back to sequential
+  concat with `[stdout]`/`[stderr]` headers and emits a warning that true interleaving
+  requires `capture_mode = "standard"`.
+
+CLI addition to `__main__.py`:
+```python
+subparsers.add_parser("combined", help="Interleave stdout/stderr logs from one or more runs.")
+```
+
+Tests:
+- Verify interleaving with timestamped logs produces correct order.
+- Verify fallback behavior with non-timestamped logs.
+- Verify size warning triggers at threshold.
+- Verify `--output` writes to file.
+- Verify multiple run IDs merge correctly.
+
+---
+
+## Removed from Roadmap
+
+### Determinism Tracking (`[capture.determinism]`)
+
+**Removed.** Recording pseudorandom seeds (`random.getstate()`, `numpy.random.get_state()`,
+`torch.manual_seed()`) was considered but rejected for the following reasons:
+
+1. **Fragile detection**: Detecting which RNG libraries are in use requires probing
+   optional imports (numpy, torch, tensorflow, jax) at runtime. Each has a different
+   API surface, and versions change frequently.
+2. **Locking seeds is harmful**: Overwriting user seeds would break scripts that
+   intentionally use randomness for exploration. Recording-only is the only safe option.
+3. **Recording-only has limited value**: If the user didn't explicitly set a seed,
+   recording the internal RNG state is useless for reproduction — the state is opaque
+   and not portable across library versions.
+4. **Better solved by the user**: A single `pubrun.annotate(seed=42)` call is more
+   explicit, safer, and requires no magic detection.
+
+The `[capture.determinism].depth = "off"` config key is retained for forward compatibility
+but documented as "not yet implemented / reserved."
+
+### `summary.txt` Generation (`[logging].write_summary`)
+
+**Removed.** A human-readable glance file was planned but is superseded by:
+
+- `pubrun status <run-id>` — Shows the same information interactively.
+- `pubrun report --basic` — Produces a full diagnostic summary.
+- `manifest.json` — Machine-readable and more complete.
+
+Writing a redundant text file to every run directory adds disk I/O, increases the
+run directory footprint, and provides no information not already available via the
+CLI. The config key is retained as "not yet implemented / reserved" for users who
+may want it in the future.

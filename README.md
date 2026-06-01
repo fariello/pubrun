@@ -275,8 +275,8 @@ See [Configuration Reference](docs/configuration.md) for the full redaction poli
 3. **Plugin / extension model** — Formal extension points for custom capture engines.
 4. **Artifact registration API** — `register_artifact()` for tracking user-produced output files.
 5. **Custom metadata API** — `register_metadata()` for injecting structured data into the manifest.
-6. **Determinism tracking** — `register_seed()` and the `[capture.determinism]` engine for recording pseudorandom seeds.
-7. **Combined console log** — Interleaved `combined.log` output alongside `stdout.log` and `stderr.log`.
+6. **Timestamped console capture** — `standard` mode prepends timestamps to log lines, enabling `pubrun combined` (below).
+7. **`pubrun combined` command** — Interleaves stdout and stderr from one or more runs using log timestamps. Requires timestamped capture (item 6).
 
 ---
 
