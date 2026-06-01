@@ -49,8 +49,16 @@ class Run:
         continues unaffected.
         """
         global _active_run
-        
-        self.config = resolve_config(overrides)
+
+        try:
+            self.config = resolve_config(overrides)
+        except Exception as config_err:
+            import logging
+            logging.getLogger("pubrun").warning(
+                f"pubrun: config resolution failed, using defaults: {config_err}"
+            )
+            from pubrun.config import load_default_config
+            self.config = load_default_config()
         self.ref_count = 1
         self.run_id = uuid.uuid4().hex[:8]
         self.pid = os.getpid()

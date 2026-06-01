@@ -19,7 +19,9 @@ def _get_cpu_model() -> Optional[str]:
             if len(lines) >= 2:
                 return lines[1]
         elif sys_plat == "darwin":
-            out = subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"], text=True, stderr=subprocess.DEVNULL)
+            from pubrun.capture.subprocesses import disable_spy
+            with disable_spy():
+                out = subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"], text=True, stderr=subprocess.DEVNULL)
             return out.strip()
         elif sys_plat.startswith("linux"):
             if os.path.exists("/proc/cpuinfo"):
@@ -43,7 +45,9 @@ def _get_total_memory_bytes() -> Optional[int]:
             if len(lines) >= 2:
                 return int(lines[1]) * 1024
         elif sys_plat == "darwin":
-            out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True, stderr=subprocess.DEVNULL)
+            from pubrun.capture.subprocesses import disable_spy
+            with disable_spy():
+                out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True, stderr=subprocess.DEVNULL)
             return int(out.strip())
         elif sys_plat.startswith("linux"):
             if os.path.exists("/proc/meminfo"):
@@ -118,7 +122,9 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
                         })
             elif sys_plat == "darwin":
                 # system_profiler SPDisplaysDataType provides Apple Silicon GPU core counts basically
-                out = subprocess.check_output(["system_profiler", "SPDisplaysDataType"], text=True, stderr=subprocess.DEVNULL)
+                from pubrun.capture.subprocesses import disable_spy
+                with disable_spy():
+                    out = subprocess.check_output(["system_profiler", "SPDisplaysDataType"], text=True, stderr=subprocess.DEVNULL)
                 gpu_rec = {"vendor": "Apple / Generic"}
                 for line in out.splitlines():
                     line = line.strip()
