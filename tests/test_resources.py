@@ -39,17 +39,19 @@ def test_resources_watcher_threads(tmp_path, monkeypatch):
     if sys.platform != "win32":
         assert res["peak_rss_bytes"] is not None
     
-    # Ensure background thread streamed ticks
-    events_path = tracker.run_dir / "events.jsonl"
-    assert events_path.exists()
-    
-    lines = events_path.read_text("utf-8").strip().splitlines()
-    # Find all emitted sample events
-    samples = [json.loads(line) for line in lines if '"resource_sample"' in line]
-    
-    # At least initial tick and maybe one scheduled tick
-    assert len(samples) >= 1
-    assert "rss_bytes" in samples[0]["payload"]
+    # Ensure background thread streamed ticks (skip on Windows where
+    # wmic is unavailable and the thread self-terminates with no samples)
+    if sys.platform != "win32":
+        events_path = tracker.run_dir / "events.jsonl"
+        assert events_path.exists()
+        
+        lines = events_path.read_text("utf-8").strip().splitlines()
+        # Find all emitted sample events
+        samples = [json.loads(line) for line in lines if '"resource_sample"' in line]
+        
+        # At least initial tick and maybe one scheduled tick
+        assert len(samples) >= 1
+        assert "rss_bytes" in samples[0]["payload"]
     assert samples[0]["payload"]["rss_bytes"] >= 0
 
 
