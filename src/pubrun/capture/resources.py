@@ -130,9 +130,11 @@ class ResourceWatcher(threading.Thread):
                 self.run_tracker.event_stream.emit("resource_sample", payload={"rss_bytes": rss, "cpu_percent": cpu_pct})
 
     def stop(self) -> None:
-        """Signal the polling thread to stop and take one final measurement."""
+        """Signal the polling thread to stop, wait for it, and take one final measurement."""
         self._stop_event.set()
-        # Run one final poll completely
+        # Wait for the daemon thread to finish its current cycle
+        self.join(timeout=self.interval + 1)
+        # Run one final poll completely (thread is now stopped)
         self._update_metrics()
         self.end_rss_bytes = self._poll_rss()
         if self.end_rss_bytes > self.peak_rss_bytes:

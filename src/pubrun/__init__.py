@@ -314,5 +314,10 @@ if _should_auto and not get_current_run():
         _should_auto = False
         
     if _should_auto:
-        start()
+        try:
+            start()
+        except Exception as _start_err:
+            _logging.getLogger("pubrun").warning(
+                f"pubrun auto-start failed (tracking disabled): {_start_err}"
+            )
 

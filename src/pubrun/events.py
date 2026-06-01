@@ -25,6 +25,12 @@ class EventStream:
             from pubrun.config import resolve_config
             config = resolve_config()
         self._max_events = config.get("events", {}).get("max_tracked_events", 1_000_000)
+        # Secondary cap for critical events (annotations, phases) to prevent
+        # unbounded disk writes from scripts calling annotate() in tight loops.
+        # Minimum of 10,000 ensures critical events always have headroom even
+        # when max_tracked_events is set very low.
+        self._max_critical_events = max(10_000, self._max_events * 10)
+        self._critical_event_count = 0
 
         try:
             # We keep the handle open in append mode for rapid high-frequency writes
@@ -62,7 +68,11 @@ class EventStream:
 
         try:
             with self._lock:
-                if not is_critical and self._event_count >= self._max_events:
+                if is_critical:
+                    if self._critical_event_count >= self._max_critical_events:
+                        return
+                    self._critical_event_count += 1
+                elif self._event_count >= self._max_events:
                     return
                 self._event_count += 1
                 self._file.write(json.dumps(record) + "\n")

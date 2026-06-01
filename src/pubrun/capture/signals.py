@@ -33,6 +33,30 @@ _TARGET_SIGNALS: List[str] = [
     "SIGBREAK",  # Ctrl+Break on Windows
 ]
 
+# Signals that will kill the process when delivered with SIG_DFL disposition.
+# For these, we must finalize the run before re-delivering.
+_LETHAL_SIGNALS: set = set()
+for _sig_name in ("SIGTERM", "SIGHUP"):
+    _sig = getattr(signal, _sig_name, None)
+    if _sig is not None:
+        _LETHAL_SIGNALS.add(_sig)
+
+
+def _finalize_active_run() -> None:
+    """Best-effort finalization of the active run before process death.
+
+    Called when a lethal signal (SIGTERM, SIGHUP) is about to kill the
+    process via SIG_DFL re-delivery.  Imports tracker lazily to avoid
+    circular imports.
+    """
+    try:
+        from pubrun.tracker import get_current_run
+        run = get_current_run()
+        if run and hasattr(run, "writer") and run.writer:
+            run.writer.write_artifacts()
+    except Exception:
+        pass  # Best-effort: never crash during signal handling
+
 
 class SignalExitCapture:
     """Non-intrusive signal and exit-code recorder.
@@ -149,6 +173,12 @@ class SignalExitCapture:
             #   - signal.SIG_IGN (1) -- ignore
             #   - A callable (user handler or Python's default KeyboardInterrupt raiser)
             if previous_handler is signal.SIG_DFL:
+                # For lethal signals (SIGTERM, SIGHUP), finalize the run before
+                # re-delivering, because SIG_DFL will kill the process without
+                # running atexit handlers.
+                if sig in _LETHAL_SIGNALS:
+                    _finalize_active_run()
+
                 # Re-raise with default behavior: temporarily reset to SIG_DFL,
                 # re-send the signal to ourselves.
                 signal.signal(sig, signal.SIG_DFL)
