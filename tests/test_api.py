@@ -1,5 +1,6 @@
 """Tests for the pubrun public API contract (start, stop, annotate, phase, tracked_run, audit_run, diff)."""
 import json
+import os
 import pytest
 from pathlib import Path
 
@@ -374,6 +375,57 @@ print(json.dumps({{"active": run is not None}}))
         assert result.returncode == 0, f"stderr: {result.stderr}"
         data = json.loads(result.stdout.strip())
         assert data["active"] is False
+
+
+class TestAutoStartResilience:
+    """P3-T4: Regression test -- auto-start failure must not crash import."""
+
+    def test_auto_start_failure_does_not_crash_import(self, tmp_path):
+        """If start() raises during auto-start, import pubrun still succeeds.
+
+        P3-T4: Regression test for the try/except around start() in __init__.py.
+        Strategy: import pubrun with auto-start disabled, poison Run, then purge
+        and re-import with auto-start enabled.
+        """
+        import subprocess
+        import sys
+
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+
+# Phase 1: Import pubrun with auto-start OFF so we can patch
+os.environ['PUBRUN_AUTO_START'] = 'false'
+import pubrun
+import pubrun.tracker
+
+# Phase 2: Poison Run.__init__ so start() always raises
+_Orig = pubrun.tracker.Run
+class _Broken(_Orig):
+    def __init__(self, **kw):
+        raise RuntimeError("simulated catastrophic failure")
+pubrun.tracker.Run = _Broken
+
+# Phase 3: Reset state and re-import with auto-start ON
+pubrun.tracker._active_run = None
+os.environ['PUBRUN_AUTO_START'] = 'true'
+# Purge only the top-level pubrun module to re-execute __init__.py
+del sys.modules['pubrun']
+import pubrun  # Re-runs __init__.py auto-start path with poisoned Run
+
+run = pubrun.get_current_run()
+print(json.dumps({{"imported": True, "active": run is not None}}))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, timeout=15,
+            env={**os.environ, "PUBRUN_AUTO_START": "false"}
+        )
+        # The critical assertion: process must not crash (returncode 0)
+        assert result.returncode == 0, f"Auto-start crash! stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["imported"] is True
+        assert data["active"] is False  # start() failed gracefully
 
 
 class TestAuditRunMetadata:

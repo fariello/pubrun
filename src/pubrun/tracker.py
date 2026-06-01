@@ -384,7 +384,7 @@ class Run:
         Decrements the reference count. Artifacts are written only when the
         count reaches zero.
         """
-        if self._outcome != "failed":
+        if self._outcome not in ("failed", "ghost"):
             self._outcome = outcome
 
         from pubrun import _run_lock
