@@ -355,6 +355,37 @@ Sensitive values use a standard `redacted_value` object:
 
 ---
 
+## Lock File (`.pubrun.lock`)
+
+While a run is active, a `.pubrun.lock` JSON file exists in the run directory. It is removed on normal finalization. If the process is killed without cleanup (SIGKILL, OOM, power loss), the lock file persists and is used by `pubrun status` to detect crashed/orphaned runs.
+
+| Field | Type | Description |
+|---|---|---|
+| `pid` | int | Process ID of the running script. |
+| `started_at_utc` | float | POSIX epoch timestamp of when the run started. Used with PID to detect PID recycling. |
+| `script` | string | Script name (stem of `sys.argv[0]`). |
+| `run_id` | string | 8-character hex run ID. |
+| `hostname` | string | Machine hostname. |
+| `git_commit` | string \| null | Git commit hash at start, or `null` if not in a repo. |
+| `cwd` | string | Working directory of the process. |
+| `argv` | list[string] | Command-line arguments (excluding `sys.argv[0]`). |
+
+**Example:**
+```json
+{
+  "pid": 12345,
+  "started_at_utc": 1780250544.068,
+  "script": "train",
+  "run_id": "a1b2c3d4",
+  "hostname": "gpu-node-07",
+  "git_commit": "3df16cf",
+  "cwd": "/home/user/project",
+  "argv": ["--epochs", "100", "--lr", "0.001"]
+}
+```
+
+---
+
 ## Meta Snapshot
 
 The `pubrun meta` command generates a similar JSON structure, but with `manifest_type` set to `"pubrun-meta-snapshot"` instead of `"pubrun-manifest"`. Meta snapshots contain only environment-level data (hardware, python, packages, git, environment, host) and do not include run-specific fields (timing, invocation, status, etc.).

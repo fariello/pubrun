@@ -228,7 +228,7 @@ pubrun --create-config .pubrun.toml       # Direct: writes to specified path
 
 ### `--show-config`
 
-Prints the complete default configuration to the terminal. If `rich` is installed, the output is syntax-highlighted.
+Prints the complete default configuration to the terminal.
 
 ```bash
 pubrun --show-config

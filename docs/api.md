@@ -52,7 +52,7 @@ Begins tracking. Returns the active `Run` instance. API overrides always take th
 ```python
 import pubrun
 
-tracker = pubrun.start(profile="deep", output_dir="./custom_storage")
+tracker = pubrun.start(core={"profile": "deep", "output_dir": "./custom_storage"})
 
 # ... do work ...
 
@@ -62,6 +62,12 @@ pubrun.stop()
 ### `pubrun.stop()`
 
 Finalizes the active run: writes the manifest, closes log files, and resets internal state. Safe to call even if no run is active.
+
+The run outcome is determined automatically:
+- `"completed"` — Normal exit, no termination signals received.
+- `"failed"` — An unhandled exception occurred (set by `tracked_run` / `audit_run`).
+- `"interrupted"` — The process received SIGINT, SIGTERM, or SIGHUP during execution (even if user code caught `KeyboardInterrupt`).
+- `"ghost"` — The run entered ghost mode due to filesystem failure at initialization.
 
 ```python
 pubrun.stop()
@@ -146,7 +152,7 @@ A decorator that wraps an entire function in a tracked run. The function's retur
 ```python
 from pubrun import audit_run
 
-@audit_run(profile="basic")
+@audit_run(core={"profile": "basic"})
 def entrypoint():
     train_model()
     return results

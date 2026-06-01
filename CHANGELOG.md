@@ -51,10 +51,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Documentation
 
-- **README.md**: Added footnote clarifying `tomli` dependency on Python <3.11. Added `--version` to diagnostic flags table. Added `ghost` and `interrupted` statuses to the Monitoring Runs table. Added `pubrun clean` command reference.
-- **`docs/cli.md`**: Added full `clean` command reference with all options and interactive mode documentation. Added `interrupted` status. Updated command count to eight.
-- **`docs/manifest.md`**: Added missing `git.repo_root` field. Corrected `status.outcome` enum to include all actual values: `"completed"`, `"failed"`, `"interrupted"`, `"ghost"`, `"unknown"`.
-- **`docs/functional_spec.md`**: Corrected `meta --out` default behavior description. Added `status` and `clean` commands to the CLI subcommands specification.
+- **README.md**: Added footnote clarifying `tomli` dependency on Python <3.11. Added `--version` to diagnostic flags table. Added `ghost` and `interrupted` statuses to the Monitoring Runs table. Added `pubrun clean` command reference. Added Installation section. Fixed API override examples to use correct nested syntax. Updated roadmap.
+- **`docs/cli.md`**: Added full `clean` command reference with all options and interactive mode documentation. Added `interrupted` status. Updated command count to eight. Removed stale `rich` reference from `--show-config`.
+- **`docs/manifest.md`**: Added missing `git.repo_root` field. Corrected `status.outcome` enum to include all actual values: `"completed"`, `"failed"`, `"interrupted"`, `"ghost"`, `"unknown"`. Documented `.pubrun.lock` file format.
+- **`docs/functional_spec.md`**: Corrected `meta --out` default behavior description. Added `status` and `clean` commands to the CLI subcommands specification. Removed stale `rich` references. Fixed meta_ref security to match implementation (blocked by default). Added critical-event secondary cap documentation. Removed phantom `summary.txt` references.
+- **`docs/api.md`**: Added outcome determination documentation to `stop()`. Fixed API override examples.
+- **`docs/configuration.md`**: Added `max_tracked_events` to `[events]` section. Marked `[logging].write_summary` as not yet implemented.
+- **`pyproject.toml`**: Fixed GitHub URLs (`gfariello` → `fariello`).
 
 ## [0.1.1] - 2026-05-09
 
