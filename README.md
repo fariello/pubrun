@@ -8,6 +8,14 @@
 
 [^1]: On Python 3.11+, pubrun uses only the standard library. On Python 3.8–3.10, the sole runtime dependency is `tomli` (a backport of the standard-library `tomllib`).
 
+## Installation
+
+```bash
+pip install pubrun
+```
+
+On Python 3.8–3.10, this also installs `tomli` (a backport of the standard-library `tomllib`). On Python 3.11+, there are zero runtime dependencies.
+
 ## Quick Start
 
 ```python
@@ -63,7 +71,7 @@ os.environ["PUBRUN_AUTO_START"] = "false"
 import pubrun
 # No directory is generated until you say so.
 
-pubrun.start(output_dir="./custom_storage", profile="deep")
+pubrun.start(core={"output_dir": "./custom_storage", "profile": "deep"})
 ```
 
 Now extract your method paragraph for your paper:
@@ -227,7 +235,7 @@ Child scripts automatically skip heavy footprint tracking. When you run `pubrun 
 
 `pubrun` supports a hierarchical configuration system (highest to lowest precedence):
 
-1. **API overrides** — `pubrun.start(profile="deep")`
+1. **API overrides** — `pubrun.start(core={"profile": "deep"})`
 2. **Environment variables** — `PUBRUN_AUTO_START=false`
 3. **Local project config** — `.pubrun.toml` or `.config/pubrun/config.toml`
 4. **User home config** — `~/.config/pubrun/config.toml`
@@ -260,16 +268,15 @@ See [Configuration Reference](docs/configuration.md) for the full redaction poli
 
 ## Roadmap
 
-### Pre-v0.2
+### Future
 
 1. **Sphinx / MkDocs integration** — Generate hosted API documentation from docstrings.
-2. **Subprocess argv redaction refinement** — The current regex-based approach may over-match legitimate scientific arguments (e.g., `--output=secret_findings.csv`). Community input welcome on the best policy.
-3. **Coverage reporting** — Integrate `pytest-cov` into CI for coverage tracking.
-4. **Plugin / extension model** — Formal extension points for custom capture engines.
-5. **Artifact registration API** — `register_artifact()` for tracking user-produced output files.
-6. **Custom metadata API** — `register_metadata()` for injecting structured data into the manifest.
-7. **Determinism tracking** — `register_seed()` and the `[capture.determinism]` engine for recording pseudorandom seeds.
-8. **Combined console log** — Interleaved `combined.log` output alongside `stdout.log` and `stderr.log`.
+2. **GitHub Actions CI** — Automated test matrix on push/PR.
+3. **Plugin / extension model** — Formal extension points for custom capture engines.
+4. **Artifact registration API** — `register_artifact()` for tracking user-produced output files.
+5. **Custom metadata API** — `register_metadata()` for injecting structured data into the manifest.
+6. **Determinism tracking** — `register_seed()` and the `[capture.determinism]` engine for recording pseudorandom seeds.
+7. **Combined console log** — Interleaved `combined.log` output alongside `stdout.log` and `stderr.log`.
 
 ---
 

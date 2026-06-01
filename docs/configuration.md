@@ -12,7 +12,7 @@
 
 | Priority | Source | Example |
 |---|---|---|
-| 1 (highest) | API overrides | `pubrun.start(profile="deep")` |
+| 1 (highest) | API overrides | `pubrun.start(core={"profile": "deep"})` |
 | 2 | Environment variables | `PUBRUN_AUTO_START=false` |
 | 3 | Local project `.pubrun.toml` | `./.pubrun.toml` |
 | 4 | Local project deep config | `./.config/pubrun/config.toml` |
@@ -63,6 +63,7 @@ Controls the real-time `events.jsonl` stream.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `true` | Whether to write events (phases, annotations) to `events.jsonl`. |
+| `max_tracked_events` | int | `1000000` | Maximum number of regular events written per run. When exhausted, non-critical events are silently dropped. Critical events (annotations, phases) bypass this limit up to a secondary cap of 10x this value (minimum 10,000). |
 | `on_inactive_annotate` | string | `"ignore"` | Behavior when `annotate()` is called with no active run: `"ignore"`, `"warn"`, or `"error"`. |
 
 ### `[redaction]`
@@ -187,7 +188,7 @@ Controls for `pubrun report` and `pubrun methods` manifest hydration.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `write_summary` | bool | `true` | Generate a `summary.txt` in the run directory. |
+| `write_summary` | bool | `true` | Reserved for future use. Intended to generate a `summary.txt` in the run directory. Not yet implemented. |
 
 ### `[methods]`
 

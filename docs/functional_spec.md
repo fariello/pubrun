@@ -83,7 +83,7 @@ The library MUST support explicit activation via:
 pubrun.start()                        # Manual start
 with pubrun.tracked_run():            # Context manager
     ...
-@pubrun.audit_run(profile="deep")     # Decorator
+@pubrun.audit_run(core={"profile": "deep"})  # Decorator
 def my_func(): ...
 ```
 
@@ -118,7 +118,6 @@ Depending on configuration, a run may also produce:
 - `stderr.log` — Captured standard error (if console capture enabled)
 - `events.jsonl` — Structured event stream (if events enabled)
 - `methods.md` or `methods.tex` — Auto-generated methodology paragraph
-- `summary.txt` — Human-readable diagnostic glance (if `write_summary = true`)
 
 ---
 
@@ -213,7 +212,7 @@ Optional JSONL event stream written to `events.jsonl`.
 
 Events are subject to a configurable budget (`max_tracked_events`, default 1,000,000). When the budget is exhausted, non-critical events are silently dropped.
 
-**Critical events** (`phase_start`, `phase_end`, `annotation`) bypass throttling and are always written.
+**Critical events** (`phase_start`, `phase_end`, `annotation`) bypass the regular throttle. However, to prevent unbounded disk writes from scripts calling `annotate()` in tight loops, critical events are subject to a secondary cap of 10x `max_tracked_events` (minimum 10,000). Once this secondary cap is reached, all events — including critical ones — are dropped.
 
 ### 7.4 Thread Safety
 
@@ -300,7 +299,7 @@ Supported locations, applied in precedence order (lowest to highest):
 | 3 | Local deep config | `./.config/pubrun/config.toml` |
 | 4 | Local root config | `./.pubrun.toml` |
 | 5 | Environment variables | `PUBRUN_PROFILE`, `PUBRUN_AUTO_START`, `PUBRUN_META_REF` |
-| 6 (highest) | API overrides | `pubrun.start(profile="deep")` |
+| 6 (highest) | API overrides | `pubrun.start(core={"profile": "deep"})` |
 
 When both `.pubrun.toml` and `.config/pubrun/config.toml` exist in the same directory, `.pubrun.toml` takes precedence (it is applied last).
 
@@ -357,7 +356,7 @@ Requirements:
 
 ### 11.2 Config Display (`--show-config`)
 
-Prints the complete default configuration to the terminal. If `rich` is installed, output is syntax-highlighted with line numbers.
+Prints the complete default configuration to the terminal.
 
 ### 11.3 System Info (`--info`)
 
@@ -431,7 +430,7 @@ Options:
 - `--no-color` — Disable ANSI color output.
 - `--export [txt|json]` — Export flattened output for external diff tools.
 
-If `rich` is available, the terminal output uses side-by-side semantic rendering; otherwise falls back to inline rendering.
+Terminal output uses the built-in inline ANSI renderer with color, truncation, wrapping, and path-split diffs.
 
 ### 11.10 Academic Citation (`cite`)
 
@@ -493,7 +492,7 @@ Example:
 
 Required: `manifest.json`, `config.resolved.json`.
 
-Optional: `stdout.log`, `stderr.log`, `events.jsonl`, `methods.md`/`methods.tex`, `summary.txt`.
+Optional: `stdout.log`, `stderr.log`, `events.jsonl`, `methods.md`/`methods.tex`.
 
 ---
 
@@ -639,7 +638,7 @@ The hydrator compares the child script's `mtime` against the parent snapshot's `
 
 ### 18.5 Security
 
-The `meta_ref` path MUST end with `.json`. If it resolves outside the run directory, a warning is emitted (but the operation is not blocked, since HPC workflows legitimately reference shared files).
+The `meta_ref` path MUST end with `.json`. If it resolves outside the manifest's parent directory, it is **rejected by default** to prevent arbitrary file reads from tampered manifests. This behavior is controlled by `[report].allow_external_meta_ref` (bool, default `false`) and `[report].meta_ref_allowed_dirs` (list of permitted absolute paths). HPC workflows that legitimately reference shared files should add the shared directory to the allowlist.
 
 ---
 

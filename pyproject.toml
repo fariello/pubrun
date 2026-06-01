@@ -42,9 +42,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/gfariello/pubrun"
-Repository = "https://github.com/gfariello/pubrun"
-Issues = "https://github.com/gfariello/pubrun/issues"
+Homepage = "https://github.com/fariello/pubrun"
+Repository = "https://github.com/fariello/pubrun"
+Issues = "https://github.com/fariello/pubrun/issues"
 
 [project.scripts]
 pubrun = "pubrun.__main__:main"
