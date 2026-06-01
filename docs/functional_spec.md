@@ -83,7 +83,7 @@ The library MUST support explicit activation via:
 pubrun.start()                        # Manual start
 with pubrun.tracked_run():            # Context manager
     ...
-@pubrun.audit_run(core={"profile": "deep"})  # Decorator
+@pubrun.audit_run(profile="deep")     # Decorator
 def my_func(): ...
 ```
 
@@ -299,7 +299,7 @@ Supported locations, applied in precedence order (lowest to highest):
 | 3 | Local deep config | `./.config/pubrun/config.toml` |
 | 4 | Local root config | `./.pubrun.toml` |
 | 5 | Environment variables | `PUBRUN_PROFILE`, `PUBRUN_AUTO_START`, `PUBRUN_META_REF` |
-| 6 (highest) | API overrides | `pubrun.start(core={"profile": "deep"})` |
+| 6 (highest) | API overrides | `pubrun.start(profile="deep")` |
 
 When both `.pubrun.toml` and `.config/pubrun/config.toml` exist in the same directory, `.pubrun.toml` takes precedence (it is applied last).
 

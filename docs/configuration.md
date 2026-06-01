@@ -12,7 +12,7 @@
 
 | Priority | Source | Example |
 |---|---|---|
-| 1 (highest) | API overrides | `pubrun.start(core={"profile": "deep"})` |
+| 1 (highest) | API overrides | `pubrun.start(profile="deep")` |
 | 2 | Environment variables | `PUBRUN_AUTO_START=false` |
 | 3 | Local project `.pubrun.toml` | `./.pubrun.toml` |
 | 4 | Local project deep config | `./.config/pubrun/config.toml` |
