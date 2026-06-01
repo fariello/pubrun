@@ -29,7 +29,7 @@ def _create_config(destination: str) -> None:
         print(f"[OK] Successfully created configuration at: {target_path}")
         
     except Exception as e:
-        print(f"Failed to create config: {e}", file=sys.stderr)
+        print(f"Error: Failed to create config: {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -85,7 +85,7 @@ def _run_methods(run_dir: str, format_type: str) -> None:
         print(f"Error: Could not find manifest file.", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"Failed to generate methods section: {e}", file=sys.stderr)
+        print(f"Error: Failed to generate methods section: {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -107,7 +107,7 @@ def _run_rerun(run_dir: str) -> None:
             print("Error: Target manifest does not contain a valid 'rerun_command' payload.", file=sys.stderr)
             sys.exit(1)
     except Exception as e:
-        print(f"Failed to fetch rerun command: {e}", file=sys.stderr)
+        print(f"Error: Failed to fetch rerun command: {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -359,10 +359,6 @@ print('Mock Training Complete.')
 
 def main() -> None:
     """CLI entrypoint for the ``pubrun`` command."""
-    if len(sys.argv) >= 2 and sys.argv[1] == "pbr":
-        print("me asap")
-        sys.exit(0)
-        
     parser = argparse.ArgumentParser(
         prog="pubrun",
         description="pubrun: Zero-dependency execution telemetry and publication engine.",

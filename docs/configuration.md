@@ -54,7 +54,7 @@ Controls interception and logging of stdout/stderr.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `capture_mode` | string | `"standard"` | `"off"` — no capture; `"basic"` — tee to files; `"standard"` — tee with timestamps; `"deep"` — structured JSON capture. |
+| `capture_mode` | string | `"standard"` | `"off"` — no capture; `"basic"` — tee stdout/stderr to text files; `"standard"` — tee to text files (same as basic); `"deep"` — reserved for future structured capture (currently same as standard). |
 
 ### `[events]`
 

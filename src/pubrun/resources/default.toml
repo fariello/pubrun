@@ -1,7 +1,7 @@
 # ==========================================
 #  pubrun Configuration
 # ==========================================
-# Documentation: https://github.com/gfariello/pubrun
+# Documentation: https://github.com/fariello/pubrun
 #
 # This file contains the default configuration for pubrun. When your script
 # runs, pubrun looks for user and project config files that override these.
@@ -31,6 +31,11 @@ output_dir = ""
 # call pubrun.start() or use @audit_run to begin tracking.
 auto_start = true
 
+# Path to a parent meta.json for HPC parent-child hydration.
+# Set via PUBRUN_META_REF env var or pubrun.start(meta_ref="path.json").
+# When set, `pubrun report` and `pubrun methods` hydrate from the parent.
+# meta_ref = ""
+
 
 [console]
 # -----------------------------------------------------------------------------
@@ -41,8 +46,8 @@ auto_start = true
 # Values:
 #   "off"      - No capture; streams are untouched.
 #   "basic"    - Tee stdout/stderr to text files in the run directory.
-#   "standard" - Same as basic, with timestamps prepended.
-#   "deep"     - Full structured JSON console capture.
+#   "standard" - Tee stdout/stderr to text files (same as basic).
+#   "deep"     - Reserved for future structured capture (currently same as standard).
 capture_mode = "standard"
 
 
@@ -205,6 +210,7 @@ enabled = true
 
 [capture.determinism]
 # Track or lock pseudorandom seeds (Python random, numpy.random).
+# NOTE: Not yet implemented. Reserved for future use.
 depth = "off"
 
 
@@ -214,6 +220,7 @@ depth = "off"
 # -----------------------------------------------------------------------------
 
 # Whether to write a human-readable summary.txt in the run directory.
+# NOTE: Not yet implemented. Reserved for future use.
 write_summary = true
 
 [methods]
