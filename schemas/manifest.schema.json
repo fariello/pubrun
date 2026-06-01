@@ -1,6 +1,6 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://example.org/pubrun/manifest.schema.json",
+    "$id": "https://raw.githubusercontent.com/fariello/pubrun/main/schemas/manifest.schema.json",
     "title": "pubrun Manifest",
     "description": "Schema for a pubrun execution manifest.",
     "type": "object",

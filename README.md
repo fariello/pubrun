@@ -71,7 +71,7 @@ os.environ["PUBRUN_AUTO_START"] = "false"
 import pubrun
 # No directory is generated until you say so.
 
-pubrun.start(core={"output_dir": "./custom_storage", "profile": "deep"})
+pubrun.start(output_dir="./custom_storage", profile="deep")
 ```
 
 Now extract your method paragraph for your paper:
@@ -235,7 +235,7 @@ Child scripts automatically skip heavy footprint tracking. When you run `pubrun 
 
 `pubrun` supports a hierarchical configuration system (highest to lowest precedence):
 
-1. **API overrides** — `pubrun.start(core={"profile": "deep"})`
+1. **API overrides** — `pubrun.start(profile="deep")`
 2. **Environment variables** — `PUBRUN_AUTO_START=false`
 3. **Local project config** — `.pubrun.toml` or `.config/pubrun/config.toml`
 4. **User home config** — `~/.config/pubrun/config.toml`

@@ -52,7 +52,7 @@ Begins tracking. Returns the active `Run` instance. API overrides always take th
 ```python
 import pubrun
 
-tracker = pubrun.start(core={"profile": "deep", "output_dir": "./custom_storage"})
+tracker = pubrun.start(profile="deep", output_dir="./custom_storage")
 
 # ... do work ...
 
@@ -152,7 +152,7 @@ A decorator that wraps an entire function in a tracked run. The function's retur
 ```python
 from pubrun import audit_run
 
-@audit_run(core={"profile": "basic"})
+@audit_run(profile="basic")
 def entrypoint():
     train_model()
     return results
