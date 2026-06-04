@@ -37,6 +37,38 @@ auto_start = true
 # meta_ref = ""
 
 
+[imports]
+# -----------------------------------------------------------------------------
+# Import behavior presets.
+# Controls what happens when `import pubrun` is executed.
+# -----------------------------------------------------------------------------
+
+# Import behavior preset.
+# Values:
+#   "auto"    - import pubrun starts tracking and enables normal capture hooks (default).
+#   "noauto"  - import pubrun loads the API, but tracking starts only after pubrun.start().
+#   "nopatch" - import pubrun starts tracking, but avoids process-global hooks.
+#   "quiet"   - import pubrun loads the API only, with no auto-start and no hooks.
+mode = "auto"
+
+# What to do if a later import requests a different effective import behavior.
+# Values: "ignore", "warn", "error"
+on_conflict = "warn"
+
+# Record the file or package that selected the import mode in manifest metadata.
+record_provenance = true
+
+# Number of external caller frames to record for import diagnostics.
+provenance_depth = 3
+
+# How file paths should be written in import provenance metadata.
+# Values: "absolute", "relative", "basename", "redacted"
+provenance_path_mode = "relative"
+
+# Maximum number of import-mode requests to retain in metadata.
+max_requests = 50
+
+
 [console]
 # -----------------------------------------------------------------------------
 # Interception and logging of stdout/stderr.

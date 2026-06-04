@@ -293,14 +293,12 @@ import logging as _logging
 
 _should_auto = False
 try:
-    from pubrun.config import resolve_config as _resolve_config
-    _config_map = _resolve_config()
-    _should_auto = _config_map.get("core", {}).get("auto_start", False)
-    _env_val = str(_os.environ.get("PUBRUN_AUTO_START", "")).lower()
-    if _env_val == "true":
-        _should_auto = True
-    elif _env_val == "false":
-        _should_auto = False
+    from pubrun._config_boot import resolve_import_mode as _resolve_import_mode
+    from pubrun._modes import get_mode_behavior as _get_mode_behavior
+
+    _import_mode, _import_source = _resolve_import_mode()
+    _mode_behavior = _get_mode_behavior(_import_mode)
+    _should_auto = _mode_behavior["auto_start"]
 except Exception as _boot_err:
     _logging.getLogger("pubrun").warning(
         f"pubrun boot sequence failed (tracking disabled): {_boot_err}"
