@@ -53,25 +53,41 @@ Modern scientific workflows rely on implicit state. When it's time to publish a 
 
 With a single `import pubrun`, the library quietly traces your script execution, hashes your environment dependencies, detects codebase drift, and compiles publication-ready **Computational Methodology** LaTeX/Markdown blocks so your run is instantly citable.
 
-### Lazy Initialization (Explicit Tracking)
+### Import Modes
 
-By default, simply importing `pubrun` spins up an invisible tracer. If you want to import `pubrun` without instantly generating a footprint until you explicitly call `pubrun.start()`, set this in your `.pubrun.toml`:
-
-```toml
-[core]
-auto_start = false
-```
-
-Or set the environment variable before import:
+By default, `import pubrun` starts tracking immediately. For more control, use namespaced import modes:
 
 ```python
-import os
-os.environ["PUBRUN_AUTO_START"] = "false"
+import pubrun.noauto as pubrun   # Load API, start later with pubrun.start()
+import pubrun.nopatch as pubrun  # Auto-start, but no subprocess/console/signal hooks
+import pubrun.quiet as pubrun    # API only — no auto-start, no hooks
+```
 
-import pubrun
-# No directory is generated until you say so.
+Or configure project-wide in `.pubrun.toml`:
+
+```toml
+[imports]
+mode = "noauto"
+```
+
+Or use the CLI wrapper for scripts you can't modify:
+
+```bash
+pubrun run --mode quiet -- python script.py
+```
+
+Legacy approaches still work: `PUBRUN_AUTO_START=false` and `[core].auto_start = false`.
+
+See [Configuration](docs/configuration.md) for the full `[imports]` section.
+
+### Explicit Tracking Example
+
+```python
+import pubrun.noauto as pubrun
 
 pubrun.start(output_dir="./custom_storage", profile="deep")
+# ... your code ...
+pubrun.stop()
 ```
 
 Now extract your method paragraph for your paper:
@@ -91,7 +107,7 @@ pubrun methods --format latex
 
 ## CLI Reference
 
-The `pubrun` CLI provides eight commands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
+The `pubrun` CLI provides nine commands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
 
 ### `pubrun cite`
 Generates the bibliographic citation for crediting this library in your paper.
@@ -145,6 +161,13 @@ pubrun clean                        # Interactive: list and confirm
 pubrun clean --older-than 7d --yes  # Non-interactive: delete all completed runs older than 7 days
 pubrun clean --status crashed --yes # Delete all crashed runs
 pubrun clean --dry-run              # Preview what would be deleted
+```
+
+### `pubrun run`
+Spawn a command with a specific import mode. Useful for CI, Slurm, and scripts you can't modify.
+```bash
+pubrun run --mode quiet -- python script.py
+pubrun run --mode nopatch -- python train.py
 ```
 
 ### Diagnostic Flags
