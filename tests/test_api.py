@@ -400,11 +400,13 @@ import pubrun
 import pubrun.tracker
 
 # Phase 2: Poison Run.__init__ so start() always raises
+import pubrun.core
 _Orig = pubrun.tracker.Run
 class _Broken(_Orig):
     def __init__(self, **kw):
         raise RuntimeError("simulated catastrophic failure")
 pubrun.tracker.Run = _Broken
+pubrun.core.Run = _Broken
 
 # Phase 3: Reset state and re-import with auto-start ON
 pubrun.tracker._active_run = None
