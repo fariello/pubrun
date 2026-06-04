@@ -2,7 +2,7 @@
 
 # pubrun CLI Reference
 
-The `pubrun` CLI is accessible via `pubrun <command>` or `python -m pubrun <command>`. It provides eight commands for post-execution analysis and diagnostic flags.
+The `pubrun` CLI is accessible via `pubrun <command>` or `python -m pubrun <command>`. It provides nine commands for post-execution analysis and diagnostic flags.
 
 ---
 
@@ -199,6 +199,33 @@ pubrun cite [--style apa|mla|chicago|bibtex]
 ```bash
 pubrun cite --style bibtex
 ```
+
+---
+
+### `run` — Import Mode Wrapper
+
+Spawns a child process with `PUBRUN_IMPORT_MODE` set in the environment. Useful for CI pipelines, shell scripts, Slurm submissions, and any case where you want to control pubrun behavior without modifying source code.
+
+```bash
+pubrun run [--mode MODE] -- COMMAND [ARGS...]
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--mode MODE` | Import mode for the child process: `auto` (default), `noauto`, `nopatch`, or `quiet` |
+
+The double dash (`--`) separates pubrun wrapper options from the target command.
+
+**Example:**
+```bash
+pubrun run --mode quiet -- python script.py      # No auto-start in child
+pubrun run --mode nopatch -- python train.py     # Auto-start but no hooks
+pubrun run -- python script.py                   # Default auto mode
+```
+
+The wrapper returns the child process exit code. It does not create a run in the wrapper process itself.
 
 ---
 

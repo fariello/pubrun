@@ -2,7 +2,7 @@
 
 # pubrun Architecture
 
-> Status: v0.2.0
+> Status: v0.3.0
 > Purpose: Defines architectural principles and constraints for pubrun.
 > Audience: Developers and contributors.
 

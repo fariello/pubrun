@@ -46,7 +46,28 @@ Core behaviors governing run initialization and storage.
 |---|---|---|---|
 | `profile` | string | `"default"` | Master capture depth: `"minimal"`, `"default"`, or `"deep"`. Controls default depth for all categories unless overridden. |
 | `output_dir` | string | `""` | Base directory for run output. Empty string defaults to `./runs/` in the current working directory. |
-| `auto_start` | bool | `true` | If `true`, `import pubrun` automatically starts a trace. If `false`, you must call `pubrun.start()` explicitly. |
+| `auto_start` | bool | `true` | If `true`, `import pubrun` automatically starts a trace. If `false`, you must call `pubrun.start()` explicitly. Equivalent to `[imports].mode = "noauto"` when set to `false`. |
+
+### `[imports]`
+
+Controls import-time behavior. These settings determine what happens when `import pubrun` is executed.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `mode` | string | `"auto"` | Import behavior preset: `"auto"` (start tracking on import), `"noauto"` (load API only, start manually), `"nopatch"` (start tracking but skip global hooks), `"quiet"` (load API only, no hooks). |
+| `on_conflict` | string | `"warn"` | What to do if a later import requests a different mode: `"ignore"`, `"warn"`, or `"error"`. |
+| `record_provenance` | bool | `true` | Record import-mode provenance (caller file, line) in the manifest. |
+| `provenance_depth` | int | `3` | Number of external caller frames to capture for diagnostics. |
+| `provenance_path_mode` | string | `"relative"` | How paths appear in provenance: `"absolute"`, `"relative"`, `"basename"`, or `"redacted"`. |
+| `max_requests` | int | `50` | Maximum import-mode requests to retain in metadata. |
+
+> [!NOTE]
+> You can also use namespaced imports as an alternative to config:
+> ```python
+> import pubrun.noauto as pubrun   # Equivalent to mode = "noauto"
+> import pubrun.nopatch as pubrun  # Equivalent to mode = "nopatch"
+> import pubrun.quiet as pubrun    # Equivalent to mode = "quiet"
+> ```
 
 ### `[console]`
 
@@ -216,9 +237,11 @@ Configuration for the `pubrun diff` engine.
 
 | Variable | Description |
 |---|---|
+| `PUBRUN_IMPORT_MODE` | Canonical import mode: `auto`, `noauto`, `nopatch`, or `quiet`. Takes highest precedence. |
 | `PUBRUN_PROFILE` | Override `[core].profile`. Set to `"minimal"`, `"default"`, or `"deep"`. |
-| `PUBRUN_AUTO_START` | Override `[core].auto_start`. Set to `"false"` to prevent import-time activation. |
+| `PUBRUN_AUTO_START` | Legacy alias for import mode. `"false"` maps to `noauto`, `"true"` maps to `auto`. |
 | `PUBRUN_META_REF` | Path to a parent `meta.json` for HPC hydration. Child runs will reference this. |
+| `PUBRUN_IMPORT_CONFLICT` | Override `[imports].on_conflict`. Set to `"ignore"`, `"warn"`, or `"error"`. |
 
 ---
 

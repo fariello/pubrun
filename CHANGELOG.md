@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-06-04
+
+### Added
+
+- **Import modes**: Namespaced import presets for controlling import-time behavior:
+  - `import pubrun.noauto as pubrun` — Load API without auto-starting.
+  - `import pubrun.nopatch as pubrun` — Auto-start without global hooks (subprocess spy, console tee, signals).
+  - `import pubrun.quiet as pubrun` — API only, no auto-start, no hooks.
+  - `import pubrun.auto as pubrun` — Explicit auto mode (same as plain `import pubrun`).
+- **`pubrun run` CLI command**: Spawn a child process with `PUBRUN_IMPORT_MODE` set. Useful for CI, shell scripts, Slurm, and HPC workflows where source code should remain unchanged. Returns the child's exit code.
+- **Import provenance metadata**: Manifest now includes a `pubrun_imports` section recording the selected mode, source, timestamp, conflict count, and caller provenance. Lock files include compact `import_mode` and `import_selected_by` fields.
+- **Import conflict detection**: When multiple imports request different modes, pubrun warns by default (configurable to `error` or `ignore` via `[imports].on_conflict` or `PUBRUN_IMPORT_CONFLICT`).
+- **`[imports]` config section**: New configuration section with `mode`, `on_conflict`, `record_provenance`, `provenance_depth`, `provenance_path_mode`, and `max_requests`.
+- **`PUBRUN_IMPORT_MODE` environment variable**: Canonical way to set import mode from the shell. Takes precedence over config files.
+
+### Changed
+
+- **Internal architecture**: Public API moved from `__init__.py` to `pubrun.core`. The root package is now a thin router that delegates to `core.py`. This is an internal refactor — all public symbols remain at `pubrun.*`.
+- **Boot sequence centralized**: Import-mode resolution moved to `_config_boot.py` and `_bootstrap.py`. The old inline logic in `__init__.py` is replaced by `_execute_boot_sequence()`.
+
+### Tests
+
+- Added 49 new tests covering mode definitions, config boot resolver, bootstrap state, conflict detection (warn/error/ignore), namespaced import modes (subprocess tests), `pubrun run` wrapper, and import metadata in manifest/lock file. Total: 457 tests.
+
+---
+
 ## [0.2.0] - 2026-05-31
 
 ### Added
