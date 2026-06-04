@@ -59,22 +59,30 @@ __all__ = [
     "__version__",
 ]
 
-# -- Public API (re-exported from core) --------------------------------------
-from pubrun.core import (  # noqa: F401, E402
-    start,
-    stop,
-    annotate,
-    phase,
-    diff,
-    audit_run,
-    tracked_run,
-    get_current_run,
-    _run_lock,
-)
+# -- Target-aware routing -----------------------------------------------------
+# When Python processes `import pubrun.noauto`, it loads pubrun/__init__.py
+# first. We detect this and defer core loading to the mode submodule.
+from pubrun._bootstrap import is_mode_submodule_import_in_progress as _is_mode_import  # noqa: E402
 
-# -- Boot Sequence ------------------------------------------------------------
-# Execute auto-start logic for root `import pubrun` (the default path).
-# Mode submodules (pubrun.noauto, etc.) will skip this in Phase 4.
-from pubrun.core import _execute_boot_sequence as _boot  # noqa: E402
-_boot()
-del _boot
+if not _is_mode_import():
+    # Root import: load core and execute boot sequence (auto-start if configured)
+    from pubrun.core import (  # noqa: F401, E402
+        start,
+        stop,
+        annotate,
+        phase,
+        diff,
+        audit_run,
+        tracked_run,
+        get_current_run,
+        _run_lock,
+        _execute_boot_sequence,
+    )
+    _execute_boot_sequence()
+    del _execute_boot_sequence
+else:
+    # Mode submodule import in progress — defer everything to the submodule.
+    # The submodule will import pubrun.core and populate pubrun.* attributes.
+    pass
+
+del _is_mode_import
