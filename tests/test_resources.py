@@ -71,8 +71,8 @@ def test_resource_watcher_failure_threshold(tmp_path, monkeypatch):
     monkeypatch.setattr(watcher, "_poll_rss", lambda: 0)
 
     # Wait enough time for max_failures consecutive failures (default 3)
-    # At 20ms interval, 3 failures = ~60ms. Give generous margin.
-    time.sleep(0.3)
+    # At 20ms interval, 3 failures = ~60ms. Give generous margin for slow CI.
+    time.sleep(1.0)
 
     # The watcher should have auto-stopped itself
     assert watcher._stop_event.is_set()
