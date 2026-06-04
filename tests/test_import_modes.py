@@ -306,6 +306,139 @@ class TestConflictDetection:
         meta = get_import_metadata()
         assert len(meta["requests"]) <= 50
 
+
+# =============================================================================
+# Phase 4: Namespaced import mode subprocess tests
+# =============================================================================
+
+class TestNamespacedImportModes:
+    """Subprocess tests verifying `import pubrun.X as pubrun` works."""
+
+    def test_noauto_does_not_auto_start(self, tmp_path):
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+import pubrun.noauto as pubrun
+run = pubrun.get_current_run()
+print(json.dumps({{"active": run is not None}}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["active"] is False
+
+    def test_noauto_allows_explicit_start(self, tmp_path):
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+import pubrun.noauto as pubrun
+pubrun.start()
+run = pubrun.get_current_run()
+print(json.dumps({{"active": run is not None}}))
+pubrun.stop()
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["active"] is True
+
+    def test_quiet_does_not_auto_start(self, tmp_path):
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+import pubrun.quiet as pubrun
+run = pubrun.get_current_run()
+print(json.dumps({{"active": run is not None}}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["active"] is False
+
+    def test_auto_does_auto_start(self, tmp_path):
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+import pubrun.auto as pubrun
+run = pubrun.get_current_run()
+print(json.dumps({{"active": run is not None}}))
+if run:
+    pubrun.stop()
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["active"] is True
+
+    def test_nopatch_auto_starts(self, tmp_path):
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+import pubrun.nopatch as pubrun
+run = pubrun.get_current_run()
+print(json.dumps({{"active": run is not None}}))
+if run:
+    pubrun.stop()
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["active"] is True
+
+    def test_noauto_as_pbr_alias(self, tmp_path):
+        """The 'as pbr' alias convention works."""
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+import pubrun.noauto as pbr
+pbr.start()
+run = pbr.get_current_run()
+print(json.dumps({{"active": run is not None, "version": pbr.__version__}}))
+pbr.stop()
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["active"] is True
+        assert data["version"] == "0.2.0"
+
+    def test_root_import_still_works(self, tmp_path):
+        """Plain import pubrun still auto-starts (backward compat)."""
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+import pubrun
+run = pubrun.get_current_run()
+print(json.dumps({{"active": run is not None}}))
+if run:
+    pubrun.stop()
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["active"] is True
+
     def test_legacy_auto_start_false_still_works(self, tmp_path):
         """PUBRUN_AUTO_START=false still prevents auto-start."""
         script = f"""

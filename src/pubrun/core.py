@@ -257,21 +257,27 @@ def _execute_boot_sequence(selected_by: str = "pubrun") -> None:
     """Resolve import mode, register selection, and auto-start if configured.
 
     Called by pubrun/__init__.py during root imports. Mode submodules
-    (pubrun.noauto, etc.) will call this with their own selected_by in
-    Phase 4.
+    (pubrun.noauto, etc.) call this after they've already selected their mode.
 
     Args:
         selected_by: Identifier for who triggered this boot (e.g., "pubrun",
             "pubrun.noauto").
     """
     from pubrun._config_boot import resolve_import_mode
-    from pubrun._bootstrap import select_mode, mark_core_loaded
+    from pubrun._bootstrap import select_mode, mark_core_loaded, is_mode_selected, get_selected_behavior
 
     _should_auto = False
     try:
-        import_mode, import_source = resolve_import_mode()
-        mode_behavior = select_mode(import_mode, selected_by, import_source)
-        _should_auto = mode_behavior["auto_start"]
+        if is_mode_selected():
+            # Mode was already selected by a submodule (e.g., pubrun.noauto).
+            # Don't re-resolve from config — just use the already-selected behavior.
+            mode_behavior = get_selected_behavior()
+        else:
+            # Root import — resolve from config/env and select.
+            import_mode, import_source = resolve_import_mode()
+            mode_behavior = select_mode(import_mode, selected_by, import_source)
+
+        _should_auto = mode_behavior["auto_start"] if mode_behavior else False
     except Exception as boot_err:
         logging.getLogger("pubrun").warning(
             f"pubrun boot sequence failed (tracking disabled): {boot_err}"
