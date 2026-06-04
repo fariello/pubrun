@@ -307,6 +307,50 @@ class TestConflictDetection:
         assert len(meta["requests"]) <= 50
 
 
+class TestImportMetadataInManifest:
+    """Tests for pubrun_imports section in manifest and lock file."""
+
+    def test_manifest_contains_pubrun_imports(self):
+        from pubrun import start, get_current_run
+        tracker = start()
+        manifest = tracker.to_manifest_dict()
+        assert "pubrun_imports" in manifest
+        imports = manifest["pubrun_imports"]
+        assert "selected_mode" in imports
+        assert "selected_behavior" in imports
+        assert "selected_by" in imports
+        assert "requests" in imports
+        tracker.stop()
+
+    def test_manifest_imports_has_correct_mode(self):
+        from pubrun import start
+        from pubrun._bootstrap import is_mode_selected, select_mode
+        # Ensure state is populated (may have been reset by earlier test fixtures)
+        if not is_mode_selected():
+            select_mode("auto", "test", "test-fixture")
+        tracker = start()
+        manifest = tracker.to_manifest_dict()
+        imports = manifest["pubrun_imports"]
+        assert imports["selected_mode"] in ("auto", "noauto", "nopatch", "quiet")
+        assert isinstance(imports["selected_behavior"], dict)
+        assert "auto_start" in imports["selected_behavior"]
+        assert "global_hooks" in imports["selected_behavior"]
+        tracker.stop()
+
+    def test_lock_file_contains_import_mode(self):
+        from pubrun import start
+        import json
+        tracker = start()
+        lock_path = tracker.run_dir / ".pubrun.lock"
+        assert lock_path.exists()
+        with open(lock_path, "r", encoding="utf-8") as f:
+            lock_data = json.load(f)
+        assert "import_mode" in lock_data
+        assert "import_selected_by" in lock_data
+        assert lock_data["import_mode"] in ("auto", "noauto", "nopatch", "quiet", None)
+        tracker.stop()
+
+
 # =============================================================================
 # Phase 4: Namespaced import mode subprocess tests
 # =============================================================================

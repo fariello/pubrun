@@ -178,6 +178,16 @@ class Run:
             git_commit = None
             if isinstance(self.git_data, dict):
                 git_commit = self.git_data.get("commit")
+            # Get compact import provenance
+            _import_mode = None
+            _import_selected_by = None
+            try:
+                from pubrun._bootstrap import get_selected_mode, _selected_by as _sel_by
+                _import_mode = get_selected_mode()
+                _import_selected_by = _sel_by
+            except Exception:
+                pass
+
             lock_data = {
                 "pid": self.pid,
                 "started_at_utc": self.started_at_utc,
@@ -187,6 +197,8 @@ class Run:
                 "git_commit": git_commit,
                 "cwd": str(Path.cwd()),
                 "argv": sys.argv[1:] if len(sys.argv) > 1 else [],
+                "import_mode": _import_mode,
+                "import_selected_by": _import_selected_by,
             }
             lock_path = self.run_dir / self.LOCK_FILENAME
             with open(lock_path, "w", encoding="utf-8") as f:
@@ -401,6 +413,14 @@ class Run:
         if _active_run is self:
             _active_run = None
 
+    def _get_import_metadata(self) -> Dict[str, Any]:
+        """Return import-mode provenance metadata for the manifest."""
+        try:
+            from pubrun._bootstrap import get_import_metadata
+            return get_import_metadata()
+        except Exception:
+            return {"selected_mode": None, "capture_state": {"status": "unavailable"}}
+
     def to_manifest_dict(self) -> Dict[str, Any]:
         """Build and return the complete ``manifest.json`` dictionary."""
         elapsed = None
@@ -456,6 +476,8 @@ class Run:
                 "capture_state": {"status": "complete"}
             },
             "signals": self.signal_capture.get_records() if self.signal_capture else {"capture_state": {"status": "suppressed"}},
+
+            "pubrun_imports": self._get_import_metadata(),
 
             "status": {
                 "outcome": self._outcome,
