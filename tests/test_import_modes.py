@@ -537,7 +537,8 @@ pbr.stop()
         assert result.returncode == 0, f"stderr: {result.stderr}"
         data = json.loads(result.stdout.strip())
         assert data["active"] is True
-        assert data["version"] == "0.2.0"
+        # Version should be a non-empty string (don't hardcode to avoid breakage on bump)
+        assert isinstance(data["version"], str) and len(data["version"]) > 0
 
     def test_root_import_still_works(self, tmp_path):
         """Plain import pubrun still auto-starts (backward compat)."""
