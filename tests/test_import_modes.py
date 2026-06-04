@@ -1,12 +1,26 @@
-"""Tests for Phase 1: Import mode resolution and centralized config boot."""
+"""Tests for import mode resolution, bootstrap state, and conflict detection."""
 import os
 import json
 import subprocess
 import sys
+import warnings
 import pytest
 
 from pubrun._modes import MODES, VALID_MODES, get_mode_behavior, resolve_mode_name
 from pubrun._config_boot import resolve_import_mode
+from pubrun._bootstrap import (
+    select_mode,
+    is_mode_selected,
+    get_selected_mode,
+    get_selected_behavior,
+    mark_core_loaded,
+    is_core_loaded,
+    get_import_metadata,
+    reset_state,
+    PubrunImportModeConflictError,
+    PubrunImportModeConflictWarning,
+    PubrunImportModeTooLateWarning,
+)
 
 
 PYTHON = sys.executable
@@ -170,23 +184,127 @@ if run:
         data = json.loads(result.stdout.strip())
         assert data["active"] is True
 
-    def test_import_mode_quiet_prevents_start(self, tmp_path):
-        """PUBRUN_IMPORT_MODE=quiet prevents auto-start."""
-        script = f"""
-import os, sys, json
-os.chdir({str(tmp_path)!r})
-import pubrun
-run = pubrun.get_current_run()
-print(json.dumps({{"active": run is not None}}))
-"""
-        result = subprocess.run(
-            [PYTHON, "-c", script],
-            capture_output=True, text=True, timeout=15,
-            env={**os.environ, "PUBRUN_IMPORT_MODE": "quiet"}
-        )
-        assert result.returncode == 0, f"stderr: {result.stderr}"
-        data = json.loads(result.stdout.strip())
-        assert data["active"] is False
+
+# =============================================================================
+# Phase 3: Bootstrap state and conflict detection
+# =============================================================================
+
+@pytest.fixture(autouse=False)
+def clean_bootstrap():
+    """Reset bootstrap state before and after each test that uses it."""
+    reset_state()
+    yield
+    reset_state()
+
+
+class TestBootstrapState:
+    """Tests for _bootstrap.py state tracking."""
+
+    def test_initial_state_is_unselected(self, clean_bootstrap):
+        assert not is_mode_selected()
+        assert get_selected_mode() is None
+        assert get_selected_behavior() is None
+        assert not is_core_loaded()
+
+    def test_select_mode_sets_state(self, clean_bootstrap):
+        behavior = select_mode("quiet", "test", "unit-test")
+        assert is_mode_selected()
+        assert get_selected_mode() == "quiet"
+        assert get_selected_behavior() == {"auto_start": False, "global_hooks": False}
+        assert behavior == {"auto_start": False, "global_hooks": False}
+
+    def test_mark_core_loaded(self, clean_bootstrap):
+        assert not is_core_loaded()
+        mark_core_loaded()
+        assert is_core_loaded()
+
+    def test_get_import_metadata_structure(self, clean_bootstrap):
+        select_mode("auto", "pubrun", "default")
+        meta = get_import_metadata()
+        assert meta["selected_mode"] == "auto"
+        assert meta["selected_behavior"] == {"auto_start": True, "global_hooks": True}
+        assert meta["selected_by"] == "pubrun"
+        assert meta["selected_source"] == "default"
+        assert isinstance(meta["selected_at_utc"], float)
+        assert meta["conflicts_detected"] == 0
+        assert len(meta["requests"]) == 1
+        assert meta["requests"][0]["selected"] is True
+
+    def test_reset_state_clears_everything(self, clean_bootstrap):
+        select_mode("nopatch", "test", "unit")
+        mark_core_loaded()
+        reset_state()
+        assert not is_mode_selected()
+        assert not is_core_loaded()
+
+
+class TestConflictDetection:
+    """Tests for import-mode conflict detection."""
+
+    def test_same_mode_no_conflict(self, clean_bootstrap, monkeypatch):
+        monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "error")
+        select_mode("auto", "pubrun", "default")
+        # Same mode again should NOT raise
+        behavior = select_mode("auto", "pubrun.auto", "explicit")
+        assert behavior == {"auto_start": True, "global_hooks": True}
+        meta = get_import_metadata()
+        assert meta["conflicts_detected"] == 0
+
+    def test_different_mode_warns_by_default(self, clean_bootstrap, monkeypatch):
+        monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "warn")
+        select_mode("auto", "pubrun", "default")
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            select_mode("noauto", "pubrun.noauto", "explicit")
+        assert len(w) == 1
+        assert issubclass(w[0].category, PubrunImportModeConflictWarning)
+        assert "Conflicting" in str(w[0].message)
+
+    def test_different_mode_errors_when_configured(self, clean_bootstrap, monkeypatch):
+        monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "error")
+        select_mode("auto", "pubrun", "default")
+        with pytest.raises(PubrunImportModeConflictError, match="Conflicting"):
+            select_mode("quiet", "pubrun.quiet", "explicit")
+
+    def test_different_mode_silent_when_ignore(self, clean_bootstrap, monkeypatch):
+        monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "ignore")
+        select_mode("auto", "pubrun", "default")
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            select_mode("noauto", "pubrun.noauto", "explicit")
+        # No warnings emitted
+        conflict_warnings = [x for x in w if issubclass(x.category, PubrunImportModeConflictWarning)]
+        assert len(conflict_warnings) == 0
+        # But metadata still records the conflict
+        meta = get_import_metadata()
+        assert meta["conflicts_detected"] == 1
+
+    def test_first_mode_wins(self, clean_bootstrap, monkeypatch):
+        monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "ignore")
+        select_mode("quiet", "first_caller", "test")
+        select_mode("auto", "second_caller", "test")
+        # First mode wins
+        assert get_selected_mode() == "quiet"
+        assert get_selected_behavior() == {"auto_start": False, "global_hooks": False}
+
+    def test_conflict_records_core_loaded_state(self, clean_bootstrap, monkeypatch):
+        monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "ignore")
+        select_mode("auto", "pubrun", "default")
+        mark_core_loaded()
+        select_mode("noauto", "pubrun.noauto", "explicit")
+        meta = get_import_metadata()
+        conflict_req = [r for r in meta["requests"] if r["conflict"]]
+        assert len(conflict_req) == 1
+        assert conflict_req[0]["core_loaded_at_request"] is True
+
+    def test_max_requests_limit(self, clean_bootstrap, monkeypatch):
+        monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "ignore")
+        select_mode("auto", "pubrun", "default")
+        # Flood with duplicate requests
+        for i in range(100):
+            select_mode("auto", f"caller_{i}", "test")
+        meta = get_import_metadata()
+        assert len(meta["requests"]) <= 50
 
     def test_legacy_auto_start_false_still_works(self, tmp_path):
         """PUBRUN_AUTO_START=false still prevents auto-start."""

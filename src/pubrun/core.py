@@ -253,26 +253,33 @@ class phase:
 
 # -- Boot sequence ------------------------------------------------------------
 
-def _execute_boot_sequence() -> None:
-    """Resolve import mode and auto-start if configured.
+def _execute_boot_sequence(selected_by: str = "pubrun") -> None:
+    """Resolve import mode, register selection, and auto-start if configured.
 
     Called by pubrun/__init__.py during root imports. Mode submodules
-    (pubrun.noauto, etc.) will call this with different parameters in
-    later phases.
+    (pubrun.noauto, etc.) will call this with their own selected_by in
+    Phase 4.
+
+    Args:
+        selected_by: Identifier for who triggered this boot (e.g., "pubrun",
+            "pubrun.noauto").
     """
     from pubrun._config_boot import resolve_import_mode
-    from pubrun._modes import get_mode_behavior
+    from pubrun._bootstrap import select_mode, mark_core_loaded
 
     _should_auto = False
     try:
         import_mode, import_source = resolve_import_mode()
-        mode_behavior = get_mode_behavior(import_mode)
+        mode_behavior = select_mode(import_mode, selected_by, import_source)
         _should_auto = mode_behavior["auto_start"]
     except Exception as boot_err:
         logging.getLogger("pubrun").warning(
             f"pubrun boot sequence failed (tracking disabled): {boot_err}"
         )
         return
+    finally:
+        # Mark core as loaded regardless of success/failure
+        mark_core_loaded()
 
     if _should_auto and not get_current_run():
         sys0 = os.path.basename(sys.argv[0]) if sys.argv else ""
