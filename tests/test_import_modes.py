@@ -352,6 +352,81 @@ class TestImportMetadataInManifest:
 
 
 # =============================================================================
+# Phase 6: pubrun run CLI wrapper
+# =============================================================================
+
+class TestPubrunRunCommand:
+    """Tests for the 'pubrun run' CLI wrapper."""
+
+    def test_run_help(self):
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--help"],
+            capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 0
+        assert "--mode" in result.stdout
+        assert "quiet" in result.stdout
+
+    def test_run_quiet_prevents_auto_start(self, tmp_path):
+        script = tmp_path / "check.py"
+        script.write_text(
+            "import os, json\n"
+            f"os.chdir({str(tmp_path)!r})\n"
+            "import pubrun\n"
+            "print(json.dumps({'active': pubrun.get_current_run() is not None}))\n",
+            encoding="utf-8"
+        )
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--mode", "quiet", "--", PYTHON, str(script)],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["active"] is False
+
+    def test_run_auto_starts(self, tmp_path):
+        script = tmp_path / "check.py"
+        script.write_text(
+            "import os, json\n"
+            f"os.chdir({str(tmp_path)!r})\n"
+            "import pubrun\n"
+            "print(json.dumps({'active': pubrun.get_current_run() is not None}))\n"
+            "if pubrun.get_current_run(): pubrun.stop()\n",
+            encoding="utf-8"
+        )
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--mode", "auto", "--", PYTHON, str(script)],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["active"] is True
+
+    def test_run_returns_child_exit_code(self):
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--", PYTHON, "-c", "import sys; sys.exit(42)"],
+            capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 42
+
+    def test_run_no_command_exits_1(self):
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--mode", "quiet"],
+            capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 1
+        assert "No command specified" in result.stderr
+
+    def test_run_bad_command_exits_127(self):
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--", "nonexistent_binary_xyz"],
+            capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 127
+        assert "Command not found" in result.stderr
+
+
+# =============================================================================
 # Phase 4: Namespaced import mode subprocess tests
 # =============================================================================
 

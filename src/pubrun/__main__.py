@@ -439,6 +439,10 @@ def main() -> None:
     # ---------------- Cite Subparser ----------------
     cite_parser = subparsers.add_parser("cite", help="Generate a formatted academic citation for pubrun.", description="Generate a formatted academic citation for pubrun.")
     cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Citation format (default: apa).")
+
+    run_parser = subparsers.add_parser("run", help="Run a command with a specific pubrun import mode.", description="Spawn a child process with PUBRUN_IMPORT_MODE set. Useful for CI, shell scripts, and HPC workflows where source code should remain unchanged.")
+    run_parser.add_argument("--mode", type=str, choices=["auto", "noauto", "nopatch", "quiet"], default="auto", help="Import mode for the child process (default: auto).")
+    run_parser.add_argument("command_args", nargs=argparse.REMAINDER, metavar="-- COMMAND", help="Command to execute (use -- to separate pubrun flags from the target command).")
     
     # ---------------- Diagnostic Flags ----------------
     parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Create an annotated `.pubrun.toml` configuration file.")
@@ -504,6 +508,26 @@ def main() -> None:
             getattr(args, "dry_run", False),
         )
         executed = True
+
+    elif args.command == "run":
+        cmd_args = getattr(args, "command_args", [])
+        # Strip leading '--' if present (separates pubrun flags from target command)
+        if cmd_args and cmd_args[0] == "--":
+            cmd_args = cmd_args[1:]
+        if not cmd_args:
+            print("Error: No command specified. Usage: pubrun run --mode quiet -- python script.py", file=sys.stderr)
+            sys.exit(1)
+        # Spawn child process with PUBRUN_IMPORT_MODE set
+        import subprocess as _sp
+        child_env = {**os.environ, "PUBRUN_IMPORT_MODE": args.mode}
+        try:
+            result = _sp.run(cmd_args, env=child_env)
+            sys.exit(result.returncode)
+        except FileNotFoundError:
+            print(f"Error: Command not found: {cmd_args[0]}", file=sys.stderr)
+            sys.exit(127)
+        except KeyboardInterrupt:
+            sys.exit(130)
 
     if getattr(args, "create_config", False):
         dest = args.create_config
