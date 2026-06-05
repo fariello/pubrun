@@ -25,13 +25,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Internal architecture**: Public API moved from `__init__.py` to `pubrun.core`. The root package is now a thin router that delegates to `core.py`. This is an internal refactor — all public symbols remain at `pubrun.*`.
 - **Boot sequence centralized**: Import-mode resolution moved to `_config_boot.py` and `_bootstrap.py`. The old inline logic in `__init__.py` is replaced by `_execute_boot_sequence()`.
 
+### Security
+
+- **Run directory permissions (umask)**: Directories are now created with `umask(0o077)` active, preventing a brief world-readable window between mkdir and chmod on shared systems.
+- **Lock file argv redaction**: Command-line arguments in `.pubrun.lock` are now passed through `redact_argv()` before writing, preventing secrets from being persisted to disk.
+- **Signal forwarding in `pubrun run`**: SIGTERM is now forwarded to the child process, preventing orphaned children when the wrapper is killed by CI/Slurm.
+
 ### Fixed
 
 - **`global_hooks` enforcement**: `nopatch` and `quiet` modes now genuinely suppress global hooks (subprocess spy, console tee, signal handlers). Previously the mode was recorded in metadata but hooks were still installed. The tracker now reads `global_hooks` from the bootstrap state and skips hook installation when `false`.
+- **SIGPIPE capture**: Added `SIGPIPE` to the signal capture target list. Previously the signal handler did not intercept SIGPIPE, making the broken pipe status feature non-functional.
+- **BrokenPipeError in console tee**: `TqdmSafeTee.write()` and `flush()` now catch `BrokenPipeError` when the downstream pipe is closed (e.g., `script.py | head`). Previously this crashed the script before the manifest could be written.
+- **Critical event double-counting**: Critical events (annotations, phases) no longer consume the general event budget. Previously they were counted against both the critical cap and the regular cap.
+- **Negative returncode in `pubrun run`**: Child processes killed by a signal now return the conventional `128+N` exit code instead of a raw negative value.
+- **Temp file cleanup**: `_atomic_json_write` now removes the `.tmp` file if `os.replace()` fails.
+- **Event stream close race**: `self._file = None` is now set inside the lock in `EventStream.close()`.
+- **start() TOCTOU**: The lock in `start()` now covers both `get_current_run()` and `ref_count` increment atomically.
+- **ResourceWatcher stop safety**: `stop()` now checks `is_alive()` after join and skips the final poll if the thread is still stuck.
 
 ### Tests
 
-- Added 55 new tests covering mode definitions, config boot resolver, bootstrap state, conflict detection (warn/error/ignore), namespaced import modes (subprocess tests), `pubrun run` wrapper, import metadata in manifest/lock file, hook suppression verification (nopatch/quiet suppress spy, signals, and console tee; auto installs them), and broken pipe status classification. Total: 463 tests.
+- Added 65 new tests covering mode definitions, config boot resolver, bootstrap state, conflict detection (warn/error/ignore), namespaced import modes (subprocess tests), `pubrun run` wrapper (including env var assertion, signal-killed exit codes, permission errors), import metadata in manifest/lock file, hook suppression verification, broken pipe status classification (unit + real SIGPIPE integration test), BrokenPipeError unit tests, lock file argv redaction, umask directory permissions, and temp file cleanup. Total: 473 tests.
+- Replaced fixed `time.sleep()` with polling loops in resource watcher tests to eliminate CI flakes.
 
 ---
 

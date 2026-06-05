@@ -402,7 +402,9 @@ While a run is active, a `.pubrun.lock` JSON file exists in the run directory. I
 | `hostname` | string | Machine hostname. |
 | `git_commit` | string \| null | Git commit hash at start, or `null` if not in a repo. |
 | `cwd` | string | Working directory of the process. |
-| `argv` | list[string] | Command-line arguments (excluding `sys.argv[0]`). |
+| `argv` | list[string] | Command-line arguments (excluding `sys.argv[0]`). Sensitive values are redacted. |
+| `import_mode` | string \| null | The active import mode (`"auto"`, `"noauto"`, `"nopatch"`, `"quiet"`). |
+| `import_selected_by` | string \| null | Who selected the mode (e.g., `"pubrun"`, `"pubrun.noauto"`). |
 
 **Example:**
 ```json
@@ -414,7 +416,9 @@ While a run is active, a `.pubrun.lock` JSON file exists in the run directory. I
   "hostname": "gpu-node-07",
   "git_commit": "3df16cf",
   "cwd": "/home/user/project",
-  "argv": ["--epochs", "100", "--lr", "0.001"]
+  "argv": ["--epochs", "100", "--lr", "0.001"],
+  "import_mode": "auto",
+  "import_selected_by": "pubrun"
 }
 ```
 
