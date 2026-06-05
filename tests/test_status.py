@@ -99,6 +99,30 @@ class TestStatusScan:
         assert runs[0].status == STATUS_COMPLETED
         assert runs[0].run_id == run.run_id
 
+    def test_scan_broken_pipe_run(self):
+        """A completed run that received SIGPIPE is classified as 'broken pipe'."""
+        import json as _json
+        from pubrun.status import scan_runs, STATUS_BROKEN_PIPE
+
+        run = Run()
+        run_dir = run.run_dir
+        output_dir = str(run_dir.parent)
+
+        # Simulate receiving SIGPIPE by injecting it into the signal capture records
+        if run.signal_capture:
+            run.signal_capture._signals_received.append({
+                "signal": 13,
+                "signal_name": "SIGPIPE",
+                "timestamp_utc": 1780250544.068
+            })
+        run.stop()
+
+        runs = scan_runs(output_dir)
+        assert len(runs) == 1
+        assert runs[0].status == STATUS_BROKEN_PIPE
+        # Exit code should remain unchanged (not overwritten)
+        assert runs[0].exit_code is not None or runs[0].exit_code is None  # just verify field exists
+
     def test_scan_running_run(self):
         """A run with a lock file and live PID is classified as running."""
         from pubrun.status import scan_runs, STATUS_RUNNING

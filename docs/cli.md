@@ -139,6 +139,7 @@ pubrun status [RUN_ID] [--dir PATH] [-v|--verbose]
 | `completed` | Run finished successfully (manifest exists, outcome is "completed") |
 | `failed` | Run finished with an error (manifest exists, outcome is "failed") |
 | `interrupted` | Run received a termination signal — SIGINT (Ctrl+C), SIGTERM, or SIGHUP |
+| `broken pipe` | Run completed but received SIGPIPE (downstream reader closed) |
 | `running` | Lock file exists and the process is still alive |
 | `crashed` | Lock file exists but the process is dead (killed without cleanup) |
 | `ghost` | Run entered ghost mode (filesystem write failure) |

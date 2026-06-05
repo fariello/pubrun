@@ -199,6 +199,7 @@ If a process is killed (`SIGKILL`, OOM, power loss), the lock file persists. `pu
 | **completed** | Manifest exists, outcome is "completed" |
 | **failed** | Manifest exists, outcome is "failed" |
 | **interrupted** | Run received SIGINT, SIGTERM, or SIGHUP (e.g., Ctrl+C) |
+| **broken pipe** | Run completed but received SIGPIPE (downstream consumer closed) |
 | **running** | Lock file present, process is alive |
 | **crashed** | Lock file present, process is dead |
 | **ghost** | Run entered ghost mode (filesystem write failure at init) |

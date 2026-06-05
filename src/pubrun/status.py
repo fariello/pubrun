@@ -31,6 +31,7 @@ from pubrun.tracker import Run
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 STATUS_INTERRUPTED = "interrupted"
+STATUS_BROKEN_PIPE = "broken pipe"
 STATUS_RUNNING = "running"
 STATUS_CRASHED = "crashed"
 STATUS_GHOST = "ghost"
@@ -85,6 +86,15 @@ class RunInfo:
             self._parse_dir_name()
             self.status = STATUS_CRASHED
 
+    def _received_sigpipe(self) -> bool:
+        """Check if SIGPIPE was received during the run."""
+        if not self.signals_received:
+            return False
+        return any(
+            s.get("signal_name") == "SIGPIPE" or s.get("signal") == 13
+            for s in self.signals_received
+        )
+
     def _load_from_manifest(self, manifest_path: Path) -> None:
         """Load status from a completed run's manifest.json."""
         try:
@@ -134,6 +144,8 @@ class RunInfo:
                 self.status = STATUS_INTERRUPTED
             elif self.outcome == "ghost":
                 self.status = STATUS_GHOST
+            elif self._received_sigpipe():
+                self.status = STATUS_BROKEN_PIPE
             else:
                 self.status = STATUS_COMPLETED
 
@@ -336,6 +348,7 @@ def _status_marker(status: str) -> str:
         STATUS_COMPLETED: "\033[32m",   # green
         STATUS_FAILED: "\033[31m",      # red
         STATUS_INTERRUPTED: "\033[35m", # magenta
+        STATUS_BROKEN_PIPE: "\033[33m", # yellow (warning, not error)
         STATUS_RUNNING: "\033[33m",     # yellow
         STATUS_CRASHED: "\033[31m",     # red
         STATUS_GHOST: "\033[90m",       # gray
@@ -606,7 +619,7 @@ def clean_runs(
 
     # Never delete running runs
     if status_filter is None:
-        status_filter = [STATUS_COMPLETED, STATUS_FAILED, STATUS_INTERRUPTED, STATUS_CRASHED, STATUS_GHOST]
+        status_filter = [STATUS_COMPLETED, STATUS_FAILED, STATUS_INTERRUPTED, STATUS_BROKEN_PIPE, STATUS_CRASHED, STATUS_GHOST]
 
     # Filter out running runs even if explicitly requested
     safe_filter = [s for s in status_filter if s != STATUS_RUNNING]
