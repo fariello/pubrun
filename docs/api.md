@@ -72,6 +72,19 @@ tracker = pubrun.start(profile="deep", output_dir="./custom_storage")
 pubrun.stop()
 ```
 
+**Override syntax:** For convenience, common `[core]` keys can be passed as flat kwargs:
+
+```python
+pubrun.start(profile="deep")                    # Equivalent to core={"profile": "deep"}
+pubrun.start(output_dir="./runs")               # Equivalent to core={"output_dir": "./runs"}
+pubrun.start(core={"profile": "deep"})          # Explicit nested form also works
+```
+
+Flat shortcuts: `profile`, `output_dir`, `auto_start`, `meta_ref`. All other overrides use nested dicts matching the TOML structure (e.g., `console={"capture_mode": "off"}`).
+
+> [!NOTE]
+> If both flat and nested forms are passed for the same key, the flat shortcut wins: `start(core={"profile": "minimal"}, profile="deep")` results in `profile = "deep"`.
+
 ### `pubrun.stop()`
 
 Finalizes the active run: writes the manifest, closes log files, and resets internal state. Safe to call even if no run is active.
