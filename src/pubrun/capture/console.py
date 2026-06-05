@@ -25,7 +25,12 @@ class TqdmSafeTee:
         progress bar redraws from bloating the log file.
         """
         # 1. Passthrough exactly what was originally sent to the user's console
-        ret = self.original_stream.write(data)
+        try:
+            ret = self.original_stream.write(data)
+        except BrokenPipeError:
+            # Downstream reader closed (e.g., piped to head). Don't crash —
+            # let the signal handler record SIGPIPE and let the process exit cleanly.
+            ret = len(data)
         
         # If logging is disabled or file is closed, simply return what was written
         if not self.log_file or self.log_file.closed:
@@ -55,7 +60,10 @@ class TqdmSafeTee:
         
     def flush(self) -> None:
         """Flush both the original stream and the log file."""
-        self.original_stream.flush()
+        try:
+            self.original_stream.flush()
+        except BrokenPipeError:
+            pass  # Downstream reader closed; SIGPIPE will be recorded
         if self.log_file and not self.log_file.closed:
             # Dump whatever is left in the buffer on a flush
             if self._current_buffer:
