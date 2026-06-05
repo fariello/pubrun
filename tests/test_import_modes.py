@@ -446,6 +446,7 @@ class TestPubrunRunCommand:
         )
         assert result.returncode == 137  # 128 + 9
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows doesn't raise PermissionError for non-executable files")
     def test_run_permission_error(self, tmp_path):
         """P2-E1: Non-executable command gets clean error, not traceback."""
         # Create a file that exists but isn't executable
