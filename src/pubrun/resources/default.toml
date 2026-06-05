@@ -253,7 +253,7 @@ depth = "off"
 
 # Whether to write a human-readable summary.txt in the run directory.
 # NOTE: Not yet implemented. Reserved for future use.
-write_summary = true
+write_summary = false
 
 [methods]
 # -----------------------------------------------------------------------------
