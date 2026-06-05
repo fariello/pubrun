@@ -107,6 +107,28 @@
             },
             "additionalProperties": true,
             "default": {}
+        },
+        "pubrun_imports": {
+            "type": "object",
+            "description": "Import-mode provenance metadata.",
+            "properties": {
+                "selected_mode": { "type": ["string", "null"] },
+                "selected_behavior": {
+                    "type": ["object", "null"],
+                    "properties": {
+                        "auto_start": { "type": "boolean" },
+                        "global_hooks": { "type": "boolean" }
+                    }
+                },
+                "selected_by": { "type": ["string", "null"] },
+                "selected_source": { "type": ["string", "null"] },
+                "selected_at_utc": { "type": ["number", "null"] },
+                "core_loaded": { "type": "boolean" },
+                "conflict_policy": { "type": ["string", "null"] },
+                "conflicts_detected": { "type": "integer" },
+                "requests": { "type": "array" }
+            },
+            "additionalProperties": true
         }
     },
     "$defs": {

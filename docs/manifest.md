@@ -307,6 +307,37 @@ Run-level capture metadata.
 
 ---
 
+## `pubrun_imports`
+
+Import-mode provenance metadata. Records how pubrun was imported, which mode was selected, and whether any conflicts occurred.
+
+| Field | Type | Description |
+|---|---|---|
+| `selected_mode` | string \| null | The effective import mode: `"auto"`, `"noauto"`, `"nopatch"`, or `"quiet"`. |
+| `selected_behavior` | object | `{"auto_start": bool, "global_hooks": bool}` — the effective behavior flags. |
+| `selected_by` | string \| null | Who selected the mode (e.g., `"pubrun"`, `"pubrun.noauto"`, `"pubrun.quiet"`). |
+| `selected_source` | string \| null | Where the selection came from (e.g., `"default"`, `"env:PUBRUN_IMPORT_MODE"`, `"config:[imports].mode"`). |
+| `selected_at_utc` | float \| null | Timestamp when the mode was selected. |
+| `core_loaded` | bool | Whether `pubrun.core` was loaded (irreversible work started). |
+| `conflict_policy` | string \| null | The active conflict policy: `"warn"`, `"error"`, or `"ignore"`. |
+| `conflicts_detected` | int | Number of conflicting import-mode requests observed. |
+| `requests` | list[object] | History of import-mode selection requests (see below). |
+
+### `pubrun_imports.requests[]`
+
+| Field | Type | Description |
+|---|---|---|
+| `timestamp_utc` | float | When this request was made. |
+| `requested_mode` | string | The mode that was requested. |
+| `selected_by` | string | Identifier for the requester. |
+| `effective_behavior` | object | `{"auto_start": bool, "global_hooks": bool}` for the requested mode. |
+| `selected` | bool | Whether this request won (first request always wins). |
+| `conflict` | bool | Whether this request conflicted with the already-selected mode. |
+| `core_loaded_at_request` | bool | Whether `pubrun.core` was already loaded when this request arrived. |
+| `caller` | object \| null | Optional caller provenance: `{"filename": str, "line_number": int, "function": str}`. |
+
+---
+
 ## `status`
 
 Run outcome.

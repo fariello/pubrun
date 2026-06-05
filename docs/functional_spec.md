@@ -73,9 +73,38 @@ The boot sequence is wrapped in `try/except`. If configuration resolution fails 
 When `auto_start = true` (the default), `import pubrun` automatically calls `start()`. This is suppressed when:
 
 - The `PUBRUN_AUTO_START` environment variable is set to `"false"`.
+- The `PUBRUN_IMPORT_MODE` environment variable is set to `"noauto"` or `"quiet"`.
+- The `[imports].mode` config is set to `"noauto"` or `"quiet"`.
 - The process is running the `pubrun` CLI itself (detected by checking `sys.argv[0]`).
 
-### 3.4 Explicit Activation
+### 3.4 Import Modes
+
+The library supports four namespaced import modes via submodule imports:
+
+```python
+import pubrun                    # Default: auto mode
+import pubrun.auto as pubrun     # Explicit auto (same as above)
+import pubrun.noauto as pubrun   # Load API, start later manually
+import pubrun.nopatch as pubrun  # Auto-start, no global hooks
+import pubrun.quiet as pubrun    # API only, no auto-start, no hooks
+```
+
+| Mode | auto_start | global_hooks | Meaning |
+| --- | --- | --- | --- |
+| `auto` | `true` | `true` | Default. Full tracking on import. |
+| `noauto` | `false` | `true` | Delay tracking until explicit `start()` call. Hooks install on start. |
+| `nopatch` | `true` | `false` | Start tracking, but do not install subprocess spy, console tee, or signal handlers. |
+| `quiet` | `false` | `false` | Load API only. No auto-start, no hooks unless explicitly overridden. |
+
+When `global_hooks = false`, the following process-global side effects are suppressed:
+
+1. `subprocess.Popen` / `os.system` interception.
+2. Console stream replacement (`sys.stdout` / `sys.stderr` wrapping).
+3. Signal handler installation.
+
+Static capture (hardware, packages, git, environment, host, process, python) and background resource monitoring are unaffected by `global_hooks`.
+
+### 3.5 Explicit Activation
 
 The library MUST support explicit activation via:
 
@@ -318,6 +347,7 @@ The configuration MUST support defaults for:
 - Profile / capture depth (`[core]`)
 - Output base directory (`[core]`)
 - Auto-start behavior (`[core]`)
+- Import mode and conflict policy (`[imports]`)
 - Console capture mode (`[console]`)
 - Event capture enablement (`[events]`)
 - Redaction policy (`[redaction]`)
@@ -466,6 +496,21 @@ pubrun clean [--dir PATH] [--older-than AGE] [--status STATUS] [-y|--yes] [--dry
 - Running processes are never deleted regardless of filters.
 - `--older-than` accepts days (`7d`), hours (`24h`), or bare numbers (days).
 - `--status` accepts comma-separated values (e.g. `completed,failed`). Default: all non-running.
+
+### 11.13 Import Mode Wrapper (`run`)
+
+Spawns a child process with `PUBRUN_IMPORT_MODE` set in the environment.
+
+```
+pubrun run [--mode MODE] -- COMMAND [ARGS...]
+```
+
+- Sets `PUBRUN_IMPORT_MODE` in the child process environment.
+- Returns the child process exit code.
+- Does not create a run in the wrapper process itself.
+- The double dash (`--`) separates pubrun wrapper options from the target command.
+
+Use cases: CI pipelines, shell scripts, Slurm submission scripts, and any case where source code should remain unchanged but import behavior needs control.
 
 ---
 
