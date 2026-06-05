@@ -519,14 +519,31 @@ def main() -> None:
             sys.exit(1)
         # Spawn child process with PUBRUN_IMPORT_MODE set
         import subprocess as _sp
+        import signal as _signal
         child_env = {**os.environ, "PUBRUN_IMPORT_MODE": args.mode}
+        child_proc = None
         try:
-            result = _sp.run(cmd_args, env=child_env)
-            sys.exit(result.returncode)
-        except FileNotFoundError:
-            print(f"Error: Command not found: {cmd_args[0]}", file=sys.stderr)
+            child_proc = _sp.Popen(cmd_args, env=child_env)
+
+            # Forward SIGTERM to child so it isn't orphaned (P2-S3)
+            def _forward_sigterm(signum, frame):
+                if child_proc and child_proc.poll() is None:
+                    child_proc.terminate()
+            if hasattr(_signal, "SIGTERM"):
+                _signal.signal(_signal.SIGTERM, _forward_sigterm)
+
+            rc = child_proc.wait()
+            # Translate negative returncode (signal death) to 128+N (P2-B4)
+            if rc < 0:
+                sys.exit(128 + abs(rc))
+            sys.exit(rc)
+        except (FileNotFoundError, PermissionError) as e:
+            print(f"Error: Cannot execute command: {e}", file=sys.stderr)
             sys.exit(127)
         except KeyboardInterrupt:
+            if child_proc and child_proc.poll() is None:
+                child_proc.terminate()
+                child_proc.wait()
             sys.exit(130)
 
     if getattr(args, "create_config", False):

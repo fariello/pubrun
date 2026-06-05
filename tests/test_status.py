@@ -213,6 +213,24 @@ class TestStatusRendering:
         assert "STATUS" in output
         assert run.run_id[:8] in output
 
+    def test_render_short_list_broken_pipe_shows(self):
+        """P2-E9: A run with SIGPIPE renders 'broken pipe' in status table."""
+        from pubrun.status import render_short_list, scan_runs
+
+        run = Run()
+        if run.signal_capture:
+            run.signal_capture._signals_received.append({
+                "signal": 13,
+                "signal_name": "SIGPIPE",
+                "timestamp_utc": 1780250544.068
+            })
+        run.stop()
+        output_dir = str(run.run_dir.parent)
+
+        runs = scan_runs(output_dir)
+        output = render_short_list(runs)
+        assert "broken pipe" in output
+
     def test_render_verbose_list_with_runs(self):
         """Verbose list renders detailed info per run."""
         from pubrun.status import render_verbose_list, scan_runs

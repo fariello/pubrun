@@ -629,7 +629,9 @@ def clean_runs(
     for r in all_runs:
         if r.status not in safe_filter:
             continue
-        if older_than_days is not None and r.started_at_utc is not None:
+        if older_than_days is not None:
+            if r.started_at_utc is None:
+                continue  # Skip runs with unknown age (P2-E3)
             age_days = (now - r.started_at_utc) / 86400
             if age_days < older_than_days:
                 continue

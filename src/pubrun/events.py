@@ -72,9 +72,10 @@ class EventStream:
                     if self._critical_event_count >= self._max_critical_events:
                         return
                     self._critical_event_count += 1
-                elif self._event_count >= self._max_events:
-                    return
-                self._event_count += 1
+                else:
+                    if self._event_count >= self._max_events:
+                        return
+                    self._event_count += 1
                 self._file.write(json.dumps(record) + "\n")
                 self._file.flush()
         except Exception as e:
@@ -82,11 +83,11 @@ class EventStream:
 
     def close(self) -> None:
         """Flush and close the event stream file. Safe to call multiple times."""
-        if self._file:
-            try:
-                with self._lock:
+        with self._lock:
+            if self._file:
+                try:
                     self._file.flush()
                     self._file.close()
-            except Exception:
-                pass
-            self._file = None
+                except Exception:
+                    pass
+                self._file = None
