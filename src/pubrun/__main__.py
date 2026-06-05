@@ -267,14 +267,30 @@ def _run_clean(output_dir: Optional[str], older_than: Optional[str], status: Opt
 
 
 def _show_info() -> None:
-    """Print hardware and invocation diagnostics for debugging."""
+    """Print hardware, invocation, and import-mode diagnostics for debugging."""
     from pubrun.capture.hardware import get_hardware
     from pubrun.capture.invocation import get_invocation
     
     print("==================================================")
     print("          pubrun Hardware Diagnostics           ")
     print("==================================================\n")
-    
+
+    # Import mode diagnostics (P5-U1)
+    print("--- [ Import Mode ] ---")
+    try:
+        from pubrun._bootstrap import get_selected_mode, get_selected_behavior
+        mode = get_selected_mode() or "auto"
+        behavior = get_selected_behavior() or {"auto_start": True, "global_hooks": True}
+        import_mode_env = os.environ.get("PUBRUN_IMPORT_MODE", "")
+        print(f"  Active mode:   {mode}")
+        print(f"  auto_start:    {behavior.get('auto_start')}")
+        print(f"  global_hooks:  {behavior.get('global_hooks')}")
+        if import_mode_env:
+            print(f"  env override:  PUBRUN_IMPORT_MODE={import_mode_env}")
+    except Exception:
+        print("  (unavailable)")
+    print()
+
     print("--- [ Invocation Details ] ---")
     data = {"invocation": get_invocation({}), "hardware": get_hardware({})}
     print(json.dumps(data, indent=2))
@@ -566,7 +582,7 @@ def main() -> None:
             elif choice in ["1", ""]:
                 dest = ".pubrun.toml"
             else:
-                print("Invalid selection. Exiting.", file=sys.stderr)
+                print("Error: Invalid selection.", file=sys.stderr)
                 sys.exit(1)
             
         _create_config(dest)

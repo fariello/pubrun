@@ -25,10 +25,11 @@ Usage
     def evaluate_node():
         ...
 
-4. Import modes (no auto-start)::
+4. Import modes::
 
-    import pubrun.noauto as pubrun
-    pubrun.start()  # You control when tracking begins.
+    import pubrun.noauto as pubrun   # No auto-start; start() manually.
+    import pubrun.nopatch as pubrun  # Auto-start, no global hooks.
+    import pubrun.quiet as pubrun    # No auto-start, no hooks.
 """
 import sys
 
