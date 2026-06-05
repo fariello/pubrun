@@ -236,11 +236,16 @@ pubrun is not:
 
 The execution engine is divided into these key systems:
 
-- **Configuration Resolver** — Merges and applies settings from API > env vars > local config > user config > defaults.
-- **Capture Engine** — Orchestrates individual data collection routines, operating gracefully under partial failures.
-- **Event Streamer** — Writes structured execution events to `events.jsonl` with throttling.
-- **Console Manager** — Tee-style wrapper around standard streams with tqdm-safe carriage return squashing.
-- **Artifact Writer** — Creates the run directory and serializes all outputs.
+- **Import Mode Router** (`__init__.py`) — Target-aware package initializer that detects mode submodule imports and defers core loading when appropriate.
+- **Bootstrap State** (`_bootstrap.py`) — Singleton tracking selected import mode, conflict detection, and provenance metadata.
+- **Boot Config Resolver** (`_config_boot.py`) — Lightweight import-mode resolver that reads env vars and `.pubrun.toml` without importing the full config system.
+- **Mode Definitions** (`_modes.py`) — Four import presets (auto, noauto, nopatch, quiet) with behavior flags.
+- **Core API** (`core.py`) — Public API implementation (start, stop, annotate, phase, diff, audit_run, tracked_run) and boot sequence logic.
+- **Configuration Resolver** (`config.py`) — Merges and applies settings from API > env vars > local config > user config > defaults.
+- **Capture Engine** (`tracker.py`) — Orchestrates individual data collection routines, operating gracefully under partial failures. Respects `global_hooks` flag.
+- **Event Streamer** (`events.py`) — Writes structured execution events to `events.jsonl` with throttling.
+- **Console Manager** (`capture/console.py`) — Tee-style wrapper around standard streams with tqdm-safe carriage return squashing.
+- **Artifact Writer** (`writer.py`) — Creates the run directory and serializes all outputs.
 - **Diagnostics Analyzer** (`pubrun report`) — Evaluates and renders execution metrics from manifests.
 - **Methods Generator** (`pubrun methods`) — Compiles manifest data into prose methodology paragraphs.
 - **Global Context Snapshotter** (`pubrun meta`) — Generates standalone environment snapshots for HPC hydration.
@@ -248,6 +253,7 @@ The execution engine is divided into these key systems:
 - **Reproducibility Extractor** (`pubrun rerun`) — Extracts cross-platform replay commands from historical manifests.
 - **Run Monitor** (`pubrun status`) — Lists and inspects runs with live PID liveness checking, signal detection, and resource usage queries.
 - **Run Cleanup** (`pubrun clean`) — Interactive deletion of old run directories with safety constraints and explicit confirmation.
+- **Import Mode Wrapper** (`pubrun run`) — Spawns child processes with `PUBRUN_IMPORT_MODE` set for external workflow integration.
 
 ## 22. Summary
 

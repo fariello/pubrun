@@ -24,9 +24,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Internal architecture**: Public API moved from `__init__.py` to `pubrun.core`. The root package is now a thin router that delegates to `core.py`. This is an internal refactor — all public symbols remain at `pubrun.*`.
 - **Boot sequence centralized**: Import-mode resolution moved to `_config_boot.py` and `_bootstrap.py`. The old inline logic in `__init__.py` is replaced by `_execute_boot_sequence()`.
 
+### Fixed
+
+- **`global_hooks` enforcement**: `nopatch` and `quiet` modes now genuinely suppress global hooks (subprocess spy, console tee, signal handlers). Previously the mode was recorded in metadata but hooks were still installed. The tracker now reads `global_hooks` from the bootstrap state and skips hook installation when `false`.
+
 ### Tests
 
-- Added 49 new tests covering mode definitions, config boot resolver, bootstrap state, conflict detection (warn/error/ignore), namespaced import modes (subprocess tests), `pubrun run` wrapper, and import metadata in manifest/lock file. Total: 457 tests.
+- Added 54 new tests covering mode definitions, config boot resolver, bootstrap state, conflict detection (warn/error/ignore), namespaced import modes (subprocess tests), `pubrun run` wrapper, import metadata in manifest/lock file, and hook suppression verification (nopatch/quiet suppress spy, signals, and console tee; auto installs them). Total: 462 tests.
 
 ---
 
