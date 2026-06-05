@@ -347,6 +347,9 @@ Run outcome.
 | `outcome` | string | `"completed"`, `"failed"`, `"interrupted"`, `"ghost"`, or `"unknown"`. `"interrupted"` indicates the run received a termination signal (SIGINT, SIGTERM, or SIGHUP). |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
+> [!NOTE]
+> `pubrun status` displays a `broken pipe` status (yellow) for runs that completed but received SIGPIPE. This is a **display-level classification only** — the manifest outcome remains `"completed"` and the exit code is unchanged. Check the `signals.signals_received` array for the raw SIGPIPE record.
+
 ---
 
 ## Common Objects
