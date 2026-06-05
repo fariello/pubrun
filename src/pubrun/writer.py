@@ -15,11 +15,19 @@ def _atomic_json_write(path: Path, data: Any) -> None:
     written file if the process is killed mid-write.
     """
     tmp_path = path.with_suffix(".json.tmp")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(str(tmp_path), str(path))
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(str(tmp_path), str(path))
+    except Exception:
+        # Clean up temp file on failure (P2-E2)
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 
 class ArtifactWriter:

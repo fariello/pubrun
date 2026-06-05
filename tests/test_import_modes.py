@@ -423,7 +423,31 @@ class TestPubrunRunCommand:
             capture_output=True, text=True, timeout=10
         )
         assert result.returncode == 127
-        assert "Command not found" in result.stderr
+        assert "Cannot execute command" in result.stderr
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="Signal-based exit codes differ on Windows")
+    def test_run_signal_killed_child_returns_128_plus_n(self):
+        """P2-E10: Child killed by signal should return 128+N exit code."""
+        # SIGKILL = 9, so expect exit 137
+        script = f"import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--", PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 137  # 128 + 9
+
+    def test_run_permission_error(self, tmp_path):
+        """P2-E1: Non-executable command gets clean error, not traceback."""
+        # Create a file that exists but isn't executable
+        non_exec = tmp_path / "not_executable.sh"
+        non_exec.write_text("#!/bin/sh\necho hi", encoding="utf-8")
+        non_exec.chmod(0o644)
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--", str(non_exec)],
+            capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 127
+        assert "Cannot execute command" in result.stderr
 
 
 # =============================================================================

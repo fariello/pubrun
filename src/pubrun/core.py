@@ -94,10 +94,11 @@ def start(**kwargs: Any) -> Run:
         >>> tracker = pubrun.start(profile="deep")
         >>> tracker.stop()
     """
-    active = get_current_run()
-    if active:
-        with _run_lock:
+    with _run_lock:
+        active = get_current_run()
+        if active:
             active.ref_count = getattr(active, "ref_count", 0) + 1
+    if active:
         if hasattr(active, "_merge_and_migrate"):
             active._merge_and_migrate(kwargs)
         return active
@@ -289,7 +290,7 @@ def _execute_boot_sequence(selected_by: str = "pubrun") -> None:
 
     if _should_auto and not get_current_run():
         sys0 = os.path.basename(sys.argv[0]) if sys.argv else ""
-        if sys0 in ("pubrun", "pubrun.exe", "__main__.py", "-m"):
+        if sys0 in ("pubrun", "pubrun.exe", "__main__.py"):
             return
 
         try:

@@ -135,11 +135,13 @@ class ResourceWatcher(threading.Thread):
         # Wait for the daemon thread to finish its current cycle.
         # Cap at 5s to prevent long hangs if OS polling is stuck.
         self.join(timeout=min(self.interval + 1, 5))
-        # Run one final poll completely (thread is now stopped)
-        self._update_metrics()
-        self.end_rss_bytes = self._poll_rss()
-        if self.end_rss_bytes > self.peak_rss_bytes:
-            self.peak_rss_bytes = self.end_rss_bytes
+        # Only take final measurement if the thread actually stopped (P2-E7).
+        # If it's still alive (stuck in I/O), skip to avoid concurrent field access.
+        if not self.is_alive():
+            self._update_metrics()
+            self.end_rss_bytes = self._poll_rss()
+            if self.end_rss_bytes > self.peak_rss_bytes:
+                self.peak_rss_bytes = self.end_rss_bytes
 
     def to_manifest_dict(self) -> Dict[str, Any]:
         """Build the ``resources`` manifest section dict."""

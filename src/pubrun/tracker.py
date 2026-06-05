@@ -85,13 +85,17 @@ class Run:
         dir_name = f"pubrun-{self.script_name}-{timestamp_str}-{self.pid}-{self.run_id}"
         self.run_dir = base_dir / dir_name
 
-        # Ensure directory is created safely with restrictive permissions
+        # Ensure directory is created safely with restrictive permissions.
+        # Set umask to prevent world-readable window between mkdir and chmod (P2-S1).
         try:
-            self.run_dir.mkdir(parents=True, exist_ok=True)
-            # Restrict to owner-only on POSIX to prevent other users on shared
-            # systems from reading captured environment data.
+            old_umask = None
             if sys.platform != "win32":
-                os.chmod(self.run_dir, 0o700)
+                old_umask = os.umask(0o077)  # Ensure dirs created as 0o700
+            try:
+                self.run_dir.mkdir(parents=True, exist_ok=True)
+            finally:
+                if old_umask is not None:
+                    os.umask(old_umask)
         except Exception as e:
             # GHOST MODE: 
             # If filesystem is read-only (e.g. strict Slurm nodes), we silently abort
@@ -188,6 +192,14 @@ class Run:
             except Exception:
                 pass
 
+            # Redact argv before writing to lock file (P2-S2)
+            _lock_argv = sys.argv[1:] if len(sys.argv) > 1 else []
+            try:
+                from pubrun.capture.redaction import redact_argv
+                _lock_argv = redact_argv(_lock_argv, self.config)
+            except Exception:
+                pass  # Best-effort redaction
+
             lock_data = {
                 "pid": self.pid,
                 "started_at_utc": self.started_at_utc,
@@ -196,7 +208,7 @@ class Run:
                 "hostname": platform.node(),
                 "git_commit": git_commit,
                 "cwd": str(Path.cwd()),
-                "argv": sys.argv[1:] if len(sys.argv) > 1 else [],
+                "argv": _lock_argv,
                 "import_mode": _import_mode,
                 "import_selected_by": _import_selected_by,
             }

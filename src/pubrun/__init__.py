@@ -83,6 +83,32 @@ if not _is_mode_import():
 else:
     # Mode submodule import in progress — defer everything to the submodule.
     # The submodule will import pubrun.core and populate pubrun.* attributes.
-    pass
+    # If the submodule import fails, we need a safety net so pubrun isn't
+    # left permanently broken (P2-B5).
+    import atexit as _atexit
+
+    def _ensure_core_loaded():
+        """Safety net: if mode submodule failed, load core as fallback."""
+        import pubrun as _pkg
+        if not hasattr(_pkg, "start"):
+            try:
+                from pubrun.core import (
+                    start, stop, annotate, phase, diff,
+                    audit_run, tracked_run, get_current_run, _run_lock,
+                )
+                _pkg.start = start
+                _pkg.stop = stop
+                _pkg.annotate = annotate
+                _pkg.phase = phase
+                _pkg.diff = diff
+                _pkg.audit_run = audit_run
+                _pkg.tracked_run = tracked_run
+                _pkg.get_current_run = get_current_run
+                _pkg._run_lock = _run_lock
+            except Exception:
+                pass
+
+    _atexit.register(_ensure_core_loaded)
+    del _atexit
 
 del _is_mode_import

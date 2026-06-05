@@ -28,6 +28,7 @@ _TARGET_SIGNALS: List[str] = [
     "SIGINT",    # Ctrl+C -> KeyboardInterrupt
     "SIGTERM",   # Polite kill
     "SIGHUP",    # Terminal hangup (Unix only)
+    "SIGPIPE",   # Broken pipe (Unix only) — downstream reader closed
     "SIGUSR1",   # User-defined (Unix only)
     "SIGUSR2",   # User-defined (Unix only)
     "SIGBREAK",  # Ctrl+Break on Windows
