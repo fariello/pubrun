@@ -9,7 +9,6 @@ This is equivalent to a plain ``import pubrun`` with default config.
 Useful when you want to be explicit about the mode in source code.
 """
 from pubrun._bootstrap import select_mode
-from pubrun._modes import get_mode_behavior
 
 # Select mode before importing core
 _behavior = select_mode("auto", "pubrun.auto", "explicit")

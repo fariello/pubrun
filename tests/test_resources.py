@@ -18,8 +18,12 @@ def test_resources_watcher_threads(tmp_path, monkeypatch):
     
     tracker = start(**overrides)
     
-    # Sleep to ensure the thread ticks correctly in the background
-    time.sleep(0.15)
+    # Poll until at least one tick has occurred (P3-T7: avoid fixed sleep)
+    deadline = time.time() + 5.0  # generous 5s deadline
+    while time.time() < deadline:
+        if tracker.resource_watcher and tracker.resource_watcher.peak_rss_bytes > 0:
+            break
+        time.sleep(0.05)
     
     tracker.stop()
     
@@ -70,9 +74,12 @@ def test_resource_watcher_failure_threshold(tmp_path, monkeypatch):
     # Force _poll_rss to always return 0 (simulating failure)
     monkeypatch.setattr(watcher, "_poll_rss", lambda: 0)
 
-    # Wait enough time for max_failures consecutive failures (default 3)
-    # At 20ms interval, 3 failures = ~60ms. Give generous margin for slow CI.
-    time.sleep(1.0)
+    # Poll until the watcher auto-stops (P3-T8: avoid fixed sleep)
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        if watcher._stop_event.is_set():
+            break
+        time.sleep(0.05)
 
     # The watcher should have auto-stopped itself
     assert watcher._stop_event.is_set()
