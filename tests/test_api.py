@@ -81,8 +81,10 @@ class TestAnnotate:
         with open(events_path, "r") as f:
             lines = f.readlines()
         assert len(lines) >= 1
-        record = json.loads(lines[0])
-        assert record["type"] == "annotation"
+        # Find the annotation event (resource_sample may appear first from background thread)
+        annotations = [json.loads(l) for l in lines if '"annotation"' in l]
+        assert len(annotations) >= 1
+        assert annotations[0]["type"] == "annotation"
 
     def test_annotate_without_active_run_no_crash(self):
         """Annotating with no active run should be silent."""
