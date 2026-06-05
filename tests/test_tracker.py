@@ -89,6 +89,24 @@ def test_atomic_manifest_write(tmp_path, monkeypatch):
     assert data["status"]["outcome"] == "completed"
 
 
+def test_atomic_write_cleans_temp_on_failure(tmp_path, monkeypatch):
+    """P3-T4: Temp file is cleaned up if os.replace fails."""
+    from pubrun.writer import _atomic_json_write
+    from pathlib import Path
+
+    target = tmp_path / "output.json"
+    # Make os.replace fail
+    monkeypatch.setattr("os.replace", lambda src, dst: (_ for _ in ()).throw(OSError("cross-device link")))
+
+    import pytest
+    with pytest.raises(OSError, match="cross-device"):
+        _atomic_json_write(target, {"key": "value"})
+
+    # Temp file should NOT be left behind
+    tmp_file = target.with_suffix(".json.tmp")
+    assert not tmp_file.exists()
+
+
 # ==========================================================================
 # _merge_and_migrate tests
 # ==========================================================================

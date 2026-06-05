@@ -324,3 +324,45 @@ class TestTqdmSafeTeeAdvanced:
         # Should not raise
         tee.write("after log closed\n")
         assert "after log closed" in original.getvalue()
+
+
+class TestTqdmSafeTeeBrokenPipe:
+    """P3-T1: BrokenPipeError handling in write() and flush()."""
+
+    def test_write_catches_broken_pipe(self):
+        """write() does not raise when original stream has a broken pipe."""
+        import io
+        from pubrun.capture.console import TqdmSafeTee
+
+        class BrokenStream:
+            def write(self, data):
+                raise BrokenPipeError("pipe closed")
+            def flush(self):
+                raise BrokenPipeError("pipe closed")
+
+        log_file = io.StringIO()
+        tee = TqdmSafeTee(BrokenStream(), log_file)
+
+        # Should NOT raise
+        ret = tee.write("hello\n")
+        assert ret == 6  # len("hello\n")
+        # Log file should still receive the data
+        assert "hello" in log_file.getvalue()
+
+    def test_flush_catches_broken_pipe(self):
+        """flush() does not raise when original stream has a broken pipe."""
+        import io
+        from pubrun.capture.console import TqdmSafeTee
+
+        class BrokenFlush:
+            def write(self, data):
+                return len(data)
+            def flush(self):
+                raise BrokenPipeError("pipe closed")
+
+        log_file = io.StringIO()
+        tee = TqdmSafeTee(BrokenFlush(), log_file)
+        tee.write("data\n")
+
+        # flush should NOT raise
+        tee.flush()

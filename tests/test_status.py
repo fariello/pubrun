@@ -52,6 +52,37 @@ class TestLockFile:
         # Clean up
         run.stop()
 
+    def test_lock_file_argv_is_redacted(self):
+        """P3-T3: Secrets in argv are redacted in the lock file."""
+        import json as _json
+        # Simulate a script launched with --password=secret
+        import sys as _sys
+        original_argv = _sys.argv
+        _sys.argv = ["train.py", "--password=s3cr3t", "--epochs=10"]
+        try:
+            run = Run()
+            lock_path = run.run_dir / Run.LOCK_FILENAME
+            assert lock_path.exists()
+            with open(lock_path, "r", encoding="utf-8") as f:
+                lock_data = _json.load(f)
+            # password should be redacted
+            argv_str = " ".join(lock_data["argv"])
+            assert "s3cr3t" not in argv_str
+            assert "[REDACTED]" in argv_str
+            # non-sensitive args should be preserved
+            assert "--epochs=10" in lock_data["argv"]
+            run.stop()
+        finally:
+            _sys.argv = original_argv
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX only")
+    def test_run_dir_created_with_0o700(self):
+        """P3-T2: Run directory is created with restrictive permissions from the start."""
+        run = Run()
+        mode = oct(run.run_dir.stat().st_mode & 0o777)
+        assert mode == "0o700"
+        run.stop()
+
     @pytest.mark.skipif(sys.platform == "win32", reason="chmod 0o444 does not prevent writes on Windows")
     def test_ghost_mode_no_lock_file(self, monkeypatch, tmp_path):
         """Ghost mode does not create a lock file."""

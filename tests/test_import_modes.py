@@ -409,6 +409,16 @@ class TestPubrunRunCommand:
         )
         assert result.returncode == 42
 
+    def test_run_sets_import_mode_env_var(self):
+        """P3-R1: pubrun run --mode X actually sets PUBRUN_IMPORT_MODE=X in child."""
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--mode", "nopatch", "--",
+             PYTHON, "-c", "import os; print(os.environ.get('PUBRUN_IMPORT_MODE', ''))"],
+            capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 0
+        assert result.stdout.strip() == "nopatch"
+
     def test_run_no_command_exits_1(self):
         result = subprocess.run(
             [PYTHON, "-m", "pubrun", "run", "--mode", "quiet"],
