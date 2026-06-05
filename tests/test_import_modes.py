@@ -427,6 +427,141 @@ class TestPubrunRunCommand:
 
 
 # =============================================================================
+# Hook suppression tests (nopatch/quiet must NOT install global hooks)
+# =============================================================================
+
+class TestHookSuppression:
+    """Verify that nopatch and quiet modes suppress global hooks."""
+
+    def test_nopatch_no_subprocess_spy(self, tmp_path):
+        """nopatch mode does not monkey-patch subprocess.Popen."""
+        script = f"""
+import os, sys, json, subprocess
+os.chdir({str(tmp_path)!r})
+os.environ['PUBRUN_IMPORT_MODE'] = 'nopatch'
+# Clear cached modules
+for mod in list(sys.modules.keys()):
+    if 'pubrun' in mod:
+        del sys.modules[mod]
+import pubrun
+# Check if Popen is patched by looking for the spy wrapper
+from pubrun.capture.subprocesses import SubprocessSpy
+print(json.dumps({{"spy_installed": SubprocessSpy._installed}}))
+pubrun.stop()
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["spy_installed"] is False
+
+    def test_nopatch_no_signal_handlers(self, tmp_path):
+        """nopatch mode does not install signal handlers."""
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+os.environ['PUBRUN_IMPORT_MODE'] = 'nopatch'
+for mod in list(sys.modules.keys()):
+    if 'pubrun' in mod:
+        del sys.modules[mod]
+import pubrun
+run = pubrun.get_current_run()
+has_signal_capture = run.signal_capture is not None if run else False
+print(json.dumps({{"signal_capture": has_signal_capture}}))
+pubrun.stop()
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["signal_capture"] is False
+
+    def test_nopatch_no_console_tee(self, tmp_path):
+        """nopatch mode does not wrap sys.stdout/stderr."""
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+os.environ['PUBRUN_IMPORT_MODE'] = 'nopatch'
+for mod in list(sys.modules.keys()):
+    if 'pubrun' in mod:
+        del sys.modules[mod]
+import pubrun
+# stdout should still be the original, not a TqdmSafeTee wrapper
+is_original = type(sys.stdout).__name__ != 'TqdmSafeTee'
+print(json.dumps({{"stdout_original": is_original}}))
+pubrun.stop()
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["stdout_original"] is True
+
+    def test_quiet_no_hooks_no_start(self, tmp_path):
+        """quiet mode: no auto-start AND no hooks."""
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+os.environ['PUBRUN_IMPORT_MODE'] = 'quiet'
+for mod in list(sys.modules.keys()):
+    if 'pubrun' in mod:
+        del sys.modules[mod]
+import pubrun
+from pubrun.capture.subprocesses import SubprocessSpy
+print(json.dumps({{
+    "active": pubrun.get_current_run() is not None,
+    "spy_installed": SubprocessSpy._installed,
+    "stdout_original": type(sys.stdout).__name__ != 'TqdmSafeTee'
+}}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["active"] is False
+        assert data["spy_installed"] is False
+        assert data["stdout_original"] is True
+
+    def test_auto_mode_installs_hooks(self, tmp_path):
+        """auto mode (default) DOES install hooks — control test."""
+        script = f"""
+import os, sys, json
+os.chdir({str(tmp_path)!r})
+os.environ['PUBRUN_IMPORT_MODE'] = 'auto'
+for mod in list(sys.modules.keys()):
+    if 'pubrun' in mod:
+        del sys.modules[mod]
+import pubrun
+from pubrun.capture.subprocesses import SubprocessSpy
+run = pubrun.get_current_run()
+has_signal = run.signal_capture is not None if run else False
+print(json.dumps({{
+    "active": run is not None,
+    "spy_installed": SubprocessSpy._installed,
+    "signal_capture": has_signal
+}}))
+pubrun.stop()
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=15
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["active"] is True
+        assert data["spy_installed"] is True
+        assert data["signal_capture"] is True
+
+
+# =============================================================================
 # Phase 4: Namespaced import mode subprocess tests
 # =============================================================================
 
