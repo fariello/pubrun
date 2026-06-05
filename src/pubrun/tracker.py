@@ -240,22 +240,37 @@ class Run:
         self.hardware_data = get_hardware(self.config)
         self.host_data = get_host(self.config)
 
-        # 5. Console & Subprocess interception setup
-        if self.config.get("capture", {}).get("subprocesses", {}).get("enabled", False):
+        # Determine if global hooks are permitted by the import mode.
+        # When global_hooks=false (nopatch/quiet modes), subprocess spy,
+        # console tee, and signal handlers are suppressed.
+        _global_hooks = True
+        try:
+            from pubrun._bootstrap import get_selected_behavior
+            _behavior = get_selected_behavior()
+            if _behavior is not None:
+                _global_hooks = _behavior.get("global_hooks", True)
+        except Exception:
+            pass
+
+        # 5. Subprocess interception (global hook)
+        if _global_hooks and self.config.get("capture", {}).get("subprocesses", {}).get("enabled", False):
             max_tracked = self.config.get("capture", {}).get("subprocesses", {}).get("max_tracked_commands", 5000)
             SubprocessSpy.install(max_tracked, config=self.config)
             self._spying_subprocesses = True
 
-        # 6. Console tee hook
-        console_mode = self.config.get("console", {}).get("capture_mode", "off")
+        # 6. Console tee (global hook — wraps sys.stdout/stderr)
+        if _global_hooks:
+            console_mode = self.config.get("console", {}).get("capture_mode", "off")
+        else:
+            console_mode = "off"
         self.console_interceptor = ConsoleInterceptor(self.run_dir, console_mode)
         self.console_interceptor.start()
 
-        # 7. Event Stream
+        # 7. Event Stream (not a global hook — safe in all modes)
         if self.config.get("events", {}).get("enabled", False):
             self.event_stream = EventStream(self.run_dir, config=self.config)
 
-        # 8. Background Telemetry (RAM watcher)
+        # 8. Background Telemetry (not a global hook — background thread only)
         res_cfg = self.config.get("capture", {}).get("resources", {})
         if res_cfg.get("depth", "off") != "off":
             interval = res_cfg.get("sample_interval_seconds", 15)
@@ -263,8 +278,8 @@ class Run:
             self.resource_watcher = ResourceWatcher(self, interval, max_fails)
             self.resource_watcher.start()
 
-        # 9. Signal and exit-code capture (non-intrusive, chains to user handlers)
-        if self.config.get("capture", {}).get("signals", {}).get("enabled", True):
+        # 9. Signal and exit-code capture (global hook — installs signal handlers)
+        if _global_hooks and self.config.get("capture", {}).get("signals", {}).get("enabled", True):
             self.signal_capture = SignalExitCapture()
             self.signal_capture.install()
 
