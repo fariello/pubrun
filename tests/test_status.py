@@ -123,6 +123,48 @@ class TestStatusScan:
         # Exit code should remain unchanged (not overwritten)
         assert runs[0].exit_code is not None or runs[0].exit_code is None  # just verify field exists
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="SIGPIPE not available on Windows")
+    def test_real_sigpipe_via_pipe(self, tmp_path):
+        """Integration test: real SIGPIPE from a broken pipe shows 'broken pipe' status."""
+        import subprocess
+
+        # Script that sleeps (ensures signal handler is installed), then prints
+        # enough output to trigger SIGPIPE when piped to head.
+        script = f"""
+import os, sys, time
+os.chdir({str(tmp_path)!r})
+import pubrun
+time.sleep(0.5)  # Ensure signal handler is fully installed
+for i in range(100000):
+    print(f"line {{i}}")
+    sys.stdout.flush()
+pubrun.stop()
+"""
+        # Pipe through head -5 to trigger SIGPIPE
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        # Read only 5 lines then close the pipe
+        lines_read = []
+        for _ in range(5):
+            line = proc.stdout.readline()
+            if not line:
+                break
+            lines_read.append(line)
+        proc.stdout.close()
+        proc.wait(timeout=10)
+
+        # Now scan the run directory and verify broken pipe status
+        from pubrun.status import scan_runs, STATUS_BROKEN_PIPE
+        runs_dir = str(tmp_path / "runs")
+        runs = scan_runs(runs_dir)
+        assert len(runs) >= 1
+        # The most recent run should show broken pipe
+        latest = sorted(runs, key=lambda r: r.started_at_utc or 0, reverse=True)[0]
+        assert latest.status == STATUS_BROKEN_PIPE
+
     def test_scan_running_run(self):
         """A run with a lock file and live PID is classified as running."""
         from pubrun.status import scan_runs, STATUS_RUNNING
