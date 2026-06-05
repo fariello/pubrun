@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Import conflict detection**: When multiple imports request different modes, pubrun warns by default (configurable to `error` or `ignore` via `[imports].on_conflict` or `PUBRUN_IMPORT_CONFLICT`).
 - **`[imports]` config section**: New configuration section with `mode`, `on_conflict`, `record_provenance`, `provenance_depth`, `provenance_path_mode`, and `max_requests`.
 - **`PUBRUN_IMPORT_MODE` environment variable**: Canonical way to set import mode from the shell. Takes precedence over config files.
+- **`broken pipe` status display**: `pubrun status` now shows `broken pipe` (yellow) instead of `completed` when a run received SIGPIPE during execution. Surfaces cases where a script terminated early because a downstream reader closed. The manifest outcome remains `"completed"` and the exit code is unchanged — this is a display-level enhancement only.
 
 ### Changed
 
@@ -30,7 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Tests
 
-- Added 54 new tests covering mode definitions, config boot resolver, bootstrap state, conflict detection (warn/error/ignore), namespaced import modes (subprocess tests), `pubrun run` wrapper, import metadata in manifest/lock file, and hook suppression verification (nopatch/quiet suppress spy, signals, and console tee; auto installs them). Total: 462 tests.
+- Added 55 new tests covering mode definitions, config boot resolver, bootstrap state, conflict detection (warn/error/ignore), namespaced import modes (subprocess tests), `pubrun run` wrapper, import metadata in manifest/lock file, hook suppression verification (nopatch/quiet suppress spy, signals, and console tee; auto installs them), and broken pipe status classification. Total: 463 tests.
 
 ---
 

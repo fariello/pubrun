@@ -478,7 +478,7 @@ Lists all runs with their current status or inspects a specific run in detail.
 pubrun status [RUN_ID] [--dir PATH] [-v|--verbose]
 ```
 
-- Classifies runs as completed, failed, interrupted, running, crashed, or ghost via lock-file PID liveness checks.
+- Classifies runs as completed, failed, interrupted, broken pipe, running, crashed, or ghost via lock-file PID liveness checks and signal analysis.
 - Shows script name with command-line arguments when terminal width permits.
 - Verbose mode (`-v`) includes PID, hostname, RSS, CPU, events, and signals.
 - Inspect mode (`pubrun status <id>`) shows full detail for a single run.
