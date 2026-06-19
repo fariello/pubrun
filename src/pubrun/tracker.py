@@ -312,34 +312,59 @@ class Run:
             new_dir = new_base / self.run_dir.name
             
             if new_dir != self.run_dir:
+                # Close open files before moving the directory (required on Windows)
+                if getattr(self, "event_stream", None):
+                    self.event_stream.close()
+                    
+                if getattr(self, "console_interceptor", None):
+                    if getattr(self.console_interceptor, "stdout_log", None):
+                        try:
+                            self.console_interceptor.stdout_log.flush()
+                            self.console_interceptor.stdout_log.close()
+                        except Exception:
+                            pass
+                        self.console_interceptor.stdout_log = None
+                    if getattr(self.console_interceptor, "stderr_log", None):
+                        try:
+                            self.console_interceptor.stderr_log.flush()
+                            self.console_interceptor.stderr_log.close()
+                        except Exception:
+                            pass
+                        self.console_interceptor.stderr_log = None
+
                 try:
                     import shutil
                     new_dir.parent.mkdir(parents=True, exist_ok=True)
                     shutil.move(str(self.run_dir), str(new_dir))
                     old_dir_str = str(self.run_dir)
                     self.run_dir = new_dir
-                    
-                    if getattr(self, "event_stream", None):
-                        self.event_stream.migrate_directory(new_dir)
-                        self.event_stream.emit("warning", payload={"message": f"Storage directory changed mid-execution from {old_dir_str} to {new_dir}"})
-                        
-                    if getattr(self, "console_interceptor", None) and hasattr(self.console_interceptor, "file_path"):
-                        new_file_path = new_dir / "console.log"
-                        if hasattr(self.console_interceptor, "file") and self.console_interceptor.file and not self.console_interceptor.file.closed:
-                            new_file = open(new_file_path, "a", encoding="utf-8")
-                            try:
-                                self.console_interceptor.file.flush()
-                                self.console_interceptor.file.close()
-                            except Exception:
-                                pass
-                            self.console_interceptor.file_path = new_file_path
-                            self.console_interceptor.file = new_file
-
-                        
                 except Exception as e:
                     import logging
                     logging.getLogger("pubrun").warning(f"Failed migrating runtime paths: {e}")
+                    # Reopen files in original directory if move failed
+                    new_dir = self.run_dir
+                    old_dir_str = str(self.run_dir)
                 
+                # Reopen or migrate the files to the active run_dir
+                if getattr(self, "event_stream", None):
+                    self.event_stream.migrate_directory(new_dir)
+                    if new_dir != Path(old_dir_str):
+                        self.event_stream.emit("warning", payload={"message": f"Storage directory changed mid-execution from {old_dir_str} to {new_dir}"})
+                        
+                if getattr(self, "console_interceptor", None):
+                    if self.console_interceptor.mode != "off":
+                        try:
+                            self.console_interceptor.stdout_log = open(new_dir / "stdout.log", "a", encoding="utf-8")
+                            if self.console_interceptor.stdout_tee:
+                                self.console_interceptor.stdout_tee.log_file = self.console_interceptor.stdout_log
+                                
+                            self.console_interceptor.stderr_log = open(new_dir / "stderr.log", "a", encoding="utf-8")
+                            if self.console_interceptor.stderr_tee:
+                                self.console_interceptor.stderr_tee.log_file = self.console_interceptor.stderr_log
+                        except Exception as reopen_err:
+                            import logging
+                            logging.getLogger("pubrun").debug(f"Failed to reopen console logs after migration: {reopen_err}")
+
         was_spying = self._spying_subprocesses
         will_spy = merged.get("capture", {}).get("subprocesses", {}).get("enabled", False)
         if will_spy and not was_spying:
