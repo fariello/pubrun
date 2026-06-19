@@ -8,7 +8,7 @@ Known issues and deferred improvements for future releases.
 
 ### Security / Privacy
 
-- **Key-name-only redaction misses sensitive values in innocuous keys** (Medium)
+- **Key-name-only redaction misses sensitive values in innocuous keys** (done) (Medium)
   - `environment.py` / `redaction.py`: The redaction regex only matches variable *names* (e.g., `PASSWORD`, `API_KEY`). An env var like `MY_APP_CONFIG={"db_password":"secret"}` or `JAVA_OPTS=-Dpassword=x` will not be redacted.
   - Recommendation: Consider value-scanning heuristics (detect URLs with embedded credentials, detect base64 tokens of certain lengths), or document the limitation prominently for users.
 
@@ -56,7 +56,7 @@ Tests marked **(done)** were implemented in `d3f4b45`. The rest are deferred.
 ### Missing Unit Tests — Modules
 
 - **P3-T1** (done): `writer.py` — no dedicated unit tests. Atomic write, temp-file cleanup, error paths untested in isolation. (Medium)
-- **P3-T2**: `report/templates.py` — no dedicated tests. Template substitution/escaping only verified indirectly. (Low)
+- **P3-T2** (done): `report/templates.py` — no dedicated tests. Template substitution/escaping only verified indirectly. (Low)
 
 ### Missing Unit Tests — Functions
 
@@ -68,7 +68,7 @@ Tests marked **(done)** were implemented in `d3f4b45`. The rest are deferred.
 - **P3-T7** (done): Critical-event secondary cap — no test emits >10,000 critical events to verify the 10x cap fires. (Low)
 - **P3-T8** (done): `disable_spy()` on macOS hardware calls — no test verifies subprocess calls are wrapped. Monkeypatch-based test possible. (Low)
 
-- **P3-T9**: `ResourceWatcher.join()` — no test verifies the thread is joined before final poll. (Low)
+- **P3-T9** (done): `ResourceWatcher.join()` — no test verifies the thread is joined before final poll. (Low)
 - **P3-T10**: `clean` interactive TTY selection — only programmatic API tested, not real stdin prompting. (Low)
 
 ### Missing Regression Tests — Existing Behavior
@@ -82,8 +82,8 @@ Tests marked **(done)** were implemented in `d3f4b45`. The rest are deferred.
 
 - **P3-T11**: `test_resources_watcher_threads` — `time.sleep(0.15)` timing-dependent; may flake on slow CI.
 - **P3-T12**: `test_resource_watcher_failure_threshold` — `time.sleep(0.3)` timing-dependent.
-- **P3-T13**: `test_sigint_sets_outcome_interrupted` — sends real SIGINT to test process.
-- **P3-T14**: `test_captures_sigint_as_keyboard_interrupt` — sends real SIGINT to test process.
+- **P3-T13** (done): `test_sigint_sets_outcome_interrupted` — sends real SIGINT to test process.
+- **P3-T14** (done): `test_captures_sigint_as_keyboard_interrupt` — sends real SIGINT to test process.
 - **P3-T15**: `test_run_tests_exits_zero` — recursively invokes test suite; latent CI time bomb.
 
 ### Infrastructure
@@ -93,9 +93,9 @@ Tests marked **(done)** were implemented in `d3f4b45`. The rest are deferred.
 
 ---
 
-## Feature Plans
+## Feature Plans (done)
 
-### P5-F1: Timestamped Console Capture (`standard` mode)
+### P5-F1: Timestamped Console Capture (`standard` mode) (done)
 
 Currently all non-`"off"` console modes produce identical plain-text tee output. The
 `standard` mode should prepend ISO 8601 timestamps to each line written to the log
@@ -115,7 +115,7 @@ Implementation plan:
 
 This is a prerequisite for `pubrun combined` (below).
 
-### P5-F5: `pubrun combined` Command
+### P5-F5: `pubrun combined` Command (done)
 
 Post-F1 command that interleaves stdout and stderr from one or more runs using the
 log-line timestamps written by `standard` mode.

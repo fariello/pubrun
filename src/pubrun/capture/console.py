@@ -8,20 +8,21 @@ logger = logging.getLogger("pubrun")
 class TqdmSafeTee:
     """Transparent stream proxy that tees writes to a log file.
 
-    Strips carriage-return (``\\r``) redraws so progress bars don't
+    Strips carriage-return (``\r``) redraws so progress bars don't
     inflate the log file.
     """
-    def __init__(self, original_stream: TextIO, log_file: Optional[TextIO]) -> None:
+    def __init__(self, original_stream: TextIO, log_file: Optional[TextIO], timestamped: bool = False) -> None:
         """Initialize the tee with the original stream and an optional log file."""
         self.original_stream = original_stream
         self.log_file = log_file
+        self.timestamped = timestamped
         self.line_count = 0
         self._current_buffer = ""
         
     def write(self, data: str) -> int:
         """Write data to the original stream and the log file.
 
-        Carriage returns (``\\r``) trigger a buffer squash to prevent
+        Carriage returns (``\r``) trigger a buffer squash to prevent
         progress bar redraws from bloating the log file.
         """
         # 1. Passthrough exactly what was originally sent to the user's console
@@ -48,7 +49,13 @@ class TqdmSafeTee:
                 # All but the last piece end with \n
                 for j, line in enumerate(lines):
                     if j < len(lines) - 1:
-                        self.log_file.write(self._current_buffer + line + '\n')
+                        full_line = self._current_buffer + line
+                        if self.timestamped:
+                            from datetime import datetime, timezone
+                            ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
+                            self.log_file.write(ts + full_line + '\n')
+                        else:
+                            self.log_file.write(full_line + '\n')
                         self.line_count += 1
                         self._current_buffer = ""
                     else:
@@ -67,7 +74,12 @@ class TqdmSafeTee:
         if self.log_file and not self.log_file.closed:
             # Dump whatever is left in the buffer on a flush
             if self._current_buffer:
-                self.log_file.write(self._current_buffer + '\n')
+                if self.timestamped:
+                    from datetime import datetime, timezone
+                    ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
+                    self.log_file.write(ts + self._current_buffer + '\n')
+                else:
+                    self.log_file.write(self._current_buffer + '\n')
                 self.line_count += 1
                 self._current_buffer = ""
             self.log_file.flush()
@@ -75,6 +87,7 @@ class TqdmSafeTee:
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the original stream (e.g. isatty, encoding)."""
         return getattr(self.original_stream, name)
+
 
 
 class ConsoleInterceptor:
@@ -109,14 +122,17 @@ class ConsoleInterceptor:
             self.stdout_log = open(self.run_dir / "stdout.log", "w", encoding="utf-8")
             self.stderr_log = open(self.run_dir / "stderr.log", "w", encoding="utf-8")
             
-            self.stdout_tee = TqdmSafeTee(sys.stdout, self.stdout_log)
+            timestamped = self.mode in {"standard", "deep"}
+            
+            self.stdout_tee = TqdmSafeTee(sys.stdout, self.stdout_log, timestamped)
             sys.stdout = self.stdout_tee
             
-            self.stderr_tee = TqdmSafeTee(sys.stderr, self.stderr_log)
+            self.stderr_tee = TqdmSafeTee(sys.stderr, self.stderr_log, timestamped)
             sys.stderr = self.stderr_tee
         except Exception as e:
             logger.debug(f"pubrun failed to intercept console: {e}")
             self.stop() # rollback
+
 
     def stop(self) -> Dict[str, Any]:
         """Restore original streams, close log files, and return capture metrics."""
