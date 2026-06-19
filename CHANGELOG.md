@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - Unreleased
+
+### Added
+
+- **Interactive TUI Manager (`pubrun tui`)**: Launch a full terminal user interface manager to browse, filter, search, inspect, and clean up historical runs interactively.
+- **TUI Optional Dependencies**: Support textual/rich optional installs via `pip install "pubrun[tui]"`. Core package remains zero-dependency.
+
+### Fixed
+
+- **EventStream Directory Migration**: Safely migrate open EventStream file handles when output_dir changes mid-execution.
+- **`script_name` Stem Sanitization**: Regex sanitization of script name to filter out invalid filesystem characters on Windows/Unix.
+- **ResourceWatcher Concurrency Lock**: Added threading Lock to resource watcher metric updates to prevent race conditions on free-threaded Python 3.13+.
+- **SubprocessSpy TOCTOU check**: Protected max_records length verification under lock to resolve race conditions.
+- **Console Interceptor Migration Leak**: Atomic log file assignment prevents descriptor leaks or corrupted state on path migration failure.
+- **Clock Skew Defense**: Capped negative age parameters to `0.0` in `_format_age` to handle skewed system time cleanly.
+
+### Tests
+
+- Dedicated unit tests for `writer.py` (`_atomic_json_write` and `ArtifactWriter`).
+- Unit tests for private status formatting helpers in `status.py`.
+- Regression tests for `EventStream` migration, critical event throttling capping, lethal signal finalization, and macOS `disable_spy()` hardware probe wrapping.
+
 ## [0.3.0] - 2026-06-04
 
 ### Added
