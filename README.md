@@ -10,6 +10,8 @@
 
 ## Installation
 
+Available on [PyPI](https://pypi.org/project/pubrun/):
+
 ```bash
 pip install pubrun
 ```
