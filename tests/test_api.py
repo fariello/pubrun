@@ -98,8 +98,10 @@ class TestAnnotate:
         tracker.stop()
         events_path = tracker.run_dir / "events.jsonl"
         with open(events_path, "r") as f:
-            record = json.loads(f.readline())
-        assert record["name"] == "just a message"
+            records = [json.loads(line) for line in f]
+        annotation_records = [r for r in records if r.get("type") == "annotation"]
+        assert len(annotation_records) >= 1
+        assert annotation_records[0]["name"] == "just a message"
 
     def test_annotate_payload_only(self):
         tracker = start(events={"enabled": True})
@@ -108,9 +110,11 @@ class TestAnnotate:
         tracker.stop()
         events_path = tracker.run_dir / "events.jsonl"
         with open(events_path, "r") as f:
-            record = json.loads(f.readline())
-        assert record["payload"]["epoch"] == 5
-        assert record["payload"]["loss"] == 0.123
+            records = [json.loads(line) for line in f]
+        annotation_records = [r for r in records if r.get("type") == "annotation"]
+        assert len(annotation_records) >= 1
+        assert annotation_records[0]["payload"]["epoch"] == 5
+        assert annotation_records[0]["payload"]["loss"] == 0.123
 
 
 class TestPhase:

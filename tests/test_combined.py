@@ -135,11 +135,15 @@ def test_combined_size_checks_force(tmp_path):
     # Create large files (virtually by patching)
     create_mock_run(runs_dir, "runE", 1000.0, ["line"], ["line"])
     
-    with patch("pathlib.Path.stat") as mock_stat:
-        class FakeStat:
-            st_size = 300 * 1024 * 1024  # 300 MB each, total 600 MB
-        mock_stat.return_value = FakeStat()
+    original_stat = Path.stat
+    def mock_stat_func(self, *args, **kwargs):
+        if self.name in ("stdout.log", "stderr.log"):
+            class FakeStat:
+                st_size = 300 * 1024 * 1024  # 300 MB each, total 600 MB
+            return FakeStat()
+        return original_stat(self, *args, **kwargs)
         
+    with patch.object(Path, "stat", mock_stat_func):
         # Without force, should exit with 1
         with pytest.raises(SystemExit) as excinfo:
             _run_combined(["runE"], dir_path=str(runs_dir), output=None, yes=True, force=False)
@@ -157,11 +161,15 @@ def test_combined_size_checks_warning_yes(tmp_path):
     runs_dir = tmp_path / "runs"
     create_mock_run(runs_dir, "runF", 1000.0, ["line"], ["line"])
     
-    with patch("pathlib.Path.stat") as mock_stat:
-        class FakeStat:
-            st_size = 130 * 1024 * 1024  # 130 MB each, total 260 MB
-        mock_stat.return_value = FakeStat()
+    original_stat = Path.stat
+    def mock_stat_func(self, *args, **kwargs):
+        if self.name in ("stdout.log", "stderr.log"):
+            class FakeStat:
+                st_size = 130 * 1024 * 1024  # 130 MB each, total 260 MB
+            return FakeStat()
+        return original_stat(self, *args, **kwargs)
         
+    with patch.object(Path, "stat", mock_stat_func):
         # With yes=True, it should proceed (not try to call input())
         with patch("pubrun.__main__.open") as mock_open:
             mock_open.side_effect = Exception("Stop execution here")
@@ -173,11 +181,15 @@ def test_combined_size_checks_warning_prompt_accept(tmp_path):
     runs_dir = tmp_path / "runs"
     create_mock_run(runs_dir, "runG", 1000.0, ["line"], ["line"])
     
-    with patch("pathlib.Path.stat") as mock_stat:
-        class FakeStat:
-            st_size = 130 * 1024 * 1024  # 260 MB total
-        mock_stat.return_value = FakeStat()
+    original_stat = Path.stat
+    def mock_stat_func(self, *args, **kwargs):
+        if self.name in ("stdout.log", "stderr.log"):
+            class FakeStat:
+                st_size = 130 * 1024 * 1024  # 260 MB total
+            return FakeStat()
+        return original_stat(self, *args, **kwargs)
         
+    with patch.object(Path, "stat", mock_stat_func):
         with patch("builtins.input", return_value="yes"):
             with patch("pubrun.__main__.open") as mock_open:
                 mock_open.side_effect = Exception("Stop execution here")
@@ -189,11 +201,15 @@ def test_combined_size_checks_warning_prompt_reject(tmp_path):
     runs_dir = tmp_path / "runs"
     create_mock_run(runs_dir, "runH", 1000.0, ["line"], ["line"])
     
-    with patch("pathlib.Path.stat") as mock_stat:
-        class FakeStat:
-            st_size = 130 * 1024 * 1024  # 260 MB total
-        mock_stat.return_value = FakeStat()
+    original_stat = Path.stat
+    def mock_stat_func(self, *args, **kwargs):
+        if self.name in ("stdout.log", "stderr.log"):
+            class FakeStat:
+                st_size = 130 * 1024 * 1024  # 260 MB total
+            return FakeStat()
+        return original_stat(self, *args, **kwargs)
         
+    with patch.object(Path, "stat", mock_stat_func):
         with patch("builtins.input", return_value="no"):
             with pytest.raises(SystemExit) as excinfo:
                 _run_combined(["runH"], dir_path=str(runs_dir), output=None, yes=False, force=False)
