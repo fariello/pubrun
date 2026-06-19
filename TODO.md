@@ -14,27 +14,29 @@ Known issues and deferred improvements for future releases.
 
 ### Correctness
 
-- **EventStream migration path: `event_stream.directory` is a no-op** (Low)
+- **EventStream migration path: `event_stream.directory` is a no-op** (done) (Low)
   - `tracker.py:273`: `_merge_and_migrate()` sets `self.event_stream.directory = new_dir`, but `EventStream` has no `directory` attribute. Events continue writing to the old path after directory migration. This is a rare path (mid-run `output_dir` change).
   - Recommendation: Close the old event stream and reopen at the new path, or update `stream_path` and reopen the file handle.
 
-- **`script_name` not sanitized for filesystem-invalid characters** (Low-Medium)
+- **`script_name` not sanitized for filesystem-invalid characters** (done) (Low-Medium)
   - `tracker.py:57`: `Path(sys.argv[0]).stem` could theoretically contain characters invalid on Windows (e.g., `<>:"|?*`). On Unix this is a non-issue. The ghost-mode fallback handles `mkdir` failure gracefully, so this won't crash.
   - Recommendation: Sanitize by replacing non-alphanumeric/dash/underscore/dot characters with `_`.
 
 ### Reliability
 
-- **ResourceWatcher peak values written without lock** (Low-Medium)
+- **ResourceWatcher peak values written without lock** (done) (Low-Medium)
   - `resources.py:109-130`: `peak_rss_bytes`, `peak_cpu_percent`, and `_consecutive_failures` are read/written from both the daemon thread and the `stop()` caller. On CPython with the GIL, this is safe. On free-threaded Python (PEP 703, 3.13+), this could race.
   - Recommendation: Add a `threading.Lock` around peak-value updates, or accept that `join()` (now added) makes this moot for the normal flow.
 
-- **File handle leak in `_merge_and_migrate` on exception** (Low)
+- **File handle leak in `_merge_and_migrate` on exception** (done) (Low)
   - `tracker.py:281`: If `open(...)` succeeds but a later exception occurs, the new file handle is not closed in the except path.
   - Recommendation: Use a local variable and only assign to `self.console_interceptor.file` after success.
 
+
 ### Performance
 
-- **TOCTOU on `_max_records` check in SubprocessSpy** (Low / Benign)
+- **TOCTOU on `_max_records` check in SubprocessSpy** (done) (Low / Benign)
+
   - `subprocesses.py:99,157`: The length check is outside the lock. In concurrent scenarios, `_max_records` can be exceeded by at most `N_threads - 1` extra records. This is a soft safety cap, not a security boundary.
   - Recommendation: Accept as benign or move the check inside the lock (minor perf cost).
 
@@ -53,18 +55,19 @@ Tests marked **(done)** were implemented in `d3f4b45`. The rest are deferred.
 
 ### Missing Unit Tests — Modules
 
-- **P3-T1**: `writer.py` — no dedicated unit tests. Atomic write, temp-file cleanup, error paths untested in isolation. (Medium)
+- **P3-T1** (done): `writer.py` — no dedicated unit tests. Atomic write, temp-file cleanup, error paths untested in isolation. (Medium)
 - **P3-T2**: `report/templates.py` — no dedicated tests. Template substitution/escaping only verified indirectly. (Low)
 
 ### Missing Unit Tests — Functions
 
-- **P3-T3**: `status.py` private formatting helpers — `_format_elapsed`, `_format_timestamp`, `_format_bytes`, `_truncate`, `_format_age`, `_status_marker`, `_dir_size`. Edge cases (zero, negative, GB-range, wide terminal) untested. (Low-Medium)
+- **P3-T3** (done): `status.py` private formatting helpers — `_format_elapsed`, `_format_timestamp`, `_format_bytes`, `_truncate`, `_format_age`, `_status_marker`, `_dir_size`. Edge cases (zero, negative, GB-range, wide terminal) untested. (Low-Medium)
 
 ### Missing Regression Tests — Recent Fixes
 
-- **P3-T5**: SIGTERM/SIGHUP finalization — no test verifies a lethal signal triggers `run.stop()` before process death. Requires subprocess-based test. (Medium)
-- **P3-T7**: Critical-event secondary cap — no test emits >10,000 critical events to verify the 10x cap fires. (Low)
-- **P3-T8**: `disable_spy()` on macOS hardware calls — no test verifies subprocess calls are wrapped. Monkeypatch-based test possible. (Low)
+- **P3-T5** (done): SIGTERM/SIGHUP finalization — no test verifies a lethal signal triggers `run.stop()` before process death. Requires subprocess-based test. (Medium)
+- **P3-T7** (done): Critical-event secondary cap — no test emits >10,000 critical events to verify the 10x cap fires. (Low)
+- **P3-T8** (done): `disable_spy()` on macOS hardware calls — no test verifies subprocess calls are wrapped. Monkeypatch-based test possible. (Low)
+
 - **P3-T9**: `ResourceWatcher.join()` — no test verifies the thread is joined before final poll. (Low)
 - **P3-T10**: `clean` interactive TTY selection — only programmatic API tested, not real stdin prompting. (Low)
 
