@@ -56,6 +56,10 @@ dev = [
     "pytest-cov",
     "tox>=4.0"
 ]
+tui = [
+    "textual>=0.80.0",
+    "rich>=13.0.0"
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pubrun"]
