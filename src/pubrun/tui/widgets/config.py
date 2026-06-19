@@ -124,16 +124,25 @@ class ConfigPanel(Vertical):
         local_conf = load_local_config() or {}
 
         # 2. Update section values
-        local_conf.setdefault("core", {})["profile"] = self.query_one("#cfg-profile", Select).value
+        profile_val = self.query_one("#cfg-profile", Select).value
+        if profile_val is not None:
+            local_conf.setdefault("core", {})["profile"] = profile_val
+            
         local_conf.setdefault("core", {})["output_dir"] = self.query_one("#cfg-output-dir", Input).value
         local_conf.setdefault("core", {})["auto_start"] = self.query_one("#cfg-auto-start", Checkbox).value
 
-        local_conf.setdefault("console", {})["capture_mode"] = self.query_one("#cfg-console-mode", Select).value
+        console_mode = self.query_one("#cfg-console-mode", Select).value
+        if console_mode is not None:
+            local_conf.setdefault("console", {})["capture_mode"] = console_mode
 
         local_conf.setdefault("events", {})["enabled"] = self.query_one("#cfg-events-enabled", Checkbox).value
 
         local_conf.setdefault("redaction", {})["sensitive_keys_regex"] = self.query_one("#cfg-sensitive-regex", Input).value
-        local_conf.setdefault("redaction", {})["representation"] = self.query_one("#cfg-redact-repr", Select).value
+        
+        redact_repr = self.query_one("#cfg-redact-repr", Select).value
+        if redact_repr is not None:
+            local_conf.setdefault("redaction", {})["representation"] = redact_repr
+            
         local_conf.setdefault("redaction", {})["env_enabled"] = self.query_one("#cfg-redact-env", Checkbox).value
         local_conf.setdefault("redaction", {})["argv_enabled"] = self.query_one("#cfg-redact-argv", Checkbox).value
 
