@@ -551,6 +551,8 @@ def _format_age(seconds: Optional[float]) -> str:
     """Format age in human-friendly terms."""
     if seconds is None:
         return "unknown"
+    if seconds < 0:
+        seconds = 0.0
     days = int(seconds // 86400)
     if days == 0:
         hours = int(seconds // 3600)

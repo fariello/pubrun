@@ -62,8 +62,11 @@ class Run:
         self.ref_count = 1
         self.run_id = uuid.uuid4().hex[:8]
         self.pid = os.getpid()
-        self.script_name = Path(sys.argv[0]).stem if sys.argv and sys.argv[0] else "interactive"
+        raw_script = Path(sys.argv[0]).stem if sys.argv and sys.argv[0] else "interactive"
+        import re
+        self.script_name = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", raw_script)
         
+
         # Timing state -- stored as POSIX epoch floats (time.time()), not ISO 8601
         # strings. This is a deliberate design choice:
         #   - Sub-second / microsecond precision via IEEE 754.
@@ -317,15 +320,21 @@ class Run:
                     self.run_dir = new_dir
                     
                     if getattr(self, "event_stream", None):
-                        self.event_stream.directory = new_dir
+                        self.event_stream.migrate_directory(new_dir)
                         self.event_stream.emit("warning", payload={"message": f"Storage directory changed mid-execution from {old_dir_str} to {new_dir}"})
                         
                     if getattr(self, "console_interceptor", None) and hasattr(self.console_interceptor, "file_path"):
-                        self.console_interceptor.file_path = new_dir / "console.log"
+                        new_file_path = new_dir / "console.log"
                         if hasattr(self.console_interceptor, "file") and self.console_interceptor.file and not self.console_interceptor.file.closed:
-                            self.console_interceptor.file.flush()
-                            self.console_interceptor.file.close()
-                            self.console_interceptor.file = open(self.console_interceptor.file_path, "a", encoding="utf-8")
+                            new_file = open(new_file_path, "a", encoding="utf-8")
+                            try:
+                                self.console_interceptor.file.flush()
+                                self.console_interceptor.file.close()
+                            except Exception:
+                                pass
+                            self.console_interceptor.file_path = new_file_path
+                            self.console_interceptor.file = new_file
+
                         
                 except Exception as e:
                     import logging

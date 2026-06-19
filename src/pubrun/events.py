@@ -91,3 +91,22 @@ class EventStream:
                 except Exception:
                     pass
                 self._file = None
+
+    def migrate_directory(self, new_dir: Path) -> None:
+        """Close the current stream file, update the path to the new directory,
+        and reopen the file in append mode. Safe to call concurrently."""
+        with self._lock:
+            if self._file:
+                try:
+                    self._file.flush()
+                    self._file.close()
+                except Exception:
+                    pass
+                self._file = None
+            self.stream_path = new_dir / "events.jsonl"
+            try:
+                self._file = open(self.stream_path, "a", encoding="utf-8")
+            except Exception as e:
+                logger.debug(f"pubrun failed to open migrated event stream: {e}")
+                self._file = None
+

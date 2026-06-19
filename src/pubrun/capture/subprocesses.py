@@ -96,9 +96,16 @@ class SubprocessSpy:
         if getattr(_spy_local, "bypass", False):
             return _original_popen_init(self, args, *sys_args, **kwargs)
             
-        if len(SubprocessSpy._records) >= SubprocessSpy._max_records:
-            SubprocessSpy._truncated = True
+        with SubprocessSpy._lock:
+            if len(SubprocessSpy._records) >= SubprocessSpy._max_records:
+                SubprocessSpy._truncated = True
+                should_record = False
+            else:
+                should_record = True
+
+        if not should_record:
             return _original_popen_init(self, args, *sys_args, **kwargs)
+
             
         start_time = time.time()
         argv_list = SubprocessSpy._safe_shlex_split(args)
@@ -154,9 +161,16 @@ class SubprocessSpy:
         if getattr(_spy_local, "bypass", False):
             return _original_os_system(command)
             
-        if len(SubprocessSpy._records) >= SubprocessSpy._max_records:
-            SubprocessSpy._truncated = True
+        with SubprocessSpy._lock:
+            if len(SubprocessSpy._records) >= SubprocessSpy._max_records:
+                SubprocessSpy._truncated = True
+                should_record = False
+            else:
+                should_record = True
+
+        if not should_record:
             return _original_os_system(command)
+
             
         start_time = time.time()
         argv_list = SubprocessSpy._safe_shlex_split(command)

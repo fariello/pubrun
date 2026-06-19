@@ -188,3 +188,81 @@ class TestEventStreamConstructorFailure:
         # Should not raise
         stream.emit("annotation", name="lost_event", payload={"key": "value"})
         stream.close()  # Also should not raise
+
+
+class TestEventStreamMigration:
+    """Tests for event stream directory migration."""
+
+    def test_migrate_directory_directly(self, tmp_path):
+        dir1 = tmp_path / "dir1"
+        dir1.mkdir()
+        dir2 = tmp_path / "dir2"
+        dir2.mkdir()
+
+        config = {"events": {"enabled": True}}
+        stream = EventStream(dir1, config=config)
+        stream.emit("annotation", name="event1")
+        
+        # Migrate
+        stream.migrate_directory(dir2)
+        stream.emit("annotation", name="event2")
+        stream.close()
+
+        # Check dir1
+        assert (dir1 / "events.jsonl").exists()
+        lines1 = (dir1 / "events.jsonl").read_text().splitlines()
+        assert len(lines1) == 1
+        assert json.loads(lines1[0])["name"] == "event1"
+
+        # Check dir2
+        assert (dir2 / "events.jsonl").exists()
+        lines2 = (dir2 / "events.jsonl").read_text().splitlines()
+        assert len(lines2) == 1
+        assert json.loads(lines2[0])["name"] == "event2"
+
+    def test_tracker_merge_and_migrate(self, tmp_path, monkeypatch):
+        from pubrun.tracker import Run
+        dir1 = tmp_path / "dir1"
+        dir2 = tmp_path / "dir2"
+        
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: dir1)
+        run = Run(overrides={"events": {"enabled": True}})
+        run.event_stream.emit("annotation", name="before_migration")
+        
+        # Trigger directory migration via config overrides
+        run._merge_and_migrate({"core": {"output_dir": str(dir2)}})
+        run.event_stream.emit("annotation", name="after_migration")
+        run.stop()
+
+        # Check original directory no longer has the run directory (as it was moved)
+        orig_events = list(dir1.rglob("events.jsonl"))
+        assert len(orig_events) == 0
+
+        # Check new directory has both events (due to dir copy/move + migrate)
+        new_events = list(dir2.rglob("events.jsonl"))
+        assert len(new_events) == 1
+        new_content = new_events[0].read_text()
+        assert "before_migration" in new_content
+        assert "after_migration" in new_content
+
+
+class TestEventStreamCriticalCap:
+    """Tests for critical event stream capping."""
+
+    def test_critical_event_cap(self, tmp_path):
+        config = {"events": {"enabled": True, "max_tracked_events": 1}}
+        stream = EventStream(tmp_path, config=config)
+        # Mock max_critical_events to a small number
+        stream._max_critical_events = 3
+
+        # Emit 5 critical events
+        for i in range(5):
+            stream.emit("annotation", name=f"critical_{i}")
+        stream.close()
+
+        lines = (tmp_path / "events.jsonl").read_text().splitlines()
+        assert len(lines) == 3
+        assert json.loads(lines[0])["name"] == "critical_0"
+        assert json.loads(lines[1])["name"] == "critical_1"
+        assert json.loads(lines[2])["name"] == "critical_2"
+
