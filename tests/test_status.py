@@ -565,3 +565,73 @@ class TestParseSelection:
         from pubrun.status import _parse_selection
         items = ["a", "b", "c", "d"]
         assert _parse_selection("1-4", items) == ["a", "b", "c", "d"]
+
+
+class TestStatusFormattingHelpers:
+    """Unit tests for the private formatting helpers in status.py."""
+
+    def test_format_elapsed(self):
+        from pubrun.status import _format_elapsed
+        assert _format_elapsed(None) == "-"
+        assert _format_elapsed(0) == "0s"
+        assert _format_elapsed(45.6) == "46s"
+        assert _format_elapsed(125) == "2m05s"
+        assert _format_elapsed(3665) == "1h01m"
+        assert _format_elapsed(-10) == "-10s"
+
+    def test_format_timestamp(self):
+        from pubrun.status import _format_timestamp
+        assert _format_timestamp(None) == "-"
+        assert len(_format_timestamp(1717156800.0)) > 0  # e.g. "2024-05-31 14:00" depending on timezone
+
+    def test_format_bytes(self):
+        from pubrun.status import _format_bytes
+        assert _format_bytes(None) == "-"
+        assert _format_bytes(500) == "500B"
+        assert _format_bytes(1024) == "1KB"
+        assert _format_bytes(1024 * 1024 * 1.5) == "1.5MB"
+        assert _format_bytes(1024 * 1024 * 1024 * 2.35) == "2.35GB"
+
+    def test_truncate(self):
+        from pubrun.status import _truncate
+        assert _truncate("", 5) == ""
+        assert _truncate("hello", 10) == "hello"
+        assert _truncate("hello world", 5) == "hell…"
+
+    def test_status_marker(self):
+        from pubrun.status import _status_marker, STATUS_COMPLETED, STATUS_FAILED
+        completed_marker = _status_marker(STATUS_COMPLETED)
+        assert STATUS_COMPLETED in completed_marker
+        assert "\033[" in completed_marker  # verify ANSI code present
+        
+        failed_marker = _status_marker(STATUS_FAILED)
+        assert STATUS_FAILED in failed_marker
+        assert "\033[" in failed_marker
+
+    def test_dir_size(self, tmp_path):
+        from pubrun.status import _dir_size
+        # Nonexistent dir
+        assert _dir_size(tmp_path / "nonexistent") == 0
+        
+        # Empty dir
+        d = tmp_path / "empty_dir"
+        d.mkdir()
+        assert _dir_size(d) == 0
+        
+        # Dir with files
+        f1 = d / "file1.txt"
+        f1.write_bytes(b"12345")
+        f2 = d / "file2.txt"
+        f2.write_bytes(b"hello")
+        assert _dir_size(d) == 10
+
+    def test_format_age(self):
+        from pubrun.status import _format_age
+        assert _format_age(None) == "unknown"
+        assert _format_age(30) == "0m ago"
+        assert _format_age(120) == "2m ago"
+        assert _format_age(3600) == "1h ago"
+        assert _format_age(86400) == "1 day ago"
+        assert _format_age(86400 * 3) == "3 days ago"
+        assert _format_age(-5) == "0m ago"
+

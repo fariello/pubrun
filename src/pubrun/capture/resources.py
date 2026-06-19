@@ -59,6 +59,7 @@ class ResourceWatcher(threading.Thread):
         self.interval = float(interval_seconds)
         self.max_failures = max_failures
         self._stop_event = threading.Event()
+        self._lock = threading.Lock()
         
         self.peak_rss_bytes = 0
         self.end_rss_bytes = 0
@@ -67,6 +68,7 @@ class ResourceWatcher(threading.Thread):
         self._last_clock = None
         self._sys_plat = sys.platform
         self._consecutive_failures = 0
+
     
     def _poll_rss(self) -> int:
         if self._sys_plat == "win32":
@@ -112,18 +114,19 @@ class ResourceWatcher(threading.Thread):
         
         updated = False
         
-        if rss > 0:
-            self._consecutive_failures = 0
-            if rss > self.peak_rss_bytes:
-                self.peak_rss_bytes = rss
-            updated = True
-        else:
-            self._consecutive_failures += 1
-            if self._consecutive_failures >= self.max_failures:
-                self._stop_event.set() # Soft-abort the daemon purely for safety; OS hook is broken.
-            
-        if cpu_pct > self.peak_cpu_percent:
-            self.peak_cpu_percent = cpu_pct
+        with self._lock:
+            if rss > 0:
+                self._consecutive_failures = 0
+                if rss > self.peak_rss_bytes:
+                    self.peak_rss_bytes = rss
+                updated = True
+            else:
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= self.max_failures:
+                    self._stop_event.set() # Soft-abort the daemon purely for safety; OS hook is broken.
+                
+            if cpu_pct > self.peak_cpu_percent:
+                self.peak_cpu_percent = cpu_pct
             
         if updated or cpu_pct > 0:
             if getattr(self.run_tracker, "event_stream", None):
@@ -139,15 +142,22 @@ class ResourceWatcher(threading.Thread):
         # If it's still alive (stuck in I/O), skip to avoid concurrent field access.
         if not self.is_alive():
             self._update_metrics()
-            self.end_rss_bytes = self._poll_rss()
-            if self.end_rss_bytes > self.peak_rss_bytes:
-                self.peak_rss_bytes = self.end_rss_bytes
+            end_rss = self._poll_rss()
+            with self._lock:
+                self.end_rss_bytes = end_rss
+                if self.end_rss_bytes > self.peak_rss_bytes:
+                    self.peak_rss_bytes = self.end_rss_bytes
 
     def to_manifest_dict(self) -> Dict[str, Any]:
         """Build the ``resources`` manifest section dict."""
+        with self._lock:
+            peak_rss = self.peak_rss_bytes
+            end_rss = self.end_rss_bytes
+            peak_cpu = self.peak_cpu_percent
         return {
-            "peak_rss_bytes": self.peak_rss_bytes if self.peak_rss_bytes > 0 else None,
-            "end_rss_bytes": self.end_rss_bytes if self.end_rss_bytes > 0 else None,
-            "peak_cpu_percent": self.peak_cpu_percent if self.peak_cpu_percent > 0 else None,
+            "peak_rss_bytes": peak_rss if peak_rss > 0 else None,
+            "end_rss_bytes": end_rss if end_rss > 0 else None,
+            "peak_cpu_percent": peak_cpu if peak_cpu > 0 else None,
             "capture_state": {"status": "complete"}
         }
+

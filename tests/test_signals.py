@@ -376,3 +376,82 @@ class TestFinalizeActiveRun:
         monkeypatch.setattr(pubrun.tracker, "_active_run", None)
         # Must not raise
         _finalize_active_run()
+
+
+class TestMacosHardwareSpying:
+    """P3-T8: Verify macOS hardware subprocess calls are wrapped in disable_spy."""
+
+    def test_macos_hardware_calls_wrapped_in_disable_spy(self, monkeypatch):
+        from pubrun.capture.subprocesses import _spy_local
+        import pubrun.capture.hardware as hardware
+        import subprocess
+
+        monkeypatch.setattr(hardware, "sys", type("sys_mock", (), {"platform": "darwin"})())
+
+        checked_bypass = []
+
+        def mock_check_output(*args, **kwargs):
+            checked_bypass.append(getattr(_spy_local, "bypass", False))
+            return "Apple M3" if "sysctl" in args[0][0] else "SPDisplaysDataType output"
+
+        monkeypatch.setattr(subprocess, "check_output", mock_check_output)
+
+        cpu_model = hardware._get_cpu_model()
+        assert cpu_model == "Apple M3"
+        assert len(checked_bypass) == 1
+        assert checked_bypass[0] is True
+
+
+class TestLethalSignalFinalization:
+    """P3-T5: Verify lethal signals (SIGTERM/SIGHUP) trigger run finalization."""
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="SIGTERM is Unix-specific")
+    def test_lethal_signal_finalization_sigterm(self, tmp_path):
+        import subprocess
+        import sys
+        import time
+        from pathlib import Path
+        import json
+        import signal
+
+        script = f"""
+import time, sys
+from pathlib import Path
+import pubrun
+
+# Start pubrun
+run = pubrun.start(events={{"enabled": True}})
+print(run.run_dir, flush=True)
+
+try:
+    time.sleep(10)
+except KeyboardInterrupt:
+    pass
+"""
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        run_dir_str = proc.stdout.readline().strip()
+        assert run_dir_str, "Subprocess failed to print run directory"
+        run_dir = Path(run_dir_str)
+
+        time.sleep(0.5)
+        proc.send_signal(signal.SIGTERM)
+
+        # Wait for exit
+        proc.wait(timeout=5)
+
+        manifest_path = run_dir / "manifest.json"
+        assert manifest_path.exists(), "manifest.json was not created on SIGTERM!"
+
+        with open(manifest_path, "r") as f:
+            manifest = json.load(f)
+
+        assert manifest["status"]["outcome"] == "interrupted", "Outcome should be interrupted"
+        assert len(manifest["signals"]["signals_received"]) >= 1
+        assert manifest["signals"]["signals_received"][0]["signal_name"] == "SIGTERM"
+
