@@ -51,3 +51,33 @@ def test_tui_missing_dependencies_prints_notice(capsys):
             captured = capsys.readouterr()
             assert "pubrun is by default zero-dependency based" in captured.err
             assert "Run `pip install textual rich`" in captured.err
+
+
+def test_tui_toml_serialization():
+    """Verify that the dict_to_toml helper serializes configurations correctly."""
+    from pubrun.tui.widgets.config import dict_to_toml
+    
+    test_dict = {
+        "core": {
+            "profile": "default",
+            "auto_start": True,
+            "sample_int": 15
+        },
+        "capture": {
+            "environment": {
+                "mode": "filtered"
+            }
+        }
+    }
+    
+    toml_str = dict_to_toml(test_dict)
+    
+    # Assert section headers are generated correctly
+    assert "[core]" in toml_str
+    assert "[capture.environment]" in toml_str
+    
+    # Assert values are serialized correctly
+    assert 'profile = "default"' in toml_str
+    assert 'auto_start = true' in toml_str
+    assert 'sample_int = 15' in toml_str
+    assert 'mode = "filtered"' in toml_str

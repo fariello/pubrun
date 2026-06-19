@@ -170,6 +170,14 @@ pubrun run --mode quiet -- python script.py
 pubrun run --mode nopatch -- python train.py
 ```
 
+### `pubrun tui`
+Launches the interactive TUI manager for exploring, archiving, diffing, and cleaning runs.
+Note: Requires optional TUI dependencies (installable via `pip install "pubrun[tui]"` or `pip install textual rich`).
+```bash
+pubrun tui              # Open the interactive TUI GUI manager
+pubrun tui --dir /path  # Scan a non-default output directory
+```
+
 ### Diagnostic Flags
 
 | Flag | Description |
