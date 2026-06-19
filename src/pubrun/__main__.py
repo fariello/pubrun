@@ -460,6 +460,10 @@ def main() -> None:
     run_parser.add_argument("--mode", type=str, choices=["auto", "noauto", "nopatch", "quiet"], default="auto", help="Import mode for the child process (default: auto).")
     run_parser.add_argument("command_args", nargs=argparse.REMAINDER, metavar="-- COMMAND", help="Command to execute (use -- to separate pubrun flags from the target command).")
     
+    # ---------------- TUI Subparser ----------------
+    tui_parser = subparsers.add_parser("tui", help="Launch the interactive pubrun TUI manager.", description="Launch the interactive pubrun TUI manager.")
+    tui_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
+    
     # ---------------- Diagnostic Flags ----------------
     parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Create an annotated `.pubrun.toml` configuration file.")
     parser.add_argument("--show-config", action="store_true", help="Print the default configuration to the terminal.")
@@ -523,6 +527,21 @@ def main() -> None:
             getattr(args, "yes", False),
             getattr(args, "dry_run", False),
         )
+        executed = True
+
+    elif args.command == "tui":
+        try:
+            from pubrun.tui.app import PubrunTUIApp
+            app = PubrunTUIApp(output_dir=getattr(args, "dir", None))
+            app.run()
+        except ImportError:
+            print(
+                "pubrun is by default zero-dependency based to keep it lean and compatible to use; "
+                "however, using the GUI based tool does require additional libraries.\n"
+                "Run `pip install textual rich` (or `pip install \"pubrun[tui]\"`) to run the gui.",
+                file=sys.stderr
+            )
+            sys.exit(1)
         executed = True
 
     elif args.command == "run":
