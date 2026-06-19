@@ -265,6 +265,144 @@ def _run_clean(output_dir: Optional[str], older_than: Optional[str], status: Opt
         dry_run=dry_run,
     )
 
+def _run_combined(run_ids: list, dir_path: Optional[str], output: Optional[str], yes: bool, force: bool) -> None:
+    """Interleave stdout/stderr logs from one or more runs."""
+    import re
+    from pubrun.status import scan_runs, find_run
+
+    TIMESTAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\] (.*)$")
+
+    if not run_ids:
+        all_runs = scan_runs(dir_path)
+        if not all_runs:
+            print("Error: No runs found.", file=sys.stderr)
+            sys.exit(1)
+        target_runs = [all_runs[0]]
+    else:
+        target_runs = []
+        for rid in run_ids:
+            run_info = find_run(rid, dir_path)
+            if not run_info:
+                print(f"Error: Run ID '{rid}' not found or ambiguous.", file=sys.stderr)
+                sys.exit(1)
+            target_runs.append(run_info)
+
+    # Calculate total size of stdout.log and stderr.log files
+    total_size = 0
+    for r in target_runs:
+        for suffix in ("stdout.log", "stderr.log"):
+            p = r.run_dir / suffix
+            if p.exists():
+                total_size += p.stat().st_size
+
+    if total_size > 500 * 1024 * 1024:
+        if not force:
+            print(f"Error: Combined log size ({total_size / (1024*1024):.1f} MB) exceeds 500 MB limit. Use --force to proceed.", file=sys.stderr)
+            sys.exit(1)
+
+    if total_size > 250 * 1024 * 1024:
+        if not yes:
+            print(f"Warning: Combined log size ({total_size / (1024*1024):.1f} MB) exceeds 250 MB.", file=sys.stderr)
+            try:
+                response = input("Proceed? [y/N] ").strip().lower()
+                if response not in ("y", "yes"):
+                    print("Operation cancelled.", file=sys.stderr)
+                    sys.exit(0)
+            except (KeyboardInterrupt, EOFError):
+                print("\nOperation cancelled.", file=sys.stderr)
+                sys.exit(0)
+
+    # Check if any log files exist and if they contain any timestamps
+    has_any_timestamps = False
+    for r in target_runs:
+        for suffix in ("stdout.log", "stderr.log"):
+            p = r.run_dir / suffix
+            if p.exists():
+                try:
+                    with open(p, "r", encoding="utf-8", errors="replace") as f:
+                        for _ in range(50):  # Check first 50 lines to detect standard mode
+                            line = f.readline()
+                            if not line:
+                                break
+                            if TIMESTAMP_RE.match(line):
+                                has_any_timestamps = True
+                                break
+                except Exception:
+                    pass
+            if has_any_timestamps:
+                break
+        if has_any_timestamps:
+            break
+
+    out_file = None
+    if output:
+        try:
+            out_file = open(output, "w", encoding="utf-8")
+        except Exception as e:
+            print(f"Error: Failed to open output file '{output}': {e}", file=sys.stderr)
+            sys.exit(1)
+
+    def _parse_log_file(file_path: Path, run_id: Optional[str], stream: str, multiple_runs: bool) -> list:
+        entries = []
+        current_ts = ""
+        prefix = f"[{run_id}][{stream}] " if multiple_runs else f"[{stream}] "
+        if not file_path.exists():
+            return entries
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line_str = line.rstrip("\r\n")
+                    m = TIMESTAMP_RE.match(line_str)
+                    if m:
+                        ts, msg = m.groups()
+                        current_ts = ts
+                        # Keep the prefix and the entire original line (including its timestamp)
+                        entries.append((ts, prefix + line_str))
+                    else:
+                        entries.append((current_ts, prefix + line_str))
+        except Exception as e:
+            print(f"Warning: Failed to read log file {file_path}: {e}", file=sys.stderr)
+        return entries
+
+    try:
+        if not has_any_timestamps:
+            print("Warning: Logs lack timestamps. Falling back to sequential concatenation. True interleaving requires capture_mode = \"standard\".", file=sys.stderr)
+            for r in target_runs:
+                for stream in ("stdout", "stderr"):
+                    p = r.run_dir / f"{stream}.log"
+                    if p.exists():
+                        prefix = f"[{r.run_id}][{stream}] " if len(target_runs) > 1 else f"[{stream}] "
+                        with open(p, "r", encoding="utf-8", errors="replace") as f:
+                            for line in f:
+                                out_line = prefix + line.rstrip("\r\n")
+                                if out_file:
+                                    out_file.write(out_line + "\n")
+                                else:
+                                    print(out_line)
+        else:
+            all_entries = []
+            multiple_runs = len(target_runs) > 1
+            for r in target_runs:
+                for stream in ("stdout", "stderr"):
+                    p = r.run_dir / f"{stream}.log"
+                    if p.exists():
+                        all_entries.extend(_parse_log_file(p, r.run_id, stream, multiple_runs))
+            
+            # Sort chronologically by timestamp
+            all_entries.sort(key=lambda x: x[0])
+            for _, line in all_entries:
+                if out_file:
+                    out_file.write(line + "\n")
+                else:
+                    print(line)
+        if out_file:
+            print(f"[OK] Combined logs written to {output}", file=sys.stderr)
+    except BrokenPipeError:
+        pass
+    finally:
+        if out_file:
+            out_file.close()
+
 
 def _show_info() -> None:
     """Print hardware, invocation, and import-mode diagnostics for debugging."""
@@ -452,6 +590,14 @@ def main() -> None:
     clean_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt (delete all matching runs).")
     clean_parser.add_argument("--dry-run", action="store_true", help="Show what would be deleted without actually deleting.")
 
+    # ---------------- Combined Subparser ----------------
+    combined_parser = subparsers.add_parser("combined", help="Interleave stdout/stderr logs from one or more runs.", description="Interleave stdout/stderr logs from one or more runs.")
+    combined_parser.add_argument("run_ids", type=str, nargs="*", help="Run IDs (or prefixes) to combine. Defaults to the latest run if omitted.")
+    combined_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
+    combined_parser.add_argument("--output", type=str, default=None, metavar="FILE", help="Write combined logs to this file instead of stdout.")
+    combined_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt for files > 250 MB.")
+    combined_parser.add_argument("-f", "--force", action="store_true", help="Force execution for files > 500 MB.")
+
     # ---------------- Cite Subparser ----------------
     cite_parser = subparsers.add_parser("cite", help="Generate a formatted academic citation for pubrun.", description="Generate a formatted academic citation for pubrun.")
     cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Citation format (default: apa).")
@@ -526,6 +672,16 @@ def main() -> None:
             getattr(args, "status", None),
             getattr(args, "yes", False),
             getattr(args, "dry_run", False),
+        )
+        executed = True
+
+    elif args.command == "combined":
+        _run_combined(
+            args.run_ids,
+            args.dir,
+            args.output,
+            args.yes,
+            args.force
         )
         executed = True
 

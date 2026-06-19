@@ -101,3 +101,18 @@ def test_resource_watcher_to_manifest_dict_zeros():
     assert result["end_rss_bytes"] is None
     assert result["peak_cpu_percent"] is None
     assert result["capture_state"]["status"] == "complete"
+
+
+def test_resource_watcher_join(tmp_path, monkeypatch):
+    """Verify that stop() calls join and the thread stops."""
+    from pubrun import start
+
+    monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+    tracker = start(capture={"resources": {"depth": "standard", "sample_interval_seconds": 0.05}})
+    watcher = tracker.resource_watcher
+    assert watcher is not None
+    assert watcher.is_alive()
+    
+    tracker.stop()
+    assert not watcher.is_alive()
+

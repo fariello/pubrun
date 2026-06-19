@@ -2,7 +2,7 @@
 
 # pubrun CLI Reference
 
-The `pubrun` CLI is accessible via `pubrun <command>` or `python -m pubrun <command>`. It provides nine commands for post-execution analysis and diagnostic flags.
+The `pubrun` CLI is accessible via `pubrun <command>` or `python -m pubrun <command>`. It provides ten commands for post-execution analysis and diagnostic flags.
 
 ---
 
@@ -184,6 +184,35 @@ pubrun clean                              # Interactive: list and confirm
 pubrun clean --older-than 7d --yes        # Non-interactive: delete completed runs > 7 days
 pubrun clean --status crashed,ghost --yes # Delete all crashed/ghost runs
 pubrun clean --dry-run                    # Preview without deleting
+```
+
+---
+
+### `combined` — Log Interleaver
+
+Post-execution command that chronologically interleaves stdout and stderr logs from one or more runs using the log-line timestamps written in `standard` or `deep` console mode.
+
+```bash
+pubrun combined [RUN_ID ...] [--dir PATH] [--output FILE] [-y|--yes] [-f|--force]
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--dir PATH` | Override the output directory to scan (default: configured `output_dir` or `./runs`) |
+| `--output FILE` | Write combined logs to this file instead of stdout |
+| `-y`, `--yes` | Skip confirmation prompt for files > 250 MB |
+| `-f`, `--force` | Force execution for files > 500 MB |
+
+- If multiple run IDs are supplied, each output line is prefixed with the run ID and stream origin, e.g. `[runA][stdout]`.
+- If a single run is combined, each output line is prefixed with the stream origin only, e.g. `[stdout]`.
+- If the logs lack timestamps (captured with `"basic"` console mode), it falls back to sequential concatenation and prints a warning.
+
+**Example:**
+```bash
+pubrun combined a3f9               # Interleave stdout/stderr for run a3f9
+pubrun combined a3f9 b2c1 --output all.log  # Combine multiple runs into a file
 ```
 
 ---

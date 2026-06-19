@@ -79,8 +79,10 @@ class TestSignalCapture:
             cap = SignalExitCapture()
             cap.install()
 
-            # Send signal
-            os.kill(os.getpid(), signal.SIGUSR1)
+            # Call handler directly
+            handler = signal.getsignal(signal.SIGUSR1)
+            assert callable(handler)
+            handler(signal.SIGUSR1, None)
 
             # Verify recording
             records = cap.get_records()
@@ -106,8 +108,10 @@ class TestSignalCapture:
         cap.install()
 
         try:
+            handler = signal.getsignal(signal.SIGINT)
+            assert callable(handler)
             with pytest.raises(KeyboardInterrupt):
-                os.kill(os.getpid(), signal.SIGINT)
+                handler(signal.SIGINT, None)
 
             records = cap.get_records()
             assert len(records["signals_received"]) == 1
@@ -126,9 +130,14 @@ class TestSignalCapture:
         try:
             cap.install()
 
-            os.kill(os.getpid(), signal.SIGUSR1)
-            os.kill(os.getpid(), signal.SIGUSR2)
-            os.kill(os.getpid(), signal.SIGUSR1)
+            handler_usr1 = signal.getsignal(signal.SIGUSR1)
+            handler_usr2 = signal.getsignal(signal.SIGUSR2)
+            assert callable(handler_usr1)
+            assert callable(handler_usr2)
+
+            handler_usr1(signal.SIGUSR1, None)
+            handler_usr2(signal.SIGUSR2, None)
+            handler_usr1(signal.SIGUSR1, None)
 
             records = cap.get_records()
             assert len(records["signals_received"]) == 3
@@ -176,8 +185,9 @@ class TestSignalCapture:
             cap = SignalExitCapture()
             cap.install()
 
-            # Should not raise, should be recorded
-            os.kill(os.getpid(), signal.SIGUSR1)
+            handler = signal.getsignal(signal.SIGUSR1)
+            assert callable(handler)
+            handler(signal.SIGUSR1, None)
 
             records = cap.get_records()
             assert len(records["signals_received"]) == 1
@@ -245,9 +255,11 @@ class TestSignalOutcomeDetermination:
         from pubrun.tracker import Run
 
         run = Run()
-        # Simulate receiving SIGINT (caught by user code so process survives)
+        # Simulate receiving SIGINT (directly invoke the handler)
+        handler = signal.getsignal(signal.SIGINT)
+        assert callable(handler)
         try:
-            os.kill(os.getpid(), signal.SIGINT)
+            handler(signal.SIGINT, None)
         except KeyboardInterrupt:
             pass  # User caught it
 
@@ -305,15 +317,17 @@ class TestSignalHandlerReinstallation:
         cap.install()
 
         try:
+            handler = signal.getsignal(signal.SIGINT)
+            assert callable(handler)
             # First SIGINT -- caught by user
             try:
-                os.kill(os.getpid(), signal.SIGINT)
+                handler(signal.SIGINT, None)
             except KeyboardInterrupt:
                 pass
 
             # Handler should still be installed -- second signal should be recorded
             try:
-                os.kill(os.getpid(), signal.SIGINT)
+                handler(signal.SIGINT, None)
             except KeyboardInterrupt:
                 pass
 

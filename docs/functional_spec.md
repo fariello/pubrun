@@ -2,7 +2,7 @@
 
 # pubrun Functional Specification
 
-> Status: v0.3.0
+> Status: v1.0.0
 > Purpose: Defines functional requirements aligned with implementation.
 > Audience: Developers and contributors.
 
@@ -189,7 +189,6 @@ The following categories are planned but have no code or config:
 
 - **Extensions** — Framework plugin model for custom capture engines.
 - **Artifacts** — User-registered output file tracking.
-- **Combined console log** — Interleaved stdout+stderr in a single `combined.log`.
 
 Each category MUST be independently configurable.
 
@@ -511,6 +510,20 @@ pubrun run [--mode MODE] -- COMMAND [ARGS...]
 - The double dash (`--`) separates pubrun wrapper options from the target command.
 
 Use cases: CI pipelines, shell scripts, Slurm submission scripts, and any case where source code should remain unchanged but import behavior needs control.
+
+### 11.14 Log Interleaving (`combined`)
+
+Post-execution command that chronologically interleaves stdout and stderr logs from one or more runs.
+
+```
+pubrun combined [RUN_IDS ...] [--dir PATH] [--output FILE] [-y|--yes] [-f|--force]
+```
+
+- Accepts one or more run IDs. If omitted, defaults to the most recent run in `./runs/`.
+- Parses ISO 8601 timestamps written in standard/deep console modes to chronological order.
+- Prefixes each line with stream origin: `[stdout]` / `[stderr]` (and run ID if multiple runs).
+- Size thresholds: warns at 250 MB (skipped via `--yes`), aborts at 500 MB (overridden via `--force`).
+- If logs lack timestamps, falls back to sequential concatenation.
 
 ---
 

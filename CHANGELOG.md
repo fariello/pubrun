@@ -4,12 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.4.0] - Unreleased
+## [1.0.0] - 2026-06-19
 
 ### Added
 
 - **Interactive TUI Manager (`pubrun tui`)**: Launch a full terminal user interface manager to browse, filter, search, inspect, and clean up historical runs interactively.
 - **TUI Optional Dependencies**: Support textual/rich optional installs via `pip install "pubrun[tui]"`. Core package remains zero-dependency.
+- **`pubrun combined` CLI Command**: Interleave stdout and stderr logs chronologically across one or more runs using prepended timestamps. Enforces safety thresholds (warns at 250 MB, aborts at 500 MB unless `--force` is used). Falls back to sequential concatenation for logs without timestamps.
+- **Value-Scanning Redaction Heuristics**: Recursively inspects nested JSON environment values and CLI arguments to redact connection string passwords, OpenAI keys (`sk-...`), and bearer authorization tokens.
+- **Timestamped Console Capture (`standard` mode)**: Console log files recorded in `standard` and `deep` capture modes now prepend ISO 8601 timestamps to each line.
 
 ### Fixed
 
@@ -22,6 +25,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Tests
 
+- **Signal Test Hardening**: Replaced brittle signal tests that send OS signals asynchronously using `os.kill` with direct, deterministic signal capture handler invocations.
+- **ResourceWatcher Join Coverage**: Added test verifying that `stop()` successfully joins the resource watcher thread.
+- **`report/templates.py` Unit Tests**: Added unit tests for academic paragraph generation templates and LaTeX/Markdown formatting.
+- **`pubrun combined` Integration Tests**: Added comprehensive test suite for log interleaving, size warning prompts, basic-mode fallback, and output options.
 - Dedicated unit tests for `writer.py` (`_atomic_json_write` and `ArtifactWriter`).
 - Unit tests for private status formatting helpers in `status.py`.
 - Regression tests for `EventStream` migration, critical event throttling capping, lethal signal finalization, and macOS `disable_spy()` hardware probe wrapping.
