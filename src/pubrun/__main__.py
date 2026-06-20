@@ -2,6 +2,7 @@ import argparse
 import sys
 import os
 import json
+import time
 import tempfile
 import subprocess
 from pathlib import Path
@@ -44,7 +45,13 @@ class RunInProgressOrCrashedError(Exception):
             self.run_info = None
 
 
-def _get_manifest_path(run_dir: str) -> str:
+def _get_manifest_path(
+    run_dir: str,
+    filter_str: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    older_than: Optional[str] = None,
+    exit_code: Optional[int] = None,
+) -> str:
     """Resolve the path to a manifest.json, auto-detecting the latest run if needed."""
     if run_dir:
         # Resolve via find_run first
@@ -70,7 +77,7 @@ def _get_manifest_path(run_dir: str) -> str:
 
         raise FileNotFoundError(f"Could not find manifest file at '{manifest_path}'.")
     else:
-        # Auto-detect latest run
+        # Auto-detect latest run matching the filters
         try:
             from pubrun.config import resolve_config
             config = resolve_config()
@@ -83,18 +90,24 @@ def _get_manifest_path(run_dir: str) -> str:
             print(f"Error: No --run directory provided and '{runs_dir}' directory not found.", file=sys.stderr)
             sys.exit(1)
 
-        # Discover all subdirectories
-        subdirs = [d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("pubrun-")]
-        if not subdirs:
-            print(f"Error: Run directory '{runs_dir}' is empty.", file=sys.stderr)
+        from pubrun.status import scan_runs, filter_runs
+        all_runs = scan_runs(str(runs_dir))
+        matched = filter_runs(
+            all_runs,
+            filter_str=filter_str,
+            status_filter=status_filter,
+            limit=1,  # We only need the latest matching run
+            older_than=older_than,
+            exit_code=exit_code,
+        )
+        if not matched:
+            print("Error: No runs match the filter criteria.", file=sys.stderr)
             sys.exit(1)
 
-        # Pick the absolute latest run by mtime
-        latest_run = max(subdirs, key=lambda d: d.stat().st_mtime)
-
+        latest_run = matched[0].run_dir
         manifest_path = latest_run / "manifest.json"
         if manifest_path.exists():
-            print(f"[*] Auto-detected latest run: {latest_run}", file=sys.stderr)
+            print(f"[*] Auto-detected matching run: {latest_run}", file=sys.stderr)
             return str(manifest_path)
 
         # Check if lock file exists in the latest run
@@ -105,13 +118,26 @@ def _get_manifest_path(run_dir: str) -> str:
         raise FileNotFoundError(f"Could not find manifest file at '{manifest_path}'.")
 
 
-def _run_methods(run_dir: str, format_type: str) -> None:
+def _run_methods(
+    run_dir: str,
+    format_type: str,
+    filter_str: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    older_than: Optional[str] = None,
+    exit_code: Optional[int] = None,
+) -> None:
     """Generate and print an academic 'Computational Methods' paragraph."""
     try:
         from pubrun.report.methods import generate_report
         from pubrun.report.utils import hydrate_manifest
         
-        manifest_path = _get_manifest_path(run_dir)
+        manifest_path = _get_manifest_path(
+            run_dir,
+            filter_str=filter_str,
+            status_filter=status_filter,
+            older_than=older_than,
+            exit_code=exit_code,
+        )
 
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
@@ -139,10 +165,22 @@ def _run_methods(run_dir: str, format_type: str) -> None:
         sys.exit(1)
 
 
-def _run_rerun(run_dir: str) -> None:
+def _run_rerun(
+    run_dir: str,
+    filter_str: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    older_than: Optional[str] = None,
+    exit_code: Optional[int] = None,
+) -> None:
     """Print the shell command needed to reproduce a recorded run."""
     try:
-        manifest_path = _get_manifest_path(run_dir)
+        manifest_path = _get_manifest_path(
+            run_dir,
+            filter_str=filter_str,
+            status_filter=status_filter,
+            older_than=older_than,
+            exit_code=exit_code,
+        )
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
             
@@ -258,7 +296,18 @@ def _run_report(run_dir: str, depth: str) -> None:
                 try:
                     from datetime import datetime
                     dt = datetime.fromtimestamp(run_info.started_at_utc)
-                    started_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    started_date_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    elapsed = time.time() - run_info.started_at_utc
+                    days = int(elapsed // 86400)
+                    rem = elapsed % 86400
+                    hours = int(rem // 3600)
+                    rem = rem % 3600
+                    minutes = int(rem // 60)
+                    seconds = int(rem % 60)
+                    
+                    duration_str = f"{days}d {hours:02d}:{minutes:02d}:{seconds:02d}"
+                    started_str = f"{started_date_str} ({duration_str} {status})"
                 except Exception:
                     started_str = str(run_info.started_at_utc)
             print(f"  - Started:   {started_str}", file=sys.stderr)
@@ -266,7 +315,22 @@ def _run_report(run_dir: str, depth: str) -> None:
                 print(f"  - PID:       {run_info.pid}", file=sys.stderr)
             if run_info.hostname:
                 print(f"  - Host:      {run_info.hostname}", file=sys.stderr)
+            cwd_str = run_info.cwd if run_info.cwd else "-"
+            print(f"  - CWD:       {cwd_str}", file=sys.stderr)
             print("", file=sys.stderr)
+            
+            use_color = not os.environ.get("NO_COLOR", "")
+            bold = "\033[1m" if use_color else ""
+            red = "\033[91m" if use_color else ""
+            yellow = "\033[93m" if use_color else ""
+            rst = "\033[0m" if use_color else ""
+            
+            if status == "running":
+                print(f"Status: {bold}{yellow}STILL RUNNING{rst}\n", file=sys.stderr)
+            else:
+                print(f"Status: {bold}{red}CRASHED{rst}\n", file=sys.stderr)
+                from pubrun.status import close_out_crashed_run
+                close_out_crashed_run(run_dir_path, run_info.lock_data)
             
         # Tail error logs (last 10 lines)
         log_file = None
@@ -348,7 +412,16 @@ def _run_cite(style: str) -> None:
         sys.exit(1)
 
 
-def _run_status(run_id: Optional[str], output_dir: Optional[str], verbose: bool, filter_str: Optional[str] = None, limit: Optional[int] = None, status_filter: Optional[str] = None) -> None:
+def _run_status(
+    run_id: Optional[str],
+    output_dir: Optional[str],
+    verbose: bool,
+    filter_str: Optional[str] = None,
+    limit: Optional[int] = None,
+    status_filter: Optional[str] = None,
+    older_than: Optional[str] = None,
+    exit_code: Optional[int] = None,
+) -> None:
     """List runs or inspect a specific run."""
     from pubrun.status import (
         find_run,
@@ -356,6 +429,8 @@ def _run_status(run_id: Optional[str], output_dir: Optional[str], verbose: bool,
         render_short_list,
         render_verbose_list,
         scan_runs,
+        filter_runs,
+        close_out_crashed_run,
     )
 
     if run_id:
@@ -364,37 +439,24 @@ def _run_status(run_id: Optional[str], output_dir: Optional[str], verbose: bool,
         if run_info is None:
             print(f"Error: No run found matching '{run_id}'.", file=sys.stderr)
             sys.exit(1)
+        if run_info.status == "crashed" and (run_info.run_dir / ".pubrun.lock").exists():
+            close_out_crashed_run(run_info.run_dir, run_info.lock_data)
         print(render_inspect(run_info))
     else:
         # List all runs
         runs = scan_runs(output_dir)
+        runs = filter_runs(
+            runs,
+            filter_str=filter_str,
+            status_filter=status_filter,
+            limit=limit,
+            older_than=older_than,
+            exit_code=exit_code,
+        )
 
-        # 1. Filter by status
-        if status_filter:
-            allowed = [s.strip().lower() for s in status_filter.split(",")]
-            runs = [r for r in runs if r.status.lower() in allowed]
-
-        # 2. Filter by search string/regex
-        if filter_str:
-            import re
-            try:
-                rx = re.compile(filter_str, re.IGNORECASE)
-                runs = [r for r in runs if (
-                    (r.script and rx.search(r.script)) or
-                    (r.args and rx.search(r.args)) or
-                    (r.run_id and rx.search(r.run_id))
-                )]
-            except re.error:
-                q = filter_str.lower()
-                runs = [r for r in runs if (
-                    (r.script and q in r.script.lower()) or
-                    (r.args and q in r.args.lower()) or
-                    (r.run_id and q in r.run_id.lower())
-                )]
-
-        # 3. Limit
-        if limit is not None and limit > 0:
-            runs = runs[:limit]
+        for r in runs:
+            if r.status == "crashed" and (r.run_dir / ".pubrun.lock").exists():
+                close_out_crashed_run(r.run_dir, r.lock_data)
 
         if verbose:
             print(render_verbose_list(runs))
@@ -402,35 +464,43 @@ def _run_status(run_id: Optional[str], output_dir: Optional[str], verbose: bool,
             print(render_short_list(runs))
 
 
-def _run_clean(output_dir: Optional[str], older_than: Optional[str], status: Optional[str], yes: bool, dry_run: bool) -> None:
+def _run_clean(
+    output_dir: Optional[str],
+    older_than: Optional[str],
+    status: Optional[str],
+    yes: bool,
+    dry_run: bool,
+    filter_str: Optional[str] = None,
+    limit: Optional[int] = None,
+    exit_code: Optional[int] = None,
+) -> None:
     """Interactive or automatic cleanup of old run directories."""
     from pubrun.status import clean_runs
 
-    # Parse --older-than value (e.g. "7d", "24h", "30")
-    older_than_days: Optional[float] = None
-    if older_than:
-        val = older_than.strip().lower()
-        if val.endswith("d"):
-            older_than_days = float(val[:-1])
-        elif val.endswith("h"):
-            older_than_days = float(val[:-1]) / 24.0
-        else:
-            older_than_days = float(val)  # assume days
-
-    # Parse status filter
-    status_filter = None
-    if status:
-        status_filter = [s.strip() for s in status.split(",")]
-
     clean_runs(
         output_dir=output_dir,
-        older_than_days=older_than_days,
-        status_filter=status_filter,
+        older_than=older_than,
+        status_filter=status,
         yes=yes,
         dry_run=dry_run,
+        filter_str=filter_str,
+        limit=limit,
+        exit_code=exit_code,
     )
 
-def _run_combined(run_ids: list, dir_path: Optional[str], output: Optional[str], yes: bool, force: bool) -> None:
+
+def _run_combined(
+    run_ids: list,
+    dir_path: Optional[str],
+    output: Optional[str],
+    yes: bool,
+    force: bool,
+    filter_str: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    limit: Optional[int] = None,
+    older_than: Optional[str] = None,
+    exit_code: Optional[int] = None,
+) -> None:
     """Interleave stdout/stderr logs from one or more runs."""
     import re
     from pubrun.status import scan_runs, find_run
@@ -438,11 +508,21 @@ def _run_combined(run_ids: list, dir_path: Optional[str], output: Optional[str],
     TIMESTAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\] (.*)$")
 
     if not run_ids:
+        from pubrun.status import filter_runs
         all_runs = scan_runs(dir_path)
-        if not all_runs:
-            print("Error: No runs found.", file=sys.stderr)
+        has_filters = any(v is not None for v in (filter_str, status_filter, older_than, exit_code))
+        run_limit = limit if limit is not None else (None if has_filters else 1)
+        target_runs = filter_runs(
+            all_runs,
+            filter_str=filter_str,
+            status_filter=status_filter,
+            limit=run_limit,
+            older_than=older_than,
+            exit_code=exit_code,
+        )
+        if not target_runs:
+            print("Error: No runs match the filter criteria.", file=sys.stderr)
             sys.exit(1)
-        target_runs = [all_runs[0]]
     else:
         target_runs = []
         for rid in run_ids:
@@ -684,14 +764,32 @@ print('Mock Training Complete.')
             pass
 
 
+def _add_run_filter_args(parser: argparse.ArgumentParser, include_limit: bool = True) -> None:
+    """Helper to add standard run filter arguments to a subparser."""
+    has_f = any("-f" in getattr(action, "option_strings", []) for action in parser._actions)
+    if has_f:
+        parser.add_argument("--filter", type=str, default=None, metavar="QUERY", help="Filter runs by script name, arguments, or run ID (supports regex or plain string).")
+    else:
+        parser.add_argument("-f", "--filter", type=str, default=None, metavar="QUERY", help="Filter runs by script name, arguments, or run ID (supports regex or plain string).")
+    parser.add_argument("-s", "--status", type=str, default=None, metavar="STATUS", help="Comma-separated status filter (e.g. 'completed,failed,crashed').")
+    parser.add_argument("--older-than", type=str, default=None, metavar="AGE", help="Only consider runs older than AGE (e.g. '7d', '24h', '30' for 30 days).")
+    parser.add_argument("--exit-code", type=int, default=None, metavar="CODE", help="Only consider runs with this exit code.")
+    if include_limit:
+        parser.add_argument("-n", "--limit", type=int, default=None, metavar="LIMIT", help="Limit the number of runs to consider.")
+
+
 def main() -> None:
     """CLI entrypoint for the ``pubrun`` command."""
-    # Translate 'pubrun help' / 'pubrun help <subcommand>' to --help
-    if len(sys.argv) > 1 and sys.argv[1] == "help":
-        if len(sys.argv) > 2:
-            sys.argv = [sys.argv[0], sys.argv[2], "--help"]
-        else:
-            sys.argv = [sys.argv[0], "--help"]
+    # Translate 'help' and subcommand translations
+    subcommands = {"report", "methods", "rerun", "diff", "meta", "status", "clean", "combined", "cite", "run", "tui"}
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "help":
+            if len(sys.argv) > 2 and sys.argv[2] in subcommands:
+                sys.argv = [sys.argv[0], sys.argv[2], "--help"]
+            else:
+                sys.argv = [sys.argv[0], "--help"]
+        elif sys.argv[1] in subcommands and len(sys.argv) > 2 and sys.argv[2] == "help":
+            sys.argv = [sys.argv[0], sys.argv[1], "--help"]
 
     prog_name = Path(sys.argv[0]).name if sys.argv[0] else "pubrun"
     if prog_name not in ("pubrun", "pbr"):
@@ -727,6 +825,7 @@ def main() -> None:
     depth_group_1.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Hardware, Git, Python, and dependency summary (default).")
     depth_group_1.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Full environment variables and complete package list.")
     report_parser.set_defaults(depth="standard")
+    _add_run_filter_args(report_parser)
 
     # ---------------- Methods Subparser ----------------
     methods_parser = subparsers.add_parser(
@@ -738,6 +837,7 @@ def main() -> None:
     )
     methods_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
     methods_parser.add_argument("--format", type=str, choices=["markdown", "latex"], default="markdown", help="Output format: markdown or latex.")
+    _add_run_filter_args(methods_parser, include_limit=False)
 
     # ---------------- Rerun Subparser ----------------
     rerun_parser = subparsers.add_parser(
@@ -748,6 +848,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     rerun_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
+    _add_run_filter_args(rerun_parser, include_limit=False)
 
     # ---------------- Diff Subparser ----------------
     diff_parser = subparsers.add_parser(
@@ -808,9 +909,7 @@ def main() -> None:
     status_parser.add_argument("run_id", type=str, nargs="?", help="Run ID (or prefix) to inspect in detail. If omitted, lists all runs.")
     status_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
     status_parser.add_argument("-v", "--verbose", action="store_true", help="Show detailed information for each run in the listing.")
-    status_parser.add_argument("-f", "--filter", type=str, default=None, metavar="QUERY", help="Filter runs by script name or arguments (supports plain string or regex).")
-    status_parser.add_argument("-n", "--limit", type=int, default=None, metavar="LIMIT", help="Limit the number of runs to display.")
-    status_parser.add_argument("-s", "--status", type=str, default=None, metavar="STATUS", help="Comma-separated status filter (e.g. 'completed,failed,crashed').")
+    _add_run_filter_args(status_parser)
 
     # ---------------- Clean Subparser ----------------
     clean_parser = subparsers.add_parser(
@@ -821,10 +920,9 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     clean_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan.")
-    clean_parser.add_argument("--older-than", type=str, default=None, metavar="AGE", help="Only consider runs older than AGE (e.g. '7d', '24h', '30' for 30 days).")
-    clean_parser.add_argument("--status", type=str, default=None, metavar="STATUS", help="Comma-separated status filter (e.g. 'completed,failed'). Default: completed,failed,crashed,ghost.")
     clean_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt (delete all matching runs).")
     clean_parser.add_argument("--dry-run", action="store_true", help="Show what would be deleted without actually deleting.")
+    _add_run_filter_args(clean_parser)
 
     # ---------------- Combined Subparser ----------------
     combined_parser = subparsers.add_parser(
@@ -839,6 +937,7 @@ def main() -> None:
     combined_parser.add_argument("--output", type=str, default=None, metavar="FILE", help="Write combined logs to this file instead of stdout.")
     combined_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt for files > 250 MB.")
     combined_parser.add_argument("-f", "--force", action="store_true", help="Force execution for files > 500 MB.")
+    _add_run_filter_args(combined_parser)
 
     # ---------------- Cite Subparser ----------------
     cite_parser = subparsers.add_parser(
@@ -884,19 +983,51 @@ def main() -> None:
     executed = False
 
     if args.command == "report":
-        runs = args.run_dirs if getattr(args, "run_dirs", None) else [None]
-        for idx, rd in enumerate(runs):
-            if idx > 0:
-                print("\n")
-            _run_report(rd, args.depth)
+        run_dirs = getattr(args, "run_dirs", [])
+        if not run_dirs:
+            from pubrun.status import scan_runs, filter_runs
+            all_runs = scan_runs()
+            matched = filter_runs(
+                all_runs,
+                filter_str=getattr(args, "filter", None),
+                status_filter=getattr(args, "status", None),
+                limit=getattr(args, "limit", None),
+                older_than=getattr(args, "older_than", None),
+                exit_code=getattr(args, "exit_code", None),
+            )
+            if not matched:
+                print("Error: No runs match the filter criteria.", file=sys.stderr)
+                sys.exit(1)
+            for idx, r in enumerate(matched):
+                if idx > 0:
+                    print("\n")
+                _run_report(str(r.run_dir), args.depth)
+        else:
+            for idx, rd in enumerate(run_dirs):
+                if idx > 0:
+                    print("\n")
+                _run_report(rd, args.depth)
         executed = True
 
     elif args.command == "methods":
-        _run_methods(args.run_dir, args.format)
+        _run_methods(
+            args.run_dir,
+            args.format,
+            filter_str=getattr(args, "filter", None),
+            status_filter=getattr(args, "status", None),
+            older_than=getattr(args, "older_than", None),
+            exit_code=getattr(args, "exit_code", None),
+        )
         executed = True
 
     elif args.command == "rerun":
-        _run_rerun(args.run_dir)
+        _run_rerun(
+            args.run_dir,
+            filter_str=getattr(args, "filter", None),
+            status_filter=getattr(args, "status", None),
+            older_than=getattr(args, "older_than", None),
+            exit_code=getattr(args, "exit_code", None),
+        )
         executed = True
 
     elif args.command == "diff":
@@ -928,6 +1059,8 @@ def main() -> None:
             filter_str=getattr(args, "filter", None),
             limit=getattr(args, "limit", None),
             status_filter=getattr(args, "status", None),
+            older_than=getattr(args, "older_than", None),
+            exit_code=getattr(args, "exit_code", None),
         )
         executed = True
 
@@ -938,6 +1071,9 @@ def main() -> None:
             getattr(args, "status", None),
             getattr(args, "yes", False),
             getattr(args, "dry_run", False),
+            filter_str=getattr(args, "filter", None),
+            limit=getattr(args, "limit", None),
+            exit_code=getattr(args, "exit_code", None),
         )
         executed = True
 
@@ -947,7 +1083,12 @@ def main() -> None:
             args.dir,
             args.output,
             args.yes,
-            args.force
+            args.force,
+            filter_str=getattr(args, "filter", None),
+            status_filter=getattr(args, "status", None),
+            limit=getattr(args, "limit", None),
+            older_than=getattr(args, "older_than", None),
+            exit_code=getattr(args, "exit_code", None),
         )
         executed = True
 

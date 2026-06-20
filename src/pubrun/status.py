@@ -140,6 +140,8 @@ class RunInfo:
             # Status mapping
             if self.outcome == "failed":
                 self.status = STATUS_FAILED
+            elif self.outcome == "crashed":
+                self.status = STATUS_CRASHED
             elif self.outcome == "interrupted":
                 self.status = STATUS_INTERRUPTED
             elif self.outcome == "ghost":
@@ -226,6 +228,129 @@ class RunInfo:
                 self.pid = int(parts[-2])
             except ValueError:
                 pass
+
+
+def filter_runs(
+    runs: List[RunInfo],
+    filter_str: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    limit: Optional[int] = None,
+    older_than: Optional[str] = None,
+    exit_code: Optional[int] = None,
+) -> List[RunInfo]:
+    """Filter a list of runs by search pattern, status, age limit, limit count, and exit code."""
+    # 1. Filter by status
+    if status_filter:
+        allowed = [s.strip().lower() for s in status_filter.split(",")]
+        runs = [r for r in runs if r.status.lower() in allowed]
+
+    # 2. Filter by search string/regex
+    if filter_str:
+        import re
+        try:
+            rx = re.compile(filter_str, re.IGNORECASE)
+            runs = [r for r in runs if (
+                (r.script and rx.search(r.script)) or
+                (r.args and rx.search(r.args)) or
+                (r.run_id and rx.search(r.run_id))
+            )]
+        except re.error:
+            q = filter_str.lower()
+            runs = [r for r in runs if (
+                (r.script and q in r.script.lower()) or
+                (r.args and q in r.args.lower()) or
+                (r.run_id and q in r.run_id.lower())
+            )]
+
+    # 3. Filter by age (older_than)
+    if older_than:
+        val = older_than.strip().lower()
+        older_than_days = None
+        try:
+            if val.endswith("d"):
+                older_than_days = float(val[:-1])
+            elif val.endswith("h"):
+                older_than_days = float(val[:-1]) / 24.0
+            else:
+                older_than_days = float(val)
+        except ValueError:
+            pass
+
+        if older_than_days is not None:
+            now = time.time()
+            filtered = []
+            for r in runs:
+                if r.started_at_utc is None:
+                    continue
+                age_days = (now - r.started_at_utc) / 86400.0
+                if age_days >= older_than_days:
+                    filtered.append(r)
+            runs = filtered
+
+    # 4. Filter by exit code
+    if exit_code is not None:
+        runs = [r for r in runs if r.exit_code == exit_code]
+
+    # 5. Limit
+    if limit is not None and limit > 0:
+        runs = runs[:limit]
+
+    return runs
+
+
+def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) -> None:
+    """Close out a crashed run by writing a fallback manifest.json and removing the lock file."""
+    manifest_path = run_dir / "manifest.json"
+    lock_path = run_dir / Run.LOCK_FILENAME
+    
+    if manifest_path.exists():
+        return
+        
+    lock_data = lock_data or {}
+    started_at = lock_data.get("started_at_utc")
+    ended_at = time.time()
+    elapsed = ended_at - started_at if started_at else None
+    
+    # Compile what we can into a fallback manifest
+    manifest = {
+        "schema_version": "1.0",
+        "manifest_type": "pubrun-manifest",
+        "run": {
+            "run_id": lock_data.get("run_id"),
+        },
+        "status": {
+            "outcome": "crashed",
+        },
+        "timing": {
+            "started_at_utc": started_at,
+            "ended_at_utc": ended_at,
+            "elapsed_seconds": elapsed,
+        },
+        "process": {
+            "pid": lock_data.get("pid"),
+        },
+        "host": {
+            "hostname": lock_data.get("hostname"),
+        },
+        "invocation": {
+            "script": {
+                "basename": Path(lock_data.get("script")).name if lock_data.get("script") else None,
+            } if lock_data.get("script") else {},
+            "argv": lock_data.get("argv", []),
+        },
+        "git": {
+            "commit": lock_data.get("git_commit"),
+        }
+    }
+    
+    try:
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+        if lock_path.exists():
+            lock_path.unlink()
+        print(f"[*] Closed out crashed run '{run_dir.name}' (process dead). Generated fallback manifest.json.", file=sys.stderr)
+    except Exception as e:
+        print(f"Warning: Failed to close out crashed run '{run_dir.name}': {e}", file=sys.stderr)
 
 
 # --------------------------------------------------------------------------
@@ -600,46 +725,60 @@ def _parse_selection(response: str, candidates: List[Any]) -> List[Any]:
 
 def clean_runs(
     output_dir: Optional[str] = None,
-    older_than_days: Optional[float] = None,
-    status_filter: Optional[List[str]] = None,
+    older_than: Optional[str] = None,
+    status_filter: Optional[Any] = None,
     yes: bool = False,
     dry_run: bool = False,
+    filter_str: Optional[str] = None,
+    limit: Optional[int] = None,
+    exit_code: Optional[int] = None,
+    # Backward compatibility:
+    older_than_days: Optional[float] = None,
 ) -> int:
     """Interactively or automatically clean up old run directories.
 
     Args:
         output_dir: Override the configured output directory.
-        older_than_days: Only consider runs older than this many days.
-            If None, all non-running runs are candidates.
-        status_filter: Only consider runs with these statuses.
-            Defaults to ["completed", "failed", "crashed", "ghost"].
+        older_than: Only consider runs older than this age (e.g. '7d', '24h').
+        status_filter: Comma-separated status labels or list of statuses.
         yes: Skip confirmation prompt (non-interactive mode).
         dry_run: Show what would be deleted without deleting.
+        filter_str: Regex or string query filter.
+        limit: Limit number of runs to consider.
+        exit_code: Filter by exit code.
+        older_than_days: Backward-compatible float for age.
 
     Returns:
         Number of run directories deleted.
     """
     all_runs = scan_runs(output_dir)
-
-    # Never delete running runs
-    if status_filter is None:
-        status_filter = [STATUS_COMPLETED, STATUS_FAILED, STATUS_INTERRUPTED, STATUS_BROKEN_PIPE, STATUS_CRASHED, STATUS_GHOST]
-
-    # Filter out running runs even if explicitly requested
-    safe_filter = [s for s in status_filter if s != STATUS_RUNNING]
-
     now = time.time()
-    candidates: List[RunInfo] = []
-    for r in all_runs:
-        if r.status not in safe_filter:
-            continue
-        if older_than_days is not None:
-            if r.started_at_utc is None:
-                continue  # Skip runs with unknown age (P2-E3)
-            age_days = (now - r.started_at_utc) / 86400
-            if age_days < older_than_days:
-                continue
-        candidates.append(r)
+
+    # 1. Resolve status filter (must never include STATUS_RUNNING)
+    if status_filter is not None:
+        if isinstance(status_filter, list):
+            status_filter_list = [s.strip().lower() for s in status_filter]
+        else:
+            status_filter_list = [s.strip().lower() for s in str(status_filter).split(",")]
+        status_filter_list = [s for s in status_filter_list if s != STATUS_RUNNING]
+    else:
+        status_filter_list = [STATUS_COMPLETED, STATUS_FAILED, STATUS_INTERRUPTED, STATUS_BROKEN_PIPE, STATUS_CRASHED, STATUS_GHOST]
+
+    status_filter_str = ",".join(status_filter_list)
+
+    # 2. Resolve older_than / older_than_days
+    if older_than is None and older_than_days is not None:
+        older_than = f"{older_than_days}d"
+
+    # 3. Apply standard filter_runs
+    candidates = filter_runs(
+        all_runs,
+        filter_str=filter_str,
+        status_filter=status_filter_str,
+        limit=limit,
+        older_than=older_than,
+        exit_code=exit_code,
+    )
 
     if not candidates:
         print("No runs match the cleanup criteria.")
