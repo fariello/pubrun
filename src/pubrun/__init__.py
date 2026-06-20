@@ -29,7 +29,7 @@ Usage
 
     import pubrun.noauto as pubrun   # No auto-start; start() manually.
     import pubrun.nopatch as pubrun  # Auto-start, no global hooks.
-    import pubrun.quiet as pubrun    # No auto-start, no hooks.
+    import pubrun.minimal as pubrun  # No auto-start, no hooks.
 """
 import sys
 

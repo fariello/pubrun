@@ -26,16 +26,16 @@ Use namespaced imports to control import-time behavior without config files:
 
 ```python
 import pubrun.noauto as pubrun   # Load API only. Start manually later.
-import pubrun.nopatch as pubrun  # Auto-start, but no subprocess/console/signal hooks.
-import pubrun.quiet as pubrun    # API only. No auto-start, no hooks.
+import pubrun.nopatch as pubrun  # Auto-start, skip subprocess/console patches, keep signal hooks.
+import pubrun.minimal as pubrun  # API only. No auto-start, all hooks/patches disabled.
 ```
 
-| Mode | Auto-start | Global hooks | Use case |
+| Mode | Auto-start | Global hooks/patches | Use case |
 |------|-----------|-------------|----------|
 | `auto` | Yes | Yes | Default. Full tracking on import. |
 | `noauto` | No | Yes | Libraries or scripts that start tracking explicitly. |
-| `nopatch` | Yes | No | When hooks conflict with other tools (debuggers, profilers). |
-| `quiet` | No | No | Shared library code that may or may not want tracking. |
+| `nopatch` | Yes | No patches (signals active) | When monkey-patching conflicts with other tools (debuggers, profilers). |
+| `minimal` | No | No | Shared library code that may or may not want tracking. |
 
 Alternatively, configure project-wide:
 
@@ -47,7 +47,7 @@ mode = "noauto"
 Or use the CLI wrapper:
 
 ```bash
-pubrun run --mode quiet -- python script.py
+pubrun run --mode minimal -- python script.py
 ```
 
 Legacy approaches still work: `PUBRUN_AUTO_START=false` and `[core].auto_start = false`.

@@ -255,26 +255,28 @@ class Run:
         self.hardware_data = get_hardware(self.config)
         self.host_data = get_host(self.config)
 
-        # Determine if global hooks are permitted by the import mode.
-        # When global_hooks=false (nopatch/quiet modes), subprocess spy,
-        # console tee, and signal handlers are suppressed.
-        _global_hooks = True
+        # Determine if global hooks and patches are permitted by the import mode.
+        _patch_subprocesses = True
+        _patch_console = True
+        _signal_hooks = True
         try:
             from pubrun._bootstrap import get_selected_behavior
             _behavior = get_selected_behavior()
             if _behavior is not None:
-                _global_hooks = _behavior.get("global_hooks", True)
+                _patch_subprocesses = _behavior.get("patch_subprocesses", True)
+                _patch_console = _behavior.get("patch_console", True)
+                _signal_hooks = _behavior.get("signal_hooks", True)
         except Exception:
             pass
 
-        # 5. Subprocess interception (global hook)
-        if _global_hooks and self.config.get("capture", {}).get("subprocesses", {}).get("enabled", False):
+        # 5. Subprocess interception (monkeypatch)
+        if _patch_subprocesses and self.config.get("capture", {}).get("subprocesses", {}).get("enabled", False):
             max_tracked = self.config.get("capture", {}).get("subprocesses", {}).get("max_tracked_commands", 5000)
             SubprocessSpy.install(max_tracked, config=self.config)
             self._spying_subprocesses = True
 
-        # 6. Console tee (global hook — wraps sys.stdout/stderr)
-        if _global_hooks:
+        # 6. Console tee (monkeypatch — wraps sys.stdout/stderr)
+        if _patch_console:
             console_mode = self.config.get("console", {}).get("capture_mode", "off")
         else:
             console_mode = "off"
@@ -293,8 +295,8 @@ class Run:
             self.resource_watcher = ResourceWatcher(self, interval, max_fails)
             self.resource_watcher.start()
 
-        # 9. Signal and exit-code capture (global hook — installs signal handlers)
-        if _global_hooks and self.config.get("capture", {}).get("signals", {}).get("enabled", True):
+        # 9. Signal and exit-code capture (standard registration hook)
+        if _signal_hooks and self.config.get("capture", {}).get("signals", {}).get("enabled", True):
             self.signal_capture = SignalExitCapture()
             self.signal_capture.install()
 

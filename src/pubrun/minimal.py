@@ -1,22 +1,22 @@
 """
-pubrun.quiet — API-only mode with no auto-start and no global hooks.
+pubrun.minimal — API-only mode with no auto-start and no global patches.
 
 Usage::
 
-    import pubrun.quiet as pubrun
+    import pubrun.minimal as pubrun
 
     # Nothing happens until you explicitly start.
-    pubrun.start()  # Starts tracking with quiet-mode defaults.
+    pubrun.start()  # Starts tracking with minimal-mode defaults.
 
 No auto-start, no subprocess interception, no console replacement,
 no signal handlers installed at import time. When ``start()`` is called
-later, the quiet-mode defaults (no global hooks) apply unless explicitly
+later, the minimal-mode defaults (no global patches/hooks) apply unless explicitly
 overridden.
 """
 from pubrun._bootstrap import select_mode
 
 # Select mode before importing core — no auto-start, no hooks
-_behavior = select_mode("quiet", "pubrun.quiet", "explicit")
+_behavior = select_mode("minimal", "pubrun.minimal", "explicit")
 
 # Import the full public API (no boot sequence side effects)
 from pubrun.core import (  # noqa: F401, E402
@@ -33,8 +33,8 @@ from pubrun.core import (  # noqa: F401, E402
 from pubrun.core import _execute_boot_sequence as _boot  # noqa: E402
 from pubrun import __version__  # noqa: F401, E402
 
-# Execute boot — mode is quiet, so no auto-start and no hooks
-_boot(selected_by="pubrun.quiet")
+# Execute boot — mode is minimal, so no auto-start and no hooks
+_boot(selected_by="pubrun.minimal")
 del _boot, _behavior
 
 # Populate the parent pubrun namespace

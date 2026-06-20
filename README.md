@@ -61,9 +61,18 @@ By default, `import pubrun` starts tracking immediately. For more control, use n
 
 ```python
 import pubrun.noauto as pubrun   # Load API, start later with pubrun.start()
-import pubrun.nopatch as pubrun  # Auto-start, but no subprocess/console/signal hooks
-import pubrun.quiet as pubrun    # API only — no auto-start, no hooks
+import pubrun.nopatch as pubrun  # Auto-start; no subprocess/console monkeypatching; standard hooks active
+import pubrun.minimal as pubrun  # API only; no auto-start; all monkeypatches and hooks disabled
 ```
+
+#### Preset Modes Behavior Matrix
+
+| Import Mode | Auto-Start | Intercept Subprocesses (`SubprocessSpy`) | Wrap Console Streams (`ConsoleInterceptor`) | Intercept Signals & Exits (`SignalExitCapture`) | Description |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **`auto`** *(default)* | ✅ | ✅ | ✅ | ✅ | Full telemetry tracking begins automatically on import. |
+| **`noauto`** | ❌ | ✅ | ✅ | ✅ | Tracking must be started manually; all patches and hooks are active once started. |
+| **`nopatch`** | ✅ | ❌ | ❌ | ✅ | Telemetry tracking begins automatically; no intrusive stdout/stderr wrapping or subprocess patching; standard exit/signal hooks remain active. |
+| **`minimal`** | ❌ | ❌ | ❌ | ❌ | API only; tracking must be started manually; all patches and hooks are disabled (zero-footprint mode). |
 
 Or configure project-wide in `.pubrun.toml`:
 
@@ -75,7 +84,7 @@ mode = "noauto"
 Or use the CLI wrapper for scripts you can't modify:
 
 ```bash
-pubrun run --mode quiet -- python script.py
+pubrun run --mode minimal -- python script.py
 ```
 
 Legacy approaches still work: `PUBRUN_AUTO_START=false` and `[core].auto_start = false`.
@@ -168,7 +177,7 @@ pubrun clean --dry-run              # Preview what would be deleted
 ### `pubrun run`
 Spawn a command with a specific import mode. Useful for CI, Slurm, and scripts you can't modify.
 ```bash
-pubrun run --mode quiet -- python script.py
+pubrun run --mode minimal -- python script.py
 pubrun run --mode nopatch -- python train.py
 ```
 

@@ -73,8 +73,8 @@ The boot sequence is wrapped in `try/except`. If configuration resolution fails 
 When `auto_start = true` (the default), `import pubrun` automatically calls `start()`. This is suppressed when:
 
 - The `PUBRUN_AUTO_START` environment variable is set to `"false"`.
-- The `PUBRUN_IMPORT_MODE` environment variable is set to `"noauto"` or `"quiet"`.
-- The `[imports].mode` config is set to `"noauto"` or `"quiet"`.
+- The `PUBRUN_IMPORT_MODE` environment variable is set to `"noauto"` or `"minimal"`.
+- The `[imports].mode` config is set to `"noauto"` or `"minimal"`.
 - The process is running the `pubrun` CLI itself (detected by checking `sys.argv[0]`).
 
 ### 3.4 Import Modes
@@ -85,24 +85,18 @@ The library supports four namespaced import modes via submodule imports:
 import pubrun                    # Default: auto mode
 import pubrun.auto as pubrun     # Explicit auto (same as above)
 import pubrun.noauto as pubrun   # Load API, start later manually
-import pubrun.nopatch as pubrun  # Auto-start, no global hooks
-import pubrun.quiet as pubrun    # API only, no auto-start, no hooks
+import pubrun.nopatch as pubrun  # Auto-start, skip subprocess/console patching, signal hooks active
+import pubrun.minimal as pubrun  # API only, no auto-start, all patches and hooks disabled
 ```
 
-| Mode | auto_start | global_hooks | Meaning |
-| --- | --- | --- | --- |
-| `auto` | `true` | `true` | Default. Full tracking on import. |
-| `noauto` | `false` | `true` | Delay tracking until explicit `start()` call. Hooks install on start. |
-| `nopatch` | `true` | `false` | Start tracking, but do not install subprocess spy, console tee, or signal handlers. |
-| `quiet` | `false` | `false` | Load API only. No auto-start, no hooks unless explicitly overridden. |
+| Mode | auto_start | patch_subprocesses | patch_console | signal_hooks | Meaning |
+| --- | --- | --- | --- | --- | --- |
+| `auto` | `true` | `true` | `true` | `true` | Default. Full tracking on import. |
+| `noauto` | `false` | `true` | `true` | `true` | Delay tracking until explicit `start()` call. |
+| `nopatch` | `true` | `false` | `false` | `true` | Start tracking, but skip subprocess and console monkey-patching. Signal handlers remain active. |
+| `minimal` | `false` | `false` | `false` | `false` | Load API only. No auto-start, no patches, no signal hooks. |
 
-When `global_hooks = false`, the following process-global side effects are suppressed:
-
-1. `subprocess.Popen` / `os.system` interception.
-2. Console stream replacement (`sys.stdout` / `sys.stderr` wrapping).
-3. Signal handler installation.
-
-Static capture (hardware, packages, git, environment, host, process, python) and background resource monitoring are unaffected by `global_hooks`.
+When patching or signal hooks are disabled, the corresponding side effects (e.g. `subprocess.Popen` interception, stdout/stderr wrapping, signal handler registration) are suppressed. Static capture (hardware, packages, git, environment, host, process, python) and background resource monitoring remain unaffected when tracking is active.
 
 ### 3.5 Explicit Activation
 

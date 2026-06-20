@@ -313,9 +313,9 @@ Import-mode provenance metadata. Records how pubrun was imported, which mode was
 
 | Field | Type | Description |
 |---|---|---|
-| `selected_mode` | string \| null | The effective import mode: `"auto"`, `"noauto"`, `"nopatch"`, or `"quiet"`. |
-| `selected_behavior` | object | `{"auto_start": bool, "global_hooks": bool}` — the effective behavior flags. |
-| `selected_by` | string \| null | Who selected the mode (e.g., `"pubrun"`, `"pubrun.noauto"`, `"pubrun.quiet"`). |
+| `selected_mode` | string \| null | The effective import mode: `"auto"`, `"noauto"`, `"nopatch"`, or `"minimal"`. |
+| `selected_behavior` | object | `{"auto_start": bool, "patch_subprocesses": bool, "patch_console": bool, "signal_hooks": bool}` — the effective behavior flags. |
+| `selected_by` | string \| null | Who selected the mode (e.g., `"pubrun"`, `"pubrun.noauto"`, `"pubrun.minimal"`). |
 | `selected_source` | string \| null | Where the selection came from (e.g., `"default"`, `"env:PUBRUN_IMPORT_MODE"`, `"config:[imports].mode"`). |
 | `selected_at_utc` | float \| null | Timestamp when the mode was selected. |
 | `core_loaded` | bool | Whether `pubrun.core` was loaded (irreversible work started). |
@@ -330,7 +330,7 @@ Import-mode provenance metadata. Records how pubrun was imported, which mode was
 | `timestamp_utc` | float | When this request was made. |
 | `requested_mode` | string | The mode that was requested. |
 | `selected_by` | string | Identifier for the requester. |
-| `effective_behavior` | object | `{"auto_start": bool, "global_hooks": bool}` for the requested mode. |
+| `effective_behavior` | object | `{"auto_start": bool, "patch_subprocesses": bool, "patch_console": bool, "signal_hooks": bool}` for the requested mode. |
 | `selected` | bool | Whether this request won (first request always wins). |
 | `conflict` | bool | Whether this request conflicted with the already-selected mode. |
 | `core_loaded_at_request` | bool | Whether `pubrun.core` was already loaded when this request arrived. |
@@ -403,7 +403,7 @@ While a run is active, a `.pubrun.lock` JSON file exists in the run directory. I
 | `git_commit` | string \| null | Git commit hash at start, or `null` if not in a repo. |
 | `cwd` | string | Working directory of the process. |
 | `argv` | list[string] | Command-line arguments (excluding `sys.argv[0]`). Sensitive values are redacted. |
-| `import_mode` | string \| null | The active import mode (`"auto"`, `"noauto"`, `"nopatch"`, `"quiet"`). |
+| `import_mode` | string \| null | The active import mode (`"auto"`, `"noauto"`, `"nopatch"`, `"minimal"`). |
 | `import_selected_by` | string \| null | Who selected the mode (e.g., `"pubrun"`, `"pubrun.noauto"`). |
 
 **Example:**
