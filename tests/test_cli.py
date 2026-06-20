@@ -506,9 +506,13 @@ class TestCliReportUsabilityDetails:
         assert "ValueError: Invalid parameter" in res_color.stdout
         assert "Signals" in res_color.stdout
         assert "SIGTERM" in res_color.stdout
-        # Unicode box boundaries should be present
-        assert "┌" in res_color.stdout
-        assert "└" in res_color.stdout
+        # Unicode box boundaries or fallback ASCII should be present
+        if sys.platform == "win32":
+            assert "┌" in res_color.stdout or "+" in res_color.stdout
+            assert "└" in res_color.stdout or "+" in res_color.stdout
+        else:
+            assert "┌" in res_color.stdout
+            assert "└" in res_color.stdout
 
         # Print report WITHOUT color
         env_no_color = os.environ.copy()
