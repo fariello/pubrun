@@ -470,6 +470,51 @@ class TestCliColorControl:
         assert "\033[" not in res_no_color.stdout
         assert "\033[" not in res_flag.stdout
 
+    def test_report_no_color_any_position(self, tmp_path):
+        # Create a run in tmp_path
+        from pubrun import start as pubrun_start
+        import pubrun.tracker
+        pubrun.tracker._active_run = None
+        old_cwd = Path.cwd
+        try:
+            Path.cwd = staticmethod(lambda: tmp_path)
+            tracker = pubrun_start()
+            tracker.stop()
+        finally:
+            Path.cwd = old_cwd
+            pubrun.tracker._active_run = None
+
+        run_dirs = list((tmp_path / "runs").glob("pubrun-*"))
+        assert len(run_dirs) == 1
+        run_dir = run_dirs[0]
+
+        env_with_color = os.environ.copy()
+        env_with_color.pop("NO_COLOR", None)
+
+        # Run pubrun report <run_dir> --no-color (flag after subcommand args)
+        cmd_report = [sys.executable, "-m", "pubrun", "report", str(run_dir), "--no-color"]
+        res_report = subprocess.run(cmd_report, capture_output=True, text=True, env=env_with_color, cwd=str(tmp_path))
+        assert res_report.returncode == 0
+        assert "\033[" not in res_report.stdout
+
+    def test_run_preserves_no_color_arg(self, tmp_path):
+        cmd = [
+            sys.executable, "-m", "pubrun", "run", "--", 
+            sys.executable, "-c", "import sys; print(' '.join(sys.argv))", "arg1", "--no-color"
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, cwd=str(tmp_path))
+        assert res.returncode == 0
+        assert "--no-color" in res.stdout
+
+    def test_global_no_color_with_run_preserves_arg(self, tmp_path):
+        cmd = [
+            sys.executable, "-m", "pubrun", "--no-color", "run", "--", 
+            sys.executable, "-c", "import sys; print(' '.join(sys.argv))", "arg1", "--no-color"
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, cwd=str(tmp_path))
+        assert res.returncode == 0
+        assert "--no-color" in res.stdout
+
 
 class TestCliReportUsabilityDetails:
 
