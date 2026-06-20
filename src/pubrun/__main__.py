@@ -199,13 +199,13 @@ def _run_cite(style: str) -> None:
     """Print a formatted academic citation for pubrun."""
     style = style.lower()
     if style == "apa":
-        print("Fariello, G. (2026). pubrun [Computer software]. https://github.com/gfariello/pubrun")
+        print("Fariello, G. (2026). pubrun [Computer software]. https://github.com/fariello/pubrun")
     elif style == "mla":
-        print("Fariello, Gabriele. pubrun. 2026. GitHub, https://github.com/gfariello/pubrun.")
+        print("Fariello, Gabriele. pubrun. 2026. GitHub, https://github.com/fariello/pubrun.")
     elif style == "chicago":
-        print('Fariello, Gabriele. 2026. "pubrun". https://github.com/gfariello/pubrun.')
+        print('Fariello, Gabriele. 2026. "pubrun". https://github.com/fariello/pubrun.')
     elif style == "bibtex":
-        print("@software{pubrun2026,\n  author = {Gabriele Fariello},\n  title = {pubrun},\n  url = {https://github.com/gfariello/pubrun},\n  year = {2026}\n}")
+        print("@software{pubrun2026,\n  author = {Gabriele Fariello},\n  title = {pubrun},\n  url = {https://github.com/fariello/pubrun},\n  year = {2026}\n}")
     else:
         print(f"Error: Unknown citation style '{style}'. Supported styles: apa, mla, chicago, bibtex.", file=sys.stderr)
         sys.exit(1)
