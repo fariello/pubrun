@@ -178,7 +178,7 @@ Use commit messages that reference action IDs. If changes cannot be separated fr
 
 ## Remote push policy
 
-Do not push to a remote during the review. At the end, create `11-push-plan.md` with branch, local commits, permission status, push recommendation, risks, suggested command if permitted, and no-push rationale if permission is absent. Only push if explicitly permitted by the user.
+Do not push to a remote during the review. At the end, create `11-push-plan.md` with branch, local commits, permission status, push recommendation, risks, suggested command if permitted, and no-push rationale if permission is absent. Only push if explicitly permitted by the user, or if explicitly authorized to perform automated release preparation (e.g., committing, pushing, updating tags, and packaging).
 
 ## Implementation philosophy
 
