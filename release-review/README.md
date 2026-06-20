@@ -138,7 +138,7 @@ Do not create a TodoWrite item for every file inspected or every tiny edit. The 
 
 Use local commits for meaningful tracked repository changes when safe and possible. Commit only files changed by this run. Do not accidentally include unrelated pre-existing user changes. Do not commit `repository-review/` artifacts unless the user explicitly asks.
 
-Remote pushes are prohibited until the final stage and only allowed if the user has explicitly permitted pushing. If permission is absent, produce a push/no-push recommendation in `repository-review/<RUN_ID>/11-push-plan.md` and in the final report.
+Remote pushes are prohibited until the final stage and only allowed if the user has explicitly permitted pushing or authorized automated release preparation. If permission is absent, produce a push/no-push recommendation in `repository-review/<RUN_ID>/11-push-plan.md` and in the final report.
 
 ## Final response requirement
 

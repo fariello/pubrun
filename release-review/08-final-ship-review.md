@@ -94,6 +94,18 @@ Create or update `repository-review/<RUN_ID>/11-push-plan.md` with current branc
 
 Do not push unless explicitly permitted.
 
+## Automated Release Preparation (PyPI Readiness)
+
+If the audit and implementation batches have completed successfully, all validations pass, and the user has explicitly authorized release preparation:
+
+1. **Commit and Push**: Ensure all changes (code, tests, docs, build files) are committed locally, and push the branch to the remote repository.
+2. **Verify CI Results**: Wait/query to verify that the remote CI checks pass successfully for the pushed commit.
+3. **Bake Commit Metadata**: Update any source commit identifier files (e.g., `COMMIT`) with the target release commit hash.
+4. **Re-build Release Packages**: Run repository-native packaging commands (e.g., `hatch build`, `python -m build`) to generate clean distribution source files and wheels under `dist/`.
+5. **Move/Create Release Tag**: Create or update the release version tag (e.g., `vX.Y.Z`) on the final commit and push the tag to the remote repository.
+6. **Twine Validation**: Run `twine check dist/*` if twine is available, verifying the generated assets are 100% ready to be published to PyPI.
+
+
 ## Restart assessment
 
 Decide whether a new review run should be started. Recommend restart only when implementation changed enough that earlier audit results may be stale, substantial architecture or behavior was discovered late, validation exposed issues requiring another broad pass, or major CI/packaging/public contract/security changes were made. Do not restart merely because minor fixes were made. Do not start a new run automatically.
