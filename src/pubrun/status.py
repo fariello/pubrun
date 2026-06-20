@@ -343,6 +343,8 @@ def _get_terminal_width() -> int:
 
 def _status_marker(status: str) -> str:
     """Return a colored/styled status string for terminal output."""
+    if os.environ.get("NO_COLOR", ""):
+        return status
     # ANSI color codes (works on most terminals including Windows 10+)
     colors = {
         STATUS_COMPLETED: "\033[32m",   # green

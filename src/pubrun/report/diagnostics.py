@@ -9,6 +9,17 @@ def bytes_to_gb(bytes_val: int) -> float:
     if not bytes_val: return 0.0
     return round(bytes_val / (1024 ** 3), 1)
 
+class Colors:
+    GREEN = '\033[92m'
+    RED = '\033[91m'
+    YELLOW = '\033[93m'
+    BOLD = '\033[1m'
+    DIM = '\033[2m'
+    RESET = '\033[0m'
+
+def _has_color() -> bool:
+    return not os.environ.get("NO_COLOR", "")
+
 def print_report(manifest_path: str, depth: str = "standard") -> None:
     """Print a human-readable diagnostic summary of a recorded run.
 
@@ -29,9 +40,19 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
     # Hydrate!
     manifest, warnings = hydrate_manifest(manifest_path, manifest)
     
-    print(f"\n=================================================")
-    print(f"            PUBRUN DIAGNOSTICS                 ")
-    print(f"=================================================")
+    use_color = _has_color()
+    bold = Colors.BOLD if use_color else ""
+    rst = Colors.RESET if use_color else ""
+    
+    if use_color:
+        print(f"\n{bold}┌─────────────────────────────────────────────────┐{rst}")
+        print(f"{bold}│               PUBRUN DIAGNOSTICS                │{rst}")
+        print(f"{bold}└─────────────────────────────────────────────────┘{rst}")
+    else:
+        print(f"\n=================================================")
+        print(f"               PUBRUN DIAGNOSTICS                ")
+        print(f"=================================================")
+        
     print(f"Source : {manifest_path}")
     
     meta_ref = manifest.get("meta_ref")
@@ -50,9 +71,33 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
     
     script_name = inv.get("script", {}).get("basename", "<interactive or module>")
     
+    signals_data = manifest.get("signals", {})
+    exit_code = signals_data.get("exit_code")
+    exit_exception = signals_data.get("exit_exception")
+    signals_received = signals_data.get("signals_received", [])
+
+    # Colorize outcome
+    outcome = status.get('outcome', 'unknown')
+    out_color = ""
+    if use_color:
+        if outcome == "completed":
+            out_color = Colors.GREEN
+        elif outcome in ("failed", "crashed"):
+            out_color = Colors.RED
+        elif outcome == "interrupted":
+            out_color = Colors.YELLOW
+
     print(f"Run ID      : {run.get('run_id')}")
     print(f"Script      : {script_name}")
-    print(f"Status      : {status.get('outcome')}")
+    print(f"Status      : {out_color}{outcome}{rst}")
+    if exit_code is not None and exit_code != 0:
+        print(f"Exit Code   : {Colors.RED if use_color else ''}{exit_code}{rst}")
+    if exit_exception:
+        print(f"Exception   : {Colors.RED if use_color else ''}{exit_exception}{rst}")
+    if signals_received:
+        sig_names = [s.get("signal_name", f"SIG{s.get('signal')}") for s in signals_received]
+        print(f"Signals     : {Colors.YELLOW if use_color else ''}{', '.join(sig_names)}{rst}")
+
     start_ts = timing.get('started_at_utc')
     start_str = datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat() if start_ts else "unknown"
     print(f"Started     : {start_str}")

@@ -268,6 +268,29 @@ def _run_report(run_dir: str, depth: str) -> None:
                 print(f"  - Host:      {run_info.hostname}", file=sys.stderr)
             print("", file=sys.stderr)
             
+        # Tail error logs (last 10 lines)
+        log_file = None
+        stderr_path = run_dir_path / "stderr.log"
+        stdout_path = run_dir_path / "stdout.log"
+        if stderr_path.exists() and stderr_path.stat().st_size > 0:
+            log_file = stderr_path
+        elif stdout_path.exists() and stdout_path.stat().st_size > 0:
+            log_file = stdout_path
+            
+        if log_file:
+            print(f"Last 10 lines of {log_file.name}:", file=sys.stderr)
+            try:
+                with open(log_file, "r", encoding="utf-8", errors="replace") as lf:
+                    lines = lf.readlines()
+                    tail_lines = lines[-10:]
+                    for line in tail_lines:
+                        sys.stderr.write(line)
+                    if tail_lines and not tail_lines[-1].endswith("\n"):
+                        sys.stderr.write("\n")
+            except Exception as le:
+                print(f"  (Failed to read log file: {le})", file=sys.stderr)
+            print("", file=sys.stderr)
+            
         # Suggest the most recent non-crashed (completed/failed) run
         try:
             from pubrun.config import resolve_config
@@ -648,6 +671,7 @@ def main() -> None:
         epilog="Use 'pubrun <command> --help' for detailed information on a specific command."
     )
     parser.add_argument("--version", action="version", version=f"pubrun {__version__}")
+    parser.add_argument("--no-color", action="store_true", help="Suppress ANSI color output globally.")
     
     subparsers = parser.add_subparsers(dest="command", title="Available core commands", metavar="<command>")
     
@@ -747,6 +771,8 @@ def main() -> None:
     parser.add_argument("--run-tests", action="store_true", help="Run the built-in test suite and a mock end-to-end script.")
     
     args = parser.parse_args()
+    if getattr(args, "no_color", False):
+        os.environ["NO_COLOR"] = "1"
 
     executed = False
 

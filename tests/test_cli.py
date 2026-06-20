@@ -433,3 +433,161 @@ class TestCliErrorExitCodes:
         assert "Suggestion:" in result.stderr
         assert "pubrun-completed" in result.stderr
 
+
+class TestCliColorControl:
+
+    def test_status_no_color_env(self, tmp_path):
+        # Create a run in tmp_path
+        from pubrun import start as pubrun_start
+        import pubrun.tracker
+        pubrun.tracker._active_run = None
+        old_cwd = Path.cwd
+        try:
+            Path.cwd = staticmethod(lambda: tmp_path)
+            tracker = pubrun_start()
+            tracker.stop()
+        finally:
+            Path.cwd = old_cwd
+            pubrun.tracker._active_run = None
+            
+        # Run pubrun status WITH color (default)
+        env_with_color = os.environ.copy()
+        env_with_color.pop("NO_COLOR", None)
+        cmd = [sys.executable, "-m", "pubrun", "status", "--dir", str(tmp_path / "runs")]
+        res_color = subprocess.run(cmd, capture_output=True, text=True, env=env_with_color, cwd=str(tmp_path))
+        
+        # Run pubrun status WITHOUT color (env var)
+        env_no_color = os.environ.copy()
+        env_no_color["NO_COLOR"] = "1"
+        res_no_color = subprocess.run(cmd, capture_output=True, text=True, env=env_no_color, cwd=str(tmp_path))
+        
+        # Run pubrun status WITHOUT color (global flag)
+        cmd_flag = [sys.executable, "-m", "pubrun", "--no-color", "status", "--dir", str(tmp_path / "runs")]
+        res_flag = subprocess.run(cmd_flag, capture_output=True, text=True, env=env_with_color, cwd=str(tmp_path))
+        
+        # Check that ANSI escape sequences are present in res_color and NOT in res_no_color/res_flag
+        assert "\033[" in res_color.stdout
+        assert "\033[" not in res_no_color.stdout
+        assert "\033[" not in res_flag.stdout
+
+
+class TestCliReportUsabilityDetails:
+
+    def test_report_failed_run_with_details(self, tmp_path):
+        run_dir = tmp_path / "runs" / "pubrun-failed"
+        run_dir.mkdir(parents=True)
+        manifest = {
+            "schema_version": "1.0",
+            "manifest_type": "pubrun-manifest",
+            "run": {"run_id": "failed-run-id"},
+            "status": {"outcome": "failed"},
+            "signals": {
+                "exit_code": 1,
+                "exit_exception": "ValueError: Invalid parameter",
+                "signals_received": [
+                    {"signal": 15, "signal_name": "SIGTERM", "timestamp_utc": 1234567.0}
+                ]
+            }
+        }
+        with open(run_dir / "manifest.json", "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+
+        # Print report WITH color
+        env_with_color = os.environ.copy()
+        env_with_color.pop("NO_COLOR", None)
+        cmd = [sys.executable, "-m", "pubrun", "report", str(run_dir)]
+        res_color = subprocess.run(cmd, capture_output=True, text=True, env=env_with_color)
+        assert res_color.returncode == 0
+        assert "PUBRUN DIAGNOSTICS" in res_color.stdout
+        assert "failed" in res_color.stdout
+        assert "Exit Code" in res_color.stdout
+        assert "1" in res_color.stdout
+        assert "Exception" in res_color.stdout
+        assert "ValueError: Invalid parameter" in res_color.stdout
+        assert "Signals" in res_color.stdout
+        assert "SIGTERM" in res_color.stdout
+        # Unicode box boundaries should be present
+        assert "┌" in res_color.stdout
+        assert "└" in res_color.stdout
+
+        # Print report WITHOUT color
+        env_no_color = os.environ.copy()
+        env_no_color["NO_COLOR"] = "1"
+        res_no_color = subprocess.run(cmd, capture_output=True, text=True, env=env_no_color)
+        assert res_no_color.returncode == 0
+        assert "PUBRUN DIAGNOSTICS" in res_no_color.stdout
+        assert "Exit Code   : 1" in res_no_color.stdout
+        assert "Exception   : ValueError: Invalid parameter" in res_no_color.stdout
+        assert "Signals     : SIGTERM" in res_no_color.stdout
+        # ASCII boundary instead of Unicode box
+        assert "===" in res_no_color.stdout
+        assert "┌" not in res_no_color.stdout
+        # No ANSI escape codes
+        assert "\033[" not in res_no_color.stdout
+
+    def test_report_crashed_run_tails_stderr(self, tmp_path):
+        from pubrun.capture.liveness import get_hostname
+        current_host = get_hostname()
+        run_dir = tmp_path / "runs" / "pubrun-crashed"
+        run_dir.mkdir(parents=True)
+        # Create a mock lock file to simulate crashed run
+        lock_data = {
+            "run_id": "crashed-id",
+            "pid": 99999,
+            "started_at_utc": 1782000000.0,
+            "script": "train.py",
+            "args": ["--epochs", "10"],
+            "hostname": current_host
+        }
+        with open(run_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
+            json.dump(lock_data, f)
+
+        # Write more than 10 lines to stderr.log
+        stderr_lines = [f"Line {i}\n" for i in range(1, 15)]
+        with open(run_dir / "stderr.log", "w", encoding="utf-8") as f:
+            f.writelines(stderr_lines)
+
+        # Run report
+        cmd = [sys.executable, "-m", "pubrun", "report", str(run_dir)]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        assert res.returncode == 1
+        assert "Error: Run directory 'pubrun-crashed' is currently crashed" in res.stderr
+        assert "Last 10 lines of stderr.log:" in res.stderr
+        # Check that we only see lines 5 to 14 (which are the last 10 lines)
+        assert "Line 1\n" not in res.stderr
+        assert "Line 4\n" not in res.stderr
+        assert "Line 5\n" in res.stderr
+        assert "Line 14\n" in res.stderr
+
+    def test_report_crashed_run_tails_stdout_fallback(self, tmp_path):
+        from pubrun.capture.liveness import get_hostname
+        current_host = get_hostname()
+        run_dir = tmp_path / "runs" / "pubrun-crashed-fallback"
+        run_dir.mkdir(parents=True)
+        # Create a mock lock file to simulate crashed run
+        lock_data = {
+            "run_id": "crashed-id",
+            "pid": 99999,
+            "started_at_utc": 1782000000.0,
+            "script": "train.py",
+            "args": ["--epochs", "10"],
+            "hostname": current_host
+        }
+        with open(run_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
+            json.dump(lock_data, f)
+
+        # Write more than 10 lines to stdout.log
+        stdout_lines = [f"Out Line {i}\n" for i in range(1, 15)]
+        with open(run_dir / "stdout.log", "w", encoding="utf-8") as f:
+            f.writelines(stdout_lines)
+
+        # Run report
+        cmd = [sys.executable, "-m", "pubrun", "report", str(run_dir)]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        assert res.returncode == 1
+        assert "Last 10 lines of stdout.log:" in res.stderr
+        assert "Out Line 1\n" not in res.stderr
+        assert "Out Line 4\n" not in res.stderr
+        assert "Out Line 5\n" in res.stderr
+        assert "Out Line 14\n" in res.stderr
+
