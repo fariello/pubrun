@@ -48,6 +48,7 @@ Issues = "https://github.com/fariello/pubrun/issues"
 
 [project.scripts]
 pubrun = "pubrun.__main__:main"
+pr = "pubrun.__main__:main"
 
 [project.optional-dependencies]
 dev = [

@@ -348,7 +348,7 @@ def _run_cite(style: str) -> None:
         sys.exit(1)
 
 
-def _run_status(run_id: Optional[str], output_dir: Optional[str], verbose: bool) -> None:
+def _run_status(run_id: Optional[str], output_dir: Optional[str], verbose: bool, filter_str: Optional[str] = None, limit: Optional[int] = None, status_filter: Optional[str] = None) -> None:
     """List runs or inspect a specific run."""
     from pubrun.status import (
         find_run,
@@ -368,6 +368,34 @@ def _run_status(run_id: Optional[str], output_dir: Optional[str], verbose: bool)
     else:
         # List all runs
         runs = scan_runs(output_dir)
+
+        # 1. Filter by status
+        if status_filter:
+            allowed = [s.strip().lower() for s in status_filter.split(",")]
+            runs = [r for r in runs if r.status.lower() in allowed]
+
+        # 2. Filter by search string/regex
+        if filter_str:
+            import re
+            try:
+                rx = re.compile(filter_str, re.IGNORECASE)
+                runs = [r for r in runs if (
+                    (r.script and rx.search(r.script)) or
+                    (r.args and rx.search(r.args)) or
+                    (r.run_id and rx.search(r.run_id))
+                )]
+            except re.error:
+                q = filter_str.lower()
+                runs = [r for r in runs if (
+                    (r.script and q in r.script.lower()) or
+                    (r.args and q in r.args.lower()) or
+                    (r.run_id and q in r.run_id.lower())
+                )]
+
+        # 3. Limit
+        if limit is not None and limit > 0:
+            runs = runs[:limit]
+
         if verbose:
             print(render_verbose_list(runs))
         else:
@@ -665,10 +693,14 @@ def main() -> None:
         else:
             sys.argv = [sys.argv[0], "--help"]
 
+    prog_name = Path(sys.argv[0]).name if sys.argv[0] else "pubrun"
+    if prog_name not in ("pubrun", "pr"):
+        prog_name = "pubrun"
+
     parser = argparse.ArgumentParser(
-        prog="pubrun",
-        description="pubrun: Zero-dependency execution telemetry and publication engine.",
-        epilog="Use 'pubrun <command> --help' for detailed information on a specific command."
+        prog=prog_name,
+        description=f"{prog_name}: Zero-dependency execution telemetry and publication engine.",
+        epilog=f"Use '{prog_name} <command> --help' for detailed information on a specific command."
     )
     parser.add_argument("--version", action="version", version=f"pubrun {__version__}")
     parser.add_argument("--no-color", action="store_true", help="Suppress ANSI color output globally.")
@@ -676,7 +708,13 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", title="Available core commands", metavar="<command>")
     
     # ---------------- Report Subparser ----------------
-    report_parser = subparsers.add_parser("report", help="Analyze and display diagnostic telemetry from a specific run.", description="Analyze and display diagnostic telemetry from a specific run.")
+    report_parser = subparsers.add_parser(
+        "report",
+        help="Analyze and display diagnostic telemetry from a specific run.",
+        description="Analyze and display diagnostic telemetry from a specific run.",
+        epilog=f"Examples:\n  {prog_name} report\n  {prog_name} report runs/pubrun-XYZ\n  {prog_name} report --deep runs/pubrun-XYZ",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     report_parser.add_argument("run_dirs", type=str, nargs="*", help="One or more run directories (e.g., runs/pubrun-XYZ). Defaults to the most recent run in ./runs/.")
     
     depth_group_1 = report_parser.add_mutually_exclusive_group()
@@ -686,16 +724,34 @@ def main() -> None:
     report_parser.set_defaults(depth="standard")
 
     # ---------------- Methods Subparser ----------------
-    methods_parser = subparsers.add_parser("methods", help="Generate publication-ready 'Computational Methods' paragraphs.", description="Generate publication-ready 'Computational Methods' paragraphs.")
+    methods_parser = subparsers.add_parser(
+        "methods",
+        help="Generate publication-ready 'Computational Methods' paragraphs.",
+        description="Generate publication-ready 'Computational Methods' paragraphs.",
+        epilog=f"Examples:\n  {prog_name} methods\n  {prog_name} methods runs/pubrun-XYZ --format latex",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     methods_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
     methods_parser.add_argument("--format", type=str, choices=["markdown", "latex"], default="markdown", help="Output format: markdown or latex.")
 
     # ---------------- Rerun Subparser ----------------
-    rerun_parser = subparsers.add_parser("rerun", help="Print the shell command needed to replicate a run.", description="Print the shell command needed to replicate a run.")
+    rerun_parser = subparsers.add_parser(
+        "rerun",
+        help="Print the shell command needed to replicate a run.",
+        description="Print the shell command needed to replicate a run.",
+        epilog=f"Examples:\n  {prog_name} rerun\n  {prog_name} rerun runs/pubrun-XYZ",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     rerun_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
 
     # ---------------- Diff Subparser ----------------
-    diff_parser = subparsers.add_parser("diff", help="Compare two execution traces and highlight differences.", description="Compare two execution traces and highlight differences.")
+    diff_parser = subparsers.add_parser(
+        "diff",
+        help="Compare two execution traces and highlight differences.",
+        description="Compare two execution traces and highlight differences.",
+        epilog=f"Examples:\n  {prog_name} diff runs/pubrun-A runs/pubrun-B\n  {prog_name} diff runs/pubrun-A runs/pubrun-B --deep --same",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     diff_parser.add_argument("run_dir_a", type=str, help="First run directory (baseline).")
     diff_parser.add_argument("run_dir_b", type=str, help="Second run directory (comparison).")
     diff_parser.add_argument("--export", type=str, nargs="?", const=True, help="Export flattened manifests to files ('txt' or 'json').")
@@ -721,7 +777,13 @@ def main() -> None:
     diff_same.add_argument("--no-same", action="store_false", dest="same", default=None, help="Hide keys that are identical between both runs.")
     
     # ---------------- Meta Subparser ----------------
-    meta_parser = subparsers.add_parser("meta", help="Generate a standalone meta.json environment snapshot.", description="Generate a standalone meta.json environment snapshot for HPC parent-child hydration.")
+    meta_parser = subparsers.add_parser(
+        "meta",
+        help="Generate a standalone meta.json environment snapshot.",
+        description="Generate a standalone meta.json environment snapshot for HPC parent-child hydration.",
+        epilog=f"Examples:\n  {prog_name} meta\n  {prog_name} meta --out custom_meta.json --deep",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     meta_parser.add_argument("--out", type=str, default="", help="Output file path. Defaults to ./runs/meta.json.")
     
     depth_group_2 = meta_parser.add_mutually_exclusive_group()
@@ -731,13 +793,28 @@ def main() -> None:
     meta_parser.set_defaults(depth="deep")
     
     # ---------------- Status Subparser ----------------
-    status_parser = subparsers.add_parser("status", help="List runs and their status, or inspect a specific run.", description="List runs and their status, or inspect a specific run.")
+    status_parser = subparsers.add_parser(
+        "status",
+        help="List runs and their status, or inspect a specific run.",
+        description="List runs and their status, or inspect a specific run.",
+        epilog=f"Examples:\n  {prog_name} status\n  {prog_name} status --status failed,crashed\n  {prog_name} status --limit 5\n  {prog_name} status -f train.py",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     status_parser.add_argument("run_id", type=str, nargs="?", help="Run ID (or prefix) to inspect in detail. If omitted, lists all runs.")
     status_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
     status_parser.add_argument("-v", "--verbose", action="store_true", help="Show detailed information for each run in the listing.")
+    status_parser.add_argument("-f", "--filter", type=str, default=None, metavar="QUERY", help="Filter runs by script name or arguments (supports plain string or regex).")
+    status_parser.add_argument("-n", "--limit", type=int, default=None, metavar="LIMIT", help="Limit the number of runs to display.")
+    status_parser.add_argument("-s", "--status", type=str, default=None, metavar="STATUS", help="Comma-separated status filter (e.g. 'completed,failed,crashed').")
 
     # ---------------- Clean Subparser ----------------
-    clean_parser = subparsers.add_parser("clean", help="Interactively delete old run directories.", description="Interactively delete old run directories. By default, lists candidates and prompts for confirmation.")
+    clean_parser = subparsers.add_parser(
+        "clean",
+        help="Interactively delete old run directories.",
+        description="Interactively delete old run directories. By default, lists candidates and prompts for confirmation.",
+        epilog=f"Examples:\n  {prog_name} clean\n  {prog_name} clean --older-than 7d --yes\n  {prog_name} clean --status completed,ghost",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     clean_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan.")
     clean_parser.add_argument("--older-than", type=str, default=None, metavar="AGE", help="Only consider runs older than AGE (e.g. '7d', '24h', '30' for 30 days).")
     clean_parser.add_argument("--status", type=str, default=None, metavar="STATUS", help="Comma-separated status filter (e.g. 'completed,failed'). Default: completed,failed,crashed,ghost.")
@@ -745,7 +822,13 @@ def main() -> None:
     clean_parser.add_argument("--dry-run", action="store_true", help="Show what would be deleted without actually deleting.")
 
     # ---------------- Combined Subparser ----------------
-    combined_parser = subparsers.add_parser("combined", help="Interleave stdout/stderr logs from one or more runs.", description="Interleave stdout/stderr logs from one or more runs.")
+    combined_parser = subparsers.add_parser(
+        "combined",
+        help="Interleave stdout/stderr logs from one or more runs.",
+        description="Interleave stdout/stderr logs from one or more runs.",
+        epilog=f"Examples:\n  {prog_name} combined\n  {prog_name} combined run-A run-B --output combined.log",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     combined_parser.add_argument("run_ids", type=str, nargs="*", help="Run IDs (or prefixes) to combine. Defaults to the latest run if omitted.")
     combined_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
     combined_parser.add_argument("--output", type=str, default=None, metavar="FILE", help="Write combined logs to this file instead of stdout.")
@@ -753,15 +836,34 @@ def main() -> None:
     combined_parser.add_argument("-f", "--force", action="store_true", help="Force execution for files > 500 MB.")
 
     # ---------------- Cite Subparser ----------------
-    cite_parser = subparsers.add_parser("cite", help="Generate a formatted academic citation for pubrun.", description="Generate a formatted academic citation for pubrun.")
+    cite_parser = subparsers.add_parser(
+        "cite",
+        help="Generate a formatted academic citation for pubrun.",
+        description="Generate a formatted academic citation for pubrun.",
+        epilog=f"Examples:\n  {prog_name} cite\n  {prog_name} cite --style bibtex",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Citation format (default: apa).")
 
-    run_parser = subparsers.add_parser("run", help="Run a command with a specific pubrun import mode.", description="Spawn a child process with PUBRUN_IMPORT_MODE set. Useful for CI, shell scripts, and HPC workflows where source code should remain unchanged.")
+    # ---------------- Run Subparser ----------------
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Run a command with a specific pubrun import mode.",
+        description="Spawn a child process with PUBRUN_IMPORT_MODE set. Useful for CI, shell scripts, and HPC workflows where source code should remain unchanged.",
+        epilog=f"Examples:\n  {prog_name} run --mode minimal -- python train.py --epochs 10\n  {prog_name} run --mode noconsole -- python evaluate.py",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     run_parser.add_argument("--mode", type=str, choices=["auto", "noauto", "nopatch", "noconsole", "minimal"], default="auto", help="Import mode for the child process (default: auto).")
     run_parser.add_argument("command_args", nargs=argparse.REMAINDER, metavar="-- COMMAND", help="Command to execute (use -- to separate pubrun flags from the target command).")
     
     # ---------------- TUI Subparser ----------------
-    tui_parser = subparsers.add_parser("tui", help="Launch the interactive pubrun TUI manager.", description="Launch the interactive pubrun TUI manager.")
+    tui_parser = subparsers.add_parser(
+        "tui",
+        help="Launch the interactive pubrun TUI manager.",
+        description="Launch the interactive pubrun TUI manager.",
+        epilog=f"Examples:\n  {prog_name} tui\n  {prog_name} tui --dir /path/to/runs",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     tui_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
     
     # ---------------- Diagnostic Flags ----------------
@@ -818,6 +920,9 @@ def main() -> None:
             getattr(args, "run_id", None),
             getattr(args, "dir", None),
             getattr(args, "verbose", False),
+            filter_str=getattr(args, "filter", None),
+            limit=getattr(args, "limit", None),
+            status_filter=getattr(args, "status", None),
         )
         executed = True
 

@@ -129,6 +129,12 @@ class ConsoleInterceptor:
             
             self.stderr_tee = TqdmSafeTee(sys.stderr, self.stderr_log, timestamped)
             sys.stderr = self.stderr_tee
+            
+            import faulthandler
+            try:
+                faulthandler.enable(file=self.stderr_log)
+            except Exception:
+                pass
         except Exception as e:
             logger.debug(f"pubrun failed to intercept console: {e}")
             self.stop() # rollback
@@ -158,6 +164,11 @@ class ConsoleInterceptor:
             self.stdout_log.close()
             self.stdout_log = None
         if self.stderr_log:
+            import faulthandler
+            try:
+                faulthandler.disable()
+            except Exception:
+                pass
             self.stderr_log.close()
             self.stderr_log = None
             

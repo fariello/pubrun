@@ -230,6 +230,13 @@ class SignalExitCapture:
             if _self._previous_excepthook is not None:
                 _self._previous_excepthook(exc_type, exc_value, exc_tb)
 
+            # Flush stdout and stderr to ensure log files receive the traceback
+            try:
+                sys.stdout.flush()
+                sys.stderr.flush()
+            except Exception:
+                pass
+
         sys.excepthook = _excepthook
 
     def _restore_excepthook(self) -> None:
