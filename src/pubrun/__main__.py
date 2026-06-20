@@ -694,8 +694,13 @@ def main() -> None:
             sys.argv = [sys.argv[0], "--help"]
 
     prog_name = Path(sys.argv[0]).name if sys.argv[0] else "pubrun"
-    if prog_name not in ("pubrun", "pr"):
+    if prog_name not in ("pubrun", "pbr"):
         prog_name = "pubrun"
+
+    # Easter egg
+    if len(sys.argv) >= 2 and prog_name == "pbr" and sys.argv[1] == "me":
+        print("ASAP")
+        sys.exit(0)
 
     parser = argparse.ArgumentParser(
         prog=prog_name,
@@ -1040,6 +1045,15 @@ def main() -> None:
 
     if not executed:
         parser.print_help()
+        try:
+            from pubrun.status import scan_runs
+            runs = scan_runs()
+            if runs:
+                print(f"\nFound {len(runs)} run(s) in the output directory. Run '{prog_name} status' to view them.")
+            else:
+                print("\nNo runs found in the output directory.")
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
