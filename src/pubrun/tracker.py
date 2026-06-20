@@ -493,12 +493,20 @@ class Run:
             pass # removed local string formatter hook
         subprocess_records = SubprocessSpy.get_records() if self._spying_subprocesses else []
 
+        try:
+            from pubrun import __version__, __commit__
+        except ImportError:
+            __version__ = "1.0.0"
+            __commit__ = None
+
         return {
             "schema_version": "1.0",
             "manifest_type": "pubrun-manifest",
             "meta_ref": self.config.get("core", {}).get("meta_ref", None),
             "run": {
                 "run_id": self.run_id,
+                "library_version": __version__,
+                "library_commit": __commit__,
                 "capture_state": {"status": "complete"}
             },
             "timing": {

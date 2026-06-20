@@ -54,7 +54,7 @@ Controls import-time behavior. These settings determine what happens when `impor
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `mode` | string | `"auto"` | Import behavior preset: `"auto"` (start tracking on import), `"noauto"` (load API only, start manually), `"nopatch"` (start tracking but skip global hooks), `"minimal"` (load API only, no hooks). |
+| `mode` | string | `"auto"` | Import behavior preset: `"auto"` (start tracking on import), `"noauto"` (load API only, start manually), `"nopatch"` (start tracking but skip global hooks), `"noconsole"` (start tracking, skip console wrapping), `"minimal"` (load API only, no hooks). |
 | `on_conflict` | string | `"warn"` | What to do if a later import requests a different mode: `"ignore"`, `"warn"`, or `"error"`. |
 | `record_provenance` | bool | `true` | Record import-mode provenance (caller file, line) in the manifest. |
 | `provenance_depth` | int | `3` | Number of external caller frames to capture for diagnostics. |
@@ -66,6 +66,7 @@ Controls import-time behavior. These settings determine what happens when `impor
 > ```python
 > import pubrun.noauto as pubrun   # Equivalent to mode = "noauto"
 > import pubrun.nopatch as pubrun  # Equivalent to mode = "nopatch"
+> import pubrun.noconsole as pubrun # Equivalent to mode = "noconsole"
 > import pubrun.minimal as pubrun  # Equivalent to mode = "minimal"
 > ```
 
@@ -237,7 +238,7 @@ Configuration for the `pubrun diff` engine.
 
 | Variable | Description |
 |---|---|
-| `PUBRUN_IMPORT_MODE` | Canonical import mode: `auto`, `noauto`, `nopatch`, or `minimal`. Takes highest precedence. |
+| `PUBRUN_IMPORT_MODE` | Canonical import mode: `auto`, `noauto`, `nopatch`, `noconsole`, or `minimal`. Takes highest precedence. |
 | `PUBRUN_PROFILE` | Override `[core].profile`. Set to `"minimal"`, `"default"`, or `"deep"`. |
 | `PUBRUN_AUTO_START` | Legacy alias for import mode. `"false"` maps to `noauto`, `"true"` maps to `auto`. |
 | `PUBRUN_META_REF` | Path to a parent `meta.json` for HPC hydration. Child runs will reference this. |

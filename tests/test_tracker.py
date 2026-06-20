@@ -34,6 +34,10 @@ def test_tracker_lifecycle_and_writer(tmp_path, monkeypatch):
     assert isinstance(manifest_data["timing"]["started_at_utc"], float)
     assert manifest_data["status"]["outcome"] == "completed"
     
+    from pubrun import __version__, __commit__
+    assert manifest_data["run"]["library_version"] == __version__
+    assert manifest_data["run"]["library_commit"] == __commit__
+    
     # Check config
     config_path = tracker.run_dir / "config.resolved.json"
     assert config_path.exists()

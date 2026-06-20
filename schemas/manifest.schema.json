@@ -251,6 +251,12 @@
                         "null"
                     ]
                 },
+                "library_commit": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
                 "profile": {
                     "type": [
                         "string",

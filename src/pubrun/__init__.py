@@ -29,6 +29,7 @@ Usage
 
     import pubrun.noauto as pubrun   # No auto-start; start() manually.
     import pubrun.nopatch as pubrun  # Auto-start, no global hooks.
+    import pubrun.noconsole as pubrun # Auto-start, no console wrapping.
     import pubrun.minimal as pubrun  # No auto-start, no hooks.
 """
 import sys
@@ -42,6 +43,15 @@ try:
     __version__ = _pkg_version("pubrun")
 except Exception:
     __version__ = "1.0.0"  # fallback for editable installs / dev
+
+try:
+    import importlib.resources as _pkg_resources
+    if sys.version_info >= (3, 9):
+        __commit__ = _pkg_resources.files("pubrun").joinpath("COMMIT").read_text(encoding="utf-8").strip()
+    else:
+        __commit__ = _pkg_resources.read_text("pubrun", "COMMIT").strip()
+except Exception:
+    __commit__ = None
 
 __author__ = "Gabriele Fariello"
 __license__ = "BSD-3-Clause"
@@ -58,6 +68,7 @@ __all__ = [
     "tracked_run",
     "get_current_run",
     "__version__",
+    "__commit__",
 ]
 
 # -- Target-aware routing -----------------------------------------------------
