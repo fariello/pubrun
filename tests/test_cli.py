@@ -720,12 +720,48 @@ raise ValueError("TEST_EXCEPTION")
             res = subprocess.run(cmd, capture_output=True, text=True)
             assert res.returncode == 0
             assert "Examples:" in res.stdout
-            assert "pubrun " in res.stdout or "pr " in res.stdout
+            assert "pubrun " in res.stdout or "pbr " in res.stdout
 
-    def test_pr_alias_registered_in_pyproject(self):
+    def test_pbr_alias_registered_in_pyproject(self):
         pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
         assert pyproject_path.exists()
         content = pyproject_path.read_text(encoding="utf-8")
-        assert 'pr = "pubrun.__main__:main"' in content
+        assert 'pbr = "pubrun.__main__:main"' in content
+
+    def test_pbr_me_easter_egg(self):
+        # Invoke main directly with modified argv[0] and argv[1]
+        import sys
+        from unittest.mock import patch
+        from pubrun.__main__ import main
+        
+        with patch.object(sys, 'argv', ['/path/to/pbr', 'me']):
+            # Capture stdout
+            import io
+            from contextlib import redirect_stdout
+            f = io.StringIO()
+            with redirect_stdout(f):
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+            assert exc_info.value.code == 0
+            assert f.getvalue().strip() == "ASAP"
+
+    def test_empty_invocation_shows_help_and_run_count(self):
+        import sys
+        from unittest.mock import patch
+        from pubrun.__main__ import main
+        
+        with patch("pubrun.status.scan_runs") as mock_scan:
+            mock_scan.return_value = [object()]
+            
+            with patch.object(sys, 'argv', ['pubrun']):
+                import io
+                from contextlib import redirect_stdout
+                f = io.StringIO()
+                with redirect_stdout(f):
+                    main()
+                output = f.getvalue()
+                assert "usage: pubrun" in output or "usage: pbr" in output
+                assert "Found 1 run(s) in the output directory." in output
+
 
 
