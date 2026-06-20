@@ -1,4 +1,4 @@
-[README](README.md) | [Architecture](docs/architecture.md) | [Functional Spec](docs/functional_spec.md) | [API](docs/api.md) | [CLI](docs/cli.md) | [Configuration](docs/configuration.md) | [Manifest](docs/manifest.md)
+[README](https://github.com/fariello/pubrun/blob/main/README.md) | [Architecture](https://github.com/fariello/pubrun/blob/main/docs/architecture.md) | [Functional Spec](https://github.com/fariello/pubrun/blob/main/docs/functional_spec.md) | [API](https://github.com/fariello/pubrun/blob/main/docs/api.md) | [CLI](https://github.com/fariello/pubrun/blob/main/docs/cli.md) | [Configuration](https://github.com/fariello/pubrun/blob/main/docs/configuration.md) | [Manifest](https://github.com/fariello/pubrun/blob/main/docs/manifest.md)
 
 # pubrun
 
@@ -31,9 +31,9 @@ That's it. No frameworks, no heavy integrations, no syntax hijacking.
 When the script exits, `pubrun` silently generates a structured, lightweight footprint in your local `./runs/` directory.
 
 > [!NOTE]
-> **Console capture**: By default, `pubrun` tees `stdout` and `stderr` to log files in the run directory. Your terminal output is unchanged, but a copy is saved alongside the manifest. If your script produces very high output volume, you can disable this with `capture_mode = "off"` in `.pubrun.toml` or via `pubrun.start(console={"capture_mode": "off"})`. See [Configuration](docs/configuration.md) for details.
+> **Console capture**: By default, `pubrun` tees `stdout` and `stderr` to log files in the run directory. Your terminal output is unchanged, but a copy is saved alongside the manifest. If your script produces very high output volume, you can disable this with `capture_mode = "off"` in `.pubrun.toml` or via `pubrun.start(console={"capture_mode": "off"})`. See [Configuration](https://github.com/fariello/pubrun/blob/main/docs/configuration.md) for details.
 
-See [CLI Reference](docs/cli.md) and [API Reference](docs/api.md) for full details.
+See [CLI Reference](https://github.com/fariello/pubrun/blob/main/docs/cli.md) and [API Reference](https://github.com/fariello/pubrun/blob/main/docs/api.md) for full details.
 
 ## Features
 
@@ -91,7 +91,7 @@ pubrun run --mode minimal -- python script.py
 
 Legacy approaches still work: `PUBRUN_AUTO_START=false` and `[core].auto_start = false`.
 
-See [Configuration](docs/configuration.md) for the full `[imports]` section.
+See [Configuration](https://github.com/fariello/pubrun/blob/main/docs/configuration.md) for the full `[imports]` section.
 
 ### Explicit Tracking Example
 
@@ -201,7 +201,7 @@ pubrun tui --dir /path  # Scan a non-default output directory
 | `--info` | Display system capabilities and pubrun version |
 | `--run-tests` | Execute the built-in self-test suite |
 
-See [CLI Reference](docs/cli.md) for full details and examples.
+See [CLI Reference](https://github.com/fariello/pubrun/blob/main/docs/cli.md) for full details and examples.
 
 ---
 
@@ -291,7 +291,7 @@ Child scripts automatically skip heavy footprint tracking. When you run `pubrun 
 pubrun --create-config
 ```
 
-See [Configuration Reference](docs/configuration.md) for all settings and examples.
+See [Configuration Reference](https://github.com/fariello/pubrun/blob/main/docs/configuration.md) for all settings and examples.
 
 ---
 
@@ -307,7 +307,7 @@ env_enabled = true    # Redact matching environment variable values
 argv_enabled = true   # Redact matching CLI argument values
 ```
 
-See [Configuration Reference](docs/configuration.md) for the full redaction policy and regex pattern.
+See [Configuration Reference](https://github.com/fariello/pubrun/blob/main/docs/configuration.md) for the full redaction policy and regex pattern.
 
 ---
 
@@ -331,8 +331,8 @@ See [Configuration Reference](docs/configuration.md) for the full redaction poli
 
 ## License
 
-Released under the BSD 3-Clause License. Copyright (c) 2007-2026 Gabriele Fariello. See the [LICENSE](LICENSE) file for full terms.
+Released under the BSD 3-Clause License. Copyright (c) 2007-2026 Gabriele Fariello. See the [LICENSE](https://github.com/fariello/pubrun/blob/main/LICENSE) file for full terms.
 
 ---
 
-[README](README.md) | [Architecture](docs/architecture.md) | [Functional Spec](docs/functional_spec.md) | [API](docs/api.md) | [CLI](docs/cli.md) | [Configuration](docs/configuration.md) | [Manifest](docs/manifest.md)
+[README](https://github.com/fariello/pubrun/blob/main/README.md) | [Architecture](https://github.com/fariello/pubrun/blob/main/docs/architecture.md) | [Functional Spec](https://github.com/fariello/pubrun/blob/main/docs/functional_spec.md) | [API](https://github.com/fariello/pubrun/blob/main/docs/api.md) | [CLI](https://github.com/fariello/pubrun/blob/main/docs/cli.md) | [Configuration](https://github.com/fariello/pubrun/blob/main/docs/configuration.md) | [Manifest](https://github.com/fariello/pubrun/blob/main/docs/manifest.md)
