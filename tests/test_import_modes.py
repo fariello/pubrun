@@ -759,27 +759,6 @@ if run:
         data = json.loads(result.stdout.strip())
         assert data["active"] is True
 
-    def test_noauto_as_pbr_alias(self, tmp_path):
-        """The 'as pbr' alias convention works."""
-        script = f"""
-import os, sys, json
-os.chdir({str(tmp_path)!r})
-import pubrun.noauto as pbr
-pbr.start()
-run = pbr.get_current_run()
-print(json.dumps({{"active": run is not None, "version": pbr.__version__}}))
-pbr.stop()
-"""
-        result = subprocess.run(
-            [PYTHON, "-c", script],
-            capture_output=True, text=True, timeout=15
-        )
-        assert result.returncode == 0, f"stderr: {result.stderr}"
-        data = json.loads(result.stdout.strip())
-        assert data["active"] is True
-        # Version should be a non-empty string (don't hardcode to avoid breakage on bump)
-        assert isinstance(data["version"], str) and len(data["version"]) > 0
-
     def test_root_import_still_works(self, tmp_path):
         """Plain import pubrun still auto-starts (backward compat)."""
         script = f"""

@@ -591,3 +591,141 @@ class TestCliReportUsabilityDetails:
         assert "Out Line 5\n" in res.stderr
         assert "Out Line 14\n" in res.stderr
 
+
+class TestCliNewFeatures:
+
+    def test_faulthandler_segfault_captured(self, tmp_path):
+        script = f"""
+import os, sys, ctypes
+import pubrun
+tracker = pubrun.start(profile="standard")
+# trigger segfault
+ctypes.string_at(0)
+"""
+        script_file = tmp_path / "segfault.py"
+        script_file.write_text(script, encoding="utf-8")
+        
+        env = os.environ.copy()
+        res = subprocess.run([sys.executable, str(script_file)], env=env, capture_output=True, text=True, cwd=str(tmp_path))
+        
+        runs_dir = tmp_path / "runs"
+        assert runs_dir.exists()
+        run_folders = list(runs_dir.iterdir())
+        assert len(run_folders) == 1
+        run_dir = run_folders[0]
+        
+        stderr_log = run_dir / "stderr.log"
+        assert stderr_log.exists()
+        content = stderr_log.read_text(encoding="utf-8")
+        # Under different platforms/interpreters, faulthandler might dump different headers or tracebacks.
+        # We assert either standard segfault output or string_at / ctypes reference.
+        assert any(x in content for x in ("Segmentation fault", "string_at", "ctypes"))
+
+    def test_excepthook_stream_flushing(self, tmp_path):
+        script = f"""
+import sys, pubrun
+tracker = pubrun.start(profile="standard")
+sys.stdout.write("FLUSH_TEST_STDOUT")
+sys.stderr.write("FLUSH_TEST_STDERR")
+raise ValueError("TEST_EXCEPTION")
+"""
+        script_file = tmp_path / "flushing.py"
+        script_file.write_text(script, encoding="utf-8")
+        
+        env = os.environ.copy()
+        subprocess.run([sys.executable, str(script_file)], env=env, capture_output=True, text=True, cwd=str(tmp_path))
+        
+        runs_dir = tmp_path / "runs"
+        assert runs_dir.exists()
+        run_dir = list(runs_dir.iterdir())[0]
+        
+        stdout_log = run_dir / "stdout.log"
+        stderr_log = run_dir / "stderr.log"
+        
+        assert stdout_log.exists()
+        assert stderr_log.exists()
+        
+        assert "FLUSH_TEST_STDOUT" in stdout_log.read_text(encoding="utf-8")
+        assert "FLUSH_TEST_STDERR" in stderr_log.read_text(encoding="utf-8")
+        assert "TEST_EXCEPTION" in stderr_log.read_text(encoding="utf-8")
+
+    def test_status_filtering_options(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir(parents=True)
+        
+        # Create completed run
+        run_completed = runs_dir / "pubrun-completed"
+        run_completed.mkdir()
+        (run_completed / "manifest.json").write_text(json.dumps({
+            "schema_version": "1.0", "manifest_type": "pubrun-manifest",
+            "run": {"run_id": "comp-id"},
+            "status": {"outcome": "completed"},
+            "invocation": {"script": {"basename": "train.py"}, "argv": ["train.py", "--lr", "0.01"]},
+            "timing": {"started_at_utc": 1782000000.0}
+        }), encoding="utf-8")
+        
+        # Create failed run
+        run_failed = runs_dir / "pubrun-failed"
+        run_failed.mkdir()
+        (run_failed / "manifest.json").write_text(json.dumps({
+            "schema_version": "1.0", "manifest_type": "pubrun-manifest",
+            "run": {"run_id": "fail-id"},
+            "status": {"outcome": "failed"},
+            "invocation": {"script": {"basename": "eval.py"}, "argv": ["eval.py", "--batch", "32"]},
+            "timing": {"started_at_utc": 1782000100.0}
+        }), encoding="utf-8")
+
+        # Create crashed run
+        run_crashed = runs_dir / "pubrun-crashed"
+        run_crashed.mkdir()
+        (run_crashed / ".pubrun.lock").write_text(json.dumps({
+            "run_id": "crash-id", "pid": 99999, "started_at_utc": 1782000200.0,
+            "script": "preprocess.py", "argv": ["preprocess.py", "--split", "train"],
+            "hostname": "otherhost"
+        }), encoding="utf-8")
+
+        # Verify status filter: completed
+        cmd = [sys.executable, "-m", "pubrun", "status", "--dir", str(runs_dir), "--status", "completed"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        assert res.returncode == 0
+        assert "comp-id" in res.stdout
+        assert "fail-id" not in res.stdout
+
+        # Verify status filter: failed
+        cmd = [sys.executable, "-m", "pubrun", "status", "--dir", str(runs_dir), "--status", "failed"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        assert res.returncode == 0
+        assert "fail-id" in res.stdout
+        assert "comp-id" not in res.stdout
+
+        # Verify limit: 1
+        cmd = [sys.executable, "-m", "pubrun", "status", "--dir", str(runs_dir), "--limit", "1"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        assert res.returncode == 0
+        assert "crash-id" in res.stdout
+        assert "fail-id" not in res.stdout
+        assert "comp-id" not in res.stdout
+
+        # Verify filter: "train"
+        cmd = [sys.executable, "-m", "pubrun", "status", "--dir", str(runs_dir), "-f", "train"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        assert res.returncode == 0
+        assert "comp-id" in res.stdout
+        assert "crash-id" in res.stdout
+        assert "fail-id" not in res.stdout
+
+    def test_subcommand_help_examples(self):
+        for sub in ("report", "methods", "rerun", "diff", "meta", "status", "clean", "combined", "cite", "run", "tui"):
+            cmd = [sys.executable, "-m", "pubrun", sub, "--help"]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            assert res.returncode == 0
+            assert "Examples:" in res.stdout
+            assert "pubrun " in res.stdout or "pr " in res.stdout
+
+    def test_pr_alias_registered_in_pyproject(self):
+        pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
+        assert pyproject_path.exists()
+        content = pyproject_path.read_text(encoding="utf-8")
+        assert 'pr = "pubrun.__main__:main"' in content
+
+
