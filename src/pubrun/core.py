@@ -290,7 +290,7 @@ def _execute_boot_sequence(selected_by: str = "pubrun") -> None:
 
     if _should_auto and not get_current_run():
         sys0 = os.path.basename(sys.argv[0]) if sys.argv else ""
-        if sys0 in ("pubrun", "pubrun.exe", "__main__.py"):
+        if sys0 in ("pubrun", "pubrun.exe", "pbr", "pbr.exe", "__main__.py") or "pubrun.__main__" in sys.modules:
             return
 
         try:
