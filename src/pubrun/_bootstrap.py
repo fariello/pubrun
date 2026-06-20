@@ -171,14 +171,14 @@ def select_mode(mode: str, selected_by: str, source: str) -> Dict[str, bool]:
     """Select an import mode. First call wins; later calls detect conflicts.
 
     Args:
-        mode: One of "auto", "noauto", "nopatch", "quiet".
+        mode: One of "auto", "noauto", "nopatch", "minimal".
         selected_by: Identifier for who selected this mode (e.g., "pubrun",
             "pubrun.noauto", "env:PUBRUN_IMPORT_MODE").
         source: Where the selection came from (e.g., "default", "config",
             "env:PUBRUN_IMPORT_MODE").
 
     Returns:
-        The effective behavior dict {"auto_start": bool, "global_hooks": bool}.
+        The effective behavior dict (e.g., {"auto_start": bool, ...}).
     """
     global _selected_mode, _selected_behavior, _selected_by
     global _selected_source, _selected_at_utc
@@ -262,7 +262,7 @@ def is_mode_submodule_import_in_progress() -> bool:
     if detection is unavailable (safe default: root import behavior).
     """
     _MODE_SUBMODULES = frozenset({
-        "pubrun.auto", "pubrun.noauto", "pubrun.nopatch", "pubrun.quiet"
+        "pubrun.auto", "pubrun.noauto", "pubrun.nopatch", "pubrun.minimal"
     })
     try:
         # Walk up the call stack looking for importlib._bootstrap._find_and_load

@@ -31,27 +31,57 @@ class TestModeDefinitions:
 
     def test_four_modes_defined(self):
         assert len(MODES) == 4
-        assert VALID_MODES == {"auto", "noauto", "nopatch", "quiet"}
+        assert VALID_MODES == {"auto", "noauto", "nopatch", "minimal"}
 
     def test_auto_mode_behavior(self):
         b = get_mode_behavior("auto")
-        assert b == {"auto_start": True, "global_hooks": True}
+        assert b == {
+            "auto_start": True,
+            "global_hooks": True,
+            "patch_subprocesses": True,
+            "patch_console": True,
+            "signal_hooks": True,
+        }
 
     def test_noauto_mode_behavior(self):
         b = get_mode_behavior("noauto")
-        assert b == {"auto_start": False, "global_hooks": True}
+        assert b == {
+            "auto_start": False,
+            "global_hooks": True,
+            "patch_subprocesses": True,
+            "patch_console": True,
+            "signal_hooks": True,
+        }
 
     def test_nopatch_mode_behavior(self):
         b = get_mode_behavior("nopatch")
-        assert b == {"auto_start": True, "global_hooks": False}
+        assert b == {
+            "auto_start": True,
+            "global_hooks": False,
+            "patch_subprocesses": False,
+            "patch_console": False,
+            "signal_hooks": True,
+        }
 
-    def test_quiet_mode_behavior(self):
-        b = get_mode_behavior("quiet")
-        assert b == {"auto_start": False, "global_hooks": False}
+    def test_minimal_mode_behavior(self):
+        b = get_mode_behavior("minimal")
+        assert b == {
+            "auto_start": False,
+            "global_hooks": False,
+            "patch_subprocesses": False,
+            "patch_console": False,
+            "signal_hooks": False,
+        }
 
     def test_unknown_mode_falls_back_to_auto(self):
         b = get_mode_behavior("invalid")
-        assert b == {"auto_start": True, "global_hooks": True}
+        assert b == {
+            "auto_start": True,
+            "global_hooks": True,
+            "patch_subprocesses": True,
+            "patch_console": True,
+            "signal_hooks": True,
+        }
 
     def test_get_mode_behavior_returns_copy(self):
         b1 = get_mode_behavior("auto")
@@ -63,7 +93,7 @@ class TestModeDefinitions:
         assert resolve_mode_name(True, True) == "auto"
         assert resolve_mode_name(False, True) == "noauto"
         assert resolve_mode_name(True, False) == "nopatch"
-        assert resolve_mode_name(False, False) == "quiet"
+        assert resolve_mode_name(False, False) == "minimal"
 
 
 class TestConfigBootResolver:
@@ -76,11 +106,11 @@ class TestConfigBootResolver:
         assert mode == "auto"
         assert source == "default"
 
-    def test_pubrun_import_mode_env_quiet(self, monkeypatch):
-        monkeypatch.setenv("PUBRUN_IMPORT_MODE", "quiet")
+    def test_pubrun_import_mode_env_minimal(self, monkeypatch):
+        monkeypatch.setenv("PUBRUN_IMPORT_MODE", "minimal")
         monkeypatch.delenv("PUBRUN_AUTO_START", raising=False)
         mode, source = resolve_import_mode()
-        assert mode == "quiet"
+        assert mode == "minimal"
         assert source == "env:PUBRUN_IMPORT_MODE"
 
     def test_pubrun_import_mode_env_nopatch(self, monkeypatch):
@@ -117,10 +147,10 @@ class TestConfigBootResolver:
         assert source == "env:PUBRUN_AUTO_START"
 
     def test_import_mode_takes_precedence_over_auto_start(self, monkeypatch):
-        monkeypatch.setenv("PUBRUN_IMPORT_MODE", "quiet")
+        monkeypatch.setenv("PUBRUN_IMPORT_MODE", "minimal")
         monkeypatch.setenv("PUBRUN_AUTO_START", "true")
         mode, source = resolve_import_mode()
-        assert mode == "quiet"
+        assert mode == "minimal"
         assert source == "env:PUBRUN_IMPORT_MODE"
 
     def test_config_file_imports_mode(self, tmp_path, monkeypatch):
@@ -148,7 +178,7 @@ class TestConfigBootResolver:
     def test_env_overrides_config_file(self, tmp_path, monkeypatch):
         """Environment variable takes precedence over config file."""
         toml_file = tmp_path / ".pubrun.toml"
-        toml_file.write_text('[imports]\nmode = "quiet"\n', encoding="utf-8")
+        toml_file.write_text('[imports]\nmode = "minimal"\n', encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("PUBRUN_IMPORT_MODE", "auto")
         mode, source = resolve_import_mode()
@@ -207,11 +237,23 @@ class TestBootstrapState:
         assert not is_core_loaded()
 
     def test_select_mode_sets_state(self, clean_bootstrap):
-        behavior = select_mode("quiet", "test", "unit-test")
+        behavior = select_mode("minimal", "test", "unit-test")
         assert is_mode_selected()
-        assert get_selected_mode() == "quiet"
-        assert get_selected_behavior() == {"auto_start": False, "global_hooks": False}
-        assert behavior == {"auto_start": False, "global_hooks": False}
+        assert get_selected_mode() == "minimal"
+        assert get_selected_behavior() == {
+            "auto_start": False,
+            "global_hooks": False,
+            "patch_subprocesses": False,
+            "patch_console": False,
+            "signal_hooks": False,
+        }
+        assert behavior == {
+            "auto_start": False,
+            "global_hooks": False,
+            "patch_subprocesses": False,
+            "patch_console": False,
+            "signal_hooks": False,
+        }
 
     def test_mark_core_loaded(self, clean_bootstrap):
         assert not is_core_loaded()
@@ -222,7 +264,13 @@ class TestBootstrapState:
         select_mode("auto", "pubrun", "default")
         meta = get_import_metadata()
         assert meta["selected_mode"] == "auto"
-        assert meta["selected_behavior"] == {"auto_start": True, "global_hooks": True}
+        assert meta["selected_behavior"] == {
+            "auto_start": True,
+            "global_hooks": True,
+            "patch_subprocesses": True,
+            "patch_console": True,
+            "signal_hooks": True,
+        }
         assert meta["selected_by"] == "pubrun"
         assert meta["selected_source"] == "default"
         assert isinstance(meta["selected_at_utc"], float)
@@ -246,7 +294,13 @@ class TestConflictDetection:
         select_mode("auto", "pubrun", "default")
         # Same mode again should NOT raise
         behavior = select_mode("auto", "pubrun.auto", "explicit")
-        assert behavior == {"auto_start": True, "global_hooks": True}
+        assert behavior == {
+            "auto_start": True,
+            "global_hooks": True,
+            "patch_subprocesses": True,
+            "patch_console": True,
+            "signal_hooks": True,
+        }
         meta = get_import_metadata()
         assert meta["conflicts_detected"] == 0
 
@@ -264,7 +318,7 @@ class TestConflictDetection:
         monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "error")
         select_mode("auto", "pubrun", "default")
         with pytest.raises(PubrunImportModeConflictError, match="Conflicting"):
-            select_mode("quiet", "pubrun.quiet", "explicit")
+            select_mode("minimal", "pubrun.minimal", "explicit")
 
     def test_different_mode_silent_when_ignore(self, clean_bootstrap, monkeypatch):
         monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "ignore")
@@ -281,11 +335,17 @@ class TestConflictDetection:
 
     def test_first_mode_wins(self, clean_bootstrap, monkeypatch):
         monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "ignore")
-        select_mode("quiet", "first_caller", "test")
+        select_mode("minimal", "first_caller", "test")
         select_mode("auto", "second_caller", "test")
         # First mode wins
-        assert get_selected_mode() == "quiet"
-        assert get_selected_behavior() == {"auto_start": False, "global_hooks": False}
+        assert get_selected_mode() == "minimal"
+        assert get_selected_behavior() == {
+            "auto_start": False,
+            "global_hooks": False,
+            "patch_subprocesses": False,
+            "patch_console": False,
+            "signal_hooks": False,
+        }
 
     def test_conflict_records_core_loaded_state(self, clean_bootstrap, monkeypatch):
         monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "ignore")
@@ -331,7 +391,7 @@ class TestImportMetadataInManifest:
         tracker = start()
         manifest = tracker.to_manifest_dict()
         imports = manifest["pubrun_imports"]
-        assert imports["selected_mode"] in ("auto", "noauto", "nopatch", "quiet")
+        assert imports["selected_mode"] in ("auto", "noauto", "nopatch", "minimal")
         assert isinstance(imports["selected_behavior"], dict)
         assert "auto_start" in imports["selected_behavior"]
         assert "global_hooks" in imports["selected_behavior"]
@@ -347,7 +407,7 @@ class TestImportMetadataInManifest:
             lock_data = json.load(f)
         assert "import_mode" in lock_data
         assert "import_selected_by" in lock_data
-        assert lock_data["import_mode"] in ("auto", "noauto", "nopatch", "quiet", None)
+        assert lock_data["import_mode"] in ("auto", "noauto", "nopatch", "minimal", None)
         tracker.stop()
 
 
@@ -365,9 +425,9 @@ class TestPubrunRunCommand:
         )
         assert result.returncode == 0
         assert "--mode" in result.stdout
-        assert "quiet" in result.stdout
+        assert "minimal" in result.stdout
 
-    def test_run_quiet_prevents_auto_start(self, tmp_path):
+    def test_run_minimal_prevents_auto_start(self, tmp_path):
         script = tmp_path / "check.py"
         script.write_text(
             "import os, json\n"
@@ -377,7 +437,7 @@ class TestPubrunRunCommand:
             encoding="utf-8"
         )
         result = subprocess.run(
-            [PYTHON, "-m", "pubrun", "run", "--mode", "quiet", "--", PYTHON, str(script)],
+            [PYTHON, "-m", "pubrun", "run", "--mode", "minimal", "--", PYTHON, str(script)],
             capture_output=True, text=True, timeout=15
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
@@ -421,7 +481,7 @@ class TestPubrunRunCommand:
 
     def test_run_no_command_exits_1(self):
         result = subprocess.run(
-            [PYTHON, "-m", "pubrun", "run", "--mode", "quiet"],
+            [PYTHON, "-m", "pubrun", "run", "--mode", "minimal"],
             capture_output=True, text=True, timeout=10
         )
         assert result.returncode == 1
@@ -492,8 +552,8 @@ pubrun.stop()
         data = json.loads(result.stdout.strip())
         assert data["spy_installed"] is False
 
-    def test_nopatch_no_signal_handlers(self, tmp_path):
-        """nopatch mode does not install signal handlers."""
+    def test_nopatch_installs_signal_handlers(self, tmp_path):
+        """nopatch mode does install signal handlers."""
         script = f"""
 import os, sys, json
 os.chdir({str(tmp_path)!r})
@@ -513,7 +573,7 @@ pubrun.stop()
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         data = json.loads(result.stdout.strip())
-        assert data["signal_capture"] is False
+        assert data["signal_capture"] is True
 
     def test_nopatch_no_console_tee(self, tmp_path):
         """nopatch mode does not wrap sys.stdout/stderr."""
@@ -538,12 +598,12 @@ pubrun.stop()
         data = json.loads(result.stdout.strip())
         assert data["stdout_original"] is True
 
-    def test_quiet_no_hooks_no_start(self, tmp_path):
-        """quiet mode: no auto-start AND no hooks."""
+    def test_minimal_no_hooks_no_start(self, tmp_path):
+        """minimal mode: no auto-start AND no hooks."""
         script = f"""
 import os, sys, json
 os.chdir({str(tmp_path)!r})
-os.environ['PUBRUN_IMPORT_MODE'] = 'quiet'
+os.environ['PUBRUN_IMPORT_MODE'] = 'minimal'
 for mod in list(sys.modules.keys()):
     if 'pubrun' in mod:
         del sys.modules[mod]
@@ -637,11 +697,11 @@ pubrun.stop()
         data = json.loads(result.stdout.strip())
         assert data["active"] is True
 
-    def test_quiet_does_not_auto_start(self, tmp_path):
+    def test_minimal_does_not_auto_start(self, tmp_path):
         script = f"""
 import os, sys, json
 os.chdir({str(tmp_path)!r})
-import pubrun.quiet as pubrun
+import pubrun.minimal as pubrun
 run = pubrun.get_current_run()
 print(json.dumps({{"active": run is not None}}))
 """

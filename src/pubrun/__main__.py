@@ -418,13 +418,22 @@ def _show_info() -> None:
     try:
         from pubrun._bootstrap import get_selected_mode, get_selected_behavior
         mode = get_selected_mode() or "auto"
-        behavior = get_selected_behavior() or {"auto_start": True, "global_hooks": True}
+        behavior = get_selected_behavior() or {
+            "auto_start": True,
+            "global_hooks": True,
+            "patch_subprocesses": True,
+            "patch_console": True,
+            "signal_hooks": True,
+        }
         import_mode_env = os.environ.get("PUBRUN_IMPORT_MODE", "")
-        print(f"  Active mode:   {mode}")
-        print(f"  auto_start:    {behavior.get('auto_start')}")
-        print(f"  global_hooks:  {behavior.get('global_hooks')}")
+        print(f"  Active mode:         {mode}")
+        print(f"  auto_start:          {behavior.get('auto_start')}")
+        print(f"  global_hooks:        {behavior.get('global_hooks')}")
+        print(f"  patch_subprocesses:  {behavior.get('patch_subprocesses')}")
+        print(f"  patch_console:       {behavior.get('patch_console')}")
+        print(f"  signal_hooks:        {behavior.get('signal_hooks')}")
         if import_mode_env:
-            print(f"  env override:  PUBRUN_IMPORT_MODE={import_mode_env}")
+            print(f"  env override:        PUBRUN_IMPORT_MODE={import_mode_env}")
     except Exception:
         print("  (unavailable)")
     print()
@@ -603,7 +612,7 @@ def main() -> None:
     cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Citation format (default: apa).")
 
     run_parser = subparsers.add_parser("run", help="Run a command with a specific pubrun import mode.", description="Spawn a child process with PUBRUN_IMPORT_MODE set. Useful for CI, shell scripts, and HPC workflows where source code should remain unchanged.")
-    run_parser.add_argument("--mode", type=str, choices=["auto", "noauto", "nopatch", "quiet"], default="auto", help="Import mode for the child process (default: auto).")
+    run_parser.add_argument("--mode", type=str, choices=["auto", "noauto", "nopatch", "minimal"], default="auto", help="Import mode for the child process (default: auto).")
     run_parser.add_argument("command_args", nargs=argparse.REMAINDER, metavar="-- COMMAND", help="Command to execute (use -- to separate pubrun flags from the target command).")
     
     # ---------------- TUI Subparser ----------------
@@ -706,7 +715,7 @@ def main() -> None:
         if cmd_args and cmd_args[0] == "--":
             cmd_args = cmd_args[1:]
         if not cmd_args:
-            print("Error: No command specified. Usage: pubrun run --mode quiet -- python script.py", file=sys.stderr)
+            print("Error: No command specified. Usage: pubrun run --mode minimal -- python script.py", file=sys.stderr)
             sys.exit(1)
         # Spawn child process with PUBRUN_IMPORT_MODE set
         import subprocess as _sp
