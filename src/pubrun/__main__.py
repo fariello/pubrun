@@ -780,8 +780,27 @@ def _add_run_filter_args(parser: argparse.ArgumentParser, include_limit: bool = 
 
 def main() -> None:
     """CLI entrypoint for the ``pubrun`` command."""
-    # Translate 'help' and subcommand translations
+    # Handle global --no-color flag regardless of position
+    # But do not strip it if it is part of the command run by 'pubrun run'
     subcommands = {"report", "methods", "rerun", "diff", "meta", "status", "clean", "combined", "cite", "run", "tui"}
+    run_idx = -1
+    for idx, arg in enumerate(sys.argv):
+        if arg in subcommands:
+            if arg == "run":
+                run_idx = idx
+            break
+            
+    no_color_present = False
+    if run_idx != -1:
+        if "--no-color" in sys.argv[:run_idx]:
+            no_color_present = True
+            sys.argv = [arg for i, arg in enumerate(sys.argv) if i >= run_idx or arg != "--no-color"]
+    else:
+        if "--no-color" in sys.argv:
+            no_color_present = True
+            sys.argv = [arg for arg in sys.argv if arg != "--no-color"]
+
+    # Translate 'help' and subcommand translations
     if len(sys.argv) > 1:
         if sys.argv[1] == "help":
             if len(sys.argv) > 2 and sys.argv[2] in subcommands:
@@ -977,6 +996,8 @@ def main() -> None:
     parser.add_argument("--run-tests", action="store_true", help="Run the built-in test suite and a mock end-to-end script.")
     
     args = parser.parse_args()
+    if no_color_present:
+        setattr(args, "no_color", True)
     if getattr(args, "no_color", False):
         os.environ["NO_COLOR"] = "1"
 
