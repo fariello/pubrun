@@ -20,6 +20,13 @@ class Colors:
 def _has_color() -> bool:
     return not os.environ.get("NO_COLOR", "")
 
+def _supports_unicode(stream) -> bool:
+    try:
+        "┌".encode(getattr(stream, "encoding", "utf-8") or "utf-8")
+        return True
+    except UnicodeEncodeError:
+        return False
+
 def print_report(manifest_path: str, depth: str = "standard") -> None:
     """Print a human-readable diagnostic summary of a recorded run.
 
@@ -45,9 +52,14 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
     rst = Colors.RESET if use_color else ""
     
     if use_color:
-        print(f"\n{bold}┌─────────────────────────────────────────────────┐{rst}")
-        print(f"{bold}│               PUBRUN DIAGNOSTICS                │{rst}")
-        print(f"{bold}└─────────────────────────────────────────────────┘{rst}")
+        if _supports_unicode(sys.stdout):
+            print(f"\n{bold}┌─────────────────────────────────────────────────┐{rst}")
+            print(f"{bold}│               PUBRUN DIAGNOSTICS                │{rst}")
+            print(f"{bold}└─────────────────────────────────────────────────┘{rst}")
+        else:
+            print(f"\n{bold}+-------------------------------------------------+{rst}")
+            print(f"{bold}|               PUBRUN DIAGNOSTICS                |{rst}")
+            print(f"{bold}+-------------------------------------------------+{rst}")
     else:
         print(f"\n=================================================")
         print(f"               PUBRUN DIAGNOSTICS                ")
@@ -166,7 +178,7 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
     print(f"Python      : {python.get('executable')} (v{v_tag})")
     
     hostname = host.get("hostname", "unknown")
-    print(f"Host        : {hostname} — {host.get('os_name')} {host.get('os_version')} ({cpu_model}, {ram_gb} GB RAM)")
+    print(f"Host        : {hostname} - {host.get('os_name')} {host.get('os_version')} ({cpu_model}, {ram_gb} GB RAM)")
     
     commit = git.get("commit")
     if commit:

@@ -591,7 +591,7 @@ def render_verbose_list(runs: List[RunInfo]) -> str:
             f"  Directory: {r.run_dir}\n"
         )
 
-    sep = "\n" + "─" * 40 + "\n\n"
+    sep = "\n" + "-" * 40 + "\n\n"
     return sep.join(lines)
 
 
