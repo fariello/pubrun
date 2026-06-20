@@ -677,3 +677,41 @@ class TestStatusFormattingHelpers:
         output = render_short_list(runs_after)
         assert "unknown" in output
 
+    def test_scan_remote_crashed_run_by_age(self, tmp_path):
+        """A run on a different host that started >48 hours ago is classified as crashed."""
+        from pubrun.status import scan_runs, STATUS_CRASHED, STATUS_RUNNING
+
+        # 1. Create a remote run started 1 hour ago (should be running)
+        run_dir_running = tmp_path / "runs" / "pubrun-remote-running"
+        run_dir_running.mkdir(parents=True)
+        lock_data_running = {
+            "pid": 99999,
+            "started_at_utc": time.time() - 3600,
+            "script": "train.py",
+            "run_id": "running-id",
+            "hostname": "otherhost",
+        }
+        with open(run_dir_running / ".pubrun.lock", "w") as f:
+            json.dump(lock_data_running, f)
+
+        # 2. Create a remote run started 50 hours ago (should be crashed)
+        run_dir_crashed = tmp_path / "runs" / "pubrun-remote-crashed"
+        run_dir_crashed.mkdir(parents=True)
+        lock_data_crashed = {
+            "pid": 99999,
+            "started_at_utc": time.time() - 180000,  # 50 hours ago
+            "script": "train.py",
+            "run_id": "crashed-id",
+            "hostname": "otherhost",
+        }
+        with open(run_dir_crashed / ".pubrun.lock", "w") as f:
+            json.dump(lock_data_crashed, f)
+
+        runs = scan_runs(str(tmp_path / "runs"))
+        assert len(runs) == 2
+        
+        runs_map = {r.run_id: r for r in runs}
+        assert runs_map["running-id"].status == STATUS_RUNNING
+        assert runs_map["crashed-id"].status == STATUS_CRASHED
+
+
