@@ -120,7 +120,7 @@ pubrun methods --format latex
 
 ## CLI Reference
 
-The `pubrun` CLI provides nine commands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
+The `pubrun` CLI (and its convenient shorthand alias `pbr`) provides nine commands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
 
 ### `pubrun cite`
 Generates the bibliographic citation for crediting this library in your paper.
