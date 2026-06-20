@@ -318,6 +318,15 @@ class TestCliNoCommand:
         assert "pubrun" in result.stdout.lower() or "usage" in result.stdout.lower()
 
 
+class TestCliSubcommandErrors:
+
+    def test_subcommand_invalid_argument_error(self):
+        result = run_pubrun("report", "--foo")
+        assert result.returncode == 2
+        assert "usage: pubrun report" in result.stderr.lower()
+        assert "pubrun report: error: unrecognized arguments: --foo" in result.stderr
+
+
 class TestCliErrorExitCodes:
     """Test that CLI commands exit 1 on error conditions."""
 

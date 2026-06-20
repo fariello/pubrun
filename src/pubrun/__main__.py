@@ -819,7 +819,28 @@ def main() -> None:
         print("ASAP")
         sys.exit(0)
 
-    parser = argparse.ArgumentParser(
+    class _SubcommandAwareArgumentParser(argparse.ArgumentParser):
+        def error(self, message: str) -> None:
+            subcommand = None
+            subparsers_actions = [
+                act for act in self._actions 
+                if isinstance(act, argparse._SubParsersAction)
+            ]
+            if subparsers_actions:
+                for arg in sys.argv[1:]:
+                    if arg in subparsers_actions[0].choices:
+                        subcommand = arg
+                        break
+            
+            if subcommand:
+                subparser = subparsers_actions[0].choices[subcommand]
+                subparser.print_usage(sys.stderr)
+                sys.stderr.write(f"{self.prog} {subcommand}: error: {message}\n")
+                sys.exit(2)
+                
+            super().error(message)
+
+    parser = _SubcommandAwareArgumentParser(
         prog=prog_name,
         description=f"{prog_name}: Zero-dependency execution telemetry and publication engine.",
         epilog=f"Use '{prog_name} <command> --help' for detailed information on a specific command."
