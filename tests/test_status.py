@@ -572,12 +572,13 @@ class TestStatusFormattingHelpers:
 
     def test_format_elapsed(self):
         from pubrun.status import _format_elapsed
-        assert _format_elapsed(None) == "-"
-        assert _format_elapsed(0) == "0s"
-        assert _format_elapsed(45.6) == "46s"
-        assert _format_elapsed(125) == "2m05s"
-        assert _format_elapsed(3665) == "1h01m"
-        assert _format_elapsed(-10) == "-10s"
+        assert _format_elapsed(None) == "unknown"
+        assert _format_elapsed(0) == "00:00:00"
+        assert _format_elapsed(45.6) == "00:00:46"
+        assert _format_elapsed(125) == "00:02:05"
+        assert _format_elapsed(3665) == "01:01:05"
+        assert _format_elapsed(90065) == "1d 01:01:05"
+        assert _format_elapsed(-10) == "-00:00:10"
 
     def test_format_timestamp(self):
         from pubrun.status import _format_timestamp
@@ -634,4 +635,45 @@ class TestStatusFormattingHelpers:
         assert _format_age(86400) == "1 day ago"
         assert _format_age(86400 * 3) == "3 days ago"
         assert _format_age(-5) == "0m ago"
+
+    def test_crashed_run_elapsed_time_unknown(self, tmp_path):
+        """A crashed run closed out by scan_runs/RunInfo has an unknown elapsed time."""
+        from pubrun.status import scan_runs, render_short_list
+        # Create a stale lock file simulating a crashed run
+        run_dir = tmp_path / "runs" / "pubrun-test-20260531T000000Z-999999-abcd1234"
+        run_dir.mkdir(parents=True)
+        lock_data = {
+            "pid": 999999,
+            "started_at_utc": time.time() - 3600,
+            "script": "test",
+            "run_id": "abcd1234",
+            "hostname": __import__("platform").node(),
+            "git_commit": None,
+            "cwd": str(tmp_path),
+        }
+        with open(run_dir / ".pubrun.lock", "w") as f:
+            json.dump(lock_data, f)
+
+        # Trigger close-out
+        from pubrun.status import close_out_crashed_run
+        runs = scan_runs(str(tmp_path / "runs"))
+        assert len(runs) == 1
+        close_out_crashed_run(runs[0].run_dir, runs[0].lock_data)
+        
+        # Verify the timing fields in the manifest written
+        manifest_path = run_dir / "manifest.json"
+        assert manifest_path.exists()
+        with open(manifest_path, "r") as f:
+            manifest_data = json.load(f)
+        assert manifest_data["timing"]["ended_at_utc"] is None
+        assert manifest_data["timing"]["elapsed_seconds"] is None
+
+        # Scan again (now it is loaded from manifest.json)
+        runs_after = scan_runs(str(tmp_path / "runs"))
+        assert len(runs_after) == 1
+        assert runs_after[0].elapsed is None
+
+        # Verify status table output formats it as 'unknown'
+        output = render_short_list(runs_after)
+        assert "unknown" in output
 
