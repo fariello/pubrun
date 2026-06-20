@@ -32,30 +32,77 @@ def _create_config(destination: str) -> None:
         sys.exit(1)
 
 
+class RunInProgressOrCrashedError(Exception):
+    """Raised when a run has a lock file but no manifest.json yet."""
+    def __init__(self, run_dir: Path) -> None:
+        super().__init__()
+        self.run_dir = run_dir
+        try:
+            from pubrun.status import RunInfo
+            self.run_info = RunInfo(run_dir)
+        except Exception:
+            self.run_info = None
+
+
 def _get_manifest_path(run_dir: str) -> str:
     """Resolve the path to a manifest.json, auto-detecting the latest run if needed."""
     if run_dir:
-        run_path = Path(run_dir)
-        if run_path.is_file() and run_path.name == "manifest.json":
-            return str(run_path)
-        else:
-            return str(run_path / "manifest.json")
+        # Resolve via find_run first
+        try:
+            from pubrun.status import find_run
+            run_info = find_run(run_dir)
+            if run_info:
+                run_path = run_info.run_dir
+            else:
+                run_path = Path(run_dir)
+        except Exception:
+            run_path = Path(run_dir)
+
+        manifest_path = run_path if (run_path.is_file() and run_path.name == "manifest.json") else (run_path / "manifest.json")
+
+        if manifest_path.exists():
+            return str(manifest_path)
+
+        # If manifest doesn't exist, check if there is a lock file in that folder
+        lock_path = run_path / ".pubrun.lock" if run_path.is_dir() else (run_path.parent / ".pubrun.lock")
+        if lock_path.exists():
+            raise RunInProgressOrCrashedError(run_path if run_path.is_dir() else run_path.parent)
+
+        raise FileNotFoundError(f"Could not find manifest file at '{manifest_path}'.")
     else:
-        runs_dir = Path("runs")
+        # Auto-detect latest run
+        try:
+            from pubrun.config import resolve_config
+            config = resolve_config()
+            base_str = config.get("core", {}).get("output_dir", "")
+            runs_dir = Path(base_str) if base_str else Path.cwd() / "runs"
+        except Exception:
+            runs_dir = Path("runs")
+
         if not runs_dir.exists() or not runs_dir.is_dir():
-            print("Error: No --run directory provided and './runs' directory not found.", file=sys.stderr)
+            print(f"Error: No --run directory provided and '{runs_dir}' directory not found.", file=sys.stderr)
             sys.exit(1)
-            
-        # Discover the most recent run directory
-        subdirs = [d for d in runs_dir.iterdir() if d.is_dir()]
+
+        # Discover all subdirectories
+        subdirs = [d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("pubrun-")]
         if not subdirs:
-            print("Error: './runs' directory is empty.", file=sys.stderr)
+            print(f"Error: Run directory '{runs_dir}' is empty.", file=sys.stderr)
             sys.exit(1)
-            
-        # Pick the most recently modified run
+
+        # Pick the absolute latest run by mtime
         latest_run = max(subdirs, key=lambda d: d.stat().st_mtime)
-        print(f"[*] Auto-detected latest run: {latest_run}", file=sys.stderr)
-        return str(latest_run / "manifest.json")
+
+        manifest_path = latest_run / "manifest.json"
+        if manifest_path.exists():
+            print(f"[*] Auto-detected latest run: {latest_run}", file=sys.stderr)
+            return str(manifest_path)
+
+        # Check if lock file exists in the latest run
+        if (latest_run / ".pubrun.lock").exists():
+            raise RunInProgressOrCrashedError(latest_run)
+
+        # If neither exist, fall back to raising file not found
+        raise FileNotFoundError(f"Could not find manifest file at '{manifest_path}'.")
 
 
 def _run_methods(run_dir: str, format_type: str) -> None:
@@ -80,6 +127,10 @@ def _run_methods(run_dir: str, format_type: str) -> None:
         print("--- Generated Computational Methods Section ---")
         print(text)
         print("-----------------------------------------------\n")
+    except RunInProgressOrCrashedError as e:
+        status = e.run_info.status if e.run_info else "crashed/running"
+        print(f"Error: Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.", file=sys.stderr)
+        sys.exit(1)
     except FileNotFoundError:
         print(f"Error: Could not find manifest file.", file=sys.stderr)
         sys.exit(1)
@@ -105,6 +156,10 @@ def _run_rerun(run_dir: str) -> None:
         else:
             print("Error: Target manifest does not contain a valid 'rerun_command' payload.", file=sys.stderr)
             sys.exit(1)
+    except RunInProgressOrCrashedError as e:
+        status = e.run_info.status if e.run_info else "crashed/running"
+        print(f"Error: Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f"Error: Failed to fetch rerun command: {e}", file=sys.stderr)
         sys.exit(1)
@@ -168,6 +223,10 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
             mlen_target = max_length if max_length is not None else conf.get("max_string_length", 300)
             print_diff(diff_report, no_color=no_color, wrap=wrap_target, max_length=mlen_target)
 
+    except RunInProgressOrCrashedError as e:
+        status = e.run_info.status if e.run_info else "crashed/running"
+        print(f"Error: Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f"Error: Failed to generate diff report: {e}", file=sys.stderr)
         sys.exit(1)
@@ -179,6 +238,61 @@ def _run_report(run_dir: str, depth: str) -> None:
         from pubrun.report.diagnostics import print_report
         manifest_path = _get_manifest_path(run_dir)
         print_report(manifest_path, depth)
+
+    except RunInProgressOrCrashedError as e:
+        run_dir_path = e.run_dir
+        run_info = e.run_info
+        
+        status = run_info.status if run_info else "crashed/running"
+        print(f"\nError: Run directory '{run_dir_path.name}' is currently {status} and does not contain a manifest.json.\n", file=sys.stderr)
+        
+        if run_info:
+            print("Run Details (from lock file):", file=sys.stderr)
+            print(f"  - Run ID:    {run_info.run_id or '-'}", file=sys.stderr)
+            print(f"  - Script:    {run_info.script or '-'}", file=sys.stderr)
+            if run_info.args:
+                print(f"  - Arguments: {run_info.args}", file=sys.stderr)
+            
+            started_str = "-"
+            if run_info.started_at_utc:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromtimestamp(run_info.started_at_utc)
+                    started_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    started_str = str(run_info.started_at_utc)
+            print(f"  - Started:   {started_str}", file=sys.stderr)
+            if run_info.pid:
+                print(f"  - PID:       {run_info.pid}", file=sys.stderr)
+            if run_info.hostname:
+                print(f"  - Host:      {run_info.hostname}", file=sys.stderr)
+            print("", file=sys.stderr)
+            
+        # Suggest the most recent non-crashed (completed/failed) run
+        try:
+            from pubrun.config import resolve_config
+            config = resolve_config()
+            base_str = config.get("core", {}).get("output_dir", "")
+            runs_dir = Path(base_str) if base_str else Path.cwd() / "runs"
+        except Exception:
+            runs_dir = Path("runs")
+            
+        completed_runs = []
+        if runs_dir.exists() and runs_dir.is_dir():
+            for d in runs_dir.iterdir():
+                if d.is_dir() and d.name.startswith("pubrun-") and (d / "manifest.json").exists():
+                    completed_runs.append((d, d.stat().st_mtime))
+                    
+        if completed_runs:
+            completed_runs.sort(key=lambda x: x[1], reverse=True)
+            latest_completed = completed_runs[0][0]
+            print("Suggestion: To view the report for the most recent completed run, run:", file=sys.stderr)
+            print(f"  pubrun report {latest_completed}", file=sys.stderr)
+        else:
+            print("No completed runs with a manifest.json were found in the output directory.", file=sys.stderr)
+            print("See 'pubrun status' to view all active or crashed runs.", file=sys.stderr)
+            
+        sys.exit(1)
 
     except Exception as e:
         print(f"Error: Failed to generate diagnostic report: {e}", file=sys.stderr)
@@ -521,6 +635,13 @@ print('Mock Training Complete.')
 
 def main() -> None:
     """CLI entrypoint for the ``pubrun`` command."""
+    # Translate 'pubrun help' / 'pubrun help <subcommand>' to --help
+    if len(sys.argv) > 1 and sys.argv[1] == "help":
+        if len(sys.argv) > 2:
+            sys.argv = [sys.argv[0], sys.argv[2], "--help"]
+        else:
+            sys.argv = [sys.argv[0], "--help"]
+
     parser = argparse.ArgumentParser(
         prog="pubrun",
         description="pubrun: Zero-dependency execution telemetry and publication engine.",
@@ -612,7 +733,7 @@ def main() -> None:
     cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Citation format (default: apa).")
 
     run_parser = subparsers.add_parser("run", help="Run a command with a specific pubrun import mode.", description="Spawn a child process with PUBRUN_IMPORT_MODE set. Useful for CI, shell scripts, and HPC workflows where source code should remain unchanged.")
-    run_parser.add_argument("--mode", type=str, choices=["auto", "noauto", "nopatch", "minimal"], default="auto", help="Import mode for the child process (default: auto).")
+    run_parser.add_argument("--mode", type=str, choices=["auto", "noauto", "nopatch", "noconsole", "minimal"], default="auto", help="Import mode for the child process (default: auto).")
     run_parser.add_argument("command_args", nargs=argparse.REMAINDER, metavar="-- COMMAND", help="Command to execute (use -- to separate pubrun flags from the target command).")
     
     # ---------------- TUI Subparser ----------------

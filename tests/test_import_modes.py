@@ -30,8 +30,8 @@ class TestModeDefinitions:
     """Unit tests for _modes.py."""
 
     def test_four_modes_defined(self):
-        assert len(MODES) == 4
-        assert VALID_MODES == {"auto", "noauto", "nopatch", "minimal"}
+        assert len(MODES) == 5
+        assert VALID_MODES == {"auto", "noauto", "nopatch", "noconsole", "minimal"}
 
     def test_auto_mode_behavior(self):
         b = get_mode_behavior("auto")
@@ -59,6 +59,16 @@ class TestModeDefinitions:
             "auto_start": True,
             "global_hooks": False,
             "patch_subprocesses": False,
+            "patch_console": False,
+            "signal_hooks": True,
+        }
+
+    def test_noconsole_mode_behavior(self):
+        b = get_mode_behavior("noconsole")
+        assert b == {
+            "auto_start": True,
+            "global_hooks": True,
+            "patch_subprocesses": True,
             "patch_console": False,
             "signal_hooks": True,
         }
@@ -391,7 +401,7 @@ class TestImportMetadataInManifest:
         tracker = start()
         manifest = tracker.to_manifest_dict()
         imports = manifest["pubrun_imports"]
-        assert imports["selected_mode"] in ("auto", "noauto", "nopatch", "minimal")
+        assert imports["selected_mode"] in ("auto", "noauto", "nopatch", "noconsole", "minimal")
         assert isinstance(imports["selected_behavior"], dict)
         assert "auto_start" in imports["selected_behavior"]
         assert "global_hooks" in imports["selected_behavior"]
@@ -407,7 +417,7 @@ class TestImportMetadataInManifest:
             lock_data = json.load(f)
         assert "import_mode" in lock_data
         assert "import_selected_by" in lock_data
-        assert lock_data["import_mode"] in ("auto", "noauto", "nopatch", "minimal", None)
+        assert lock_data["import_mode"] in ("auto", "noauto", "nopatch", "noconsole", "minimal", None)
         tracker.stop()
 
 

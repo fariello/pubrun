@@ -27,6 +27,7 @@ Use namespaced imports to control import-time behavior without config files:
 ```python
 import pubrun.noauto as pubrun   # Load API only. Start manually later.
 import pubrun.nopatch as pubrun  # Auto-start, skip subprocess/console patches, keep signal hooks.
+import pubrun.noconsole as pubrun # Auto-start, skip console patch, keep subprocess/signal hooks.
 import pubrun.minimal as pubrun  # API only. No auto-start, all hooks/patches disabled.
 ```
 
@@ -35,6 +36,7 @@ import pubrun.minimal as pubrun  # API only. No auto-start, all hooks/patches di
 | `auto` | Yes | Yes | Default. Full tracking on import. |
 | `noauto` | No | Yes | Libraries or scripts that start tracking explicitly. |
 | `nopatch` | Yes | No patches (signals active) | When monkey-patching conflicts with other tools (debuggers, profilers). |
+| `noconsole` | Yes | Subprocesses/signals active | When stdout/stderr console wrapping is undesirable but subprocesses/signals tracking is needed. |
 | `minimal` | No | No | Shared library code that may or may not want tracking. |
 
 Alternatively, configure project-wide:

@@ -79,13 +79,14 @@ When `auto_start = true` (the default), `import pubrun` automatically calls `sta
 
 ### 3.4 Import Modes
 
-The library supports four namespaced import modes via submodule imports:
+The library supports five namespaced import modes via submodule imports:
 
 ```python
 import pubrun                    # Default: auto mode
 import pubrun.auto as pubrun     # Explicit auto (same as above)
 import pubrun.noauto as pubrun   # Load API, start later manually
 import pubrun.nopatch as pubrun  # Auto-start, skip subprocess/console patching, signal hooks active
+import pubrun.noconsole as pubrun # Auto-start, skip console patching, subprocess spying and signals active
 import pubrun.minimal as pubrun  # API only, no auto-start, all patches and hooks disabled
 ```
 
@@ -94,6 +95,7 @@ import pubrun.minimal as pubrun  # API only, no auto-start, all patches and hook
 | `auto` | `true` | `true` | `true` | `true` | Default. Full tracking on import. |
 | `noauto` | `false` | `true` | `true` | `true` | Delay tracking until explicit `start()` call. |
 | `nopatch` | `true` | `false` | `false` | `true` | Start tracking, but skip subprocess and console monkey-patching. Signal handlers remain active. |
+| `noconsole` | `true` | `true` | `false` | `true` | Start tracking, patch subprocesses and signals, but skip stdout/stderr console wrapping. |
 | `minimal` | `false` | `false` | `false` | `false` | Load API only. No auto-start, no patches, no signal hooks. |
 
 When patching or signal hooks are disabled, the corresponding side effects (e.g. `subprocess.Popen` interception, stdout/stderr wrapping, signal handler registration) are suppressed. Static capture (hardware, packages, git, environment, host, process, python) and background resource monitoring remain unaffected when tracking is active.

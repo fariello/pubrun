@@ -62,6 +62,7 @@ By default, `import pubrun` starts tracking immediately. For more control, use n
 ```python
 import pubrun.noauto as pubrun   # Load API, start later with pubrun.start()
 import pubrun.nopatch as pubrun  # Auto-start; no subprocess/console monkeypatching; standard hooks active
+import pubrun.noconsole as pubrun # Auto-start; intercepts subprocesses and signals, but skips wrapping console streams
 import pubrun.minimal as pubrun  # API only; no auto-start; all monkeypatches and hooks disabled
 ```
 
@@ -72,6 +73,7 @@ import pubrun.minimal as pubrun  # API only; no auto-start; all monkeypatches an
 | **`auto`** *(default)* | ✅ | ✅ | ✅ | ✅ | Full telemetry tracking begins automatically on import. |
 | **`noauto`** | ❌ | ✅ | ✅ | ✅ | Tracking must be started manually; all patches and hooks are active once started. |
 | **`nopatch`** | ✅ | ❌ | ❌ | ✅ | Telemetry tracking begins automatically; no intrusive stdout/stderr wrapping or subprocess patching; standard exit/signal hooks remain active. |
+| **`noconsole`** | ✅ | ✅ | ❌ | ✅ | Telemetry tracking begins automatically; intercepts subprocesses and signals, but skips wrapping stdout/stderr console streams. |
 | **`minimal`** | ❌ | ❌ | ❌ | ❌ | API only; tracking must be started manually; all patches and hooks are disabled (zero-footprint mode). |
 
 Or configure project-wide in `.pubrun.toml`:

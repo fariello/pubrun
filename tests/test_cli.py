@@ -31,6 +31,16 @@ class TestCliHelp:
         result = run_pubrun("--help")
         assert "pubrun" in result.stdout.lower()
 
+    def test_help_command_translation_root(self):
+        result = run_pubrun("help")
+        assert result.returncode == 0
+        assert "usage: pubrun" in result.stdout.lower()
+
+    def test_help_command_translation_subcommand(self):
+        result = run_pubrun("help", "report")
+        assert result.returncode == 0
+        assert "usage: pubrun report" in result.stdout.lower()
+
     def test_report_help(self):
         result = run_pubrun("report", "--help")
         assert result.returncode == 0
@@ -358,3 +368,68 @@ class TestCliErrorExitCodes:
         result = run_pubrun("cite", "--style", "unknown_style", cwd=str(tmp_path))
         # argparse rejects unknown choices with exit code 2
         assert result.returncode != 0
+
+    def test_report_running_or_crashed_run(self, tmp_path):
+        """pubrun report when the run is running or crashed (only has lock file)."""
+        run_dir = tmp_path / "runs" / "pubrun-crashed"
+        run_dir.mkdir(parents=True)
+        # Create a mock lock file
+        lock_data = {
+            "run_id": "crashed-id",
+            "pid": 99999,
+            "started_at_utc": 1782000000.0,
+            "script": "train.py",
+            "args": ["--epochs", "10"],
+            "hostname": "localhost"
+        }
+        with open(run_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
+            json.dump(lock_data, f)
+
+        # Let's run `pubrun report` with the path
+        result = run_pubrun("report", str(run_dir), cwd=str(tmp_path))
+        assert result.returncode == 1
+        assert "crashed" in result.stderr or "running" in result.stderr
+        assert "crashed-id" in result.stderr
+        assert "train.py" in result.stderr
+        assert "localhost" in result.stderr
+
+    def test_report_auto_detected_crashed_run_with_suggestion(self, tmp_path):
+        """pubrun report auto-detection gets a crashed run and suggests the latest completed run."""
+        # 1. Create a completed run
+        completed_dir = tmp_path / "runs" / "pubrun-completed"
+        completed_dir.mkdir(parents=True)
+        manifest = {
+            "schema_version": "1.0",
+            "manifest_type": "pubrun-manifest",
+            "run": {"run_id": "completed-id"},
+            "status": {"outcome": "completed"}
+        }
+        with open(completed_dir / "manifest.json", "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+
+        # 2. Create a crashed run (more recent)
+        crashed_dir = tmp_path / "runs" / "pubrun-crashed"
+        crashed_dir.mkdir(parents=True)
+        lock_data = {
+            "run_id": "crashed-id",
+            "pid": 99999,
+            "started_at_utc": 1782000000.0,
+            "script": "train.py",
+            "args": ["--epochs", "10"],
+            "hostname": "localhost"
+        }
+        with open(crashed_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
+            json.dump(lock_data, f)
+        
+        # Set mtime of crashed run to be greater
+        import time
+        os.utime(completed_dir, (time.time() - 100, time.time() - 100))
+        os.utime(crashed_dir, (time.time(), time.time()))
+
+        # Run report without arguments
+        result = run_pubrun("report", cwd=str(tmp_path))
+        assert result.returncode == 1
+        assert "crashed" in result.stderr or "running" in result.stderr
+        assert "Suggestion:" in result.stderr
+        assert "pubrun-completed" in result.stderr
+

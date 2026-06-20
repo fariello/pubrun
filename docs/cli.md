@@ -244,7 +244,7 @@ pubrun run [--mode MODE] -- COMMAND [ARGS...]
 
 | Flag | Description |
 |---|---|
-| `--mode MODE` | Import mode for the child process: `auto` (default), `noauto`, `nopatch`, or `minimal` |
+| `--mode MODE` | Import mode for the child process: `auto` (default), `noauto`, `nopatch`, `noconsole`, or `minimal` |
 
 The double dash (`--`) separates pubrun wrapper options from the target command.
 
@@ -252,6 +252,7 @@ The double dash (`--`) separates pubrun wrapper options from the target command.
 ```bash
 pubrun run --mode minimal -- python script.py      # No auto-start in child
 pubrun run --mode nopatch -- python train.py     # Auto-start but no hooks
+pubrun run --mode noconsole -- python train.py   # Auto-start but no console wrap
 pubrun run -- python script.py                   # Default auto mode
 ```
 

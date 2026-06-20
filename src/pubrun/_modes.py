@@ -34,6 +34,13 @@ MODES: Dict[str, Dict[str, bool]] = {
         "patch_console": False,
         "signal_hooks": True,
     },
+    "noconsole": {
+        "auto_start": True,
+        "global_hooks": True,
+        "patch_subprocesses": True,
+        "patch_console": False,
+        "signal_hooks": True,
+    },
     "minimal": {
         "auto_start": False,
         "global_hooks": False,
