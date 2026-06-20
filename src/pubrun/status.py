@@ -308,38 +308,54 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
         
     lock_data = lock_data or {}
     started_at = lock_data.get("started_at_utc")
-    ended_at = time.time()
-    elapsed = ended_at - started_at if started_at else None
     
-    # Compile what we can into a fallback manifest
+    # Compile what we can into a fallback manifest (with ended_at_utc / elapsed_seconds set to None since they are unknown)
     manifest = {
         "schema_version": "1.0",
         "manifest_type": "pubrun-manifest",
         "run": {
             "run_id": lock_data.get("run_id"),
+            "capture_state": {"status": "partial"},
         },
         "status": {
             "outcome": "crashed",
+            "capture_state": {"status": "complete"},
         },
         "timing": {
             "started_at_utc": started_at,
-            "ended_at_utc": ended_at,
-            "elapsed_seconds": elapsed,
+            "ended_at_utc": None,
+            "elapsed_seconds": None,
+            "capture_state": {"status": "partial"},
+        },
+        "capture": {
+            "output_base_dir": None,
+            "run_dir": str(run_dir),
+            "capture_state": {"status": "unavailable"},
         },
         "process": {
             "pid": lock_data.get("pid"),
+            "capture_state": {"status": "partial"},
         },
         "host": {
-            "hostname": lock_data.get("hostname"),
+            "hostname": {
+                "representation": "plain",
+                "value": lock_data.get("hostname"),
+            } if lock_data.get("hostname") else {
+                "representation": "unavailable",
+                "value": None,
+            },
+            "capture_state": {"status": "partial"},
         },
         "invocation": {
             "script": {
                 "basename": Path(lock_data.get("script")).name if lock_data.get("script") else None,
             } if lock_data.get("script") else {},
             "argv": lock_data.get("argv", []),
+            "capture_state": {"status": "partial"},
         },
         "git": {
             "commit": lock_data.get("git_commit"),
+            "capture_state": {"status": "partial"},
         }
     }
     
@@ -414,19 +430,25 @@ def find_run(run_id_or_prefix: str, output_dir: Optional[str] = None) -> Optiona
 # --------------------------------------------------------------------------
 
 def _format_elapsed(seconds: Optional[float]) -> str:
-    """Format elapsed seconds as a human-friendly string."""
+    """Format elapsed seconds as a human-friendly string in HH:MM:SS (or Xd HH:MM:SS if >= 24h) format."""
     if seconds is None:
-        return "-"
-    if seconds < 60:
-        return f"{seconds:.0f}s"
-    elif seconds < 3600:
-        m = int(seconds // 60)
-        s = int(seconds % 60)
-        return f"{m}m{s:02d}s"
+        return "unknown"
+    
+    is_negative = seconds < 0
+    total_seconds = int(round(abs(seconds)))
+    
+    s = total_seconds % 60
+    m = (total_seconds // 60) % 60
+    h = total_seconds // 3600
+    
+    if h >= 24:
+        days = h // 24
+        hours = h % 24
+        formatted = f"{days}d {hours:02d}:{m:02d}:{s:02d}"
     else:
-        h = int(seconds // 3600)
-        m = int((seconds % 3600) // 60)
-        return f"{h}h{m:02d}m"
+        formatted = f"{h:02d}:{m:02d}:{s:02d}"
+        
+    return f"-{formatted}" if is_negative else formatted
 
 
 def _format_timestamp(epoch: Optional[float]) -> str:
