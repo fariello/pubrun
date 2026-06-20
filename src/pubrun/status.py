@@ -178,9 +178,15 @@ class RunInfo:
             current_host = get_hostname()
             if self.hostname and self.hostname != current_host:
                 # Different host -- can't verify PID liveness
-                # Assume running (could be on a cluster node)
-                self.status = STATUS_RUNNING
-                self.elapsed = time.time() - self.started_at_utc if self.started_at_utc else None
+                # If started more than 48 hours ago, assume crashed (stale lock from synced dir or dead node)
+                age = time.time() - self.started_at_utc if self.started_at_utc else 0
+                if age > 172800:  # 48 hours
+                    self.status = STATUS_CRASHED
+                    self.elapsed = None
+                else:
+                    # Assume running (could be on a cluster node)
+                    self.status = STATUS_RUNNING
+                    self.elapsed = time.time() - self.started_at_utc if self.started_at_utc else None
             elif self.pid and self.started_at_utc:
                 if is_same_process(self.pid, self.started_at_utc):
                     self.status = STATUS_RUNNING

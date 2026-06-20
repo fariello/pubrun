@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pubrun"
-version = "1.0.1"
+version = "1.0.2"
 description = "A lightweight Python library for capturing execution context."
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
