@@ -141,6 +141,8 @@ class Run:
         self.hardware_data: Dict[str, Any] = {}
         self.host_data: Dict[str, Any] = {}
         self.console_data: Dict[str, Any] = {}
+        self.data_files: Dict[str, Any] = {"inputs": [], "outputs": []}
+        self.manual_subprocess_records: list = []
         self._spying_subprocesses = False
         self.console_interceptor = None
         self.event_stream = None
@@ -491,7 +493,9 @@ class Run:
             elapsed = self.ended_at_utc - self.started_at_utc
             
             pass # removed local string formatter hook
-        subprocess_records = SubprocessSpy.get_records() if self._spying_subprocesses else []
+        spy_records = SubprocessSpy.get_records() if self._spying_subprocesses else []
+        manual_records = getattr(self, "manual_subprocess_records", [])
+        subprocess_records = spy_records + manual_records
 
         try:
             from pubrun import __version__, __commit__
@@ -549,6 +553,7 @@ class Run:
             "signals": self.signal_capture.get_records() if self.signal_capture else {"capture_state": {"status": "suppressed"}},
 
             "pubrun_imports": self._get_import_metadata(),
+            "data_files": getattr(self, "data_files", {"inputs": [], "outputs": []}),
 
             "status": {
                 "outcome": self._outcome,

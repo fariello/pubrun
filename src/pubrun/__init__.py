@@ -67,6 +67,12 @@ __all__ = [
     "audit_run",
     "tracked_run",
     "get_current_run",
+    "report",
+    "artifact",
+    "print",
+    "open",
+    "subprocess",
+    "popen",
     "__version__",
     "__commit__",
 ]
@@ -87,6 +93,12 @@ if not _is_mode_import():
         audit_run,
         tracked_run,
         get_current_run,
+        report,
+        artifact,
+        print,
+        open,
+        subprocess,
+        popen,
         _run_lock,
         _execute_boot_sequence,
     )
@@ -106,7 +118,9 @@ else:
             try:
                 from pubrun.core import (
                     start, stop, annotate, phase, diff,
-                    audit_run, tracked_run, get_current_run, _run_lock,
+                    audit_run, tracked_run, get_current_run,
+                    report, artifact, print, open, subprocess, popen,
+                    _run_lock,
                 )
                 _pkg.start = start
                 _pkg.stop = stop
@@ -116,6 +130,12 @@ else:
                 _pkg.audit_run = audit_run
                 _pkg.tracked_run = tracked_run
                 _pkg.get_current_run = get_current_run
+                _pkg.report = report
+                _pkg.artifact = artifact
+                _pkg.print = print
+                _pkg.open = open
+                _pkg.subprocess = subprocess
+                _pkg.popen = popen
                 _pkg._run_lock = _run_lock
             except Exception:
                 pass
