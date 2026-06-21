@@ -1,3 +1,4 @@
+import os
 import subprocess
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
@@ -8,8 +9,10 @@ class CustomBuildHook(BuildHookInterface):
             commit = subprocess.check_output(
                 ["git", "-C", self.root, "rev-parse", "HEAD"], text=True
             ).strip()
-            with open("src/pubrun/COMMIT", "w", encoding="utf-8") as f:
+            commit_path = os.path.join(self.root, "src", "pubrun", "COMMIT")
+            with open(commit_path, "w", encoding="utf-8") as f:
                 f.write(commit + "\n")
         except Exception:
             # If not building inside a git repository, fallback gracefully
             pass
+

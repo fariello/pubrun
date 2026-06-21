@@ -100,10 +100,16 @@ If the audit and implementation batches have completed successfully, all validat
 
 1. **Commit and Push**: Ensure all changes (code, tests, docs, build files) are committed locally, and push the branch to the remote repository.
 2. **Verify CI Results**: Wait/query to verify that the remote CI checks pass successfully for the pushed commit.
-3. **Bake Commit Metadata**: Update any source commit identifier files (e.g., `COMMIT`) with the target release commit hash.
+3. **Bake Commit Metadata**: Running the build command automatically invokes the custom Hatch build hook, writing the exact current git commit hash to the `src/pubrun/COMMIT` file.
 4. **Re-build Release Packages**: Run repository-native packaging commands (e.g., `hatch build`, `python -m build`) to generate clean distribution source files and wheels under `dist/`.
-5. **Move/Create Release Tag**: Create or update the release version tag (e.g., `vX.Y.Z`) on the final commit and push the tag to the remote repository.
-6. **Twine Validation**: Run `twine check dist/*` if twine is available, verifying the generated assets are 100% ready to be published to PyPI.
+5. **Verify Baked Commit**: Confirm that the commit hash inside the generated wheel is correct:
+   ```bash
+   unzip -p dist/*.whl pubrun/COMMIT
+   git rev-parse HEAD
+   ```
+6. **Move/Create Release Tag**: Create or update the release version tag (e.g., `vX.Y.Z`) on the final commit and push the tag to the remote repository.
+7. **Twine Validation**: Run `twine check dist/*` if twine is available, verifying the generated assets are 100% ready to be published to PyPI.
+
 
 
 ## Restart assessment
