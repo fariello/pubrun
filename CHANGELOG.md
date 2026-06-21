@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.1] - 2026-06-21
+
+### Changed
+- **CLI diff default depth**: Changed default diff depth from `--basic` to `--standard` to align with the `report` subcommand and provide standard telemetry comparison by default.
+
+### Fixed
+- **CLI diff formatting**: Fixed a bug where the `depth` parameter was not passed to `print_diff` in the `diff` CLI command, causing it to fall back to basic formatting instead of standard/deep list formatting.
+
 ## [1.1.0] - 2026-06-21
 
 ### Added
