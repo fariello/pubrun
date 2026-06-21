@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.2] - 2026-06-22
+
+### Fixed
+- **Windows GHA runner compatibility**: Skip process command-line mismatch tests on systems where process command-line retrieval via `wmic` is deprecated or unavailable, falling back correctly to start-time checks.
+
 ## [1.1.1] - 2026-06-21
 
 ### Changed
