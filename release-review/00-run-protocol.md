@@ -6,7 +6,7 @@ This file defines the global rules for the release review. These rules apply to 
 
 1. `README.md` is the controlling instruction.
 2. This file defines shared rules.
-3. Section files `01` through `08` define phase-specific tasks.
+3. Section files `01` through `09` define phase-specific tasks.
 4. `repository-review/<RUN_ID>/` is the authoritative run record.
 5. TodoWrite, if available, is live progress tracking only.
 
@@ -57,7 +57,7 @@ Required artifacts:
 | `ci-assessment.md` | CI and GitHub Actions assessment, recommendations, changes made, or reasons no change was made. |
 | `schema-validation.md` | Discovered schemas, schema validation commands, sample payload/config/example validation, compatibility risks, and schema drift findings. |
 | `final-bug-security-audit.md` | Final post-implementation bug, correctness, security, privacy, and unsafe-change sanity audit before completion. |
-| `section-summaries/` | Exact per-section summary files for Sections 1 through 8. |
+| `section-summaries/` | Exact per-section summary files for Sections 1 through 9. |
 | `audit-lanes/` | Optional reports from controlled parallel read-only audit lanes used after Section 1. |
 
 If any artifact is not applicable, create it anyway and mark it as not applicable with rationale.
