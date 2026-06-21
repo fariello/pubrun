@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.0] - 2026-06-21
+
+### Added
+- **Smarter array/list diffing**: Depth-aware array comparisons in `pubrun diff`. Under `--basic` depth, outputs additions and deletions as standard multi-line items. Under `--standard` and `--deep` depths, outputs full lists on two lines with inline green (`+`), red (`-`), and yellow (`~`) ANSI colors highlighting added, removed, and rearranged elements.
+- **Epoch time formatting**: Formats epoch timestamps into human-readable local date strings in diff output.
+- **Rerun Command Reconstruction**: Rebuilds run commands from active/crashed lock files.
+- **CLI error standardization**: CLI error prefix standardized to `[ERRO]` and warning prefix to `[WARN]`.
+- **Exclude volatile timestamps**: Exclude volatile execution timestamps in basic/standard diff.
+- **Not-filters**: Implemented exclusions filtering via `-S`/`--not-status` and `-F`/`--not-filter`.
+
+### Fixed
+- **Windows CI compatibility**: Made rerun tests platform-independent to ensure Windows CI compatibility.
+
 ## [1.0.0] - 2026-06-19
 
 ### Added
