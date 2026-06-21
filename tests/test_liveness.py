@@ -82,11 +82,35 @@ class TestIsSameProcess:
 
     def test_expected_script_matches(self):
         """If expected_script matches the actual process command line, it matches."""
+        from pubrun.capture.liveness import _PLATFORM, _check_command_linux, _check_command_macos, _check_command_windows
+        functional = False
+        if _PLATFORM == "linux":
+            functional = _check_command_linux(os.getpid(), "pytest") is not None
+        elif _PLATFORM == "darwin":
+            functional = _check_command_macos(os.getpid(), "pytest") is not None
+        elif _PLATFORM == "win32":
+            functional = _check_command_windows(os.getpid(), "pytest") is not None
+
+        if not functional:
+            pytest.skip("Command-line checking is not functional on this platform")
+
         # Our own process should be running "pytest"
         assert is_same_process(os.getpid(), time.time(), expected_script="pytest") is True
 
     def test_expected_script_mismatch(self):
         """If expected_script does not match, it should return False immediately (recycled PID)."""
+        from pubrun.capture.liveness import _PLATFORM, _check_command_linux, _check_command_macos, _check_command_windows
+        functional = False
+        if _PLATFORM == "linux":
+            functional = _check_command_linux(os.getpid(), "pytest") is not None
+        elif _PLATFORM == "darwin":
+            functional = _check_command_macos(os.getpid(), "pytest") is not None
+        elif _PLATFORM == "win32":
+            functional = _check_command_windows(os.getpid(), "pytest") is not None
+
+        if not functional:
+            pytest.skip("Command-line checking is not functional on this platform")
+
         # Even if the start time is identical (current process), script name mismatch fails
         start = get_process_start_time(os.getpid())
         if start is None:
