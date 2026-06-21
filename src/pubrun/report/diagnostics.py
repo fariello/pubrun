@@ -20,6 +20,12 @@ class Colors:
 def _has_color() -> bool:
     return not os.environ.get("NO_COLOR", "")
 
+def _print_error(message: str) -> None:
+    if os.environ.get("NO_COLOR", ""):
+        print(f"[ERRO] {message}", file=sys.stderr)
+    else:
+        print(f"\033[31m[ERRO]\033[0m {message}", file=sys.stderr)
+
 def _supports_unicode(stream) -> bool:
     try:
         "┌".encode(getattr(stream, "encoding", "utf-8") or "utf-8")
@@ -38,10 +44,10 @@ def print_report(manifest_path: str, depth: str = "standard") -> None:
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
     except FileNotFoundError:
-        print(f"Error: Could not find manifest file at '{manifest_path}'.", file=sys.stderr)
+        _print_error(f"Could not find manifest file at '{manifest_path}'.")
         sys.exit(1)
     except json.JSONDecodeError:
-        print(f"Error: The manifest file at '{manifest_path}' is corrupt or contains invalid JSON.", file=sys.stderr)
+        _print_error(f"The manifest file at '{manifest_path}' is corrupt or contains invalid JSON.")
         sys.exit(1)
         
     # Hydrate!

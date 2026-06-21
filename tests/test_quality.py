@@ -181,6 +181,28 @@ class TestDiffEngine:
         assert "foo.x" in result["removed"]
         assert "bar.y" in result["added"]
 
+    def test_list_diff_added_removed(self):
+        a = {"python": {"sys_path": ["/path/a", "/path/b"]}}
+        b = {"python": {"sys_path": ["/path/b", "/path/c"]}}
+        result = compare_manifests(a, b)
+        assert "python.sys_path" in result["modified"]
+        mod = result["modified"]["python.sys_path"]
+        assert mod["type"] == "list_diff"
+        assert mod["added"] == ["/path/c"]
+        assert mod["removed"] == ["/path/a"]
+        assert mod["order_changed"] is False
+
+    def test_list_diff_order_changed(self):
+        a = {"python": {"sys_path": ["/path/a", "/path/b"]}}
+        b = {"python": {"sys_path": ["/path/b", "/path/a"]}}
+        result = compare_manifests(a, b)
+        assert "python.sys_path" in result["modified"]
+        mod = result["modified"]["python.sys_path"]
+        assert mod["type"] == "list_diff"
+        assert mod["added"] == []
+        assert mod["removed"] == []
+        assert mod["order_changed"] is True
+
 
 class TestDiffNormalization:
     """Layer 5: Tests for _normalize_manifest internals."""
@@ -231,7 +253,48 @@ class TestDiffNormalization:
     def test_empty_list_renders_as_brackets(self):
         manifest = {"errors": {"records": []}}
         flat = _normalize_manifest(manifest, [])
-        assert flat["errors.records"] == "[]"
+        assert flat["errors.records"] == []
+
+    def test_wildcard_ignores(self):
+        manifest = {
+            "pubrun_imports": {
+                "selected_at_utc": 12345.67,
+                "requests": [
+                    {
+                        "timestamp_utc": 111.1,
+                        "caller": {
+                            "line_number": 42,
+                            "filename": "a.py"
+                        }
+                    }
+                ]
+            }
+        }
+        ignores = [
+            "pubrun_imports.selected_at_utc",
+            "pubrun_imports.requests.*.timestamp_utc",
+            "pubrun_imports.requests.*.caller.line_number"
+        ]
+        flat = _normalize_manifest(manifest, ignores)
+        assert "pubrun_imports.selected_at_utc" not in flat
+        assert "pubrun_imports.requests.0.timestamp_utc" not in flat
+        assert "pubrun_imports.requests.0.caller.line_number" not in flat
+        assert flat["pubrun_imports.requests.0.caller.filename"] == "a.py"
+
+    def test_complex_list_flattening(self):
+        manifest = {
+            "pubrun_imports": {
+                "requests": [
+                    {"name": "requests", "conflict": False},
+                    {"name": "urllib3", "conflict": True}
+                ]
+            }
+        }
+        flat = _normalize_manifest(manifest, [])
+        assert flat["pubrun_imports.requests.0.name"] == "requests"
+        assert flat["pubrun_imports.requests.0.conflict"] is False
+        assert flat["pubrun_imports.requests.1.name"] == "urllib3"
+        assert flat["pubrun_imports.requests.1.conflict"] is True
 
 
 class TestIsPathVar:

@@ -1,5 +1,6 @@
 import os
 import json
+import fnmatch
 from typing import Any, Dict, List, Tuple
 
 
@@ -12,10 +13,20 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str]) -> Dict[st
     """Flatten a manifest into a one-dimensional dict suitable for diffing.
 
     Environment variables and packages are expanded into individual keys.
-    Keys matching any prefix in ``ignores`` are excluded.
+    Keys matching any pattern in ``ignores`` are excluded.
     """
     flat = {}
     
+    # Helper to check if a key matches any ignore pattern
+    def _should_ignore(key: str) -> bool:
+        for ig in ignores:
+            if "*" in ig:
+                if fnmatch.fnmatch(key, ig):
+                    return True
+            elif key.startswith(ig):
+                return True
+        return False
+
     # 1. Environment variables expanded into individual keys
     env_vars = manifest.get("environment", {}).get("variables", [])
     for var in env_vars:
@@ -25,7 +36,7 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str]) -> Dict[st
             val = val.get("value")
             
         full_key = f"environment.{name}"
-        if not any(full_key.startswith(ig) for ig in ignores):
+        if not _should_ignore(full_key):
             flat[full_key] = str(val) if val is not None else ""
 
     # 2. Packages expanded into individual keys
@@ -34,28 +45,33 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str]) -> Dict[st
         name = p.get("name")
         ver = p.get("version", "unknown")
         full_key = f"packages.{name}"
-        if not any(full_key.startswith(ig) for ig in ignores):
+        if not _should_ignore(full_key):
             flat[full_key] = ver
 
-    # 3. Everything else recursively flattened
+    # 3. Recursively flatten everything else
+    def _recruit_val(v: Any, full_key: str) -> None:
+        if _should_ignore(full_key):
+            return
+            
+        if isinstance(v, dict):
+            for sub_k, sub_v in v.items():
+                _recruit_val(sub_v, f"{full_key}.{sub_k}")
+        elif isinstance(v, list):
+            if not v:
+                flat[full_key] = []
+            elif all(isinstance(x, (str, int, float, bool)) or x is None for x in v):
+                flat[full_key] = v
+            else:
+                for idx, item in enumerate(v):
+                    _recruit_val(item, f"{full_key}.{idx}")
+        else:
+            flat[full_key] = v
+
     def _recruit(d: Dict[str, Any], prefix: str = "") -> None:
         for k, v in d.items():
             if k in ["environment", "packages"] and prefix == "": 
                 continue # Already handled above
-                
-            full_key = f"{prefix}{k}"
-            if any(full_key.startswith(ig) for ig in ignores):
-                continue
-                
-            if isinstance(v, dict):
-                _recruit(v, f"{full_key}.")
-            elif isinstance(v, list):
-                if not v:
-                    flat[full_key] = "[]"
-                else:
-                    flat[full_key] = str(v)
-            else:
-                flat[full_key] = v
+            _recruit_val(v, f"{prefix}{k}")
 
     _recruit(manifest)
     return flat
@@ -105,8 +121,23 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Lis
         elif k in flat_a and k not in flat_b:
             diff_report["removed"][k] = val_a
         elif val_a != val_b:
+            if isinstance(val_a, list) and isinstance(val_b, list):
+                # Diff lists of simple elements
+                added_items = [x for x in val_b if x not in val_a]
+                removed_items = [x for x in val_a if x not in val_b]
+                
+                common_a = [x for x in val_a if x in val_b]
+                common_b = [x for x in val_b if x in val_a]
+                order_changed = common_a != common_b
+                
+                diff_report["modified"][k] = {
+                    "type": "list_diff",
+                    "added": added_items,
+                    "removed": removed_items,
+                    "order_changed": order_changed
+                }
             # PATH-style variable: split on OS path separator
-            if _is_path_var(k) and isinstance(val_a, str) and isinstance(val_b, str):
+            elif _is_path_var(k) and isinstance(val_a, str) and isinstance(val_b, str):
                 parts_a = set(val_a.split(os.pathsep)) if val_a else set()
                 parts_b = set(val_b.split(os.pathsep)) if val_b else set()
                 
