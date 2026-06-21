@@ -157,7 +157,9 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Lis
                     "type": "list_diff",
                     "added": added_items,
                     "removed": removed_items,
-                    "order_changed": order_changed
+                    "order_changed": order_changed,
+                    "old": val_a,
+                    "new": val_b
                 }
             # PATH-style variable: split on OS path separator
             elif _is_path_var(k) and isinstance(val_a, str) and isinstance(val_b, str):
