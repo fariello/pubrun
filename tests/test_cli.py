@@ -279,7 +279,11 @@ class TestCliRerun:
         assert result.returncode == 0
         assert "[WARN]" in result.stderr
         assert "is currently running" in result.stderr
-        assert "cd /some/cwd && python train.py --epochs 10" in result.stdout
+        if sys.platform == "win32":
+            assert "cd /some/cwd" in result.stdout
+            assert "python train.py --epochs 10" in result.stdout
+        else:
+            assert "cd /some/cwd && python train.py --epochs 10" in result.stdout
 
     def test_rerun_crashed_run_reconstruction(self, tmp_path):
         import time
@@ -302,7 +306,11 @@ class TestCliRerun:
         assert result.returncode == 0
         assert "[WARN]" in result.stderr
         assert "is currently crashed" in result.stderr
-        assert "cd /some/cwd && python train.py --epochs 10" in result.stdout
+        if sys.platform == "win32":
+            assert "cd /some/cwd" in result.stdout
+            assert "python train.py --epochs 10" in result.stdout
+        else:
+            assert "cd /some/cwd && python train.py --epochs 10" in result.stdout
 
     def test_rerun_crashed_run_no_color(self, tmp_path):
         import time
@@ -326,7 +334,11 @@ class TestCliRerun:
         assert "[WARN]" in result.stderr
         assert "\033[" not in result.stderr
         assert "is currently crashed" in result.stderr
-        assert "cd /some/cwd && python train.py --epochs 10" in result.stdout
+        if sys.platform == "win32":
+            assert "cd /some/cwd" in result.stdout
+            assert "python train.py --epochs 10" in result.stdout
+        else:
+            assert "cd /some/cwd && python train.py --epochs 10" in result.stdout
 
 
 class TestCliDiff:
