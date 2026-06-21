@@ -290,7 +290,7 @@ def _execute_boot_sequence(selected_by: str = "pubrun") -> None:
 
     if _should_auto and not get_current_run():
         sys0 = os.path.basename(sys.argv[0]) if sys.argv else ""
-        if sys0 in ("pubrun", "pubrun.exe", "pbr", "pbr.exe", "__main__.py") or "pubrun.__main__" in sys.modules:
+        if sys0 in ("pubrun", "pubrun.exe", "pbr", "pbr.exe", "__main__.py", "-m") or "pubrun.__main__" in sys.modules:
             return
 
         try:
@@ -299,3 +299,372 @@ def _execute_boot_sequence(selected_by: str = "pubrun") -> None:
             logging.getLogger("pubrun").warning(
                 f"pubrun auto-start failed (tracking disabled): {start_err}"
             )
+
+
+# -- Explicit Tracking API (Phases 1-4) --------------------------------------
+
+import hashlib
+import time
+import subprocess as _subprocess
+from pathlib import Path
+import builtins
+
+def report(name: str, data: Any) -> None:
+    """Save a custom structured report to the run directory.
+    
+    If data is a dict or list, it is serialized as JSON (to '{name}.json').
+    Otherwise, it is written as a plain string (to '{name}.txt').
+    
+    Emits an annotation event so the report is discoverable via `pubrun report`.
+    """
+    import json
+    run = get_current_run()
+    if not run or not run.is_active:
+        _handle_inactive(f"pubrun.report('{name}')")
+        return
+
+    try:
+        # Determine format and file name
+        if isinstance(data, (dict, list)):
+            filename = f"{name}.json"
+            content = json.dumps(data, indent=2)
+            summary = data if isinstance(data, dict) else {"items": len(data)}
+        else:
+            filename = f"{name}.txt"
+            content = str(data)
+            summary = {"preview": content[:100]}
+
+        # Write file safely
+        dest = run.run_dir / filename
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+
+        # Emit annotation to make it visible in `pubrun report`
+        annotate(f"report: {name}", filename=filename, summary=summary)
+    except Exception as e:
+        logging.getLogger("pubrun").warning(f"pubrun: failed to write report '{name}': {e}")
+
+
+def artifact(filename: str, content: Any) -> None:
+    """Write a file (e.g., text, csv, or binary bytes) to the run directory.
+    
+    Emits an annotation event so the file is recorded in the run's event timeline.
+    """
+    run = get_current_run()
+    if not run or not run.is_active:
+        _handle_inactive(f"pubrun.artifact('{filename}')")
+        return
+
+    try:
+        dest = run.run_dir / filename
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        if isinstance(content, bytes):
+            dest.write_bytes(content)
+        else:
+            dest.write_text(str(content), encoding="utf-8")
+
+        # Emit annotation to make it visible in `pubrun report`
+        annotate(f"artifact: {filename}", filename=filename)
+    except Exception as e:
+        logging.getLogger("pubrun").warning(f"pubrun: failed to write artifact '{filename}': {e}")
+
+
+def print(*args: Any, **kwargs: Any) -> None:
+    """Drop-in print replacement that logs to stdout.log in the active run directory.
+    
+    Respects all standard print arguments (sep, end, file, flush).
+    """
+    # 1. Capture the printed string
+    sep = kwargs.get("sep", " ")
+    end = kwargs.get("end", "\n")
+    msg = sep.join(map(str, args)) + end
+    
+    builtins.print(*args, **kwargs)
+    
+    run = get_current_run()
+    if run and run.is_active:
+        try:
+            log_path = run.run_dir / "stdout.log"
+            timestamped = run.config.get("console", {}).get("capture_mode", "off") in {"standard", "deep"}
+            
+            if timestamped:
+                from datetime import datetime, timezone
+                lines = msg.split('\n')
+                out_lines = []
+                for i, line in enumerate(lines):
+                    if i < len(lines) - 1 or line:
+                        ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
+                        out_lines.append(ts + line)
+                    else:
+                        out_lines.append("")
+                log_msg = '\n'.join(out_lines)
+            else:
+                log_msg = msg
+                
+            with builtins.open(log_path, "a", encoding="utf-8") as f:
+                f.write(log_msg)
+        except Exception as e:
+            logging.getLogger("pubrun").warning(f"pubrun.print: failed to write to stdout.log: {e}")
+
+
+class ProvenanceFileProxy:
+    """Wraps a standard file stream to compute hash on the fly for reads,
+    and record file size/hashes on close."""
+    def __init__(self, file_obj: Any, path: Path, mode: str, run_instance: Any) -> None:
+        self._file_obj = file_obj
+        self._path = path
+        self._mode = mode
+        self._run = run_instance
+        self._hash = hashlib.sha256()
+        self._bytes_read = 0
+        self._closed = False
+
+    def read(self, size: int = -1) -> Any:
+        data = self._file_obj.read(size)
+        if data:
+            chunk = data if isinstance(data, bytes) else data.encode("utf-8", errors="ignore")
+            self._hash.update(chunk)
+            self._bytes_read += len(chunk)
+        return data
+
+    def readline(self, limit: int = -1) -> Any:
+        data = self._file_obj.readline(limit)
+        if data:
+            chunk = data if isinstance(data, bytes) else data.encode("utf-8", errors="ignore")
+            self._hash.update(chunk)
+            self._bytes_read += len(chunk)
+        return data
+
+    def readlines(self, hint: int = -1) -> Any:
+        lines = self._file_obj.readlines(hint)
+        for line in lines:
+            chunk = line if isinstance(line, bytes) else line.encode("utf-8", errors="ignore")
+            self._hash.update(chunk)
+            self._bytes_read += len(chunk)
+        return lines
+
+    def __next__(self) -> Any:
+        try:
+            line = self._file_obj.__next__()
+            chunk = line if isinstance(line, bytes) else line.encode("utf-8", errors="ignore")
+            self._hash.update(chunk)
+            self._bytes_read += len(chunk)
+            return line
+        except StopIteration:
+            raise
+
+    def __iter__(self) -> Any:
+        return self
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._file_obj.close()
+        finally:
+            self._register_provenance()
+
+    def _register_provenance(self) -> None:
+        try:
+            sha = None
+            size = 0
+            if self._path.exists():
+                size = os.path.getsize(self._path)
+                
+            if self._path.exists():
+                h = hashlib.sha256()
+                with builtins.open(self._path, "rb") as f:
+                    for chunk in iter(lambda: f.read(65536), b""):
+                        h.update(chunk)
+                sha = h.hexdigest()
+            
+            if "r" in self._mode:
+                record = {
+                    "path": str(self._path.resolve()),
+                    "size_bytes": size,
+                    "sha256": sha or self._hash.hexdigest(),
+                    "accessed_at_utc": time.time()
+                }
+                if not hasattr(self._run, "data_files"):
+                    self._run.data_files = {"inputs": [], "outputs": []}
+                self._run.data_files["inputs"].append(record)
+                
+                if getattr(self._run, "event_stream", None):
+                    self._run.event_stream.emit("input_dataset", name=str(self._path.name), payload={"path": record["path"], "sha256": record["sha256"]})
+            else:
+                record = {
+                    "path": str(self._path.resolve()),
+                    "size_bytes": size,
+                    "sha256": sha or self._hash.hexdigest(),
+                    "modified_at_utc": time.time()
+                }
+                if not hasattr(self._run, "data_files"):
+                    self._run.data_files = {"inputs": [], "outputs": []}
+                self._run.data_files["outputs"].append(record)
+                
+                if getattr(self._run, "event_stream", None):
+                    self._run.event_stream.emit("output_artifact", name=str(self._path.name), payload={"path": record["path"], "sha256": record["sha256"]})
+        except Exception as e:
+            logging.getLogger("pubrun").warning(f"pubrun: failed to register provenance for '{self._path}': {e}")
+
+    def __enter__(self) -> "ProvenanceFileProxy":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._file_obj, name)
+
+
+def open(file: Any, mode: str = "r", **kwargs: Any) -> Any:
+    """Wrapper around Python's built-in open() that intercepts file reads and writes
+    to catalog dataset provenance.
+    """
+    f_obj = builtins.open(file, mode, **kwargs)
+    
+    current_run = get_current_run()
+    if current_run and current_run.is_active:
+        try:
+            f_path = Path(file)
+            return ProvenanceFileProxy(f_obj, f_path, mode, current_run)
+        except Exception as e:
+            logging.getLogger("pubrun").warning(f"pubrun: failed to wrap file for provenance: {e}")
+            
+    return f_obj
+
+
+class _PubrunSubprocessNamespace:
+    """Explicit subprocess execution tracking wrappers."""
+    @staticmethod
+    def run(*args: Any, **kwargs: Any) -> _subprocess.CompletedProcess:
+        cmd = args[0] if args else kwargs.get("args")
+        if isinstance(cmd, list):
+            cmd_args = [str(c) for c in cmd]
+        else:
+            cmd_args = [str(cmd)]
+            
+        started_at = time.time()
+        
+        from pubrun.capture.subprocesses import disable_spy
+        with disable_spy():
+            res = _subprocess.run(*args, **kwargs)
+                
+        ended_at = time.time()
+        
+        current_run = get_current_run()
+        if current_run and current_run.is_active:
+            record = {
+                "argv": cmd_args,
+                "exit_code": res.returncode,
+                "started_at_utc": started_at,
+                "ended_at_utc": ended_at,
+                "pid": None
+            }
+            if not hasattr(current_run, "manual_subprocess_records"):
+                current_run.manual_subprocess_records = []
+            current_run.manual_subprocess_records.append(record)
+            
+        return res
+
+    class Popen(_subprocess.Popen):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self._pubrun_cmd = args[0] if args else kwargs.get("args")
+            self._pubrun_started_at = time.time()
+            from pubrun.capture.subprocesses import disable_spy
+            with disable_spy():
+                super().__init__(*args, **kwargs)
+
+        def _log_pubrun_record(self) -> None:
+            if getattr(self, "_pubrun_logged", False):
+                return
+            self._pubrun_logged = True
+            ended_at = time.time()
+            current_run = get_current_run()
+            if current_run and current_run.is_active:
+                if isinstance(self._pubrun_cmd, list):
+                    cmd_args = [str(c) for c in self._pubrun_cmd]
+                else:
+                    cmd_args = [str(self._pubrun_cmd)]
+                record = {
+                    "argv": cmd_args,
+                    "exit_code": self.returncode,
+                    "started_at_utc": self._pubrun_started_at,
+                    "ended_at_utc": ended_at,
+                    "pid": self.pid
+                }
+                if not hasattr(current_run, "manual_subprocess_records"):
+                    current_run.manual_subprocess_records = []
+                current_run.manual_subprocess_records.append(record)
+
+        def wait(self, timeout: Optional[float] = None) -> int:
+            res = super().wait(timeout)
+            self._log_pubrun_record()
+            return res
+
+        def communicate(self, input: Any = None, timeout: Optional[float] = None) -> Any:
+            res = super().communicate(input, timeout)
+            self._log_pubrun_record()
+            return res
+
+        def poll(self) -> Optional[int]:
+            res = super().poll()
+            if res is not None:
+                self._log_pubrun_record()
+            return res
+
+
+subprocess = _PubrunSubprocessNamespace()
+
+
+def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
+    """Wrapper around os.popen that tracks execution provenance."""
+    started_at = time.time()
+    from pubrun.capture.subprocesses import disable_spy
+    with disable_spy():
+        pipe = os.popen(cmd, mode, bufsize)
+    
+    class _PopenPipeProxy:
+        def __init__(self, pipe_obj: Any) -> None:
+            self._pipe_obj = pipe_obj
+            self._closed = False
+
+        def close(self) -> Optional[int]:
+            if self._closed:
+                return None
+            self._closed = True
+            exit_status = self._pipe_obj.close()
+            rc = 0
+            if exit_status is not None:
+                if sys.platform == "win32":
+                    rc = exit_status
+                else:
+                    rc = os.WEXITSTATUS(exit_status) if os.WIFEXITED(exit_status) else exit_status
+                    
+            ended_at = time.time()
+            current_run = get_current_run()
+            if current_run and current_run.is_active:
+                record = {
+                    "argv": [cmd],
+                    "exit_code": rc,
+                    "started_at_utc": started_at,
+                    "ended_at_utc": ended_at,
+                    "pid": None
+                }
+                if not hasattr(current_run, "manual_subprocess_records"):
+                    current_run.manual_subprocess_records = []
+                current_run.manual_subprocess_records.append(record)
+            return exit_status
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._pipe_obj, name)
+
+        def __enter__(self) -> "_PopenPipeProxy":
+            return self
+
+        def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+            self.close()
+
+    return _PopenPipeProxy(pipe)
