@@ -379,6 +379,14 @@ class TestCliDiff:
         result = run_pubrun("diff", two_runs[0], two_runs[1], "--export", "json")
         assert result.returncode == 0
 
+    def test_diff_standard(self, two_runs):
+        result = run_pubrun("diff", two_runs[0], two_runs[1], "--standard")
+        assert result.returncode == 0
+
+    def test_diff_deep(self, two_runs):
+        result = run_pubrun("diff", two_runs[0], two_runs[1], "--deep")
+        assert result.returncode == 0
+
     def test_diff_invalid_paths(self, tmp_path):
         result = run_pubrun("diff", "/nonexistent/a", "/nonexistent/b")
         assert result.returncode != 0
