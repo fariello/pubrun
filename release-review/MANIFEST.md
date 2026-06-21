@@ -57,6 +57,7 @@ OpenCode project commands are discovered from `.opencode/commands/`; the Markdow
 | `06-compatibility-packaging-release.md` | Compatibility, packaging, build, CI, deployment, versioning, changelog, migration, and release artifacts. |
 | `07-implementation.md` | Consolidated implementation plan and safe, significant-value fixes. |
 | `08-final-ship-review.md` | Final release readiness assessment, final bug/security sanity audit, validation reconciliation, final report, push/no-push decision, and restart assessment. |
+| `09-release-execution.md` | Post-Go release execution checklist (commit/push, CI validation, package build hook validation, git tagging, and PyPI publishing). |
 | `templates/execution-plan.md` | Template for the early run execution plan. |
 | `templates/implementation-plan.md` | Template for the implementation plan created after audit sections and before fixes. |
 | `templates/section-summary.md` | Generic template for per-section summaries saved under `repository-review/<RUN_ID>/section-summaries/`. |
