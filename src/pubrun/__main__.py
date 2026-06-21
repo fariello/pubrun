@@ -311,7 +311,7 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
             diff_report = compare_manifests(manifest_a, manifest_b, ignores, show_same=ss_target, depth=depth)
             wrap_target = wrap_config if wrap_config is not None else conf.get("wrap", True)
             mlen_target = max_length if max_length is not None else conf.get("max_string_length", 300)
-            print_diff(diff_report, no_color=no_color, wrap=wrap_target, max_length=mlen_target)
+            print_diff(diff_report, no_color=no_color, wrap=wrap_target, max_length=mlen_target, depth=depth)
 
     except RunInProgressOrCrashedError as e:
         status = e.run_info.status if e.run_info else "crashed/running"
@@ -980,10 +980,10 @@ def main() -> None:
 
     # Depth logic
     diff_depth = diff_parser.add_mutually_exclusive_group()
-    diff_depth.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Structural changes only, filtering most metrics (default).")
-    diff_depth.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Include standard telemetry, ignoring jitter metrics.")
+    diff_depth.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Structural changes only, filtering most metrics.")
+    diff_depth.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Include standard telemetry, ignoring jitter metrics (default).")
     diff_depth.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Unfiltered comparison of all captured data.")
-    diff_parser.set_defaults(depth="basic")
+    diff_parser.set_defaults(depth="standard")
 
     # Identical keys logic
     diff_same = diff_parser.add_mutually_exclusive_group()
