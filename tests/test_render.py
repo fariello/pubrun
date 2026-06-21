@@ -90,6 +90,82 @@ class TestRenderInline:
         output = capsys.readouterr().out
         assert "Pubrun Diagnostic Difference" in output
 
+    def test_renders_list_diff_basic_depth(self, capsys):
+        """Under basic depth, list_diff outputs line-by-line added/removed items."""
+        diff = {
+            "added": {}, "removed": {},
+            "modified": {"python.sys_path": {
+                "type": "list_diff",
+                "added": ["/path/c"],
+                "removed": ["/path/a"],
+                "order_changed": False,
+                "old": ["/path/a", "/path/b"],
+                "new": ["/path/b", "/path/c"]
+            }},
+            "same": {}
+        }
+        _render_inline(diff, use_color=False, depth="basic")
+        output = capsys.readouterr().out
+        assert "- /path/a" in output
+        assert "+ /path/c" in output
+        assert "[" not in output.split("python.sys_path:")[-1]
+
+    def test_renders_list_diff_standard_depth_no_color(self, capsys):
+        """Under standard depth without color, list_diff outputs the old/new array representation with prefixes."""
+        diff = {
+            "added": {}, "removed": {},
+            "modified": {"python.sys_path": {
+                "type": "list_diff",
+                "added": ["/path/c"],
+                "removed": ["/path/a"],
+                "order_changed": False,
+                "old": ["/path/a", "/path/b"],
+                "new": ["/path/b", "/path/c"]
+            }},
+            "same": {}
+        }
+        _render_inline(diff, use_color=False, depth="standard")
+        output = capsys.readouterr().out
+        assert "- [-'/path/a', '/path/b']" in output
+        assert "+ ['/path/b', +'/path/c']" in output
+
+    def test_renders_list_diff_standard_depth_add_delete_rearrange(self, capsys):
+        """Under standard depth, verify formatting when elements are added, deleted, and rearranged simultaneously."""
+        diff = {
+            "added": {}, "removed": {},
+            "modified": {"python.sys_path": {
+                "type": "list_diff",
+                "added": ["/path/added"],
+                "removed": ["/path/deleted"],
+                "order_changed": True,
+                "old": ["/path/deleted", "/path/a", "/path/b"],
+                "new": ["/path/b", "/path/a", "/path/added"]
+            }},
+            "same": {}
+        }
+        _render_inline(diff, use_color=False, depth="standard")
+        output = capsys.readouterr().out
+        assert "- [-'/path/deleted', ~'/path/a', ~'/path/b']" in output
+        assert "+ [~'/path/b', ~'/path/a', +'/path/added']" in output
+
+    def test_renders_list_diff_standard_depth_with_color_and_rearrange(self, capsys):
+        """Under standard depth with color, list_diff formats elements with ANSI and bold/yellow for rearranged ones."""
+        diff = {
+            "added": {}, "removed": {},
+            "modified": {"python.sys_path": {
+                "type": "list_diff",
+                "added": [],
+                "removed": [],
+                "order_changed": True,
+                "old": ["/path/a", "/path/b"],
+                "new": ["/path/b", "/path/a"]
+            }},
+            "same": {}
+        }
+        _render_inline(diff, use_color=True, depth="standard")
+        output = capsys.readouterr().out
+        assert "\033[1m\033[93m~" in output
+
 
 class TestPrintDiff:
     """Test that print_diff renders correctly."""
