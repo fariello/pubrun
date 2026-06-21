@@ -199,9 +199,11 @@ class Run:
 
             # Redact argv before writing to lock file (P2-S2)
             _lock_argv = sys.argv[1:] if len(sys.argv) > 1 else []
+            _sys_argv = list(sys.argv) if sys.argv else []
             try:
                 from pubrun.capture.redaction import redact_argv
                 _lock_argv = redact_argv(_lock_argv, self.config)
+                _sys_argv = redact_argv(_sys_argv, self.config)
             except Exception:
                 pass  # Best-effort redaction
 
@@ -214,6 +216,7 @@ class Run:
                 "git_commit": git_commit,
                 "cwd": str(Path.cwd()),
                 "argv": _lock_argv,
+                "sys_argv": _sys_argv,
                 "import_mode": _import_mode,
                 "import_selected_by": _import_selected_by,
             }

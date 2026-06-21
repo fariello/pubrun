@@ -258,6 +258,76 @@ class TestCliRerun:
         assert result.returncode == 0
         assert "cd " in result.stdout or "python" in result.stdout
 
+    def test_rerun_running_run(self, tmp_path):
+        import time
+        run_dir = tmp_path / "runs" / "pubrun-running"
+        run_dir.mkdir(parents=True)
+        lock_data = {
+            "run_id": "running-id",
+            "pid": 12345,
+            "started_at_utc": time.time() - 3600,
+            "script": "train.py",
+            "argv": ["--epochs", "10"],
+            "sys_argv": ["train.py", "--epochs", "10"],
+            "hostname": "otherhost",
+            "cwd": "/some/cwd"
+        }
+        with open(run_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
+            json.dump(lock_data, f)
+            
+        result = run_pubrun("rerun", str(run_dir))
+        assert result.returncode == 0
+        assert "[WARN]" in result.stderr
+        assert "is currently running" in result.stderr
+        assert "cd /some/cwd && python train.py --epochs 10" in result.stdout
+
+    def test_rerun_crashed_run_reconstruction(self, tmp_path):
+        import time
+        run_dir = tmp_path / "runs" / "pubrun-crashed"
+        run_dir.mkdir(parents=True)
+        lock_data = {
+            "run_id": "crashed-id",
+            "pid": 12345,
+            "started_at_utc": time.time() - 200000,
+            "script": "train.py",
+            "argv": ["--epochs", "10"],
+            "sys_argv": ["train.py", "--epochs", "10"],
+            "hostname": "otherhost",
+            "cwd": "/some/cwd"
+        }
+        with open(run_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
+            json.dump(lock_data, f)
+            
+        result = run_pubrun("rerun", str(run_dir))
+        assert result.returncode == 0
+        assert "[WARN]" in result.stderr
+        assert "is currently crashed" in result.stderr
+        assert "cd /some/cwd && python train.py --epochs 10" in result.stdout
+
+    def test_rerun_crashed_run_no_color(self, tmp_path):
+        import time
+        run_dir = tmp_path / "runs" / "pubrun-crashed-nocolor"
+        run_dir.mkdir(parents=True)
+        lock_data = {
+            "run_id": "crashed-nocolor-id",
+            "pid": 12345,
+            "started_at_utc": time.time() - 200000,
+            "script": "train.py",
+            "argv": ["--epochs", "10"],
+            "sys_argv": ["train.py", "--epochs", "10"],
+            "hostname": "otherhost",
+            "cwd": "/some/cwd"
+        }
+        with open(run_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
+            json.dump(lock_data, f)
+            
+        result = run_pubrun("rerun", str(run_dir), "--no-color")
+        assert result.returncode == 0
+        assert "[WARN]" in result.stderr
+        assert "\033[" not in result.stderr
+        assert "is currently crashed" in result.stderr
+        assert "cd /some/cwd && python train.py --epochs 10" in result.stdout
+
 
 class TestCliDiff:
 
@@ -363,14 +433,14 @@ class TestCliErrorExitCodes:
         result = run_pubrun("diff", str(tmp_path / "a"), str(tmp_path / "b"),
                            "--export", "yaml", cwd=str(tmp_path))
         assert result.returncode == 1
-        assert "unsupported" in result.stderr.lower() or "error" in result.stderr.lower()
+        assert "unsupported" in result.stderr.lower() or "erro" in result.stderr.lower()
 
     def test_status_nonexistent_run_id_exits_1(self, tmp_path):
         """pubrun status <nonexistent_id> exits 1."""
         result = run_pubrun("status", "zzzznonexistent", "--dir", str(tmp_path),
                            cwd=str(tmp_path))
         assert result.returncode == 1
-        assert "no run found" in result.stderr.lower() or "error" in result.stderr.lower()
+        assert "no run found" in result.stderr.lower() or "erro" in result.stderr.lower()
 
     def test_cite_unknown_style_exits_1(self, tmp_path):
         """pubrun cite --style unknown exits 1."""
@@ -609,7 +679,8 @@ class TestCliReportUsabilityDetails:
         cmd = [sys.executable, "-m", "pubrun", "report", str(run_dir)]
         res = subprocess.run(cmd, capture_output=True, text=True)
         assert res.returncode == 1
-        assert "Error: Run directory 'pubrun-crashed' is currently crashed" in res.stderr
+        assert "Run directory 'pubrun-crashed' is currently crashed" in res.stderr
+        assert "ERRO" in res.stderr
         assert "Last 10 lines of stderr.log:" in res.stderr
         # Check that we only see lines 5 to 14 (which are the last 10 lines)
         assert "Line 1\n" not in res.stderr
@@ -771,6 +842,22 @@ raise ValueError("TEST_EXCEPTION")
         assert "comp-id" in res.stdout
         assert "crash-id" in res.stdout
         assert "fail-id" not in res.stdout
+
+        # Verify not-status filter: completed
+        cmd = [sys.executable, "-m", "pubrun", "status", "--dir", str(runs_dir), "-S", "completed"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        assert res.returncode == 0
+        assert "comp-id" not in res.stdout
+        assert "fail-id" in res.stdout
+        assert "crash-id" in res.stdout
+
+        # Verify not-filter: "train"
+        cmd = [sys.executable, "-m", "pubrun", "status", "--dir", str(runs_dir), "-F", "train"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        assert res.returncode == 0
+        assert "fail-id" in res.stdout
+        assert "comp-id" not in res.stdout
+        assert "crash-id" not in res.stdout
 
     def test_subcommand_help_examples(self):
         for sub in ("report", "methods", "rerun", "diff", "meta", "status", "clean", "combined", "cite", "run", "tui"):

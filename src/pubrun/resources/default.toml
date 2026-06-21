@@ -294,7 +294,9 @@ ignore_basic = [
 ignore_standard = [
     "timing", "run.run_id", "process.pid", "hardware.memory_total_bytes",
     "resources.end_rss_bytes", "resources.peak_cpu_percent", "resources.peak_rss_bytes",
-    "process.ppid", "invocation.script.size", "invocation.script.path", "capture.run_dir"
+    "process.ppid", "invocation.script.size", "invocation.script.path", "capture.run_dir",
+    "pubrun_imports.selected_at_utc", "pubrun_imports.requests.*.timestamp_utc",
+    "pubrun_imports.requests.*.caller.line_number"
 ]
 
 ignore_deep = []
