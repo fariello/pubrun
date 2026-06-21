@@ -296,6 +296,31 @@ class TestDiffNormalization:
         assert flat["pubrun_imports.requests.1.name"] == "urllib3"
         assert flat["pubrun_imports.requests.1.conflict"] is True
 
+    def test_epoch_formatting_basic_depth(self):
+        manifest = {
+            "pubrun_imports": {
+                "selected_at_utc": 1782033547.0901701,
+                "requests": [
+                    {
+                        "timestamp_utc": 1782033032.4165914,
+                        "name": "requests"
+                    }
+                ]
+            }
+        }
+        flat = _normalize_manifest(manifest, [], depth="basic")
+        assert flat["pubrun_imports.selected_at_utc"] == "2026-06-21 09:19:07"
+        assert flat["pubrun_imports.requests.0.timestamp_utc"] == "2026-06-21 09:10:32"
+
+    def test_epoch_formatting_standard_depth(self):
+        manifest = {
+            "pubrun_imports": {
+                "selected_at_utc": 1782033547.0901701
+            }
+        }
+        flat = _normalize_manifest(manifest, [], depth="standard")
+        assert flat["pubrun_imports.selected_at_utc"] == "2026-06-21 09:19:07 (1782033547.0901701)"
+
 
 class TestIsPathVar:
     """Layer 5: Tests for the PATH variable heuristic."""

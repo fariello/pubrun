@@ -302,13 +302,13 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
             out_a = f".pubrun_diff_A_{name_a}_clean.{fmt}"
             out_b = f".pubrun_diff_B_{name_b}_clean.{fmt}"
 
-            Path(out_a).write_text(export_manifest(manifest_a, ignores, fmt), encoding="utf-8")
-            Path(out_b).write_text(export_manifest(manifest_b, ignores, fmt), encoding="utf-8")
+            Path(out_a).write_text(export_manifest(manifest_a, ignores, fmt, depth=depth), encoding="utf-8")
+            Path(out_b).write_text(export_manifest(manifest_b, ignores, fmt, depth=depth), encoding="utf-8")
 
             print(f"[OK] Successfully exported semantic baseline A to: {out_a}")
             print(f"[OK] Successfully exported semantic target B to: {out_b}")
         else:
-            diff_report = compare_manifests(manifest_a, manifest_b, ignores, show_same=ss_target)
+            diff_report = compare_manifests(manifest_a, manifest_b, ignores, show_same=ss_target, depth=depth)
             wrap_target = wrap_config if wrap_config is not None else conf.get("wrap", True)
             mlen_target = max_length if max_length is not None else conf.get("max_string_length", 300)
             print_diff(diff_report, no_color=no_color, wrap=wrap_target, max_length=mlen_target)
