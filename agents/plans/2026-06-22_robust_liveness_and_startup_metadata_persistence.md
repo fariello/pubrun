@@ -1,8 +1,15 @@
-# Implementation Plan - Robust Liveness Checking and Startup Metadata Persistence
+# Robust Liveness Checking and Startup Metadata Persistence
 
 This implementation plan details changes to resolve two critical issues:
 1. **WSL2 Clock Drift False Crashed Runs**: Replacing the strict 60-second start-time tolerance check with process command-line verification (script name matching) and a generous 24-hour start-time tolerance fallback to prevent active processes from being incorrectly cleaned up and flagged as "crashed".
 2. **"Flying Blind" on Crashed Runs**: Writing the initial manifest at startup so that all static metadata (packages, environment, host, hardware, git) is saved to disk immediately. If a crash (OOM, SIGKILL) occurs, `pubrun status` will update the existing manifest's status and timing rather than overwriting it with a blank template.
+
+## User Review Required
+
+> [!IMPORTANT]
+> - **Liveness Check Change**: The process liveness check (`is_same_process`) will now verify that the process PID exists **and** that the command line matches the script name recorded in the lock file.
+> - **Generous Tolerance Fallback**: If the command line cannot be checked (e.g. permission limits or platform restrictions), we fall back to checking if the process start time is within **24 hours** of the expected start time (up from 60 seconds).
+> - **Startup Manifest I/O**: `pubrun` will now write the initial `manifest.json` and `config.resolved.json` files to disk immediately at startup (adding a ~70–500ms startup penalty depending on the package capture mode).
 
 ## Proposed Changes
 

@@ -307,3 +307,92 @@ class TestResolveConfigFallback:
 
         assert any("config resolution failed" in r.message for r in caplog.records)
         run.stop()
+
+
+class TestStartupManifestAndCrashedFallback:
+    """Tests startup manifest writing and updating existing manifests during crashed closeout."""
+
+    def test_startup_manifest_written_immediately(self, tmp_path, monkeypatch):
+        """Verifies that starting a run immediately writes manifest.json with outcome 'running'."""
+        from pubrun.tracker import Run
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+
+        run = Run()
+        manifest_path = run.run_dir / "manifest.json"
+        config_path = run.run_dir / "config.resolved.json"
+
+        assert manifest_path.exists(), "Startup manifest.json was not created!"
+        assert config_path.exists(), "Startup config.resolved.json was not created!"
+
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        assert data["status"]["outcome"] == "running"
+        assert "git" in data
+        assert "host" in data
+        
+        # Stop tracking cleanly
+        run.stop()
+        
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            data_final = json.load(f)
+        assert data_final["status"]["outcome"] == "completed"
+
+    def test_crashed_closeout_preserves_and_updates_manifest(self, tmp_path, monkeypatch):
+        """Verifies that close_out_crashed_run updates an existing manifest rather than clobbering it."""
+        from pubrun.status import close_out_crashed_run
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+
+        # Create a mock run directory structure
+        run_dir = tmp_path / "mock_run"
+        run_dir.mkdir()
+        
+        # Write a mock manifest representing startup state
+        manifest_data = {
+            "schema_version": "1.0",
+            "run": {"run_id": "test-run-123"},
+            "status": {"outcome": "running"},
+            "timing": {"started_at_utc": 1000.0},
+            "host": {"hostname": {"value": "my-mock-host"}},
+            "git": {"commit": "mockcommit123"},
+            "environment": {"captured_vars": {"FOO": "BAR"}}
+        }
+        
+        manifest_path = run_dir / "manifest.json"
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest_data, f)
+            
+        # Write a mock lock file
+        from pubrun.tracker import Run
+        lock_path = run_dir / Run.LOCK_FILENAME
+        lock_data = {
+            "run_id": "test-run-123",
+            "pid": 9999,
+            "started_at_utc": 1000.0,
+            "script": "sleep.py"
+        }
+        with open(lock_path, "w", encoding="utf-8") as f:
+            json.dump(lock_data, f)
+
+        # Perform closeout
+        close_out_crashed_run(run_dir, lock_data)
+
+        # Assert lock file is removed
+        assert not lock_path.exists()
+        assert manifest_path.exists()
+
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            updated_data = json.load(f)
+
+        # The outcome must be updated to crashed
+        assert updated_data["status"]["outcome"] == "crashed"
+        
+        # Timing must be filled
+        assert updated_data["timing"]["started_at_utc"] == 1000.0
+        assert updated_data["timing"]["ended_at_utc"] is not None
+        assert updated_data["timing"]["elapsed_seconds"] is not None
+        
+        # The other pre-captured static metadata must be fully preserved
+        assert updated_data["host"]["hostname"]["value"] == "my-mock-host"
+        assert updated_data["git"]["commit"] == "mockcommit123"
+        assert updated_data["environment"]["captured_vars"]["FOO"] == "BAR"

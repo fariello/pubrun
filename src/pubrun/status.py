@@ -69,6 +69,27 @@ class RunInfo:
 
         self._classify()
 
+    def _enrich_from_manifest(self, manifest_path: Path) -> None:
+        """Enrich a running/crashed run's metadata using the startup manifest."""
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.manifest = data
+            
+            git = data.get("git", {})
+            if not self.git_commit:
+                self.git_commit = git.get("commit")
+                
+            host = data.get("host", {})
+            if isinstance(host, dict):
+                hostname_val = host.get("hostname")
+                if isinstance(hostname_val, dict):
+                    self.hostname = hostname_val.get("value") or self.hostname
+                elif isinstance(hostname_val, str):
+                    self.hostname = hostname_val or self.hostname
+        except Exception:
+            pass
+
     def _classify(self) -> None:
         """Determine run status from artifacts on disk."""
         manifest_path = self.run_dir / "manifest.json"
@@ -77,10 +98,12 @@ class RunInfo:
         has_manifest = manifest_path.exists()
         has_lock = lock_path.exists()
 
-        if has_manifest:
-            self._load_from_manifest(manifest_path)
-        elif has_lock:
+        if has_lock:
             self._load_from_lock(lock_path)
+            if has_manifest:
+                self._enrich_from_manifest(manifest_path)
+        elif has_manifest:
+            self._load_from_manifest(manifest_path)
         else:
             # No manifest, no lock -- parse what we can from directory name
             self._parse_dir_name()
@@ -188,7 +211,7 @@ class RunInfo:
                     self.status = STATUS_RUNNING
                     self.elapsed = time.time() - self.started_at_utc if self.started_at_utc else None
             elif self.pid and self.started_at_utc:
-                if is_same_process(self.pid, self.started_at_utc):
+                if is_same_process(self.pid, self.started_at_utc, expected_script=self.script):
                     self.status = STATUS_RUNNING
                     self.elapsed = time.time() - self.started_at_utc
                     # Fetch live resource usage
@@ -330,72 +353,99 @@ def filter_runs(
 
 
 def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) -> None:
-    """Close out a crashed run by writing a fallback manifest.json and removing the lock file."""
+    """Close out a crashed run by updating/writing manifest.json and removing the lock file."""
     manifest_path = run_dir / "manifest.json"
     lock_path = run_dir / Run.LOCK_FILENAME
     
-    if manifest_path.exists():
-        return
-        
     lock_data = lock_data or {}
     started_at = lock_data.get("started_at_utc")
     
-    # Compile what we can into a fallback manifest (with ended_at_utc / elapsed_seconds set to None since they are unknown)
-    manifest = {
-        "schema_version": "1.0",
-        "manifest_type": "pubrun-manifest",
-        "run": {
-            "run_id": lock_data.get("run_id"),
-            "capture_state": {"status": "partial"},
-        },
-        "status": {
+    manifest = {}
+    if manifest_path.exists():
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+        except Exception:
+            pass
+            
+    if not manifest:
+        # Compile what we can into a fallback manifest
+        manifest = {
+            "schema_version": "1.0",
+            "manifest_type": "pubrun-manifest",
+            "run": {
+                "run_id": lock_data.get("run_id"),
+                "capture_state": {"status": "partial"},
+            },
+            "status": {
+                "outcome": "crashed",
+                "capture_state": {"status": "complete"},
+            },
+            "timing": {
+                "started_at_utc": started_at,
+                "ended_at_utc": None,
+                "elapsed_seconds": None,
+                "capture_state": {"status": "partial"},
+            },
+            "capture": {
+                "output_base_dir": None,
+                "run_dir": str(run_dir),
+                "capture_state": {"status": "unavailable"},
+            },
+            "process": {
+                "pid": lock_data.get("pid"),
+                "capture_state": {"status": "partial"},
+            },
+            "host": {
+                "hostname": {
+                    "representation": "plain",
+                    "value": lock_data.get("hostname"),
+                } if lock_data.get("hostname") else {
+                    "representation": "unavailable",
+                    "value": None,
+                },
+                "capture_state": {"status": "partial"},
+            },
+            "invocation": {
+                "script": {
+                    "basename": Path(lock_data.get("script")).name if lock_data.get("script") else None,
+                } if lock_data.get("script") else {},
+                "argv": lock_data.get("argv", []),
+                "capture_state": {"status": "partial"},
+            },
+            "git": {
+                "commit": lock_data.get("git_commit"),
+                "capture_state": {"status": "partial"},
+            }
+        }
+    else:
+        # Update status of existing manifest to crashed
+        manifest["status"] = {
             "outcome": "crashed",
             "capture_state": {"status": "complete"},
-        },
-        "timing": {
-            "started_at_utc": started_at,
-            "ended_at_utc": None,
-            "elapsed_seconds": None,
-            "capture_state": {"status": "partial"},
-        },
-        "capture": {
-            "output_base_dir": None,
-            "run_dir": str(run_dir),
-            "capture_state": {"status": "unavailable"},
-        },
-        "process": {
-            "pid": lock_data.get("pid"),
-            "capture_state": {"status": "partial"},
-        },
-        "host": {
-            "hostname": {
-                "representation": "plain",
-                "value": lock_data.get("hostname"),
-            } if lock_data.get("hostname") else {
-                "representation": "unavailable",
-                "value": None,
-            },
-            "capture_state": {"status": "partial"},
-        },
-        "invocation": {
-            "script": {
-                "basename": Path(lock_data.get("script")).name if lock_data.get("script") else None,
-            } if lock_data.get("script") else {},
-            "argv": lock_data.get("argv", []),
-            "capture_state": {"status": "partial"},
-        },
-        "git": {
-            "commit": lock_data.get("git_commit"),
-            "capture_state": {"status": "partial"},
         }
-    }
-    
+        
+        # Estimate ended_at_utc from lock file modification time if available, or current time
+        ended_at = time.time()
+        if lock_path.exists():
+            try:
+                ended_at = lock_path.stat().st_mtime
+            except OSError:
+                pass
+                
+        timing = manifest.get("timing", {})
+        timing["ended_at_utc"] = ended_at
+        if timing.get("started_at_utc"):
+            timing["elapsed_seconds"] = ended_at - timing["started_at_utc"]
+        timing["capture_state"] = {"status": "partial"}
+        manifest["timing"] = timing
+
     try:
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
         if lock_path.exists():
             lock_path.unlink()
-        print(f"[*] Closed out crashed run '{run_dir.name}' (process dead). Generated fallback manifest.json.", file=sys.stderr)
+        print(f"[*] Closed out crashed run '{run_dir.name}' (process dead). Updated manifest.json.", file=sys.stderr)
     except Exception as e:
         print(f"Warning: Failed to close out crashed run '{run_dir.name}': {e}", file=sys.stderr)
 
