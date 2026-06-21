@@ -11,7 +11,44 @@ class Colors:
     RED = '\033[91m'
     YELLOW = '\033[93m'
     DIM = '\033[2m'
+    BOLD = '\033[1m'
     RESET = '\033[0m'
+
+
+def _format_array_diff(
+    elements: list,
+    is_new_list: bool,
+    added_set: set,
+    removed_set: set,
+    common_a: list,
+    common_b: list,
+    use_color: bool
+) -> str:
+    """Format an array/list of simple types with color coding for additions, removals, and rearrangements."""
+    grn = Colors.BOLD + Colors.GREEN if use_color else ""
+    red = Colors.BOLD + Colors.RED if use_color else ""
+    yel = Colors.BOLD + Colors.YELLOW if use_color else ""
+    rst = Colors.RESET if use_color else ""
+
+    parts = []
+    for x in elements:
+        x_repr = repr(x)
+        if is_new_list:
+            if x in added_set:
+                parts.append(f"{grn}+{x_repr}{rst}")
+            elif x in common_a and x in common_b and common_a.index(x) != common_b.index(x):
+                parts.append(f"{yel}~{x_repr}{rst}")
+            else:
+                parts.append(x_repr)
+        else:
+            if x in removed_set:
+                parts.append(f"{red}-{x_repr}{rst}")
+            elif x in common_a and x in common_b and common_a.index(x) != common_b.index(x):
+                parts.append(f"{yel}~{x_repr}{rst}")
+            else:
+                parts.append(x_repr)
+
+    return "[" + ", ".join(parts) + "]"
 
 
 def _has_color(no_color_flag: bool) -> bool:
@@ -33,7 +70,7 @@ def _fmt(val: Any, max_length: int, wrap: bool) -> str:
     return s
 
 
-def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int = 300, wrap: bool = False) -> None:
+def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int = 300, wrap: bool = False, depth: str = "basic") -> None:
     """Print a plain-text diff using +/- prefixes (git-style)."""
     grn = Colors.GREEN if use_color else ""
     red = Colors.RED if use_color else ""
@@ -62,13 +99,28 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int
             for p_sub in mod.get("removed", []):
                 print(f"    {red}- {p_sub}{rst}")
         elif mod["type"] == "list_diff":
-            # List-style: show added/removed elements, order change warning
-            for p_sub in mod.get("removed", []):
-                print(f"    {red}- {p_sub}{rst}")
-            for p_add in mod.get("added", []):
-                print(f"    {grn}+ {p_add}{rst}")
-            if mod.get("order_changed", False):
-                print(f"    {yel}~ [ORDER CHANGED]{rst}")
+            if depth in ("standard", "deep"):
+                added_set = set(mod.get("added", []))
+                removed_set = set(mod.get("removed", []))
+                val_a = mod.get("old", [])
+                val_b = mod.get("new", [])
+                
+                common_a = [x for x in val_a if x in val_b]
+                common_b = [x for x in val_b if x in val_a]
+                
+                old_repr = _format_array_diff(val_a, False, added_set, removed_set, common_a, common_b, use_color)
+                new_repr = _format_array_diff(val_b, True, added_set, removed_set, common_a, common_b, use_color)
+                
+                print(f"    {grn}+{rst} {_fmt(new_repr, max_length, wrap)}")
+                print(f"    {red}-{rst} {_fmt(old_repr, max_length, wrap)}")
+            else:
+                # List-style: show added/removed elements, order change warning
+                for p_sub in mod.get("removed", []):
+                    print(f"    {red}- {p_sub}{rst}")
+                for p_add in mod.get("added", []):
+                    print(f"    {grn}+ {p_add}{rst}")
+                if mod.get("order_changed", False):
+                    print(f"    {yel}~ [ORDER CHANGED]{rst}")
         else:
             old_val = _fmt(mod.get("old", ""), max_length, wrap)
             new_val = _fmt(mod.get("new", ""), max_length, wrap)
@@ -83,7 +135,7 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int
             print(f"{dim}= {k}: {_fmt(v, max_length, wrap)}{rst}")
 
 
-def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool = False, max_length: int = 300) -> None:
+def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool = False, max_length: int = 300, depth: str = "basic") -> None:
     """Render a diff report to stdout using ANSI-colored text.
 
     Args:
@@ -91,6 +143,7 @@ def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool =
         no_color: Suppress ANSI color output.
         wrap: Allow long values to wrap naturally instead of truncating.
         max_length: Max characters before truncation (ignored when wrap=True).
+        depth: The diff depth level ("basic", "standard", or "deep").
     """
     has_colors = _has_color(no_color)
-    _render_inline(diff_report, has_colors, max_length=max_length, wrap=wrap)
+    _render_inline(diff_report, has_colors, max_length=max_length, wrap=wrap, depth=depth)
