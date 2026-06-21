@@ -84,3 +84,20 @@ class ArtifactWriter:
         except Exception as e:
             # The golden rule: pubrun never crashes the host script.
             logger.debug(f"pubrun failed to write execution artifacts: {e}")
+
+    def write_startup_manifest(self) -> None:
+        """Write the initial manifest.json and config.resolved.json at startup.
+        Does not finalize state.
+        """
+        try:
+            out_dir: Path = self.run.run_dir
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            manifest_data = self.run.to_manifest_dict()
+            manifest_path = out_dir / "manifest.json"
+            _atomic_json_write(manifest_path, manifest_data)
+
+            config_path = out_dir / "config.resolved.json"
+            _atomic_json_write(config_path, self.run.config)
+        except Exception as e:
+            logger.debug(f"pubrun failed to write startup artifacts: {e}")

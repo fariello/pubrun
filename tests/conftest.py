@@ -25,7 +25,8 @@ def isolated_cwd(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def clean_active_run():
-    """Ensure _active_run is reset after each test to prevent cross-test pollution."""
+    """Ensure _active_run is reset before and after each test to prevent cross-test pollution."""
+    pubrun.tracker._active_run = None
     yield
     pubrun.tracker._active_run = None
 

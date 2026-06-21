@@ -56,30 +56,95 @@ def get_process_start_time(pid: int) -> Optional[float]:
     return None
 
 
-def is_same_process(pid: int, expected_start_utc: float, tolerance: float = 60.0) -> bool:
-    """Check if a PID is alive AND matches the expected start time.
+def _check_command_linux(pid: int, expected_script: str) -> Optional[bool]:
+    try:
+        with open(f"/proc/{pid}/cmdline", "r", encoding="utf-8") as f:
+            cmdline = f.read()
+        if not cmdline:
+            return None
+        parts = [p for p in cmdline.split("\x00") if p]
+        from pathlib import Path
+        for part in parts:
+            if expected_script in part or Path(part).name == expected_script:
+                return True
+        return False
+    except OSError:
+        return None
+
+
+def _check_command_macos(pid: int, expected_script: str) -> Optional[bool]:
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "command=", "-p", str(pid)],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            cmdline = result.stdout.strip()
+            if cmdline:
+                if expected_script in cmdline:
+                    return True
+                return False
+        return None
+    except Exception:
+        return None
+
+
+def _check_command_windows(pid: int, expected_script: str) -> Optional[bool]:
+    try:
+        result = subprocess.run(
+            ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            lines = [l.strip() for l in result.stdout.strip().splitlines() if l.strip()]
+            if len(lines) >= 2:
+                cmdline = lines[1]
+                if expected_script in cmdline:
+                    return True
+                return False
+        return None
+    except Exception:
+        return None
+
+
+def is_same_process(
+    pid: int,
+    expected_start_utc: float,
+    expected_script: Optional[str] = None,
+    tolerance: float = 86400.0,
+) -> bool:
+    """Check if a PID is alive AND matches the expected process/script/start time.
 
     Args:
         pid: Process ID to check.
         expected_start_utc: POSIX timestamp when the run originally started.
-            Note: this is the run start time, not the process creation time.
-            The process may have been alive for some time before the run
-            started (import time, setup, etc.), so tolerance must be generous.
+        expected_script: Basename of the script that was executed. If provided,
+            we attempt to verify that the target process is indeed running this
+            script before falling back to timing validation.
         tolerance: Seconds of allowed difference between recorded start and
-            actual process creation time.  Default is 60s to account for
-            import overhead and slow startup.
-
-    Returns:
-        True if the process is alive and was created within ``tolerance``
-        seconds of ``expected_start_utc``.  If start time cannot be
-        determined, falls back to liveness-only check.
+            actual process creation time. Default is 24 hours (86400s) to be
+            resilient against virtualization / VM suspend-resume time drifts.
     """
     if not is_pid_alive(pid):
         return False
 
+    if expected_script:
+        match_status = None
+        if _PLATFORM == "linux":
+            match_status = _check_command_linux(pid, expected_script)
+        elif _PLATFORM == "darwin":
+            match_status = _check_command_macos(pid, expected_script)
+        elif _PLATFORM == "win32":
+            match_status = _check_command_windows(pid, expected_script)
+
+        if match_status is True:
+            return True
+        elif match_status is False:
+            return False
+
     actual_start = get_process_start_time(pid)
     if actual_start is None:
-        # Can't verify -- assume alive if PID exists.
+        # Can't verify start time -- assume alive if PID exists.
         return True
 
     return abs(actual_start - expected_start_utc) < tolerance

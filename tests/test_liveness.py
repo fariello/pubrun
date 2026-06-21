@@ -73,12 +73,33 @@ class TestIsSameProcess:
         assert is_same_process(4000000, time.time()) is False
 
     def test_wrong_start_time_does_not_match(self):
-        """Alive PID but wrong start time (PID recycling) should not match."""
+        """Alive PID but wrong start time (PID recycling) should not match when no script name is given."""
         start = get_process_start_time(os.getpid())
         if start is None:
             pytest.skip("Platform does not support start time retrieval")
-        # Use a start time from 1 day ago -- clearly a recycled PID
-        assert is_same_process(os.getpid(), start - 86400) is False
+        # Use a start time from 2 days ago -- beyond the default 24h tolerance
+        assert is_same_process(os.getpid(), start - 172800) is False
+
+    def test_expected_script_matches(self):
+        """If expected_script matches the actual process command line, it matches."""
+        # Our own process should be running "pytest"
+        assert is_same_process(os.getpid(), time.time(), expected_script="pytest") is True
+
+    def test_expected_script_mismatch(self):
+        """If expected_script does not match, it should return False immediately (recycled PID)."""
+        # Even if the start time is identical (current process), script name mismatch fails
+        start = get_process_start_time(os.getpid())
+        if start is None:
+            pytest.skip("Platform does not support start time retrieval")
+        assert is_same_process(os.getpid(), start, expected_script="nonexistent_script_xyz.py") is False
+
+    def test_default_generous_tolerance(self):
+        """The default tolerance should be 24 hours, so a start time off by 12 hours matches."""
+        start = get_process_start_time(os.getpid())
+        if start is None:
+            pytest.skip("Platform does not support start time retrieval")
+        # Off by 12 hours (43200 seconds) - within default 24h tolerance
+        assert is_same_process(os.getpid(), start - 43200) is True
 
 
 class TestGetRssBytes:

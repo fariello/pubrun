@@ -127,7 +127,7 @@ class Run:
             return
         
         # State tracking (to detect crashes)
-        self._outcome = "unknown"
+        self._outcome = "running"
         self._finalized = False
 
         # Initialize all capture data to safe defaults so that a partial
@@ -169,6 +169,10 @@ class Run:
         # Wire up crash-safety
         self.writer = ArtifactWriter(self)
         self.writer.register_atexit()
+
+        # Write initial manifest snapshot to disk to prevent flying blind on crashes
+        if self.writer:
+            self.writer.write_startup_manifest()
 
         # Update global reference
         _active_run = self
@@ -396,7 +400,7 @@ class Run:
             self.ended_at_utc = time.time()
             self.is_active = False
 
-        if self._outcome == "unknown":
+        if self._outcome in ("unknown", "running"):
             # If sys.exc_info() denotes an active crash at exit time, we log failed.
             if sys.exc_info()[0] is not None:
                 exc_type = sys.exc_info()[0]
