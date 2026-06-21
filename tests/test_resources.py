@@ -108,6 +108,8 @@ def test_resource_watcher_join(tmp_path, monkeypatch):
     from pubrun import start
 
     monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+    monkeypatch.setattr("pubrun.capture.resources._get_rss_windows", lambda: 1024 * 1024)
+    
     tracker = start(capture={"resources": {"depth": "standard", "sample_interval_seconds": 0.05}})
     watcher = tracker.resource_watcher
     assert watcher is not None
@@ -115,4 +117,5 @@ def test_resource_watcher_join(tmp_path, monkeypatch):
     
     tracker.stop()
     assert not watcher.is_alive()
+
 
