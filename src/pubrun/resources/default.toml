@@ -288,7 +288,8 @@ meta_ref_allowed_dirs = []
 
 # Keys excluded at each depth level to reduce noise.
 ignore_basic = [
-    "timing", "run", "process", "hardware", "resources", "capture", "environment"
+    "timing", "run", "process", "hardware", "resources", "capture", "environment",
+    "*_utc", "*_utc.*"
 ]
 
 ignore_standard = [
@@ -296,7 +297,8 @@ ignore_standard = [
     "resources.end_rss_bytes", "resources.peak_cpu_percent", "resources.peak_rss_bytes",
     "process.ppid", "invocation.script.size", "invocation.script.path", "capture.run_dir",
     "pubrun_imports.selected_at_utc", "pubrun_imports.requests.*.timestamp_utc",
-    "pubrun_imports.requests.*.caller.line_number"
+    "pubrun_imports.requests.*.caller.line_number",
+    "*_utc", "*_utc.*"
 ]
 
 ignore_deep = []
