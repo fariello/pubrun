@@ -109,8 +109,11 @@ Read and follow `00-run-protocol.md` first. Then execute the section files in or
 6. `06-compatibility-packaging-release.md`
 7. `07-implementation.md`
 8. `08-final-ship-review.md`
+9. `09-release-execution.md`
 
 Do not begin Section 7 implementation before completing Sections 1 through 6 and creating `repository-review/<RUN_ID>/09-implementation-plan.md`.
+Do not begin Section 9 release execution until a "GO" or "CONDITIONAL GO" decision has been explicitly approved by the user at the end of Section 8.
+
 
 ## Run setup
 
