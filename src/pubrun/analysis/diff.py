@@ -9,7 +9,19 @@ def _is_path_var(key_path: str) -> bool:
     return "PATH" in key_path.upper()
 
 
-def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str]) -> Dict[str, Any]:
+def _format_epoch(ts: float, include_float: bool) -> str:
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        fmt_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+        if include_float:
+            return f"{fmt_str} ({ts})"
+        return fmt_str
+    except Exception:
+        return str(ts)
+
+
+def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str], depth: str = "basic") -> Dict[str, Any]:
     """Flatten a manifest into a one-dimensional dict suitable for diffing.
 
     Environment variables and packages are expanded into individual keys.
@@ -60,12 +72,22 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str]) -> Dict[st
             if not v:
                 flat[full_key] = []
             elif all(isinstance(x, (str, int, float, bool)) or x is None for x in v):
-                flat[full_key] = v
+                # Also check and format elements if they are epoch floats
+                formatted_list = []
+                for x in v:
+                    if isinstance(x, (int, float)) and full_key.endswith("_utc"):
+                        formatted_list.append(_format_epoch(float(x), include_float=(depth != "basic")))
+                    else:
+                        formatted_list.append(x)
+                flat[full_key] = formatted_list
             else:
                 for idx, item in enumerate(v):
                     _recruit_val(item, f"{full_key}.{idx}")
         else:
-            flat[full_key] = v
+            if isinstance(v, (int, float)) and full_key.endswith("_utc"):
+                flat[full_key] = _format_epoch(float(v), include_float=(depth != "basic"))
+            else:
+                flat[full_key] = v
 
     def _recruit(d: Dict[str, Any], prefix: str = "") -> None:
         for k, v in d.items():
@@ -91,7 +113,7 @@ def unflatten_manifest(flat_dict: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: List[str] = [], show_same: bool = False) -> Dict[str, Any]:
+def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: List[str] = [], show_same: bool = False, depth: str = "basic") -> Dict[str, Any]:
     """Compare two manifests and return added, removed, modified, and same keys.
 
     Args:
@@ -99,9 +121,10 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Lis
         raw_b: Comparison manifest.
         ignores: Key prefixes to exclude from diffing.
         show_same: If True, populate the ``"same"`` bucket.
+        depth: The diff depth level ("basic", "standard", or "deep").
     """
-    flat_a = _normalize_manifest(raw_a, ignores)
-    flat_b = _normalize_manifest(raw_b, ignores)
+    flat_a = _normalize_manifest(raw_a, ignores, depth)
+    flat_b = _normalize_manifest(raw_b, ignores, depth)
     
     diff_report = {
         "added": {},    # Exists in B, missing from A
@@ -159,15 +182,16 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Lis
     return diff_report
 
 
-def export_manifest(raw: Dict[str, Any], ignores: List[str], fmt: str = "txt") -> str:
+def export_manifest(raw: Dict[str, Any], ignores: List[str], fmt: str = "txt", depth: str = "basic") -> str:
     """Export a flattened manifest as a text or JSON string.
 
     Args:
         raw: Loaded manifest dictionary.
         ignores: Key prefixes to exclude.
         fmt: Output format (``"txt"`` or ``"json"``).
+        depth: The diff depth level ("basic", "standard", or "deep").
     """
-    flat = _normalize_manifest(raw, ignores)
+    flat = _normalize_manifest(raw, ignores, depth)
     
     if fmt.lower() == "json":
         nested = unflatten_manifest(flat)
