@@ -65,6 +65,9 @@ tui = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/pubrun"]
 
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
