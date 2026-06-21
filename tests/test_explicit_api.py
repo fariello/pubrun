@@ -100,9 +100,9 @@ def test_pubrun_open_provenance(tmp_path):
         
         assert len(inputs) == 1
         assert inputs[0]["path"] == str(input_file.resolve())
-        assert inputs[0]["size_bytes"] == len("dataset content line 1\nline 2")
+        assert inputs[0]["size_bytes"] == os.path.getsize(input_file)
         import hashlib
-        expected_sha = hashlib.sha256(b"dataset content line 1\nline 2").hexdigest()
+        expected_sha = hashlib.sha256(input_file.read_bytes()).hexdigest()
         assert inputs[0]["sha256"] == expected_sha
         
         assert len(outputs) == 1
