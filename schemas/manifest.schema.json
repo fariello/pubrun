@@ -129,6 +129,40 @@
                 "requests": { "type": "array" }
             },
             "additionalProperties": true
+        },
+        "data_files": {
+            "type": "object",
+            "description": "Custom tracked input datasets and output files.",
+            "properties": {
+                "inputs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string" },
+                            "size_bytes": { "type": "integer" },
+                            "sha256": { "type": "string" },
+                            "accessed_at_utc": { "type": "number" }
+                        },
+                        "required": ["path", "size_bytes", "sha256", "accessed_at_utc"]
+                    }
+                },
+                "outputs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string" },
+                            "size_bytes": { "type": "integer" },
+                            "sha256": { "type": "string" },
+                            "modified_at_utc": { "type": "number" }
+                        },
+                        "required": ["path", "size_bytes", "sha256", "modified_at_utc"]
+                    }
+                }
+            },
+            "additionalProperties": false,
+            "default": {"inputs": [], "outputs": []}
         }
     },
     "$defs": {
