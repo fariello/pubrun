@@ -10,6 +10,19 @@ from typing import Optional
 
 from pubrun import __version__
 
+def _print_error(message: str) -> None:
+    if os.environ.get("NO_COLOR", ""):
+        print(f"[ERRO] {message}", file=sys.stderr)
+    else:
+        print(f"\033[31m[ERRO]\033[0m {message}", file=sys.stderr)
+
+
+def _print_warn(message: str) -> None:
+    if os.environ.get("NO_COLOR", ""):
+        print(f"[WARN] {message}", file=sys.stderr)
+    else:
+        print(f"\033[33m[WARN]\033[0m {message}", file=sys.stderr)
+
 
 def _create_config(destination: str) -> None:
     """Create a default ``.pubrun.toml`` at the given path. Refuses to overwrite."""
@@ -22,14 +35,14 @@ def _create_config(destination: str) -> None:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         
         if target_path.exists():
-            print(f"Error: '{target_path}' already exists. Refusing to overwrite.", file=sys.stderr)
+            _print_error(f"'{target_path}' already exists. Refusing to overwrite.")
             sys.exit(1)
             
         target_path.write_text(content, encoding="utf-8")
         print(f"[OK] Successfully created configuration at: {target_path}")
         
     except Exception as e:
-        print(f"Error: Failed to create config: {e}", file=sys.stderr)
+        _print_error(f"Failed to create config: {e}")
         sys.exit(1)
 
 
@@ -51,6 +64,8 @@ def _get_manifest_path(
     status_filter: Optional[str] = None,
     older_than: Optional[str] = None,
     exit_code: Optional[int] = None,
+    not_filter_str: Optional[str] = None,
+    not_status_filter: Optional[str] = None,
 ) -> str:
     """Resolve the path to a manifest.json, auto-detecting the latest run if needed."""
     if run_dir:
@@ -87,7 +102,7 @@ def _get_manifest_path(
             runs_dir = Path("runs")
 
         if not runs_dir.exists() or not runs_dir.is_dir():
-            print(f"Error: No --run directory provided and '{runs_dir}' directory not found.", file=sys.stderr)
+            _print_error(f"No --run directory provided and '{runs_dir}' directory not found.")
             sys.exit(1)
 
         from pubrun.status import scan_runs, filter_runs
@@ -99,9 +114,11 @@ def _get_manifest_path(
             limit=1,  # We only need the latest matching run
             older_than=older_than,
             exit_code=exit_code,
+            not_filter_str=not_filter_str,
+            not_status_filter=not_status_filter,
         )
         if not matched:
-            print("Error: No runs match the filter criteria.", file=sys.stderr)
+            _print_error("No runs match the filter criteria.")
             sys.exit(1)
 
         latest_run = matched[0].run_dir
@@ -125,6 +142,8 @@ def _run_methods(
     status_filter: Optional[str] = None,
     older_than: Optional[str] = None,
     exit_code: Optional[int] = None,
+    not_filter_str: Optional[str] = None,
+    not_status_filter: Optional[str] = None,
 ) -> None:
     """Generate and print an academic 'Computational Methods' paragraph."""
     try:
@@ -137,6 +156,8 @@ def _run_methods(
             status_filter=status_filter,
             older_than=older_than,
             exit_code=exit_code,
+            not_filter_str=not_filter_str,
+            not_status_filter=not_status_filter,
         )
 
         with open(manifest_path, "r", encoding="utf-8") as f:
@@ -155,13 +176,13 @@ def _run_methods(
         print("-----------------------------------------------\n")
     except RunInProgressOrCrashedError as e:
         status = e.run_info.status if e.run_info else "crashed/running"
-        print(f"Error: Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.", file=sys.stderr)
+        _print_error(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.")
         sys.exit(1)
     except FileNotFoundError:
-        print(f"Error: Could not find manifest file.", file=sys.stderr)
+        _print_error("Could not find manifest file.")
         sys.exit(1)
     except Exception as e:
-        print(f"Error: Failed to generate methods section: {e}", file=sys.stderr)
+        _print_error(f"Failed to generate methods section: {e}")
         sys.exit(1)
 
 
@@ -171,6 +192,8 @@ def _run_rerun(
     status_filter: Optional[str] = None,
     older_than: Optional[str] = None,
     exit_code: Optional[int] = None,
+    not_filter_str: Optional[str] = None,
+    not_status_filter: Optional[str] = None,
 ) -> None:
     """Print the shell command needed to reproduce a recorded run."""
     try:
@@ -180,6 +203,8 @@ def _run_rerun(
             status_filter=status_filter,
             older_than=older_than,
             exit_code=exit_code,
+            not_filter_str=not_filter_str,
+            not_status_filter=not_status_filter,
         )
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
@@ -192,14 +217,41 @@ def _run_rerun(
                 rerun_cmd = rerun_cmd.replace(" && python ", "\npython ").replace("'", '"')
             print(rerun_cmd)
         else:
-            print("Error: Target manifest does not contain a valid 'rerun_command' payload.", file=sys.stderr)
+            _print_error("Target manifest does not contain a valid 'rerun_command' payload.")
             sys.exit(1)
     except RunInProgressOrCrashedError as e:
         status = e.run_info.status if e.run_info else "crashed/running"
-        print(f"Error: Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.", file=sys.stderr)
-        sys.exit(1)
+        lock_data = e.run_info.lock_data if (e.run_info and hasattr(e.run_info, "lock_data")) else None
+        if lock_data:
+            cwd = lock_data.get("cwd")
+            sys_argv = lock_data.get("sys_argv")
+            if not sys_argv:
+                # Reconstruct from script and argv if sys_argv is not present (for compatibility)
+                script = lock_data.get("script") or "script.py"
+                script_filename = script if script.endswith(".py") else f"{script}.py"
+                argv = lock_data.get("argv", [])
+                sys_argv = [script_filename] + argv
+                
+            import shlex
+            if sys.platform == "win32":
+                import subprocess as _sp
+                redacted_cmdline = _sp.list2cmdline(sys_argv)
+                cwd_str = _sp.list2cmdline([str(cwd)]) if cwd else "."
+                rerun_cmd = f"cd {cwd_str}\npython {redacted_cmdline}"
+            else:
+                redacted_cmdline = shlex.join(sys_argv)
+                cwd_str = shlex.quote(str(cwd)) if cwd else "."
+                rerun_cmd = f"cd {cwd_str} && python {redacted_cmdline}"
+                
+            _print_warn(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json. Reconstructed rerun command from lock file:")
+            if sys.platform == "win32" and "&& python " in rerun_cmd:
+                rerun_cmd = rerun_cmd.replace(" && python ", "\npython ").replace("'", '"')
+            print(rerun_cmd)
+        else:
+            _print_error(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.")
+            sys.exit(1)
     except Exception as e:
-        print(f"Error: Failed to fetch rerun command: {e}", file=sys.stderr)
+        _print_error(f"Failed to fetch rerun command: {e}")
         sys.exit(1)
 
 
@@ -241,7 +293,7 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
             fmt = export_format if export_format is not True else conf.get("export_format", "txt")
             fmt = fmt.lower()
             if fmt not in ["txt", "json"]:
-                print(f"Error: Unsupported export format '{fmt}'. Use 'txt' or 'json'.", file=sys.stderr)
+                _print_error(f"Unsupported export format '{fmt}'. Use 'txt' or 'json'.")
                 sys.exit(1)
 
             name_a = Path(manifest_path_a).parent.name
@@ -263,10 +315,10 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
 
     except RunInProgressOrCrashedError as e:
         status = e.run_info.status if e.run_info else "crashed/running"
-        print(f"Error: Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.", file=sys.stderr)
+        _print_error(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.")
         sys.exit(1)
     except Exception as e:
-        print(f"Error: Failed to generate diff report: {e}", file=sys.stderr)
+        _print_error(f"Failed to generate diff report: {e}")
         sys.exit(1)
 
 
@@ -282,7 +334,9 @@ def _run_report(run_dir: str, depth: str) -> None:
         run_info = e.run_info
         
         status = run_info.status if run_info else "crashed/running"
-        print(f"\nError: Run directory '{run_dir_path.name}' is currently {status} and does not contain a manifest.json.\n", file=sys.stderr)
+        print(file=sys.stderr)
+        _print_error(f"Run directory '{run_dir_path.name}' is currently {status} and does not contain a manifest.json.")
+        print(file=sys.stderr)
         
         if run_info:
             print("Run Details (from lock file):", file=sys.stderr)
@@ -382,7 +436,7 @@ def _run_report(run_dir: str, depth: str) -> None:
         sys.exit(1)
 
     except Exception as e:
-        print(f"Error: Failed to generate diagnostic report: {e}", file=sys.stderr)
+        _print_error(f"Failed to generate diagnostic report: {e}")
         sys.exit(1)
         
         
@@ -392,7 +446,7 @@ def _run_meta(out_path: str, depth: str) -> None:
         from pubrun.report.meta_snapshot import generate_meta_snapshot
         generate_meta_snapshot(out_path, depth)
     except Exception as e:
-        print(f"Error: Failed to generate meta snapshot: {e}", file=sys.stderr)
+        _print_error(f"Failed to generate meta snapshot: {e}")
         sys.exit(1)
 
 
@@ -408,7 +462,7 @@ def _run_cite(style: str) -> None:
     elif style == "bibtex":
         print("@article{fariello_pubrun_2026,\n  author    = {Gabriele Fariello},\n  title     = {pubrun: A zero-dependency Python library for execution provenance and telemetry capture},\n  journal   = {Journal of Open Source Software},\n  volume    = {11},\n  number    = {121},\n  pages     = {8024},\n  year      = {2026},\n  doi       = {10.21105/joss.08024},\n  url       = {https://doi.org/10.21105/joss.08024}\n}")
     else:
-        print(f"Error: Unknown citation style '{style}'. Supported styles: apa, mla, chicago, bibtex.", file=sys.stderr)
+        _print_error(f"Unknown citation style '{style}'. Supported styles: apa, mla, chicago, bibtex.")
         sys.exit(1)
 
 
@@ -421,6 +475,8 @@ def _run_status(
     status_filter: Optional[str] = None,
     older_than: Optional[str] = None,
     exit_code: Optional[int] = None,
+    not_filter_str: Optional[str] = None,
+    not_status_filter: Optional[str] = None,
 ) -> None:
     """List runs or inspect a specific run."""
     from pubrun.status import (
@@ -437,7 +493,7 @@ def _run_status(
         # Inspect a specific run
         run_info = find_run(run_id, output_dir)
         if run_info is None:
-            print(f"Error: No run found matching '{run_id}'.", file=sys.stderr)
+            _print_error(f"No run found matching '{run_id}'.")
             sys.exit(1)
         if run_info.status == "crashed" and (run_info.run_dir / ".pubrun.lock").exists():
             close_out_crashed_run(run_info.run_dir, run_info.lock_data)
@@ -452,6 +508,8 @@ def _run_status(
             limit=limit,
             older_than=older_than,
             exit_code=exit_code,
+            not_filter_str=not_filter_str,
+            not_status_filter=not_status_filter,
         )
 
         for r in runs:
@@ -473,6 +531,8 @@ def _run_clean(
     filter_str: Optional[str] = None,
     limit: Optional[int] = None,
     exit_code: Optional[int] = None,
+    not_filter_str: Optional[str] = None,
+    not_status_filter: Optional[str] = None,
 ) -> None:
     """Interactive or automatic cleanup of old run directories."""
     from pubrun.status import clean_runs
@@ -486,6 +546,8 @@ def _run_clean(
         filter_str=filter_str,
         limit=limit,
         exit_code=exit_code,
+        not_filter_str=not_filter_str,
+        not_status_filter=not_status_filter,
     )
 
 
@@ -500,6 +562,8 @@ def _run_combined(
     limit: Optional[int] = None,
     older_than: Optional[str] = None,
     exit_code: Optional[int] = None,
+    not_filter_str: Optional[str] = None,
+    not_status_filter: Optional[str] = None,
 ) -> None:
     """Interleave stdout/stderr logs from one or more runs."""
     import re
@@ -519,16 +583,18 @@ def _run_combined(
             limit=run_limit,
             older_than=older_than,
             exit_code=exit_code,
+            not_filter_str=not_filter_str,
+            not_status_filter=not_status_filter,
         )
         if not target_runs:
-            print("Error: No runs match the filter criteria.", file=sys.stderr)
+            _print_error("No runs match the filter criteria.")
             sys.exit(1)
     else:
         target_runs = []
         for rid in run_ids:
             run_info = find_run(rid, dir_path)
             if not run_info:
-                print(f"Error: Run ID '{rid}' not found or ambiguous.", file=sys.stderr)
+                _print_error(f"Run ID '{rid}' not found or ambiguous.")
                 sys.exit(1)
             target_runs.append(run_info)
 
@@ -542,12 +608,12 @@ def _run_combined(
 
     if total_size > 500 * 1024 * 1024:
         if not force:
-            print(f"Error: Combined log size ({total_size / (1024*1024):.1f} MB) exceeds 500 MB limit. Use --force to proceed.", file=sys.stderr)
+            _print_error(f"Combined log size ({total_size / (1024*1024):.1f} MB) exceeds 500 MB limit. Use --force to proceed.")
             sys.exit(1)
 
     if total_size > 250 * 1024 * 1024:
         if not yes:
-            print(f"Warning: Combined log size ({total_size / (1024*1024):.1f} MB) exceeds 250 MB.", file=sys.stderr)
+            _print_warn(f"Combined log size ({total_size / (1024*1024):.1f} MB) exceeds 250 MB.")
             try:
                 response = input("Proceed? [y/N] ").strip().lower()
                 if response not in ("y", "yes"):
@@ -584,7 +650,7 @@ def _run_combined(
         try:
             out_file = open(output, "w", encoding="utf-8")
         except Exception as e:
-            print(f"Error: Failed to open output file '{output}': {e}", file=sys.stderr)
+            _print_error(f"Failed to open output file '{output}': {e}")
             sys.exit(1)
 
     def _parse_log_file(file_path: Path, run_id: Optional[str], stream: str, multiple_runs: bool) -> list:
@@ -771,7 +837,9 @@ def _add_run_filter_args(parser: argparse.ArgumentParser, include_limit: bool = 
         parser.add_argument("--filter", type=str, default=None, metavar="QUERY", help="Filter runs by script name, arguments, or run ID (supports regex or plain string).")
     else:
         parser.add_argument("-f", "--filter", type=str, default=None, metavar="QUERY", help="Filter runs by script name, arguments, or run ID (supports regex or plain string).")
+    parser.add_argument("-F", "--not-filter", type=str, default=None, metavar="QUERY", help="Exclude runs matching script name, arguments, or run ID.")
     parser.add_argument("-s", "--status", type=str, default=None, metavar="STATUS", help="Comma-separated status filter (e.g. 'completed,failed,crashed').")
+    parser.add_argument("-S", "--not-status", type=str, default=None, metavar="STATUS", help="Comma-separated status exclusion filter (e.g. 'completed').")
     parser.add_argument("--older-than", type=str, default=None, metavar="AGE", help="Only consider runs older than AGE (e.g. '7d', '24h', '30' for 30 days).")
     parser.add_argument("--exit-code", type=int, default=None, metavar="CODE", help="Only consider runs with this exit code.")
     if include_limit:
@@ -1036,9 +1104,11 @@ def main() -> None:
                 limit=getattr(args, "limit", None),
                 older_than=getattr(args, "older_than", None),
                 exit_code=getattr(args, "exit_code", None),
+                not_filter_str=getattr(args, "not_filter", None),
+                not_status_filter=getattr(args, "not_status", None),
             )
             if not matched:
-                print("Error: No runs match the filter criteria.", file=sys.stderr)
+                _print_error("No runs match the filter criteria.")
                 sys.exit(1)
             for idx, r in enumerate(matched):
                 if idx > 0:
@@ -1059,6 +1129,8 @@ def main() -> None:
             status_filter=getattr(args, "status", None),
             older_than=getattr(args, "older_than", None),
             exit_code=getattr(args, "exit_code", None),
+            not_filter_str=getattr(args, "not_filter", None),
+            not_status_filter=getattr(args, "not_status", None),
         )
         executed = True
 
@@ -1069,6 +1141,8 @@ def main() -> None:
             status_filter=getattr(args, "status", None),
             older_than=getattr(args, "older_than", None),
             exit_code=getattr(args, "exit_code", None),
+            not_filter_str=getattr(args, "not_filter", None),
+            not_status_filter=getattr(args, "not_status", None),
         )
         executed = True
 
@@ -1103,6 +1177,8 @@ def main() -> None:
             status_filter=getattr(args, "status", None),
             older_than=getattr(args, "older_than", None),
             exit_code=getattr(args, "exit_code", None),
+            not_filter_str=getattr(args, "not_filter", None),
+            not_status_filter=getattr(args, "not_status", None),
         )
         executed = True
 
@@ -1116,6 +1192,8 @@ def main() -> None:
             filter_str=getattr(args, "filter", None),
             limit=getattr(args, "limit", None),
             exit_code=getattr(args, "exit_code", None),
+            not_filter_str=getattr(args, "not_filter", None),
+            not_status_filter=getattr(args, "not_status", None),
         )
         executed = True
 
@@ -1131,6 +1209,8 @@ def main() -> None:
             limit=getattr(args, "limit", None),
             older_than=getattr(args, "older_than", None),
             exit_code=getattr(args, "exit_code", None),
+            not_filter_str=getattr(args, "not_filter", None),
+            not_status_filter=getattr(args, "not_status", None),
         )
         executed = True
 
@@ -1155,7 +1235,7 @@ def main() -> None:
         if cmd_args and cmd_args[0] == "--":
             cmd_args = cmd_args[1:]
         if not cmd_args:
-            print("Error: No command specified. Usage: pubrun run --mode minimal -- python script.py", file=sys.stderr)
+            _print_error("No command specified. Usage: pubrun run --mode minimal -- python script.py")
             sys.exit(1)
         # Spawn child process with PUBRUN_IMPORT_MODE set
         import subprocess as _sp
@@ -1178,7 +1258,7 @@ def main() -> None:
                 sys.exit(128 + abs(rc))
             sys.exit(rc)
         except (FileNotFoundError, PermissionError) as e:
-            print(f"Error: Cannot execute command: {e}", file=sys.stderr)
+            _print_error(f"Cannot execute command: {e}")
             sys.exit(127)
         except KeyboardInterrupt:
             if child_proc and child_proc.poll() is None:
@@ -1206,7 +1286,7 @@ def main() -> None:
             elif choice in ["1", ""]:
                 dest = ".pubrun.toml"
             else:
-                print("Error: Invalid selection.", file=sys.stderr)
+                _print_error("Invalid selection.")
                 sys.exit(1)
             
         _create_config(dest)

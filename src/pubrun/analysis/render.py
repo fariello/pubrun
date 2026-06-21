@@ -61,6 +61,14 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int
                 print(f"    {grn}+ {p_add}{rst}")
             for p_sub in mod.get("removed", []):
                 print(f"    {red}- {p_sub}{rst}")
+        elif mod["type"] == "list_diff":
+            # List-style: show added/removed elements, order change warning
+            for p_sub in mod.get("removed", []):
+                print(f"    {red}- {p_sub}{rst}")
+            for p_add in mod.get("added", []):
+                print(f"    {grn}+ {p_add}{rst}")
+            if mod.get("order_changed", False):
+                print(f"    {yel}~ [ORDER CHANGED]{rst}")
         else:
             old_val = _fmt(mod.get("old", ""), max_length, wrap)
             new_val = _fmt(mod.get("new", ""), max_length, wrap)

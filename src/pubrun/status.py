@@ -243,12 +243,19 @@ def filter_runs(
     limit: Optional[int] = None,
     older_than: Optional[str] = None,
     exit_code: Optional[int] = None,
+    not_filter_str: Optional[str] = None,
+    not_status_filter: Optional[str] = None,
 ) -> List[RunInfo]:
     """Filter a list of runs by search pattern, status, age limit, limit count, and exit code."""
     # 1. Filter by status
     if status_filter:
         allowed = [s.strip().lower() for s in status_filter.split(",")]
         runs = [r for r in runs if r.status.lower() in allowed]
+
+    # 1b. Exclude by status
+    if not_status_filter:
+        excluded = [s.strip().lower() for s in not_status_filter.split(",")]
+        runs = [r for r in runs if r.status.lower() not in excluded]
 
     # 2. Filter by search string/regex
     if filter_str:
@@ -263,6 +270,24 @@ def filter_runs(
         except re.error:
             q = filter_str.lower()
             runs = [r for r in runs if (
+                (r.script and q in r.script.lower()) or
+                (r.args and q in r.args.lower()) or
+                (r.run_id and q in r.run_id.lower())
+            )]
+
+    # 2b. Exclude by search string/regex
+    if not_filter_str:
+        import re
+        try:
+            rx = re.compile(not_filter_str, re.IGNORECASE)
+            runs = [r for r in runs if not (
+                (r.script and rx.search(r.script)) or
+                (r.args and rx.search(r.args)) or
+                (r.run_id and rx.search(r.run_id))
+            )]
+        except re.error:
+            q = not_filter_str.lower()
+            runs = [r for r in runs if not (
                 (r.script and q in r.script.lower()) or
                 (r.args and q in r.args.lower()) or
                 (r.run_id and q in r.run_id.lower())
@@ -762,6 +787,8 @@ def clean_runs(
     exit_code: Optional[int] = None,
     # Backward compatibility:
     older_than_days: Optional[float] = None,
+    not_filter_str: Optional[str] = None,
+    not_status_filter: Optional[str] = None,
 ) -> int:
     """Interactively or automatically clean up old run directories.
 
@@ -806,6 +833,8 @@ def clean_runs(
         limit=limit,
         older_than=older_than,
         exit_code=exit_code,
+        not_filter_str=not_filter_str,
+        not_status_filter=not_status_filter,
     )
 
     if not candidates:
