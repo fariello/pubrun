@@ -62,8 +62,8 @@ Contributions that preserve this scope are more likely to be accepted.
 
 ## Code of conduct
 
-Contributors are expected to communicate respectfully and constructively. Maintainers may close issues or pull requests that are abusive, off-topic, or inconsistent with the project scope.
+Contributors are expected to adhere to the [Code of Conduct](file:///home/gfariello/VC/pubrun/CODE_OF_CONDUCT.md). Please report any unacceptable behavior to gfariello@uri.edu.
 
 ## Maintainer review
 
-The maintainer will review issues and pull requests as availability permits. Acceptance of a contribution depends on correctness, maintainability, fit with project scope, tests, documentation, and compatibility with existing behavior.
+The maintainer will review issues and pull requests as availability permits. Acceptance of a contribution depends on correctness, maintainability, fit with project scope (including maintaining the zero-dependency, lightweight footprint), tests, documentation, and compatibility with existing behavior.
