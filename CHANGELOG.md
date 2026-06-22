@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] - 2026-06-22
+
+### Added
+- **Minimal Research Workflow Example**: Added a complete, self-contained mock research regression fit script under `examples/minimal-research-workflow/analysis.py`, along with detailed reviewer notes in the README, manifest excerpts, and artifact notes.
+- **Example Automated Smoke Test**: Added a pytest smoke test under `tests/test_examples.py` to automatically run and validate the research workflow execution and event outputs.
+- **UI Command Aliases**: Supported `tui` and `gui` aliases for the canonical `pubrun ui` subcommand.
+- **Research Use Documentation**: Created `docs/research-use.md` outlining project adoption statistics and guidelines for public example workflows.
+- **API Audit Documentation**: Documented custom reports/artifacts API (`pubrun.report` and `pubrun.artifact`) in `docs/api.md`.
+- **Citation Guidelines**: Added a dedicated `Citation` section in `README.md` and updated `CITATION.cff` with placeholders for future Zenodo concept and version-specific DOIs.
+
 ## [1.1.2] - 2026-06-22
 
 ### Fixed
