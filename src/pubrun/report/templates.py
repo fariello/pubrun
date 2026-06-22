@@ -21,7 +21,7 @@ Computational experiments were executed on a machine running {os_name} equipped 
 
 {packages_text}
 
-To guarantee computational reproducibility, the exact state of the source code was archived at Git commit `{git_commit}`{git_repo_text}. Environment and execution provenance were tracked using the `pubrun` library [1].
+To facilitate computational reproducibility, the exact state of the source code was archived at Git commit `{git_commit}`{git_repo_text}. Environment and execution provenance were tracked using the `pubrun` library [1].
 
 **References:**
 [1] Fariello, G. (2026). pubrun: A zero-dependency Python library for execution provenance and telemetry capture. GitHub repository, https://github.com/fariello/pubrun
@@ -34,7 +34,7 @@ Computational experiments were executed on a machine running {os_name} equipped 
 
 {packages_text}
 
-To guarantee computational reproducibility, the exact state of the source code was archived at Git commit \\texttt{{{git_commit}}}{git_repo_text}. Environment and execution provenance were tracked using the \\texttt{{pubrun}} library \\cite{{fariello_pubrun_2026}}.
+To facilitate computational reproducibility, the exact state of the source code was archived at Git commit \\texttt{{{git_commit}}}{git_repo_text}. Environment and execution provenance were tracked using the \\texttt{{pubrun}} library \\cite{{fariello_pubrun_2026}}.
 
 %% Ensure you add the following to your .bib file:
 %% @misc{{fariello_pubrun_2026,
