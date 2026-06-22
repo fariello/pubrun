@@ -68,21 +68,15 @@ twine check dist/*
 ```
 - **Acceptance Criteria**: Both the source distribution (`.tar.gz`) and binary distribution (`.whl`) must report `PASSED`.
 
-### 7. Publish to PyPI (Twine Upload)
-Upload the final verified distribution files to PyPI:
-```bash
-twine upload dist/*
-```
+### 7. Publish to PyPI (Manual Twine Upload)
+Because PyPI publishing prompts for user credentials or API tokens, the agent MUST NOT attempt to execute `twine upload` directly. This step must always be executed manually by the user.
 
-#### Handling Interactive Prompts & Credentials
-Because PyPI publishing typically prompts for user credentials or API tokens, follow these strict execution rules:
-- **Interactive Check**: If you launch the command as a background task, check the status or log output.
-- **Prompt Detection**: If the task prompts for an API token or password (`Enter your API token:`), you must:
-  1. Notify the user immediately in the chat that the command is waiting for input.
-  2. Provide the user with two options:
-     - **Option A**: Provide the token/credentials directly in the chat, which you will send to the command using `send_input`.
-     - **Option B**: Cancel the background task and hand the publish step off to the user to run directly in their own local terminal.
-- **Task Cancellation**: If the user prefers Option B, cancel the task using `manage_task` with action `kill`, and record the handoff in `task.md` and `walkthrough.md`.
+- **Action for Agent**: Hand off the publish step to the user. Do not attempt to run `twine upload` via terminal commands.
+- **Action for User**: Execute the following command in your local terminal to publish the verified distributions:
+  ```bash
+  twine upload dist/*
+  ```
+
 
 ---
 
