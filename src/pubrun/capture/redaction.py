@@ -123,6 +123,11 @@ def _redact_value_string_heuristics(val: str, config: Optional[Dict[str, Any]] =
     uri_pattern = re.compile(r"([a-zA-Z0-9+.-]+)://([^/:]+):([^/@]+)@([^/]+)")
     if uri_pattern.search(val):
         val = uri_pattern.sub(r"\1://\2:[REDACTED]@\4", val)
+    else:
+        # scheme://token@host (e.g. git tokens)
+        token_uri_pattern = re.compile(r"([a-zA-Z0-9+.-]+)://([^/:]+)@([^/]+)")
+        if token_uri_pattern.search(val):
+            val = token_uri_pattern.sub(r"\1://[REDACTED]@\3", val)
 
     # 3. Known API keys / Tokens
     openai_pattern = re.compile(r"sk-[a-zA-Z0-9]{20,}")

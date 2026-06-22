@@ -55,6 +55,9 @@ def get_git(config: Dict[str, Any]) -> Dict[str, Any]:
     
     # 4. Grab remote origin to document exactly where the codebase logic originates
     remote_url = _run_git(["remote", "get-url", "origin"])
+    if remote_url:
+        from pubrun.capture.redaction import _redact_value_string_heuristics
+        remote_url = _redact_value_string_heuristics(remote_url, config)
     
     return {
         "repo_root": repo_root,
