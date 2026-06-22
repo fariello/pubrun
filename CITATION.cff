@@ -5,7 +5,7 @@ authors:
     given-names: "Gabriele"
     orcid: "https://orcid.org/0000-0002-0326-4752"
 title: "pubrun: Lightweight native execution provenance and reproducibility tracking"
-version: 1.1.2
+version: 1.2.0
 date-released: 2026-06-22
 url: "https://github.com/fariello/pubrun"
 repository-code: "https://github.com/fariello/pubrun"
@@ -19,3 +19,24 @@ keywords:
   - metadata
   - research-software
 license: "BSD-3-Clause"
+
+# Once archived on Zenodo, uncomment and update the DOIs below:
+# identifiers:
+#   - type: doi
+#     value: 10.5281/zenodo.[CONCEPT_DOI]
+#     description: The concept DOI for the collection of all archives.
+#   - type: doi
+#     value: 10.5281/zenodo.[VERSION_DOI]
+#     description: The version-specific DOI for version 1.2.0 of this software.
+
+# Once the JOSS paper is accepted, uncomment and update the preferred citation below:
+# preferred-citation:
+#   type: article
+#   authors:
+#     - family-names: "Fariello"
+#       given-names: "Gabriele"
+#       orcid: "https://orcid.org/0000-0002-0326-4752"
+#   title: "pubrun: Low-friction execution provenance for Python research"
+#   journal: "Journal of Open Source Software"
+#   doi: "10.21105/joss.[PAPER_ID]"
+#   url: "https://doi.org/10.21105/joss.[PAPER_ID]"

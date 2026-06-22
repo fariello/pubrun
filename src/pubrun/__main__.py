@@ -489,13 +489,13 @@ def _run_cite(style: str) -> None:
     """Print a formatted academic citation for pubrun."""
     style = style.lower()
     if style == "apa":
-        print("Fariello, G. (2026). pubrun: A zero-dependency Python library for execution provenance and telemetry capture. GitHub repository, https://github.com/fariello/pubrun")
+        print("Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research. Journal of Open Source Software, (In Submission).")
     elif style == "mla":
-        print("Fariello, Gabriele. \"pubrun: A zero-dependency Python library for execution provenance and telemetry capture.\" GitHub, 2026, https://github.com/fariello/pubrun.")
+        print("Fariello, Gabriele. \"pubrun: Low-friction execution provenance for Python research.\" Journal of Open Source Software, (In Submission).")
     elif style == "chicago":
-        print('Fariello, Gabriele. 2026. "pubrun: A zero-dependency Python library for execution provenance and telemetry capture." GitHub. https://github.com/fariello/pubrun.')
+        print("Fariello, Gabriele. 2026. \"pubrun: Low-friction execution provenance for Python research.\" Journal of Open Source Software, (In Submission).")
     elif style == "bibtex":
-        print("@misc{fariello_pubrun_2026,\n  author    = {Gabriele Fariello},\n  title     = {pubrun: A zero-dependency Python library for execution provenance and telemetry capture},\n  howpublished = {\\url{https://github.com/fariello/pubrun}},\n  year      = {2026}\n}")
+        print("@article{fariello_pubrun_2026,\n  author    = {Gabriele Fariello},\n  title     = {pubrun: Low-friction execution provenance for Python research},\n  journal   = {Journal of Open Source Software},\n  note      = {In Submission},\n  year      = {2026}\n}")
     else:
         _print_error(f"Unknown citation style '{style}'. Supported styles: apa, mla, chicago, bibtex.")
         sys.exit(1)

@@ -325,6 +325,21 @@ See [Configuration Reference](https://github.com/fariello/pubrun/blob/main/docs/
 
 ---
 
+## Citation
+
+If you use `pubrun` in your research, please cite the JOSS paper as the preferred reference, or cite the specific software version archived on Zenodo.
+
+- **Preferred Citation (JOSS Paper)**:
+  > Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research. *Journal of Open Source Software*, (Paper in submission).
+- **Software Archive (Zenodo)**:
+  > Fariello, G. (2026). pubrun: Lightweight native execution provenance and reproducibility tracking. Zenodo. (Archive pending public release).
+
+*Upon release and archiving on Zenodo, the following citation badges will be active:*
+- **Concept DOI Badge** (resolves to all versions): `[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.[CONCEPT_ID].svg)](https://doi.org/10.5281/zenodo.[CONCEPT_ID])`
+- **Version DOI Badge** (resolves specifically to version 1.2.0): `[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.[VERSION_ID].svg)](https://doi.org/10.5281/zenodo.[VERSION_ID])`
+
+---
+
 ## Acknowledgements
 
 `pubrun` was redesigned and rewritten from pre-existing custom libraries, code fragments, scripts, and ideas spanning almost two decades, with the assistance of Google Antigravity for its official release.
