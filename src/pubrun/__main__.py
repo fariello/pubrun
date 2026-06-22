@@ -885,7 +885,7 @@ def main() -> None:
     """CLI entrypoint for the ``pubrun`` command."""
     # Handle global --no-color flag regardless of position
     # But do not strip it if it is part of the command run by 'pubrun run'
-    subcommands = {"report", "methods", "rerun", "diff", "meta", "status", "clean", "combined", "cite", "run", "tui"}
+    subcommands = {"report", "methods", "rerun", "diff", "meta", "status", "clean", "combined", "cite", "run", "ui", "tui", "gui"}
     run_idx = -1
     for idx, arg in enumerate(sys.argv):
         if arg in subcommands:
@@ -1103,15 +1103,16 @@ def main() -> None:
     run_parser.add_argument("--mode", type=str, choices=["auto", "noauto", "nopatch", "noconsole", "minimal"], default="auto", help="Import mode for the child process (default: auto).")
     run_parser.add_argument("command_args", nargs=argparse.REMAINDER, metavar="-- COMMAND", help="Command to execute (use -- to separate pubrun flags from the target command).")
     
-    # ---------------- TUI Subparser ----------------
-    tui_parser = subparsers.add_parser(
-        "tui",
-        help="Launch the interactive pubrun TUI manager.",
-        description="Launch the interactive pubrun TUI manager.",
-        epilog=f"Examples:\n  {prog_name} tui\n  {prog_name} tui --dir /path/to/runs",
+    # ---------------- UI Subparser ----------------
+    ui_parser = subparsers.add_parser(
+        "ui",
+        aliases=["tui", "gui"],
+        help="Launch the interactive pubrun dashboard.",
+        description="Launch the interactive pubrun dashboard.",
+        epilog=f"Examples:\n  {prog_name} ui\n  {prog_name} ui --dir /path/to/runs",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    tui_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
+    ui_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
     
     # ---------------- Diagnostic Flags ----------------
     parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Create an annotated `.pubrun.toml` configuration file.")
@@ -1249,16 +1250,15 @@ def main() -> None:
         )
         executed = True
 
-    elif args.command == "tui":
+    elif args.command in {"ui", "tui", "gui"}:
         try:
             from pubrun.tui.app import PubrunTUIApp
             app = PubrunTUIApp(output_dir=getattr(args, "dir", None))
             app.run()
         except ImportError:
             print(
-                "pubrun is by default zero-dependency based to keep it lean and compatible to use; "
-                "however, using the GUI based tool does require additional libraries.\n"
-                "Run `pip install textual rich` (or `pip install \"pubrun[tui]\"`) to run the gui.",
+                "pubrun is by default zero-dependency based and does not install the TUI dashboard.\n"
+                "Run `pip install textual rich` (or `pip install \"pubrun[tui]\"`) to run the UI.",
                 file=sys.stderr
             )
             sys.exit(1)
