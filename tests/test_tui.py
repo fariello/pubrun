@@ -5,24 +5,25 @@ from unittest import mock
 import argparse
 
 def test_tui_cli_parser_and_run():
-    """Verify that pubrun tui parses correctly and launches when dependencies exist."""
+    """Verify that pubrun ui parses correctly and launches when dependencies exist."""
     from pubrun.__main__ import main
     
-    with mock.patch("sys.argv", ["pubrun", "tui", "--dir", "/tmp/runs"]):
-        with mock.patch("pubrun.tui.app.PubrunTUIApp") as mock_app:
-            # Inject mocked module
-            mock_module = mock.Mock()
-            mock_module.PubrunTUIApp = mock_app
-            sys.modules["pubrun.tui.app"] = mock_module
-            
-            try:
-                main()
-            except SystemExit as e:
-                # main() might exit 0 after executing command
-                assert e.code in (0, None)
+    for sub in ("ui", "tui", "gui"):
+        with mock.patch("sys.argv", ["pubrun", sub, "--dir", "/tmp/runs"]):
+            with mock.patch("pubrun.tui.app.PubrunTUIApp") as mock_app:
+                # Inject mocked module
+                mock_module = mock.Mock()
+                mock_module.PubrunTUIApp = mock_app
+                sys.modules["pubrun.tui.app"] = mock_module
                 
-            mock_app.assert_called_once_with(output_dir="/tmp/runs")
-            mock_app.return_value.run.assert_called_once()
+                try:
+                    main()
+                except SystemExit as e:
+                    # main() might exit 0 after executing command
+                    assert e.code in (0, None)
+                    
+                mock_app.assert_called_once_with(output_dir="/tmp/runs")
+                mock_app.return_value.run.assert_called_once()
 
 
 def test_tui_missing_dependencies_prints_notice(capsys):
@@ -33,7 +34,7 @@ def test_tui_missing_dependencies_prints_notice(capsys):
     if "pubrun.tui.app" in sys.modules:
         del sys.modules["pubrun.tui.app"]
         
-    with mock.patch("sys.argv", ["pubrun", "tui"]):
+    with mock.patch("sys.argv", ["pubrun", "ui"]):
         # Mock import to raise ImportError
         original_import = __import__
         
