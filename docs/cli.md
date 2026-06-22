@@ -1,8 +1,8 @@
-[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Changelog](../CHANGELOG.md)
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Research Use](research-use.md) | [Changelog](../CHANGELOG.md)
 
 # pubrun CLI Reference
 
-The `pubrun` CLI is accessible via `pubrun <command>`, `pbr <command>` (a convenient shorthand alias), or `python -m pubrun <command>`. It provides ten commands for post-execution analysis and diagnostic flags.
+The `pubrun` CLI is accessible via `pubrun <command>`, `pbr <command>` (a convenient shorthand alias), or `python -m pubrun <command>`. It provides eleven commands for post-execution analysis and diagnostic flags.
 
 ---
 
@@ -153,6 +153,30 @@ pubrun status --dir /shared/runs # Scan a different directory
 ```
 
 For running processes, the inspect view also shows live RSS memory and CPU usage (cross-platform: Linux, macOS, Windows).
+
+---
+
+### `ui` — Interactive Dashboard
+
+Launches the terminal user interface (TUI) dashboard to browse, inspect, and manage run records interactively.
+
+```bash
+pubrun ui [--dir PATH]
+```
+
+**Aliases:** `tui`, `gui`
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--dir PATH` | Override the directory containing the runs (default: configured `output_dir` or `./runs`) |
+
+**Example:**
+```bash
+pubrun ui
+pubrun gui
+```
 
 ---
 
@@ -319,4 +343,4 @@ pubrun --run-tests
 
 ---
 
-[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Changelog](../CHANGELOG.md)
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Research Use](research-use.md) | [Changelog](../CHANGELOG.md)

@@ -10,9 +10,9 @@ date-released: 2026-06-22
 url: "https://github.com/fariello/pubrun"
 repository-code: "https://github.com/fariello/pubrun"
 abstract: >-
-  pubrun is a zero-dependency, manifest-first Python framework for tracking
-  computational provenance, environment state, and execution metadata without
-  requiring complex virtualization overhead.
+  pubrun is a zero-dependency (on Python 3.11+), manifest-first Python framework
+  for tracking computational provenance, environment state, and execution metadata
+  without requiring complex virtualization overhead.
 keywords:
   - reproducibility
   - provenance
