@@ -490,6 +490,58 @@ class TestCleanRuns:
 
         run.stop()
 
+    def test_clean_interactive_selection_and_confirm(self, monkeypatch):
+        """P3-T10: Test clean_runs with interactive selection (e.g., '1-2') and confirmation 'y'."""
+        from pubrun.status import clean_runs
+
+        # Create 3 runs, stop them
+        runs = []
+        for _ in range(3):
+            r = Run()
+            runs.append(r)
+            r.stop()
+        output_dir = str(runs[0].run_dir.parent)
+
+        # Mock inputs: first select '1-2', then confirm 'y'
+        inputs = iter(["1-2", "y"])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+
+        deleted = clean_runs(output_dir=output_dir, yes=False)
+        assert deleted == 2
+        # verify the two newest runs are deleted, the oldest survives
+        assert not runs[2].run_dir.exists()
+        assert not runs[1].run_dir.exists()
+        assert runs[0].run_dir.exists()
+
+    def test_clean_interactive_cancel_at_selection(self, monkeypatch):
+        """P3-T10: Test clean_runs with empty selection input to cancel."""
+        from pubrun.status import clean_runs
+
+        r = Run()
+        r.stop()
+        output_dir = str(r.run_dir.parent)
+
+        monkeypatch.setattr("builtins.input", lambda prompt="": "")
+        deleted = clean_runs(output_dir=output_dir, yes=False)
+        assert deleted == 0
+        assert r.run_dir.exists()
+
+    def test_clean_interactive_cancel_at_confirm(self, monkeypatch):
+        """P3-T10: Test clean_runs interactive select 'all' but confirm 'n'."""
+        from pubrun.status import clean_runs
+
+        r = Run()
+        r.stop()
+        output_dir = str(r.run_dir.parent)
+
+        inputs = iter(["all", "n"])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+
+        deleted = clean_runs(output_dir=output_dir, yes=False)
+        assert deleted == 0
+        assert r.run_dir.exists()
+
+
 
 class TestCleanCli:
     """Tests for the pubrun clean CLI command."""
