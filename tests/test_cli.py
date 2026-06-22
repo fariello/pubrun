@@ -391,6 +391,35 @@ class TestCliDiff:
         result = run_pubrun("diff", "/nonexistent/a", "/nonexistent/b")
         assert result.returncode != 0
 
+    def test_diff_default_no_args(self, two_runs, tmp_path):
+        result = run_pubrun("diff", cwd=str(tmp_path))
+        assert result.returncode == 0
+        assert "auto-detected" in result.stderr.lower()
+
+    def test_diff_default_one_arg(self, two_runs, tmp_path):
+        result = run_pubrun("diff", two_runs[0], cwd=str(tmp_path))
+        assert result.returncode == 0
+        assert "comparing" in result.stderr.lower()
+
+    def test_diff_default_no_args_insufficient_runs(self, tmp_path):
+        from pubrun import start as pubrun_start
+        import pubrun.tracker
+        
+        old_cwd = Path.cwd
+        try:
+            Path.cwd = staticmethod(lambda: tmp_path)
+            pubrun.tracker._active_run = None
+            tracker = pubrun_start()
+            tracker.stop()
+        finally:
+            Path.cwd = old_cwd
+            pubrun.tracker._active_run = None
+
+        result = run_pubrun("diff", cwd=str(tmp_path))
+        assert result.returncode != 0
+        assert "need at least 2 runs" in result.stderr.lower()
+
+
 
 class TestCliRunTests:
 
