@@ -222,11 +222,62 @@ class TestGit:
         if result["capture_state"]["status"] == "complete":
             assert "branch" in result
 
-    def test_has_is_dirty(self):
+    def test_has_dirty(self):
         result = get_git({})
         if result["capture_state"]["status"] == "complete":
-            assert "is_dirty" in result
-            assert isinstance(result["is_dirty"], bool)
+            assert "dirty" in result
+            assert isinstance(result["dirty"], bool)
+
+    def test_git_capture_redaction_token(self):
+        """Test that git capture redacts token in remote url."""
+        def mock_run(args, **kwargs):
+            cmd = args
+            if "--show-toplevel" in cmd:
+                return MagicMock(returncode=0, stdout="/some/path")
+            elif "--abbrev-ref" in cmd:
+                return MagicMock(returncode=0, stdout="main")
+            elif "HEAD" in cmd:
+                return MagicMock(returncode=0, stdout="a"*40)
+            elif "status" in cmd:
+                return MagicMock(returncode=0, stdout="")
+            elif "remote" in cmd and "get-url" in cmd:
+                return MagicMock(returncode=0, stdout="https://mytoken@github.com/user/repo.git\n")
+            return MagicMock(returncode=1)
+
+        with patch("subprocess.run", side_effect=mock_run):
+            result = get_git({})
+            assert result["capture_state"]["status"] == "complete"
+            assert result["commit"] == "a"*40
+            assert result["branch"] == "main"
+            assert result["dirty"] is False
+            assert result["remote_url"] == {
+                "representation": "plain",
+                "value": "https://[REDACTED]@github.com/user/repo.git"
+            }
+
+    def test_git_capture_redaction_password(self):
+        """Test that git capture redacts password in remote url."""
+        def mock_run(args, **kwargs):
+            cmd = args
+            if "--show-toplevel" in cmd:
+                return MagicMock(returncode=0, stdout="/some/path")
+            elif "--abbrev-ref" in cmd:
+                return MagicMock(returncode=0, stdout="main")
+            elif "HEAD" in cmd:
+                return MagicMock(returncode=0, stdout="a"*40)
+            elif "status" in cmd:
+                return MagicMock(returncode=0, stdout="")
+            elif "remote" in cmd and "get-url" in cmd:
+                return MagicMock(returncode=0, stdout="https://user:password@github.com/user/repo.git\n")
+            return MagicMock(returncode=1)
+
+        with patch("subprocess.run", side_effect=mock_run):
+            result = get_git({})
+            assert result["capture_state"]["status"] == "complete"
+            assert result["remote_url"] == {
+                "representation": "plain",
+                "value": "https://user:[REDACTED]@github.com/user/repo.git"
+            }
 
     def test_no_crash_outside_git_repo(self, tmp_path, monkeypatch):
         """Simulate running outside a git repo."""
