@@ -6,7 +6,7 @@ import time
 import tempfile
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from pubrun import __version__
 
@@ -255,13 +255,47 @@ def _run_rerun(
         sys.exit(1)
 
 
-def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool, wrap_config: Optional[bool] = None, max_length: Optional[int] = None, depth: str = "basic", show_same: Optional[bool] = None) -> None:
+def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_config: Optional[bool] = None, max_length: Optional[int] = None, depth: str = "basic", show_same: Optional[bool] = None) -> None:
     """Run the semantic diff engine comparing two execution traces."""
     try:
         from pubrun.report.utils import hydrate_manifest
         from pubrun.config import resolve_config
         from pubrun.analysis.diff import compare_manifests, export_manifest
         from pubrun.analysis.render import print_diff
+        from pubrun.status import scan_runs, find_run
+
+        all_runs = scan_runs()
+        valid_runs = [r for r in all_runs if (r.run_dir / "manifest.json").exists()]
+
+        if len(run_dirs) >= 2:
+            run_dir_a = run_dirs[0]
+            run_dir_b = run_dirs[1]
+        elif len(run_dirs) == 1:
+            run_dir_a = run_dirs[0]
+            
+            # Resolve run_dir_a to its canonical path first
+            r_a = find_run(run_dir_a)
+            run_dir_a_path = r_a.run_dir if r_a else Path(run_dir_a)
+            
+            run_dir_b_path = None
+            for r in valid_runs:
+                if r.run_dir.resolve() != run_dir_a_path.resolve():
+                    run_dir_b_path = r.run_dir
+                    break
+            if not run_dir_b_path:
+                _print_error("Only one run was provided, and no other runs with a manifest.json were found to compare against.")
+                sys.exit(1)
+            
+            run_dir_b = str(run_dir_b_path)
+            print(f"[*] Comparing {run_dir_a_path.name} against most recent other run: {run_dir_b_path.name}", file=sys.stderr)
+        else:
+            # 0 runs provided: diff the last two runs (second most recent as baseline A, most recent as target B)
+            if len(valid_runs) < 2:
+                _print_error(f"Need at least 2 runs with manifest.json to perform default diff (found {len(valid_runs)}).")
+                sys.exit(1)
+            run_dir_a = str(valid_runs[1].run_dir)
+            run_dir_b = str(valid_runs[0].run_dir)
+            print(f"[*] Auto-detected last two runs for comparison: {valid_runs[1].run_dir.name} vs {valid_runs[0].run_dir.name}", file=sys.stderr)
 
         manifest_path_a = _get_manifest_path(run_dir_a)
         manifest_path_b = _get_manifest_path(run_dir_b)
@@ -320,6 +354,7 @@ def _run_diff(run_dir_a: str, run_dir_b: str, export_format: str, no_color: bool
     except Exception as e:
         _print_error(f"Failed to generate diff report: {e}")
         sys.exit(1)
+
 
 
 def _run_report(run_dir: str, depth: str) -> None:
@@ -966,10 +1001,10 @@ def main() -> None:
         epilog=f"Examples:\n  {prog_name} diff runs/pubrun-A runs/pubrun-B\n  {prog_name} diff runs/pubrun-A runs/pubrun-B --deep --same",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    diff_parser.add_argument("run_dir_a", type=str, help="First run directory (baseline).")
-    diff_parser.add_argument("run_dir_b", type=str, help="Second run directory (comparison).")
+    diff_parser.add_argument("run_dirs", type=str, nargs="*", help="Run directories to compare. If omitted, diffs the last two runs. If one is provided, diffs it against the most recent different run.")
     diff_parser.add_argument("--export", type=str, nargs="?", const=True, help="Export flattened manifests to files ('txt' or 'json').")
     diff_parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output.")
+
     
     # Wrap config logic
     wrap_group = diff_parser.add_mutually_exclusive_group()
@@ -1148,8 +1183,7 @@ def main() -> None:
 
     elif args.command == "diff":
         _run_diff(
-            args.run_dir_a, 
-            args.run_dir_b, 
+            getattr(args, "run_dirs", []), 
             args.export, 
             args.no_color, 
             getattr(args, "wrap", None), 
@@ -1158,6 +1192,7 @@ def main() -> None:
             getattr(args, "same", None)
         )
         executed = True
+
 
     elif args.command == "meta":
         _run_meta(args.out, args.depth)
