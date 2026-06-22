@@ -24,7 +24,7 @@ Computational experiments were executed on a machine running {os_name} equipped 
 To guarantee computational reproducibility, the exact state of the source code was archived at Git commit `{git_commit}`{git_repo_text}. Environment and execution provenance were tracked using the `pubrun` library [1].
 
 **References:**
-[1] Fariello, G. (2026). pubrun: A zero-dependency Python library for execution provenance and telemetry capture. *Journal of Open Source Software*, 11(121), 8024. https://doi.org/10.21105/joss.08024
+[1] Fariello, G. (2026). pubrun: A zero-dependency Python library for execution provenance and telemetry capture. GitHub repository, https://github.com/fariello/pubrun
 """
 
 LATEX_TEMPLATE = """
@@ -37,15 +37,10 @@ Computational experiments were executed on a machine running {os_name} equipped 
 To guarantee computational reproducibility, the exact state of the source code was archived at Git commit \\texttt{{{git_commit}}}{git_repo_text}. Environment and execution provenance were tracked using the \\texttt{{pubrun}} library \\cite{{fariello_pubrun_2026}}.
 
 %% Ensure you add the following to your .bib file:
-%% @article{{fariello_pubrun_2026,
+%% @misc{{fariello_pubrun_2026,
 %%   author    = {{Gabriele Fariello}},
 %%   title     = {{pubrun: A zero-dependency Python library for execution provenance and telemetry capture}},
-%%   journal   = {{Journal of Open Source Software}},
-%%   volume    = {{11}},
-%%   number    = {{121}},
-%%   pages     = {{8024}},
-%%   year      = {{2026}},
-%%   doi       = {{10.21105/joss.08024}},
-%%   url       = {{https://doi.org/10.21105/joss.08024}}
+%%   howpublished = {{\\url{{https://github.com/fariello/pubrun}}}},
+%%   year      = {{2026}}
 %% }}
 """

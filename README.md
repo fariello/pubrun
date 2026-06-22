@@ -51,9 +51,9 @@ Modern scientific workflows rely on implicit state. When it's time to publish a 
 
 ## The Solution
 
-`pubrun` permanently ends this friction.
+`pubrun` removes this friction by automating execution tracking and metadata compilation.
 
-With a single `import pubrun`, the library quietly traces your script execution, hashes your environment dependencies, detects codebase drift, and compiles publication-ready **Computational Methodology** LaTeX/Markdown blocks so your run is instantly citable.
+With a single `import pubrun`, the library quietly traces your script execution, hashes your environment dependencies, detects codebase drift, and compiles publication-ready **Computational Methodology** LaTeX/Markdown blocks making your run immediately documentable and ready for publication.
 
 ### Import Modes
 
