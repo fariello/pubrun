@@ -100,13 +100,13 @@ Read and follow `00-run-protocol.md` first. Then execute the section files seque
 
 ### Step 9: Post-Go Release Execution
 - **Instructions**: Follow [09-release-execution.md](file://~/VC/pubrun/release-review/09-release-execution.md).
-- **Execution**: Push code, verify remote CI, build final distribution packages, verify embedded commit metadata in built artifacts, tag the release with an annotated tag, run twine check, and publish to PyPI.
+- **Execution**: Push code, verify remote CI, build final distribution packages, verify embedded commit metadata in built artifacts, tag the release with an annotated tag, run twine check, and hand off PyPI publishing to the user (manual upload).
 - **Expected Outputs**:
   - Code pushed to `origin/main`.
   - Passing remote CI run.
   - Built distribution packages with baked git HEAD commit hash.
   - Annotated tag pushed to remote.
-  - Distribution files uploaded to PyPI (or handed off to user).
+  - Distribution files handed off to the user for manual PyPI publication.
 
 ---
 
