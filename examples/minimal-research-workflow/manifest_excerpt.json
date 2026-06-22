@@ -1,0 +1,73 @@
+{
+  "run": {
+    "id": "pubrun-20260622-141929-abcde",
+    "command": "python analysis.py",
+    "script": "analysis.py"
+  },
+  "status": {
+    "outcome": "completed",
+    "exit_code": 0
+  },
+  "phases": [
+    {
+      "name": "data_generation",
+      "started_at_utc": 1782226769.12345,
+      "ended_at_utc": 1782226769.12567,
+      "elapsed_seconds": 0.00222
+    },
+    {
+      "name": "model_fitting",
+      "started_at_utc": 1782226769.12568,
+      "ended_at_utc": 1782226769.12678,
+      "elapsed_seconds": 0.00110
+    },
+    {
+      "name": "model_evaluation",
+      "started_at_utc": 1782226769.12679,
+      "ended_at_utc": 1782226769.12890,
+      "elapsed_seconds": 0.00211
+    }
+  ],
+  "annotations": [
+    {
+      "timestamp_utc": 1782226769.12456,
+      "message": "Generated synthetic dataset.",
+      "metadata": {
+        "n_samples": 100
+      }
+    },
+    {
+      "timestamp_utc": 1782226769.12623,
+      "message": "Linear model fitting complete.",
+      "metadata": {
+        "slope": 2.4839,
+        "intercept": 0.9832
+      }
+    },
+    {
+      "timestamp_utc": 1782226769.12854,
+      "message": "Evaluation complete and artifacts saved.",
+      "metadata": {}
+    }
+  ],
+  "reports": {
+    "evaluation_metrics.json": {
+      "path": "evaluation_metrics.json",
+      "metadata": {
+        "model_type": "LinearRegression",
+        "metrics": {
+          "mse": 0.9842,
+          "rmse": 0.9921
+        }
+      }
+    }
+  },
+  "artifacts": {
+    "raw_data.csv": {
+      "path": "raw_data.csv"
+    },
+    "predictions.csv": {
+      "path": "predictions.csv"
+    }
+  }
+}

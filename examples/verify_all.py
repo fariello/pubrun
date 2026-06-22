@@ -37,11 +37,12 @@ def main() -> None:
                     time.sleep(0.5)
 
     scripts = sorted(glob.glob(os.path.join(base_dir, "[0-9]*.py")))
+    scripts.append(os.path.join(base_dir, "minimal-research-workflow", "analysis.py"))
 
     failed = []
 
     for script in scripts:
-        script_name = os.path.basename(script)
+        script_name = os.path.relpath(script, base_dir)
         print(f"Executing {script_name}...")
 
         runs_before = set(os.listdir(runs_dir)) if os.path.exists(runs_dir) else set()
