@@ -62,4 +62,8 @@ src/pubrun/COMMIT
 .coverage
 coverage.xml
 htmlcov/
+# pubrun example outputs
+examples/minimal-research-workflow/runs/
+examples/minimal-research-workflow/outputs/
+
 
