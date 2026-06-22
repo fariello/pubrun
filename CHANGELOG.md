@@ -15,6 +15,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Research Use Documentation**: Created `docs/research-use.md` outlining project adoption statistics and guidelines for public example workflows.
 - **API Audit Documentation**: Documented custom reports/artifacts API (`pubrun.report` and `pubrun.artifact`) in `docs/api.md`.
 - **Citation Guidelines**: Added a dedicated `Citation` section in `README.md` and updated `CITATION.cff` with placeholders for future Zenodo concept and version-specific DOIs.
+- **Direct Bug and Feature Reporting CLI**: Added a built-in `bug-report` CLI command (with aliases `feedback` and `issue`) to print system diagnostics and open the GitHub issues form.
+- **Enforced Test Coverage**: Configured `pytest-cov` settings in `pyproject.toml` to automatically gather and report code coverage during test runs.
+
+### Fixed
+- **Recursive Pytest Subprocesses**: Defused a latent CI time bomb where `--run-tests` would run the entire test suite recursively by mocking pytest invocation in tests.
+- **Tested Clean Interactive Prompts**: Implemented comprehensive unit tests validating `pubrun clean` interactive selection parsing and confirmation flows.
+- **Critical Event Capping**: Validated event stream capping and verified that `max_tracked_events=0` correctly defaults the critical event cap to 10,000.
+- **Eliminated Brittle Sleep Timings**: Refactored resource watcher thread tests to use dynamic polling deadlines rather than fixed sleep delays.
 
 ## [1.1.2] - 2026-06-22
 

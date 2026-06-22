@@ -266,3 +266,10 @@ class TestEventStreamCriticalCap:
         assert json.loads(lines[1])["name"] == "critical_1"
         assert json.loads(lines[2])["name"] == "critical_2"
 
+    def test_critical_event_cap_with_max_events_zero(self, tmp_path):
+        """P3-R4: Verify critical event cap is correctly set to 10,000 when max_tracked_events is 0."""
+        config = {"events": {"enabled": True, "max_tracked_events": 0}}
+        stream = EventStream(tmp_path, config=config)
+        assert stream._max_critical_events == 10000
+        stream.close()
+

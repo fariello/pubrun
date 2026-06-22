@@ -423,7 +423,18 @@ class TestCliDiff:
 
 class TestCliRunTests:
 
-    def test_run_tests_exits_zero(self, tmp_path):
+    def test_run_tests_exits_zero(self, tmp_path, monkeypatch):
+        """P3-T15: Test --run-tests command exits 0, defusing recursive pytest call."""
+        import subprocess
+        original_run = subprocess.run
+
+        def mock_run(cmd, *args, **kwargs):
+            if isinstance(cmd, list) and len(cmd) > 2 and cmd[2] == "pytest":
+                return subprocess.CompletedProcess(cmd, 0, stdout="Mocked pytest success", stderr="")
+            return original_run(cmd, *args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
         result = run_pubrun("--run-tests", cwd=str(tmp_path))
         assert result.returncode == 0
 
@@ -435,6 +446,38 @@ class TestCliNoCommand:
         # Should print help and exit 0 (no error)
         assert result.returncode == 0
         assert "pubrun" in result.stdout.lower() or "usage" in result.stdout.lower()
+
+
+class TestCliBugReport:
+
+    def test_bug_report_opens_browser_and_prints_diagnostics(self, monkeypatch, capsys):
+        """Test bug-report command outputs diagnostics and opens GitHub URL."""
+        import webbrowser
+        import sys
+        from pubrun.__main__ import main
+
+        browser_opened_url = None
+
+        def mock_open(url, *args, **kwargs):
+            nonlocal browser_opened_url
+            browser_opened_url = url
+            return True
+
+        monkeypatch.setattr(webbrowser, "open", mock_open)
+        monkeypatch.setattr(sys, "argv", ["pubrun", "bug-report"])
+
+        try:
+            main()
+        except SystemExit as e:
+            assert e.code == 0 or e.code is None
+
+        captured = capsys.readouterr()
+        stdout_lower = captured.out.lower()
+        assert "bug & feature reporting" in stdout_lower
+        assert "python version" in stdout_lower
+        assert "platform" in stdout_lower
+        assert "github.com/fariello/pubrun/issues/new" in captured.out
+        assert browser_opened_url == "https://github.com/fariello/pubrun/issues/new"
 
 
 class TestCliSubcommandErrors:

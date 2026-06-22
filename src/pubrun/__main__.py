@@ -865,6 +865,39 @@ print('Mock Training Complete.')
             pass
 
 
+def _run_bug_report() -> None:
+    """Guide the user to report a bug or request a feature on GitHub."""
+    import webbrowser
+    import platform
+    import sys
+    import time
+    from pubrun.__init__ import __version__
+
+    print("==================================================")
+    print("        pubrun Bug & Feature Reporting           ")
+    print("==================================================\n")
+    print("Please copy the following environment diagnostics for your report:")
+    print("--------------------------------------------------")
+    print(f"pubrun Version : {__version__}")
+    print(f"Python Version : {platform.python_version()}")
+    print(f"Platform       : {platform.platform()}")
+    print(f"Machine        : {platform.machine()}")
+    print(f"Processor      : {platform.processor() or 'unknown'}")
+    print(f"System Time    : {time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    print("--------------------------------------------------\n")
+
+    url = "https://github.com/fariello/pubrun/issues/new"
+    print(f"Opening GitHub issue tracker at:\n  {url}\n")
+    try:
+        opened = webbrowser.open(url)
+        if not opened:
+            print("Could not launch web browser automatically.")
+            print(f"Please navigate to the URL manually: {url}")
+    except Exception as e:
+        print(f"Failed to open web browser: {e}")
+        print(f"Please navigate to the URL manually: {url}")
+
+
 def _add_run_filter_args(parser: argparse.ArgumentParser, include_limit: bool = True) -> None:
     """Helper to add standard run filter arguments to a subparser."""
     has_f = any("-f" in getattr(action, "option_strings", []) for action in parser._actions)
@@ -1114,6 +1147,15 @@ def main() -> None:
     )
     ui_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
     
+    # ---------------- Bug Report Subparser ----------------
+    bug_parser = subparsers.add_parser(
+        "bug-report",
+        aliases=["feedback", "issue"],
+        help="File a bug report or request a feature.",
+        description="Opens the GitHub issue tracker and prints environment diagnostics for copy-pasting.",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
     # ---------------- Diagnostic Flags ----------------
     parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Create an annotated `.pubrun.toml` configuration file.")
     parser.add_argument("--show-config", action="store_true", help="Print the default configuration to the terminal.")
@@ -1248,6 +1290,10 @@ def main() -> None:
             not_filter_str=getattr(args, "not_filter", None),
             not_status_filter=getattr(args, "not_status", None),
         )
+        executed = True
+
+    elif args.command in {"bug-report", "feedback", "issue"}:
+        _run_bug_report()
         executed = True
 
     elif args.command in {"ui", "tui", "gui"}:

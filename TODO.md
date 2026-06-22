@@ -4,29 +4,6 @@ Known issues and deferred improvements for future releases.
 
 ---
 
-## Test Coverage Gaps (from P3 Review)
-
-### Missing Regression Tests — Recent Fixes
-
-- **P3-T10**: `clean` interactive TTY selection — only programmatic API tested, not real stdin prompting. (Low)
-
-### Missing Regression Tests — Existing Behavior
-
-- **P3-R4**: Critical event cap with `max_events=0` — indirectly covered by existing `test_phase_events_bypass_throttle` and `test_zero_max_events`. (Low)
-- **P3-R6**: `EventStream.directory` dead assignment — untested; document-only until the bug is fixed. (Low)
-
-### Brittle Tests (Consider Refactoring)
-
-- **P3-T11**: `test_resources_watcher_threads` — `time.sleep(0.15)` timing-dependent; may flake on slow CI.
-- **P3-T12**: `test_resource_watcher_failure_threshold` — `time.sleep(0.3)` timing-dependent.
-- **P3-T15**: `test_run_tests_exits_zero` — recursively invokes test suite; latent CI time bomb.
-
-### Infrastructure
-
-- `pytest-cov` is in dev deps but coverage is not configured or enforced.
-
----
-
 ## Removed from Roadmap
 
 ### Determinism Tracking (`[capture.determinism]`)
@@ -60,12 +37,3 @@ Writing a redundant text file to every run directory adds disk I/O, increases th
 run directory footprint, and provides no information not already available via the
 CLI. The config key is retained as "not yet implemented / reserved" for users who
 may want it in the future.
-
----
-
-## Future Feature Considerations
-
-### Direct Bug Reporting and Feature Requests option in CLI
-- **Provide a built-in CLI command to file bug reports or request features** (Deferred) (Low-Medium)
-  - Suggestion: Add a `pubrun bug-report` (or `pubrun feedback` / `pubrun issue`) command that guides the user through filing an issue or opens the GitHub issue forms in their default web browser directly, possibly pre-populating environment context.
-  - This increases community interaction and simplifies reporting problems or proposing enhancements.
