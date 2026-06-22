@@ -1,0 +1,23 @@
+name: Support Request
+description: Need help using or configuring pubrun?
+title: "[SUPPORT]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting a support request, please make sure to read the documentation.
+        You can also ask questions in our Discussions area.
+  - type: textarea
+    id: question
+    attributes:
+      label: What are you trying to achieve?
+      description: Describe what you want to do and where you are stuck.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant Configuration / Code
+      description: Share your python script or pubrun configuration file.
+      render: python
