@@ -1,4 +1,4 @@
-[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Changelog](../CHANGELOG.md)
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Research Use](research-use.md) | [Changelog](../CHANGELOG.md)
 
 # pubrun Python API
 
@@ -208,6 +208,34 @@ for key, detail in result["modified"].items():
 
 ---
 
+## 7. Custom Artifacts and Reports
+
+### `pubrun.report(name: str, data: Any)`
+Saves a structured custom report directly to the run directory.
+*   **Arguments**:
+    *   `name`: The base filename (without extension).
+    *   `data`: The payload to write. If `data` is a `dict` or `list`, it is serialized as JSON (`{name}.json`). Otherwise, it is written as plain text (`{name}.txt`).
+*   **Return value**: None.
+*   **Example**:
+    ```python
+    import pubrun
+    pubrun.report("eval_metrics", {"accuracy": 0.942, "loss": 0.108})
+    ```
+
+### `pubrun.artifact(filename: str, content: Any)`
+Writes a raw artifact file (such as CSV data, text, or binary bytes) directly to the active run directory.
+*   **Arguments**:
+    *   `filename`: The output filename (including extension, e.g., `"data.csv"`).
+    *   `content`: The file content. If `content` is `bytes`, it is written using binary mode; otherwise, it is cast to `str` and written as UTF-8 text.
+*   **Return value**: None.
+*   **Example**:
+    ```python
+    import pubrun
+    pubrun.artifact("predictions.csv", "id,pred\n1,0.94\n2,0.12")
+    ```
+
+---
+
 ## API Summary
 
 | Function | Purpose | Safe without active run? |
@@ -217,6 +245,8 @@ for key, detail in result["modified"].items():
 | `get_current_run()` | Access active `Run` instance | Yes (returns `None`) |
 | `annotate(msg, **kw)` | Inject custom events | Yes (configurable) |
 | `phase(name)` | Time a named code region | Yes (silent no-op) |
+| `report(name, data)` | Save structured custom report | Yes (configurable) |
+| `artifact(filename, content)` | Save raw artifact file | Yes (configurable) |
 | `tracked_run(**kw)` | Context manager lifecycle | N/A (creates run) |
 | `audit_run(**kw)` | Decorator lifecycle | N/A (creates run) |
 | `diff(a, b, ignores)` | Compare two runs | N/A (reads files) |
@@ -233,6 +263,8 @@ for key, detail in result["modified"].items():
 | `stop()` | **Main thread only.** Finalizes engines and writes artifacts. |
 | `annotate()` | Safe from any thread. |
 | `phase()` | Safe from any thread. |
+| `report()` | Safe from any thread. |
+| `artifact()` | Safe from any thread. |
 | `get_current_run()` | Safe from any thread (read-only). |
 | `tracked_run` / `audit_run` | Should wrap main-thread code. |
 
@@ -242,4 +274,4 @@ Internal state mutations (`ref_count`) are protected by a lock to prevent corrup
 
 ---
 
-[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Changelog](../CHANGELOG.md)
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Research Use](research-use.md) | [Changelog](../CHANGELOG.md)
