@@ -1,0 +1,29 @@
+name: Documentation Issue
+description: Report an issue or suggest improvements for the documentation
+title: "[DOCS]: "
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Help us improve the documentation!
+  - type: textarea
+    id: page
+    attributes:
+      label: Document Page
+      description: Which page or section of the documentation needs improvement?
+      placeholder: e.g. README.md, docs/cli.md
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description of the issue / improvement
+      description: What is incorrect, missing, or could be explained better?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested change
+      description: Do you have a draft or suggestion for the new wording?
