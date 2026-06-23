@@ -6,6 +6,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- **ASCII/Unicode Resource Charts**: Added the `resources` subcommand (with aliases `monitor`, `chart`, and `stats`) to print terminal CPU and memory utilization graphs over the lifecycle of a run.
+- **Colorized Diagnostics Telemetry**: The `pbr report` command output is now colorized by default, respecting the `--no-color` CLI option and the `NO_COLOR` environment variable.
+- **Trailing Time Filter**: Added the `-l`/`--last` option to the `resources` command to filter and display telemetry only for a specific trailing duration (e.g., `--last 10m` or `-l 30s`).
+
+### Changed
+- **Alphabetical CLI Subcommands**: Alphabetized subcommand help blocks in `--help` output.
+- **Dynamic Chart Width**: Utilization charts now dynamically adjust their width to match the terminal size.
+- **Human-Readable X-Axis Labels**: Replaced raw seconds on the x-axis with human-readable elapsed durations (e.g., `00:00 ... 14:35:50`).
+- **Peak Data Center-Labels**: Displays the peak data value (e.g., `Max: 71.4%` or `Max: 364.90 MB`) centered along the timeline axis when space permits.
+
+### Fixed
+- **Nested Command Aliases Preprocessing**: Automatically collapse consecutive resources aliases (e.g., `pbr resources chart <run-id>`) in `sys.argv` to prevent argument parsing errors.
+- **Graph Decimation / Data Loss**: Replaced index-based downsampling in `draw_ascii_chart` with robust time-based binning using maximum values (default) or mean values (when `--average` is set) to prevent telemetry data spikes from being lost.
+- **Crashed Run Report Suggestions**: Excluded crashed runs from suggestion listing under `pbr report`.
+
 ## [1.2.0] - 2026-06-22
 
 ### Added
