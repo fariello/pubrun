@@ -8,21 +8,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-23
+
 ### Added
-- **ASCII/Unicode Resource Charts**: Added the `resources` subcommand (with aliases `monitor`, `chart`, and `stats`) to print terminal CPU and memory utilization graphs over the lifecycle of a run.
-- **Colorized Diagnostics Telemetry**: The `pbr report` command output is now colorized by default, respecting the `--no-color` CLI option and the `NO_COLOR` environment variable.
-- **Trailing Time Filter**: Added the `-l`/`--last` option to the `resources` command to filter and display telemetry only for a specific trailing duration (e.g., `--last 10m` or `-l 30s`).
+- **ASCII/Unicode Resource Charts**: Added the `resources` subcommand to print terminal CPU and memory utilization graphs over the lifecycle of a run.
+- **Standalone Resource Commands**: Added standalone `cpu`, `mem`, and `res` commands to view specific or combined utilization charts.
+- **Custom Chart Width**: Added `-w`/`--width` options for resource monitoring commands to customize terminal column widths.
+- **Colorized Diagnostics Telemetry**: The `pbr show` command output is now colorized by default, respecting the `--no-color` CLI option and the `NO_COLOR` environment variable.
+- **Trailing Time Filter**: Added the `-l`/`--last` option to the resource commands to filter and display telemetry only for a specific trailing duration.
+- **Dyslexic-Friendly CLI Syntax**: Implemented command preprocessor in `main()` to support placing the run ID before subcommands (e.g., `pubrun 16528343 cpu`).
 
 ### Changed
+- **Renamed Diagnostics Command**: Renamed the diagnostics command from `report` to `show` with support for optional positional sections (`logs`, `env`, `packages`) and parameter shifting. The old `report` command remains hidden for backward compatibility.
 - **Alphabetical CLI Subcommands**: Alphabetized subcommand help blocks in `--help` output.
 - **Dynamic Chart Width**: Utilization charts now dynamically adjust their width to match the terminal size.
-- **Human-Readable X-Axis Labels**: Replaced raw seconds on the x-axis with human-readable elapsed durations (e.g., `00:00 ... 14:35:50`).
-- **Peak Data Center-Labels**: Displays the peak data value (e.g., `Max: 71.4%` or `Max: 364.90 MB`) centered along the timeline axis when space permits.
+- **Human-Readable X-Axis Labels**: Replaced raw seconds on the x-axis with human-readable elapsed durations, including custom start/end time markers (`Start: 0s` / `End: Xs`) and proportional axis tick marks.
+- **Peak Data Center-Labels**: Displays the peak data value centered along the timeline axis when space permits.
+- **Dropped Obsolete Aliases**: Removed `resources`, `monitor`, `chart`, `stats` aliases from `res` subparser to simplify command listings.
 
 ### Fixed
-- **Nested Command Aliases Preprocessing**: Automatically collapse consecutive resources aliases (e.g., `pbr resources chart <run-id>`) in `sys.argv` to prevent argument parsing errors.
+- **Python 3.8 Compatibility**: Fixed PEP 585 subscripted type hints and Path-like subprocess arguments in tests to ensure compatibility with Python 3.8.
+- **Nested Command Aliases Preprocessing**: Automatically collapse consecutive resources aliases in `sys.argv` to prevent argument parsing errors.
 - **Graph Decimation / Data Loss**: Replaced index-based downsampling in `draw_ascii_chart` with robust time-based binning using maximum values (default) or mean values (when `--average` is set) to prevent telemetry data spikes from being lost.
-- **Crashed Run Report Suggestions**: Excluded crashed runs from suggestion listing under `pbr report`.
+- **Crashed Run Report Suggestions**: Excluded crashed runs from suggestion listing.
 
 ## [1.2.0] - 2026-06-22
 
