@@ -347,3 +347,151 @@ class TestPrintReportUnit:
         print_report(manifest_path, "deep")
         output = capsys.readouterr().out
         assert "torch" in output or "Packages" in output
+
+
+class TestResourceMonitoring:
+    """Unit tests for drawing utilization graphs and printing resources report."""
+
+    def test_draw_ascii_chart_unicode(self, capsys, monkeypatch):
+        from pubrun.report.diagnostics import draw_ascii_chart
+        # Force Unicode support
+        monkeypatch.setattr("pubrun.report.diagnostics._supports_unicode", lambda stream: True)
+        
+        data = [10.0, 20.0, 50.0, 90.0]
+        timestamps = [100.0, 110.0, 120.0, 130.0]
+        draw_ascii_chart(data, timestamps, "Test Chart", "%", height=5, width=20, use_color=False)
+        output = capsys.readouterr().out
+        
+        # Verify title, labels and Unicode border characters
+        assert "Test Chart" in output
+        assert "└" in output
+        assert "│" in output
+        assert "─" in output
+        assert "█" in output
+        assert "Start: 0s" in output
+        assert "End: 30s" in output
+
+    def test_draw_ascii_chart_ascii_fallback(self, capsys, monkeypatch):
+        from pubrun.report.diagnostics import draw_ascii_chart
+        # Force non-Unicode support
+        monkeypatch.setattr("pubrun.report.diagnostics._supports_unicode", lambda stream: False)
+        
+        data = [10.0, 20.0, 50.0, 90.0]
+        timestamps = [100.0, 110.0, 120.0, 130.0]
+        draw_ascii_chart(data, timestamps, "Test Chart", "%", height=5, width=20, use_color=False)
+        output = capsys.readouterr().out
+        
+        assert "Test Chart" in output
+        assert "+" in output
+        assert "|" in output
+        assert "-" in output
+        assert "#" in output
+        assert "Start: 0s" in output
+        assert "End: 30s" in output
+
+    def test_print_resources_report_no_samples(self, tmp_path, capsys):
+        from pubrun.report.diagnostics import print_resources_report
+        manifest = {
+            "run": {"run_id": "test_res"},
+            "timing": {"started_at_utc": 100.0},
+            "status": {"outcome": "completed"},
+            "invocation": {"script": {"basename": "test.py"}},
+            "resources": {"peak_rss_bytes": 1024**2 * 50, "peak_cpu_percent": 15.0}
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        
+        print_resources_report(str(manifest_path))
+        output = capsys.readouterr().out
+        assert "RESOURCE MONITORING" in output
+        assert "test_res" in output
+        assert "50.00 MB" in output
+        assert "15.0%" in output
+        assert "No events.jsonl file found" in output
+
+    def test_print_resources_report_with_samples(self, tmp_path, capsys, monkeypatch):
+        from pubrun.report.diagnostics import print_resources_report
+        monkeypatch.setenv("NO_COLOR", "1")
+        
+        manifest = {
+            "run": {"run_id": "test_res_2"},
+            "timing": {"started_at_utc": 100.0},
+            "status": {"outcome": "completed"},
+            "invocation": {"script": {"basename": "test.py"}},
+            "resources": {"peak_rss_bytes": 1024**3 * 2, "peak_cpu_percent": 85.0}
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        
+        events = [
+            {"type": "resource_sample", "timestamp_utc": 100.0, "payload": {"rss_bytes": int(1024**3), "cpu_percent": 10.0}},
+            {"type": "resource_sample", "timestamp_utc": 110.0, "payload": {"rss_bytes": int(1024**3 * 1.5), "cpu_percent": 40.0}},
+            {"type": "resource_sample", "timestamp_utc": 120.0, "payload": {"rss_bytes": int(1024**3 * 2.0), "cpu_percent": 80.0}},
+        ]
+        events_path = tmp_path / "events.jsonl"
+        with open(events_path, "w", encoding="utf-8") as ef:
+            for ev in events:
+                ef.write(json.dumps(ev) + "\n")
+                
+        print_resources_report(str(manifest_path))
+        output = capsys.readouterr().out
+        assert "RESOURCE MONITORING" in output
+        assert "CPU Utilization History" in output
+        assert "Memory (RSS) History" in output
+        assert "GB" in output
+        # Ensure color code escapes are NOT in output because NO_COLOR is set
+        assert "\033" not in output
+
+    def test_draw_ascii_chart_average(self, capsys, monkeypatch):
+        from pubrun.report.diagnostics import draw_ascii_chart
+        # Force non-Unicode support for simple character asserting
+        monkeypatch.setattr("pubrun.report.diagnostics._supports_unicode", lambda stream: False)
+        
+        data = [0.0, 100.0, 0.0, 0.0, 100.0, 0.0]
+        timestamps = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0]
+        
+        # Test with max (default)
+        draw_ascii_chart(data, timestamps, "Max Chart", "%", height=5, width=2, use_color=False, average=False)
+        output_max = capsys.readouterr().out
+        
+        # Test with average
+        draw_ascii_chart(data, timestamps, "Avg Chart", "%", height=5, width=2, use_color=False, average=True)
+        output_avg = capsys.readouterr().out
+        
+        assert "Max Chart" in output_max
+        assert "Avg Chart" in output_avg
+        assert "#" in output_max
+        assert "#" in output_avg
+        assert output_max != output_avg
+
+    def test_print_resources_report_average(self, tmp_path, capsys, monkeypatch):
+        from pubrun.report.diagnostics import print_resources_report
+        monkeypatch.setenv("NO_COLOR", "1")
+        
+        manifest = {
+            "run": {"run_id": "test_res_avg"},
+            "timing": {"started_at_utc": 100.0},
+            "status": {"outcome": "completed"},
+            "invocation": {"script": {"basename": "test.py"}},
+            "resources": {"peak_rss_bytes": 1024**2 * 10, "peak_cpu_percent": 50.0}
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        
+        events = [
+            {"type": "resource_sample", "timestamp_utc": 100.0, "payload": {"rss_bytes": int(1024**2 * 5), "cpu_percent": 10.0}},
+            {"type": "resource_sample", "timestamp_utc": 110.0, "payload": {"rss_bytes": int(1024**2 * 10), "cpu_percent": 90.0}},
+            {"type": "resource_sample", "timestamp_utc": 120.0, "payload": {"rss_bytes": int(1024**2 * 6), "cpu_percent": 20.0}},
+        ]
+        events_path = tmp_path / "events.jsonl"
+        with open(events_path, "w", encoding="utf-8") as ef:
+            for ev in events:
+                ef.write(json.dumps(ev) + "\n")
+                
+        # Just verify it executes with average=True without error
+        print_resources_report(str(manifest_path), average=True)
+        output = capsys.readouterr().out
+        assert "RESOURCE MONITORING" in output
+        assert "CPU Utilization History" in output
+
+

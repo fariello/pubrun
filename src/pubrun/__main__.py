@@ -90,7 +90,7 @@ def _get_manifest_path(
         if lock_path.exists():
             raise RunInProgressOrCrashedError(run_path if run_path.is_dir() else run_path.parent)
 
-        raise FileNotFoundError(f"Could not find manifest file at '{manifest_path}'.")
+        raise FileNotFoundError(f"Run directory '{run_dir}' does not exist or does not contain a manifest.json.")
     else:
         # Auto-detect latest run matching the filters
         try:
@@ -177,9 +177,8 @@ def _run_methods(
     except RunInProgressOrCrashedError as e:
         status = e.run_info.status if e.run_info else "crashed/running"
         _print_error(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.")
-        sys.exit(1)
-    except FileNotFoundError:
-        _print_error("Could not find manifest file.")
+    except FileNotFoundError as e:
+        _print_error(str(e))
         sys.exit(1)
     except Exception as e:
         _print_error(f"Failed to generate methods section: {e}")
@@ -354,15 +353,71 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
     except Exception as e:
         _print_error(f"Failed to generate diff report: {e}")
         sys.exit(1)
+def _run_resources(
+    run_dir: str,
+    filter_str: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    older_than: Optional[str] = None,
+    exit_code: Optional[int] = None,
+    not_filter_str: Optional[str] = None,
+    not_status_filter: Optional[str] = None,
+    average: bool = False,
+    last: Optional[str] = None,
+    metric: str = "all",
+    width: Optional[int] = None,
+) -> None:
+    """Print resource monitoring graphs for a recorded run."""
+    try:
+        from pubrun.report.diagnostics import print_resources_report
+        manifest_path = _get_manifest_path(
+            run_dir,
+            filter_str=filter_str,
+            status_filter=status_filter,
+            older_than=older_than,
+            exit_code=exit_code,
+            not_filter_str=not_filter_str,
+            not_status_filter=not_status_filter,
+        )
+        print_resources_report(manifest_path, average=average, last=last, metric=metric, width=width)
+    except RunInProgressOrCrashedError as e:
+        status = e.run_info.status if e.run_info else "crashed/running"
+        _print_error(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.")
+    except FileNotFoundError as e:
+        _print_error(str(e))
+        sys.exit(1)
+    except Exception as e:
+        _print_error(f"Failed to generate resources report: {e}")
+        sys.exit(1)
 
 
 
-def _run_report(run_dir: str, depth: str) -> None:
+def _run_report(run_dir: str, depth: str, section: Optional[str] = None) -> None:
     """Print a human-readable diagnostic report for a recorded run."""
     try:
         from pubrun.report.diagnostics import print_report
-        manifest_path = _get_manifest_path(run_dir)
-        print_report(manifest_path, depth)
+        try:
+            manifest_path = _get_manifest_path(run_dir)
+            print_report(manifest_path, depth, section)
+        except RunInProgressOrCrashedError as e:
+            if section == "logs":
+                run_dir_path = e.run_dir
+                stdout_path = run_dir_path / "stdout.log"
+                stderr_path = run_dir_path / "stderr.log"
+                if stdout_path.exists():
+                    try:
+                        with open(stdout_path, "r", encoding="utf-8", errors="replace") as sf:
+                            print(sf.read(), end="")
+                    except Exception as le:
+                        _print_error(f"Failed to read stdout log: {le}")
+                if stderr_path.exists():
+                    try:
+                        with open(stderr_path, "r", encoding="utf-8", errors="replace") as se:
+                            print(se.read(), end="")
+                    except Exception as le:
+                        _print_error(f"Failed to read stderr log: {le}")
+                sys.exit(0)
+            else:
+                raise
 
     except RunInProgressOrCrashedError as e:
         run_dir_path = e.run_dir
@@ -457,7 +512,13 @@ def _run_report(run_dir: str, depth: str) -> None:
         if runs_dir.exists() and runs_dir.is_dir():
             for d in runs_dir.iterdir():
                 if d.is_dir() and d.name.startswith("pubrun-") and (d / "manifest.json").exists():
-                    completed_runs.append((d, d.stat().st_mtime))
+                    try:
+                        with open(d / "manifest.json", "r", encoding="utf-8") as f:
+                            m = json.load(f)
+                            if m.get("status", {}).get("outcome") != "crashed":
+                                completed_runs.append((d, d.stat().st_mtime))
+                    except Exception:
+                        pass
                     
         if completed_runs:
             completed_runs.sort(key=lambda x: x[1], reverse=True)
@@ -918,7 +979,7 @@ def main() -> None:
     """CLI entrypoint for the ``pubrun`` command."""
     # Handle global --no-color flag regardless of position
     # But do not strip it if it is part of the command run by 'pubrun run'
-    subcommands = {"report", "methods", "rerun", "diff", "meta", "status", "clean", "combined", "cite", "run", "ui", "tui", "gui"}
+    subcommands = {"report", "methods", "rerun", "diff", "meta", "status", "clean", "combined", "cite", "run", "ui", "tui", "gui", "show", "res", "cpu", "mem"}
     run_idx = -1
     for idx, arg in enumerate(sys.argv):
         if arg in subcommands:
@@ -935,6 +996,15 @@ def main() -> None:
         if "--no-color" in sys.argv:
             no_color_present = True
             sys.argv = [arg for arg in sys.argv if arg != "--no-color"]
+
+    # Support placing run ID / prefix / path before the subcommand
+    # (e.g. `pubrun 16528343 cpu` -> `pubrun cpu 16528343`)
+    if len(sys.argv) > 2 and sys.argv[1] not in subcommands and not sys.argv[1].startswith("-"):
+        for idx in range(2, len(sys.argv)):
+            if sys.argv[idx] in subcommands:
+                cmd = sys.argv.pop(idx)
+                sys.argv.insert(1, cmd)
+                break
 
     # Translate 'help' and subcommand translations
     if len(sys.argv) > 1:
@@ -986,106 +1056,24 @@ def main() -> None:
     
     subparsers = parser.add_subparsers(dest="command", title="Available core commands", metavar="<command>")
     
-    # ---------------- Report Subparser ----------------
-    report_parser = subparsers.add_parser(
-        "report",
-        help="Analyze and display diagnostic telemetry from a specific run.",
-        description="Analyze and display diagnostic telemetry from a specific run.",
-        epilog=f"Examples:\n  {prog_name} report\n  {prog_name} report runs/pubrun-XYZ\n  {prog_name} report --deep runs/pubrun-XYZ",
+    # ---------------- Bug Report Subparser ----------------
+    bug_parser = subparsers.add_parser(
+        "bug-report",
+        aliases=["feedback", "issue"],
+        help="File a bug report or request a feature.",
+        description="Opens the GitHub issue tracker and prints environment diagnostics for copy-pasting.",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    report_parser.add_argument("run_dirs", type=str, nargs="*", help="One or more run directories (e.g., runs/pubrun-XYZ). Defaults to the most recent run in ./runs/.")
-    
-    depth_group_1 = report_parser.add_mutually_exclusive_group()
-    depth_group_1.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Timing and outcome only.")
-    depth_group_1.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Hardware, Git, Python, and dependency summary (default).")
-    depth_group_1.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Full environment variables and complete package list.")
-    report_parser.set_defaults(depth="standard")
-    _add_run_filter_args(report_parser)
 
-    # ---------------- Methods Subparser ----------------
-    methods_parser = subparsers.add_parser(
-        "methods",
-        help="Generate publication-ready 'Computational Methods' paragraphs.",
-        description="Generate publication-ready 'Computational Methods' paragraphs.",
-        epilog=f"Examples:\n  {prog_name} methods\n  {prog_name} methods runs/pubrun-XYZ --format latex",
+    # ---------------- Cite Subparser ----------------
+    cite_parser = subparsers.add_parser(
+        "cite",
+        help="Generate a formatted academic citation for pubrun.",
+        description="Generate a formatted academic citation for pubrun.",
+        epilog=f"Examples:\n  {prog_name} cite\n  {prog_name} cite --style bibtex",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    methods_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
-    methods_parser.add_argument("--format", type=str, choices=["markdown", "latex"], default="markdown", help="Output format: markdown or latex.")
-    _add_run_filter_args(methods_parser, include_limit=False)
-
-    # ---------------- Rerun Subparser ----------------
-    rerun_parser = subparsers.add_parser(
-        "rerun",
-        help="Print the shell command needed to replicate a run.",
-        description="Print the shell command needed to replicate a run.",
-        epilog=f"Examples:\n  {prog_name} rerun\n  {prog_name} rerun runs/pubrun-XYZ",
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    rerun_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
-    _add_run_filter_args(rerun_parser, include_limit=False)
-
-    # ---------------- Diff Subparser ----------------
-    diff_parser = subparsers.add_parser(
-        "diff",
-        help="Compare two execution traces and highlight differences.",
-        description="Compare two execution traces and highlight differences.",
-        epilog=f"Examples:\n  {prog_name} diff runs/pubrun-A runs/pubrun-B\n  {prog_name} diff runs/pubrun-A runs/pubrun-B --deep --same",
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    diff_parser.add_argument("run_dirs", type=str, nargs="*", help="Run directories to compare. If omitted, diffs the last two runs. If one is provided, diffs it against the most recent different run.")
-    diff_parser.add_argument("--export", type=str, nargs="?", const=True, help="Export flattened manifests to files ('txt' or 'json').")
-    diff_parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output.")
-
-    
-    # Wrap config logic
-    wrap_group = diff_parser.add_mutually_exclusive_group()
-    wrap_group.add_argument("--wrap", action="store_true", default=None, help="Wrap long strings across multiple lines instead of truncating.")
-    wrap_group.add_argument("--no-wrap", action="store_false", dest="wrap", default=None, help="Force ellipsis truncation for long values.")
-    
-    diff_parser.add_argument("--max-length", type=int, default=None, help="Max characters per value before truncation.")
-
-    # Depth logic
-    diff_depth = diff_parser.add_mutually_exclusive_group()
-    diff_depth.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Structural changes only, filtering most metrics.")
-    diff_depth.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Include standard telemetry, ignoring jitter metrics (default).")
-    diff_depth.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Unfiltered comparison of all captured data.")
-    diff_parser.set_defaults(depth="standard")
-
-    # Identical keys logic
-    diff_same = diff_parser.add_mutually_exclusive_group()
-    diff_same.add_argument("--same", action="store_true", default=None, help="Show keys that are identical between both runs.")
-    diff_same.add_argument("--no-same", action="store_false", dest="same", default=None, help="Hide keys that are identical between both runs.")
-    
-    # ---------------- Meta Subparser ----------------
-    meta_parser = subparsers.add_parser(
-        "meta",
-        help="Generate a standalone meta.json environment snapshot.",
-        description="Generate a standalone meta.json environment snapshot for HPC parent-child hydration.",
-        epilog=f"Examples:\n  {prog_name} meta\n  {prog_name} meta --out custom_meta.json --deep",
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    meta_parser.add_argument("--out", type=str, default="", help="Output file path. Defaults to ./runs/meta.json.")
-    
-    depth_group_2 = meta_parser.add_mutually_exclusive_group()
-    depth_group_2.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Minimal footprint (fastest).")
-    depth_group_2.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Standard environment factors.")
-    depth_group_2.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Full hardware, git, and pip dependency snapshot (default).")
-    meta_parser.set_defaults(depth="deep")
-    
-    # ---------------- Status Subparser ----------------
-    status_parser = subparsers.add_parser(
-        "status",
-        help="List runs and their status, or inspect a specific run.",
-        description="List runs and their status, or inspect a specific run.",
-        epilog=f"Examples:\n  {prog_name} status\n  {prog_name} status --status failed,crashed\n  {prog_name} status --limit 5\n  {prog_name} status -f train.py",
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    status_parser.add_argument("run_id", type=str, nargs="?", help="Run ID (or prefix) to inspect in detail. If omitted, lists all runs.")
-    status_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
-    status_parser.add_argument("-v", "--verbose", action="store_true", help="Show detailed information for each run in the listing.")
-    _add_run_filter_args(status_parser)
+    cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Citation format (default: apa).")
 
     # ---------------- Clean Subparser ----------------
     clean_parser = subparsers.add_parser(
@@ -1115,15 +1103,132 @@ def main() -> None:
     combined_parser.add_argument("-f", "--force", action="store_true", help="Force execution for files > 500 MB.")
     _add_run_filter_args(combined_parser)
 
-    # ---------------- Cite Subparser ----------------
-    cite_parser = subparsers.add_parser(
-        "cite",
-        help="Generate a formatted academic citation for pubrun.",
-        description="Generate a formatted academic citation for pubrun.",
-        epilog=f"Examples:\n  {prog_name} cite\n  {prog_name} cite --style bibtex",
+    # ---------------- CPU Subparser ----------------
+    cpu_parser = subparsers.add_parser(
+        "cpu",
+        help="Display CPU utilization chart over the run lifecycle.",
+        description="Display CPU utilization chart over the run lifecycle.",
+        epilog=f"Examples:\n  {prog_name} cpu\n  {prog_name} cpu runs/pubrun-XYZ",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Citation format (default: apa).")
+    cpu_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
+    cpu_parser.add_argument("--average", action="store_true", help="Plot average/mean values instead of the default maximum values.")
+    cpu_parser.add_argument("-l", "--last", type=str, default=None, help="Only show the last X minutes, hours, or seconds of data (e.g. '10m', '2h', '30s').")
+    cpu_parser.add_argument("-w", "--width", type=int, default=None, help="Override chart width in columns.")
+    _add_run_filter_args(cpu_parser, include_limit=False)
+
+    # ---------------- Diff Subparser ----------------
+    diff_parser = subparsers.add_parser(
+        "diff",
+        help="Compare two execution traces and highlight differences.",
+        description="Compare two execution traces and highlight differences.",
+        epilog=f"Examples:\n  {prog_name} diff runs/pubrun-A runs/pubrun-B\n  {prog_name} diff runs/pubrun-A runs/pubrun-B --deep --same",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    diff_parser.add_argument("run_dirs", type=str, nargs="*", help="Run directories to compare. If omitted, diffs the last two runs. If one is provided, diffs it against the most recent different run.")
+    diff_parser.add_argument("--export", type=str, nargs="?", const=True, help="Export flattened manifests to files ('txt' or 'json').")
+    diff_parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output.")
+    
+    wrap_group = diff_parser.add_mutually_exclusive_group()
+    wrap_group.add_argument("--wrap", action="store_true", default=None, help="Wrap long strings across multiple lines instead of truncating.")
+    wrap_group.add_argument("--no-wrap", action="store_false", dest="wrap", default=None, help="Force ellipsis truncation for long values.")
+    
+    diff_parser.add_argument("--max-length", type=int, default=None, help="Max characters per value before truncation.")
+
+    diff_depth = diff_parser.add_mutually_exclusive_group()
+    diff_depth.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Structural changes only, filtering most metrics.")
+    diff_depth.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Include standard telemetry, ignoring jitter metrics (default).")
+    diff_depth.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Unfiltered comparison of all captured data.")
+    diff_parser.set_defaults(depth="standard")
+
+    diff_same = diff_parser.add_mutually_exclusive_group()
+    diff_same.add_argument("--same", action="store_true", default=None, help="Show keys that are identical between both runs.")
+    diff_same.add_argument("--no-same", action="store_false", dest="same", default=None, help="Hide keys that are identical between both runs.")
+
+    # ---------------- Memory Subparser ----------------
+    mem_parser = subparsers.add_parser(
+        "mem",
+        help="Display memory utilization chart over the run lifecycle.",
+        description="Display memory utilization chart over the run lifecycle.",
+        epilog=f"Examples:\n  {prog_name} mem\n  {prog_name} mem runs/pubrun-XYZ",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    mem_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
+    mem_parser.add_argument("--average", action="store_true", help="Plot average/mean values instead of the default maximum values.")
+    mem_parser.add_argument("-l", "--last", type=str, default=None, help="Only show the last X minutes, hours, or seconds of data (e.g. '10m', '2h', '30s').")
+    mem_parser.add_argument("-w", "--width", type=int, default=None, help="Override chart width in columns.")
+    _add_run_filter_args(mem_parser, include_limit=False)
+
+    # ---------------- Meta Subparser ----------------
+    meta_parser = subparsers.add_parser(
+        "meta",
+        help="Generate a standalone meta.json environment snapshot.",
+        description="Generate a standalone meta.json environment snapshot for HPC parent-child hydration.",
+        epilog=f"Examples:\n  {prog_name} meta\n  {prog_name} meta --out custom_meta.json --deep",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    meta_parser.add_argument("--out", type=str, default="", help="Output file path. Defaults to ./runs/meta.json.")
+    
+    depth_group_2 = meta_parser.add_mutually_exclusive_group()
+    depth_group_2.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Minimal footprint (fastest).")
+    depth_group_2.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Standard environment factors.")
+    depth_group_2.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Full hardware, git, and pip dependency snapshot (default).")
+    meta_parser.set_defaults(depth="deep")
+
+    # ---------------- Methods Subparser ----------------
+    methods_parser = subparsers.add_parser(
+        "methods",
+        help="Generate publication-ready 'Computational Methods' paragraphs.",
+        description="Generate publication-ready 'Computational Methods' paragraphs.",
+        epilog=f"Examples:\n  {prog_name} methods\n  {prog_name} methods runs/pubrun-XYZ --format latex",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    methods_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
+    methods_parser.add_argument("--format", type=str, choices=["markdown", "latex"], default="markdown", help="Output format: markdown or latex.")
+    _add_run_filter_args(methods_parser, include_limit=False)
+
+    # ---------------- Hidden Report Subparser ----------------
+    report_parser = subparsers.add_parser(
+        "report",
+        help=argparse.SUPPRESS,
+        description="Analyze and display diagnostic telemetry from a specific run.",
+        epilog=f"Examples:\n  {prog_name} report\n  {prog_name} report runs/pubrun-XYZ\n  {prog_name} report env",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    report_parser.add_argument("run_dir", type=str, nargs="?", help="Run directory (e.g., runs/pubrun-XYZ). Defaults to the most recent run.")
+    report_parser.add_argument("section", type=str, nargs="?", help="Optional section to view (e.g. 'logs', 'env', 'packages').")
+    
+    depth_group_report = report_parser.add_mutually_exclusive_group()
+    depth_group_report.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Timing and outcome only.")
+    depth_group_report.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Hardware, Git, Python, and dependency summary (default).")
+    depth_group_report.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Full environment variables and complete package list.")
+    report_parser.set_defaults(depth="standard")
+    _add_run_filter_args(report_parser)
+
+    # ---------------- Rerun Subparser ----------------
+    rerun_parser = subparsers.add_parser(
+        "rerun",
+        help="Print the shell command needed to replicate a run.",
+        description="Print the shell command needed to replicate a run.",
+        epilog=f"Examples:\n  {prog_name} rerun\n  {prog_name} rerun runs/pubrun-XYZ",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    rerun_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
+    _add_run_filter_args(rerun_parser, include_limit=False)
+
+    # ---------------- Resources Subparser ----------------
+    res_parser = subparsers.add_parser(
+        "res",
+        help="Display memory and CPU utilization charts over the run lifecycle.",
+        description="Display memory and CPU utilization charts over the run lifecycle.",
+        epilog=f"Examples:\n  {prog_name} res\n  {prog_name} res runs/pubrun-XYZ",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    res_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
+    res_parser.add_argument("--average", action="store_true", help="Plot average/mean values instead of the default maximum values.")
+    res_parser.add_argument("-l", "--last", type=str, default=None, help="Only show the last X minutes, hours, or seconds of data (e.g. '10m', '2h', '30s').")
+    res_parser.add_argument("-w", "--width", type=int, default=None, help="Override chart width in columns.")
+    _add_run_filter_args(res_parser, include_limit=False)
 
     # ---------------- Run Subparser ----------------
     run_parser = subparsers.add_parser(
@@ -1135,7 +1240,38 @@ def main() -> None:
     )
     run_parser.add_argument("--mode", type=str, choices=["auto", "noauto", "nopatch", "noconsole", "minimal"], default="auto", help="Import mode for the child process (default: auto).")
     run_parser.add_argument("command_args", nargs=argparse.REMAINDER, metavar="-- COMMAND", help="Command to execute (use -- to separate pubrun flags from the target command).")
+
+    # ---------------- Show Subparser ----------------
+    show_parser = subparsers.add_parser(
+        "show",
+        help="Analyze and display diagnostic telemetry from a specific run.",
+        description="Analyze and display diagnostic telemetry from a specific run.",
+        epilog=f"Examples:\n  {prog_name} show\n  {prog_name} show runs/pubrun-XYZ\n  {prog_name} show runs/pubrun-XYZ env\n  {prog_name} show env",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    show_parser.add_argument("run_dir", type=str, nargs="?", help="Run directory (e.g., runs/pubrun-XYZ). Defaults to the most recent run.")
+    show_parser.add_argument("section", type=str, nargs="?", help="Optional section to view (e.g. 'logs', 'env', 'packages').")
     
+    depth_group_show = show_parser.add_mutually_exclusive_group()
+    depth_group_show.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Timing and outcome only.")
+    depth_group_show.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Hardware, Git, Python, and dependency summary (default).")
+    depth_group_show.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Full environment variables and complete package list.")
+    show_parser.set_defaults(depth="standard")
+    _add_run_filter_args(show_parser)
+
+    # ---------------- Status Subparser ----------------
+    status_parser = subparsers.add_parser(
+        "status",
+        help="List runs and their status, or inspect a specific run.",
+        description="List runs and their status, or inspect a specific run.",
+        epilog=f"Examples:\n  {prog_name} status\n  {prog_name} status --status failed,crashed\n  {prog_name} status --limit 5\n  {prog_name} status -f train.py",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    status_parser.add_argument("run_id", type=str, nargs="?", help="Run ID (or prefix) to inspect in detail. If omitted, lists all runs.")
+    status_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
+    status_parser.add_argument("-v", "--verbose", action="store_true", help="Show detailed information for each run in the listing.")
+    _add_run_filter_args(status_parser)
+
     # ---------------- UI Subparser ----------------
     ui_parser = subparsers.add_parser(
         "ui",
@@ -1147,14 +1283,8 @@ def main() -> None:
     )
     ui_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
     
-    # ---------------- Bug Report Subparser ----------------
-    bug_parser = subparsers.add_parser(
-        "bug-report",
-        aliases=["feedback", "issue"],
-        help="File a bug report or request a feature.",
-        description="Opens the GitHub issue tracker and prints environment diagnostics for copy-pasting.",
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    # Hide report subcommand from help listing
+    subparsers._choices_actions = [a for a in subparsers._choices_actions if a.dest != "report"]
     
     # ---------------- Diagnostic Flags ----------------
     parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Create an annotated `.pubrun.toml` configuration file.")
@@ -1168,11 +1298,17 @@ def main() -> None:
     if getattr(args, "no_color", False):
         os.environ["NO_COLOR"] = "1"
 
+    # Shifting logic: if run_dir is in {logs, env, packages}, shift it to section and set run_dir = None
+    if args.command in {"show", "report"}:
+        if getattr(args, "run_dir", None) in {"logs", "env", "packages"}:
+            args.section = args.run_dir
+            args.run_dir = None
+
     executed = False
 
-    if args.command == "report":
-        run_dirs = getattr(args, "run_dirs", [])
-        if not run_dirs:
+    if args.command in {"show", "report"}:
+        run_dir = getattr(args, "run_dir", None)
+        if not run_dir:
             from pubrun.status import scan_runs, filter_runs
             all_runs = scan_runs()
             matched = filter_runs(
@@ -1191,12 +1327,31 @@ def main() -> None:
             for idx, r in enumerate(matched):
                 if idx > 0:
                     print("\n")
-                _run_report(str(r.run_dir), args.depth)
+                _run_report(str(r.run_dir), args.depth, getattr(args, "section", None))
         else:
-            for idx, rd in enumerate(run_dirs):
-                if idx > 0:
-                    print("\n")
-                _run_report(rd, args.depth)
+            _run_report(run_dir, args.depth, getattr(args, "section", None))
+        executed = True
+
+    elif args.command in {"res", "resources", "monitor", "chart", "stats", "cpu", "mem"}:
+        metric = "all"
+        if args.command == "cpu":
+            metric = "cpu"
+        elif args.command == "mem":
+            metric = "mem"
+
+        _run_resources(
+            args.run_dir,
+            filter_str=getattr(args, "filter", None),
+            status_filter=getattr(args, "status", None),
+            older_than=getattr(args, "older_than", None),
+            exit_code=getattr(args, "exit_code", None),
+            not_filter_str=getattr(args, "not_filter", None),
+            not_status_filter=getattr(args, "not_status", None),
+            average=getattr(args, "average", False),
+            last=getattr(args, "last", None),
+            metric=metric,
+            width=getattr(args, "width", None),
+        )
         executed = True
 
     elif args.command == "methods":
