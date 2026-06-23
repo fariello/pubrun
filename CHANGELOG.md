@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-06-24
+
+### Changed
+- **Human-Friendly Timestamps**: Started time in diagnostic reports is now formatted as `YYYY-MM-DD HH:MM:SS` (UTC), and elapsed duration is formatted as `Xd HH:MM:SS` (matching the status list format).
+- **Inline Exit Codes**: Diagnostic reports now display the process exit code inline with the run status, colored in bold green for successful runs (0) and bold red for failures (non-zero), eliminating the redundant separate line.
+- **Resource Utilization Charts x-axis Tickmarks**: CPU and memory utilization history charts now display vertical tickmarks and evenly distributed elapsed duration values (space-permitting) aligned with x-axis ticks. The peak values are cleanly moved to the chart titles.
+
 ## [1.3.0] - 2026-06-23
 
 ### Added

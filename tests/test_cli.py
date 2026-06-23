@@ -716,7 +716,6 @@ class TestCliReportUsabilityDetails:
         assert res_color.returncode == 0
         assert "PUBRUN DIAGNOSTICS" in res_color.stdout
         assert "failed" in res_color.stdout
-        assert "Exit Code" in res_color.stdout
         assert "1" in res_color.stdout
         assert "Exception" in res_color.stdout
         assert "ValueError: Invalid parameter" in res_color.stdout
@@ -736,7 +735,7 @@ class TestCliReportUsabilityDetails:
         res_no_color = subprocess.run(cmd, capture_output=True, text=True, env=env_no_color)
         assert res_no_color.returncode == 0
         assert "PUBRUN DIAGNOSTICS" in res_no_color.stdout
-        assert "Exit Code   : 1" in res_no_color.stdout
+        assert "Status      : failed (1)" in res_no_color.stdout
         assert "Exception   : ValueError: Invalid parameter" in res_no_color.stdout
         assert "Signals     : SIGTERM" in res_no_color.stdout
         # ASCII boundary instead of Unicode box
