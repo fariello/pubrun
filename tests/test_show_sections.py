@@ -11,12 +11,12 @@ PYTHON = sys.executable
 
 def run_pubrun(*args, cwd=None):
     """Helper to invoke pubrun CLI and return the completed process."""
-    cmd = [PYTHON, "-m", "pubrun"] + list(args)
+    cmd = [str(PYTHON), "-m", "pubrun"] + [str(a) for a in args]
     return subprocess.run(
         cmd,
         capture_output=True,
         text=True,
-        cwd=cwd or os.getcwd(),
+        cwd=str(cwd) if cwd else os.getcwd(),
         timeout=30
     )
 
