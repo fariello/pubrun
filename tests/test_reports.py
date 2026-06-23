@@ -368,8 +368,12 @@ class TestResourceMonitoring:
         assert "│" in output
         assert "─" in output
         assert "█" in output
-        assert "Start: 0s" in output
-        assert "End: 30s" in output
+        assert "Timeline" in output
+        assert "Elapsed" in output
+        assert "1970-01-01 00:01:40" in output
+        assert "1970-01-01 00:02:10" in output
+        assert "00:00:00" in output
+        assert "00:00:30" in output
 
     def test_draw_ascii_chart_ascii_fallback(self, capsys, monkeypatch):
         from pubrun.report.diagnostics import draw_ascii_chart
@@ -386,8 +390,12 @@ class TestResourceMonitoring:
         assert "|" in output
         assert "-" in output
         assert "#" in output
-        assert "Start: 0s" in output
-        assert "End: 30s" in output
+        assert "Timeline" in output
+        assert "Elapsed" in output
+        assert "1970-01-01 00:01:40" in output
+        assert "1970-01-01 00:02:10" in output
+        assert "00:00:00" in output
+        assert "00:00:30" in output
 
     def test_print_resources_report_no_samples(self, tmp_path, capsys):
         from pubrun.report.diagnostics import print_resources_report

@@ -183,11 +183,19 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         elif outcome == "interrupted":
             out_color = Colors.YELLOW
 
+    from pubrun.status import _format_elapsed
+
+    exit_str = ""
+    if exit_code is not None:
+        if exit_code == 0:
+            code_color = Colors.BOLD + Colors.GREEN if use_color else ""
+        else:
+            code_color = Colors.BOLD + Colors.RED if use_color else ""
+        exit_str = f" ({code_color}{exit_code}{rst})"
+
     print(f"{cyan}Run ID{rst}      : {run.get('run_id')}")
     print(f"{cyan}Script{rst}      : {script_name}")
-    print(f"{cyan}Status{rst}      : {out_color}{outcome}{rst}")
-    if exit_code is not None and exit_code != 0:
-        print(f"{cyan}Exit Code{rst}   : {red}{exit_code}{rst}")
+    print(f"{cyan}Status{rst}      : {out_color}{outcome}{rst}{exit_str}")
     if exit_exception:
         print(f"{cyan}Exception{rst}   : {red}{exit_exception}{rst}")
     if signals_received:
@@ -195,10 +203,12 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         print(f"{cyan}Signals{rst}     : {yellow}{', '.join(sig_names)}{rst}")
 
     start_ts = timing.get('started_at_utc')
-    start_str = datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat() if start_ts else "unknown"
+    start_str = datetime.fromtimestamp(start_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if start_ts else "unknown"
     print(f"{cyan}Started{rst}     : {start_str}")
-    if timing.get("elapsed_seconds"):
-        print(f"{cyan}Elapsed{rst}     : {timing.get('elapsed_seconds')}s")
+    elapsed_val = timing.get("elapsed_seconds")
+    if elapsed_val is not None:
+        elapsed_str = _format_elapsed(elapsed_val)
+        print(f"{cyan}Elapsed{rst}     : {elapsed_str}")
         
     # Read Events if available
     events_path = Path(manifest_path).parent / "events.jsonl"
@@ -453,36 +463,6 @@ def draw_ascii_chart(
     pipe = "│" if _supports_unicode(sys.stdout) else "|"
     hline = "─" if _supports_unicode(sys.stdout) else "-"
     
-    print(f"\n{bold}{title}{rst}")
-    
-    for r in range(height):
-        val = max_val - r * (max_val - min_val) / (height - 1)
-        label_str = f"{val:6.1f} {unit}".rjust(10)
-        row_str = "".join(grid[r])
-        if use_color and color:
-            row_str = f"{color}{row_str}{rst}"
-        print(f"  {label_str} {pipe} {row_str}")
-        
-    # Put ticks at the start, 25%, middle, 75%, and end marks
-    ticks_str = list(hline * width)
-    if width > 1:
-        tick_char = "┴" if _supports_unicode(sys.stdout) else "+"
-        ticks_str[0] = tick_char
-        ticks_str[-1] = tick_char
-        ticks_str[(width - 1) // 2] = tick_char
-        if width >= 8:
-            ticks_str[(width - 1) // 4] = tick_char
-            ticks_str[(3 * (width - 1)) // 4] = tick_char
-    axis_line = "".join(ticks_str)
-    print(f"  {' ' * 10} {corner}{axis_line}")
-    
-    elapsed_total = round(timestamps[-1] - timestamps[0], 1)
-    # Format elapsed total cleanly without trailing .0 if integer
-    elapsed_val = int(elapsed_total) if elapsed_total % 1 == 0 else elapsed_total
-    
-    start_lbl = "Start: 0s"
-    end_lbl = f"End: {elapsed_val}s"
-    
     # Format max value string
     if data:
         max_data_val = max(data)
@@ -495,20 +475,118 @@ def draw_ascii_chart(
                 max_str = f"Max: {max_data_val:.1f} {unit}"
     else:
         max_str = ""
-            
-    total_lbl_len = len(start_lbl) + len(end_lbl) + len(max_str)
-    if width - total_lbl_len >= 4:
-        rem_spaces = width - len(start_lbl) - len(end_lbl) - len(max_str)
-        spaces_left = rem_spaces // 2
-        spaces_right = rem_spaces - spaces_left
-        axis_labels = f"{start_lbl}{' ' * spaces_left}{max_str}{' ' * spaces_right}{end_lbl}"
-    else:
-        spaces = width - len(start_lbl) - len(end_lbl)
-        if spaces > 0:
-            axis_labels = f"{start_lbl}{' ' * spaces}{end_lbl}"
+
+    title_suffix = f" ({max_str})" if max_str else ""
+    print(f"\n{bold}{title}{title_suffix}{rst}")
+    
+    for r in range(height):
+        val = max_val - r * (max_val - min_val) / (height - 1)
+        label_str = f"{val:6.1f} {unit}".rjust(10)
+        row_str = "".join(grid[r])
+        if use_color and color:
+            row_str = f"{color}{row_str}{rst}"
+        print(f"  {label_str} {pipe} {row_str}")
+        
+    # Put ticks at the start, 25%, middle, 75%, and end marks
+    ticks_str = list(hline * width)
+    if width > 1:
+        tick_char = "┼" if _supports_unicode(sys.stdout) else "+"
+        ticks_str[0] = tick_char
+        ticks_str[-1] = tick_char
+        ticks_str[(width - 1) // 2] = tick_char
+        if width >= 8:
+            ticks_str[(width - 1) // 4] = tick_char
+            ticks_str[(3 * (width - 1)) // 4] = tick_char
+    axis_line = "".join(ticks_str)
+    print(f"  {' ' * 10} {corner}{axis_line}")
+    
+    from pubrun.status import _format_elapsed
+
+    # Format dates
+    t_start = timestamps[0]
+    t_end = timestamps[-1]
+    start_dt = datetime.fromtimestamp(t_start, tz=timezone.utc)
+    end_dt = datetime.fromtimestamp(t_end, tz=timezone.utc)
+    start_time_str = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+    end_time_str = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Format elapsed durations
+    duration = t_end - t_start
+    elapsed_total_str = _format_elapsed(duration)
+    start_elapsed_str = "0d 00:00:00" if "d " in elapsed_total_str else "00:00:00"
+
+    # Build tick indices
+    tick_indices = []
+    if width > 0:
+        tick_indices.append(0)
+    if width > 1:
+        if width >= 8:
+            tick_indices.append((width - 1) // 4)
+        tick_indices.append((width - 1) // 2)
+        if width >= 8:
+            tick_indices.append((3 * (width - 1)) // 4)
+        tick_indices.append(width - 1)
+
+    # Greedy placement of elapsed labels
+    placed = {}  # maps idx -> (start_col, end_col, lbl_str)
+    
+    # Priority order: End tick, Start tick, Middle tick, then the rest
+    priority_order = []
+    if tick_indices:
+        priority_order.append(tick_indices[-1])
+        if tick_indices[0] not in priority_order:
+            priority_order.append(tick_indices[0])
+        mid_idx = tick_indices[len(tick_indices) // 2]
+        if mid_idx not in priority_order:
+            priority_order.append(mid_idx)
+        for idx in tick_indices:
+            if idx not in priority_order:
+                priority_order.append(idx)
+
+    for idx in priority_order:
+        if idx == 0:
+            lbl_str = start_elapsed_str
         else:
-            axis_labels = f"{start_lbl} ... {end_lbl}"
-    print(f"  {' ' * 13}{axis_labels}")
+            lbl_str = _format_elapsed((idx / (width - 1)) * duration if width > 1 else 0.0)
+        
+        L = len(lbl_str)
+        if idx == 0:
+            start_col = 0
+        elif idx == width - 1:
+            start_col = width - L
+        else:
+            start_col = idx - 1 - (L // 2)
+            
+        start_col = max(0, min(width - L, start_col))
+        
+        # Check overlap with gap = 1
+        overlap = False
+        for p_start, p_end, _ in placed.values():
+            if not (start_col + L + 1 <= p_start or p_end + 1 <= start_col):
+                overlap = True
+                break
+                
+        if not overlap:
+            placed[idx] = (start_col, start_col + L, lbl_str)
+
+    # Build elapsed row
+    elapsed_row_list = [" "] * width
+    for idx in placed:
+        s_col, e_col, lbl_str = placed[idx]
+        elapsed_row_list[s_col:e_col] = list(lbl_str)
+    row2_vals = "".join(elapsed_row_list)
+
+    # Row 1 (Timeline):
+    spaces1 = width - len(start_time_str) - len(end_time_str)
+    if spaces1 > 0:
+        row1_vals = f"{start_time_str}{' ' * spaces1}{end_time_str}"
+    else:
+        row1_vals = f"{start_time_str} ... {end_time_str}"
+
+    prefix1 = "  Timeline".ljust(13) + ": "
+    prefix2 = "  Elapsed".ljust(13) + ": "
+    print(f"{prefix1}{row1_vals}")
+    print(f"{prefix2}{row2_vals}")
 
 
 def print_resources_report(manifest_path: str, average: bool = False, last: Optional[str] = None, metric: str = "all", width: Optional[int] = None) -> None:
