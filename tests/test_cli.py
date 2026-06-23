@@ -1001,4 +1001,130 @@ raise ValueError("TEST_EXCEPTION")
                 assert "Found 1 run(s) in the output directory." in output
 
 
+class TestCliResourcesAliases:
+
+    def test_res_average_flag(self):
+        import sys
+        from unittest.mock import patch
+        from pubrun.__main__ import main
+
+        # Test that 'pbr res --average 16528343' passes average=True to _run_resources
+        with patch("pubrun.__main__._run_resources") as mock_run_resources:
+            with patch.object(sys, 'argv', ['pbr', 'res', '--average', '16528343']):
+                try:
+                    main()
+                except SystemExit:
+                    pass
+            mock_run_resources.assert_called_once_with(
+                '16528343',
+                filter_str=None,
+                status_filter=None,
+                older_than=None,
+                exit_code=None,
+                not_filter_str=None,
+                not_status_filter=None,
+                average=True,
+                last=None,
+                metric='all',
+                width=None
+            )
+
+    def test_res_last_flag(self):
+        import sys
+        from unittest.mock import patch
+        from pubrun.__main__ import main
+
+        # Test that 'pbr res --last 10m 16528343' passes last='10m' to _run_resources
+        with patch("pubrun.__main__._run_resources") as mock_run_resources:
+            with patch.object(sys, 'argv', ['pbr', 'res', '--last', '10m', '16528343']):
+                try:
+                    main()
+                except SystemExit:
+                    pass
+            mock_run_resources.assert_called_once_with(
+                '16528343',
+                filter_str=None,
+                status_filter=None,
+                older_than=None,
+                exit_code=None,
+                not_filter_str=None,
+                not_status_filter=None,
+                average=False,
+                last='10m',
+                metric='all',
+                width=None
+            )
+
+    def test_res_width_flag(self):
+        import sys
+        from unittest.mock import patch
+        from pubrun.__main__ import main
+
+        # Test that 'pbr res --width 60 16528343' passes width=60 to _run_resources
+        with patch("pubrun.__main__._run_resources") as mock_run_resources:
+            with patch.object(sys, 'argv', ['pbr', 'res', '--width', '60', '16528343']):
+                try:
+                    main()
+                except SystemExit:
+                    pass
+            mock_run_resources.assert_called_once_with(
+                '16528343',
+                filter_str=None,
+                status_filter=None,
+                older_than=None,
+                exit_code=None,
+                not_filter_str=None,
+                not_status_filter=None,
+                average=False,
+                last=None,
+                metric='all',
+                width=60
+            )
+
+    def test_run_id_subcommand_swapping(self):
+        import sys
+        from unittest.mock import patch
+        from pubrun.__main__ import main
+
+        # Test swapping of 'pbr 16528343 cpu' -> 'pbr cpu 16528343'
+        with patch("pubrun.__main__._run_resources") as mock_run_resources:
+            with patch.object(sys, 'argv', ['pbr', '16528343', 'cpu']):
+                try:
+                    main()
+                except SystemExit:
+                    pass
+            mock_run_resources.assert_called_once_with(
+                '16528343',
+                filter_str=None,
+                status_filter=None,
+                older_than=None,
+                exit_code=None,
+                not_filter_str=None,
+                not_status_filter=None,
+                average=False,
+                last=None,
+                metric='cpu',
+                width=None
+            )
+
+        # Test swapping of 'pbr 16528343 cpu --width 60' -> 'pbr cpu 16528343 --width 60'
+        with patch("pubrun.__main__._run_resources") as mock_run_resources:
+            with patch.object(sys, 'argv', ['pbr', '16528343', 'cpu', '--width', '60']):
+                try:
+                    main()
+                except SystemExit:
+                    pass
+            mock_run_resources.assert_called_once_with(
+                '16528343',
+                filter_str=None,
+                status_filter=None,
+                older_than=None,
+                exit_code=None,
+                not_filter_str=None,
+                not_status_filter=None,
+                average=False,
+                last=None,
+                metric='cpu',
+                width=60
+            )
 

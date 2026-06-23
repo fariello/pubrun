@@ -120,12 +120,45 @@ pubrun methods --format latex
 
 ## CLI Reference
 
-The `pubrun` CLI (and its convenient shorthand alias `pbr`) provides nine commands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
+The `pubrun` CLI (and its convenient shorthand alias `pbr`) provides thirteen commands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
+
+### `pubrun bug-report`
+Opens the GitHub issue tracker and prints environment diagnostics for copy-pasting.
+```bash
+pubrun bug-report
+```
 
 ### `pubrun cite`
 Generates the bibliographic citation for crediting this library in your paper.
 ```bash
 pubrun cite --style bibtex
+```
+
+### `pubrun clean`
+Interactively delete old run directories. Lists candidates with age and size, then prompts for confirmation.
+```bash
+pubrun clean                        # Interactive: list and confirm
+pubrun clean --older-than 7d --yes  # Non-interactive: delete all completed runs older than 7 days
+pubrun clean --status crashed --yes # Delete all crashed runs
+pubrun clean --dry-run              # Preview what would be deleted
+```
+
+### `pubrun combined`
+Interleave stdout and stderr logs chronologically from one or more runs.
+```bash
+pubrun combined [RUN_ID ...] --output combined.log
+```
+
+### `pubrun diff`
+Generates a semantic side-by-side comparison between two execution traces, filtering volatile noise (timestamps, PIDs) by default.
+```bash
+pubrun diff ./runs/pubrun-A ./runs/pubrun-B --same --basic --wrap
+```
+
+### `pubrun meta`
+Generates a standalone environment snapshot for HPC parent-child hydration.
+```bash
+pubrun meta --out ./runs/meta.json --deep
 ```
 
 ### `pubrun methods`
@@ -146,16 +179,17 @@ Extracts the exact shell command needed to reproduce a run.
 pubrun rerun ./runs/pubrun-A
 ```
 
-### `pubrun diff`
-Generates a semantic side-by-side comparison between two execution traces, filtering volatile noise (timestamps, PIDs) by default.
+### `pubrun resources`
+Renders CPU and memory utilization graphs over the lifecycle of a run.
 ```bash
-pubrun diff ./runs/pubrun-A ./runs/pubrun-B --same --basic --wrap
+pubrun resources [RUN_DIR]
 ```
 
-### `pubrun meta`
-Generates a standalone environment snapshot for HPC parent-child hydration.
+### `pubrun run`
+Spawn a command with a specific import mode. Useful for CI, Slurm, and scripts you can't modify.
 ```bash
-pubrun meta --out ./runs/meta.json --deep
+pubrun run --mode minimal -- python script.py
+pubrun run --mode nopatch -- python train.py
 ```
 
 ### `pubrun status`
@@ -167,28 +201,12 @@ pubrun status a3f9         # Inspect a specific run by ID prefix
 pubrun status --dir /path  # Scan a non-default output directory
 ```
 
-### `pubrun clean`
-Interactively delete old run directories. Lists candidates with age and size, then prompts for confirmation.
-```bash
-pubrun clean                        # Interactive: list and confirm
-pubrun clean --older-than 7d --yes  # Non-interactive: delete all completed runs older than 7 days
-pubrun clean --status crashed --yes # Delete all crashed runs
-pubrun clean --dry-run              # Preview what would be deleted
-```
-
-### `pubrun run`
-Spawn a command with a specific import mode. Useful for CI, Slurm, and scripts you can't modify.
-```bash
-pubrun run --mode minimal -- python script.py
-pubrun run --mode nopatch -- python train.py
-```
-
-### `pubrun tui`
-Launches the interactive TUI manager for exploring, archiving, diffing, and cleaning runs.
+### `pubrun ui`
+Launches the interactive terminal user interface (TUI) dashboard to browse, inspect, and manage runs.
 Note: Requires optional TUI dependencies (installable via `pip install "pubrun[tui]"` or `pip install textual rich`).
 ```bash
-pubrun tui              # Open the interactive TUI GUI manager
-pubrun tui --dir /path  # Scan a non-default output directory
+pubrun ui              # Open the interactive TUI manager (aliases: tui, gui)
+pubrun ui --dir /path  # Scan a non-default output directory
 ```
 
 ### Diagnostic Flags

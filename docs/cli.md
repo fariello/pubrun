@@ -2,11 +2,145 @@
 
 # pubrun CLI Reference
 
-The `pubrun` CLI is accessible via `pubrun <command>`, `pbr <command>` (a convenient shorthand alias), or `python -m pubrun <command>`. It provides eleven commands for post-execution analysis and diagnostic flags.
+The `pubrun` CLI is accessible via `pubrun <command>`, `pbr <command>` (a convenient shorthand alias), or `python -m pubrun <command>`. It provides thirteen commands for post-execution analysis and diagnostic flags.
 
 ---
 
 ## Commands
+
+### `bug-report` — Feature Request or Bug Reporter
+
+Opens the GitHub issue tracker in your default browser and displays system configuration telemetry in the console for easy copying and pasting.
+
+```bash
+pubrun bug-report
+```
+
+**Aliases:** `feedback`, `issue`
+
+---
+
+### `cite` — Academic Citation
+
+Generates a formatted citation for crediting `pubrun` in academic publications.
+
+```bash
+pubrun cite [--style apa|mla|chicago|bibtex]
+```
+
+**Example:**
+```bash
+pubrun cite --style bibtex
+```
+
+---
+
+### `clean` — Run Cleanup
+
+Interactively delete old run directories. Lists candidates with their age and size, then prompts for confirmation before removal.
+
+```bash
+pubrun clean [--dir PATH] [--older-than AGE] [--status STATUS] [-y|--yes] [--dry-run]
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--dir PATH` | Override the output directory to scan |
+| `--older-than AGE` | Only consider runs older than AGE (e.g. `7d`, `24h`, `30` for 30 days) |
+| `--status STATUS` | Comma-separated status filter (e.g. `completed,failed`). Default: all non-running statuses |
+| `-y`, `--yes` | Skip confirmation prompt (non-interactive mode) |
+| `--dry-run` | Show what would be deleted without actually deleting |
+
+Running processes are never deleted, even if explicitly included in `--status`.
+
+**Interactive mode** (default): displays a numbered list with exit codes, args, age, and size. The user must explicitly select runs by number, range (e.g. `1-3,5`), or type `all`. The selected runs are then displayed in a confirmation table before a final `y/N` prompt. Nothing is deleted without explicit confirmation.
+
+**Example:**
+```bash
+pubrun clean                              # Interactive: list and confirm
+pubrun clean --older-than 7d --yes        # Non-interactive: delete completed runs > 7 days
+pubrun clean --status crashed,ghost --yes # Delete all crashed/ghost runs
+pubrun clean --dry-run                    # Preview without deleting
+```
+
+---
+
+### `combined` — Log Interleaver
+
+Post-execution command that chronologically interleaves stdout and stderr logs from one or more runs using the log-line timestamps written in `standard` or `deep` console mode.
+
+```bash
+pubrun combined [RUN_ID ...] [--dir PATH] [--output FILE] [-y|--yes] [-f|--force]
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--dir PATH` | Override the output directory to scan (default: configured `output_dir` or `./runs`) |
+| `--output FILE` | Write combined logs to this file instead of stdout |
+| `-y`, `--yes` | Skip confirmation prompt for files > 250 MB |
+| `-f`, `--force` | Force execution for files > 500 MB |
+
+- If multiple run IDs are supplied, each output line is prefixed with the run ID and stream origin, e.g. `[runA][stdout]`.
+- If a single run is combined, each output line is prefixed with the stream origin only, e.g. `[stdout]`.
+- If the logs lack timestamps (captured with `"basic"` console mode), it falls back to sequential concatenation and prints a warning.
+
+**Example:**
+```bash
+pubrun combined a3f9               # Interleave stdout/stderr for run a3f9
+pubrun combined a3f9 b2c1 --output all.log  # Combine multiple runs into a file
+```
+
+---
+
+### `diff` — Semantic Comparison
+
+Generates a side-by-side structural comparison between two execution traces, filtering volatile noise (timestamps, PIDs) by default.
+
+```bash
+pubrun diff RUN_DIR_A RUN_DIR_B [OPTIONS]
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--basic` | Filter heavily; show only script, package, and user telemetry changes (default) |
+| `--standard` | Moderate filtering; include hardware and resource changes |
+| `--deep` | No filtering; compare everything |
+| `--same` / `--no-same` | Show or hide unchanged values |
+| `--wrap` / `--no-wrap` | Wrap long strings or truncate with ellipsis |
+| `--max-length N` | Maximum character length before truncation |
+| `--no-color` | Disable ANSI color output |
+| `--export [txt\|json]` | Export flattened key-value output for external diff tools (e.g., `meld`, VS Code) |
+
+**Example:**
+```bash
+pubrun diff ./runs/pubrun-A ./runs/pubrun-B --standard --same --wrap
+```
+
+---
+
+### `meta` — Global Environment Snapshot
+
+Generates a standalone `meta.json` snapshot of the current environment (hardware, packages, git, environment variables) without running any script. Designed for HPC parent-child hydration workflows.
+
+```bash
+pubrun meta [--out PATH] [--basic|--standard|--deep]
+```
+
+- If `--out` is omitted, writes to `./runs/meta.json`.
+- Default depth is `--deep` (captures full virtual environment).
+
+**Example:**
+```bash
+pubrun meta --out ./shared/meta.json --deep
+```
+
+---
 
 ### `methods` — Academic Methodology Writer
 
@@ -47,34 +181,6 @@ pubrun report [RUN_DIR ...] [--basic|--standard|--deep]
 
 ---
 
-### `diff` — Semantic Comparison
-
-Generates a side-by-side structural comparison between two execution traces, filtering volatile noise (timestamps, PIDs) by default.
-
-```bash
-pubrun diff RUN_DIR_A RUN_DIR_B [OPTIONS]
-```
-
-**Options:**
-
-| Flag | Description |
-|---|---|
-| `--basic` | Filter heavily; show only script, package, and user telemetry changes (default) |
-| `--standard` | Moderate filtering; include hardware and resource changes |
-| `--deep` | No filtering; compare everything |
-| `--same` / `--no-same` | Show or hide unchanged values |
-| `--wrap` / `--no-wrap` | Wrap long strings or truncate with ellipsis |
-| `--max-length N` | Maximum character length before truncation |
-| `--no-color` | Disable ANSI color output |
-| `--export [txt\|json]` | Export flattened key-value output for external diff tools (e.g., `meld`, VS Code) |
-
-**Example:**
-```bash
-pubrun diff ./runs/pubrun-A ./runs/pubrun-B --standard --same --wrap
-```
-
----
-
 ### `rerun` — Reproducibility Command
 
 Extracts the exact shell command needed to re-execute a recorded run.
@@ -91,21 +197,51 @@ pubrun rerun ./runs/pubrun-A | bash
 
 ---
 
-### `meta` — Global Environment Snapshot
+### `resources` — Resource Monitoring Graphs
 
-Generates a standalone `meta.json` snapshot of the current environment (hardware, packages, git, environment variables) without running any script. Designed for HPC parent-child hydration workflows.
+Renders ASCII or Unicode graphs in the terminal showing live CPU and memory utilization history over the execution lifecycle of a specific run.
 
 ```bash
-pubrun meta [--out PATH] [--basic|--standard|--deep]
+pubrun resources [RUN_DIR]
 ```
 
-- If `--out` is omitted, writes to `./runs/meta.json`.
-- Default depth is `--deep` (captures full virtual environment).
+- If `RUN_DIR` is omitted, automatically uses the most recent run in `./runs/`.
+- Parses log events from `events.jsonl` to render utilization timelines.
+
+**Aliases:** `monitor`, `chart`, `stats`
 
 **Example:**
 ```bash
-pubrun meta --out ./shared/meta.json --deep
+pubrun resources ./runs/pubrun-train-20260509-a1b2
 ```
+
+---
+
+### `run` — Import Mode Wrapper
+
+Spawns a child process with `PUBRUN_IMPORT_MODE` set in the environment. Useful for CI pipelines, shell scripts, Slurm submissions, and any case where you want to control pubrun behavior without modifying source code.
+
+```bash
+pubrun run [--mode MODE] -- COMMAND [ARGS...]
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--mode MODE` | Import mode for the child process: `auto` (default), `noauto`, `nopatch`, `noconsole`, or `minimal` |
+
+The double dash (`--`) separates pubrun wrapper options from the target command.
+
+**Example:**
+```bash
+pubrun run --mode minimal -- python script.py      # No auto-start in child
+pubrun run --mode nopatch -- python train.py     # Auto-start but no hooks
+pubrun run --mode noconsole -- python train.py   # Auto-start but no console wrap
+pubrun run -- python script.py                   # Default auto mode
+```
+
+The wrapper returns the child process exit code. It does not create a run in the wrapper process itself.
 
 ---
 
@@ -177,110 +313,6 @@ pubrun ui [--dir PATH]
 pubrun ui
 pubrun gui
 ```
-
----
-
-### `clean` — Run Cleanup
-
-Interactively delete old run directories. Lists candidates with their age and size, then prompts for confirmation before removal.
-
-```bash
-pubrun clean [--dir PATH] [--older-than AGE] [--status STATUS] [-y|--yes] [--dry-run]
-```
-
-**Options:**
-
-| Flag | Description |
-|---|---|
-| `--dir PATH` | Override the output directory to scan |
-| `--older-than AGE` | Only consider runs older than AGE (e.g. `7d`, `24h`, `30` for 30 days) |
-| `--status STATUS` | Comma-separated status filter (e.g. `completed,failed`). Default: all non-running statuses |
-| `-y`, `--yes` | Skip confirmation prompt (non-interactive mode) |
-| `--dry-run` | Show what would be deleted without actually deleting |
-
-Running processes are never deleted, even if explicitly included in `--status`.
-
-**Interactive mode** (default): displays a numbered list with exit codes, args, age, and size. The user must explicitly select runs by number, range (e.g. `1-3,5`), or type `all`. The selected runs are then displayed in a confirmation table before a final `y/N` prompt. Nothing is deleted without explicit confirmation.
-
-**Example:**
-```bash
-pubrun clean                              # Interactive: list and confirm
-pubrun clean --older-than 7d --yes        # Non-interactive: delete completed runs > 7 days
-pubrun clean --status crashed,ghost --yes # Delete all crashed/ghost runs
-pubrun clean --dry-run                    # Preview without deleting
-```
-
----
-
-### `combined` — Log Interleaver
-
-Post-execution command that chronologically interleaves stdout and stderr logs from one or more runs using the log-line timestamps written in `standard` or `deep` console mode.
-
-```bash
-pubrun combined [RUN_ID ...] [--dir PATH] [--output FILE] [-y|--yes] [-f|--force]
-```
-
-**Options:**
-
-| Flag | Description |
-|---|---|
-| `--dir PATH` | Override the output directory to scan (default: configured `output_dir` or `./runs`) |
-| `--output FILE` | Write combined logs to this file instead of stdout |
-| `-y`, `--yes` | Skip confirmation prompt for files > 250 MB |
-| `-f`, `--force` | Force execution for files > 500 MB |
-
-- If multiple run IDs are supplied, each output line is prefixed with the run ID and stream origin, e.g. `[runA][stdout]`.
-- If a single run is combined, each output line is prefixed with the stream origin only, e.g. `[stdout]`.
-- If the logs lack timestamps (captured with `"basic"` console mode), it falls back to sequential concatenation and prints a warning.
-
-**Example:**
-```bash
-pubrun combined a3f9               # Interleave stdout/stderr for run a3f9
-pubrun combined a3f9 b2c1 --output all.log  # Combine multiple runs into a file
-```
-
----
-
-### `cite` — Academic Citation
-
-Generates a formatted citation for crediting `pubrun` in academic publications.
-
-```bash
-pubrun cite [--style apa|mla|chicago|bibtex]
-```
-
-**Example:**
-```bash
-pubrun cite --style bibtex
-```
-
----
-
-### `run` — Import Mode Wrapper
-
-Spawns a child process with `PUBRUN_IMPORT_MODE` set in the environment. Useful for CI pipelines, shell scripts, Slurm submissions, and any case where you want to control pubrun behavior without modifying source code.
-
-```bash
-pubrun run [--mode MODE] -- COMMAND [ARGS...]
-```
-
-**Options:**
-
-| Flag | Description |
-|---|---|
-| `--mode MODE` | Import mode for the child process: `auto` (default), `noauto`, `nopatch`, `noconsole`, or `minimal` |
-
-The double dash (`--`) separates pubrun wrapper options from the target command.
-
-**Example:**
-```bash
-pubrun run --mode minimal -- python script.py      # No auto-start in child
-pubrun run --mode nopatch -- python train.py     # Auto-start but no hooks
-pubrun run --mode noconsole -- python train.py   # Auto-start but no console wrap
-pubrun run -- python script.py                   # Default auto mode
-```
-
-The wrapper returns the child process exit code. It does not create a run in the wrapper process itself.
 
 ---
 
