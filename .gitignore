@@ -67,3 +67,6 @@ examples/minimal-research-workflow/runs/
 examples/minimal-research-workflow/outputs/
 
 
+
+# agent-workflows installer local backups
+.agent-workflows-installer-backups/
