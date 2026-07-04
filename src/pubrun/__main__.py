@@ -596,9 +596,9 @@ def _run_status(
         print(render_inspect(run_info))
     else:
         # List all runs
-        runs = scan_runs(output_dir)
+        all_runs = scan_runs(output_dir)
         runs = filter_runs(
-            runs,
+            all_runs,
             filter_str=filter_str,
             status_filter=status_filter,
             limit=limit,
@@ -615,7 +615,7 @@ def _run_status(
         if verbose:
             print(render_verbose_list(runs))
         else:
-            print(render_short_list(runs))
+            print(render_short_list(runs, all_runs=all_runs))
 
 
 def _run_clean(
