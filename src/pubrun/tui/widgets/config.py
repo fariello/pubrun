@@ -98,7 +98,7 @@ class ConfigPanel(Vertical):
 
         # Console
         console = self.config_data.get("console", {})
-        self.query_one("#cfg-console-mode", Select).value = console.get("capture_mode", "standard")
+        self.query_one("#cfg-console-mode", Select).value = console.get("capture_mode", "off")
 
         # Events
         events = self.config_data.get("events", {})

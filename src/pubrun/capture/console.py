@@ -5,6 +5,54 @@ from pathlib import Path
 
 logger = logging.getLogger("pubrun")
 
+
+def _is_jupyter_kernel() -> bool:
+    """Detect if running inside a Jupyter/IPython notebook kernel."""
+    try:
+        if "IPython" not in sys.modules:
+            return False
+        from IPython import get_ipython
+        ip = get_ipython()
+        if ip is None:
+            return False
+        # ZMQInteractiveShell = Jupyter kernel; TerminalInteractiveShell = IPython CLI
+        return ip.__class__.__name__ == "ZMQInteractiveShell"
+    except Exception:
+        return False
+
+
+def resolve_console_mode(config: Dict[str, Any]) -> str:
+    """Resolve the effective console capture mode considering context.
+
+    Applies Jupyter and non-TTY overrides on top of the base capture_mode.
+
+    Args:
+        config: Resolved pubrun configuration.
+
+    Returns:
+        The effective capture mode string ("off", "basic", "standard", "deep").
+    """
+    base_mode = config.get("console", {}).get("capture_mode", "off")
+
+    if base_mode == "off":
+        return "off"
+
+    # Jupyter override
+    if _is_jupyter_kernel():
+        jupyter_mode = config.get("console", {}).get("jupyter_mode", "off")
+        return jupyter_mode
+
+    # Non-TTY override
+    try:
+        if not sys.stdout.isatty():
+            non_tty_mode = config.get("console", {}).get("non_tty_mode", "inherit")
+            if non_tty_mode != "inherit":
+                return non_tty_mode
+    except Exception:
+        pass  # isatty() can fail on broken streams; ignore
+
+    return base_mode
+
 class TqdmSafeTee:
     """Transparent stream proxy that tees writes to a log file.
 

@@ -815,10 +815,11 @@ class TestCliReportUsabilityDetails:
 class TestCliNewFeatures:
 
     def test_faulthandler_segfault_captured(self, tmp_path):
-        script = f"""
+        script = """
 import os, sys, ctypes
+os.environ["PUBRUN_AUTO_START"] = "false"
 import pubrun
-tracker = pubrun.start(profile="standard")
+tracker = pubrun.start(profile="standard", console={"capture_mode": "standard"})
 # trigger segfault
 ctypes.string_at(0)
 """
@@ -842,9 +843,11 @@ ctypes.string_at(0)
         assert any(x in content for x in ("Segmentation fault", "string_at", "ctypes"))
 
     def test_excepthook_stream_flushing(self, tmp_path):
-        script = f"""
-import sys, pubrun
-tracker = pubrun.start(profile="standard")
+        script = """
+import os, sys
+os.environ["PUBRUN_AUTO_START"] = "false"
+import pubrun
+tracker = pubrun.start(profile="standard", console={"capture_mode": "standard"})
 sys.stdout.write("FLUSH_TEST_STDOUT")
 sys.stderr.write("FLUSH_TEST_STDERR")
 raise ValueError("TEST_EXCEPTION")

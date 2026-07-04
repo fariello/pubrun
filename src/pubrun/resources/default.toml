@@ -76,11 +76,27 @@ max_requests = 50
 
 # How pubrun handles print output and error tracebacks.
 # Values:
-#   "off"      - No capture; streams are untouched.
+#   "off"      - No capture; streams are untouched (default).
 #   "basic"    - Tee stdout/stderr to text files in the run directory.
-#   "standard" - Tee stdout/stderr to text files (same as basic).
+#   "standard" - Tee with timestamps on each line.
 #   "deep"     - Reserved for future structured capture (currently same as standard).
-capture_mode = "standard"
+#
+# Default is "off" so that `import pubrun` never wraps sys.stdout/stderr
+# without explicit opt-in. Set to "standard" for full output capture.
+capture_mode = "off"
+
+# Override capture behavior when stdout is not a TTY (piped or redirected).
+# Values:
+#   "inherit"  - Use capture_mode as-is (default).
+#   "off"      - Disable capture when not a TTY.
+#   "basic"    - Downgrade to basic (no timestamps) when piped.
+non_tty_mode = "inherit"
+
+# Override capture behavior when running inside Jupyter/IPython.
+# Jupyter replaces sys.stdout with its own wrapper; double-wrapping can
+# cause issues. Default "off" auto-disables capture in notebooks.
+# Set to "standard" to force capture even in Jupyter.
+jupyter_mode = "off"
 
 
 [events]
