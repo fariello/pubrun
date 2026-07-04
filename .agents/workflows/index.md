@@ -21,6 +21,8 @@ focusing on different concerns; leave it `-` when not used.
 | release-review | .agents/workflows/release-review/README.md | - | Full pre-release repository review and hardening: deep audit through eight personas, the Fix Bar, fix/validate/report, push and release decisions. |
 | release-review-plan | .agents/workflows/release-review/README.md | - | Release review in planning-only mode: audit and consolidated implementation plan, stopping before implementation. |
 | plan-review | .agents/workflows/plan-review/plan-review.md | - | Pre-execution plan reviewer: review and improve a proposed implementation plan before any code is written (edits planning documents only). |
+| setup-repo | .agents/workflows/setup-repo/setup-repo.md | - | Guided, idempotent, drift-aware repo setup AND conformance check: detect state, classify each area (conformant/partial/missing/outdated), then ask-before-each-change to install tools and add secret-scanning, the plan/IPD lifecycle (dirs + documented contract), .gitignore/CI/pre-commit/hygiene files. Safe to re-run after updates; stages changes. |
+| scaffold | .agents/workflows/scaffold/scaffold.md | - | Guided, wizard-style creation of a new assess-* lens, standalone workflow, or command: generate from the existing patterns, wire the manifest, and regenerate shims. Authoring/meta workflow. |
 | assess-performance | .agents/workflows/assess/assess.md | .agents/workflows/assess/lenses/performance.md | Assess runtime/resource performance and propose an IPD. |
 | assess-security | .agents/workflows/assess/assess.md | .agents/workflows/assess/lenses/security.md | Assess security posture and propose an IPD. |
 | assess-privacy | .agents/workflows/assess/assess.md | .agents/workflows/assess/lenses/privacy.md | Assess privacy/data-protection handling and propose an IPD. |
@@ -48,17 +50,44 @@ focusing on different concerns; leave it `-` when not used.
 | assess-logging-audit | .agents/workflows/assess/assess.md | .agents/workflows/assess/lenses/logging-audit.md | Assess logging and audit-trail quality/integrity/safety and propose an IPD. |
 | assess-compliance-readiness | .agents/workflows/assess/assess.md | .agents/workflows/assess/lenses/compliance-readiness.md | Assess readiness for a formal regime (FIPS / NIST 800-171 / CMMC L2, parameterized) - repo-slice only, not a certification - and propose an IPD. |
 | assess-generalization | .agents/workflows/assess/assess.md | .agents/workflows/assess/lenses/generalization.md | Assess generalization/extensibility/configurability (productization for reuse across orgs/tenants/deployments) and propose an IPD. |
+| assess-secrets | .agents/workflows/assess/assess.md | .agents/workflows/assess/lenses/secrets.md | Scan the working tree and git history for committed secrets/keys/PII/PHI (via tools/scan_secrets.py, read-only, redacted) and propose a rotate-first remediation IPD. |
+| assess-prose | .agents/workflows/assess/assess.md | .agents/workflows/assess/lenses/prose.md | Assess prose quality/style across ALL prose (docs, comments/docstrings, UI strings, error/help/CLI text, commit messages) against the distilled nonfiction style guide - quiet force, no mechanical fingerprints, modifier restraint, no em dashes. IPD by default; supports an optional author-in-the-loop interactive mode. |
 <!-- WORKFLOWS-MANIFEST:END -->
 
-## Running a workflow
+## Running a workflow (by tool)
 
-- **OpenCode / Claude Code (native):** type the slash command, e.g.
-  `/release-review`, `/plan-review`, or any `/assess-<concern>`. Pass an optional
-  target scope or flags as arguments, e.g. `/assess-performance src/server` or
-  `/assess-compliance gdpr`.
-- **Any other agent (universal fallback):** tell it to "read and execute" the body
-  path, e.g. "Read and execute .agents/workflows/assess/assess.md, applying the lens
-  .agents/workflows/assess/lenses/security.md".
+Every workflow is just an instruction file plus (for some tools) a generated slash-
+command shim that says "read and execute" it. The **substance works in any agent**; only
+the convenience of a native `/command` is tool-specific.
+
+| Tool | How to run a workflow |
+|---|---|
+| **OpenCode** | Native `/command`: type e.g. `/release-review`, `/assess-security`, `/setup-repo`. Shims live in `.opencode/commands/`. Arguments: `/assess-performance src/server`. |
+| **Claude Code** | Native `/command` via `.claude/commands/` (works; the repo also has these). Type e.g. `/assess-security`. Arguments supported (`$ARGUMENTS`). |
+| **Cursor, Codex, Antigravity, VS Code Copilot, or any other agent** | **No repo-file slash-command mechanism** - use the universal fallback: tell the agent to *read and execute* the workflow body, e.g. "Read and execute `.agents/workflows/assess/assess.md`, applying the lens `.agents/workflows/assess/lenses/security.md`" (or for a non-lens workflow, just its body path, e.g. "Read and execute `.agents/workflows/setup-repo/setup-repo.md`"). The body paths are listed in the manifest above. |
+
+`AGENTS.md` at the repo root points here, so any tool that reads `AGENTS.md` can discover
+the workflow list without being told the paths.
+
+## Meta / authoring workflows (`setup-repo`, `scaffold`)
+
+Two guided, wizard-style workflows differ from the reviewers above: they are
+interactive and MAY change files (with per-step confirmation), rather than only
+proposing.
+
+- **`/setup-repo`** walks the repo owner through best-practices and security setup -
+  installing tools (via `setup-repo/tools/setup_tools.py`, which detects and, on
+  confirmation, installs gitleaks/pre-commit/detect-secrets), adding secret-scanning CI
+  and a local hook, the **plan/IPD lifecycle** (`.agents/plans/pending/` +
+  `executed/` plus a documented contract in `AGENTS.md`/`CONTRIBUTING` so coding agents
+  follow it), `.gitignore` hygiene, hygiene files, a stack CI baseline, a pre-commit
+  config, dependency hygiene, and branch-protection advice. Ask-before-each-change,
+  stages (does not commit). It is **idempotent and drift-aware**: the same command is a
+  fresh setup, a quiet re-run, or a post-update **conformance check** that classifies
+  each area (conformant/partial/missing/outdated) and only proposes the gaps.
+- **`/scaffold`** walks the owner through adding a new `assess-*` lens, standalone
+  workflow, or command: generate from the existing pattern, wire the manifest, and
+  regenerate shims. Authoring/meta; edits framework files only.
 
 ## The `assess-*` family (single-concern, IPD-producing)
 
