@@ -641,8 +641,13 @@ def _render_summary(runs: List[RunInfo]) -> str:
     return f"{line1}\n{line2}"
 
 
-def render_short_list(runs: List[RunInfo]) -> str:
+def render_short_list(runs: List[RunInfo], all_runs: Optional[List[RunInfo]] = None) -> str:
     """Render a compact table of all runs.
+
+    Args:
+        runs: The runs to display in the table (may be filtered/limited).
+        all_runs: The full unfiltered run set for the summary line. If None,
+            uses ``runs`` for both the table and the summary.
 
     Columns: RUN ID, SCRIPT, COMMIT, STARTED, STATUS, EXIT, ELAPSED
     """
@@ -696,9 +701,13 @@ def render_short_list(runs: List[RunInfo]) -> str:
         )
         lines.append(line)
 
-    # Append summary
+    # Append summary (based on full run set if provided)
+    summary_runs = all_runs if all_runs is not None else runs
     lines.append("")
-    lines.append(_render_summary(runs))
+    summary = _render_summary(summary_runs)
+    if all_runs is not None and len(all_runs) != len(runs):
+        summary += f" (showing {len(runs)})"
+    lines.append(summary)
 
     return "\n".join(lines)
 
