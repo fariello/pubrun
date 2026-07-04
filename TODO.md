@@ -59,24 +59,61 @@ the reported peak RSS drastically underestimates actual resource usage.
 Proposed:
 - Walk `/proc/<pid>/task/` or use platform APIs to sum RSS/CPU across the process tree.
 - On Linux: iterate `/proc/<pid>/children` recursively or use cgroups v2 `memory.current`.
+  (Prefer whichever is more performant; cgroups is single-read but only works if the
+  process is in its own cgroup. /proc walk is universal but racy.)
 - On macOS: `pgrep -P <pid>` or `proc_listchildpids` via ctypes.
 - Config: `[capture.resources].scope = "process" | "tree"` (default `"process"`).
 - Must work with zero dependencies using only stdlib + /proc / platform APIs.
 
-**2. Profiling integration**
+Open design questions (need discussion before implementation):
+- Should `scope = "tree"` be available on bare `import pubrun` or only in explicit
+  modes / deeper profiles?
+- Visualization: tree-level data should be graphed separately from main-process data
+  in `pubrun report` (e.g., "Process RSS" vs "Process Tree RSS" as distinct series).
+- Need a way to view this in `pubrun status` and the TUI when present.
 
-Allow pubrun to capture a profiling snapshot (cProfile, py-spy flamegraph, or
-similar) and save it to the run directory for post-hoc analysis.
+**2. Profiling integration (phase-scoped)**
+
+Allow pubrun to capture profiling data for specific `pubrun.phase()` blocks and save
+it to the run directory. Phase-scoped only (not whole-run) because:
+- Whole-run profiling adds 30-50% overhead, violating "zero footprint."
+- Whole-run cProfile is trivially available via `python -m cProfile script.py`.
+- Phase-scoped profiling tied to pubrun's timeline is genuinely new and useful.
 
 Proposed:
 - `[capture.profiling].enabled = false` (opt-in only).
 - `[capture.profiling].backend = "cprofile" | "pyspy" | "yappi"` etc.
-- `cprofile` backend uses stdlib `cProfile` — zero dependencies.
-- `pyspy` / `yappi` / other backends require the user to install the tool;
+- When enabled, `pubrun.phase().__enter__` calls `cProfile.enable()` and
+  `__exit__` calls `disable()` + dumps to `profile-<phase_name>.prof`.
+- `cprofile` backend uses stdlib — zero dependencies.
+- External backends (pyspy, yappi) require user to install the tool;
   pubrun detects availability at runtime and logs a clear error if missing.
-- Output: `profile.prof` (pstats-compatible) or `flamegraph.svg` in the run dir.
 - **Any backend that requires a dependency MUST be opt-in only** — never auto-install,
   never fail the run if the tool is absent (just log and skip).
+- Viewable via `pubrun report` alongside the phase timeline.
+
+### Runs directory index for fast `pubrun status` (PERF-09)
+
+When a user accumulates 500+ runs, `pubrun status` gets slow because it reads and
+parses `manifest.json` (or `.pubrun.lock`) from every single run directory. A
+lightweight index file (`.pubrun-index.json`) in the runs directory could cache the
+key metadata (run_id, status, started_at, script, exit_code) so status queries are
+O(1) instead of O(n).
+
+Deferred because: most users clean regularly and won't hit 500 runs. Implement only
+after benchmarking confirms >1s scan time at realistic run counts.
+
+### Transitive/full package capture modes
+
+The current `imported-only` mode (default) records only packages loaded in
+`sys.modules`. This misses indirect dependencies (e.g., your script imports `pandas`
+but you'd also want to know the exact `numpy` version pandas is using).
+
+Two modes to add:
+- `imported-transitive`: for each imported package, also record its declared
+  dependencies (read from dist metadata). Still fast — no full env scan.
+- `full-environment`: already supported as opt-in config, iterates all installed
+  distributions (slower, ~50-200ms in large venvs).
 
 ### `summary.txt` Generation (`[logging].write_summary`)
 
