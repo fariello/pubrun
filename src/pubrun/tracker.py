@@ -331,7 +331,8 @@ class Run:
         if res_cfg.get("depth", "off") != "off":
             interval = res_cfg.get("sample_interval_seconds", 15)
             max_fails = res_cfg.get("max_consecutive_failures", 3)
-            self.resource_watcher = ResourceWatcher(self, interval, max_fails)
+            scope = res_cfg.get("scope", "process")
+            self.resource_watcher = ResourceWatcher(self, interval, max_fails, scope=scope)
             self.resource_watcher.start()
 
         # 9. Signal and exit-code capture (standard registration hook)

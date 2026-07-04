@@ -243,15 +243,59 @@ class phase:
     def __init__(self, name: str) -> None:
         self.name = name
         self.run_tracker = get_current_run()
+        self._profiler = None
 
     def __enter__(self) -> "phase":
         if self.run_tracker and getattr(self.run_tracker, "event_stream", None):
             self.run_tracker.event_stream.emit("phase_start", name=self.name)
         else:
             _handle_inactive(f"pubrun.phase('{self.name}')")
+        # Phase-scoped profiling (opt-in via [capture.profiling].enabled)
+        if self.run_tracker and self.run_tracker.is_active:
+            prof_cfg = self.run_tracker.config.get("capture", {}).get("profiling", {})
+            if prof_cfg.get("enabled", False):
+                backend = prof_cfg.get("backend", "cprofile")
+                try:
+                    if backend == "cprofile":
+                        import cProfile
+                        self._profiler = cProfile.Profile()
+                        self._profiler.enable()
+                    elif backend == "yappi":
+                        import yappi  # type: ignore[import-not-found]
+                        yappi.start()
+                        self._profiler = "yappi"
+                except Exception as prof_err:
+                    logging.getLogger("pubrun").warning(
+                        f"pubrun: profiling backend '{backend}' unavailable: {prof_err}"
+                    )
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        # Stop profiler and dump stats
+        if self._profiler and self.run_tracker and self.run_tracker.is_active:
+            try:
+                if self._profiler == "yappi":
+                    import yappi  # type: ignore[import-not-found]
+                    yappi.stop()
+                    prof_path = self.run_tracker.run_dir / f"profile-{self.name}.prof"
+                    stats = yappi.get_func_stats()
+                    stats.save(str(prof_path), type="pstat")
+                    yappi.clear_stats()
+                else:
+                    # cProfile.Profile instance
+                    self._profiler.disable()
+                    prof_path = self.run_tracker.run_dir / f"profile-{self.name}.prof"
+                    self._profiler.dump_stats(str(prof_path))
+                # Emit event so profile is discoverable
+                if getattr(self.run_tracker, "event_stream", None):
+                    self.run_tracker.event_stream.emit(
+                        "profile_saved", name=self.name,
+                        payload={"path": f"profile-{self.name}.prof"}
+                    )
+            except Exception as prof_err:
+                logging.getLogger("pubrun").debug(f"pubrun: profiling save failed: {prof_err}")
+            self._profiler = None
+
         if self.run_tracker and getattr(self.run_tracker, "event_stream", None):
             if exc_type is not None:
                 err_payload = {"error": exc_val.__class__.__name__}
