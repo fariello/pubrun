@@ -36,7 +36,7 @@ discoverable features.
 
 | Step | Source | Change | Files | Remediation Risk | Validation |
 |------|--------|--------|-------|------------------|------------|
-| 1 | UX-01 | Suppress aliases from the argparse `choices` error message. Override `ArgumentParser.error()` to show only primary command names, not aliases, in the "invalid choice" message. | `__main__.py` | Low | `pubrun boguscmd` shows clean error with only primary commands. |
+| 1 | UX-01 | Suppress aliases from the argparse `choices` error message. The existing `_SubcommandAwareArgumentParser.error()` at `__main__.py:1029` is the natural place: filter the "invalid choice" message to show only primary command names (exclude aliases). A primary-commands list is already implicit in the subparsers definition. | `__main__.py:1029` | Low | `pubrun boguscmd` shows clean error with only primary commands. |
 | 2 | UX-03 | When `pubrun status` finds no runs, print a helpful hint: "No runs found in ./runs/. To start tracking: `import pubrun` in your script, or `pubrun run -- python script.py`." | `status.py` or `__main__.py` | Low | First-time user gets actionable guidance. |
 | 3 | UX-04 | When `pubrun diff` has < 2 runs, print: "Need at least 2 runs to diff. Run your script twice, then try again." | `__main__.py` (diff handler) | Low | Clearer error for common novice case. |
 | 4 | UX-05 | Add a "Useful attributes" section to the `start()` docstring listing `run.run_dir`, `run.run_id`, `run.config`, `run.is_active`. | `core.py` | Low | `help(pubrun.start)` shows useful return info. |
@@ -48,7 +48,15 @@ discoverable features.
 
 | Finding ID | Remediation Risk | Axis | Reason |
 |------------|------------------|------|--------|
-| UX-02 | Medium-High | Complexity | Argparse alias handling is deeply embedded; cleanly separating aliases from primary names in all error paths requires subclassing or post-processing argparse internals. The current behavior (aliases in error output) is confusing but not broken. Defer to a broader argparse rework if needed. |
+| UX-02 | Low | — | **Resolved by Step 1.** The alias-in-error problem IS UX-01. Once Step 1 filters the error message to show only primary commands, the confusing alias appearance is fixed. No separate work needed. |
+
+## Domain invariants preserved
+
+- `pubrun clean` safety contract: `-y` still does NOT add a `y` shortcut to
+  delete all; it skips the selection prompt but deletes all *candidates*. Step 5
+  adds feedback but does not change the deletion logic.
+- `pubrun` must never crash the host script: none of these changes touch the
+  tracking/capture path. All are CLI-layer only.
 
 ## Required tests / validation
 
