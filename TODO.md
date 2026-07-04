@@ -25,6 +25,27 @@ Known issues and deferred improvements for future releases.
 The `[capture.determinism].depth = "off"` config key is retained for forward compatibility
 but documented as "not yet implemented / reserved."
 
+---
+
+## Needs Assessment
+
+### Default `import pubrun` behavior — STDIN/STDOUT capture
+
+Assess whether the default behavior of a bare `import pubrun` (auto mode) is correct
+and user-friendly with respect to STDIN/STDOUT interception. Specifically:
+
+- Is console tee (`capture_mode = "standard"`) the right default for all users, or
+  should it default to `"off"` and require opt-in?
+- Does wrapping `sys.stdout`/`sys.stderr` break interactive prompts, `input()`, REPL
+  sessions, debuggers (pdb), or piped workflows?
+- Are there edge cases where the tee silently corrupts output (encoding, binary pipes,
+  non-UTF-8 streams)?
+- Should `import pubrun` in a Jupyter/IPython notebook behave differently than in a
+  script?
+
+This should be a dedicated `/assess-*` pass (likely assess-bugs or assess-ui-ux) focused
+on the STDIN/STDOUT surface before the next release.
+
 ### `summary.txt` Generation (`[logging].write_summary`)
 
 **Removed.** A human-readable glance file was planned but is superseded by:
