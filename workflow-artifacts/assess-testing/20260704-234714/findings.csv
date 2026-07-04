@@ -1,0 +1,11 @@
+id,severity,remediation_risk,remediation_risk_axis,persona,area,finding,evidence,proposed_action,disposition
+TST-01,High,Low,n/a,Testing,packages.py,"imported-transitive mode (lines 62-107) entirely untested. Parser dedup required_by all unverified.","coverage report: 49% on packages.py",Add test_imported_transitive_mode with mocked sys.modules,proposed
+TST-02,High,Low,n/a,Testing,resources.py,"_get_tree_rss_linux() (lines 65-94) /proc walk untested.","coverage report: lines uncovered",Add test with mocked /proc filesystem reads,proposed
+TST-03,High,Low,n/a,Testing,resources.py,"_get_tree_rss_darwin() (lines 104-148) ps parse + tree walk untested.","coverage report: lines uncovered",Add test with mocked subprocess output,proposed
+TST-04,Medium,Low,n/a,Testing,core.py,"Phase profiling hooks (lines 264-324) untested. No test for .prof generation or orphan cleanup.","coverage report: lines uncovered",Add test_phase_profiling_cprofile,proposed
+TST-05,Medium,Low,n/a,Testing,console.py,"resolve_console_mode() Jupyter + non-TTY paths untested.","coverage report: lines 14-21 42-52 uncovered",Add test with mocked _is_jupyter_kernel and isatty,proposed
+TST-06,Medium,Low,n/a,Testing,events.py,"Non-serializable payload error path (lines 83-88) untested.","coverage report: lines uncovered",Add test passing non-serializable object,proposed
+TST-07,Low,Low,n/a,Testing,resources.py,"scope='tree' ResourceWatcher integration untested end-to-end.","No integration test exists",Add test verifying manifest has tree fields,proposed
+TST-08,Low,Low,n/a,Testing,status.py,"_render_summary() untested.","No test for summary output",Add unit test with synthetic runs,proposed
+TST-09,Low,Low,n/a,Testing,core.py,"start() concurrent race protection (BUG-04 fix) untested.","No threading test",Add 5-thread concurrent start test,proposed
+TST-10,Low,Low,n/a,Testing,core.py,"ProvenanceFileProxy write()/writelines() hash accuracy untested.","No test for write-mode provenance",Add test verifying sha256 matches file,proposed
