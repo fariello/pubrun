@@ -2,14 +2,18 @@ import json
 import logging
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 logger = logging.getLogger("pubrun")
 
 class EventStream:
-    """Manages the ``events.jsonl`` output, flushing each event immediately
-    to disk so context is preserved if the host script crashes."""
+    """Manages the ``events.jsonl`` output with buffered writes for throughput.
+
+    Critical events (annotations, phases) are flushed immediately to preserve
+    context on crash. Non-critical events (resource_sample, etc.) are buffered
+    and flushed every ``_flush_interval`` events or on close/explicit flush.
+    """
     def __init__(self, run_dir: Path, config: Optional[Dict[str, Any]] = None) -> None:
         """Open the event stream file for writing.
 
@@ -32,6 +36,11 @@ class EventStream:
         self._max_critical_events = max(10_000, self._max_events * 10)
         self._critical_event_count = 0
 
+        # PERF-06: Buffer non-critical events to reduce flush() syscalls.
+        # Critical events still get immediate flush for crash safety.
+        self._flush_interval = config.get("events", {}).get("flush_interval_events", 100)
+        self._buffer: List[str] = []
+
         try:
             # We keep the handle open in append mode for rapid high-frequency writes
             # typical in machine learning epochs.
@@ -43,6 +52,10 @@ class EventStream:
     def emit(self, event_type: str, name: Optional[str] = None, payload: Optional[Dict[str, Any]] = None) -> None:
         """Write one JSON-Lines record to disk.
 
+        Critical events (phase_start, phase_end, annotation) are flushed
+        immediately. Non-critical events are buffered and flushed every
+        ``flush_interval_events`` writes.
+
         Args:
             event_type: Category string (e.g. ``"annotation"``, ``"phase_start"``).
             name: Optional semantic label.
@@ -52,9 +65,7 @@ class EventStream:
             return
 
         # Critical lifecycle events bypass the throttle threshold so they are
-        # never silently dropped.  The names here MUST match the event_type
-        # strings passed to emit() elsewhere (phase_start / phase_end /
-        # annotation).
+        # never silently dropped.
         is_critical = event_type in {"phase_start", "phase_end", "annotation"}
 
         record = {
@@ -66,18 +77,30 @@ class EventStream:
         if payload is not None:
             record["payload"] = payload
 
+        # Serialize outside the lock for reduced contention (PERF-06).
+        line = json.dumps(record) + "\n"
+
         try:
             with self._lock:
                 if is_critical:
                     if self._critical_event_count >= self._max_critical_events:
                         return
                     self._critical_event_count += 1
+                    # Flush any buffered events first, then write + flush immediately.
+                    if self._buffer:
+                        self._file.writelines(self._buffer)
+                        self._buffer.clear()
+                    self._file.write(line)
+                    self._file.flush()
                 else:
                     if self._event_count >= self._max_events:
                         return
                     self._event_count += 1
-                self._file.write(json.dumps(record) + "\n")
-                self._file.flush()
+                    self._buffer.append(line)
+                    if len(self._buffer) >= self._flush_interval:
+                        self._file.writelines(self._buffer)
+                        self._buffer.clear()
+                        self._file.flush()
         except Exception as e:
             logger.debug(f"pubrun event write failed: {e}")
 
@@ -86,6 +109,10 @@ class EventStream:
         with self._lock:
             if self._file:
                 try:
+                    # Flush remaining buffer before closing.
+                    if self._buffer:
+                        self._file.writelines(self._buffer)
+                        self._buffer.clear()
                     self._file.flush()
                     self._file.close()
                 except Exception:
@@ -98,6 +125,9 @@ class EventStream:
         with self._lock:
             if self._file:
                 try:
+                    if self._buffer:
+                        self._file.writelines(self._buffer)
+                        self._buffer.clear()
                     self._file.flush()
                     self._file.close()
                 except Exception:
@@ -109,4 +139,3 @@ class EventStream:
             except Exception as e:
                 logger.debug(f"pubrun failed to open migrated event stream: {e}")
                 self._file = None
-
