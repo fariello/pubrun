@@ -245,6 +245,8 @@ class Run:
         Called from ``__init__``.  If this method raises, the run promotes
         itself to ghost mode (handled by the caller).
         """
+        import threading as _threading
+
         # 1. Invocation canonical path extraction
         self.invocation_data = get_invocation(self.config)
 
@@ -260,9 +262,29 @@ class Run:
         self.packages_data = get_packages(self.config)
         self.environment_data = get_environment(self.config)
 
-        # 4. Hardware tracking (Must run before SubprocessSpy to avoid logging psutil tools etc)
-        self.hardware_data = get_hardware(self.config)
-        self.host_data = get_host(self.config)
+        # 4. Hardware tracking — deferred to a background thread (PERF-02).
+        # Hardware info (CPU model, RAM, GPU) doesn't change during a run and
+        # can take 200-500ms (GPU detection spawns nvidia-smi/system_profiler).
+        # The get_hardware/get_host functions use disable_spy() internally so
+        # they won't be captured by SubprocessSpy even if it installs first.
+        self.hardware_data = {"capture_state": {"status": "pending"}}
+        self.host_data = {"capture_state": {"status": "pending"}}
+        self._hardware_future_done = _threading.Event()
+
+        def _collect_hardware():
+            try:
+                self.hardware_data = get_hardware(self.config)
+                self.host_data = get_host(self.config)
+            except Exception:
+                self.hardware_data = {"capture_state": {"status": "failed"}}
+                self.host_data = {"capture_state": {"status": "failed"}}
+            finally:
+                self._hardware_future_done.set()
+
+        self._hardware_thread = _threading.Thread(
+            target=_collect_hardware, daemon=True, name="pubrun-hw"
+        )
+        self._hardware_thread.start()
 
         # Determine if global hooks and patches are permitted by the import mode.
         _patch_subprocesses = True
@@ -395,6 +417,11 @@ class Run:
         if self._finalized:
             return
         self._finalized = True
+
+        # Wait for deferred hardware collection to complete (PERF-02).
+        # Cap at 2s to avoid blocking exit on a stuck nvidia-smi.
+        if hasattr(self, "_hardware_future_done"):
+            self._hardware_future_done.wait(timeout=2.0)
 
         if self.is_active:
             self.ended_at_utc = time.time()
