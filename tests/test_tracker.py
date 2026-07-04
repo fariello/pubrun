@@ -237,13 +237,19 @@ class TestBootstrapEnginesFailures:
         run = Run()
         assert run._outcome == "ghost"
 
-    def test_hardware_failure_ghost_mode(self, tmp_path, monkeypatch):
-        """get_hardware raising promotes to ghost mode."""
+    def test_hardware_failure_graceful(self, tmp_path, monkeypatch):
+        """get_hardware raising in background thread is handled gracefully (not ghost)."""
         from pubrun.tracker import Run
         monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
         monkeypatch.setattr("pubrun.tracker.get_hardware", lambda c: (_ for _ in ()).throw(RuntimeError("hw broken")))
         run = Run()
-        assert run._outcome == "ghost"
+        # Hardware now runs in a background thread; failure does not promote to ghost.
+        assert run._outcome == "running"
+        assert run.is_active is True
+        # Wait for background thread and verify hardware shows failed state.
+        run._hardware_future_done.wait(timeout=2)
+        assert run.hardware_data.get("capture_state", {}).get("status") == "failed"
+        run.stop()
 
     def test_environment_failure_ghost_mode(self, tmp_path, monkeypatch):
         """get_environment raising promotes to ghost mode."""
