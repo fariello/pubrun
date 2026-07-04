@@ -3,7 +3,7 @@
 - Date / run ID: 20260704-143134
 - Concern: performance
 - Scope: whole project (src/pubrun/)
-- IPD written: plans/pending/2026-07-04-assess-performance.md
+- IPD written: plans/pending/20260704-assess-performance.md
 - Verdict: adequate for performance (with targeted improvements available)
 
 ## Top findings
