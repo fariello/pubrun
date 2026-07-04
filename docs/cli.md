@@ -245,6 +245,26 @@ pubrun mem -w 120             # Memory chart, custom width
 
 ---
 
+### `cpu` — CPU Utilization Chart
+
+Renders the CPU utilization history for a run. Standalone shortcut for the CPU portion of `res`.
+
+```bash
+pubrun cpu [RUN_DIR] [-w WIDTH] [-l LAST] [--average]
+```
+
+---
+
+### `mem` — Memory Utilization Chart
+
+Renders the memory (RSS) utilization history for a run. Standalone shortcut for the memory portion of `res`.
+
+```bash
+pubrun mem [RUN_DIR] [-w WIDTH] [-l LAST] [--average]
+```
+
+---
+
 ### `run` — Import Mode Wrapper
 
 Spawns a child process with `PUBRUN_IMPORT_MODE` set in the environment. Useful for CI pipelines, shell scripts, Slurm submissions, and any case where you want to control pubrun behavior without modifying source code.

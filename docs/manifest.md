@@ -286,9 +286,53 @@ Runtime resource utilization, sampled by a background thread.
 
 | Field | Type | Description |
 |---|---|---|
-| `peak_rss_bytes` | int | Peak resident set size (RAM) in bytes. |
-| `end_rss_bytes` | int | RSS at finalization. |
+| `scope` | string | `"process"` or `"tree"`. Indicates measurement scope. |
+| `peak_rss_bytes` | int | Peak resident set size (RAM) of the main process in bytes. |
+| `end_rss_bytes` | int | RSS of the main process at finalization. |
 | `peak_cpu_percent` | float | Peak CPU utilization percentage. |
+| `peak_tree_rss_bytes` | int \| null | Peak RSS summed across the process tree (only when `scope = "tree"`). |
+| `end_tree_rss_bytes` | int \| null | Tree RSS at finalization (only when `scope = "tree"`). |
+| `capture_state` | object | See [Capture State](#capture-state). |
+
+---
+
+## `data_files`
+
+Provenance-tracked file I/O (populated by `pubrun.open()`).
+
+| Field | Type | Description |
+|---|---|---|
+| `inputs` | list[object] | Files read via `pubrun.open()`. Each entry has `path`, `size_bytes`, `sha256`, `accessed_at_utc`. |
+| `outputs` | list[object] | Files written via `pubrun.open()`. Each entry has `path`, `size_bytes`, `sha256`, `modified_at_utc`. |
+
+---
+
+## `profiling`
+
+Phase-scoped profiling metadata (only present when `[capture.profiling].enabled = true`).
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | bool | Whether profiling was active for this run. |
+| `backend` | string | `"cprofile"` or `"yappi"`. |
+| `profiles` | list[object] | Per-phase profile records: `{"phase": "name", "path": "profile-name.prof"}`. |
+| `capture_state` | object | See [Capture State](#capture-state). |
+
+---
+
+## `pubrun_imports`
+
+Import-mode provenance metadata.
+
+| Field | Type | Description |
+|---|---|---|
+| `selected_mode` | string \| null | The effective import mode (`"auto"`, `"noauto"`, `"nopatch"`, etc.). |
+| `selected_behavior` | object | Behavior flags: `auto_start`, `patch_subprocesses`, `patch_console`, `signal_hooks`. |
+| `selected_by` | string \| null | Who selected the mode (e.g., `"pubrun.noauto"`, `"config:[imports].mode"`). |
+| `selected_source` | string \| null | Where the selection came from (e.g., `"env:PUBRUN_IMPORT_MODE"`). |
+| `selected_at_utc` | float \| null | When the mode was selected. |
+| `conflict_policy` | string | `"ignore"`, `"warn"`, or `"error"`. |
+| `conflicts_detected` | int | Number of conflicting mode requests. |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
 ---

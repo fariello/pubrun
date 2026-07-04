@@ -244,7 +244,9 @@ The execution engine is divided into these key systems:
 - **Configuration Resolver** (`config.py`) — Merges and applies settings from API > env vars > local config > user config > defaults.
 - **Capture Engine** (`tracker.py`) — Orchestrates individual data collection routines, operating gracefully under partial failures. Respects granular behavior flags (patch_subprocesses, patch_console, signal_hooks).
 - **Event Streamer** (`events.py`) — Writes structured execution events to `events.jsonl` with throttling.
-- **Console Manager** (`capture/console.py`) — Tee-style wrapper around standard streams with tqdm-safe carriage return squashing.
+- **Console Manager** (`capture/console.py`) — Tee-style wrapper around standard streams with tqdm-safe carriage return squashing. Includes `resolve_console_mode()` for context-aware mode selection (Jupyter detection, non-TTY override).
+- **Resource Tree Walker** (`capture/resources.py`) — Background resource sampling with optional process-tree scope (`_get_tree_rss_linux`, `_get_tree_rss_darwin`).
+- **Phase Profiler** (`core.py` phase hooks) — Optional cProfile/yappi integration that profiles `pubrun.phase()` blocks and saves per-phase `.prof` files.
 - **Artifact Writer** (`writer.py`) — Creates the run directory and serializes all outputs.
 - **Diagnostics Analyzer** (`pubrun report`) — Evaluates and renders execution metrics from manifests.
 - **Methods Generator** (`pubrun methods`) — Compiles manifest data into prose methodology paragraphs.
