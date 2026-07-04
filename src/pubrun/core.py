@@ -468,19 +468,27 @@ class ProvenanceFileProxy:
 
     def _register_provenance(self) -> None:
         try:
-            sha = None
             size = 0
             if self._path.exists():
                 size = os.path.getsize(self._path)
-                
-            if self._path.exists():
+
+            if "r" in self._mode and "w" not in self._mode and "a" not in self._mode:
+                # Read-only: use the incrementally computed hash (avoids re-reading
+                # the entire file just to get a hash we already have). PERF-07.
+                sha = self._hash.hexdigest()
+            elif self._path.exists():
+                # Write/append mode: we didn't see all data go through our proxy
+                # (e.g. the file may have been written by the underlying object),
+                # so compute the hash from the final file on disk.
                 h = hashlib.sha256()
                 with builtins.open(self._path, "rb") as f:
                     for chunk in iter(lambda: f.read(65536), b""):
                         h.update(chunk)
                 sha = h.hexdigest()
-            
-            if "r" in self._mode:
+            else:
+                sha = None
+
+            if "r" in self._mode and "w" not in self._mode and "a" not in self._mode:
                 record = {
                     "path": str(self._path.resolve()),
                     "size_bytes": size,
