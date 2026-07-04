@@ -95,30 +95,57 @@ def _get_tree_rss_linux() -> int:
 
 
 def _get_tree_rss_darwin() -> int:
-    """Sum RSS across the process tree on macOS via pgrep + ps."""
+    """Sum RSS across the entire process tree on macOS.
+
+    Uses a single `ps -eo pid,ppid,rss` call to get all processes, then
+    walks the tree in Python to find all descendants. Always includes self
+    RSS even if there are no children. (BUG2-01 + BUG2-06)
+    """
     try:
         import subprocess
         from pubrun.capture.subprocesses import disable_spy
-        pid = os.getpid()
-        # Get all descendant PIDs
+        my_pid = os.getpid()
+
+        # Single subprocess call: get pid, ppid, rss for ALL processes
         with disable_spy():
             out = subprocess.check_output(
-                ['pgrep', '-P', str(pid)],
+                ['ps', '-eo', 'pid,ppid,rss'],
                 text=True, stderr=subprocess.DEVNULL
             )
-        child_pids = [int(p) for p in out.strip().split() if p]
-        all_pids = [pid] + child_pids
-        # Get RSS for all PIDs in one ps call
-        with disable_spy():
-            out = subprocess.check_output(
-                ['ps', '-o', 'rss=', '-p', ','.join(str(p) for p in all_pids)],
-                text=True, stderr=subprocess.DEVNULL
-            )
-        total_rss = sum(int(line.strip()) * 1024 for line in out.strip().split('\n') if line.strip())
+
+        # Parse into {pid: (ppid, rss_kb)} map
+        children_of: dict = {}  # ppid -> [pid, ...]
+        rss_of: dict = {}       # pid -> rss_bytes
+        for line in out.strip().split('\n')[1:]:  # skip header
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            try:
+                pid = int(parts[0])
+                ppid = int(parts[1])
+                rss_kb = int(parts[2])
+                rss_of[pid] = rss_kb * 1024
+                children_of.setdefault(ppid, []).append(pid)
+            except (ValueError, IndexError):
+                continue
+
+        # Walk the tree from our PID to collect all descendants
+        total_rss = rss_of.get(my_pid, 0)
+        to_visit = list(children_of.get(my_pid, []))
+        visited = {my_pid}
+        while to_visit:
+            p = to_visit.pop()
+            if p in visited:
+                continue
+            visited.add(p)
+            total_rss += rss_of.get(p, 0)
+            to_visit.extend(children_of.get(p, []))
+
         return total_rss
     except Exception as e:
         logger.debug(f"pubrun failed Mac tree RSS poll: {e}")
-        return 0
+        # Graceful fallback: return at least self RSS
+        return _get_rss_darwin()
 
 
 class ResourceWatcher(threading.Thread):

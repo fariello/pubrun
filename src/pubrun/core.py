@@ -251,6 +251,7 @@ class phase:
         else:
             _handle_inactive(f"pubrun.phase('{self.name}')")
         # Phase-scoped profiling (opt-in via [capture.profiling].enabled)
+        self._started_yappi = False
         if self.run_tracker and self.run_tracker.is_active:
             prof_cfg = self.run_tracker.config.get("capture", {}).get("profiling", {})
             if prof_cfg.get("enabled", False):
@@ -260,10 +261,23 @@ class phase:
                         import cProfile
                         self._profiler = cProfile.Profile()
                         self._profiler.enable()
+                        # Track on Run for orphan cleanup (BUG2-04)
+                        if not hasattr(self.run_tracker, "_active_profilers"):
+                            self.run_tracker._active_profilers = []
+                        self.run_tracker._active_profilers.append(self._profiler)
                     elif backend == "yappi":
                         import yappi  # type: ignore[import-not-found]
-                        yappi.start()
-                        self._profiler = "yappi"
+                        # BUG2-03: guard against concurrent/nested phases
+                        if not getattr(phase, "_yappi_active", False):
+                            yappi.start()
+                            phase._yappi_active = True
+                            self._started_yappi = True
+                            self._profiler = "yappi"
+                        else:
+                            logging.getLogger("pubrun").warning(
+                                "pubrun: yappi already active (nested/concurrent phase); "
+                                f"skipping profiling for phase '{self.name}'"
+                            )
                 except Exception as prof_err:
                     logging.getLogger("pubrun").warning(
                         f"pubrun: profiling backend '{backend}' unavailable: {prof_err}"
@@ -274,18 +288,25 @@ class phase:
         # Stop profiler and dump stats
         if self._profiler and self.run_tracker and self.run_tracker.is_active:
             try:
-                if self._profiler == "yappi":
+                if self._profiler == "yappi" and self._started_yappi:
                     import yappi  # type: ignore[import-not-found]
                     yappi.stop()
+                    phase._yappi_active = False
                     prof_path = self.run_tracker.run_dir / f"profile-{self.name}.prof"
                     stats = yappi.get_func_stats()
                     stats.save(str(prof_path), type="pstat")
                     yappi.clear_stats()
-                else:
+                elif self._profiler != "yappi":
                     # cProfile.Profile instance
                     self._profiler.disable()
                     prof_path = self.run_tracker.run_dir / f"profile-{self.name}.prof"
                     self._profiler.dump_stats(str(prof_path))
+                    # Remove from active list
+                    if hasattr(self.run_tracker, "_active_profilers"):
+                        try:
+                            self.run_tracker._active_profilers.remove(self._profiler)
+                        except ValueError:
+                            pass
                 # Emit event so profile is discoverable
                 if getattr(self.run_tracker, "event_stream", None):
                     self.run_tracker.event_stream.emit(
