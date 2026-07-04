@@ -57,7 +57,6 @@ Thumbs.db
 *.wmv
 
 tmp.txt
-repository-review/
 src/pubrun/COMMIT
 .coverage
 coverage.xml
