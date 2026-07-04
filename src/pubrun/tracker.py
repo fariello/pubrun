@@ -315,7 +315,8 @@ class Run:
 
         # 6. Console tee (monkeypatch — wraps sys.stdout/stderr)
         if _patch_console:
-            console_mode = self.config.get("console", {}).get("capture_mode", "off")
+            from pubrun.capture.console import resolve_console_mode
+            console_mode = resolve_console_mode(self.config)
         else:
             console_mode = "off"
         self.console_interceptor = ConsoleInterceptor(self.run_dir, console_mode)
