@@ -40,6 +40,12 @@ class TqdmSafeTee:
         try:
             # 2. Process strings for log file safely (handling carriage returns aka TQDM interception)
             # Split on \r first to squash progress bar redraws, then process \n for line breaks.
+            # PERF-05: compute timestamp once per write() call, not per line.
+            if self.timestamped:
+                from datetime import datetime, timezone
+                ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
+            else:
+                ts = ""
             segments = data.split('\r')
             for i, segment in enumerate(segments):
                 if i > 0:
@@ -50,9 +56,7 @@ class TqdmSafeTee:
                 for j, line in enumerate(lines):
                     if j < len(lines) - 1:
                         full_line = self._current_buffer + line
-                        if self.timestamped:
-                            from datetime import datetime, timezone
-                            ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
+                        if ts:
                             self.log_file.write(ts + full_line + '\n')
                         else:
                             self.log_file.write(full_line + '\n')
