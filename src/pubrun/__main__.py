@@ -1025,6 +1025,9 @@ def main() -> None:
         print("ASAP")
         sys.exit(0)
 
+    # Primary commands (excluding aliases) for clean error messages.
+    _PRIMARY_COMMANDS: list = []
+
     class _SubcommandAwareArgumentParser(argparse.ArgumentParser):
         def error(self, message: str) -> None:
             subcommand = None
@@ -1043,7 +1046,21 @@ def main() -> None:
                 subparser.print_usage(sys.stderr)
                 sys.stderr.write(f"{self.prog} {subcommand}: error: {message}\n")
                 sys.exit(2)
-                
+
+            # UX-01: Rewrite "invalid choice" errors to show only primary
+            # commands (not aliases) for a cleaner novice experience.
+            if "invalid choice" in message and _PRIMARY_COMMANDS:
+                import re
+                bad = re.search(r"'([^']+)'", message)
+                bad_cmd = bad.group(1) if bad else "?"
+                clean_msg = (
+                    f"argument <command>: unknown command '{bad_cmd}' "
+                    f"(choose from: {', '.join(_PRIMARY_COMMANDS)})"
+                )
+                self.print_usage(sys.stderr)
+                sys.stderr.write(f"{self.prog}: error: {clean_msg}\n")
+                sys.exit(2)
+
             super().error(message)
 
     parser = _SubcommandAwareArgumentParser(
@@ -1055,7 +1072,18 @@ def main() -> None:
     parser.add_argument("--no-color", action="store_true", help="Suppress ANSI color output globally.")
     
     subparsers = parser.add_subparsers(dest="command", title="Available core commands", metavar="<command>")
-    
+
+    # ---------------- Init Subparser (UX-08) ----------------
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Initialize pubrun in the current project (create .pubrun.toml).",
+        description="Create a .pubrun.toml configuration file and display getting-started guidance.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="After init, add 'import pubrun' to your script to begin tracking."
+    )
+    init_parser.add_argument("dest", nargs="?", default=".pubrun.toml",
+                             help="Destination path (default: .pubrun.toml).")
+
     # ---------------- Bug Report Subparser ----------------
     bug_parser = subparsers.add_parser(
         "bug-report",
@@ -1289,9 +1317,15 @@ def main() -> None:
     # ---------------- Diagnostic Flags ----------------
     parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Create an annotated `.pubrun.toml` configuration file.")
     parser.add_argument("--show-config", action="store_true", help="Print the default configuration to the terminal.")
-    parser.add_argument("--info", action="store_true", help="Display system capabilities and pubrun version info.")
+    parser.add_argument("--info", action="store_true", help="Display runtime diagnostics: Python version, pubrun version, import mode, detected config files, and capture capabilities.")
     parser.add_argument("--run-tests", action="store_true", help="Run the built-in test suite and a mock end-to-end script.")
     
+    # UX-01: Build the primary commands list (excluding aliases) for clean errors.
+    _known_aliases = {"feedback", "issue", "tui", "gui"}
+    _PRIMARY_COMMANDS.extend(
+        name for name in subparsers.choices if name not in _known_aliases
+    )
+
     args = parser.parse_args()
     if no_color_present:
         setattr(args, "no_color", True)
@@ -1501,6 +1535,19 @@ def main() -> None:
                 child_proc.terminate()
                 child_proc.wait()
             sys.exit(130)
+
+    elif args.command == "init":
+        dest = getattr(args, "dest", ".pubrun.toml")
+        _create_config(dest)
+        print()
+        print("Getting started:")
+        print("  1. Add 'import pubrun' at the top of your script.")
+        print("  2. Run your script normally — pubrun captures everything.")
+        print("  3. View results: pubrun status")
+        print()
+        print(f"  Config: {dest}")
+        print("  Tip: set capture_mode = \"standard\" in [console] to capture stdout/stderr.")
+        executed = True
 
     if getattr(args, "create_config", False):
         dest = args.create_config

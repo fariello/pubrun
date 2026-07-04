@@ -652,7 +652,11 @@ def render_short_list(runs: List[RunInfo], all_runs: Optional[List[RunInfo]] = N
     Columns: RUN ID, SCRIPT, COMMIT, STARTED, STATUS, EXIT, ELAPSED
     """
     if not runs:
-        return "No runs found."
+        return (
+            "No runs found.\n"
+            "  To start tracking: import pubrun in your script,\n"
+            "  or run: pubrun run -- python your_script.py"
+        )
 
     term_width = _get_terminal_width()
 
@@ -1069,6 +1073,10 @@ def clean_runs(
             return 0
     else:
         to_delete = candidates
+
+    # UX-06: Print summary before deleting (even with -y) so user sees what happened.
+    total_size = sum(_dir_size(r.run_dir) for r in to_delete)
+    print(f"\nDeleting {len(to_delete)} run(s) ({_format_bytes(total_size)})...")
 
     # Delete
     deleted = 0
