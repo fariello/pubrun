@@ -127,7 +127,7 @@ Each capture category is a modular sub-engine responsible for one section of the
 | Category | Manifest Key | Configurable Modes |
 |---|---|---|
 | Environment | `environment` | `allowlist`, `filtered`, `full` |
-| Packages | `packages` | `imported-only`, `top-level-installed`, `full-environment` |
+| Packages | `packages` | `imported-only`, `imported-transitive`, `top-level-installed`, `full-environment` |
 | Subprocesses | `subprocesses` | `enabled = true/false` |
 | Console | `console` | `off`, `basic`, `standard`, `deep` |
 | Git | `git` | depth-based |

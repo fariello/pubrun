@@ -144,7 +144,7 @@ Tracked Python dependencies.
 
 | Field | Type | Description |
 |---|---|---|
-| `mode` | string | `"imported-only"`, `"top-level-installed"`, or `"full-environment"`. |
+| `mode` | string | `"imported-only"`, `"imported-transitive"`, `"top-level-installed"`, or `"full-environment"`. |
 | `records` | list[object] | Package records (see below). |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
