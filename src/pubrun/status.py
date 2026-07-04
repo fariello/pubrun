@@ -599,6 +599,42 @@ def _status_marker(status: str) -> str:
 # Public rendering functions
 # --------------------------------------------------------------------------
 
+def _render_summary(runs: List[RunInfo]) -> str:
+    """Render a 2-line summary: count, date range, status/exit frequencies."""
+    from collections import Counter
+
+    count = len(runs)
+    # Date range (runs are sorted most-recent-first)
+    earliest = None
+    latest = None
+    for r in runs:
+        if r.started_at_utc is not None:
+            if earliest is None or r.started_at_utc < earliest:
+                earliest = r.started_at_utc
+            if latest is None or r.started_at_utc > latest:
+                latest = r.started_at_utc
+
+    date_range = ""
+    if earliest and latest:
+        date_range = f" | {_format_timestamp(earliest)} to {_format_timestamp(latest)}"
+
+    # Status frequencies
+    statuses = Counter(r.status for r in runs)
+    status_parts = [f"{c} {s}" for s, c in statuses.most_common()]
+    status_str = ", ".join(status_parts)
+
+    # Exit code frequencies (non-zero only, to keep it concise)
+    exit_codes = Counter(r.exit_code for r in runs if r.exit_code is not None and r.exit_code != 0)
+    exit_str = ""
+    if exit_codes:
+        exit_parts = [f"exit {code}: {c}" for code, c in exit_codes.most_common(5)]
+        exit_str = " | " + ", ".join(exit_parts)
+
+    line1 = f"{count} runs{date_range}"
+    line2 = f"  {status_str}{exit_str}"
+    return f"{line1}\n{line2}"
+
+
 def render_short_list(runs: List[RunInfo]) -> str:
     """Render a compact table of all runs.
 
@@ -653,6 +689,10 @@ def render_short_list(runs: List[RunInfo]) -> str:
             f"{elapsed:<8}"
         )
         lines.append(line)
+
+    # Append summary
+    lines.append("")
+    lines.append(_render_summary(runs))
 
     return "\n".join(lines)
 
