@@ -419,11 +419,19 @@ class ProvenanceFileProxy:
         self._hash = hashlib.sha256()
         self._bytes_read = 0
         self._closed = False
+        # PERF-08: detect binary mode at construction to skip isinstance per I/O call.
+        self._is_binary = "b" in mode
+
+    def _to_bytes(self, data: Any) -> bytes:
+        """Convert data to bytes for hashing. Skips encode for binary mode."""
+        if self._is_binary:
+            return data
+        return data.encode("utf-8", errors="ignore")
 
     def read(self, size: int = -1) -> Any:
         data = self._file_obj.read(size)
         if data:
-            chunk = data if isinstance(data, bytes) else data.encode("utf-8", errors="ignore")
+            chunk = self._to_bytes(data)
             self._hash.update(chunk)
             self._bytes_read += len(chunk)
         return data
@@ -431,7 +439,7 @@ class ProvenanceFileProxy:
     def readline(self, limit: int = -1) -> Any:
         data = self._file_obj.readline(limit)
         if data:
-            chunk = data if isinstance(data, bytes) else data.encode("utf-8", errors="ignore")
+            chunk = self._to_bytes(data)
             self._hash.update(chunk)
             self._bytes_read += len(chunk)
         return data
@@ -439,7 +447,7 @@ class ProvenanceFileProxy:
     def readlines(self, hint: int = -1) -> Any:
         lines = self._file_obj.readlines(hint)
         for line in lines:
-            chunk = line if isinstance(line, bytes) else line.encode("utf-8", errors="ignore")
+            chunk = self._to_bytes(line)
             self._hash.update(chunk)
             self._bytes_read += len(chunk)
         return lines
@@ -447,7 +455,7 @@ class ProvenanceFileProxy:
     def __next__(self) -> Any:
         try:
             line = self._file_obj.__next__()
-            chunk = line if isinstance(line, bytes) else line.encode("utf-8", errors="ignore")
+            chunk = self._to_bytes(line)
             self._hash.update(chunk)
             self._bytes_read += len(chunk)
             return line
