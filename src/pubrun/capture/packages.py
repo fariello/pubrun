@@ -6,15 +6,19 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
     """Capture installed Python packages via ``importlib.metadata``.
 
     Modes:
-    - ``imported-only``: Only packages already loaded in ``sys.modules``.
+    - ``imported-only``: Only packages already loaded in ``sys.modules`` (default).
     - ``top-level-installed``: All top-level pip distributions.
     - ``full-environment``: Every distribution in the environment.
+
+    .. todo:: Future modes to consider:
+       - ``imported-transitive``: imported packages plus their declared dependencies.
+       - ``full-environment`` with lazy/deferred collection (background thread).
 
     Args:
         config: Resolved pubrun configuration.
     """
     cfg = config.get("capture", {}).get("packages", {})
-    mode = cfg.get("mode", "full-environment")
+    mode = cfg.get("mode", "imported-only")
     
     # 1. Fast-exit if disabled
     if mode == "off":
