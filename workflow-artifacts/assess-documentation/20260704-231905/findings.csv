@@ -1,0 +1,22 @@
+id,severity,remediation_risk,remediation_risk_axis,persona,area,finding,evidence,proposed_action,disposition
+DOC-01,High,Low,n/a,Novice,api.md,"Claimed pubrun tees stdout/stderr by default — wrong (default is now 'off')","docs/api.md NOTE block",Fixed: updated to say default is off,completed
+DOC-02,High,Low,n/a,Novice,README.md,"Same stale claim about default tee behavior","README.md:34",Fixed: updated to reflect off default,completed
+DOC-03,High,Low,n/a,Engineer,configuration.md,"capture_mode default listed as 'standard' — wrong (now 'off')","docs/configuration.md console section",Fixed: changed to 'off',completed
+DOC-04,Medium,Low,n/a,Engineer,configuration.md,"Missing 6 new config keys added today","default.toml vs configuration.md diff",Fixed: added all keys,completed
+DOC-05,Medium,Low,n/a,Engineer,configuration.md,"write_summary default listed as 'true' — actually false","default.toml:256 vs docs",Fixed,completed
+DOC-06,Medium,Low,n/a,Novice,cli.md,"Missing pubrun init command","__main__.py has init; cli.md did not",Fixed: added init section,completed
+DOC-07,Medium,Low,n/a,Power-user,cli.md,"'resources' command listed but renamed to 'res' in 1.3.0","CHANGELOG 1.3.0 + actual --help",Fixed: changed to res,completed
+DOC-08,Medium,Low,n/a,Power-user,cli.md,"'report' listed as primary but renamed to 'show' in 1.3.0","CHANGELOG 1.3.0",Fixed: changed to show,completed
+DOC-09,Medium,Low,n/a,Novice,cli.md,"Missing status summary line feature documentation","status.py _render_summary exists; cli.md didn't mention it",Fixed: added description,completed
+DOC-10,Medium,Low,n/a,Engineer,functional_spec.md,"Missing imported-transitive package mode","packages.py has it; spec didn't",Fixed,completed
+DOC-11,Medium,Low,n/a,Engineer,functional_spec.md,"ResourceWatcher missing scope/tree documentation","resources.py has scope param; spec didn't",Fixed: added 16.2 scope config,completed
+DOC-12,Medium,Low,n/a,Engineer,functional_spec.md,"Missing phase-scoped profiling section","core.py has profiling; spec didn't",Fixed: added section 16b,completed
+DOC-13,Medium,Low,n/a,Engineer,manifest.md,"Missing imported-transitive in packages.mode enum","packages.py supports it; manifest.md didn't list it",Fixed,completed
+DOC-14,Medium,Low,n/a,Engineer,architecture.md,"Missing imported-transitive in packages modes table","architecture.md:130",Fixed,completed
+DOC-15,Medium,Low,n/a,Novice,api.md,"Missing print/open/subprocess/popen from API documentation","__all__ lists them; api.md didn't",Fixed: added section 8,completed
+DOC-16,High,Low,n/a,Stakeholder,CHANGELOG.md,"No [Unreleased] entries for today's substantial changes","CHANGELOG.md:9 was empty",Fixed: added comprehensive section,completed
+DOC-17,Low,Low,n/a,Novice,README.md,"'thirteen commands' should be 'fourteen' (init added)","README.md:123",Fixed,completed
+DOC-18,Low,Low,n/a,Engineer,functional_spec.md,"Section 3.2 'MUST NOT wrap stdout unless configured' — now correct","functional_spec.md:95",No action (spec was ahead of code; code caught up),not_applicable
+DOC-19,Low,Low,n/a,Engineer,architecture.md,"System components missing resolve_console_mode and profiling","architecture.md section 21",Update component list,proposed
+DOC-20,Low,Low,n/a,Novice,cli.md,"cpu and mem not documented as standalone sections","cli.md only mentions under res",Add standalone sections,proposed
+DOC-21,Low,Low,n/a,Engineer,manifest.md,"Missing profiling/data_files/pubrun_imports/resources.scope fields","manifest.md vs to_manifest_dict()",Add missing sections,proposed
