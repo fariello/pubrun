@@ -63,17 +63,22 @@ No change proposed to this architecture. It is correct.
 | CON-02 | Medium | Low | Engineer | Jupyter | No detection of IPython/Jupyter kernel — tee wraps Jupyter's custom stdout wrapper, risking double-wrapping or output corruption | `capture/console.py:125-130` — always wraps regardless of context |
 | CON-03 | Low | Low | Power-user | Config | No way to differentiate capture behavior between TTY and non-TTY contexts | No config key exists for context-specific behavior |
 | CON-04 | Low | Low | Novice | Docs/CHANGELOG | Changing the default is a user-visible behavior change that needs clear migration guidance | N/A — documentation gap |
+| CON-05 | Low | Low | Engineer | tracker.py + TUI | `tracker.py:318` reads `capture_mode` directly without context resolution; TUI widget at `tui/widgets/config.py:101` hardcodes fallback `"standard"` | `tracker.py:318`, `tui/widgets/config.py:101` |
+| CON-06 | Low | Low | QA | Tests | At least 2 tests (`test_faulthandler_segfault_captured`, `test_excepthook_stream_flushing`) assume capture is on by default and will fail | `tests/test_cli.py:821,847` — assert `stderr.log`/`stdout.log` exist without explicit capture_mode |
 
 ## Proposed changes (ordered, validatable)
 
 | Step | Source | Change | Files | Remediation Risk | Validation |
 |------|--------|--------|-------|------------------|------------|
 | 1 | CON-01 | Change `capture_mode` default from `"standard"` to `"off"` in `default.toml`. | `src/pubrun/resources/default.toml` | Low | `import pubrun` no longer wraps stdout; verify with `assert sys.stdout is original_stdout` after import. Existing tests that depend on capture must pass config override. |
-| 2 | CON-02 | Add Jupyter/IPython detection in `ConsoleInterceptor.start()`. If `IPython` is in `sys.modules` and has a running kernel, skip tee installation even if `capture_mode != "off"` — unless the user explicitly set capture_mode (not just the default). | `src/pubrun/capture/console.py` | Low | Test: mock IPython kernel detection, verify tee is not installed. Test: explicit `capture_mode = "standard"` in config overrides detection. |
-| 3 | CON-03 | Add `[console].non_tty_mode` config key: `"inherit"` (default, same as capture_mode), `"off"`, or `"basic"`. When stdout is not a TTY and non_tty_mode is set, use that mode instead of capture_mode. | `src/pubrun/resources/default.toml`, `src/pubrun/capture/console.py` | Low | Test: mock `isatty() = False`, verify non_tty_mode is applied. |
+| 2 | CON-02 | Add `resolve_console_mode()` function with Jupyter/IPython detection. Place in `capture/console.py`. When Jupyter is detected and user hasn't explicitly opted in, return the `jupyter_mode` value (default "off"). | `src/pubrun/capture/console.py` | Low | Test: mock IPython kernel detection, verify tee is not installed. Test: explicit `capture_mode = "standard"` in config overrides detection. |
+| 3 | CON-03 | Add `[console].non_tty_mode` config key: `"inherit"` (default, same as capture_mode), `"off"`, or `"basic"`. `resolve_console_mode()` checks `sys.stdout.isatty()` and applies override. | `src/pubrun/resources/default.toml`, `src/pubrun/capture/console.py` | Low | Test: mock `isatty() = False`, verify non_tty_mode is applied. |
 | 4 | CON-02 | Add `[console].jupyter_mode` config key: `"off"` (default) or any valid capture_mode. This is what's used when Jupyter is detected. Users who want capture in notebooks set `jupyter_mode = "standard"`. | `src/pubrun/resources/default.toml`, `src/pubrun/capture/console.py` | Low | Test: with Jupyter detected and `jupyter_mode = "standard"`, verify capture activates. |
-| 5 | CON-04 | Update CHANGELOG.md with the default change. Add migration note: "If you relied on automatic stdout/stderr capture, add `capture_mode = \"standard\"` to your `.pubrun.toml`." | `CHANGELOG.md` | Low | Human review. |
-| 6 | CON-04 | Update `docs/configuration.md` with the new `non_tty_mode` and `jupyter_mode` keys and the rationale for the default change. | `docs/configuration.md` | Low | Human review. |
+| 5 | CON-05 | Update `tracker.py` `_bootstrap_engines()` to call `resolve_console_mode(self.config)` instead of reading `capture_mode` directly. | `src/pubrun/tracker.py` | Low | Existing console tests pass with explicit override. |
+| 6 | CON-05 | Update TUI config widget fallback from `"standard"` to `"off"` at `tui/widgets/config.py:101`. | `src/pubrun/tui/widgets/config.py` | Low | TUI displays correct default. |
+| 7 | CON-04 | Update CHANGELOG.md with the default change. Add migration note: "If you relied on automatic stdout/stderr capture, add `capture_mode = \"standard\"` to your `.pubrun.toml`." | `CHANGELOG.md` | Low | Human review. |
+| 8 | CON-04 | Update `docs/configuration.md` with the new `non_tty_mode` and `jupyter_mode` keys and the rationale for the default change. | `docs/configuration.md` | Low | Human review. |
+| 9 | CON-06 | Update tests that assume capture is on by default: explicitly pass `console={"capture_mode": "standard"}` to `start()` in tests that assert `stdout.log`/`stderr.log` existence. | `tests/test_cli.py` (and any others) | Low | Full regression green. |
 
 ## Deferred / out of scope (with reason)
 
@@ -88,6 +93,18 @@ No change proposed to this architecture. It is correct.
   considered but deferred — users in CI can set `capture_mode = "off"` in their
   CI config or via `PUBRUN_PROFILE`. Adding yet another context key is over-scope
   for now. Revisit if users ask for it.
+
+## Interaction with `pubrun.print()`
+
+Note: `pubrun.print()` (the explicit API in `core.py:380-416`) writes to
+`stdout.log` *independently* of the console tee. When `capture_mode = "off"`:
+- The implicit tee is NOT installed (sys.stdout is not wrapped).
+- But `pubrun.print()` still writes to `stdout.log` via direct file open.
+
+This is **correct and intentional**: the explicit API is opt-in by usage (you
+called `pubrun.print()`, so you want it logged). The implicit tee is opt-in by
+config. No change needed here — just documenting the interaction so it's not
+mistaken for a bug during implementation.
 
 ## Implementation notes
 
@@ -157,13 +174,19 @@ def _resolve_console_mode(config: dict) -> str:
 1. **Version bump**: This is technically a breaking change for users who rely on
    the implicit capture. Does this warrant a minor bump (1.4.0) or a major (2.0)?
    Recommendation: minor, with clear CHANGELOG migration note, since the fix is
-   one line in `.pubrun.toml`.
+   one line in `.pubrun.toml`. The user base is small and known; direct
+   notification is feasible.
 2. **Should `import pubrun.auto` (explicit auto mode) also default to "off"
    for capture?** Recommendation: yes — the import mode controls auto-start and
    hooks, not capture depth. Capture depth is always controlled by `[console]`.
-3. **Should we emit a one-time info log** when capture_mode is "off" suggesting
-   users can enable it? Recommendation: no — that's spammy and violates
-   zero-footprint. Users who want it will find it in docs.
+   (Resolved: no code change needed — auto.py uses the same config resolution.)
+3. ~~Should we emit a one-time info log when capture_mode is "off"?~~
+   **Resolved: No.** Spammy, violates zero-footprint.
+4. **Interaction with `pubrun run` CLI**: when `pubrun run -- python script.py`
+   is used, should it override capture_mode to "standard" for the child process
+   (since the user is explicitly asking pubrun to manage the run)? Or respect
+   the config as-is? Recommendation: respect config — `pubrun run` should not
+   have hidden magic that differs from `import pubrun`.
 
 ## Approval and execution gate
 
