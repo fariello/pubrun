@@ -494,6 +494,14 @@ class Run:
             self.resource_watcher.stop()
         if self.event_stream:
             self.event_stream.close()
+        # BUG2-04: Disable any orphaned profilers (phase entered without exit).
+        for profiler in getattr(self, "_active_profilers", []):
+            try:
+                profiler.disable()
+            except Exception:
+                pass
+        if hasattr(self, "_active_profilers"):
+            self._active_profilers.clear()
         # Restore original signal handlers so pubrun leaves no footprint
         if self.signal_capture:
             self.signal_capture.uninstall()
