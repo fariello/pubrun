@@ -31,7 +31,7 @@ That's it. No frameworks, no heavy integrations, no syntax hijacking.
 When the script exits, `pubrun` silently generates a structured, lightweight footprint in your local `./runs/` directory.
 
 > [!NOTE]
-> **Console capture**: By default, `pubrun` tees `stdout` and `stderr` to log files in the run directory. Your terminal output is unchanged, but a copy is saved alongside the manifest. If your script produces very high output volume, you can disable this with `capture_mode = "off"` in `.pubrun.toml` or via `pubrun.start(console={"capture_mode": "off"})`. See [Configuration](https://github.com/fariello/pubrun/blob/main/docs/configuration.md) for details.
+> **Console capture**: By default, `pubrun` does NOT wrap stdout/stderr (`capture_mode = "off"`). To enable output logging, set `capture_mode = "standard"` in `.pubrun.toml` or via `pubrun.start(console={"capture_mode": "standard"})`. When enabled, your terminal output is unchanged but a timestamped copy is saved alongside the manifest. See [Configuration](https://github.com/fariello/pubrun/blob/main/docs/configuration.md) for details.
 
 See [CLI Reference](https://github.com/fariello/pubrun/blob/main/docs/cli.md) and [API Reference](https://github.com/fariello/pubrun/blob/main/docs/api.md) for full details.
 
@@ -120,7 +120,7 @@ pubrun methods --format latex
 
 ## CLI Reference
 
-The `pubrun` CLI (and its convenient shorthand alias `pbr`) provides thirteen commands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
+The `pubrun` CLI (and its convenient shorthand alias `pbr`) provides fourteen commands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
 
 ### `pubrun bug-report`
 Opens the GitHub issue tracker and prints environment diagnostics for copy-pasting.

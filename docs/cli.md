@@ -184,13 +184,15 @@ pubrun methods ./runs/pubrun-train-20260509-a1b2 --format latex
 
 ---
 
-### `report` — Diagnostic Viewer
+### `show` — Diagnostic Viewer
 
 Renders a human-readable diagnostic summary of one or more runs, including timing, hardware, dependencies, and codebase drift.
 
 ```bash
-pubrun report [RUN_DIR ...] [--basic|--standard|--deep]
+pubrun show [RUN_DIR ...] [--basic|--standard|--deep]
 ```
+
+**Alias:** `report` (backward-compatible)
 
 - Pass multiple directories to evaluate them sequentially.
 - If the manifest references a `meta_ref`, the parent context is hydrated automatically.
@@ -221,22 +223,24 @@ pubrun rerun ./runs/pubrun-A | bash
 
 ---
 
-### `resources` — Resource Monitoring Graphs
+### `res` — Resource Monitoring Graphs
 
-Renders ASCII or Unicode graphs in the terminal showing live CPU and memory utilization history over the execution lifecycle of a specific run.
+Renders ASCII or Unicode graphs in the terminal showing CPU and memory utilization history over the execution lifecycle of a specific run.
 
 ```bash
-pubrun resources [RUN_DIR]
+pubrun res [RUN_DIR] [-w WIDTH] [-l LAST] [--average]
 ```
 
 - If `RUN_DIR` is omitted, automatically uses the most recent run in `./runs/`.
-- Parses log events from `events.jsonl` to render utilization timelines.
+- Parses resource_sample events from `events.jsonl` to render utilization timelines.
 
-**Aliases:** `monitor`, `chart`, `stats`
+The `cpu` and `mem` commands show individual charts; `res` shows both.
 
 **Example:**
 ```bash
-pubrun resources ./runs/pubrun-train-20260509-a1b2
+pubrun res ./runs/pubrun-train-20260509-a1b2
+pubrun cpu                    # CPU chart only (most recent run)
+pubrun mem -w 120             # Memory chart, custom width
 ```
 
 ---

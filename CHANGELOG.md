@@ -8,6 +8,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **`pubrun init` command**: Creates `.pubrun.toml` and prints getting-started guidance.
+- **Process-tree resource capture**: `[capture.resources].scope = "tree"` sums RSS/CPU across all child processes (Linux /proc walk, macOS ps-based tree walk).
+- **Phase-scoped profiling**: `[capture.profiling].enabled = true` profiles `pubrun.phase()` blocks via cProfile or yappi. Saves `profile-<phase>.prof` per phase.
+- **`imported-transitive` package mode**: Records imported packages plus their declared dependencies (one level deep) with `source` and `required_by` fields.
+- **Status summary line**: `pubrun status` ends with a colored summary showing run count, date range, status frequencies, and non-zero exit codes. Reflects full run set even with `-n` limit.
+- **`[console].non_tty_mode`**: Override capture behavior when stdout is piped/redirected.
+- **`[console].jupyter_mode`**: Auto-disable console capture in Jupyter notebooks (default `"off"`).
+- **`[capture.git].check_dirty`**: Skip `git status --porcelain` for faster startup on large repos.
+- **`[events].flush_interval_events`**: Buffer non-critical events (default 100) for throughput.
+- **Secret scanning CI**: `gitleaks` workflow on push/PR + `.gitleaksignore`.
+- **Dependency audit CI**: `pip-audit` workflow on push/PR.
+- **Pre-commit framework**: gitleaks + hygiene hooks (large-file guard, whitespace, YAML/TOML check).
+
+### Changed
+- **BREAKING: `capture_mode` default is now `"off"`**. `import pubrun` no longer wraps stdout/stderr without explicit opt-in. To restore the old behavior, add `capture_mode = "standard"` to `.pubrun.toml`. Jupyter/IPython is auto-detected and capture is suppressed.
+- **Hardware detection deferred to background thread**: Import/startup is ~200-500ms faster. Hardware data appears in the manifest after the thread completes; crash-safety manifest shows `pending` until then.
+- **Event stream buffering**: Non-critical events are buffered (100 events) before flushing. Critical events (annotations, phases) still flush immediately.
+- **Default config and regex caching**: `load_default_config()` cached at module level; redaction regex compiled once.
+- **Console tee timestamps**: Computed once per `write()` call, not per line.
+- **Script hash gated by size**: Files >= 1MB skip SHA-256 at startup.
+
+### Fixed
+- **macOS RSS**: Reverted from `resource.getrusage` (peak only) to `ps -o rss=` (current RSS) for accurate polling. Tree mode uses `ps -eo pid,ppid,rss`.
+- **`start()` race condition**: Double-checked locking prevents concurrent threads from creating duplicate Runs.
+- **ProvenanceFileProxy**: Uses incremental hash for read-mode files (no redundant re-read); added `write()`/`writelines()` for write-mode hash accuracy.
+- **Hardware manifest staleness**: Background thread re-writes startup manifest after hardware data is collected.
+- **Event stream serialization errors**: Non-serializable payloads log at warning level (not debug).
+- **SubprocessSpy records**: Cleared on uninstall to prevent cross-run leakage; saved before clearing.
+- **Event stream migration**: Guarded emit after failed directory migration.
+- **Orphaned profilers**: Disabled in `_finalize_state()` if phase entered without exit.
+- **yappi concurrent guard**: Nested/concurrent phases with yappi log a warning and skip.
+
 ## [1.3.1] - 2026-06-24
 
 ### Changed
