@@ -60,18 +60,84 @@ def _get_rss_darwin() -> int:
         return 0
 
 
+def _get_tree_rss_linux() -> int:
+    """Sum RSS across the process tree on Linux via /proc."""
+    try:
+        pid = os.getpid()
+        total_rss = 0
+        # Collect self + all descendants
+        pids_to_check = [pid]
+        visited = set()
+        while pids_to_check:
+            p = pids_to_check.pop()
+            if p in visited:
+                continue
+            visited.add(p)
+            # Read this process's RSS
+            try:
+                with open(f'/proc/{p}/statm', 'r') as f:
+                    pages = int(f.read().split()[1])
+                    total_rss += pages * os.sysconf("SC_PAGE_SIZE")
+            except (OSError, IndexError, ValueError):
+                continue
+            # Find children of this process
+            try:
+                children_path = f'/proc/{p}/task/{p}/children'
+                with open(children_path, 'r') as f:
+                    child_pids = [int(c) for c in f.read().split() if c]
+                    pids_to_check.extend(child_pids)
+            except (OSError, ValueError):
+                pass
+        return total_rss
+    except Exception as e:
+        logger.debug(f"pubrun failed Linux tree RSS poll: {e}")
+        return 0
+
+
+def _get_tree_rss_darwin() -> int:
+    """Sum RSS across the process tree on macOS via pgrep + ps."""
+    try:
+        import subprocess
+        from pubrun.capture.subprocesses import disable_spy
+        pid = os.getpid()
+        # Get all descendant PIDs
+        with disable_spy():
+            out = subprocess.check_output(
+                ['pgrep', '-P', str(pid)],
+                text=True, stderr=subprocess.DEVNULL
+            )
+        child_pids = [int(p) for p in out.strip().split() if p]
+        all_pids = [pid] + child_pids
+        # Get RSS for all PIDs in one ps call
+        with disable_spy():
+            out = subprocess.check_output(
+                ['ps', '-o', 'rss=', '-p', ','.join(str(p) for p in all_pids)],
+                text=True, stderr=subprocess.DEVNULL
+            )
+        total_rss = sum(int(line.strip()) * 1024 for line in out.strip().split('\n') if line.strip())
+        return total_rss
+    except Exception as e:
+        logger.debug(f"pubrun failed Mac tree RSS poll: {e}")
+        return 0
+
+
 class ResourceWatcher(threading.Thread):
-    def __init__(self, run_tracker: Any, interval_seconds: float, max_failures: int = 3):
+    def __init__(self, run_tracker: Any, interval_seconds: float, max_failures: int = 3,
+                 scope: str = "process"):
         super().__init__(daemon=True)
         self.run_tracker = run_tracker
         self.interval = float(interval_seconds)
         self.max_failures = max_failures
+        self._scope = scope
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         
         self.peak_rss_bytes = 0
         self.end_rss_bytes = 0
         self.peak_cpu_percent = 0.0
+        # Tree-level metrics (only populated when scope="tree")
+        self.peak_tree_rss_bytes = 0
+        self.end_tree_rss_bytes = 0
         self._last_times = None
         self._last_clock = None
         self._sys_plat = sys.platform
@@ -116,9 +182,19 @@ class ResourceWatcher(threading.Thread):
             logger.debug(f"pubrun failed CPU poll: {e}")
             return 0.0
 
+    def _poll_tree_rss(self) -> int:
+        """Poll the total RSS across the process tree."""
+        if self._sys_plat.startswith("linux"):
+            return _get_tree_rss_linux()
+        elif self._sys_plat == "darwin":
+            return _get_tree_rss_darwin()
+        # Windows tree not yet implemented; return 0 (graceful fallback).
+        return 0
+
     def _update_metrics(self) -> None:
         rss = self._poll_rss()
         cpu_pct = self._poll_cpu()
+        tree_rss = self._poll_tree_rss() if self._scope == "tree" else 0
         
         updated = False
         
@@ -135,10 +211,16 @@ class ResourceWatcher(threading.Thread):
                 
             if cpu_pct > self.peak_cpu_percent:
                 self.peak_cpu_percent = cpu_pct
+
+            if tree_rss > 0 and tree_rss > self.peak_tree_rss_bytes:
+                self.peak_tree_rss_bytes = tree_rss
             
+        payload = {"rss_bytes": rss, "cpu_percent": cpu_pct}
+        if tree_rss > 0:
+            payload["tree_rss_bytes"] = tree_rss
         if updated or cpu_pct > 0:
             if getattr(self.run_tracker, "event_stream", None):
-                self.run_tracker.event_stream.emit("resource_sample", payload={"rss_bytes": rss, "cpu_percent": cpu_pct})
+                self.run_tracker.event_stream.emit("resource_sample", payload=payload)
 
     def stop(self) -> None:
         """Signal the polling thread to stop, wait for it, and take one final measurement."""
@@ -151,10 +233,15 @@ class ResourceWatcher(threading.Thread):
         if not self.is_alive():
             self._update_metrics()
             end_rss = self._poll_rss()
+            end_tree_rss = self._poll_tree_rss() if self._scope == "tree" else 0
             with self._lock:
                 self.end_rss_bytes = end_rss
                 if self.end_rss_bytes > self.peak_rss_bytes:
                     self.peak_rss_bytes = self.end_rss_bytes
+                if end_tree_rss > 0:
+                    self.end_tree_rss_bytes = end_tree_rss
+                    if end_tree_rss > self.peak_tree_rss_bytes:
+                        self.peak_tree_rss_bytes = end_tree_rss
 
     def to_manifest_dict(self) -> Dict[str, Any]:
         """Build the ``resources`` manifest section dict."""
@@ -162,10 +249,17 @@ class ResourceWatcher(threading.Thread):
             peak_rss = self.peak_rss_bytes
             end_rss = self.end_rss_bytes
             peak_cpu = self.peak_cpu_percent
-        return {
+            peak_tree = self.peak_tree_rss_bytes
+            end_tree = self.end_tree_rss_bytes
+        result: Dict[str, Any] = {
+            "scope": self._scope,
             "peak_rss_bytes": peak_rss if peak_rss > 0 else None,
             "end_rss_bytes": end_rss if end_rss > 0 else None,
             "peak_cpu_percent": peak_cpu if peak_cpu > 0 else None,
             "capture_state": {"status": "complete"}
         }
+        if self._scope == "tree":
+            result["peak_tree_rss_bytes"] = peak_tree if peak_tree > 0 else None
+            result["end_tree_rss_bytes"] = end_tree if end_tree > 0 else None
+        return result
 

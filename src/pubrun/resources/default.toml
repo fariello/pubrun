@@ -247,12 +247,35 @@ capture_cpu_fp_precision = false
 # When enabled, a background thread samples CPU and memory usage.
 depth = "standard"
 
+# What to measure: the main process only, or the entire process tree (parent +
+# all child processes). Tree mode is useful for multiprocessing/Dask/Ray workloads
+# where the main process is a thin orchestrator.
+# Values: "process" (default) | "tree"
+scope = "process"
+
 # Sampling interval in seconds. Shorter intervals give finer data but increase
 # overhead and events.jsonl size.
 sample_interval_seconds = 15
 
 # Kill the background thread after this many consecutive read failures.
 max_consecutive_failures = 3
+
+
+[capture.profiling]
+# -----------------------------------------------------------------------------
+# Phase-scoped profiling (opt-in).
+# When enabled, pubrun.phase() blocks are profiled and stats saved to the run dir.
+# -----------------------------------------------------------------------------
+
+# Master switch. Must be explicitly enabled.
+enabled = false
+
+# Profiling backend.
+# Values:
+#   "cprofile" - stdlib cProfile (zero dependencies, ~30-50% overhead within phase).
+#   "yappi"    - requires `pip install yappi` (~10-20% overhead, wall+CPU time).
+# If the selected backend is unavailable, logs a warning and skips.
+backend = "cprofile"
 
 
 [capture.signals]
