@@ -12,6 +12,14 @@ Fix bugs introduced in today's new feature implementations. This is a focused
 follow-up to the earlier bugs assessment, targeting only the code added since
 the first bugs IPD was executed.
 
+## Project conventions discovered (Step 0)
+
+- Pending-plans location: `.agents/plans/pending/` (YYYYMMDD-slug.md)
+- Stack: Python 3.8+, zero runtime deps except tomli on <3.11
+- Guiding principles: Universal fallback (KISS, general case, honest docs)
+- Domain invariant: pubrun must never crash the host script. Failures in tree
+  RSS or profiling must degrade gracefully (log + skip), never raise.
+
 ## Findings
 
 | ID | Severity | Remediation Risk | Persona | Area | Finding | Evidence (file:line) |
@@ -28,10 +36,9 @@ the first bugs IPD was executed.
 
 | Step | Source finding IDs | Change | Files | Remediation Risk | Validation |
 |------|-------------------|--------|-------|------------------|------------|
-| 1 | BUG2-01 | On macOS, use recursive `pgrep` or walk children iteratively: call `pgrep -P` for each discovered child PID to find grandchildren. Or use a single `ps -eo pid,ppid` and filter the tree in Python. | `capture/resources.py` | Low | Test: spawn a child that spawns a grandchild; verify tree RSS includes all 3. |
-| 2 | BUG2-06 | When `pgrep -P` fails (no children), fall back to returning just the self RSS via `_get_rss_darwin()` instead of 0. Restructure: always include self RSS, then add children's RSS on top. | `capture/resources.py` | Low | Test: process with no children, verify tree RSS == self RSS. |
-| 3 | BUG2-03 | For yappi backend, track a module-level `_yappi_active` flag and skip `yappi.start()` if already running (nested/concurrent phases). Or use cProfile per-phase instances only (yappi doesn't support per-phase easily). Add a warning if concurrent phase detected with yappi. | `core.py` | Low | Test: nested phases with yappi; verify no crash. |
-| 4 | BUG2-04 | Add an atexit or weakref-based safety net: if a profiler was enabled but never disabled (orphaned phase), disable it during `_finalize_state()`. | `tracker.py` or `core.py` | Low | Test: enter phase without exit; verify profiler stopped at run.stop(). |
+| 1 | BUG2-01, BUG2-06 | Rewrite `_get_tree_rss_darwin()` to: (a) always start with self RSS via `_get_rss_darwin()`; (b) use `ps -eo pid,ppid,rss` once to get all processes, then filter in Python for descendants of our PID. This solves both the grandchildren problem (full tree walk in Python) and the no-children fallback (self RSS is always included). Single subprocess call regardless of tree depth. | `capture/resources.py` | Low | Test: process with no children → tree RSS == self RSS. Test (if feasible): spawn child + grandchild → tree includes all. |
+| 2 | BUG2-03 | For yappi backend, add a module-level `_yappi_active: bool = False` guard. In `phase.__enter__`: if `_yappi_active` is True, log a warning and skip (don't call `yappi.start()` again). In `__exit__`: only call `yappi.stop()` if this phase instance started it. This prevents interference from concurrent or nested phases. | `core.py` | Low | Test: nested `pubrun.phase()` blocks with yappi enabled; verify no crash and outer phase profile is complete. |
+| 3 | BUG2-04 | Track active profilers on the Run instance (`self._active_profilers: List[cProfile.Profile]`). In `_finalize_state()`, disable any still-enabled profilers. This handles orphaned `phase.__enter__()` calls that never reached `__exit__()`. | `tracker.py` + `core.py` | Low | Test: `p = pubrun.phase("x"); p.__enter__()` without `__exit__`; call `run.stop()`; verify profiler disabled and no resource leak. |
 
 ## Deferred / out of scope
 
@@ -41,11 +48,17 @@ the first bugs IPD was executed.
 
 ## Required tests / validation
 
-1. macOS tree RSS with grandchildren (platform-skip on non-macOS).
-2. No-children fallback: tree RSS equals self RSS.
-3. Yappi concurrent/nested phase guard.
-4. Orphaned profiler cleanup on finalization.
-5. Full regression: 583+ tests green.
+1. **macOS tree RSS no-children**: mock `ps -eo pid,ppid,rss` to return only self;
+   verify `_get_tree_rss_darwin()` returns self RSS (not 0). Platform-skip on non-macOS.
+2. **macOS tree RSS with descendants**: mock `ps -eo pid,ppid,rss` with a 3-level
+   tree; verify sum includes all descendants.
+3. **Yappi concurrent guard**: enable yappi profiling, enter two nested
+   `pubrun.phase()` blocks; verify no `yappi.YappiError` and outer profile saved.
+4. **Orphaned profiler cleanup**: call `phase.__enter__()` without `__exit__()`;
+   call `run.stop()`; verify no `cProfile.Profile` remains enabled.
+5. **Domain invariant**: tree RSS failure (mock subprocess to raise) must not
+   propagate — returns 0 or self RSS gracefully.
+6. **Full regression**: 583+ tests green.
 
 ## Approval and execution gate
 
