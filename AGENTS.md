@@ -11,3 +11,7 @@ This repository includes reusable agent workflows under `.agents/workflows/`. Th
 
 Proposals are dated Implementation Plan Documents (IPDs) in `.agents/plans/pending/`, named `YYYYMMDD-<slug>.md`. They are reviewed (optionally via the `plan-review` workflow), approved by a human, executed, then moved to `.agents/plans/executed/`. This workflow is NOT auto-executed; human approval gates execution.
 <!-- PLAN-LIFECYCLE:END -->
+
+## Doc-sync discipline
+
+After any session that changes user-visible behavior (new config keys, changed defaults, new CLI commands, new API functions), run `/assess documentation` to verify docs match the implementation. The documentation lens requires cross-referencing every claim against the actual code — this catches stale defaults, missing keys, and renamed commands that manual review misses.
