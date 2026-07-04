@@ -46,6 +46,38 @@ and user-friendly with respect to STDIN/STDOUT interception. Specifically:
 This should be a dedicated `/assess-*` pass (likely assess-bugs or assess-ui-ux) focused
 on the STDIN/STDOUT surface before the next release.
 
+### Process-tree resource capture and profiling
+
+Two related capabilities that are currently missing:
+
+**1. Total process-tree RAM and CPU usage**
+
+The current `ResourceWatcher` tracks only the main process (`os.getpid()`). For
+workloads that spawn child workers (multiprocessing, Dask, Ray, subprocess pipelines),
+the reported peak RSS drastically underestimates actual resource usage.
+
+Proposed:
+- Walk `/proc/<pid>/task/` or use platform APIs to sum RSS/CPU across the process tree.
+- On Linux: iterate `/proc/<pid>/children` recursively or use cgroups v2 `memory.current`.
+- On macOS: `pgrep -P <pid>` or `proc_listchildpids` via ctypes.
+- Config: `[capture.resources].scope = "process" | "tree"` (default `"process"`).
+- Must work with zero dependencies using only stdlib + /proc / platform APIs.
+
+**2. Profiling integration**
+
+Allow pubrun to capture a profiling snapshot (cProfile, py-spy flamegraph, or
+similar) and save it to the run directory for post-hoc analysis.
+
+Proposed:
+- `[capture.profiling].enabled = false` (opt-in only).
+- `[capture.profiling].backend = "cprofile" | "pyspy" | "yappi"` etc.
+- `cprofile` backend uses stdlib `cProfile` — zero dependencies.
+- `pyspy` / `yappi` / other backends require the user to install the tool;
+  pubrun detects availability at runtime and logs a clear error if missing.
+- Output: `profile.prof` (pstats-compatible) or `flamegraph.svg` in the run dir.
+- **Any backend that requires a dependency MUST be opt-in only** — never auto-install,
+  never fail the run if the tool is absent (just log and skip).
+
 ### `summary.txt` Generation (`[logging].write_summary`)
 
 **Removed.** A human-readable glance file was planned but is superseded by:
