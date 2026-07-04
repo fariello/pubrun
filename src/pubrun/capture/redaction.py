@@ -12,16 +12,28 @@ DEFAULT_SECRET_REGEX = (
     r'|conn_str|connection_string|database_url|dsn|signing|bearer)'
 )
 
+# Compiled pattern cache: keyed by pattern string to avoid re.compile() per call.
+_PATTERN_CACHE: Dict[str, re.Pattern] = {}
+
 
 def _get_secret_pattern(config: Optional[Dict[str, Any]] = None) -> re.Pattern:
-    """Returns the compiled secret-detection regex from config, or the default."""
+    """Returns the compiled secret-detection regex from config, or the default.
+
+    Results are cached by pattern string so re.compile() is called at most once
+    per unique pattern across the lifetime of the process.
+    """
     if config:
         pattern_str = config.get("redaction", {}).get(
             "sensitive_keys_regex", DEFAULT_SECRET_REGEX
         )
     else:
         pattern_str = DEFAULT_SECRET_REGEX
-    return re.compile(pattern_str)
+    cached = _PATTERN_CACHE.get(pattern_str)
+    if cached is not None:
+        return cached
+    compiled = re.compile(pattern_str)
+    _PATTERN_CACHE[pattern_str] = compiled
+    return compiled
 
 
 def _get_representation(config: Optional[Dict[str, Any]] = None) -> str:

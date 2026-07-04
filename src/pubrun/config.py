@@ -40,10 +40,20 @@ def _read_package_resource(package: str, resource: str) -> str:
         return importlib.resources.read_text(package, resource, encoding="utf-8")
 
 
+_DEFAULT_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+
+
 def load_default_config() -> Dict[str, Any]:
-    """Load the built-in ``default.toml`` shipped with the package."""
-    content = _read_package_resource("pubrun.resources", "default.toml")
-    return tomllib.loads(content)
+    """Load the built-in ``default.toml`` shipped with the package.
+
+    The result is cached at module level since default.toml never changes
+    at runtime. Returns a deep copy to prevent caller mutation of the cache.
+    """
+    global _DEFAULT_CONFIG_CACHE
+    if _DEFAULT_CONFIG_CACHE is None:
+        content = _read_package_resource("pubrun.resources", "default.toml")
+        _DEFAULT_CONFIG_CACHE = tomllib.loads(content)
+    return copy.deepcopy(_DEFAULT_CONFIG_CACHE)
 
 
 def get_global_config_dir() -> Path:
