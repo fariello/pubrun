@@ -178,6 +178,11 @@ depth = "standard"
 # Git repository state: branch, commit hash, remote URL, dirty status.
 depth = "standard"
 
+# Whether to run `git status --porcelain` to detect uncommitted changes.
+# On large repos or network-mounted filesystems this can be slow (~100ms+).
+# Set to false to skip the dirty check for faster startup.
+check_dirty = true
+
 
 [capture.inputs]
 # -----------------------------------------------------------------------------

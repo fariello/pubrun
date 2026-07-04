@@ -50,8 +50,13 @@ def get_git(config: Dict[str, Any]) -> Dict[str, Any]:
     branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"])
     
     # 3. Check for any uncommitted changes logic ("dirty" status)
-    dirty_str = _run_git(["status", "--porcelain"])
-    dirty = bool(dirty_str) if dirty_str is not None else None
+    # Skippable via config: git status --porcelain can be slow on large repos.
+    check_dirty = cfg.get("check_dirty", True)
+    if check_dirty:
+        dirty_str = _run_git(["status", "--porcelain"])
+        dirty = bool(dirty_str) if dirty_str is not None else None
+    else:
+        dirty = None
     
     # 4. Grab remote origin to document exactly where the codebase logic originates
     remote_url = _run_git(["remote", "get-url", "origin"])
