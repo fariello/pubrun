@@ -603,6 +603,12 @@ def _render_summary(runs: List[RunInfo]) -> str:
     """Render a 2-line summary: count, date range, status/exit frequencies."""
     from collections import Counter
 
+    no_color = os.environ.get("NO_COLOR", "")
+    bold = "" if no_color else "\033[1m"
+    dim = "" if no_color else "\033[2m"
+    red = "" if no_color else "\033[31m"
+    reset = "" if no_color else "\033[0m"
+
     count = len(runs)
     # Date range (runs are sorted most-recent-first)
     earliest = None
@@ -616,21 +622,21 @@ def _render_summary(runs: List[RunInfo]) -> str:
 
     date_range = ""
     if earliest and latest:
-        date_range = f" | {_format_timestamp(earliest)} to {_format_timestamp(latest)}"
+        date_range = f" {dim}|{reset} {_format_timestamp(earliest)} to {_format_timestamp(latest)}"
 
-    # Status frequencies
+    # Status frequencies (colored per status)
     statuses = Counter(r.status for r in runs)
-    status_parts = [f"{c} {s}" for s, c in statuses.most_common()]
-    status_str = ", ".join(status_parts)
+    status_parts = [f"{c} {_status_marker(s)}" for s, c in statuses.most_common()]
+    status_str = f"{dim},{reset} ".join(status_parts)
 
     # Exit code frequencies (non-zero only, to keep it concise)
     exit_codes = Counter(r.exit_code for r in runs if r.exit_code is not None and r.exit_code != 0)
     exit_str = ""
     if exit_codes:
-        exit_parts = [f"exit {code}: {c}" for code, c in exit_codes.most_common(5)]
-        exit_str = " | " + ", ".join(exit_parts)
+        exit_parts = [f"{red}exit {code}{reset}: {c}" for code, c in exit_codes.most_common(5)]
+        exit_str = f" {dim}|{reset} " + f"{dim},{reset} ".join(exit_parts)
 
-    line1 = f"{count} runs{date_range}"
+    line1 = f"{bold}{count} runs{reset}{date_range}"
     line2 = f"  {status_str}{exit_str}"
     return f"{line1}\n{line2}"
 
