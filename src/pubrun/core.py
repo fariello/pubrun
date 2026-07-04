@@ -88,7 +88,13 @@ def start(**kwargs: Any) -> Run:
         **kwargs: Configuration overrides (same keys as ``.pubrun.toml``).
 
     Returns:
-        The active ``Run`` instance.
+        The active ``Run`` instance. Useful attributes:
+
+        - ``run.run_dir`` (Path): the directory where artifacts are written.
+        - ``run.run_id`` (str): 8-char hex identifier for this run.
+        - ``run.config`` (dict): the resolved configuration.
+        - ``run.is_active`` (bool): whether the run is still collecting data.
+        - ``run.started_at_utc`` (float): POSIX start timestamp.
 
     Example:
         >>> tracker = pubrun.start(profile="deep")
