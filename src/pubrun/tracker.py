@@ -280,6 +280,13 @@ class Run:
                 self.host_data = {"capture_state": {"status": "failed"}}
             finally:
                 self._hardware_future_done.set()
+                # BUG-06: Re-write startup manifest so on-disk state includes
+                # hardware data even if the process is killed before stop().
+                try:
+                    if getattr(self, "writer", None) and self.is_active:
+                        self.writer.write_startup_manifest()
+                except Exception:
+                    pass  # Best-effort
 
         self._hardware_thread = _threading.Thread(
             target=_collect_hardware, daemon=True, name="pubrun-hw"
@@ -381,8 +388,13 @@ class Run:
                 # Reopen or migrate the files to the active run_dir
                 if getattr(self, "event_stream", None):
                     self.event_stream.migrate_directory(new_dir)
+                    # BUG-10: Only emit if the stream successfully reopened.
                     if new_dir != Path(old_dir_str):
-                        self.event_stream.emit("warning", payload={"message": f"Storage directory changed mid-execution from {old_dir_str} to {new_dir}"})
+                        if getattr(self.event_stream, "_file", None):
+                            self.event_stream.emit("warning", payload={"message": f"Storage directory changed mid-execution from {old_dir_str} to {new_dir}"})
+                        else:
+                            import logging as _log
+                            _log.getLogger("pubrun").warning(f"pubrun: storage migrated to {new_dir} but event stream failed to reopen")
                         
                 if getattr(self, "console_interceptor", None):
                     if self.console_interceptor.mode != "off":
@@ -471,6 +483,8 @@ class Run:
         # Gracefully shutdown engines
         if self._spying_subprocesses:
             SubprocessSpy.finalize_all()
+            # Save records before uninstall clears them (BUG-09).
+            self._saved_subprocess_records = SubprocessSpy.get_records()
             SubprocessSpy.uninstall()
         if self.console_interceptor:
             self.console_data = self.console_interceptor.stop()
@@ -527,7 +541,10 @@ class Run:
             elapsed = self.ended_at_utc - self.started_at_utc
             
             pass # removed local string formatter hook
-        spy_records = SubprocessSpy.get_records() if self._spying_subprocesses else []
+        # Use saved records (captured before uninstall) if available; fall back to live.
+        spy_records = getattr(self, "_saved_subprocess_records", None)
+        if spy_records is None:
+            spy_records = SubprocessSpy.get_records() if self._spying_subprocesses else []
         manual_records = getattr(self, "manual_subprocess_records", [])
         subprocess_records = spy_records + manual_records
 
