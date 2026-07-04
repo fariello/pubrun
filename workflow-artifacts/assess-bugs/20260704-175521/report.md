@@ -3,7 +3,7 @@
 - Date / run ID: 20260704-175521
 - Concern: bugs and correctness
 - Scope: whole project (src/pubrun/)
-- IPD written: plans/pending/20260704-assess-bugs.md
+- IPD written: .agents/plans/pending/20260704-assess-bugs.md
 - Verdict: adequate for correctness (no blockers; several Medium-severity logic bugs)
 
 ## Top findings

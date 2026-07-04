@@ -9,5 +9,5 @@ This repository includes reusable agent workflows under `.agents/workflows/`. Th
 <!-- PLAN-LIFECYCLE:BEGIN -->
 ## Plan / IPD lifecycle
 
-Proposals are dated Implementation Plan Documents (IPDs) in `plans/pending/` (or `.agents/plans/pending/`). They are reviewed (optionally via the `plan-review` workflow), approved by a human, executed, then moved to `plans/` (root, as the executed archive). This workflow is NOT auto-executed; human approval gates execution.
+Proposals are dated Implementation Plan Documents (IPDs) in `.agents/plans/pending/`, named `YYYYMMDD-<slug>.md`. They are reviewed (optionally via the `plan-review` workflow), approved by a human, executed, then moved to `.agents/plans/executed/`. This workflow is NOT auto-executed; human approval gates execution.
 <!-- PLAN-LIFECYCLE:END -->
