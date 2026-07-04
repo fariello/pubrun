@@ -61,6 +61,9 @@ class SubprocessSpy:
             subprocess.Popen.wait = _original_popen_wait
             os.system = _original_os_system
             cls._installed = False
+            # BUG-09: Clear records on uninstall to prevent cross-run leakage.
+            cls._records = []
+            cls._truncated = False
 
     @classmethod
     def get_records(cls) -> List[Dict[str, Any]]:

@@ -78,7 +78,14 @@ class EventStream:
             record["payload"] = payload
 
         # Serialize outside the lock for reduced contention (PERF-06).
-        line = json.dumps(record) + "\n"
+        try:
+            line = json.dumps(record) + "\n"
+        except (TypeError, ValueError, OverflowError) as ser_err:
+            # BUG-05: Non-serializable payload — log at warning so user knows.
+            logger.warning(
+                f"pubrun: event '{event_type}' dropped (payload not JSON-serializable): {ser_err}"
+            )
+            return
 
         try:
             with self._lock:

@@ -102,7 +102,15 @@ def start(**kwargs: Any) -> Run:
         if hasattr(active, "_merge_and_migrate"):
             active._merge_and_migrate(kwargs)
         return active
-    return Run(overrides=kwargs)
+    # BUG-04: Hold the lock across Run() construction to prevent two
+    # concurrent threads from both seeing active=None and creating two Runs.
+    with _run_lock:
+        # Double-check: another thread may have created one while we waited.
+        active = get_current_run()
+        if active:
+            active.ref_count = getattr(active, "ref_count", 0) + 1
+            return active
+        return Run(overrides=kwargs)
 
 
 def stop() -> None:
@@ -462,10 +470,33 @@ class ProvenanceFileProxy:
         except StopIteration:
             raise
 
+    def write(self, data: Any) -> int:
+        """Write data and update the incremental hash for write-mode tracking."""
+        result = self._file_obj.write(data)
+        if data:
+            chunk = self._to_bytes(data)
+            self._hash.update(chunk)
+        return result
+
+    def writelines(self, lines: Any) -> None:
+        """Write lines and update the incremental hash for write-mode tracking."""
+        self._file_obj.writelines(lines)
+        for line in lines:
+            if line:
+                chunk = self._to_bytes(line)
+                self._hash.update(chunk)
+
     def __iter__(self) -> Any:
         return self
 
     def close(self) -> None:
+        """Close the underlying file and register provenance.
+
+        Note: For write-mode files, the hash is computed from the file on disk
+        after close(). This relies on the underlying file object flushing
+        buffered data during close() — which is guaranteed for standard Python
+        file objects (io.FileIO, io.BufferedWriter, io.TextIOWrapper).
+        """
         if self._closed:
             return
         self._closed = True
