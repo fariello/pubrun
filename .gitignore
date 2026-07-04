@@ -70,3 +70,26 @@ examples/minimal-research-workflow/outputs/
 
 # agent-workflows installer local backups
 .agent-workflows-installer-backups/
+
+# Credentials and secrets (never commit these)
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+.netrc
+.npmrc
+.pypirc
+service-account*.json
+credentials*.json
+
+# Virtual environments
+.venv/
+venv/
+
+# Editor state
+*.swp
+.vscode/
