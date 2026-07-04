@@ -76,7 +76,9 @@ Controls interception and logging of stdout/stderr.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `capture_mode` | string | `"standard"` | `"off"` — no capture; `"basic"` — tee stdout/stderr to text files; `"standard"` — tee to text files (same as basic); `"deep"` — reserved for future structured capture (currently same as standard). |
+| `capture_mode` | string | `"off"` | `"off"` — no capture (default, zero-footprint); `"basic"` — tee stdout/stderr to text files; `"standard"` — tee with timestamps on each line; `"deep"` — reserved for future structured capture (currently same as standard). |
+| `non_tty_mode` | string | `"inherit"` | Override capture behavior when stdout is not a TTY (piped/redirected): `"inherit"` (use capture_mode as-is), `"off"`, or `"basic"`. |
+| `jupyter_mode` | string | `"off"` | Override capture behavior when running inside Jupyter/IPython. Default `"off"` auto-disables capture in notebooks. Set to `"standard"` to force capture in Jupyter. |
 
 ### `[events]`
 
@@ -86,6 +88,7 @@ Controls the real-time `events.jsonl` stream.
 |---|---|---|---|
 | `enabled` | bool | `true` | Whether to write events (phases, annotations) to `events.jsonl`. |
 | `max_tracked_events` | int | `1000000` | Maximum number of regular events written per run. When exhausted, non-critical events are silently dropped. Critical events (annotations, phases) bypass this limit up to a secondary cap of 10x this value (minimum 10,000). |
+| `flush_interval_events` | int | `100` | Number of non-critical events to buffer before flushing to disk. Higher values improve throughput but increase data-loss window on hard crashes. Critical events (annotations, phases) always flush immediately regardless. |
 | `on_inactive_annotate` | string | `"ignore"` | Behavior when `annotate()` is called with no active run: `"ignore"`, `"warn"`, or `"error"`. |
 
 ### `[redaction]`
@@ -120,7 +123,7 @@ Security policies for preventing secret leakage into manifest files.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `mode` | string | `"imported-only"` | `"imported-only"` — scan `sys.modules`; `"top-level-installed"` — pip/conda list; `"full-environment"` — every dependency in the virtualenv. |
+| `mode` | string | `"imported-only"` | `"imported-only"` — scan `sys.modules`; `"imported-transitive"` — imported packages plus their declared dependencies (one level); `"top-level-installed"` — pip/conda list; `"full-environment"` — every dependency in the virtualenv. |
 | `depth` | string | `"standard"` | Capture depth for this category. |
 
 ### `[capture.subprocesses]`
@@ -154,6 +157,7 @@ Security policies for preventing secret leakage into manifest files.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `depth` | string | `"standard"` | Capture depth for Git repository state. |
+| `check_dirty` | bool | `true` | Whether to run `git status --porcelain` to detect uncommitted changes. Set to `false` for faster startup on large or network-mounted repos. |
 
 ### `[capture.inputs]`
 
@@ -178,8 +182,20 @@ Security policies for preventing secret leakage into manifest files.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `depth` | string | `"standard"` | Capture depth for background resource monitoring. |
+| `scope` | string | `"process"` | What to measure: `"process"` (main process only) or `"tree"` (sum RSS/CPU across all child processes). Tree mode is useful for multiprocessing/Dask/Ray workloads. |
 | `sample_interval_seconds` | int | `15` | How often the background thread samples CPU/memory. |
 | `max_consecutive_failures` | int | `3` | Kill the background thread after this many consecutive read failures. |
+
+### `[capture.profiling]`
+
+Phase-scoped profiling (opt-in). When enabled, `pubrun.phase()` blocks are profiled and stats saved to the run directory.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | Master switch for profiling. Must be explicitly enabled. |
+| `backend` | string | `"cprofile"` | `"cprofile"` — stdlib cProfile (zero dependencies, ~30-50% overhead within phase); `"yappi"` — requires `pip install yappi` (~10-20% overhead). If the selected backend is unavailable, logs a warning and skips. |
+
+When enabled, each `pubrun.phase("name")` block saves a `profile-<name>.prof` file (pstats-compatible) to the run directory. Load with `snakeviz`, `pstats`, or `flameprof`.
 
 ### `[capture.signals]`
 
@@ -210,7 +226,7 @@ Controls for `pubrun report` and `pubrun methods` manifest hydration.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `write_summary` | bool | `true` | Reserved for future use. Intended to generate a `summary.txt` in the run directory. Not yet implemented. |
+| `write_summary` | bool | `false` | Reserved for future use. Intended to generate a `summary.txt` in the run directory. Not yet implemented. |
 
 ### `[methods]`
 

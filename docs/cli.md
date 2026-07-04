@@ -8,6 +8,30 @@ The `pubrun` CLI is accessible via `pubrun <command>`, `pbr <command>` (a conven
 
 ## Commands
 
+### `init` — Project Initialization
+
+Creates a `.pubrun.toml` configuration file and displays getting-started guidance.
+
+```bash
+pubrun init [DEST]
+```
+
+**Options:**
+
+| Argument | Description |
+|---|---|
+| `DEST` | Destination path (default: `.pubrun.toml`) |
+
+**Example:**
+```bash
+pubrun init                    # Create .pubrun.toml in current directory
+pubrun init ./config/.pubrun.toml  # Custom path
+```
+
+After init, add `import pubrun` to your script to begin tracking.
+
+---
+
 ### `bug-report` — Feature Request or Bug Reporter
 
 Opens the GitHub issue tracker in your default browser and displays system configuration telemetry in the console for easy copying and pasting.
@@ -286,7 +310,17 @@ pubrun status                    # List all runs
 pubrun status -v                 # Detailed listing
 pubrun status a3f9               # Inspect run by ID prefix
 pubrun status --dir /shared/runs # Scan a different directory
+pubrun status -n 10              # Show last 10, full summary
 ```
+
+The listing ends with a colored summary line showing total run count, date range, status frequencies, and non-zero exit codes:
+
+```
+504 runs | 2026-05-31 13:57 to 2026-07-04 14:31
+  488 completed, 10 interrupted, 3 crashed, 3 broken pipe | exit 1: 10
+```
+
+When using `-n` to limit displayed rows, the summary still reflects all runs (with "(showing N)" appended).
 
 For running processes, the inspect view also shows live RSS memory and CPU usage (cross-platform: Linux, macOS, Windows).
 

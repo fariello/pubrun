@@ -18,7 +18,7 @@ print("Training model...")
 ```
 
 > [!NOTE]
-> By default, `pubrun` tees `stdout`/`stderr` to log files. If your scripts produce heavy output, set `capture_mode = "off"` in `.pubrun.toml` or pass `pubrun.start(console={"capture_mode": "off"})`. See [Configuration Reference](configuration.md) for all console options.
+> By default, `pubrun` does NOT capture stdout/stderr (the default `capture_mode` is `"off"`). To enable output logging, set `capture_mode = "standard"` in `.pubrun.toml` or pass `pubrun.start(console={"capture_mode": "standard"})`. See [Configuration Reference](configuration.md) for all console options including Jupyter auto-detection and non-TTY overrides.
 
 ### Import Modes
 
@@ -236,6 +236,48 @@ Writes a raw artifact file (such as CSV data, text, or binary bytes) directly to
 
 ---
 
+## 8. Provenance-Tracked I/O
+
+These APIs are drop-in replacements for standard Python I/O functions that automatically track file and subprocess provenance in the run manifest.
+
+### `pubrun.open(file, mode="r", **kwargs)`
+
+Drop-in replacement for `builtins.open()`. When a run is active, wraps the returned file object to track SHA-256 hashes and access metadata in the manifest's `data_files` section.
+
+```python
+import pubrun
+
+with pubrun.open("data/input.csv", "r") as f:
+    df = process(f.read())
+
+with pubrun.open("results/output.json", "w") as f:
+    f.write(json.dumps(results))
+```
+
+### `pubrun.print(*args, **kwargs)`
+
+Drop-in replacement for `builtins.print()`. Calls the real `print()` AND appends the output to `stdout.log` in the run directory (independent of console tee capture_mode).
+
+```python
+import pubrun
+pubrun.print("Epoch 1 complete", flush=True)
+```
+
+### `pubrun.subprocess.run(*args, **kwargs)` / `pubrun.subprocess.Popen(...)`
+
+Explicit subprocess tracking wrappers. Records argv, timing, and exit code without relying on the global subprocess spy (useful in `nopatch` mode).
+
+```python
+import pubrun
+result = pubrun.subprocess.run(["python", "preprocess.py", "--input", "data.csv"])
+```
+
+### `pubrun.popen(cmd, mode="r", bufsize=-1)`
+
+Drop-in replacement for `os.popen()` with provenance tracking.
+
+---
+
 ## API Summary
 
 | Function | Purpose | Safe without active run? |
@@ -247,6 +289,10 @@ Writes a raw artifact file (such as CSV data, text, or binary bytes) directly to
 | `phase(name)` | Time a named code region | Yes (silent no-op) |
 | `report(name, data)` | Save structured custom report | Yes (configurable) |
 | `artifact(filename, content)` | Save raw artifact file | Yes (configurable) |
+| `print(*args, **kw)` | Print + log to stdout.log | Yes (falls back to print) |
+| `open(file, mode, **kw)` | File I/O with provenance | Yes (falls back to open) |
+| `subprocess.run(...)` | Tracked subprocess execution | Yes (falls back to subprocess) |
+| `popen(cmd)` | Tracked os.popen replacement | Yes (falls back to popen) |
 | `tracked_run(**kw)` | Context manager lifecycle | N/A (creates run) |
 | `audit_run(**kw)` | Decorator lifecycle | N/A (creates run) |
 | `diff(a, b, ignores)` | Compare two runs | N/A (reads files) |

@@ -162,7 +162,7 @@ Each category corresponds to a modular capture engine and a top-level manifest s
 | Process | `process` | `[capture.process]` | depth-based |
 | Host | `host` | `[capture.host]` | depth-based |
 | Python | `python` | `[capture.python]` | depth-based |
-| Packages | `packages` | `[capture.packages]` | `imported-only`, `top-level-installed`, `full-environment` |
+| Packages | `packages` | `[capture.packages]` | `imported-only`, `imported-transitive`, `top-level-installed`, `full-environment` |
 | Environment | `environment` | `[capture.environment]` | `allowlist`, `filtered`, `full` |
 | Git | `git` | `[capture.git]` | depth-based |
 | Hardware | `hardware` | `[capture.hardware]` | depth-based, explicit GPU/CPU flags |
@@ -637,20 +637,38 @@ If `[redaction].argv_enabled = true`, subprocess argument values matching the se
 
 ### 16.2 Configuration
 
+- `scope` (default `"process"`): `"process"` monitors only the main process; `"tree"` sums RSS/CPU across the entire process tree (parent + all child processes).
 - `sample_interval_seconds` (default 15): How often the thread wakes to sample.
 - `max_consecutive_failures` (default 3): The thread self-terminates after this many consecutive read failures.
 
 ### 16.3 Platform Support
 
-| Platform | RSS Source |
-|---|---|
-| Linux | `/proc/self/statm` |
-| macOS | `ps -o rss= -p <pid>` |
-| Windows | `wmic process get WorkingSetSize` |
+| Platform | RSS Source (process) | RSS Source (tree) |
+|---|---|---|
+| Linux | `/proc/self/statm` | `/proc/<pid>/task/<pid>/children` recursive walk |
+| macOS | `ps -o rss= -p <pid>` | `ps -eo pid,ppid,rss` with in-Python tree walk |
+| Windows | `wmic process get WorkingSetSize` | Not yet implemented (falls back to process) |
 
 ### 16.4 Output
 
-The `resources` manifest section contains: `peak_rss_bytes`, `end_rss_bytes`, `peak_cpu_percent`.
+The `resources` manifest section contains: `scope`, `peak_rss_bytes`, `end_rss_bytes`, `peak_cpu_percent`. When `scope = "tree"`, also includes `peak_tree_rss_bytes` and `end_tree_rss_bytes`.
+
+---
+
+## 16b. Phase-Scoped Profiling
+
+### 16b.1 Mechanism
+
+When `[capture.profiling].enabled = true`, `pubrun.phase()` blocks are profiled using the configured backend. A `profile-<phase_name>.prof` file is saved to the run directory for each phase.
+
+### 16b.2 Configuration
+
+- `enabled` (default `false`): Must be explicitly opted in.
+- `backend` (default `"cprofile"`): `"cprofile"` uses stdlib (zero dependencies); `"yappi"` requires user installation.
+
+### 16b.3 Output
+
+Each profiled phase produces a pstats-compatible `.prof` file. A `profile_saved` event is emitted to `events.jsonl` for discoverability.
 
 ---
 
