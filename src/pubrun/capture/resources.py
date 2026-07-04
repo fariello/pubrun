@@ -40,15 +40,14 @@ def _get_rss_linux() -> int:
 
 
 def _get_rss_darwin() -> int:
+    # PERF-14: Use os.getrusage() instead of spawning a subprocess per sample.
+    # ru_maxrss on macOS is in bytes (unlike Linux where it's in KB).
     try:
-        import subprocess
-        from pubrun.capture.subprocesses import disable_spy
-        with disable_spy():
-            # Invoke Mac built-in command precisely for target Process ID
-            out = subprocess.check_output(['ps', '-o', 'rss=', '-p', str(os.getpid())], text=True, stderr=subprocess.DEVNULL)
-        return int(out.strip()) * 1024 # PS output is native to KB
+        import resource
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        return usage.ru_maxrss  # bytes on macOS
     except Exception as e:
-        logger.debug(f"pubrun failed Mac RSS poll: {e}")
+        logger.debug(f"pubrun failed Mac RSS poll via getrusage: {e}")
         return 0
 
 

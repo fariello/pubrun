@@ -58,13 +58,19 @@ def get_invocation(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
                 except Exception:
                     pass
                 
-                # Try to hash the script file for exact reproducibility validation
+                # Try to hash the script file for exact reproducibility validation.
+                # PERF-04: skip hashing for files >= 1MB to avoid startup latency
+                # on large notebooks/generated scripts.
+                _max_hash_size = 1_048_576  # 1 MB
                 try:
-                    sha = hashlib.sha256()
-                    with open(real_path, "rb") as f:
-                        for chunk in iter(lambda: f.read(8192), b""):
-                            sha.update(chunk)
-                    script_data["sha256"] = sha.hexdigest()
+                    if script_data.get("size", 0) <= _max_hash_size:
+                        sha = hashlib.sha256()
+                        with open(real_path, "rb") as f:
+                            for chunk in iter(lambda: f.read(8192), b""):
+                                sha.update(chunk)
+                        script_data["sha256"] = sha.hexdigest()
+                    else:
+                        script_data["sha256_skipped"] = "file exceeds 1MB"
                 except Exception:
                     pass
             elif main_file == "-m":
