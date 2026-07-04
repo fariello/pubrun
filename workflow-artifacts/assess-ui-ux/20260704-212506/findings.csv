@@ -1,0 +1,9 @@
+id,severity,remediation_risk,remediation_risk_axis,persona,area,finding,evidence,proposed_action,disposition
+UX-01,Medium,Low,n/a,Novice,CLI help,"Unknown command error shows all aliases expanded (bug-report feedback issue cite...). Noisy and confusing.",pubrun boguscmd output shows 20+ choices including aliases.,Suppress aliases from argparse error choices.,proposed
+UX-02,Medium,Medium-High,Complexity,Novice/Power-user,CLI,"Aliases appear inconsistently: in error messages but not in --help. Confusing.","--help shows 'show' but error also shows 'report' as valid; user doesn't know they're the same.",Defer: requires deep argparse subclassing.,deferred
+UX-03,Low,Low,n/a,Novice,CLI status,"'No runs found.' gives no hint on how to start tracking. Dead end for first-time user.","pubrun status with no ./runs/ directory.",Add hint: how to start tracking.,proposed
+UX-04,Low,Low,n/a,Power-user,CLI diff,"diff with <2 runs gives unhelpful error without guidance.","pubrun diff with 1 run.",Add clear message: need 2+ runs.,proposed
+UX-05,Low,Low,n/a,Novice,Python API,"start() returns Run but useful attributes (run_dir run_id config) undocumented in docstring.","core.py:78-105 docstring says 'Returns: The active Run instance' only.",Document key attributes in docstring.,proposed
+UX-06,Low,Low,n/a,Power-user,CLI clean,"clean -y deletes without showing what was deleted. No feedback for destructive operation.","status.py clean_runs: -y skips directly to deletion.",Print summary line before deleting.,proposed
+UX-07,Low,Low,n/a,Novice,CLI,--info help text is vague ('system capabilities'). Doesn't explain what it shows.,"--help output for --info flag.",Improve description to list what it shows.,proposed
+UX-08,Low,Low,n/a,Stakeholder,CLI,"No 'pubrun init' entry point. New CLI user has no guided onboarding command.","Missing command; first-run is undiscoverable from CLI.",Add pubrun init as create-config + getting-started.,proposed
