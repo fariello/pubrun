@@ -48,6 +48,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Secret scanning CI**: `gitleaks` workflow on push/PR + `.gitleaksignore`.
 - **Dependency audit CI**: `pip-audit` workflow on push/PR.
 - **Pre-commit framework**: gitleaks + hygiene hooks (large-file guard, whitespace, YAML/TOML check).
+- **Benchmark suite** (`benchmarks/`): a reproducible, stdlib-only harness that measures
+  pubrun's startup and run-time overhead per feature (import modes, resource watcher,
+  subprocess spy, git/hardware/packages capture, patched `open()`/`print()` hot paths).
+  `harness.py` writes machine-tagged result JSONs; `aggregate.py` merges them into CSV +
+  Markdown; optional `plot.py`/`test_benchmarks.py` use a new dev-only `[bench]` extra
+  (`pytest-benchmark`, `matplotlib`). New `docs/performance.md` documents how to run it
+  and holds a placeholder results table. Does not affect the runtime install (zero deps
+  on 3.11+).
 - **`status`/`show --utc` flag**: Display timestamps in UTC (default remains local time). Timestamps are always stored as UTC epochs; this only affects display.
 - **Capture subprocess timeouts**: `[capture.hardware].timeout` (default 10s), `[capture.resources].poll_timeout` (default 3s), and `[capture.git].timeout` (default 5s) bound hung external tools so they cannot orphan a capture thread/child. A git timeout is recorded as `capture_state.status = "timeout"` (distinct from "not a git repository").
 

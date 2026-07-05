@@ -1,4 +1,4 @@
-[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Research Use](research-use.md) | [Changelog](../CHANGELOG.md)
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Performance](performance.md) | [Research Use](research-use.md) | [Changelog](../CHANGELOG.md)
 
 # pubrun Manifest Reference
 
@@ -475,4 +475,4 @@ The `pubrun meta` command generates a similar JSON structure, but with `manifest
 
 ---
 
-[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Research Use](research-use.md) | [Changelog](../CHANGELOG.md)
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Performance](performance.md) | [Research Use](research-use.md) | [Changelog](../CHANGELOG.md)
