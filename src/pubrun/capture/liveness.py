@@ -25,6 +25,13 @@ def is_pid_alive(pid: int) -> bool:
     Returns True if the process is alive, False otherwise.
     Does not guarantee the process is the *same* one (PID recycling).
     """
+    # Reject impossible PIDs before touching os.kill. On POSIX, os.kill(0, 0)
+    # signals the caller's process GROUP and os.kill(-1, 0) signals every
+    # process the user can reach -- both return without raising, which would be
+    # a false "alive" verdict. None/non-positive PIDs come from malformed or
+    # foreign lock/manifest files. (IPD 20260705 EC-05.)
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
     if _PLATFORM == "win32":
         return _is_pid_alive_windows(pid)
     else:
@@ -37,7 +44,8 @@ def is_pid_alive(pid: int) -> bool:
         except PermissionError:
             # Process exists but we don't own it -- still alive.
             return True
-        except OSError:
+        except (OSError, OverflowError):
+            # OverflowError: an absurdly large PID from a corrupt dir name.
             return False
 
 
@@ -56,23 +64,72 @@ def get_process_start_time(pid: int) -> Optional[float]:
     return None
 
 
+# Generic interpreter/flag tokens that are NOT distinctive enough to confirm a
+# same-process match on their own -- e.g. a recycled PID also running "python"
+# would spuriously match. When expected_script is one of these (or too short),
+# the script check is inconclusive and we fall through to start-time timing.
+# (IPD 20260705 EC-06.)
+_GENERIC_SCRIPT_TOKENS = frozenset(
+    {"python", "python2", "python3", "python3.8", "python3.9", "python3.10",
+     "python3.11", "python3.12", "python3.13", "python3.14", "-c", "-m",
+     "sh", "bash", "env", "interactive"}
+)
+
+
+def _script_is_generic(expected_script: str) -> bool:
+    """True if expected_script is too generic to confirm a match alone."""
+    from pathlib import Path
+    base = Path(expected_script).name
+    return len(base) < 3 or base in _GENERIC_SCRIPT_TOKENS
+
+
+def _match_script_in_tokens(expected_script: str, tokens) -> Optional[bool]:
+    """Given the command-line tokens of a process, decide whether it is running
+    ``expected_script``.
+
+    Returns True on an exact basename match (confirmed same process), False when
+    the script name appears nowhere at all (confirmed mismatch / recycled PID),
+    and None when the only evidence is a substring (ambiguous) so the caller
+    falls through to start-time timing. (IPD 20260705 EC-06.)
+    """
+    from pathlib import Path
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return None
+    exact = False
+    substring = False
+    for tok in tokens:
+        if Path(tok).name == expected_script or tok == expected_script:
+            exact = True
+            break
+        if expected_script in tok:
+            substring = True
+    if exact:
+        return True
+    if substring:
+        # Substring-only evidence is not trustworthy (e.g. train.py vs
+        # train_backup.py); let timing decide.
+        return None
+    return False
+
+
 def _check_command_linux(pid: int, expected_script: str) -> Optional[bool]:
+    if _script_is_generic(expected_script):
+        return None
     try:
         with open(f"/proc/{pid}/cmdline", "r", encoding="utf-8") as f:
             cmdline = f.read()
         if not cmdline:
             return None
-        parts = [p for p in cmdline.split("\x00") if p]
-        from pathlib import Path
-        for part in parts:
-            if expected_script in part or Path(part).name == expected_script:
-                return True
-        return False
+        parts = cmdline.split("\x00")
+        return _match_script_in_tokens(expected_script, parts)
     except OSError:
         return None
 
 
 def _check_command_macos(pid: int, expected_script: str) -> Optional[bool]:
+    if _script_is_generic(expected_script):
+        return None
     try:
         result = subprocess.run(
             ["ps", "-o", "command=", "-p", str(pid)],
@@ -81,15 +138,15 @@ def _check_command_macos(pid: int, expected_script: str) -> Optional[bool]:
         if result.returncode == 0:
             cmdline = result.stdout.strip()
             if cmdline:
-                if expected_script in cmdline:
-                    return True
-                return False
+                return _match_script_in_tokens(expected_script, cmdline.split())
         return None
     except Exception:
         return None
 
 
 def _check_command_windows(pid: int, expected_script: str) -> Optional[bool]:
+    if _script_is_generic(expected_script):
+        return None
     try:
         result = subprocess.run(
             ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine"],
@@ -99,9 +156,7 @@ def _check_command_windows(pid: int, expected_script: str) -> Optional[bool]:
             lines = [l.strip() for l in result.stdout.strip().splitlines() if l.strip()]
             if len(lines) >= 2:
                 cmdline = lines[1]
-                if expected_script in cmdline:
-                    return True
-                return False
+                return _match_script_in_tokens(expected_script, cmdline.split())
         return None
     except Exception:
         return None
@@ -138,16 +193,32 @@ def is_same_process(
             match_status = _check_command_windows(pid, expected_script)
 
         if match_status is True:
+            # Confirmed exact-basename match -> same process.
             return True
         elif match_status is False:
+            # Script confirmed absent from the command line -> recycled PID.
             return False
+        # match_status is None: inconclusive (substring-only or generic token);
+        # fall through to start-time timing.
 
     actual_start = get_process_start_time(pid)
     if actual_start is None:
-        # Can't verify start time -- assume alive if PID exists.
+        # Start time is genuinely unreadable (e.g. ps/wmic slow, lstart didn't
+        # parse, or permission denied on /proc/<pid>/stat). We have no POSITIVE
+        # evidence of a mismatch, so stay conservative and assume the run is
+        # still alive rather than falsely reporting it crashed. Flipping this to
+        # "crashed" is the documented macOS PID-liveness flake source.
+        # (IPD 20260705 EC-07.)
         return True
 
-    return abs(actual_start - expected_start_utc) < tolerance
+    # Only a readable start time that DIFFERS beyond tolerance is positive
+    # mismatch evidence.
+    try:
+        return abs(actual_start - expected_start_utc) < tolerance
+    except (TypeError, ValueError):
+        # expected_start_utc was non-numeric (foreign/edited lock) -> can't
+        # prove a mismatch; stay conservative.
+        return True
 
 
 # --------------------------------------------------------------------------

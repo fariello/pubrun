@@ -177,6 +177,60 @@ class TestLivenessCharacterization:
         ) is False
 
 
+class TestLivenessHardening:
+    """Tests for the EC-05/06/07 hardening (IPD 20260705 Steps 2a-2c)."""
+
+    def test_nonpositive_and_none_pids_are_not_alive(self):
+        """pid <= 0 / None must never reach os.kill (process-group semantics)."""
+        assert is_pid_alive(0) is False
+        assert is_pid_alive(-1) is False
+        assert is_pid_alive(None) is False  # type: ignore[arg-type]
+        assert is_pid_alive(True) is False  # bool is not a valid PID  # type: ignore[arg-type]
+
+    def test_huge_pid_does_not_raise(self):
+        """An absurd PID (corrupt dir name) returns False without OverflowError."""
+        assert is_pid_alive(2 ** 70) is False
+
+    def test_same_process_rejects_nonpositive_pid(self):
+        assert is_same_process(0, time.time()) is False
+        assert is_same_process(-5, time.time()) is False
+
+    def test_generic_script_token_is_inconclusive(self):
+        """A generic token like 'python' must not confirm a match by itself;
+        it falls through to timing (so a matching start time still says same)."""
+        from pubrun.capture.liveness import _check_command_linux, _PLATFORM
+        if _PLATFORM != "linux":
+            pytest.skip("Linux-specific cmdline check")
+        assert _check_command_linux(os.getpid(), "python") is None
+        assert _check_command_linux(os.getpid(), "-c") is None
+
+    def test_substring_only_match_is_inconclusive(self):
+        """A substring hit (train.py inside train_backup.py) is not confirmed."""
+        from pubrun.capture.liveness import _match_script_in_tokens
+        # exact basename -> True
+        assert _match_script_in_tokens("train.py", ["/usr/bin/python", "/x/train.py"]) is True
+        # substring only -> None (let timing decide)
+        assert _match_script_in_tokens("train.py", ["/usr/bin/python", "/x/train.py.bak"]) is None
+        # absent -> False (confirmed mismatch)
+        assert _match_script_in_tokens("train.py", ["/usr/bin/python", "/x/other.py"]) is False
+
+    def test_start_time_none_stays_conservative(self, monkeypatch):
+        """When start time is unreadable and script is inconclusive, assume alive
+        (do not falsely report crashed)."""
+        import pubrun.capture.liveness as lv
+        monkeypatch.setattr(lv, "is_pid_alive", lambda pid: True)
+        monkeypatch.setattr(lv, "get_process_start_time", lambda pid: None)
+        # No script given -> pure timing path -> start None -> conservative True
+        assert lv.is_same_process(12345, time.time()) is True
+
+    def test_nonnumeric_expected_start_stays_conservative(self, monkeypatch):
+        import pubrun.capture.liveness as lv
+        monkeypatch.setattr(lv, "is_pid_alive", lambda pid: True)
+        monkeypatch.setattr(lv, "get_process_start_time", lambda pid: time.time())
+        # A foreign/edited lock could yield a non-numeric expected start.
+        assert lv.is_same_process(12345, "not-a-number") is True  # type: ignore[arg-type]
+
+
 class TestGetRssBytes:
     """Tests for RSS memory retrieval."""
 
