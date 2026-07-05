@@ -343,14 +343,53 @@ See [Configuration Reference](https://github.com/fariello/pubrun/blob/main/docs/
 
 ---
 
+## Citation
+
+If you use `pubrun` in your research, please cite it. Because no peer-reviewed
+publication exists yet, cite the software itself (see `pubrun cite`, the `CITATION.cff`
+file, or GitHub's "Cite this repository" button):
+
+> Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research [Computer software]. https://github.com/fariello/pubrun
+
+A Zenodo archive DOI will be added on public release, and this citation will be updated to
+the peer-reviewed reference if/when a journal article is accepted. See the
+consolidated **License, Attribution & Citation** section below for the required
+attribution.
+
+---
+
 ## Acknowledgements
 
 `pubrun` was redesigned and rewritten from pre-existing custom libraries, code fragments, scripts, and ideas spanning almost two decades, with the assistance of Google Antigravity for its official release.
 
 ## License
 
-Released under the BSD 3-Clause License. Copyright (c) 2007-2026 Gabriele Fariello. See the [LICENSE](https://github.com/fariello/pubrun/blob/main/LICENSE) file for full terms.
+Released under the Apache License 2.0. Copyright 2007-2026 Gabriele G. R. Fariello. See the [LICENSE](https://github.com/fariello/pubrun/blob/main/LICENSE) and [NOTICE](https://github.com/fariello/pubrun/blob/main/NOTICE) files for full terms.
 
 ---
 
 [README](https://github.com/fariello/pubrun/blob/main/README.md) | [Architecture](https://github.com/fariello/pubrun/blob/main/docs/architecture.md) | [Functional Spec](https://github.com/fariello/pubrun/blob/main/docs/functional_spec.md) | [API](https://github.com/fariello/pubrun/blob/main/docs/api.md) | [CLI](https://github.com/fariello/pubrun/blob/main/docs/cli.md) | [Configuration](https://github.com/fariello/pubrun/blob/main/docs/configuration.md) | [Manifest](https://github.com/fariello/pubrun/blob/main/docs/manifest.md) | [Research Use](https://github.com/fariello/pubrun/blob/main/docs/research-use.md) | [Changelog](https://github.com/fariello/pubrun/blob/main/CHANGELOG.md)
+
+
+---
+
+## License, Attribution & Citation
+
+`pubrun` is licensed under the **Apache License 2.0** (see `LICENSE` and `NOTICE`).
+
+**Attribution (required).** Under Apache-2.0 §4(d), any distribution of this software or a
+derivative work must retain the `NOTICE` file and display its attribution reasonably
+prominently. Concretely, derived/redistributed works must include the following, visibly,
+in the project README (or equivalent top-level documentation) and in any "About"/credits
+screen the software presents:
+
+> Based on the original pubrun by Gabriele G. R. Fariello (https://github.com/fariello/pubrun).
+
+**Citation.** If you use `pubrun` in academic or scholarly work, please cite it. GitHub's
+"Cite this repository" button (backed by `CITATION.cff`) provides ready-to-use formats. A
+suggested citation:
+
+> Fariello, Gabriele G. R. *pubrun*. 2026. https://github.com/fariello/pubrun
+
+The attribution and citation requests impose no warranty or liability on the author; the
+software is provided "AS IS" per the LICENSE.

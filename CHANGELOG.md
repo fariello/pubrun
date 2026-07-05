@@ -8,7 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **License changed from BSD-3-Clause to Apache-2.0.** Now licensed under the Apache License 2.0
+  (see `LICENSE` and the new `NOTICE`). Apache-2.0 requires redistributions and derivative works to
+  retain the `NOTICE` file and display its attribution reasonably prominently ("Based on the original
+  pubrun by Gabriele G. R. Fariello — https://github.com/fariello/pubrun"), and adds an explicit
+  patent grant. Copyright holder normalized to the full legal name **Gabriele G. R. Fariello**
+  (copyright span 2007–2026 preserved); author email set to gfariello@fariel.com.
+
 ### Added
+- **`NOTICE`** file with the required Apache-2.0 attribution string; **`CITATION.cff`** added/updated
+  for citation; README gained a License/Attribution/Citation section.
 - **`pubrun init` command**: Creates `.pubrun.toml` and prints getting-started guidance.
 - **Process-tree resource capture**: `[capture.resources].scope = "tree"` sums RSS/CPU across all child processes (Linux /proc walk, macOS ps-based tree walk).
 - **Phase-scoped profiling**: `[capture.profiling].enabled = true` profiles `pubrun.phase()` blocks via cProfile or yappi. Saves `profile-<phase>.prof` per phase.
