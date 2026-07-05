@@ -15,6 +15,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pubrun by Gabriele G. R. Fariello — https://github.com/fariello/pubrun"), and adds an explicit
   patent grant. Copyright holder normalized to the full legal name **Gabriele G. R. Fariello**
   (copyright span 2007–2026 preserved); author email set to gfariello@fariel.com.
+- **Package metadata license fixed**: `pubrun.__license__` now reports `Apache-2.0` (was still
+  `BSD-3-Clause`). Legal/copyright surfaces (`LICENSE`, `NOTICE`, `__copyright__`, README copyright)
+  use the full legal name **Gabriele G. R. Fariello**; **citation** surfaces (`pubrun cite`, generated
+  methods report, `CITATION.cff`, PyPI author) use the publication name **Gabriele Fariello** so
+  citations aggregate with the author's existing record.
+- **`pubrun cite` and generated methods citation corrected**: now cite the software itself
+  (`[Computer software]`, repository URL, version-aware) instead of an unsubmitted "Journal of Open
+  Source Software (In Submission)" reference; a single consistent title is used across all surfaces.
+  Will switch to the peer-reviewed citation with DOI once a journal article is accepted.
+- **`pubrun --version`** now prints the required NOTICE attribution line.
 
 ### Added
 - **`NOTICE`** file with the required Apache-2.0 attribution string; **`CITATION.cff`** added/updated

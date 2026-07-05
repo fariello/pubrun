@@ -9,7 +9,7 @@ description = "A lightweight Python library for capturing execution context."
 readme = "README.md"
 license = "Apache-2.0"
 authors = [
-    { name = "Gabriele G. R. Fariello", email = "gfariello@fariel.com" }
+    { name = "Gabriele Fariello", email = "gfariello@fariel.com" }
 ]
 requires-python = ">=3.8"
 keywords = [

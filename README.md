@@ -345,16 +345,16 @@ See [Configuration Reference](https://github.com/fariello/pubrun/blob/main/docs/
 
 ## Citation
 
-If you use `pubrun` in your research, please cite the JOSS paper as the preferred reference, or cite the specific software version archived on Zenodo.
+If you use `pubrun` in your research, please cite it. Because no peer-reviewed
+publication exists yet, cite the software itself (see `pubrun cite`, the `CITATION.cff`
+file, or GitHub's "Cite this repository" button):
 
-- **Preferred Citation (JOSS Paper)**:
-  > Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research. *Journal of Open Source Software*, (Paper in submission).
-- **Software Archive (Zenodo)**:
-  > Fariello, G. (2026). pubrun: Lightweight native execution provenance and reproducibility tracking. Zenodo. (Archive pending public release).
+> Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research [Computer software]. https://github.com/fariello/pubrun
 
-*Upon release and archiving on Zenodo, the following citation badges will be active:*
-- **Concept DOI Badge** (resolves to all versions): `[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.[CONCEPT_ID].svg)](https://doi.org/10.5281/zenodo.[CONCEPT_ID])`
-- **Version DOI Badge** (resolves specifically to version 1.2.0): `[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.[VERSION_ID].svg)](https://doi.org/10.5281/zenodo.[VERSION_ID])`
+A Zenodo archive DOI will be added on public release, and this citation will be updated to
+the peer-reviewed reference if/when a journal article (e.g. JOSS) is accepted. See the
+consolidated **License, Attribution & Citation** section below for the required
+attribution.
 
 ---
 
@@ -389,7 +389,7 @@ screen the software presents:
 "Cite this repository" button (backed by `CITATION.cff`) provides ready-to-use formats. A
 suggested citation:
 
-> Fariello, Gabriele G. R. *pubrun*. 2026. https://github.com/fariello/pubrun
+> Fariello, Gabriele. *pubrun*. 2026. https://github.com/fariello/pubrun
 
 The attribution and citation requests impose no warranty or liability on the author; the
 software is provided "AS IS" per the LICENSE.

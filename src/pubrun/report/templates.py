@@ -17,30 +17,30 @@ HIGHLIGHT_PACKAGES = {
 MARKDOWN_TEMPLATE = """
 ### Computational Methods
 
-Computational experiments were executed on a machine running {os_name} equipped with an {cpu_model} and {ram_gb} GB of RAM. The execution environment relied on Python {python_version} ({python_impl}). 
+Computational experiments were executed on a machine running {os_name} equipped with an {cpu_model} and {ram_gb} GB of RAM. The execution environment relied on Python {python_version} ({python_impl}).
 
 {packages_text}
 
 To facilitate computational reproducibility, the exact state of the source code was archived at Git commit `{git_commit}`{git_repo_text}. Environment and execution provenance were tracked using the `pubrun` library [1].
 
 **References:**
-[1] Fariello, G. (2026). pubrun: A zero-dependency Python library for execution provenance and telemetry capture. GitHub repository, https://github.com/fariello/pubrun
+[1] Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research [Computer software]. https://github.com/fariello/pubrun
 """
 
 LATEX_TEMPLATE = """
 \\subsection*{{Computational Methods}}
 
-Computational experiments were executed on a machine running {os_name} equipped with an {cpu_model} processor and {ram_gb} GB of RAM. The execution environment relied on Python {python_version} ({python_impl}). 
+Computational experiments were executed on a machine running {os_name} equipped with an {cpu_model} processor and {ram_gb} GB of RAM. The execution environment relied on Python {python_version} ({python_impl}).
 
 {packages_text}
 
 To facilitate computational reproducibility, the exact state of the source code was archived at Git commit \\texttt{{{git_commit}}}{git_repo_text}. Environment and execution provenance were tracked using the \\texttt{{pubrun}} library \\cite{{fariello_pubrun_2026}}.
 
 %% Ensure you add the following to your .bib file:
-%% @misc{{fariello_pubrun_2026,
+%% @software{{fariello_pubrun_2026,
 %%   author    = {{Gabriele Fariello}},
-%%   title     = {{pubrun: A zero-dependency Python library for execution provenance and telemetry capture}},
-%%   howpublished = {{\\url{{https://github.com/fariello/pubrun}}}},
-%%   year      = {{2026}}
+%%   title     = {{pubrun: Low-friction execution provenance for Python research}},
+%%   year      = {{2026}},
+%%   url       = {{https://github.com/fariello/pubrun}}
 %% }}
 """

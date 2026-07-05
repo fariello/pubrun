@@ -53,9 +53,11 @@ try:
 except Exception:
     __commit__ = None
 
+# Publication name (matches the author's existing academic publication record so
+# citations aggregate correctly). The full legal name appears in LICENSE/NOTICE.
 __author__ = "Gabriele Fariello"
-__license__ = "BSD-3-Clause"
-__copyright__ = "Copyright 2026 Gabriele Fariello"
+__license__ = "Apache-2.0"
+__copyright__ = "Copyright 2007-2026 Gabriele G. R. Fariello"
 __credit__ = __author__  # backward-compatible alias
 
 __all__ = [

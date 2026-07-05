@@ -547,16 +547,37 @@ def _run_meta(out_path: str, depth: str) -> None:
 
 
 def _run_cite(style: str) -> None:
-    """Print a formatted academic citation for pubrun."""
+    """Print a formatted academic citation for pubrun.
+
+    This cites the software itself (repository), which is the honest, stable form
+    while no peer-reviewed publication exists yet. Once a journal article (e.g.
+    JOSS) is accepted, update these strings and CITATION.cff to the published
+    citation with its DOI.
+    """
     style = style.lower()
+    try:
+        from pubrun import __version__ as _ver
+    except Exception:
+        _ver = None
+    ver_apa = f" (Version {_ver})" if _ver else ""
+    ver_bib = f",\n  version   = {{{_ver}}}" if _ver else ""
+    url = "https://github.com/fariello/pubrun"
+    title = "pubrun: Low-friction execution provenance for Python research"
     if style == "apa":
-        print("Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research. Journal of Open Source Software, (In Submission).")
+        print(f"Fariello, G. (2026). {title}{ver_apa} [Computer software]. {url}")
     elif style == "mla":
-        print("Fariello, Gabriele. \"pubrun: Low-friction execution provenance for Python research.\" Journal of Open Source Software, (In Submission).")
+        print(f"Fariello, Gabriele. \"{title}.\" 2026. Computer software. {url}.")
     elif style == "chicago":
-        print("Fariello, Gabriele. 2026. \"pubrun: Low-friction execution provenance for Python research.\" Journal of Open Source Software, (In Submission).")
+        print(f"Fariello, Gabriele. 2026. \"{title}.\" Computer software. {url}.")
     elif style == "bibtex":
-        print("@article{fariello_pubrun_2026,\n  author    = {Gabriele Fariello},\n  title     = {pubrun: Low-friction execution provenance for Python research},\n  journal   = {Journal of Open Source Software},\n  note      = {In Submission},\n  year      = {2026}\n}")
+        print(
+            "@software{fariello_pubrun_2026,\n"
+            "  author    = {Gabriele Fariello},\n"
+            f"  title     = {{{title}}},\n"
+            "  year      = {2026},\n"
+            f"  url       = {{{url}}}{ver_bib}\n"
+            "}"
+        )
     else:
         _print_error(f"Unknown citation style '{style}'. Supported styles: apa, mla, chicago, bibtex.")
         sys.exit(1)
@@ -1074,7 +1095,16 @@ def main() -> None:
         description=f"{prog_name}: Zero-dependency execution telemetry and publication engine.",
         epilog=f"Use '{prog_name} <command> --help' for detailed information on a specific command."
     )
-    parser.add_argument("--version", action="version", version=f"pubrun {__version__}")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=(
+            f"pubrun {__version__}\n"
+            "Based on the original pubrun by Gabriele G. R. Fariello "
+            "(https://github.com/fariello/pubrun).\n"
+            "Licensed under Apache-2.0; see the NOTICE file for the required attribution."
+        ),
+    )
     parser.add_argument("--no-color", action="store_true", help="Suppress ANSI color output globally.")
 
     subparsers = parser.add_subparsers(dest="command", title="Available core commands", metavar="<command>")
