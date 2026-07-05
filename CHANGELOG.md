@@ -78,6 +78,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Orphaned profilers**: Disabled in `_finalize_state()` if phase entered without exit.
 - **yappi concurrent guard**: Nested/concurrent phases with yappi log a warning and skip.
 
+#### Other fixes
+- **Namespaced import-mode aliases now expose the full public API.** `import pubrun.auto/
+  noauto/nopatch/noconsole/minimal as pubrun` previously rebound only 8 of the 12 public
+  names, so `pubrun.print`, `pubrun.open`, `pubrun.report`, `pubrun.artifact`,
+  `pubrun.subprocess`, and `pubrun.popen` raised `AttributeError` via the alias (top-level
+  `import pubrun` was unaffected). All aliases now match the top-level surface; a
+  regression test asserts parity. This makes `pubrun.print()` usable as the output-capture
+  escape hatch in `noconsole`/`nopatch`/`minimal` as documented.
+
 #### Edge-case / failure-mode hardening
 - **Status reader tolerance**: A single malformed, truncated, hand-edited, or foreign-version `manifest.json`/`.pubrun.lock` (non-numeric `started_at_utc`, out-of-range/NaN epoch, non-dict `signals_received`, non-string `argv`) no longer crashes `pubrun status`/`show`/`inspect`; the bad run is shown degraded and the rest still list. Numeric fields are coerced at a single choke point; `scan_runs` has a per-run backstop.
 - **PID liveness**: `is_pid_alive` rejects `None`/non-positive/overflow PIDs before `os.kill` (which would signal a process group for `pid <= 0`); same-process script matching now trusts only an exact basename (substring-only or generic tokens like `python`/`-c` fall through to timing), correcting recycled-PID false positives; the conservative "assume alive when start time is unreadable" default is preserved to avoid false "crashed" verdicts on macOS.

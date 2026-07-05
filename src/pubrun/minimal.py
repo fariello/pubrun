@@ -28,6 +28,12 @@ from pubrun.core import (  # noqa: F401, E402
     audit_run,
     tracked_run,
     get_current_run,
+    report,
+    artifact,
+    print,
+    open,
+    subprocess,
+    popen,
     _run_lock,
 )
 from pubrun.core import _execute_boot_sequence as _boot  # noqa: E402
@@ -47,5 +53,11 @@ _pkg.diff = diff
 _pkg.audit_run = audit_run
 _pkg.tracked_run = tracked_run
 _pkg.get_current_run = get_current_run
+_pkg.report = report
+_pkg.artifact = artifact
+_pkg.print = print
+_pkg.open = open
+_pkg.subprocess = subprocess
+_pkg.popen = popen
 _pkg._run_lock = _run_lock
 del _pkg

@@ -259,12 +259,12 @@ with pubrun.open("results/output.json", "w") as f:
 
 Drop-in replacement for `builtins.print()`. Calls the real `print()` AND appends the output to `stdout.log` in the run directory, **independently of console-stream wrapping**. It only needs an active run.
 
-This is the recommended way to capture output when the console tee is NOT active — any mode with `capture_mode = "off"` (the default), or the `noconsole`/`nopatch`/`minimal` modes. It records output without monkeypatching `sys.stdout`/`sys.stderr`.
+This is the recommended way to capture output when the console tee is NOT active — any mode with `capture_mode = "off"` (the default), or the `noconsole`/`nopatch`/`minimal` modes. It records output without monkeypatching `sys.stdout`/`sys.stderr`, and is available via every import mode alias.
 
 ```python
-import pubrun
+import pubrun.noconsole as pubrun   # streams are not wrapped
 
-pubrun.print("Epoch 1 complete", flush=True)  # recorded to stdout.log
+pubrun.print("Epoch 1 complete", flush=True)  # still recorded to stdout.log
 ```
 
 ### `pubrun.subprocess.run(*args, **kwargs)` / `pubrun.subprocess.Popen(...)`
