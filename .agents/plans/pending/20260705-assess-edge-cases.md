@@ -6,7 +6,7 @@
   (`status.py`), external-command capture (`hardware.py`, `git.py`, `resources.py`),
   the monkeypatched surfaces (`core.py`, `console.py`, `signals.py`), config loading
   (`config.py`), and package capture (`packages.py`).
-- Status: PENDING (awaiting human approval; not executed)
+- Status: APPROVED (user approved execution 2026-07-05; open questions resolved)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Run record: `workflow-artifacts/assess-edge-cases/20260705-002318/`
 - Plan-review: hardened 2026-07-05 (verdict APPROVE WITH REVISIONS APPLIED); see the
@@ -90,11 +90,11 @@ low Remediation Risk (defensive guards + config, behavior-preserving on the happ
 | 2d | EC-05/06/07 | **Anti-regression gate (rubric D — do this FIRST).** Liveness determines run *status* (running/crashed), a domain invariant. Before changing 2b/2c, write characterization tests that pin the CURRENT correct verdicts for the common cases (Linux `/proc`, macOS `ps`, Windows via mocks): live matching PID → running; dead PID → crashed; matching PID+start → running. These must be green before AND after 2b/2c. Any intentional verdict change (e.g. the recycled-PID false-positive being corrected) is called out explicitly in the commit message as a deliberate correctness fix, not a silent behavior diff. | `tests/` (new), `liveness.py` | Low | New characterization tests pass pre-change; full suite green post-change; no unexplained verdict diffs. |
 | 3 | EC-08 | Move `sorted(...)` inside the try in `packages.py` (or null-guard: `key=lambda x: (x["name"] or "").lower()`), so a `None` dist name yields `status="partial"` instead of crashing → run keeps tracking. | `packages.py` | Low | Test: `full-environment` mode with a mocked distribution whose `metadata["Name"]` is `None` → returns records + `status="partial"`, run not ghosted. |
 | 4 | EC-09 | Cap `manual_subprocess_records` at `capture.subprocesses.max_tracked_commands` (reuse the existing key), matching `SubprocessSpy`. Stop appending past the cap (optionally record a truncation marker). | `core.py` | Low | Test: call `pubrun.subprocess.run` past the cap; assert list length is bounded. |
-| 5 | EC-10, EC-11, EC-13 | Add subprocess `timeout=` to all `hardware.py` and macOS/Windows `resources.py` external calls; make them configurable. **Exact keys (add to `default.toml` with comments, matching existing sections):** `[capture.hardware].timeout` (default 5), `[capture.resources].poll_timeout` (default 2; the `[capture.resources]` section already holds `sample_interval_seconds`/`max_consecutive_failures`), `[capture.git].timeout` (default 3; `[capture.git]` already holds `check_dirty`). **The git timeout must apply to the repo-detection call `rev-parse --show-toplevel` (git.py:39), not only the dirty check** — `check_dirty=false` does not cover it. On timeout in hardware capture set `hardware_data.capture_state.status = "timeout"` (a terminal state distinct from "pending"). In `git.py`, distinguish a `TimeoutExpired` (record `capture_state.status = "timeout"` / detail "git timed out") from a genuine non-repo/`git`-missing so the manifest never falsely claims "Not a git repository". | `hardware.py`, `resources.py`, `git.py`, `resources/default.toml`, `docs/configuration.md`, `docs/manifest.md` | Low | Tests mocking a slow/raising subprocess → capture returns a terminal `timeout`/`unavailable` status, no hang beyond the timeout, child not left running; a mocked git `TimeoutExpired` → status `timeout`, not `unavailable`. |
+| 5 | EC-10, EC-11, EC-13 | Add subprocess `timeout=` to all `hardware.py` and macOS/Windows `resources.py` external calls; make them configurable. **Exact keys + DECISION (user) defaults (add to `default.toml` with comments, matching existing sections):** `[capture.hardware].timeout` (default **10**), `[capture.resources].poll_timeout` (default **3**; the `[capture.resources]` section already holds `sample_interval_seconds`/`max_consecutive_failures`), `[capture.git].timeout` (default **5**; `[capture.git]` already holds `check_dirty`). **The git timeout must apply to the repo-detection call `rev-parse --show-toplevel` (git.py:39), not only the dirty check** — `check_dirty=false` does not cover it. On timeout in hardware capture set `hardware_data.capture_state.status = "timeout"` (a terminal state distinct from "pending"). In `git.py`, distinguish a `TimeoutExpired` (record `capture_state.status = "timeout"` / detail "git timed out") from a genuine non-repo/`git`-missing so the manifest never falsely claims "Not a git repository". | `hardware.py`, `resources.py`, `git.py`, `resources/default.toml`, `docs/configuration.md`, `docs/manifest.md` | Low | Tests mocking a slow/raising subprocess → capture returns a terminal `timeout`/`unavailable` status, no hang beyond the timeout, child not left running; a mocked git `TimeoutExpired` → status `timeout`, not `unavailable`. |
 | 6 | EC-12 | Make the resource-watcher self-abort less brittle: only count a *raised exception / unreadable poll* (not a legitimate RSS of 0) toward the consecutive-failure counter. The existing `[capture.resources].max_consecutive_failures` (default 3, `resources.py:229-237`) key stays as-is — do NOT add a new key; just change what counts as a "failure" so a transient 0 never permanently disables telemetry. | `resources.py` | Low | Existing `test_resource_watcher_failure_threshold` updated to reflect the new semantics + a test that a legitimate 0-RSS poll does not count toward the threshold and sampling continues. |
 | 7 | EC-14 | Make config loading tolerant: wrap each `tomllib.loads(...)` in `load_local_config`/`load_user_config` in try/except that logs a warning and skips the malformed file (returns the rest), so no CLI command crashes on a bad `.pubrun.toml`. | `config.py` | Low | Test: malformed `.pubrun.toml` → `resolve_config()` returns defaults+valid layers with a warning, `pubrun status` runs. |
 | 8 | EC-15, EC-16 | (a) Make `_restore_excepthook` identity-guarded like `console.py` (only restore if current hook is still ours). (b) Broaden the console tee passthrough guard beyond `BrokenPipeError` (catch `(OSError, ValueError)` around the passthrough write). | `signals.py`, `console.py` | Low | Tests: install a later excepthook, stop pubrun, assert the later hook survives; tee write to a closed original stream does not raise out of `write()`. |
-| 9 | EC-17, EC-20 | Standardize `status.py` timestamp rendering on UTC (`datetime.fromtimestamp(epoch, tz=timezone.utc)`, match `diff.py`) and label the zone (e.g. suffix `Z` or "UTC" in the column header). Mark `event_count` as an estimate in the UI ("~N est."). **First grep the tests for any that assert local-time-formatted status output and update them in the same commit** so the suite reflects the intended UTC output rather than silently masking a diff. | `status.py`, `docs/cli.md`, `tests/` | Low | New UTC format test; updated any existing status-timestamp assertions; doc update. |
+| 9 | EC-17, EC-20 | **DECISION (user):** store timestamps as UTC epochs (already the case) and **display local time by default**, with an opt-in `--utc` flag that renders UTC. Add `--utc` to the relevant `status`/`show`/`inspect` argparse subcommands; thread it into `_format_timestamp(epoch, utc: bool = False)` (local by default; `datetime.fromtimestamp(epoch, tz=timezone.utc)` when `--utc`). Label the zone in output either way (local shows the local offset or a "local" note; `--utc` shows `Z`/"UTC"). This makes the zone explicit and user-controlled, resolving the status-vs-diff ambiguity without forcing UTC on everyone. Also mark `event_count` as an estimate ("~N est."). **Grep tests for local-time status assertions and update as needed** (local remains the default so most should be stable). | `status.py`, `__main__.py` (argparse), `docs/cli.md`, `tests/` | Low | Test: `_format_timestamp(epoch)` (local) and `_format_timestamp(epoch, utc=True)` (UTC `Z`); `pubrun status --utc` renders UTC; default renders local; malformed epoch → "-". |
 | 10 | EC-18, EC-19 | Diff robustness: guard `unflatten_manifest` against scalar/dict prefix collisions; guard `_normalize_manifest` against non-list `variables`/`records`; use identity-aware list-diff (compare by `repr`/type-tagged value) so `True`/`1` do not alias; note duplicate-env-name collapse. | `diff.py`, `render.py` | Low–Medium (complexity: keep the diff logic simple; do the minimal type-tag) | Tests: manifest with `a.b` scalar + `a.b.c`, env var with `.`, list containing both `1` and `True`; export + diff succeed with correct output. |
 | 11 | EC-21, EC-22, EC-24, EC-25, EC-26 | Small correctness/hygiene fixes: normalize `sep`/`end` in `pubrun.print` inside the guard; make combined-log sort stable/robust for empty timestamps (secondary key = original order); make `_pubrun_logged` set atomic under a lock; record failed `pubrun.subprocess.run` invocations; replace the mutable default arg with `None`. | `core.py`, `__main__.py`, `diff.py` | Low | Targeted unit tests for each. |
 
@@ -167,21 +167,20 @@ User-visible behavior changes requiring doc/CHANGELOG updates (per AGENTS.md doc
 - `CHANGELOG.md` `[Unreleased]`: add the hardening entries.
 - After execution, run `/assess documentation` to verify.
 
-## Open questions
+## Open questions — RESOLVED (user decisions 2026-07-05)
 
-1. **Timezone for `status.py`:** standardize on UTC (matches `diff.py` and the manifest
-   epochs) — assumed yes. Confirm you do not prefer local time with an explicit label.
-2. **Default timeouts:** proposed defaults — hardware 5s, git 3s, resource poll 2s.
-   Confirm or adjust. (Assumption, marked for confirmation.)
-3. **EC-27 (signal finalization):** confirm it should be deferred to its own design
-   pass rather than attempted here. (Recommended: defer.)
-4. **Liveness strictness (EC-06/EC-07):** the plan now (post-review) bounds this risk —
-   Step 2c keeps "assume alive" as the default when start-time is genuinely unreadable
-   and only marks "not same" on positive mismatch evidence, and Step 2d requires
-   characterization tests first. The residual decision: confirm you accept that the
-   recycled-PID false-positive being corrected (EC-06) is a deliberate, desirable
-   verdict change (a run that WAS wrongly shown "running" may now correctly show
-   "crashed"). Recommended: yes, it is a correctness fix.
+1. **Timezone for `status.py`:** RESOLVED — store UTC, **display local by default, add
+   `--utc` flag** for UTC display. (See Step 9, updated.)
+2. **Default timeouts:** RESOLVED — hardware **10s**, git **5s**, resource poll **3s**.
+   (See Step 5, updated.)
+3. **EC-27 (signal finalization):** RESOLVED — **defer** to its own design pass.
+   (Remains in the Deferred table.)
+4. **Liveness strictness (EC-06/EC-07):** RESOLVED — **accept the correctness fix**; a
+   run wrongly shown "running" due to a recycled-PID false-positive may now correctly
+   show "crashed". Gated by Step 2d characterization tests; intentional verdict changes
+   are called out in the commit.
+
+Execution approved by the user on 2026-07-05.
 
 ## Approval and execution gate
 
