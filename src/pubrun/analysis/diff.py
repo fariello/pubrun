@@ -1,7 +1,7 @@
 import os
 import json
 import fnmatch
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def _is_path_var(key_path: str) -> bool:
@@ -146,7 +146,7 @@ def unflatten_manifest(flat_dict: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: List[str] = [], show_same: bool = False, depth: str = "basic") -> Dict[str, Any]:
+def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Optional[List[str]] = None, show_same: bool = False, depth: str = "basic") -> Dict[str, Any]:
     """Compare two manifests and return added, removed, modified, and same keys.
 
     Args:
@@ -156,6 +156,8 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Lis
         show_same: If True, populate the ``"same"`` bucket.
         depth: The diff depth level ("basic", "standard", or "deep").
     """
+    if ignores is None:
+        ignores = []
     flat_a = _normalize_manifest(raw_a, ignores, depth)
     flat_b = _normalize_manifest(raw_b, ignores, depth)
 

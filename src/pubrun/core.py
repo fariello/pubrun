@@ -478,10 +478,21 @@ def print(*args: Any, **kwargs: Any) -> None:
 
     Respects all standard print arguments (sep, end, file, flush).
     """
-    # 1. Capture the printed string
-    sep = kwargs.get("sep", " ")
-    end = kwargs.get("end", "\n")
-    msg = sep.join(map(str, args)) + end
+    # 1. Capture the printed string. Builtin print() accepts sep=None/end=None
+    # as "use the default", so normalize before joining to avoid an
+    # AttributeError on None.join(...). (IPD 20260705 EC-21.)
+    sep = kwargs.get("sep")
+    if sep is None:
+        sep = " "
+    end = kwargs.get("end")
+    if end is None:
+        end = "\n"
+    try:
+        msg = sep.join(map(str, args)) + end
+    except Exception:
+        # Never let provenance-side string building change the host's print
+        # semantics; fall back to a best-effort representation.
+        msg = " ".join(str(a) for a in args) + "\n"
 
     builtins.print(*args, **kwargs)
 
@@ -691,8 +702,24 @@ class _PubrunSubprocessNamespace:
         started_at = time.time()
 
         from pubrun.capture.subprocesses import disable_spy
-        with disable_spy():
-            res = _subprocess.run(*args, **kwargs)
+        try:
+            with disable_spy():
+                res = _subprocess.run(*args, **kwargs)
+        except Exception as exc:
+            # Record the failed invocation for provenance (parity with the
+            # SubprocessSpy, which logs failures), then re-raise unchanged so
+            # host semantics are untouched. (IPD 20260705 EC-25.)
+            current_run = get_current_run()
+            if current_run and current_run.is_active:
+                _append_manual_subprocess_record(current_run, {
+                    "argv": cmd_args,
+                    "exit_code": None,
+                    "started_at_utc": started_at,
+                    "ended_at_utc": time.time(),
+                    "pid": None,
+                    "error": f"{type(exc).__name__}: {exc}",
+                })
+            raise
 
         ended_at = time.time()
 
@@ -713,14 +740,25 @@ class _PubrunSubprocessNamespace:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             self._pubrun_cmd = args[0] if args else kwargs.get("args")
             self._pubrun_started_at = time.time()
+            self._pubrun_log_lock = threading.Lock()
+            self._pubrun_logged = False
             from pubrun.capture.subprocesses import disable_spy
             with disable_spy():
                 super().__init__(*args, **kwargs)
 
         def _log_pubrun_record(self) -> None:
-            if getattr(self, "_pubrun_logged", False):
-                return
-            self._pubrun_logged = True
+            # Atomically claim the single log slot so concurrent wait()/poll()
+            # from two threads cannot double-append. (IPD 20260705 EC-24.)
+            lock = getattr(self, "_pubrun_log_lock", None)
+            if lock is not None:
+                with lock:
+                    if self._pubrun_logged:
+                        return
+                    self._pubrun_logged = True
+            else:
+                if getattr(self, "_pubrun_logged", False):
+                    return
+                self._pubrun_logged = True
             ended_at = time.time()
             current_run = get_current_run()
             if current_run and current_run.is_active:
