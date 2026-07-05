@@ -1,9 +1,12 @@
 import copy
+import logging
 import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 import importlib.resources
+
+logger = logging.getLogger("pubrun")
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -70,11 +73,29 @@ def get_global_config_dir() -> Path:
     return Path(config_dir) / "pubrun"
 
 
+def _safe_load_toml(path: Path) -> Optional[Dict[str, Any]]:
+    """Parse a TOML config file, tolerating malformed content.
+
+    A syntactically-invalid ``.pubrun.toml`` (truncated, hand-edited, wrong
+    syntax) must not crash ``pubrun`` commands or the host script. On a parse
+    error, log a warning and skip the file (returning None) so the remaining
+    config layers still resolve. (IPD 20260705 EC-14.)
+    """
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as e:
+        logger.warning(f"pubrun: ignoring malformed config file {path}: {e}")
+        return None
+    except OSError as e:
+        logger.debug(f"pubrun: could not read config file {path}: {e}")
+        return None
+
+
 def load_user_config() -> Optional[Dict[str, Any]]:
     """Load the user-level config from the global config directory, if it exists."""
     path = get_global_config_dir() / "config.toml"
     if path.is_file():
-        return tomllib.loads(path.read_text(encoding="utf-8"))
+        return _safe_load_toml(path)
     return None
 
 
@@ -88,19 +109,23 @@ def load_local_config(start_dir: Optional[Path] = None) -> Optional[Dict[str, An
     """
     if start_dir is None:
         start_dir = Path.cwd()
-        
+
     merged = {}
-    
+
     # Base local configuration standard targeting explicit ecosystems
     deep_path = start_dir / ".config" / "pubrun" / "config.toml"
     if deep_path.is_file():
-        merged = _deep_merge(merged, tomllib.loads(deep_path.read_text(encoding="utf-8")))
-        
+        deep_conf = _safe_load_toml(deep_path)
+        if deep_conf:
+            merged = _deep_merge(merged, deep_conf)
+
     # Highly explicit root footprint directly mapping local states
     root_path = start_dir / ".pubrun.toml"
     if root_path.is_file():
-        merged = _deep_merge(merged, tomllib.loads(root_path.read_text(encoding="utf-8")))
-        
+        root_conf = _safe_load_toml(root_path)
+        if root_conf:
+            merged = _deep_merge(merged, root_conf)
+
     return merged if merged else None
 
 
@@ -118,15 +143,15 @@ def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         overrides: Dict of config keys to merge at highest priority.
     """
     config = load_default_config()
-    
+
     user_conf = load_user_config()
     if user_conf:
         config = _deep_merge(config, user_conf)
-        
+
     local_conf = load_local_config()
     if local_conf:
         config = _deep_merge(config, local_conf)
-        
+
     # Environment variable overrides (between local config and API overrides)
     env_profile = os.environ.get("PUBRUN_PROFILE")
     if env_profile:
@@ -135,7 +160,7 @@ def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     env_meta_ref = os.environ.get("PUBRUN_META_REF")
     if env_meta_ref:
         config = _deep_merge(config, {"core": {"meta_ref": env_meta_ref}})
-    
+
     if overrides:
         # Convenience flattening: allow start(profile="deep", output_dir="./x")
         # as shorthand for start(core={"profile": "deep", "output_dir": "./x"}).
@@ -146,5 +171,5 @@ def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         if flat_core:
             overrides.setdefault("core", {}).update(flat_core)
         config = _deep_merge(config, overrides)
-        
+
     return config
