@@ -12,7 +12,8 @@ from pubrun._bootstrap import select_mode
 # Select mode before importing core
 _behavior = select_mode("noconsole", "pubrun.noconsole", "explicit")
 
-# Import the full public API
+# Import the full public API (must match the top-level `import pubrun` surface,
+# so `import pubrun.noconsole as pubrun` exposes the same names).
 from pubrun.core import (  # noqa: F401, E402
     start,
     stop,
@@ -22,6 +23,12 @@ from pubrun.core import (  # noqa: F401, E402
     audit_run,
     tracked_run,
     get_current_run,
+    report,
+    artifact,
+    print,
+    open,
+    subprocess,
+    popen,
     _run_lock,
 )
 from pubrun.core import _execute_boot_sequence as _boot  # noqa: E402
@@ -41,5 +48,11 @@ _pkg.diff = diff
 _pkg.audit_run = audit_run
 _pkg.tracked_run = tracked_run
 _pkg.get_current_run = get_current_run
+_pkg.report = report
+_pkg.artifact = artifact
+_pkg.print = print
+_pkg.open = open
+_pkg.subprocess = subprocess
+_pkg.popen = popen
 _pkg._run_lock = _run_lock
 del _pkg

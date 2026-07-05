@@ -795,3 +795,69 @@ print(json.dumps({{"active": run is not None}}))
         assert result.returncode == 0, f"stderr: {result.stderr}"
         data = json.loads(result.stdout.strip())
         assert data["active"] is False
+
+
+# =============================================================================
+# Mode-alias public API parity (regression: mode submodules must expose the
+# SAME public names as the top-level `import pubrun`).
+# =============================================================================
+
+class TestModeAliasApiParity:
+    """`import pubrun.<mode> as pubrun` must expose the full public API.
+
+    Previously the mode submodules only rebound 8 of the 12 public names,
+    so `pubrun.print` / `pubrun.open` / `pubrun.report` / `pubrun.artifact` /
+    `pubrun.subprocess` / `pubrun.popen` raised AttributeError via the alias
+    (while top-level `import pubrun` worked). These run in subprocesses because
+    import mode is process-global.
+    """
+
+    _PUBLIC = [
+        "start", "stop", "annotate", "phase", "diff", "audit_run",
+        "tracked_run", "get_current_run", "report", "artifact",
+        "print", "open", "subprocess", "popen",
+    ]
+
+    @pytest.mark.parametrize("mode", ["auto", "noauto", "nopatch", "noconsole", "minimal"])
+    def test_mode_alias_exposes_full_api(self, mode):
+        names = json.dumps(self._PUBLIC)
+        script = f"""
+import json
+import pubrun.{mode} as pubrun
+names = {names}
+missing = [n for n in names if not hasattr(pubrun, n)]
+print(json.dumps({{"missing": missing}}))
+try:
+    if pubrun.get_current_run():
+        pubrun.stop()
+except Exception:
+    pass
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=20,
+            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["missing"] == [], f"{mode} alias missing: {data['missing']}"
+
+    def test_noconsole_alias_print_captures_to_stdout_log(self, tmp_path):
+        """pubrun.print via the noconsole alias records to stdout.log even
+        though console streams are not wrapped."""
+        script = """
+import glob, sys
+import pubrun.noconsole as pubrun
+pubrun.print("captured-line-parity-check")
+pubrun.stop()
+logs = glob.glob("runs/pubrun-*/stdout.log")
+ok = bool(logs) and "captured-line-parity-check" in open(logs[0]).read()
+print("CAPTURE_OK" if ok else "CAPTURE_FAIL")
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=20, cwd=str(tmp_path),
+            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert "CAPTURE_OK" in result.stdout, f"stdout: {result.stdout}"
