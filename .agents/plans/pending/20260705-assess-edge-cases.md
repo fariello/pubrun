@@ -9,6 +9,8 @@
 - Status: PENDING (awaiting human approval; not executed)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Run record: `workflow-artifacts/assess-edge-cases/20260705-002318/`
+- Plan-review: hardened 2026-07-05 (verdict APPROVE WITH REVISIONS APPLIED); see the
+  "Plan-review revisions" section at the end for what changed and why.
 
 ## Goal
 
@@ -81,15 +83,18 @@ low Remediation Risk (defensive guards + config, behavior-preserving on the happ
 
 | Step | Source finding IDs | Change | Files | Remediation Risk | Validation |
 |------|--------------------|--------|-------|------------------|------------|
-| 1 | EC-01, EC-02, EC-03, EC-04 | Make the status reader tolerant of malformed/foreign manifests+locks. (a) In `RunInfo` coerce/validate `started_at_utc`/`ended_at_utc`/`pid` to numeric (treat non-numeric as `None`) before any arithmetic. (b) Wrap each `RunInfo(entry)` construction in `scan_runs` in a try/except that degrades that single run to `crashed`/`unknown` and continues (never crash the whole listing). (c) Make the sort key numeric-safe. (d) Guard `_format_timestamp` (try/except → `"-"` or `str(epoch)`). (e) Guard `signals_received` iteration/`len` against non-list/non-dict. | `status.py` | Low | New tests feeding a run dir with a string `started_at_utc`, an out-of-range/NaN epoch, a non-dict `signals_received`, and a non-list `argv`; assert `pubrun status`/`inspect` still list all other runs and mark the bad one degraded, no exception. |
-| 2 | EC-05, EC-06, EC-07 | Harden liveness. (a) `is_pid_alive` returns `False` for `pid <= 0` and catches `OverflowError`. (b) Replace substring script match with a stricter comparison (basename equality / word-boundary), and require a non-generic script token before trusting the match (fall through to timing otherwise). (c) When start-time is unreadable, do NOT default to "alive"; fall back to the age-based/hostname heuristic already present rather than an unconditional True. | `liveness.py`, `status.py` (call sites) | Low–Medium (functionality: liveness heuristics; keep conservative, add tests) | Unit tests: `is_pid_alive(0)`/`(-1)`/`(2**70)` → False, no raise; same-process with a recycled PID running a substring-containing cmdline → not same; start-time None → not blindly alive. |
+| 1 | EC-01, EC-02, EC-03, EC-04 | Make the status reader tolerant of malformed/foreign manifests+locks. (a) Add ONE private coercion helper in `status.py` (e.g. `_as_float(x)` / `_as_int(x)` returning `None` for non-numeric/NaN/inf) and route `started_at_utc`/`ended_at_utc`/`pid` through it at the assignment points in both `_load_from_lock` and `_load_from_manifest` — a single choke point, not scattered guards, so all downstream arithmetic (`time.time() - started_at_utc`, elapsed, sort) is safe by construction. (b) Wrap each `RunInfo(entry)` construction in `scan_runs` in a try/except that degrades that single run to `crashed`/`unknown` and continues (never crash the whole listing) — this is the backstop even if a new field is missed. (c) Make the sort key numeric-safe (falls out of (a), but keep `or 0` defensively). (d) Guard `_format_timestamp` (try/except → `"-"`). (e) Guard `signals_received` iteration/`len` against non-list/non-dict (coerce a non-list to `[]`, skip non-dict entries). | `status.py` | Low | New tests feeding a run dir with a string `started_at_utc`, an out-of-range/NaN epoch, a non-dict `signals_received`, and a non-list `argv`; assert `pubrun status`/`inspect` still list all other runs and mark the bad one degraded, no exception. Include a test asserting the per-run try/except backstop catches an unforeseen bad field. |
+| 2a | EC-05 | **Unambiguous PID guard (no behavior-flip risk).** In the shared `is_pid_alive` entry point, return `False` immediately for `pid is None` or `pid <= 0` (before the platform branch, so both the POSIX `os.kill` path and the Windows `OpenProcess` path are covered), and add `OverflowError` to the POSIX `except` tuple (`os.kill(2**70, 0)` raises it). Rationale: `os.kill(0,0)`/`os.kill(-1,0)` do NOT raise — they signal process groups and return `True`, a wrong liveness verdict. This guard only rejects impossible-PID inputs and cannot flip a legitimate run's status. | `liveness.py:22-41` | Low | Unit tests: `is_pid_alive(0)`/`(-1)`/`(None)` → False; `is_pid_alive(2**70)` → False, no raise. |
+| 2b | EC-06 | **Tighten script match, prefer the existing exact-basename branch.** On Linux, `_check_command_linux` already tests `Path(part).name == expected_script` alongside the loose `expected_script in part` substring (liveness.py:68); make exact-basename the trusted signal and treat a substring-only hit as NOT a confirmed match (fall through to timing). On macOS/Windows the check is substring-only (liveness.py:84,102); tokenize the command line and require an exact basename/token match. Additionally, do not trust ANY script match when `expected_script` is a short/generic token (e.g. length < 3, or in `{"python","python3","-c","-m"}`); fall through to timing instead. | `liveness.py:59-70,84,102,131-143` | Low–Medium (functionality) — **gated by 2d characterization tests** | Unit tests: recycled PID running `python /x/train_backup.py` with `expected_script="train.py"` → not confirmed; `expected_script="python"` → never confirmed via script, falls to timing. |
+| 2c | EC-07 | **Conservative start-time handling (bounded to avoid the macOS flake regression).** Do NOT change the current "start-time unobtainable → assume alive" default into an unconditional "crashed" — on macOS/Windows `get_process_start_time` returns `None` legitimately when `ps`/`wmic` is slow or the `lstart` format does not parse, so flipping it would wrongly mark live runs crashed (this is the documented macOS PID-liveness flake source). Instead: only treat the process as NOT the same when we have **positive evidence of a mismatch** (a readable `actual_start` that differs beyond `tolerance`, OR a confirmed script mismatch from 2b). When start-time is genuinely unreadable AND the script check was inconclusive, keep the conservative "assume alive". This narrows EC-07's dangerous branch (permission-denied on `/proc/<pid>/stat` → blindly alive) via the 2b script check without introducing false "crashed" verdicts. | `liveness.py:145-150` | Low–Medium (functionality) — **gated by 2d** | Unit tests: readable `actual_start` far from expected → not same; `actual_start=None` + script confirmed → same; `actual_start=None` + script inconclusive → same (conservative). |
+| 2d | EC-05/06/07 | **Anti-regression gate (rubric D — do this FIRST).** Liveness determines run *status* (running/crashed), a domain invariant. Before changing 2b/2c, write characterization tests that pin the CURRENT correct verdicts for the common cases (Linux `/proc`, macOS `ps`, Windows via mocks): live matching PID → running; dead PID → crashed; matching PID+start → running. These must be green before AND after 2b/2c. Any intentional verdict change (e.g. the recycled-PID false-positive being corrected) is called out explicitly in the commit message as a deliberate correctness fix, not a silent behavior diff. | `tests/` (new), `liveness.py` | Low | New characterization tests pass pre-change; full suite green post-change; no unexplained verdict diffs. |
 | 3 | EC-08 | Move `sorted(...)` inside the try in `packages.py` (or null-guard: `key=lambda x: (x["name"] or "").lower()`), so a `None` dist name yields `status="partial"` instead of crashing → run keeps tracking. | `packages.py` | Low | Test: `full-environment` mode with a mocked distribution whose `metadata["Name"]` is `None` → returns records + `status="partial"`, run not ghosted. |
 | 4 | EC-09 | Cap `manual_subprocess_records` at `capture.subprocesses.max_tracked_commands` (reuse the existing key), matching `SubprocessSpy`. Stop appending past the cap (optionally record a truncation marker). | `core.py` | Low | Test: call `pubrun.subprocess.run` past the cap; assert list length is bounded. |
-| 5 | EC-10, EC-11, EC-13 | Add subprocess `timeout=` to all `hardware.py` and macOS/Windows `resources.py` external calls; make the timeouts configurable (`capture.hardware.timeout`, `capture.resources.poll_timeout`, `capture.git.timeout`) with sensible defaults (hardware/git larger than 1s). On timeout in hardware capture, set `hardware_data.capture_state.status = "timeout"` (a terminal state, not "pending"). Distinguish git timeout from "not a repo". | `hardware.py`, `resources.py`, `git.py`, `resources/default.toml`, docs | Low | Tests mocking a slow/raising subprocess → capture returns a terminal `timeout`/`unavailable` status, no hang beyond the timeout, child not left running. |
-| 6 | EC-12 | Make the resource-watcher self-abort less brittle: only count a *raised exception* (not a legitimate 0 RSS) toward the failure threshold, and/or raise the threshold; never permanently disable telemetry on transient zeros. | `resources.py` | Low | Existing `test_resource_watcher_failure_threshold` updated + a test that a single transient 0 does not permanently stop sampling. |
+| 5 | EC-10, EC-11, EC-13 | Add subprocess `timeout=` to all `hardware.py` and macOS/Windows `resources.py` external calls; make them configurable. **Exact keys (add to `default.toml` with comments, matching existing sections):** `[capture.hardware].timeout` (default 5), `[capture.resources].poll_timeout` (default 2; the `[capture.resources]` section already holds `sample_interval_seconds`/`max_consecutive_failures`), `[capture.git].timeout` (default 3; `[capture.git]` already holds `check_dirty`). **The git timeout must apply to the repo-detection call `rev-parse --show-toplevel` (git.py:39), not only the dirty check** — `check_dirty=false` does not cover it. On timeout in hardware capture set `hardware_data.capture_state.status = "timeout"` (a terminal state distinct from "pending"). In `git.py`, distinguish a `TimeoutExpired` (record `capture_state.status = "timeout"` / detail "git timed out") from a genuine non-repo/`git`-missing so the manifest never falsely claims "Not a git repository". | `hardware.py`, `resources.py`, `git.py`, `resources/default.toml`, `docs/configuration.md`, `docs/manifest.md` | Low | Tests mocking a slow/raising subprocess → capture returns a terminal `timeout`/`unavailable` status, no hang beyond the timeout, child not left running; a mocked git `TimeoutExpired` → status `timeout`, not `unavailable`. |
+| 6 | EC-12 | Make the resource-watcher self-abort less brittle: only count a *raised exception / unreadable poll* (not a legitimate RSS of 0) toward the consecutive-failure counter. The existing `[capture.resources].max_consecutive_failures` (default 3, `resources.py:229-237`) key stays as-is — do NOT add a new key; just change what counts as a "failure" so a transient 0 never permanently disables telemetry. | `resources.py` | Low | Existing `test_resource_watcher_failure_threshold` updated to reflect the new semantics + a test that a legitimate 0-RSS poll does not count toward the threshold and sampling continues. |
 | 7 | EC-14 | Make config loading tolerant: wrap each `tomllib.loads(...)` in `load_local_config`/`load_user_config` in try/except that logs a warning and skips the malformed file (returns the rest), so no CLI command crashes on a bad `.pubrun.toml`. | `config.py` | Low | Test: malformed `.pubrun.toml` → `resolve_config()` returns defaults+valid layers with a warning, `pubrun status` runs. |
 | 8 | EC-15, EC-16 | (a) Make `_restore_excepthook` identity-guarded like `console.py` (only restore if current hook is still ours). (b) Broaden the console tee passthrough guard beyond `BrokenPipeError` (catch `(OSError, ValueError)` around the passthrough write). | `signals.py`, `console.py` | Low | Tests: install a later excepthook, stop pubrun, assert the later hook survives; tee write to a closed original stream does not raise out of `write()`. |
-| 9 | EC-17, EC-20 | Standardize `status.py` timestamp rendering on UTC (match `diff.py`) and label the zone; mark `event_count` as an estimate in the UI ("~N est."). | `status.py`, docs | Low | Snapshot/format tests; doc update. |
+| 9 | EC-17, EC-20 | Standardize `status.py` timestamp rendering on UTC (`datetime.fromtimestamp(epoch, tz=timezone.utc)`, match `diff.py`) and label the zone (e.g. suffix `Z` or "UTC" in the column header). Mark `event_count` as an estimate in the UI ("~N est."). **First grep the tests for any that assert local-time-formatted status output and update them in the same commit** so the suite reflects the intended UTC output rather than silently masking a diff. | `status.py`, `docs/cli.md`, `tests/` | Low | New UTC format test; updated any existing status-timestamp assertions; doc update. |
 | 10 | EC-18, EC-19 | Diff robustness: guard `unflatten_manifest` against scalar/dict prefix collisions; guard `_normalize_manifest` against non-list `variables`/`records`; use identity-aware list-diff (compare by `repr`/type-tagged value) so `True`/`1` do not alias; note duplicate-env-name collapse. | `diff.py`, `render.py` | Low–Medium (complexity: keep the diff logic simple; do the minimal type-tag) | Tests: manifest with `a.b` scalar + `a.b.c`, env var with `.`, list containing both `1` and `True`; export + diff succeed with correct output. |
 | 11 | EC-21, EC-22, EC-24, EC-25, EC-26 | Small correctness/hygiene fixes: normalize `sep`/`end` in `pubrun.print` inside the guard; make combined-log sort stable/robust for empty timestamps (secondary key = original order); make `_pubrun_logged` set atomic under a lock; record failed `pubrun.subprocess.run` invocations; replace the mutable default arg with `None`. | `core.py`, `__main__.py`, `diff.py` | Low | Targeted unit tests for each. |
 
@@ -112,25 +117,51 @@ proposed above. No finding was dropped for effort.
   capabilities the tool needs to be honest under hung tools; config tolerance for
   malformed TOML (EC-14) is a missing robustness the ghost-mode philosophy implies.
 
+## Execution order and commit grouping
+
+- **Do Step 2d (liveness characterization tests) BEFORE Steps 2a–2c.** Everything else
+  is order-independent.
+- Suggested commit grouping (keep product changes separate from the test-only commit
+  per the project's convention): (1) status-reader hardening (Steps 1, 9-status parts),
+  (2) liveness (2d then 2a-2c), (3) capture timeouts + config + docs (Step 5),
+  (4) resource-watcher + config-TOML tolerance (Steps 6, 7), (5) hooks (Step 8),
+  (6) memory cap + diff + hygiene (Steps 4, 10, 11), (7) the new tests in one commit,
+  (8) CHANGELOG/docs sync. Adjust as convenient, but never bundle a behavior change
+  with an unrelated one.
+
+## KISS / dependency guardrail (rubric G)
+
+- **No new runtime dependencies, no `rich`, no new abstraction layers.** Every change
+  is a defensive guard, a configurable timeout, a bounded list, or a helper local to
+  its module. If any step seems to require a new dependency or a broad refactor, STOP
+  and raise it as an open question rather than expanding scope. This is the Complexity
+  counterweight to fix-by-default.
+
 ## Required tests / validation
 
-- New regression tests for every proposed step (enumerated in the Validation column),
-  added in one commit per the project's testing-IPD convention.
+- New regression tests for every proposed step (enumerated in the Validation column).
+  Group the *new-test* additions into one commit per the project's testing-IPD
+  convention; the liveness characterization tests (Step 2d) are the exception — they
+  land before the liveness code change so they can be shown green pre- and post-change.
 - Full suite green: `~/venv/p3.14/bin/python -m pytest tests/ -q`
-  (baseline: 599 passed, 2 skipped, 1 known-flaky `test_real_sigpipe_via_pipe`).
+  (baseline: 599 passed, 2 skipped, 1 known-flaky `test_real_sigpipe_via_pipe` — confirm
+  any failure reproduces in isolation before treating it as a regression).
 - Manual smoke: create a run dir with a hand-edited malformed `manifest.json`/lock
   (string `started_at_utc`, non-dict `signals_received`) and confirm `pubrun status`,
   `pubrun show`, `pubrun inspect` all still work and degrade only that run.
-- Confirm no behavior change on the happy path (existing tests unchanged except the
-  resource-watcher threshold test in Step 6 and any UTC-timestamp snapshot in Step 9).
+- Confirm no behavior change on the happy path. Existing tests should stay green
+  unchanged EXCEPT: the resource-watcher threshold test (Step 6) and any status
+  timestamp assertion that hardcodes local-time formatting (Step 9) — both must be
+  updated in the same commit as the code change, with the change explained.
 
 ## Spec / documentation sync
 
 User-visible behavior changes requiring doc/CHANGELOG updates (per AGENTS.md doc-sync):
 
-- New config keys: `capture.hardware.timeout`, `capture.resources.poll_timeout`,
-  `capture.git.timeout` → `docs/configuration.md`, `default.toml`, `docs/manifest.md`
-  (new hardware `"timeout"` state), `README` if it lists config.
+- New config keys `[capture.hardware].timeout`, `[capture.resources].poll_timeout`,
+  `[capture.git].timeout` → `docs/configuration.md`, `default.toml` (with comments),
+  `docs/manifest.md` (new hardware/git `"timeout"` capture_state), `README` if it lists
+  config.
 - Status timestamps switching to UTC and the `event_count` estimate label →
   `docs/cli.md` / status output docs.
 - `CHANGELOG.md` `[Unreleased]`: add the hardening entries.
@@ -144,10 +175,13 @@ User-visible behavior changes requiring doc/CHANGELOG updates (per AGENTS.md doc
    Confirm or adjust. (Assumption, marked for confirmation.)
 3. **EC-27 (signal finalization):** confirm it should be deferred to its own design
    pass rather than attempted here. (Recommended: defer.)
-4. **Liveness strictness (EC-06/EC-07):** tightening the same-process heuristic could
-   flip a currently-"running" edge to "crashed" for unusual invocations (e.g. `-c`
-   scripts). Confirm the conservative direction (prefer correctness, add tests) is
-   acceptable given the known macOS PID-liveness flakes.
+4. **Liveness strictness (EC-06/EC-07):** the plan now (post-review) bounds this risk —
+   Step 2c keeps "assume alive" as the default when start-time is genuinely unreadable
+   and only marks "not same" on positive mismatch evidence, and Step 2d requires
+   characterization tests first. The residual decision: confirm you accept that the
+   recycled-PID false-positive being corrected (EC-06) is a deliberate, desirable
+   verdict change (a run that WAS wrongly shown "running" may now correctly show
+   "crashed"). Recommended: yes, it is a correctness fix.
 
 ## Approval and execution gate
 
@@ -157,3 +191,39 @@ and it is NOT auto-executed. Recommended next steps:
 1. Review this IPD (optionally run the `plan-review` workflow to harden it).
 2. On approval, execute the ordered changes, run the validation, and sync specs/docs.
 3. Only then move this IPD from `.agents/plans/pending/` to `.agents/plans/executed/`.
+
+## Plan-review revisions (2026-07-05)
+
+Verdict: **APPROVE WITH REVISIONS APPLIED**. The plan-review re-read the actual source
+(`liveness.py`, `default.toml`, `config.py`, `status.py`) to verify the plan's claims
+and hardened it. No finding required a re-plan; the approach is sound. Changes:
+
+- **PR-01 / PR-02 (High, rubric D + functionality):** the original single Step 2 for
+  liveness refactored run-status logic (a domain invariant) without pinning current
+  behavior, and its "do not default to alive" instruction, if executed literally, would
+  have flipped legitimate macOS/Windows runs to "crashed" whenever `ps`/`wmic`
+  start-time reads fail — exactly the known macOS PID-liveness flake source. Split into
+  2a (unambiguous `pid<=0`/overflow guard — no flip risk), 2b (tighten script match,
+  preferring the exact-basename branch that already exists at `liveness.py:68`), 2c
+  (conservative start-time handling: only mark "not same" on positive mismatch
+  evidence, keep "assume alive" when start-time is genuinely unreadable), and 2d
+  (mandatory characterization tests FIRST, per rubric D).
+- **PR-06 (Medium):** Step 1 (EC-01) now names a single coercion choke point
+  (`_as_float`/`_as_int` helper routed through both loaders) plus a per-run try/except
+  backstop, instead of scattered guards.
+- **PR-03 (Medium):** Step 5 now names the exact TOML sections/keys (all under existing
+  `[capture.hardware]`/`[capture.resources]`/`[capture.git]` sections) and calls out
+  that the git timeout must cover the repo-detection `rev-parse --show-toplevel` call
+  (not just the dirty check) and must record a distinct `"timeout"` status.
+- **PR-04 (Medium):** Step 6 (EC-12) clarified to reuse the existing
+  `max_consecutive_failures` key (no new key) and only change what counts as a failure.
+- **PR-05 (Medium, rubric F):** added an "Execution order and commit grouping" section
+  (Step 2d first; suggested commit split) and the exact venv pytest command.
+- **PR-07 (Low):** Step 9 now requires grepping/updating any existing local-time status
+  assertions in the same commit as the UTC switch, so the diff is not silently masked.
+- **PR-08 (Low, rubric G/H):** added an explicit KISS / no-new-dependency / no-`rich`
+  guardrail with a STOP-and-ask instruction if any step appears to need one.
+
+No new findings were deferred; every plan-review finding was fixed in place. The IPD's
+own deferral (EC-27) remains correctly deferred (Medium-High Remediation Risk on
+Functionality/Complexity).
