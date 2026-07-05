@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Secret scanning CI**: `gitleaks` workflow on push/PR + `.gitleaksignore`.
 - **Dependency audit CI**: `pip-audit` workflow on push/PR.
 - **Pre-commit framework**: gitleaks + hygiene hooks (large-file guard, whitespace, YAML/TOML check).
+- **`status`/`show --utc` flag**: Display timestamps in UTC (default remains local time). Timestamps are always stored as UTC epochs; this only affects display.
+- **Capture subprocess timeouts**: `[capture.hardware].timeout` (default 10s), `[capture.resources].poll_timeout` (default 3s), and `[capture.git].timeout` (default 5s) bound hung external tools so they cannot orphan a capture thread/child. A git timeout is recorded as `capture_state.status = "timeout"` (distinct from "not a git repository").
 
 ### Changed
 - **BREAKING: `capture_mode` default is now `"off"`**. `import pubrun` no longer wraps stdout/stderr without explicit opt-in. To restore the old behavior, add `capture_mode = "standard"` to `.pubrun.toml`. Jupyter/IPython is auto-detected and capture is suppressed.
@@ -40,6 +42,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Event stream migration**: Guarded emit after failed directory migration.
 - **Orphaned profilers**: Disabled in `_finalize_state()` if phase entered without exit.
 - **yappi concurrent guard**: Nested/concurrent phases with yappi log a warning and skip.
+
+#### Edge-case / failure-mode hardening
+- **Status reader tolerance**: A single malformed, truncated, hand-edited, or foreign-version `manifest.json`/`.pubrun.lock` (non-numeric `started_at_utc`, out-of-range/NaN epoch, non-dict `signals_received`, non-string `argv`) no longer crashes `pubrun status`/`show`/`inspect`; the bad run is shown degraded and the rest still list. Numeric fields are coerced at a single choke point; `scan_runs` has a per-run backstop.
+- **PID liveness**: `is_pid_alive` rejects `None`/non-positive/overflow PIDs before `os.kill` (which would signal a process group for `pid <= 0`); same-process script matching now trusts only an exact basename (substring-only or generic tokens like `python`/`-c` fall through to timing), correcting recycled-PID false positives; the conservative "assume alive when start time is unreadable" default is preserved to avoid false "crashed" verdicts on macOS.
+- **Package capture**: A distribution with a missing/`None` name no longer crashes package capture (and thus no longer demotes the whole run to ghost mode).
+- **Manual subprocess records**: `pubrun.subprocess.run`/`Popen`/`popen` records are now bounded by `[capture.subprocesses].max_tracked_commands` (previously unbounded — an OOM risk in tight loops); a failed `run()` invocation is now recorded before re-raising.
+- **Config tolerance**: A malformed `.pubrun.toml`/user config is warned-and-skipped instead of crashing CLI commands.
+- **Resource watcher**: Only unreadable polls (errors/timeouts) count toward the consecutive-failure self-abort; a legitimate RSS of 0 no longer permanently disables telemetry.
+- **`sys.excepthook` restore**: Only restores pubrun's wrapper if it is still installed, so a third party's later-installed hook is not clobbered.
+- **Console tee**: Passthrough tolerates `OSError`/`ValueError` from the original stream (e.g. host closed stdout), matching plain-stream behavior.
+- **`show --export json`**: Tolerates flat-key prefix collisions (e.g. a package named `numpy.core`) instead of raising.
+- **Diff correctness**: Guards non-list `environment.variables`/`packages.records`; list diffs use a type-tagged comparison so `bool`/`int` (`True`/`1`) no longer alias.
+- **Combined logs**: Interleave uses a stable secondary sort key so untimestamped/partial lines keep their original position instead of being hoisted to the top.
+- **`pubrun.print`**: Tolerates `sep=None`/`end=None` (accepted by the builtin `print`).
+- **`pubrun status` timestamps**: Now rendered in local time by default with an explicit zone, resolving the prior status-vs-diff inconsistency; event counts shown from the size estimate are labeled `~N (est.)`.
 
 ## [1.3.1] - 2026-06-24
 

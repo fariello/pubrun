@@ -404,13 +404,14 @@ Every manifest section includes a `capture_state` object indicating the status o
 
 | Field | Type | Description |
 |---|---|---|
-| `status` | string | `"complete"`, `"partial"`, `"unavailable"`, `"suppressed"`, or `"failed"`. |
+| `status` | string | `"complete"`, `"partial"`, `"unavailable"`, `"suppressed"`, `"failed"`, or `"timeout"`. |
 
 - `complete` — Data captured successfully.
 - `partial` — Some data captured, but errors occurred.
 - `unavailable` — The data source was not accessible (e.g., no git repo).
 - `suppressed` — Capture was disabled by configuration or profile.
 - `failed` — Capture attempted but failed entirely.
+- `timeout` — The capture's external tool did not respond within its configured timeout (e.g. `git` on a slow/large repository, or a hung GPU query). Distinct from `unavailable` so a slow repo is never mislabeled as "not a git repository". See `[capture.git].timeout` and `[capture.hardware].timeout`.
 
 ### Redacted Values
 
