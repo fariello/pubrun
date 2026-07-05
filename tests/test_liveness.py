@@ -126,6 +126,57 @@ class TestIsSameProcess:
         assert is_same_process(os.getpid(), start - 43200) is True
 
 
+class TestLivenessCharacterization:
+    """Characterization tests (IPD 20260705 Step 2d): pin the current correct
+    verdicts before hardening liveness (EC-05/06/07), so intended changes are
+    visible and unintended regressions fail. These must stay green after the
+    hardening; the recycled-PID false-positive correction (EC-06) is the one
+    deliberate change and is covered by dedicated tests below.
+    """
+
+    def test_char_live_matching_pid_is_running(self):
+        """Live PID + correct start time + correct script -> same process (running)."""
+        start = get_process_start_time(os.getpid())
+        if start is None:
+            pytest.skip("Platform does not support start time retrieval")
+        assert is_same_process(os.getpid(), start, tolerance=30.0) is True
+
+    def test_char_dead_pid_is_crashed(self):
+        """Dead PID -> not same process (crashed), regardless of other args."""
+        assert is_same_process(4000000, time.time()) is False
+        assert is_same_process(4000000, time.time(), expected_script="pytest") is False
+
+    def test_char_matching_pid_and_start_no_script(self):
+        """Live PID + matching start, no script -> same (timing path)."""
+        start = get_process_start_time(os.getpid())
+        if start is None:
+            pytest.skip("Platform does not support start time retrieval")
+        assert is_same_process(os.getpid(), start, tolerance=30.0) is True
+
+    def test_char_absent_script_is_mismatch(self):
+        """A script name that appears NOWHERE in the cmdline is a confirmed
+        mismatch and short-circuits to False, even when the start time matches
+        (this is the current behavior and must be preserved)."""
+        from pubrun.capture.liveness import (
+            _PLATFORM, _check_command_linux, _check_command_macos, _check_command_windows,
+        )
+        functional = False
+        if _PLATFORM == "linux":
+            functional = _check_command_linux(os.getpid(), "pytest") is not None
+        elif _PLATFORM == "darwin":
+            functional = _check_command_macos(os.getpid(), "pytest") is not None
+        elif _PLATFORM == "win32":
+            functional = _check_command_windows(os.getpid(), "pytest") is not None
+        if not functional:
+            pytest.skip("Command-line checking is not functional on this platform")
+        start = get_process_start_time(os.getpid())
+        if start is None:
+            pytest.skip("Platform does not support start time retrieval")
+        assert is_same_process(
+            os.getpid(), start, expected_script="nonexistent_script_xyz.py"
+        ) is False
+
+
 class TestGetRssBytes:
     """Tests for RSS memory retrieval."""
 
