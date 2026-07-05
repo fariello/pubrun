@@ -795,8 +795,14 @@ def _run_combined(
                     if p.exists():
                         all_entries.extend(_parse_log_file(p, r.run_id, stream, multiple_runs))
 
-            # Sort chronologically by timestamp
-            all_entries.sort(key=lambda x: x[0])
+            # Sort chronologically by timestamp, keeping the original read order
+            # as a stable secondary key. Lines with an empty timestamp (content
+            # before the first timestamped line, or partial final lines from a
+            # killed process) thus stay in their original relative position
+            # instead of being hoisted to the top. (IPD 20260705 EC-22.)
+            indexed = list(enumerate(all_entries))
+            indexed.sort(key=lambda pair: (pair[1][0], pair[0]))
+            all_entries = [entry for _, entry in indexed]
             for _, line in all_entries:
                 if out_file:
                     out_file.write(line + "\n")
