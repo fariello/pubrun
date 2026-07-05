@@ -7,6 +7,11 @@ Usage::
 
 This is equivalent to a plain ``import pubrun`` with default config.
 Useful when you want to be explicit about the mode in source code.
+
+Note: "auto" permits the console tee, but stdout/stderr are NOT wrapped by
+default — ``[console].capture_mode`` defaults to ``"off"``. Subprocess and
+signal capture are on by default (their ``enabled`` keys default true), and the
+background resource watcher runs in every mode while a run is active.
 """
 from pubrun._bootstrap import select_mode
 

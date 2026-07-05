@@ -8,9 +8,12 @@ Usage::
     # API is available but no run is active yet.
     pubrun.start()  # You control when tracking begins.
 
-Global hooks (subprocess spy, console tee, signal handlers) are still
-installed when ``start()`` is called. Use ``pubrun.quiet`` if you also
-want to suppress hooks.
+The same hooks as the default ``auto`` mode apply once ``start()`` is called:
+the subprocess spy and signal handlers install and are on by default, while the
+console tee is *permitted* but stays off unless ``[console].capture_mode`` is
+set (it defaults to ``"off"``). To auto-start while suppressing hooks, use
+``pubrun.nopatch``; to auto-start while skipping only the console tee, use
+``pubrun.noconsole``.
 """
 from pubrun._bootstrap import select_mode
 
