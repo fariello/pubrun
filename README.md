@@ -60,11 +60,21 @@ With a single `import pubrun`, the library quietly traces your script execution,
 By default, `import pubrun` starts tracking immediately. For more control, use namespaced import modes:
 
 ```python
-import pubrun.noauto as pubrun   # Load API, start later with pubrun.start()
-import pubrun.nopatch as pubrun  # Auto-start; no subprocess/console monkeypatching; standard hooks active
+import pubrun.auto as pubrun      # Explicit form of the default `import pubrun` (auto-start)
+import pubrun.noauto as pubrun    # Load API, start later with pubrun.start()
+import pubrun.nopatch as pubrun   # Auto-start; no subprocess/console monkeypatching; standard hooks active
 import pubrun.noconsole as pubrun # Auto-start; intercepts subprocesses and signals, but skips wrapping console streams
-import pubrun.minimal as pubrun  # API only; no auto-start; all monkeypatches and hooks disabled
+import pubrun.minimal as pubrun   # API only; no auto-start; all monkeypatches and hooks disabled
 ```
+
+> **Not wrapping console streams?** In `noconsole`/`nopatch`/`minimal` (and by default in
+> any mode, since `capture_mode` is `"off"`), pubrun does not tee stdout/stderr. To still
+> record output, use `pubrun.print(...)` — a drop-in `print` replacement that writes to
+> the run's `stdout.log` **without** monkeypatching your streams. The import mode is
+> chosen once per process (first import wins); a mode that forbids console wrapping
+> (`noconsole`/`nopatch`/`minimal`) cannot be re-enabled later via `start(console=...)`.
+>
+> Access it via the top-level package (`import pubrun; pubrun.print(...)`).
 
 #### Preset Modes Behavior Matrix
 

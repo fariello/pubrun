@@ -25,6 +25,7 @@ print("Training model...")
 Use namespaced imports to control import-time behavior without config files:
 
 ```python
+import pubrun.auto as pubrun     # Explicit form of the default `import pubrun` (auto-start).
 import pubrun.noauto as pubrun   # Load API only. Start manually later.
 import pubrun.nopatch as pubrun  # Auto-start, skip subprocess/console patches, keep signal hooks.
 import pubrun.noconsole as pubrun # Auto-start, skip console patch, keep subprocess/signal hooks.
@@ -256,11 +257,14 @@ with pubrun.open("results/output.json", "w") as f:
 
 ### `pubrun.print(*args, **kwargs)`
 
-Drop-in replacement for `builtins.print()`. Calls the real `print()` AND appends the output to `stdout.log` in the run directory (independent of console tee capture_mode).
+Drop-in replacement for `builtins.print()`. Calls the real `print()` AND appends the output to `stdout.log` in the run directory, **independently of console-stream wrapping**. It only needs an active run.
+
+This is the recommended way to capture output when the console tee is NOT active — any mode with `capture_mode = "off"` (the default), or the `noconsole`/`nopatch`/`minimal` modes. It records output without monkeypatching `sys.stdout`/`sys.stderr`.
 
 ```python
 import pubrun
-pubrun.print("Epoch 1 complete", flush=True)
+
+pubrun.print("Epoch 1 complete", flush=True)  # recorded to stdout.log
 ```
 
 ### `pubrun.subprocess.run(*args, **kwargs)` / `pubrun.subprocess.Popen(...)`
