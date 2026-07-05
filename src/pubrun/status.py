@@ -37,6 +37,58 @@ STATUS_CRASHED = "crashed"
 STATUS_GHOST = "ghost"
 
 
+def _as_float(value: Any) -> Optional[float]:
+    """Coerce a value read from a manifest/lock JSON to a finite float, or None.
+
+    Manifests and lock files can be truncated by a killed process, hand-edited,
+    or produced by a different pubrun version, so a field that should be a POSIX
+    epoch may arrive as a string, bool, None, NaN, or infinity. Routing every
+    numeric timing field through this single choke point keeps all downstream
+    arithmetic (elapsed = now - started_at, sorting, formatting) safe by
+    construction. (IPD 20260705 EC-01/EC-02/EC-03.)
+    """
+    if isinstance(value, bool):  # bool is an int subclass; never a timestamp
+        return None
+    if isinstance(value, (int, float)):
+        f = float(value)
+        # Reject NaN / +-inf, which would crash datetime.fromtimestamp and
+        # poison comparisons.
+        if f != f or f in (float("inf"), float("-inf")):
+            return None
+        return f
+    return None
+
+
+def _as_int(value: Any) -> Optional[int]:
+    """Coerce a value read from a manifest/lock JSON to an int, or None.
+
+    Used for PID and exit-code fields, which must be integers before they reach
+    ``os.kill``/liveness checks. (IPD 20260705 EC-01/EC-05.)
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        f = float(value)
+        if f != f or f in (float("inf"), float("-inf")):
+            return None
+        return int(f)
+    return None
+
+
+def _as_signal_list(value: Any) -> List[Dict[str, Any]]:
+    """Coerce a ``signals_received`` value to a list of dicts, dropping junk.
+
+    A version-drifted or hand-edited manifest may store this as a non-list, or
+    a list containing non-dict entries; iterating those with ``.get`` would
+    raise. (IPD 20260705 EC-04.)
+    """
+    if not isinstance(value, list):
+        return []
+    return [s for s in value if isinstance(s, dict)]
+
+
 class RunInfo:
     """Lightweight descriptor for a single run directory."""
 
@@ -67,7 +119,26 @@ class RunInfo:
         self.console_log_size: Optional[int] = None
         self.signals_received: Optional[List[Dict[str, Any]]] = None
 
-        self._classify()
+        if run_dir is not None:
+            self._classify()
+
+    @classmethod
+    def _make_degraded(cls, run_dir: Path) -> Optional["RunInfo"]:
+        """Build a RunInfo with only defaults + the directory, skipping the
+        artifact-parsing that raised. Used as the scan_runs backstop so one
+        unreadable run cannot crash the whole listing. (IPD 20260705 EC-01.)
+        """
+        try:
+            info = cls(None)  # type: ignore[arg-type]  # skips _classify
+            info.run_dir = run_dir
+            info.status = STATUS_CRASHED
+            try:
+                info.run_id = run_dir.name.split("-")[-1]
+            except Exception:
+                pass
+            return info
+        except Exception:
+            return None
 
     def _enrich_from_manifest(self, manifest_path: Path) -> None:
         """Enrich a running/crashed run's metadata using the startup manifest."""
@@ -75,11 +146,11 @@ class RunInfo:
             with open(manifest_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.manifest = data
-            
+
             git = data.get("git", {})
             if not self.git_commit:
                 self.git_commit = git.get("commit")
-                
+
             host = data.get("host", {})
             if isinstance(host, dict):
                 hostname_val = host.get("hostname")
@@ -128,9 +199,9 @@ class RunInfo:
             self.outcome = data.get("status", {}).get("outcome", "unknown")
 
             timing = data.get("timing", {})
-            self.started_at_utc = timing.get("started_at_utc")
-            self.ended_at_utc = timing.get("ended_at_utc")
-            self.elapsed = timing.get("elapsed_seconds")
+            self.started_at_utc = _as_float(timing.get("started_at_utc"))
+            self.ended_at_utc = _as_float(timing.get("ended_at_utc"))
+            self.elapsed = _as_float(timing.get("elapsed_seconds"))
 
             # Git
             git = data.get("git", {})
@@ -142,22 +213,26 @@ class RunInfo:
             if isinstance(script_data, dict) and script_data.get("basename"):
                 self.script = script_data["basename"]
             elif invocation.get("argv"):
-                # Fallback: use first argv element (e.g. "-c", "train.py")
-                self.script = Path(invocation["argv"][0]).stem
+                # Fallback: use first argv element (e.g. "-c", "train.py").
+                # Guard against a non-string argv[0] from a foreign/edited manifest.
+                argv0 = invocation["argv"][0]
+                if isinstance(argv0, str):
+                    self.script = Path(argv0).stem
 
-            # Command-line arguments (everything after the script name)
+            # Command-line arguments (everything after the script name). Coerce
+            # every element to str so a non-string entry cannot crash the join.
             argv = invocation.get("argv", [])
-            if len(argv) > 1:
-                self.args = " ".join(argv[1:])
+            if isinstance(argv, list) and len(argv) > 1:
+                self.args = " ".join(str(a) for a in argv[1:])
 
             # Signals/exit
             signals = data.get("signals", {})
-            self.exit_code = signals.get("exit_code")
-            self.signals_received = signals.get("signals_received", [])
+            self.exit_code = _as_int(signals.get("exit_code"))
+            self.signals_received = _as_signal_list(signals.get("signals_received", []))
 
             # Process
             process = data.get("process", {})
-            self.pid = process.get("pid")
+            self.pid = _as_int(process.get("pid"))
             self.hostname = data.get("host", {}).get("hostname")
 
             # Status mapping
@@ -184,18 +259,19 @@ class RunInfo:
             with open(lock_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.lock_data = data
-            self.pid = data.get("pid")
-            self.started_at_utc = data.get("started_at_utc")
+            self.pid = _as_int(data.get("pid"))
+            self.started_at_utc = _as_float(data.get("started_at_utc"))
             self.script = data.get("script")
             self.run_id = data.get("run_id")
             self.hostname = data.get("hostname")
             self.git_commit = data.get("git_commit")
             self.cwd = data.get("cwd")
 
-            # Command-line arguments from lock file
+            # Command-line arguments from lock file. Coerce every element to str
+            # so a non-string entry (foreign/edited lock) cannot crash the join.
             argv = data.get("argv", [])
-            if argv:
-                self.args = " ".join(argv)
+            if isinstance(argv, list) and argv:
+                self.args = " ".join(str(a) for a in argv)
 
             # Determine if the process is still alive
             current_host = get_hostname()
@@ -261,8 +337,11 @@ class RunInfo:
             self.script = parts[1]
             self.run_id = parts[-1]
             try:
-                self.pid = int(parts[-2])
-            except ValueError:
+                pid = int(parts[-2])
+                # Only accept a plausible positive PID; a non-positive or absurd
+                # value from a malformed dir name must not reach os.kill.
+                self.pid = pid if pid > 0 else None
+            except (ValueError, OverflowError):
                 pass
 
 
@@ -363,10 +442,10 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
     """Close out a crashed run by updating/writing manifest.json and removing the lock file."""
     manifest_path = run_dir / "manifest.json"
     lock_path = run_dir / Run.LOCK_FILENAME
-    
+
     lock_data = lock_data or {}
     started_at = lock_data.get("started_at_utc")
-    
+
     manifest = {}
     if manifest_path.exists():
         try:
@@ -374,7 +453,7 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
                 manifest = json.load(f)
         except Exception:
             pass
-            
+
     if not manifest:
         # Compile what we can into a fallback manifest
         manifest = {
@@ -415,8 +494,8 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
             },
             "invocation": {
                 "script": {
-                    "basename": Path(lock_data.get("script")).name if lock_data.get("script") else None,
-                } if lock_data.get("script") else {},
+                    "basename": Path(str(lock_data.get("script"))).name if isinstance(lock_data.get("script"), str) else None,
+                } if isinstance(lock_data.get("script"), str) else {},
                 "argv": lock_data.get("argv", []),
                 "capture_state": {"status": "partial"},
             },
@@ -431,7 +510,7 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
             "outcome": "crashed",
             "capture_state": {"status": "complete"},
         }
-        
+
         # Estimate ended_at_utc from lock file modification time if available, or current time
         ended_at = time.time()
         if lock_path.exists():
@@ -439,7 +518,7 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
                 ended_at = lock_path.stat().st_mtime
             except OSError:
                 pass
-                
+
         timing = manifest.get("timing", {})
         timing["ended_at_utc"] = ended_at
         if timing.get("started_at_utc"):
@@ -484,10 +563,19 @@ def scan_runs(output_dir: Optional[str] = None) -> List[RunInfo]:
     runs: List[RunInfo] = []
     for entry in base.iterdir():
         if entry.is_dir() and entry.name.startswith("pubrun-"):
-            runs.append(RunInfo(entry))
+            try:
+                runs.append(RunInfo(entry))
+            except Exception:
+                # Backstop: a single malformed/foreign run directory must never
+                # crash the whole listing. Numeric fields are coerced at the
+                # source (see _as_float/_as_int), but this guards any unforeseen
+                # bad field so the other runs still render. (IPD 20260705 EC-01.)
+                degraded = RunInfo._make_degraded(entry)
+                if degraded is not None:
+                    runs.append(degraded)
 
-    # Sort by start time (most recent first), with None-start at the end
-    runs.sort(key=lambda r: r.started_at_utc or 0, reverse=True)
+    # Sort by start time (most recent first), with None/non-numeric start last.
+    runs.sort(key=lambda r: r.started_at_utc if isinstance(r.started_at_utc, (int, float)) else 0, reverse=True)
     return runs
 
 
@@ -521,30 +609,58 @@ def _format_elapsed(seconds: Optional[float]) -> str:
     """Format elapsed seconds as a human-friendly string in HH:MM:SS (or Xd HH:MM:SS if >= 24h) format."""
     if seconds is None:
         return "unknown"
-    
+
     is_negative = seconds < 0
     total_seconds = int(round(abs(seconds)))
-    
+
     s = total_seconds % 60
     m = (total_seconds // 60) % 60
     h = total_seconds // 3600
-    
+
     if h >= 24:
         days = h // 24
         hours = h % 24
         formatted = f"{days}d {hours:02d}:{m:02d}:{s:02d}"
     else:
         formatted = f"{h:02d}:{m:02d}:{s:02d}"
-        
+
     return f"-{formatted}" if is_negative else formatted
 
 
-def _format_timestamp(epoch: Optional[float]) -> str:
-    """Format a POSIX timestamp as a local datetime string."""
-    if epoch is None:
+# Display timezone preference for the CLI render. Timestamps are always STORED
+# as UTC epochs; this only controls how status/show/inspect render them. Local
+# is the default (researchers reason in local time); `pubrun ... --utc` sets
+# this True. Kept as a module flag so it does not have to thread through every
+# render function signature (KISS). (IPD 20260705 EC-17.)
+_DISPLAY_UTC = False
+
+
+def set_display_utc(utc: bool) -> None:
+    """Set the CLI timestamp display timezone (True = UTC, False = local)."""
+    global _DISPLAY_UTC
+    _DISPLAY_UTC = bool(utc)
+
+
+def _format_timestamp(epoch: Optional[float], utc: Optional[bool] = None) -> str:
+    """Format a POSIX timestamp for display.
+
+    Timestamps are stored as UTC epochs. By default they render in the viewer's
+    LOCAL time; when the ``--utc`` flag is set (via ``set_display_utc``) or
+    ``utc=True`` is passed, they render UTC with a ``Z`` suffix. Any non-numeric
+    / out-of-range epoch (from a malformed or foreign manifest) degrades to
+    ``"-"`` rather than crashing the render. (IPD 20260705 EC-03/EC-17.)
+    """
+    if epoch is None or not isinstance(epoch, (int, float)):
         return "-"
-    dt = datetime.fromtimestamp(epoch)
-    return dt.strftime("%Y-%m-%d %H:%M")
+    use_utc = _DISPLAY_UTC if utc is None else utc
+    try:
+        if use_utc:
+            dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+            return dt.strftime("%Y-%m-%d %H:%M") + "Z"
+        dt = datetime.fromtimestamp(epoch)
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except (ValueError, OverflowError, OSError):
+        return "-"
 
 
 def _format_bytes(nbytes: Optional[int]) -> str:
@@ -738,7 +854,7 @@ def render_verbose_list(runs: List[RunInfo]) -> str:
         rss = _format_bytes(r.rss_bytes) if r.status == STATUS_RUNNING else "-"
         cpu = f"{r.cpu_percent:.1f}%" if r.cpu_percent is not None and r.status == STATUS_RUNNING else "-"
         sig_count = str(len(r.signals_received)) if r.signals_received else "0"
-        events = str(r.event_count) if r.event_count is not None else "-"
+        events = f"~{r.event_count} (est.)" if r.event_count else ("0" if r.event_count == 0 else "-")
 
         args = r.args or "-"
 
@@ -805,7 +921,8 @@ def render_inspect(run_info: RunInfo) -> str:
 
     # Events and console
     if run_info.event_count is not None:
-        lines.append(f"  Events:        {run_info.event_count}")
+        events_str = f"~{run_info.event_count} (est.)" if run_info.event_count else "0"
+        lines.append(f"  Events:        {events_str}")
     if run_info.console_log_size is not None:
         lines.append(f"  Console Log:   {_format_bytes(run_info.console_log_size)}")
 
