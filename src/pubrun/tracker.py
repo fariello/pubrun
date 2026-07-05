@@ -65,7 +65,7 @@ class Run:
         raw_script = Path(sys.argv[0]).stem if sys.argv and sys.argv[0] else "interactive"
         import re
         self.script_name = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", raw_script)
-        
+
 
         # Timing state -- stored as POSIX epoch floats (time.time()), not ISO 8601
         # strings. This is a deliberate design choice:
@@ -77,11 +77,11 @@ class Run:
         self.started_at_utc = time.time()
         self.ended_at_utc: Optional[float] = None
         self.is_active = True
-        
+
         # Establish the unique run directory name
         base_dir_str = self.config.get("core", {}).get("output_dir", "")
         base_dir = Path(base_dir_str) if base_dir_str else Path.cwd() / "runs"
-        
+
         # Format timezone for human-readable directory names
         dt = datetime.fromtimestamp(self.started_at_utc, tz=timezone.utc)
         timestamp_str = dt.strftime("%Y%m%dT%H%M%SZ")
@@ -100,7 +100,7 @@ class Run:
                 if old_umask is not None:
                     os.umask(old_umask)
         except Exception as e:
-            # GHOST MODE: 
+            # GHOST MODE:
             # If filesystem is read-only (e.g. strict Slurm nodes), we silently abort
             # internal serialization tracking completely so the user's ML script doesn't crash.
             # However, we must alert the user via standard error so that Slurm logs show context.
@@ -125,7 +125,7 @@ class Run:
             self.signal_capture = None
             _active_run = self
             return
-        
+
         # State tracking (to detect crashes)
         self._outcome = "running"
         self._finalized = False
@@ -332,6 +332,8 @@ class Run:
             interval = res_cfg.get("sample_interval_seconds", 15)
             max_fails = res_cfg.get("max_consecutive_failures", 3)
             scope = res_cfg.get("scope", "process")
+            from pubrun.capture.resources import set_poll_timeout
+            set_poll_timeout(res_cfg.get("poll_timeout", 3))
             self.resource_watcher = ResourceWatcher(self, interval, max_fails, scope=scope)
             self.resource_watcher.start()
 
@@ -345,19 +347,19 @@ class Run:
         if the output_dir changes."""
         if not overrides:
             return
-            
+
         merged = resolve_config(overrides)
         new_base_str = merged.get("core", {}).get("output_dir", "")
-        
+
         if new_base_str:
             new_base = Path(new_base_str)
             new_dir = new_base / self.run_dir.name
-            
+
             if new_dir != self.run_dir:
                 # Close open files before moving the directory (required on Windows)
                 if getattr(self, "event_stream", None):
                     self.event_stream.close()
-                    
+
                 if getattr(self, "console_interceptor", None):
                     if getattr(self.console_interceptor, "stdout_log", None):
                         try:
@@ -386,7 +388,7 @@ class Run:
                     # Reopen files in original directory if move failed
                     new_dir = self.run_dir
                     old_dir_str = str(self.run_dir)
-                
+
                 # Reopen or migrate the files to the active run_dir
                 if getattr(self, "event_stream", None):
                     self.event_stream.migrate_directory(new_dir)
@@ -397,14 +399,14 @@ class Run:
                         else:
                             import logging as _log
                             _log.getLogger("pubrun").warning(f"pubrun: storage migrated to {new_dir} but event stream failed to reopen")
-                        
+
                 if getattr(self, "console_interceptor", None):
                     if self.console_interceptor.mode != "off":
                         try:
                             self.console_interceptor.stdout_log = open(new_dir / "stdout.log", "a", encoding="utf-8")
                             if self.console_interceptor.stdout_tee:
                                 self.console_interceptor.stdout_tee.log_file = self.console_interceptor.stdout_log
-                                
+
                             self.console_interceptor.stderr_log = open(new_dir / "stderr.log", "a", encoding="utf-8")
                             if self.console_interceptor.stderr_tee:
                                 self.console_interceptor.stderr_tee.log_file = self.console_interceptor.stderr_log
@@ -418,7 +420,7 @@ class Run:
             max_tracked = merged.get("capture", {}).get("subprocesses", {}).get("max_tracked_commands", 5000)
             SubprocessSpy.install(max_tracked)
             self._spying_subprocesses = True
-            
+
         self.config = merged
 
     def _finalize_state(self) -> None:
@@ -527,11 +529,11 @@ class Run:
             self.ref_count = getattr(self, "ref_count", 1) - 1
             if self.ref_count > 0:
                 return  # Still referenced by an outer wrapper.
-            
+
         self._finalize_state()
         if getattr(self, "writer", None):
             self.writer.write_artifacts()
-            
+
         global _active_run
         if _active_run is self:
             _active_run = None
@@ -549,7 +551,7 @@ class Run:
         elapsed = None
         if self.ended_at_utc:
             elapsed = self.ended_at_utc - self.started_at_utc
-            
+
             pass # removed local string formatter hook
         # Use saved records (captured before uninstall) if available; fall back to live.
         spy_records = getattr(self, "_saved_subprocess_records", None)
@@ -580,30 +582,30 @@ class Run:
                 "elapsed_seconds": elapsed,
                 "capture_state": {"status": "complete"}
             },
-            
+
             # Integrated Phase 3 sections
             "invocation": self.invocation_data,
             "console": self.console_data,
             "subprocesses": subprocess_records,
-            
+
             "process": self.process_data,
             "python": self.python_data,
             "packages": self.packages_data,
             "environment": self.environment_data,
             "git": self.git_data,
             "errors": {"records": [], "capture_state": {"status": "complete"}},
-            
+
             "config": {
                 "resolved_config_path": "config.resolved.json",
                 "sources_path": None,
                 "source_files": [],
                 "capture_state": {"status": "complete"}
             },
-            
+
             "hardware": self.hardware_data,
             "host": self.host_data,
             "resources": self.resource_watcher.to_manifest_dict() if self.resource_watcher else {"capture_state": {"status": "suppressed"}},
-            
+
             "capture": {
                 "output_base_dir": str(self.run_dir.parent),
                 "run_dir": str(self.run_dir),
