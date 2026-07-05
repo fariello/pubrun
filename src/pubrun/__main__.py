@@ -30,17 +30,17 @@ def _create_config(destination: str) -> None:
         # Resolve the package-native default architecture
         from pubrun.config import _read_package_resource
         content = _read_package_resource("pubrun.resources", "default.toml")
-        
+
         target_path = Path(destination).resolve()
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         if target_path.exists():
             _print_error(f"'{target_path}' already exists. Refusing to overwrite.")
             sys.exit(1)
-            
+
         target_path.write_text(content, encoding="utf-8")
         print(f"[OK] Successfully created configuration at: {target_path}")
-        
+
     except Exception as e:
         _print_error(f"Failed to create config: {e}")
         sys.exit(1)
@@ -149,7 +149,7 @@ def _run_methods(
     try:
         from pubrun.report.methods import generate_report
         from pubrun.report.utils import hydrate_manifest
-        
+
         manifest_path = _get_manifest_path(
             run_dir,
             filter_str=filter_str,
@@ -162,13 +162,13 @@ def _run_methods(
 
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
-            
+
         # Hydrate to merge parent HPC context if available
         manifest, warnings = hydrate_manifest(manifest_path, manifest)
         if warnings:
             for w in warnings:
                 print(f"[WARNING] {w}", file=sys.stderr)
-        
+
         # Dispatch to structural compilers
         text = generate_report(manifest, format_type)
         print("--- Generated Computational Methods Section ---")
@@ -207,10 +207,10 @@ def _run_rerun(
         )
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
-            
+
         inv = manifest.get("invocation", {})
         rerun_cmd = inv.get("rerun_command")
-        
+
         if rerun_cmd:
             if sys.platform == "win32" and "&& python " in rerun_cmd:
                 rerun_cmd = rerun_cmd.replace(" && python ", "\npython ").replace("'", '"')
@@ -230,7 +230,7 @@ def _run_rerun(
                 script_filename = script if script.endswith(".py") else f"{script}.py"
                 argv = lock_data.get("argv", [])
                 sys_argv = [script_filename] + argv
-                
+
             import shlex
             if sys.platform == "win32":
                 import subprocess as _sp
@@ -241,7 +241,7 @@ def _run_rerun(
                 redacted_cmdline = shlex.join(sys_argv)
                 cwd_str = shlex.quote(str(cwd)) if cwd else "."
                 rerun_cmd = f"cd {cwd_str} && python {redacted_cmdline}"
-                
+
             _print_warn(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json. Reconstructed rerun command from lock file:")
             if sys.platform == "win32" and "&& python " in rerun_cmd:
                 rerun_cmd = rerun_cmd.replace(" && python ", "\npython ").replace("'", '"')
@@ -271,11 +271,11 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
             run_dir_b = run_dirs[1]
         elif len(run_dirs) == 1:
             run_dir_a = run_dirs[0]
-            
+
             # Resolve run_dir_a to its canonical path first
             r_a = find_run(run_dir_a)
             run_dir_a_path = r_a.run_dir if r_a else Path(run_dir_a)
-            
+
             run_dir_b_path = None
             for r in valid_runs:
                 if r.run_dir.resolve() != run_dir_a_path.resolve():
@@ -284,7 +284,7 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
             if not run_dir_b_path:
                 _print_error("Only one run was provided, and no other runs with a manifest.json were found to compare against.")
                 sys.exit(1)
-            
+
             run_dir_b = str(run_dir_b_path)
             print(f"[*] Comparing {run_dir_a_path.name} against most recent other run: {run_dir_b_path.name}", file=sys.stderr)
         else:
@@ -312,14 +312,14 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
             print(f"[WARNING] {w}", file=sys.stderr)
 
         conf = resolve_config().get("diff", {})
-        
+
         if depth == "basic":
             ignores = conf.get("ignore_basic", [])
         elif depth == "standard":
             ignores = conf.get("ignore_standard", [])
         else:
             ignores = conf.get("ignore_deep", [])
-            
+
         ss_target = show_same if show_same is not None else conf.get("show_same", False)
 
         if export_format:
@@ -331,7 +331,7 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
 
             name_a = Path(manifest_path_a).parent.name
             name_b = Path(manifest_path_b).parent.name
-            
+
             out_a = f".pubrun_diff_A_{name_a}_clean.{fmt}"
             out_b = f".pubrun_diff_B_{name_b}_clean.{fmt}"
 
@@ -422,26 +422,26 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None) -> None
     except RunInProgressOrCrashedError as e:
         run_dir_path = e.run_dir
         run_info = e.run_info
-        
+
         status = run_info.status if run_info else "crashed/running"
         print(file=sys.stderr)
         _print_error(f"Run directory '{run_dir_path.name}' is currently {status} and does not contain a manifest.json.")
         print(file=sys.stderr)
-        
+
         if run_info:
             print("Run Details (from lock file):", file=sys.stderr)
             print(f"  - Run ID:    {run_info.run_id or '-'}", file=sys.stderr)
             print(f"  - Script:    {run_info.script or '-'}", file=sys.stderr)
             if run_info.args:
                 print(f"  - Arguments: {run_info.args}", file=sys.stderr)
-            
+
             started_str = "-"
             if run_info.started_at_utc:
                 try:
                     from datetime import datetime
                     dt = datetime.fromtimestamp(run_info.started_at_utc)
                     started_date_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-                    
+
                     elapsed = time.time() - run_info.started_at_utc
                     days = int(elapsed // 86400)
                     rem = elapsed % 86400
@@ -449,7 +449,7 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None) -> None
                     rem = rem % 3600
                     minutes = int(rem // 60)
                     seconds = int(rem % 60)
-                    
+
                     duration_str = f"{days}d {hours:02d}:{minutes:02d}:{seconds:02d}"
                     started_str = f"{started_date_str} ({duration_str} {status})"
                 except Exception:
@@ -462,20 +462,20 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None) -> None
             cwd_str = run_info.cwd if run_info.cwd else "-"
             print(f"  - CWD:       {cwd_str}", file=sys.stderr)
             print("", file=sys.stderr)
-            
+
             use_color = not os.environ.get("NO_COLOR", "")
             bold = "\033[1m" if use_color else ""
             red = "\033[91m" if use_color else ""
             yellow = "\033[93m" if use_color else ""
             rst = "\033[0m" if use_color else ""
-            
+
             if status == "running":
                 print(f"Status: {bold}{yellow}STILL RUNNING{rst}\n", file=sys.stderr)
             else:
                 print(f"Status: {bold}{red}CRASHED{rst}\n", file=sys.stderr)
                 from pubrun.status import close_out_crashed_run
                 close_out_crashed_run(run_dir_path, run_info.lock_data)
-            
+
         # Tail error logs (last 10 lines)
         log_file = None
         stderr_path = run_dir_path / "stderr.log"
@@ -484,7 +484,7 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None) -> None
             log_file = stderr_path
         elif stdout_path.exists() and stdout_path.stat().st_size > 0:
             log_file = stdout_path
-            
+
         if log_file:
             print(f"Last 10 lines of {log_file.name}:", file=sys.stderr)
             try:
@@ -498,7 +498,7 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None) -> None
             except Exception as le:
                 print(f"  (Failed to read log file: {le})", file=sys.stderr)
             print("", file=sys.stderr)
-            
+
         # Suggest the most recent non-crashed (completed/failed) run
         try:
             from pubrun.config import resolve_config
@@ -507,7 +507,7 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None) -> None
             runs_dir = Path(base_str) if base_str else Path.cwd() / "runs"
         except Exception:
             runs_dir = Path("runs")
-            
+
         completed_runs = []
         if runs_dir.exists() and runs_dir.is_dir():
             for d in runs_dir.iterdir():
@@ -519,7 +519,7 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None) -> None
                                 completed_runs.append((d, d.stat().st_mtime))
                     except Exception:
                         pass
-                    
+
         if completed_runs:
             completed_runs.sort(key=lambda x: x[1], reverse=True)
             latest_completed = completed_runs[0][0]
@@ -528,14 +528,14 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None) -> None
         else:
             print("No completed runs with a manifest.json were found in the output directory.", file=sys.stderr)
             print("See 'pubrun status' to view all active or crashed runs.", file=sys.stderr)
-            
+
         sys.exit(1)
 
     except Exception as e:
         _print_error(f"Failed to generate diagnostic report: {e}")
         sys.exit(1)
-        
-        
+
+
 def _run_meta(out_path: str, depth: str) -> None:
     """Generate a standalone environment snapshot for HPC parent-child hydration."""
     try:
@@ -794,7 +794,7 @@ def _run_combined(
                     p = r.run_dir / f"{stream}.log"
                     if p.exists():
                         all_entries.extend(_parse_log_file(p, r.run_id, stream, multiple_runs))
-            
+
             # Sort chronologically by timestamp
             all_entries.sort(key=lambda x: x[0])
             for _, line in all_entries:
@@ -815,7 +815,7 @@ def _show_info() -> None:
     """Print hardware, invocation, and import-mode diagnostics for debugging."""
     from pubrun.capture.hardware import get_hardware
     from pubrun.capture.invocation import get_invocation
-    
+
     print("==================================================")
     print("          pubrun Hardware Diagnostics           ")
     print("==================================================\n")
@@ -857,14 +857,14 @@ def _run_tests() -> None:
     print("==================================================")
     print("        pubrun Pipeline Evaluation Mode         ")
     print("==================================================\n")
-    
+
     if Path("tests").exists() and Path("tox.ini").exists():
         print("[*] Source repository detected. Running PyTest matrix...")
         try:
             subprocess.run(["python", "-m", "pytest", "tests/", "-q"])
         except Exception:
             print("[WARN] PyTest execution failed.")
-            
+
     print("\n[*] Executing Native End-to-End Mock Script...")
     MOCK_SCRIPT = """
 import time
@@ -891,32 +891,32 @@ print('Mock Training Complete.')
     with tempfile.TemporaryDirectory() as td:
         script_path = Path(td) / "mock_training.py"
         script_path.write_text(MOCK_SCRIPT.strip(), encoding="utf-8")
-        
+
         env = os.environ.copy()
         env["PUBRUN_AUTO_START"] = "true"
-        
+
         result = subprocess.run([sys.executable, str(script_path)], env=env, capture_output=True, text=True, cwd=td)
-        
+
         if result.returncode != 0:
             print(f"[FAIL] Mock Evaluation Failed. Exit Code: {result.returncode}")
             return
-            
+
         print("[OK] Mock script executed without crashing.")
-        
+
         runs_dir = Path(td) / "runs"
         if not runs_dir.exists():
             return
-            
+
         run_folders = list(runs_dir.iterdir())
         if not run_folders:
             return
-            
+
         active_run = run_folders[0]
         manifest_p = active_run / "manifest.json"
-        
+
         if not manifest_p.exists():
             return
-            
+
         try:
             manifest_data = json.loads(manifest_p.read_text(encoding="utf-8"))
             rcs = manifest_data.get("subprocesses", [])
@@ -986,7 +986,7 @@ def main() -> None:
             if arg == "run":
                 run_idx = idx
             break
-            
+
     no_color_present = False
     if run_idx != -1:
         if "--no-color" in sys.argv[:run_idx]:
@@ -1032,7 +1032,7 @@ def main() -> None:
         def error(self, message: str) -> None:
             subcommand = None
             subparsers_actions = [
-                act for act in self._actions 
+                act for act in self._actions
                 if isinstance(act, argparse._SubParsersAction)
             ]
             if subparsers_actions:
@@ -1040,7 +1040,7 @@ def main() -> None:
                     if arg in subparsers_actions[0].choices:
                         subcommand = arg
                         break
-            
+
             if subcommand:
                 subparser = subparsers_actions[0].choices[subcommand]
                 subparser.print_usage(sys.stderr)
@@ -1070,7 +1070,7 @@ def main() -> None:
     )
     parser.add_argument("--version", action="version", version=f"pubrun {__version__}")
     parser.add_argument("--no-color", action="store_true", help="Suppress ANSI color output globally.")
-    
+
     subparsers = parser.add_subparsers(dest="command", title="Available core commands", metavar="<command>")
 
     # ---------------- Init Subparser (UX-08) ----------------
@@ -1156,11 +1156,11 @@ def main() -> None:
     diff_parser.add_argument("run_dirs", type=str, nargs="*", help="Run directories to compare. If omitted, diffs the last two runs. If one is provided, diffs it against the most recent different run.")
     diff_parser.add_argument("--export", type=str, nargs="?", const=True, help="Export flattened manifests to files ('txt' or 'json').")
     diff_parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output.")
-    
+
     wrap_group = diff_parser.add_mutually_exclusive_group()
     wrap_group.add_argument("--wrap", action="store_true", default=None, help="Wrap long strings across multiple lines instead of truncating.")
     wrap_group.add_argument("--no-wrap", action="store_false", dest="wrap", default=None, help="Force ellipsis truncation for long values.")
-    
+
     diff_parser.add_argument("--max-length", type=int, default=None, help="Max characters per value before truncation.")
 
     diff_depth = diff_parser.add_mutually_exclusive_group()
@@ -1196,7 +1196,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     meta_parser.add_argument("--out", type=str, default="", help="Output file path. Defaults to ./runs/meta.json.")
-    
+
     depth_group_2 = meta_parser.add_mutually_exclusive_group()
     depth_group_2.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Minimal footprint (fastest).")
     depth_group_2.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Standard environment factors.")
@@ -1225,7 +1225,7 @@ def main() -> None:
     )
     report_parser.add_argument("run_dir", type=str, nargs="?", help="Run directory (e.g., runs/pubrun-XYZ). Defaults to the most recent run.")
     report_parser.add_argument("section", type=str, nargs="?", help="Optional section to view (e.g. 'logs', 'env', 'packages').")
-    
+
     depth_group_report = report_parser.add_mutually_exclusive_group()
     depth_group_report.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Timing and outcome only.")
     depth_group_report.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Hardware, Git, Python, and dependency summary (default).")
@@ -1279,11 +1279,12 @@ def main() -> None:
     )
     show_parser.add_argument("run_dir", type=str, nargs="?", help="Run directory (e.g., runs/pubrun-XYZ). Defaults to the most recent run.")
     show_parser.add_argument("section", type=str, nargs="?", help="Optional section to view (e.g. 'logs', 'env', 'packages').")
-    
+
     depth_group_show = show_parser.add_mutually_exclusive_group()
     depth_group_show.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Timing and outcome only.")
     depth_group_show.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Hardware, Git, Python, and dependency summary (default).")
     depth_group_show.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Full environment variables and complete package list.")
+    show_parser.add_argument("--utc", action="store_true", help="Display timestamps in UTC instead of local time.")
     show_parser.set_defaults(depth="standard")
     _add_run_filter_args(show_parser)
 
@@ -1298,6 +1299,7 @@ def main() -> None:
     status_parser.add_argument("run_id", type=str, nargs="?", help="Run ID (or prefix) to inspect in detail. If omitted, lists all runs.")
     status_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
     status_parser.add_argument("-v", "--verbose", action="store_true", help="Show detailed information for each run in the listing.")
+    status_parser.add_argument("--utc", action="store_true", help="Display timestamps in UTC instead of local time.")
     _add_run_filter_args(status_parser)
 
     # ---------------- UI Subparser ----------------
@@ -1310,16 +1312,16 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ui_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
-    
+
     # Hide report subcommand from help listing
     subparsers._choices_actions = [a for a in subparsers._choices_actions if a.dest != "report"]
-    
+
     # ---------------- Diagnostic Flags ----------------
     parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Create an annotated `.pubrun.toml` configuration file.")
     parser.add_argument("--show-config", action="store_true", help="Print the default configuration to the terminal.")
     parser.add_argument("--info", action="store_true", help="Display runtime diagnostics: Python version, pubrun version, import mode, detected config files, and capture capabilities.")
     parser.add_argument("--run-tests", action="store_true", help="Run the built-in test suite and a mock end-to-end script.")
-    
+
     # UX-01: Build the primary commands list (excluding aliases) for clean errors.
     _known_aliases = {"feedback", "issue", "tui", "gui"}
     _PRIMARY_COMMANDS.extend(
@@ -1331,6 +1333,12 @@ def main() -> None:
         setattr(args, "no_color", True)
     if getattr(args, "no_color", False):
         os.environ["NO_COLOR"] = "1"
+
+    # Timestamp display timezone: local by default, UTC when --utc is given
+    # (status/show). Timestamps are always stored as UTC epochs. (IPD EC-17.)
+    if getattr(args, "utc", False):
+        from pubrun.status import set_display_utc
+        set_display_utc(True)
 
     # Shifting logic: if run_dir is in {logs, env, packages}, shift it to section and set run_dir = None
     if args.command in {"show", "report"}:
@@ -1415,10 +1423,10 @@ def main() -> None:
 
     elif args.command == "diff":
         _run_diff(
-            getattr(args, "run_dirs", []), 
-            args.export, 
-            args.no_color, 
-            getattr(args, "wrap", None), 
+            getattr(args, "run_dirs", []),
+            args.export,
+            args.no_color,
+            getattr(args, "wrap", None),
             getattr(args, "max_length", None),
             getattr(args, "depth", "basic"),
             getattr(args, "same", None)
@@ -1556,13 +1564,13 @@ def main() -> None:
             print("  [1] Locally (./.pubrun.toml)")
             global_hint = "Global AppData" if sys.platform == "win32" else "Global (~/.config/pubrun/config.toml)"
             print(f"  [2] {global_hint}")
-            
+
             try:
                 choice = input("Select an option [1/2] (Default: 1): ").strip()
             except KeyboardInterrupt:
                 print("\nConfiguration abandoned.", file=sys.stderr)
                 sys.exit(1)
-                
+
             if choice == "2":
                 from pubrun.config import get_global_config_dir
                 dest = str(get_global_config_dir() / "config.toml")
@@ -1571,10 +1579,10 @@ def main() -> None:
             else:
                 _print_error("Invalid selection.")
                 sys.exit(1)
-            
+
         _create_config(dest)
         executed = True
-        
+
     if getattr(args, "show_config", False):
         from pubrun.config import _read_package_resource
         content = _read_package_resource("pubrun.resources", "default.toml")
@@ -1584,7 +1592,7 @@ def main() -> None:
     if getattr(args, "info", False):
         _show_info()
         executed = True
-        
+
     if getattr(args, "run_tests", False):
         _run_tests()
         executed = True
