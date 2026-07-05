@@ -29,14 +29,14 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     cfg = config.get("capture", {}).get("packages", {})
     mode = cfg.get("mode", "imported-only")
-    
+
     # 1. Fast-exit if disabled
     if mode == "off":
         return {"capture_state": {"status": "suppressed"}}
-        
+
     records: List[Dict[str, Any]] = []
     status = "complete"
-    
+
     try:
         if mode in ("imported-only", "imported-transitive"):
             # Grab versions of whatever is currently loaded in memory
@@ -48,9 +48,9 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
                         version = importlib.metadata.version(mod_name)
                         imported_names.add(mod_name)
                         records.append({
-                            "name": mod_name, 
-                            "version": version, 
-                            "location": None, 
+                            "name": mod_name,
+                            "version": version,
+                            "location": None,
                             "editable": None,
                             "source": "imported",
                         })
@@ -106,13 +106,13 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
                         if dep_lower in required_by:
                             rec["required_by"] = required_by[dep_lower]
 
-        else: 
+        else:
             # Extract across the full isolated environment or top-level list
             for dist in importlib.metadata.distributions():
                 name = dist.metadata["Name"]
                 version = dist.version
                 location = str(dist.locate_file(""))
-                
+
                 # Check for "editable" install status by reading direct_url.json metadata
                 editable = False
                 try:
@@ -121,7 +121,7 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
                         editable = True
                 except Exception:
                     pass
-                    
+
                 records.append({
                     "name": name,
                     "version": version,
@@ -130,9 +130,13 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
                 })
     except Exception:
         status = "partial"
-        
+
+    # Null-guard the sort key: a distribution with missing metadata can yield a
+    # None name, and None.lower() would raise here -- OUTSIDE the try above --
+    # crashing get_packages and demoting the whole run to ghost mode. Coerce a
+    # missing/None name to "" for ordering only. (IPD 20260705 EC-08.)
     return {
         "mode": mode,
-        "records": sorted(records, key=lambda x: x["name"].lower()),
+        "records": sorted(records, key=lambda x: (x.get("name") or "").lower()),
         "capture_state": {"status": status}
     }
