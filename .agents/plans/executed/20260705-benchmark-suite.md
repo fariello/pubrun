@@ -4,7 +4,10 @@
 - Concern: performance measurement / reproducible benchmarking (net-new tooling)
 - Scope: new `benchmarks/` tree in the public repo; a `[bench]` optional-dependency
   extra; no change to `src/pubrun/` runtime behavior.
-- Status: PENDING (awaiting human approval; not executed)
+- Status: EXECUTED (2026-07-05). All steps implemented; deferrals (CI perf-gating,
+  Windows tree-scope) intact. `pytest tests/` unchanged (631 collected). `[bench]` extra
+  does not leak into the base install. A quick sample result + aggregated summary are
+  committed; representative docs numbers await multi-system collection by the maintainer.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Plan-review: hardened 2026-07-05 (verdict APPROVE WITH REVISIONS APPLIED); see the
   "Plan-review revisions" section at the end.
