@@ -66,7 +66,7 @@ class TqdmSafeTee:
         self.timestamped = timestamped
         self.line_count = 0
         self._current_buffer = ""
-        
+
     def write(self, data: str) -> int:
         """Write data to the original stream and the log file.
 
@@ -80,11 +80,17 @@ class TqdmSafeTee:
             # Downstream reader closed (e.g., piped to head). Don't crash —
             # let the signal handler record SIGPIPE and let the process exit cleanly.
             ret = len(data)
-        
+        except (OSError, ValueError):
+            # The original stream may be closed or in a bad state (e.g. host code
+            # closed sys.stdout, or "I/O operation on closed file"). The tee must
+            # never surface an error the plain stream would not have here; report
+            # the bytes as consumed and keep logging. (IPD 20260705 EC-16.)
+            ret = len(data)
+
         # If logging is disabled or file is closed, simply return what was written
         if not self.log_file or self.log_file.closed:
             return ret
-            
+
         try:
             # 2. Process strings for log file safely (handling carriage returns aka TQDM interception)
             # Split on \r first to squash progress bar redraws, then process \n for line breaks.
@@ -114,9 +120,9 @@ class TqdmSafeTee:
                         self._current_buffer += line
         except Exception as e:
             logger.debug(f"pubrun tee internal error: {e}")
-            
+
         return ret
-        
+
     def flush(self) -> None:
         """Flush both the original stream and the log file."""
         try:
@@ -135,7 +141,7 @@ class TqdmSafeTee:
                 self.line_count += 1
                 self._current_buffer = ""
             self.log_file.flush()
-            
+
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the original stream (e.g. isatty, encoding)."""
         return getattr(self.original_stream, name)
@@ -157,7 +163,7 @@ class ConsoleInterceptor:
         self.stderr_log = None
         self.stdout_tee = None
         self.stderr_tee = None
-        
+
         # Save original streams for safe teardown later
         self.original_stdout = sys.stdout
         self.original_stderr = sys.stderr
@@ -169,19 +175,19 @@ class ConsoleInterceptor:
         """
         if self.mode == "off":
             return
-            
+
         try:
             self.stdout_log = open(self.run_dir / "stdout.log", "w", encoding="utf-8")
             self.stderr_log = open(self.run_dir / "stderr.log", "w", encoding="utf-8")
-            
+
             timestamped = self.mode in {"standard", "deep"}
-            
+
             self.stdout_tee = TqdmSafeTee(sys.stdout, self.stdout_log, timestamped)
             sys.stdout = self.stdout_tee
-            
+
             self.stderr_tee = TqdmSafeTee(sys.stderr, self.stderr_log, timestamped)
             sys.stderr = self.stderr_tee
-            
+
             import faulthandler
             try:
                 faulthandler.enable(file=self.stderr_log)
@@ -201,17 +207,17 @@ class ConsoleInterceptor:
             sys.stdout = self.original_stdout
         if sys.stderr is self.stderr_tee:
             sys.stderr = self.original_stderr
-        
+
         lines_out = 0
         lines_err = 0
-        
+
         if self.stdout_tee:
             self.stdout_tee.flush()
             lines_out = self.stdout_tee.line_count
         if self.stderr_tee:
             self.stderr_tee.flush()
             lines_err = self.stderr_tee.line_count
-            
+
         if self.stdout_log:
             self.stdout_log.close()
             self.stdout_log = None
@@ -223,7 +229,7 @@ class ConsoleInterceptor:
                 pass
             self.stderr_log.close()
             self.stderr_log = None
-            
+
         return {
             "capture_mode": self.mode,
             "stdout": {

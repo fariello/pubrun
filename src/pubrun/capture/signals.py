@@ -206,6 +206,7 @@ class SignalExitCapture:
         """Wrap sys.excepthook to capture SystemExit and unhandled exceptions."""
         self._previous_excepthook = sys.excepthook
         _self = self  # closure reference
+        self._installed_excepthook = None  # set after we build the wrapper
 
         def _excepthook(exc_type: type, exc_value: BaseException, exc_tb: Any) -> None:
             # Record exit information
@@ -238,12 +239,22 @@ class SignalExitCapture:
                 pass
 
         sys.excepthook = _excepthook
+        self._installed_excepthook = _excepthook
 
     def _restore_excepthook(self) -> None:
-        """Restore the original sys.excepthook."""
-        if self._previous_excepthook is not None:
+        """Restore the original sys.excepthook, but only if it is still ours.
+
+        If a third party replaced sys.excepthook after we installed our wrapper,
+        blindly restoring the previous hook would silently discard theirs. Only
+        restore when the current hook is the wrapper we installed, matching the
+        identity-guarded pattern used for the console stream restore.
+        (IPD 20260705 EC-15.)
+        """
+        installed = getattr(self, "_installed_excepthook", None)
+        if self._previous_excepthook is not None and sys.excepthook is installed:
             sys.excepthook = self._previous_excepthook
-            self._previous_excepthook = None
+        self._previous_excepthook = None
+        self._installed_excepthook = None
 
 
 # --------------------------------------------------------------------------
