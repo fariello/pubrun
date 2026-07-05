@@ -60,6 +60,10 @@ tui = [
     "textual>=0.80.0",
     "rich>=13.0.0"
 ]
+bench = [
+    "pytest-benchmark>=4.0",
+    "matplotlib>=3.5"
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pubrun"]
