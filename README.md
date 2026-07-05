@@ -389,7 +389,7 @@ screen the software presents:
 "Cite this repository" button (backed by `CITATION.cff`) provides ready-to-use formats. A
 suggested citation:
 
-> Fariello, Gabriele G. R. *pubrun*. 2026. https://github.com/fariello/pubrun
+> Fariello, Gabriele. *pubrun*. 2026. https://github.com/fariello/pubrun
 
 The attribution and citation requests impose no warranty or liability on the author; the
 software is provided "AS IS" per the LICENSE.
