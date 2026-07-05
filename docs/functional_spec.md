@@ -92,13 +92,30 @@ import pubrun.minimal as pubrun  # API only, no auto-start, all patches and hook
 
 | Mode | auto_start | patch_subprocesses | patch_console | signal_hooks | Meaning |
 | --- | --- | --- | --- | --- | --- |
-| `auto` | `true` | `true` | `true` | `true` | Default. Full tracking on import. |
+| `auto` | `true` | `true` | `true` | `true` | Default. Auto-start on import. |
 | `noauto` | `false` | `true` | `true` | `true` | Delay tracking until explicit `start()` call. |
 | `nopatch` | `true` | `false` | `false` | `true` | Start tracking, but skip subprocess and console monkey-patching. Signal handlers remain active. |
 | `noconsole` | `true` | `true` | `false` | `true` | Start tracking, patch subprocesses and signals, but skip stdout/stderr console wrapping. |
 | `minimal` | `false` | `false` | `false` | `false` | Load API only. No auto-start, no patches, no signal hooks. |
 
-When patching or signal hooks are disabled, the corresponding side effects (e.g. `subprocess.Popen` interception, stdout/stderr wrapping, signal handler registration) are suppressed. Static capture (hardware, packages, git, environment, host, process, python) and background resource monitoring remain unaffected when tracking is active.
+These flags express what each mode **permits**, not what is active. Two layers gate
+actual capture:
+
+1. **The mode flag** (above) — whether the hook is permitted at all.
+2. **Per-feature config** — whether the permitted hook is turned on.
+
+The most important consequence: `patch_console = true` in `auto`/`noauto` only *permits*
+the console tee; it does **not** wrap stdout/stderr by default, because
+`[console].capture_mode` defaults to `"off"`. The tee activates only when
+`capture_mode` is `"basic"`/`"standard"`/`"deep"`. Similarly, `patch_subprocesses`/
+`signal_hooks` are permitted-and-on-by-default via `[capture.subprocesses].enabled` /
+`[capture.signals].enabled` (both default `true`).
+
+When patching or signal hooks are disabled (by mode or config), the corresponding side
+effects (`subprocess.Popen` interception, stdout/stderr wrapping, signal handler
+registration) are suppressed. Static capture (hardware, packages, git, environment,
+host, process, python) and background resource monitoring are **not gated by import
+mode** and remain active in every mode whenever a run is running.
 
 ### 3.5 Explicit Activation
 

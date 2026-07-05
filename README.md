@@ -68,13 +68,30 @@ import pubrun.minimal as pubrun  # API only; no auto-start; all monkeypatches an
 
 #### Preset Modes Behavior Matrix
 
+The matrix shows whether each mode **permits** a hook. Whether a permitted hook is
+actually *active* is a separate, per-feature config decision (see the footnotes).
+
 | Import Mode | Auto-Start | Intercept Subprocesses (`SubprocessSpy`) | Wrap Console Streams (`ConsoleInterceptor`) | Intercept Signals & Exits (`SignalExitCapture`) | Description |
 | :--- | :---: | :---: | :---: | :---: | :--- |
-| **`auto`** *(default)* | ✅ | ✅ | ✅ | ✅ | Full telemetry tracking begins automatically on import. |
-| **`noauto`** | ❌ | ✅ | ✅ | ✅ | Tracking must be started manually; all patches and hooks are active once started. |
+| **`auto`** *(default)* | ✅ | ✅ | ⚠️ permitted, **off by default** | ✅ | Tracking begins automatically on import. |
+| **`noauto`** | ❌ | ✅ | ⚠️ permitted, **off by default** | ✅ | Tracking must be started manually; the same hooks as `auto` apply once `start()` is called. |
 | **`nopatch`** | ✅ | ❌ | ❌ | ✅ | Telemetry tracking begins automatically; no intrusive stdout/stderr wrapping or subprocess patching; standard exit/signal hooks remain active. |
 | **`noconsole`** | ✅ | ✅ | ❌ | ✅ | Telemetry tracking begins automatically; intercepts subprocesses and signals, but skips wrapping stdout/stderr console streams. |
 | **`minimal`** | ❌ | ❌ | ❌ | ❌ | API only; tracking must be started manually; all patches and hooks are disabled (zero-footprint mode). |
+
+**Footnotes:**
+
+- **Console wrapping is OFF by default in every mode**, including `auto`/`noauto`. The
+  mode only controls whether console wrapping is *permitted*; the tee activates only
+  when `[console].capture_mode` is set to `"basic"`/`"standard"`/`"deep"` (default
+  `"off"`). `nopatch`/`noconsole`/`minimal` forbid it regardless of `capture_mode`.
+- **Subprocess interception** is permitted in `auto`/`noauto`/`noconsole` and is **on by
+  default** there (`[capture.subprocesses].enabled` defaults `true`); disable it via that
+  key. **Signal/exit capture** is likewise on by default where permitted
+  (`[capture.signals].enabled` defaults `true`).
+- **Background resource monitoring is NOT gated by import mode.** It samples in every
+  mode whenever a run is active and `[capture.resources].depth != "off"` (default
+  `"standard"`) — even in `nopatch` and `minimal` once `start()` has been called.
 
 Or configure project-wide in `.pubrun.toml`:
 

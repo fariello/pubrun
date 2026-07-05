@@ -33,7 +33,7 @@ import pubrun.minimal as pubrun  # API only. No auto-start, all hooks/patches di
 
 | Mode | Auto-start | Global hooks/patches | Use case |
 |------|-----------|-------------|----------|
-| `auto` | Yes | Yes | Default. Full tracking on import. |
+| `auto` | Yes | Yes (permitted) | Default. Auto-start on import. Console tee is permitted but off unless `capture_mode` is set (see note above). |
 | `noauto` | No | Yes | Libraries or scripts that start tracking explicitly. |
 | `nopatch` | Yes | No patches (signals active) | When monkey-patching conflicts with other tools (debuggers, profilers). |
 | `noconsole` | Yes | Subprocesses/signals active | When stdout/stderr console wrapping is undesirable but subprocesses/signals tracking is needed. |

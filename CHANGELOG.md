@@ -25,6 +25,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Source Software (In Submission)" reference; a single consistent title is used across all surfaces.
   Will switch to the peer-reviewed citation with DOI once a journal article is accepted.
 - **`pubrun --version`** now prints the required NOTICE attribution line.
+- **Import-mode docs accuracy**: the README "Preset Modes Behavior Matrix" (and
+  `functional_spec.md`, `api.md`, and the `auto`/`noauto` docstrings) previously implied
+  console wrapping is ON in `auto`/`noauto`. Corrected: a mode only *permits* the console
+  tee; it is **off by default** in every mode because `[console].capture_mode` defaults to
+  `"off"`. Also clarified that background resource monitoring is NOT gated by import mode
+  (it runs in every mode while a run is active). Removed a stale `pubrun.quiet` reference
+  in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
 - **`NOTICE`** file with the required Apache-2.0 attribution string; **`CITATION.cff`** added/updated
