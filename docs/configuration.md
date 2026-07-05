@@ -158,6 +158,7 @@ Security policies for preventing secret leakage into manifest files.
 |---|---|---|---|
 | `depth` | string | `"standard"` | Capture depth for Git repository state. |
 | `check_dirty` | bool | `true` | Whether to run `git status --porcelain` to detect uncommitted changes. Set to `false` for faster startup on large or network-mounted repos. |
+| `timeout` | int | `5` | Per-command timeout (seconds) for every git invocation, including repository detection. A timeout is recorded as `capture_state.status = "timeout"` (distinct from "not a git repository"), so a slow/large repo is never mislabeled as "not a repo". |
 
 ### `[capture.inputs]`
 
@@ -176,6 +177,7 @@ Security policies for preventing secret leakage into manifest files.
 | `capture_gpu_fp_precision` | bool | `false` | Query GPU floating-point precision support. |
 | `capture_cpu_clock_speed` | bool | `false` | Query CPU clock speeds (reads `/proc`). |
 | `capture_cpu_fp_precision` | bool | `false` | Query CPU floating-point precision support. |
+| `timeout` | int | `10` | Per-command timeout (seconds) for hardware-inspection subprocesses (`nvidia-smi`, `system_profiler`, `sysctl`, `wmic`). Bounds a hung tool (e.g. a wedged GPU driver) so it cannot orphan the background hardware thread. |
 
 ### `[capture.resources]`
 
@@ -184,7 +186,8 @@ Security policies for preventing secret leakage into manifest files.
 | `depth` | string | `"standard"` | Capture depth for background resource monitoring. |
 | `scope` | string | `"process"` | What to measure: `"process"` (main process only) or `"tree"` (sum RSS/CPU across all child processes). Tree mode is useful for multiprocessing/Dask/Ray workloads. |
 | `sample_interval_seconds` | int | `15` | How often the background thread samples CPU/memory. |
-| `max_consecutive_failures` | int | `3` | Kill the background thread after this many consecutive read failures. |
+| `max_consecutive_failures` | int | `3` | Kill the background thread after this many consecutive **unreadable** polls (errors/timeouts). A legitimate reading of 0 does not count, so a transient blip cannot permanently disable telemetry. |
+| `poll_timeout` | int | `3` | Per-poll timeout (seconds) for the macOS/Windows sampling subprocesses (`ps`/`wmic`). Bounds a hung tool so it cannot orphan the sampling thread. |
 
 ### `[capture.profiling]`
 

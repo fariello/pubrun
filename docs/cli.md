@@ -298,7 +298,7 @@ The wrapper returns the child process exit code. It does not create a run in the
 Lists all runs in the output directory with their current status, or inspects a specific run in detail. Classifies runs as completed, failed, interrupted, running, crashed, or ghost via lock-file PID liveness checks.
 
 ```bash
-pubrun status [RUN_ID] [--dir PATH] [-v|--verbose]
+pubrun status [RUN_ID] [--dir PATH] [-v|--verbose] [--utc]
 ```
 
 **Modes:**
@@ -315,6 +315,7 @@ pubrun status [RUN_ID] [--dir PATH] [-v|--verbose]
 |---|---|
 | `--dir PATH` | Override the output directory to scan (default: configured `output_dir` or `./runs`) |
 | `-v`, `--verbose` | Show detailed information for each run in the listing |
+| `--utc` | Display timestamps in UTC (with a `Z` suffix) instead of the default local time. Timestamps are always stored as UTC epochs; this only affects display. Also available on `pubrun show`. |
 
 **Status Values:**
 
