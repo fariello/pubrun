@@ -7,21 +7,25 @@ from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger("pubrun")
 
+# Default per-command timeout (seconds) for hardware-inspection subprocesses if
+# no config value is available. Overridable via [capture.hardware].timeout.
+_DEFAULT_HW_TIMEOUT = 10.0
 
-def _get_cpu_model() -> Optional[str]:
+
+def _get_cpu_model(timeout: float = _DEFAULT_HW_TIMEOUT) -> Optional[str]:
     try:
         sys_plat = sys.platform
         if sys_plat == "win32":
             from pubrun.capture.subprocesses import disable_spy
             with disable_spy():
-                out = subprocess.check_output(["wmic", "cpu", "get", "Name"], text=True, stderr=subprocess.DEVNULL)
+                out = subprocess.check_output(["wmic", "cpu", "get", "Name"], text=True, stderr=subprocess.DEVNULL, timeout=timeout)
             lines = [l.strip() for l in out.splitlines() if l.strip()]
             if len(lines) >= 2:
                 return lines[1]
         elif sys_plat == "darwin":
             from pubrun.capture.subprocesses import disable_spy
             with disable_spy():
-                out = subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"], text=True, stderr=subprocess.DEVNULL)
+                out = subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"], text=True, stderr=subprocess.DEVNULL, timeout=timeout)
             return out.strip()
         elif sys_plat.startswith("linux"):
             if os.path.exists("/proc/cpuinfo"):
@@ -34,20 +38,20 @@ def _get_cpu_model() -> Optional[str]:
     return None
 
 
-def _get_total_memory_bytes() -> Optional[int]:
+def _get_total_memory_bytes(timeout: float = _DEFAULT_HW_TIMEOUT) -> Optional[int]:
     try:
         sys_plat = sys.platform
         if sys_plat == "win32":
             from pubrun.capture.subprocesses import disable_spy
             with disable_spy():
-                out = subprocess.check_output(["wmic", "OS", "get", "TotalVisibleMemorySize"], text=True, stderr=subprocess.DEVNULL)
+                out = subprocess.check_output(["wmic", "OS", "get", "TotalVisibleMemorySize"], text=True, stderr=subprocess.DEVNULL, timeout=timeout)
             lines = [l.strip() for l in out.splitlines() if l.strip()]
             if len(lines) >= 2:
                 return int(lines[1]) * 1024
         elif sys_plat == "darwin":
             from pubrun.capture.subprocesses import disable_spy
             with disable_spy():
-                out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True, stderr=subprocess.DEVNULL)
+                out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True, stderr=subprocess.DEVNULL, timeout=timeout)
             return int(out.strip())
         elif sys_plat.startswith("linux"):
             if os.path.exists("/proc/meminfo"):
@@ -62,9 +66,9 @@ def _get_total_memory_bytes() -> Optional[int]:
     return None
 
 
-def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _get_gpus(config_hw: Dict[str, Any], timeout: float = _DEFAULT_HW_TIMEOUT) -> List[Dict[str, Any]]:
     gpus: List[Dict[str, Any]] = []
-    
+
     # Attempt 1: NVIDIA specific (SMI) for high precision ML metadata
     try:
         # We start by probing nvidia-smi. Extremely fast and rigorous if they have CUDA.
@@ -72,11 +76,11 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
         if config_hw.get("capture_gpu_clock_speed", False):
             # Caution: clocks.max.sm is the highest SM clock. Not supported on very old GPUs.
             cmd[1] += ",clocks.max.sm"
-            
+
         from pubrun.capture.subprocesses import disable_spy
         with disable_spy():
-            out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
-        
+            out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL, timeout=timeout)
+
         for line in out.splitlines():
             if not line.strip():
                 continue
@@ -89,13 +93,13 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
             }
             if len(parts) > 3 and parts[3].isdigit():
                 gpu_record["clock_speed_mhz"] = int(parts[3])
-                
+
             gpus.append(gpu_record)
-            
+
     except Exception as e:
         # Will naturally trigger if nvidia-smi doesn't exist on PATH (meaning AMD/Intel/Apple)
         logger.debug(f"pubrun nvidia-smi failed or not found: {e}")
-        
+
     # If NVIDIA SMI yielded nothing, attempt generic OS fallback.
     # Essential for researchers running models on M-series Macbooks or generic Intel/AMD laptops.
     if not gpus:
@@ -104,7 +108,7 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
             if sys_plat == "win32":
                 from pubrun.capture.subprocesses import disable_spy
                 with disable_spy():
-                    out = subprocess.check_output(["wmic", "path", "win32_VideoController", "get", "Name,AdapterRAM,DriverVersion", "/format:csv"], text=True, stderr=subprocess.DEVNULL)
+                    out = subprocess.check_output(["wmic", "path", "win32_VideoController", "get", "Name,AdapterRAM,DriverVersion", "/format:csv"], text=True, stderr=subprocess.DEVNULL, timeout=timeout)
                 lines = [l.strip() for l in out.splitlines() if l.strip()]
                 for line in lines[1:]: # Skip CSV header
                     parts = line.split(",")
@@ -124,7 +128,7 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
                 # system_profiler SPDisplaysDataType provides Apple Silicon GPU core counts basically
                 from pubrun.capture.subprocesses import disable_spy
                 with disable_spy():
-                    out = subprocess.check_output(["system_profiler", "SPDisplaysDataType"], text=True, stderr=subprocess.DEVNULL)
+                    out = subprocess.check_output(["system_profiler", "SPDisplaysDataType"], text=True, stderr=subprocess.DEVNULL, timeout=timeout)
                 gpu_rec = {"vendor": "Apple / Generic"}
                 for line in out.splitlines():
                     line = line.strip()
@@ -136,7 +140,7 @@ def _get_gpus(config_hw: Dict[str, Any]) -> List[Dict[str, Any]]:
                     gpus.append(gpu_rec)
         except Exception as e:
             logger.debug(f"pubrun generic GPU fallback failed: {e}")
-            
+
     return gpus
 
 
@@ -151,23 +155,28 @@ def get_hardware(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     hw_config_root = config.get("capture", {}).get("hardware", {})
     depth = hw_config_root.get("depth", "basic")
-    
+
     if depth == "off":
         return {
             "capture_state": {"status": "suppressed", "detail": "Hardware depth set to off."}
         }
-        
+
+    try:
+        hw_timeout = float(hw_config_root.get("timeout", _DEFAULT_HW_TIMEOUT))
+    except (TypeError, ValueError):
+        hw_timeout = _DEFAULT_HW_TIMEOUT
+
     try:
         # Standard fast extractions
         cpu = {
             "architecture": platform.machine(),
             "logical_cores": os.cpu_count(),
-            "model": _get_cpu_model(),
+            "model": _get_cpu_model(hw_timeout),
         }
-        
-        mem_bytes = _get_total_memory_bytes()
-        gpus = _get_gpus(hw_config_root)
-        
+
+        mem_bytes = _get_total_memory_bytes(hw_timeout)
+        gpus = _get_gpus(hw_config_root, hw_timeout)
+
         return {
             "cpu": cpu,
             "memory_total_bytes": mem_bytes,

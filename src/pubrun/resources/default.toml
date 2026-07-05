@@ -204,6 +204,12 @@ depth = "standard"
 # Set to false to skip the dirty check for faster startup.
 check_dirty = true
 
+# Per-command timeout (seconds) for every git invocation, including repository
+# detection. On a slow/large repo or network filesystem, a timeout is recorded
+# as capture_state "timeout" (distinct from "not a git repository") rather than
+# silently dropping git metadata.
+timeout = 5
+
 
 [capture.inputs]
 # -----------------------------------------------------------------------------
@@ -231,6 +237,12 @@ compute_md5 = false
 # and GPU make/model.
 depth = "basic"
 
+# Per-command timeout (seconds) for hardware-inspection subprocesses
+# (nvidia-smi, system_profiler, sysctl, wmic). Bounds a hung tool (e.g. a
+# wedged GPU driver) so it cannot orphan the background hardware thread or leave
+# the manifest's hardware section stuck as non-terminal "pending".
+timeout = 10
+
 # Advanced flags for ML reproducibility. These require slow system calls
 # (NVML queries, /proc reads) and are opt-in even when depth is "deep".
 capture_gpu_clock_speed = false
@@ -257,8 +269,14 @@ scope = "process"
 # overhead and events.jsonl size.
 sample_interval_seconds = 15
 
-# Kill the background thread after this many consecutive read failures.
+# Kill the background thread after this many consecutive read failures. Only
+# unreadable polls (errors) count -- a legitimate RSS reading of 0 does not, so
+# a transient blip cannot permanently disable telemetry.
 max_consecutive_failures = 3
+
+# Per-poll timeout (seconds) for resource-sampling subprocesses on macOS/Windows
+# (ps/wmic). Bounds a hung tool so it cannot orphan the sampling thread.
+poll_timeout = 3
 
 
 [capture.profiling]

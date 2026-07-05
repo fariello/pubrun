@@ -9,6 +9,21 @@ logger = logging.getLogger("pubrun")
 
 # Removed ctypes in favor of reliable OS wmic command for Python compatibility across Win10/11
 
+# Per-poll timeout (seconds) for the macOS/Windows sampling subprocesses
+# (ps/wmic). Bounds a hung tool so it cannot orphan the sampling thread.
+# Overridable via [capture.resources].poll_timeout. (IPD 20260705 EC-11.)
+_DEFAULT_POLL_TIMEOUT = 3.0
+_poll_timeout = _DEFAULT_POLL_TIMEOUT
+
+
+def set_poll_timeout(seconds: float) -> None:
+    """Set the module-level subprocess poll timeout (seconds)."""
+    global _poll_timeout
+    try:
+        _poll_timeout = float(seconds)
+    except (TypeError, ValueError):
+        _poll_timeout = _DEFAULT_POLL_TIMEOUT
+
 
 def _get_rss_windows() -> int:
     try:
@@ -17,14 +32,15 @@ def _get_rss_windows() -> int:
         with disable_spy():
             out = subprocess.check_output(
                 ["wmic", "process", "where", f"processid={os.getpid()}", "get", "WorkingSetSize"],
-                text=True, stderr=subprocess.DEVNULL
+                text=True, stderr=subprocess.DEVNULL, timeout=_poll_timeout
             )
         lines = [l.strip() for l in out.splitlines() if l.strip()]
         if len(lines) >= 2 and lines[1].isdigit():
             return int(lines[1])
     except Exception as e:
         logger.debug(f"pubrun failed Windows RSS poll: {e}")
-    return 0
+        return -1  # unreadable (distinct from a legitimate 0); see EC-12
+    return -1
 
 
 def _get_rss_linux() -> int:
@@ -36,7 +52,7 @@ def _get_rss_linux() -> int:
             return pages * os.sysconf("SC_PAGE_SIZE")
     except Exception as e:
         logger.debug(f"pubrun failed Linux RSS poll: {e}")
-        return 0
+        return -1  # unreadable (distinct from a legitimate 0); see EC-12
 
 
 def _get_rss_darwin() -> int:
@@ -52,12 +68,12 @@ def _get_rss_darwin() -> int:
         with disable_spy():
             out = subprocess.check_output(
                 ['ps', '-o', 'rss=', '-p', str(os.getpid())],
-                text=True, stderr=subprocess.DEVNULL
+                text=True, stderr=subprocess.DEVNULL, timeout=_poll_timeout
             )
         return int(out.strip()) * 1024  # ps output is in KB
     except Exception as e:
         logger.debug(f"pubrun failed Mac RSS poll: {e}")
-        return 0
+        return -1  # unreadable (distinct from a legitimate 0); see EC-12
 
 
 def _get_tree_rss_linux() -> int:
@@ -110,7 +126,7 @@ def _get_tree_rss_darwin() -> int:
         with disable_spy():
             out = subprocess.check_output(
                 ['ps', '-eo', 'pid,ppid,rss'],
-                text=True, stderr=subprocess.DEVNULL
+                text=True, stderr=subprocess.DEVNULL, timeout=_poll_timeout
             )
 
         # Parse into {pid: (ppid, rss_kb)} map
@@ -144,8 +160,9 @@ def _get_tree_rss_darwin() -> int:
         return total_rss
     except Exception as e:
         logger.debug(f"pubrun failed Mac tree RSS poll: {e}")
-        # Graceful fallback: return at least self RSS
-        return _get_rss_darwin()
+        # Graceful fallback: return at least self RSS (clamp the -1 unreadable
+        # sentinel to 0, since the tree consumer only checks > 0).
+        return max(0, _get_rss_darwin())
 
 
 class ResourceWatcher(threading.Thread):
@@ -158,7 +175,7 @@ class ResourceWatcher(threading.Thread):
         self._scope = scope
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
-        
+
         self.peak_rss_bytes = 0
         self.end_rss_bytes = 0
         self.peak_cpu_percent = 0.0
@@ -170,21 +187,24 @@ class ResourceWatcher(threading.Thread):
         self._sys_plat = sys.platform
         self._consecutive_failures = 0
 
-    
+
     def _poll_rss(self) -> int:
+        """Return current RSS in bytes, or -1 if the reading was unreadable
+        (error/timeout/unsupported platform). A return of 0 means a genuine
+        zero, which must NOT count as a failure. (IPD 20260705 EC-12.)"""
         if self._sys_plat == "win32":
             return _get_rss_windows()
         elif self._sys_plat.startswith("linux"):
             return _get_rss_linux()
         elif self._sys_plat == "darwin":
             return _get_rss_darwin()
-        return 0
+        return -1
 
     def run(self) -> None:
         """Background polling loop. Samples immediately, then at each interval."""
         # Check instantly so we don't skip short runs
         self._update_metrics()
-        
+
         while not self._stop_event.wait(timeout=self.interval):
             self._update_metrics()
 
@@ -193,15 +213,15 @@ class ResourceWatcher(threading.Thread):
             current_times = os.times()
             current_clock = time.perf_counter()
             cpu_pct = 0.0
-            
+
             if self._last_times is not None and self._last_clock is not None:
                 user_delta = (current_times.user - self._last_times.user) + getattr(current_times, "children_user", 0) - getattr(self._last_times, "children_user", 0)
                 sys_delta = (current_times.system - self._last_times.system) + getattr(current_times, "children_system", 0) - getattr(self._last_times, "children_system", 0)
                 wall_delta = current_clock - self._last_clock
-                
+
                 if wall_delta > 0:
                     cpu_pct = ((user_delta + sys_delta) / wall_delta) * 100.0
-                    
+
             self._last_times = current_times
             self._last_clock = current_clock
             return float(round(cpu_pct, 1))
@@ -222,27 +242,34 @@ class ResourceWatcher(threading.Thread):
         rss = self._poll_rss()
         cpu_pct = self._poll_cpu()
         tree_rss = self._poll_tree_rss() if self._scope == "tree" else 0
-        
+
+        # rss == -1 means the poll was UNREADABLE (error/timeout); rss >= 0 is a
+        # successful reading (0 being a legitimate value). Only unreadable polls
+        # count toward the consecutive-failure self-abort, so a transient blip
+        # cannot permanently disable telemetry. (IPD 20260705 EC-12.)
+        readable = rss >= 0
+        rss_bytes = rss if readable else 0
+
         updated = False
-        
+
         with self._lock:
-            if rss > 0:
+            if readable:
                 self._consecutive_failures = 0
-                if rss > self.peak_rss_bytes:
-                    self.peak_rss_bytes = rss
+                if rss_bytes > self.peak_rss_bytes:
+                    self.peak_rss_bytes = rss_bytes
                 updated = True
             else:
                 self._consecutive_failures += 1
                 if self._consecutive_failures >= self.max_failures:
                     self._stop_event.set() # Soft-abort the daemon purely for safety; OS hook is broken.
-                
+
             if cpu_pct > self.peak_cpu_percent:
                 self.peak_cpu_percent = cpu_pct
 
             if tree_rss > 0 and tree_rss > self.peak_tree_rss_bytes:
                 self.peak_tree_rss_bytes = tree_rss
-            
-        payload = {"rss_bytes": rss, "cpu_percent": cpu_pct}
+
+        payload = {"rss_bytes": rss_bytes, "cpu_percent": cpu_pct}
         if tree_rss > 0:
             payload["tree_rss_bytes"] = tree_rss
         if updated or cpu_pct > 0:
@@ -289,4 +316,3 @@ class ResourceWatcher(threading.Thread):
             result["peak_tree_rss_bytes"] = peak_tree if peak_tree > 0 else None
             result["end_tree_rss_bytes"] = end_tree if end_tree > 0 else None
         return result
-
