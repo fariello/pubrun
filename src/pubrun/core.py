@@ -25,6 +25,30 @@ from pubrun.tracker import Run, get_current_run
 _run_lock = threading.Lock()
 
 
+def _append_manual_subprocess_record(current_run: Any, record: dict) -> None:
+    """Append a manual (pubrun.subprocess.*) subprocess record with a size cap.
+
+    The SubprocessSpy has its own cap (max_tracked_commands); the manual
+    wrappers previously had none, so a script calling pubrun.subprocess.run() in
+    a tight loop grew the list without bound (OOM risk). Reuse the same
+    configured cap here. (IPD 20260705 EC-09.)
+    """
+    if not hasattr(current_run, "manual_subprocess_records"):
+        current_run.manual_subprocess_records = []
+    records = current_run.manual_subprocess_records
+    try:
+        cap = int(
+            current_run.config.get("capture", {})
+            .get("subprocesses", {})
+            .get("max_tracked_commands", 5000)
+        )
+    except Exception:
+        cap = 5000
+    if cap > 0 and len(records) >= cap:
+        return  # cap reached; stop recording to bound memory
+    records.append(record)
+
+
 # -- Internal helpers ---------------------------------------------------------
 
 def _handle_inactive(context: str) -> None:
@@ -390,10 +414,10 @@ import builtins
 
 def report(name: str, data: Any) -> None:
     """Save a custom structured report to the run directory.
-    
+
     If data is a dict or list, it is serialized as JSON (to '{name}.json').
     Otherwise, it is written as a plain string (to '{name}.txt').
-    
+
     Emits an annotation event so the report is discoverable via `pubrun report`.
     """
     import json
@@ -426,7 +450,7 @@ def report(name: str, data: Any) -> None:
 
 def artifact(filename: str, content: Any) -> None:
     """Write a file (e.g., text, csv, or binary bytes) to the run directory.
-    
+
     Emits an annotation event so the file is recorded in the run's event timeline.
     """
     run = get_current_run()
@@ -451,22 +475,22 @@ def artifact(filename: str, content: Any) -> None:
 
 def print(*args: Any, **kwargs: Any) -> None:
     """Drop-in print replacement that logs to stdout.log in the active run directory.
-    
+
     Respects all standard print arguments (sep, end, file, flush).
     """
     # 1. Capture the printed string
     sep = kwargs.get("sep", " ")
     end = kwargs.get("end", "\n")
     msg = sep.join(map(str, args)) + end
-    
+
     builtins.print(*args, **kwargs)
-    
+
     run = get_current_run()
     if run and run.is_active:
         try:
             log_path = run.run_dir / "stdout.log"
             timestamped = run.config.get("console", {}).get("capture_mode", "off") in {"standard", "deep"}
-            
+
             if timestamped:
                 from datetime import datetime, timezone
                 lines = msg.split('\n')
@@ -480,7 +504,7 @@ def print(*args: Any, **kwargs: Any) -> None:
                 log_msg = '\n'.join(out_lines)
             else:
                 log_msg = msg
-                
+
             with builtins.open(log_path, "a", encoding="utf-8") as f:
                 f.write(log_msg)
         except Exception as e:
@@ -608,7 +632,7 @@ class ProvenanceFileProxy:
                 if not hasattr(self._run, "data_files"):
                     self._run.data_files = {"inputs": [], "outputs": []}
                 self._run.data_files["inputs"].append(record)
-                
+
                 if getattr(self._run, "event_stream", None):
                     self._run.event_stream.emit("input_dataset", name=str(self._path.name), payload={"path": record["path"], "sha256": record["sha256"]})
             else:
@@ -621,7 +645,7 @@ class ProvenanceFileProxy:
                 if not hasattr(self._run, "data_files"):
                     self._run.data_files = {"inputs": [], "outputs": []}
                 self._run.data_files["outputs"].append(record)
-                
+
                 if getattr(self._run, "event_stream", None):
                     self._run.event_stream.emit("output_artifact", name=str(self._path.name), payload={"path": record["path"], "sha256": record["sha256"]})
         except Exception as e:
@@ -642,7 +666,7 @@ def open(file: Any, mode: str = "r", **kwargs: Any) -> Any:
     to catalog dataset provenance.
     """
     f_obj = builtins.open(file, mode, **kwargs)
-    
+
     current_run = get_current_run()
     if current_run and current_run.is_active:
         try:
@@ -650,7 +674,7 @@ def open(file: Any, mode: str = "r", **kwargs: Any) -> Any:
             return ProvenanceFileProxy(f_obj, f_path, mode, current_run)
         except Exception as e:
             logging.getLogger("pubrun").warning(f"pubrun: failed to wrap file for provenance: {e}")
-            
+
     return f_obj
 
 
@@ -663,15 +687,15 @@ class _PubrunSubprocessNamespace:
             cmd_args = [str(c) for c in cmd]
         else:
             cmd_args = [str(cmd)]
-            
+
         started_at = time.time()
-        
+
         from pubrun.capture.subprocesses import disable_spy
         with disable_spy():
             res = _subprocess.run(*args, **kwargs)
-                
+
         ended_at = time.time()
-        
+
         current_run = get_current_run()
         if current_run and current_run.is_active:
             record = {
@@ -681,10 +705,8 @@ class _PubrunSubprocessNamespace:
                 "ended_at_utc": ended_at,
                 "pid": None
             }
-            if not hasattr(current_run, "manual_subprocess_records"):
-                current_run.manual_subprocess_records = []
-            current_run.manual_subprocess_records.append(record)
-            
+            _append_manual_subprocess_record(current_run, record)
+
         return res
 
     class Popen(_subprocess.Popen):
@@ -713,9 +735,7 @@ class _PubrunSubprocessNamespace:
                     "ended_at_utc": ended_at,
                     "pid": self.pid
                 }
-                if not hasattr(current_run, "manual_subprocess_records"):
-                    current_run.manual_subprocess_records = []
-                current_run.manual_subprocess_records.append(record)
+                _append_manual_subprocess_record(current_run, record)
 
         def wait(self, timeout: Optional[float] = None) -> int:
             res = super().wait(timeout)
@@ -743,7 +763,7 @@ def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
     from pubrun.capture.subprocesses import disable_spy
     with disable_spy():
         pipe = os.popen(cmd, mode, bufsize)
-    
+
     class _PopenPipeProxy:
         def __init__(self, pipe_obj: Any) -> None:
             self._pipe_obj = pipe_obj
@@ -760,7 +780,7 @@ def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
                     rc = exit_status
                 else:
                     rc = os.WEXITSTATUS(exit_status) if os.WIFEXITED(exit_status) else exit_status
-                    
+
             ended_at = time.time()
             current_run = get_current_run()
             if current_run and current_run.is_active:
@@ -771,9 +791,7 @@ def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
                     "ended_at_utc": ended_at,
                     "pid": None
                 }
-                if not hasattr(current_run, "manual_subprocess_records"):
-                    current_run.manual_subprocess_records = []
-                current_run.manual_subprocess_records.append(record)
+                _append_manual_subprocess_record(current_run, record)
             return exit_status
 
         def __getattr__(self, name: str) -> Any:
