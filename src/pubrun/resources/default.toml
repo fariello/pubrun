@@ -259,9 +259,11 @@ capture_cpu_fp_precision = false
 # When enabled, a background thread samples CPU and memory usage.
 depth = "standard"
 
-# What to measure: the main process only, or the entire process tree (parent +
-# all child processes). Tree mode is useful for multiprocessing/Dask/Ray workloads
-# where the main process is a thin orchestrator.
+# Which RSS (resident memory) to measure: the main process only, or the entire
+# process tree (parent + all descendant processes). Tree mode is useful for
+# multiprocessing/Dask/Ray workloads where the main process is a thin orchestrator.
+# Affects memory only -- CPU is always measured for the current process. Tree RSS
+# is captured on Linux and macOS; Windows falls back to process scope.
 # Values: "process" (default) | "tree"
 scope = "process"
 

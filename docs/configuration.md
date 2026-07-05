@@ -184,10 +184,41 @@ Security policies for preventing secret leakage into manifest files.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `depth` | string | `"standard"` | Capture depth for background resource monitoring. |
-| `scope` | string | `"process"` | What to measure: `"process"` (main process only) or `"tree"` (sum RSS/CPU across all child processes). Tree mode is useful for multiprocessing/Dask/Ray workloads. |
+| `scope` | string | `"process"` | What RSS to measure: `"process"` (main process only) or `"tree"` (sum resident memory across the whole process tree — parent plus all descendant processes). Tree mode is useful for multiprocessing/Dask/Ray workloads where the main process is a thin orchestrator. **Affects memory (RSS) only** — CPU is always measured for the current process (via `os.times()`, which includes already-reaped children). Tree RSS is captured on **Linux and macOS**; Windows falls back to process scope. When enabled, adds `peak_tree_rss_bytes`/`end_tree_rss_bytes` to the manifest and `tree_rss_bytes` to each `resource_sample` event. |
 | `sample_interval_seconds` | int | `15` | How often the background thread samples CPU/memory. |
 | `max_consecutive_failures` | int | `3` | Kill the background thread after this many consecutive **unreadable** polls (errors/timeouts). A legitimate reading of 0 does not count, so a transient blip cannot permanently disable telemetry. |
 | `poll_timeout` | int | `3` | Per-poll timeout (seconds) for the macOS/Windows sampling subprocesses (`ps`/`wmic`). Bounds a hung tool so it cannot orphan the sampling thread. |
+
+#### Enabling process-tree memory capture
+
+`scope` is a nested key, so set it in a config file or pass it as a nested dict to the
+API (there is no environment-variable shortcut for nested `capture.*` keys — only
+`PUBRUN_PROFILE`, `PUBRUN_META_REF`, and the import-mode variables are wired to env).
+
+**For a whole project** — add to the project's `.pubrun.toml` (or
+`.config/pubrun/config.toml`):
+
+```toml
+[capture.resources]
+scope = "tree"
+```
+
+**For your user account (all projects)** — the same stanza in
+`~/.config/pubrun/config.toml`.
+
+**For a single script (via the API)** — pass the nested section to `start()`:
+
+```python
+import pubrun.noauto as pubrun
+
+pubrun.start(capture={"resources": {"scope": "tree"}})
+# ... your work ...
+pubrun.stop()
+```
+
+The `pubrun.start(profile=..., output_dir=...)` shorthand only flattens the top-level
+`[core]` keys; every `[capture.*]` setting must be passed as the nested dict shown
+above.
 
 ### `[capture.profiling]`
 
