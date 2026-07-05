@@ -1,42 +1,14 @@
 cff-version: 1.2.0
-message: "If you use this software in your research, please cite it."
+message: "If you use this software, please cite it using the metadata below."
+title: "pubrun"
+abstract: >-
+  A tool for running and managing publication/experiment pipelines.
+type: software
 authors:
   - family-names: "Fariello"
-    given-names: "Gabriele"
-    orcid: "https://orcid.org/0000-0002-0326-4752"
-title: "pubrun: Lightweight native execution provenance and reproducibility tracking"
-version: 1.3.1
-date-released: 2026-06-24
-url: "https://github.com/fariello/pubrun"
+    given-names: "Gabriele G. R."
+    email: "gfariello@fariel.com"
 repository-code: "https://github.com/fariello/pubrun"
-abstract: >-
-  pubrun is a zero-dependency (on Python 3.11+), manifest-first Python framework
-  for tracking computational provenance, environment state, and execution metadata
-  without requiring complex virtualization overhead.
-keywords:
-  - reproducibility
-  - provenance
-  - metadata
-  - research-software
-license: "BSD-3-Clause"
-
-# Once archived on Zenodo, uncomment and update the DOIs below:
-# identifiers:
-#   - type: doi
-#     value: 10.5281/zenodo.[CONCEPT_DOI]
-#     description: The concept DOI for the collection of all archives.
-#   - type: doi
-#     value: 10.5281/zenodo.[VERSION_DOI]
-#     description: The version-specific DOI for version 1.3.1 of this software.
-
-# Once the JOSS paper is accepted, uncomment and update the preferred citation below:
-# preferred-citation:
-#   type: article
-#   authors:
-#     - family-names: "Fariello"
-#       given-names: "Gabriele"
-#       orcid: "https://orcid.org/0000-0002-0326-4752"
-#   title: "pubrun: Low-friction execution provenance for Python research"
-#   journal: "Journal of Open Source Software"
-#   doi: "10.21105/joss.[PAPER_ID]"
-#   url: "https://doi.org/10.21105/joss.[PAPER_ID]"
+url: "https://github.com/fariello/pubrun"
+license: Apache-2.0
+date-released: "2026-07-05"

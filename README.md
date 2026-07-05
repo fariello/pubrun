@@ -364,8 +364,32 @@ If you use `pubrun` in your research, please cite the JOSS paper as the preferre
 
 ## License
 
-Released under the BSD 3-Clause License. Copyright (c) 2007-2026 Gabriele Fariello. See the [LICENSE](https://github.com/fariello/pubrun/blob/main/LICENSE) file for full terms.
+Released under the Apache License 2.0. Copyright 2007-2026 Gabriele G. R. Fariello. See the [LICENSE](https://github.com/fariello/pubrun/blob/main/LICENSE) and [NOTICE](https://github.com/fariello/pubrun/blob/main/NOTICE) files for full terms.
 
 ---
 
 [README](https://github.com/fariello/pubrun/blob/main/README.md) | [Architecture](https://github.com/fariello/pubrun/blob/main/docs/architecture.md) | [Functional Spec](https://github.com/fariello/pubrun/blob/main/docs/functional_spec.md) | [API](https://github.com/fariello/pubrun/blob/main/docs/api.md) | [CLI](https://github.com/fariello/pubrun/blob/main/docs/cli.md) | [Configuration](https://github.com/fariello/pubrun/blob/main/docs/configuration.md) | [Manifest](https://github.com/fariello/pubrun/blob/main/docs/manifest.md) | [Research Use](https://github.com/fariello/pubrun/blob/main/docs/research-use.md) | [Changelog](https://github.com/fariello/pubrun/blob/main/CHANGELOG.md)
+
+
+---
+
+## License, Attribution & Citation
+
+`pubrun` is licensed under the **Apache License 2.0** (see `LICENSE` and `NOTICE`).
+
+**Attribution (required).** Under Apache-2.0 §4(d), any distribution of this software or a
+derivative work must retain the `NOTICE` file and display its attribution reasonably
+prominently. Concretely, derived/redistributed works must include the following, visibly,
+in the project README (or equivalent top-level documentation) and in any "About"/credits
+screen the software presents:
+
+> Based on the original pubrun by Gabriele G. R. Fariello (https://github.com/fariello/pubrun).
+
+**Citation.** If you use `pubrun` in academic or scholarly work, please cite it. GitHub's
+"Cite this repository" button (backed by `CITATION.cff`) provides ready-to-use formats. A
+suggested citation:
+
+> Fariello, Gabriele G. R. *pubrun*. 2026. https://github.com/fariello/pubrun
+
+The attribution and citation requests impose no warranty or liability on the author; the
+software is provided "AS IS" per the LICENSE.
