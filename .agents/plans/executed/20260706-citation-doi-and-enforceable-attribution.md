@@ -1,4 +1,4 @@
-# IPD: strengthen citation recourse — Zenodo DOI, publication path, and enforceable attribution
+# IPD: strengthen citation recourse — Zenodo DOI, EXAMPLE path, and enforceable attribution
 
 - Date: 2026-07-06
 - Concern: citation / release-metadata / licensing posture (a deliberate strategy
@@ -7,7 +7,7 @@
 - Scope: `pubrun`'s citation + attribution surface only. Adds a `.zenodo.json` so the
   next GitHub release auto-mints a DOI; wires that DOI into `CITATION.cff`, the README
   "Citation" section, `docs/research-use.md`, and `pubrun cite`; fixes the author name to
-  the full legal form; and (optionally, maintainer-gated) prepares a software-paper
+  the full legal form; and (optionally, maintainer-gated) prepares an EXAMPLE software-paper
   path and/or a CC-BY license for any distributed data/docs. Does NOT change the code
   license (stays Apache-2.0) and does NOT add a citation-as-license-condition clause
   unless the maintainer explicitly opts in (see "Open questions").
@@ -29,7 +29,7 @@ not cite me?"* The honest answer:
   license governs copying the software, not citing ideas in a paper. So the strongest
   *practical* levers for citation are non-legal: a **DOI + a canonical citable artifact**
   (which reviewers/editors/institutions actually enforce), optionally a **peer-reviewed
-  software paper**, and — only if adoption cost is acceptable — a citation term as
+  software paper** (EXAMPLE), and — only if adoption cost is acceptable — a citation term as
   a license condition or a CC-BY license on distributed *data/docs*.
 
 This IPD builds the high-ROI, zero-adoption-cost parts by default (DOI + citable
@@ -65,8 +65,8 @@ metadata) and records the higher-cost options as explicit maintainer decisions.
 - `docs/research-use.md` exists and is the natural home for the "how to cite / why cite"
   guidance.
 - A prior executed IPD (`.agents/plans/executed/20260622-citation_and_release_readiness.md`)
-  *sketched* a `preferred-citation` block + **fabricated placeholder** Zenodo
-  DOIs (`10.5281/zenodo.1234567`, `10.5281/zenodo.1234568`, `example.21105/example.08024`).
+  *sketched* a `preferred-citation` (EXAMPLE) block + **fabricated placeholder** Zenodo/EXAMPLE
+  DOIs (`10.5281/zenodo.1234567`, `10.5281/zenodo.1234568`, `example.1234/example.08024`).
   **VERIFIED (plan-review 2026-07-06): none of those placeholders ever landed** — the
   current `CITATION.cff` has no `identifiers` block and no `preferred-citation`, and no
   fake DOI appears anywhere in the repo. So there is **nothing stale to reconcile**; the
@@ -83,7 +83,7 @@ levers, strongest-recourse vs. adoption-cost:
 - **(Baseline — DEFAULT, do by default) DOI + canonical citable artifact.** `.zenodo.json`
   + DOI in `CITATION.cff`/README/`pubrun cite`. Not legally enforceable, but the *de facto*
   standard that gets software cited; zero adoption cost. **This IPD does this regardless.**
-- **(Opt-in A) a software paper.** Submit a short paper; make its DOI the
+- **(Opt-in A) EXAMPLE software paper.** Submit a short paper; make its DOI the
   `preferred-citation`. Highest citation ROI in academia; cost = writing + review time,
   zero adoption/licensing cost. Recommended, maintainer-gated (belongs to a separate manuscript effort outside this repository).
 - **(Opt-in B) CC-BY-4.0 on distributed DATA/DOCS (not the code).** If `pubrun` ships
@@ -97,7 +97,7 @@ levers, strongest-recourse vs. adoption-cost:
   adopters**. Strongly recommend NOT applying to the main Apache-2.0 code; if wanted, scope
   it narrowly and get an IP attorney to draft it. Recorded here only as an explicit choice.
 
-**Recommendation to evaluate:** do the Baseline now; strongly recommend Opt-in A
+**Recommendation to evaluate:** do the Baseline now; strongly recommend Opt-in A (EXAMPLE)
 and Opt-in B (only if data/docs are distributed); recommend AGAINST Opt-in C for the code.
 
 ## Proposed changes (Baseline — do by default, subject to open questions)
@@ -149,7 +149,7 @@ and Opt-in B (only if data/docs are distributed); recommend AGAINST Opt-in C for
    Island", "over 500 direct downloads on PyPI", and a "Citation status" section stating
    no publication currently cites pubrun). The executor must **not** alter or contradict
    those numbers, and must **only add** the how-to-cite text; if the honest citation
-   status changes (e.g. a DOI exists), update the "Citation status" section
+   status changes (e.g. a EXAMPLE DOI exists), update the "Citation status" section
    truthfully rather than fabricating adoption/impact. Keep the "no publication cites it
    yet" statement until that is actually false.
 7. **CHANGELOG** entry under `[Unreleased]` describing the DOI/citation metadata addition
@@ -157,12 +157,12 @@ and Opt-in B (only if data/docs are distributed); recommend AGAINST Opt-in C for
 
 ## Optional changes (maintainer-gated — only if the corresponding open question says yes)
 
-- **Opt-in A  — DECIDED "ready, not live" (see Open Questions #1/#4):** do
+- **Opt-in A (EXAMPLE) — DECIDED "EXAMPLE-ready, not live" (see Open Questions #1/#4):** do
   **NOT** add manuscript source files here (any manuscript work lives outside this repo), and do
   **NOT** set `preferred-citation` now — that would insinuate a paper that does not yet
   exist, which the maintainer explicitly refused. The only permitted action is a
   clearly-marked, commented **follow-up note** documenting how to add `preferred-citation`
-  with the real DOI *if/when the paper is accepted*.
+  with the real EXAMPLE DOI *if/when the paper is accepted*.
 - **Opt-in B (CC-BY data/docs):** identify any distributed data/doc artifacts, add a
   `LICENSES/CC-BY-4.0.txt` and a clear statement that *those artifacts* are CC-BY-4.0 while
   the code stays Apache-2.0. Only if such artifacts exist.
@@ -219,13 +219,13 @@ and Opt-in B (only if data/docs are distributed); recommend AGAINST Opt-in C for
 
 All six are now resolved. The executor must follow these answers exactly.
 
-1. **Enforcement ladder → Baseline (live now) + Opt-in A "ready" (documented, NOT
+1. **Enforcement ladder → Baseline (live now) + Opt-in A "EXAMPLE-ready" (documented, NOT
    live). No Opt-in B (N/A). No Opt-in C.** Critical nuance from the maintainer: *"day 1
    is just baseline… I don't want to cite or insinuate a paper that does not yet exist."*
-   Therefore the executor must **NOT** add a `preferred-citation` block, a DOI, or
-   any live reference to a paper. "ready" means only a clearly-marked, commented
+   Therefore the executor must **NOT** add a `preferred-citation` block, a EXAMPLE DOI, or
+   any live reference to a paper. "EXAMPLE-ready" means only a clearly-marked, commented
    follow-up (in this IPD and/or a `TODO`) describing how to flip `preferred-citation` to
-   the real paper DOI *if/when accepts*. No live paper reference of any kind. Keep any manuscript work completely separate from this repository.
+   the real paper DOI *if/when EXAMPLE accepts*. No live paper reference of any kind. Keep any manuscript work completely separate from this repository.
 2. **ORCID / affiliation → PROVIDED. Use both.** ORCID `0000-0002-0326-4752`; affiliation
    `University of Rhode Island`. These are additive only; display name stays the
    **publication** form `Fariello, Gabriele` / `given-names: "Gabriele"` (per the
@@ -234,8 +234,8 @@ All six are now resolved. The executor must follow these answers exactly.
    `.zenodo.json` `creators`.
 3. **DOI type → concept DOI only** (all-versions, never goes stale). Do not add the
    per-version DOI.
-4. **Opt-in A → handled separately outside this repo; do NOT draft a paper here
-   and do NOT wire `preferred-citation`** until a real DOI exists (see #1). Only the
+4. **EXAMPLE (Opt-in A) → handled separately outside this repo; do NOT draft a paper here
+   and do NOT wire `preferred-citation`** until a real EXAMPLE DOI exists (see #1). Only the
    documented follow-up.
 5. **Distributed DATA/DOCS artifacts → NONE.** pubrun ships code + its own docs only (no
    bundled datasets/figures/corpora; per-run manifests are user-generated, not shipped).
@@ -280,3 +280,50 @@ maintainer enables Zenodo and the first release mints the concept DOI, fill the 
 into `CITATION.cff`/README/`pubrun cite` and validate. On completion, move this IPD to
 `.agents/plans/executed/`. Recommended: run `plan-review` on this IPD, and consult an IP
 attorney before any Opt-in C.
+
+## Execution record — PHASE 1 COMPLETE (2026-07-06)
+
+Executed by opencode after human approval. Phase 1 (everything landable without an
+operator action in Zenodo) is done:
+
+- **`.zenodo.json`** added at repo root: `upload_type: software`, `license: Apache-2.0`,
+  creator `Fariello, Gabriele` (publication name) + ORCID `0000-0002-0326-4752` +
+  affiliation `University of Rhode Island`, keywords, and a `related_identifiers` link to
+  the GitHub repo. Valid JSON.
+- **`CITATION.cff`**: added `orcid` + `affiliation` (additive; name unchanged),
+  `version: "1.3.1"`, and an `identifiers:` DOI block with the **placeholder** concept DOI
+  `10.5281/zenodo.PENDING` (clearly-commented). Explicit inline comment states NO
+  `preferred-citation` by design (no live paper reference).
+- **`pubrun cite`** (`src/pubrun/__main__.py` `_run_cite`): all four styles
+  (apa/mla/chicago/bibtex) now emit the placeholder DOI; publication name preserved
+  (bibtex `Gabriele Fariello`, others `Fariello, G.`/`Fariello, Gabriele`).
+- **README** `## Citation`: replaced the "DOI will be added" promise with the
+  placeholder-DOI citation + a commented Phase-2 follow-up (swap the DOI, add a Zenodo
+  badge); honest "no paper yet" language.
+- **`docs/research-use.md`**: added a "How to cite pubrun" subsection (DOI + required-vs-
+  requested explanation). Existing factual claims (URI researchers, 500+ downloads,
+  "Citation status") left untouched, per the PR-4 guardrail.
+- **`docs/cli.md`**: `cite` entry notes the DOI + placeholder.
+- **`CHANGELOG.md`** `[Unreleased] → Added`: entry describing the Zenodo/DOI metadata,
+  ORCID/affiliation, placeholder discipline, and the no-paper-reference decision.
+- **Tests** (`tests/test_cli.py`): extended `TestCliCite` (DOI present, publication name,
+  no legal name) and added `TestCitationConsistency` (4 tests: `.zenodo.json` validity +
+  publication name; CFF parse via stdlib line-reader — NO PyYAML, to keep zero-dep — +
+  publication name; DOI agreement across CITATION.cff/README/all `cite` styles; CFF
+  `version` == `pubrun.__version__`). This is the drift guard replacing a shared source.
+- **Validation:** 690 passed / 2 skipped; the only failure was the **known pre-existing
+  SIGPIPE flake** `tests/test_status.py::...test_real_sigpipe_via_pipe` (confirmed passes
+  in isolation — not a regression). No fabricated DOI anywhere (grep-verified: every DOI
+  reference is `zenodo.PENDING`).
+
+### PHASE 2 — REMAINING (operator action required; NOT done)
+
+The maintainer must: (a) enable the `fariello/pubrun` repository at
+`zenodo.org` (GitHub settings, ORCID linked), then (b) cut a GitHub Release. Zenodo then
+mints the real **concept** DOI. After that, replace `10.5281/zenodo.PENDING` in
+`CITATION.cff`, `README.md`, `docs/research-use.md`, `docs/cli.md`, and
+`src/pubrun/__main__.py` with the real concept DOI (grep `zenodo.PENDING` to find all
+sites), add a "Cite this DOI" Zenodo badge to the README, update the CHANGELOG, and
+re-run the consistency test. **EXAMPLE-ready follow-up:** if/when a peer-reviewed paper is
+accepted, add a `preferred-citation` block to `CITATION.cff` with the real paper DOI
+(never before it exists).

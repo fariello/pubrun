@@ -1,0 +1,29 @@
+{
+  "title": "pubrun: Low-friction execution provenance for Python research",
+  "description": "pubrun is a Python library and CLI for capturing durable, low-friction execution provenance of research runs: the command or script executed, the Python runtime and package state, the operating environment, the source-code state, console output, exit status, user-recorded analysis events, and methods-supporting text derived from the actual run context.",
+  "upload_type": "software",
+  "license": "Apache-2.0",
+  "creators": [
+    {
+      "name": "Fariello, Gabriele",
+      "affiliation": "University of Rhode Island",
+      "orcid": "0000-0002-0326-4752"
+    }
+  ],
+  "keywords": [
+    "reproducibility",
+    "provenance",
+    "research software",
+    "Python",
+    "experiment tracking",
+    "methods",
+    "open science"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/fariello/pubrun",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}

@@ -675,18 +675,26 @@ def _run_cite(style: str) -> None:
     ver_bib = f",\n  version   = {{{_ver}}}" if _ver else ""
     url = "https://github.com/fariello/pubrun"
     title = "pubrun: Low-friction execution provenance for Python research"
+    # Zenodo concept DOI (all versions). PLACEHOLDER until the repo is enabled in
+    # Zenodo and the first GitHub release mints a real DOI. Keep this in sync with
+    # CITATION.cff / README (a consistency test guards drift). Replace
+    # "10.5281/zenodo.PENDING" with the real concept DOI in Phase 2; see
+    # .agents/plans/pending/20260706-citation-doi-and-enforceable-attribution.md.
+    doi = "10.5281/zenodo.PENDING"
+    doi_url = f"https://doi.org/{doi}"
     if style == "apa":
-        print(f"Fariello, G. (2026). {title}{ver_apa} [Computer software]. {url}")
+        print(f"Fariello, G. (2026). {title}{ver_apa} [Computer software]. {url}. {doi_url}")
     elif style == "mla":
-        print(f"Fariello, Gabriele. \"{title}.\" 2026. Computer software. {url}.")
+        print(f"Fariello, Gabriele. \"{title}.\" 2026. Computer software. {url}. doi:{doi}.")
     elif style == "chicago":
-        print(f"Fariello, Gabriele. 2026. \"{title}.\" Computer software. {url}.")
+        print(f"Fariello, Gabriele. 2026. \"{title}.\" Computer software. {url}. https://doi.org/{doi}.")
     elif style == "bibtex":
         print(
             "@software{fariello_pubrun_2026,\n"
             "  author    = {Gabriele Fariello},\n"
             f"  title     = {{{title}}},\n"
             "  year      = {2026},\n"
+            f"  doi       = {{{doi}}},\n"
             f"  url       = {{{url}}}{ver_bib}\n"
             "}"
         )

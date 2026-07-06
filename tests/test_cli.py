@@ -128,19 +128,99 @@ class TestCliCite:
         result = run_pubrun("cite", "--style", "apa")
         assert result.returncode == 0
         assert "pubrun" in result.stdout.lower() or "fariello" in result.stdout.lower()
+        # DOI must flow through to the citation (placeholder or real).
+        assert "zenodo" in result.stdout.lower() or "doi.org" in result.stdout.lower()
+        # Citation surface uses the PUBLICATION name, never the legal name.
+        assert "G. R." not in result.stdout
 
     def test_cite_bibtex(self):
         result = run_pubrun("cite", "--style", "bibtex")
         assert result.returncode == 0
         assert "pubrun" in result.stdout.lower() or "@" in result.stdout
+        assert "doi" in result.stdout.lower() and "zenodo" in result.stdout.lower()
+        # bibtex author is the publication name "Gabriele Fariello", not legal name.
+        assert "Gabriele Fariello" in result.stdout
+        assert "G. R." not in result.stdout
 
     def test_cite_mla(self):
         result = run_pubrun("cite", "--style", "mla")
         assert result.returncode == 0
+        assert "zenodo" in result.stdout.lower()
+        assert "G. R." not in result.stdout
 
     def test_cite_chicago(self):
         result = run_pubrun("cite", "--style", "chicago")
         assert result.returncode == 0
+        assert "zenodo" in result.stdout.lower()
+        assert "G. R." not in result.stdout
+
+
+class TestCitationConsistency:
+    """Drift guard: author name, DOI, version, and license must agree across
+    CITATION.cff, .zenodo.json, README.md, and `pubrun cite` output.
+
+    CITATION.cff is parsed with a tiny stdlib line reader (NOT PyYAML) because the
+    project is zero-runtime-dependency and PyYAML is not a declared dependency; the
+    fields asserted here (given-names/family-names, version, license, and the DOI
+    `value:`) are flat scalars, so line parsing is sufficient and keeps tests dep-free.
+    """
+
+    @staticmethod
+    def _repo_root():
+        # tests/ -> repo root
+        return Path(__file__).resolve().parent.parent
+
+    @classmethod
+    def _cff_fields(cls):
+        text = (cls._repo_root() / "CITATION.cff").read_text(encoding="utf-8")
+        fields = {}
+        for raw in text.splitlines():
+            line = raw.strip()
+            if line.startswith("#") or ":" not in line:
+                continue
+            key, _, val = line.partition(":")
+            key = key.strip().lstrip("- ").strip()
+            val = val.strip().strip('"')
+            # first occurrence wins for the flat scalars we care about
+            fields.setdefault(key, val)
+        return fields
+
+    def test_zenodo_json_valid_and_publication_name(self):
+        data = json.loads((self._repo_root() / ".zenodo.json").read_text(encoding="utf-8"))
+        assert data["upload_type"] == "software"
+        assert data["license"] == "Apache-2.0"
+        creator = data["creators"][0]
+        assert creator["name"] == "Fariello, Gabriele"  # publication form
+        assert "G. R." not in creator["name"]
+        assert creator["orcid"] == "0000-0002-0326-4752"
+        assert creator["affiliation"] == "University of Rhode Island"
+
+    def test_cff_parses_and_publication_name(self):
+        f = self._cff_fields()
+        assert f["cff-version"] == "1.2.0"
+        assert f["given-names"] == "Gabriele"     # publication form, NOT "Gabriele G. R."
+        assert f["family-names"] == "Fariello"
+        assert f["license"] == "Apache-2.0"
+        assert "version" in f and f["version"]
+        assert "orcid" in f["orcid"]  # value contains the orcid.org URL
+        assert "0000-0002-0326-4752" in f["orcid"]
+
+    def test_doi_agrees_across_surfaces(self):
+        f = self._cff_fields()
+        cff_doi = f["value"]  # the identifiers: - type: doi / value: line
+        assert "zenodo" in cff_doi
+        # README carries the same DOI string.
+        readme = (self._repo_root() / "README.md").read_text(encoding="utf-8")
+        assert cff_doi in readme
+        # pubrun cite emits the same DOI in every style.
+        for style in ("apa", "mla", "chicago", "bibtex"):
+            out = run_pubrun("cite", "--style", style).stdout
+            assert cff_doi in out, f"{style} citation missing DOI {cff_doi}"
+
+    def test_cff_version_matches_package(self):
+        from pubrun import __version__
+        f = self._cff_fields()
+        assert f["version"] == __version__
 
 
 class TestCliMeta:
@@ -274,7 +354,7 @@ class TestCliRerun:
         }
         with open(run_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
             json.dump(lock_data, f)
-            
+
         result = run_pubrun("rerun", str(run_dir))
         assert result.returncode == 0
         assert "[WARN]" in result.stderr
@@ -301,7 +381,7 @@ class TestCliRerun:
         }
         with open(run_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
             json.dump(lock_data, f)
-            
+
         result = run_pubrun("rerun", str(run_dir))
         assert result.returncode == 0
         assert "[WARN]" in result.stderr
@@ -328,7 +408,7 @@ class TestCliRerun:
         }
         with open(run_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
             json.dump(lock_data, f)
-            
+
         result = run_pubrun("rerun", str(run_dir), "--no-color")
         assert result.returncode == 0
         assert "[WARN]" in result.stderr
@@ -404,7 +484,7 @@ class TestCliDiff:
     def test_diff_default_no_args_insufficient_runs(self, tmp_path):
         from pubrun import start as pubrun_start
         import pubrun.tracker
-        
+
         old_cwd = Path.cwd
         try:
             Path.cwd = staticmethod(lambda: tmp_path)
@@ -591,7 +671,7 @@ class TestCliErrorExitCodes:
         }
         with open(crashed_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
             json.dump(lock_data, f)
-        
+
         # Set mtime of crashed run to be greater
         import time
         os.utime(completed_dir, (time.time() - 100, time.time() - 100))
@@ -620,22 +700,22 @@ class TestCliColorControl:
         finally:
             Path.cwd = old_cwd
             pubrun.tracker._active_run = None
-            
+
         # Run pubrun status WITH color (default)
         env_with_color = os.environ.copy()
         env_with_color.pop("NO_COLOR", None)
         cmd = [sys.executable, "-m", "pubrun", "status", "--dir", str(tmp_path / "runs")]
         res_color = subprocess.run(cmd, capture_output=True, text=True, env=env_with_color, cwd=str(tmp_path))
-        
+
         # Run pubrun status WITHOUT color (env var)
         env_no_color = os.environ.copy()
         env_no_color["NO_COLOR"] = "1"
         res_no_color = subprocess.run(cmd, capture_output=True, text=True, env=env_no_color, cwd=str(tmp_path))
-        
+
         # Run pubrun status WITHOUT color (global flag)
         cmd_flag = [sys.executable, "-m", "pubrun", "--no-color", "status", "--dir", str(tmp_path / "runs")]
         res_flag = subprocess.run(cmd_flag, capture_output=True, text=True, env=env_with_color, cwd=str(tmp_path))
-        
+
         # Check that ANSI escape sequences are present in res_color and NOT in res_no_color/res_flag
         assert "\033[" in res_color.stdout
         assert "\033[" not in res_no_color.stdout
@@ -670,7 +750,7 @@ class TestCliColorControl:
 
     def test_run_preserves_no_color_arg(self, tmp_path):
         cmd = [
-            sys.executable, "-m", "pubrun", "run", "--", 
+            sys.executable, "-m", "pubrun", "run", "--",
             sys.executable, "-c", "import sys; print(' '.join(sys.argv))", "arg1", "--no-color"
         ]
         res = subprocess.run(cmd, capture_output=True, text=True, cwd=str(tmp_path))
@@ -679,7 +759,7 @@ class TestCliColorControl:
 
     def test_global_no_color_with_run_preserves_arg(self, tmp_path):
         cmd = [
-            sys.executable, "-m", "pubrun", "--no-color", "run", "--", 
+            sys.executable, "-m", "pubrun", "--no-color", "run", "--",
             sys.executable, "-c", "import sys; print(' '.join(sys.argv))", "arg1", "--no-color"
         ]
         res = subprocess.run(cmd, capture_output=True, text=True, cwd=str(tmp_path))
@@ -825,16 +905,16 @@ ctypes.string_at(0)
 """
         script_file = tmp_path / "segfault.py"
         script_file.write_text(script, encoding="utf-8")
-        
+
         env = os.environ.copy()
         res = subprocess.run([sys.executable, str(script_file)], env=env, capture_output=True, text=True, cwd=str(tmp_path))
-        
+
         runs_dir = tmp_path / "runs"
         assert runs_dir.exists()
         run_folders = list(runs_dir.iterdir())
         assert len(run_folders) == 1
         run_dir = run_folders[0]
-        
+
         stderr_log = run_dir / "stderr.log"
         assert stderr_log.exists()
         content = stderr_log.read_text(encoding="utf-8")
@@ -854,20 +934,20 @@ raise ValueError("TEST_EXCEPTION")
 """
         script_file = tmp_path / "flushing.py"
         script_file.write_text(script, encoding="utf-8")
-        
+
         env = os.environ.copy()
         subprocess.run([sys.executable, str(script_file)], env=env, capture_output=True, text=True, cwd=str(tmp_path))
-        
+
         runs_dir = tmp_path / "runs"
         assert runs_dir.exists()
         run_dir = list(runs_dir.iterdir())[0]
-        
+
         stdout_log = run_dir / "stdout.log"
         stderr_log = run_dir / "stderr.log"
-        
+
         assert stdout_log.exists()
         assert stderr_log.exists()
-        
+
         assert "FLUSH_TEST_STDOUT" in stdout_log.read_text(encoding="utf-8")
         assert "FLUSH_TEST_STDERR" in stderr_log.read_text(encoding="utf-8")
         assert "TEST_EXCEPTION" in stderr_log.read_text(encoding="utf-8")
@@ -875,7 +955,7 @@ raise ValueError("TEST_EXCEPTION")
     def test_status_filtering_options(self, tmp_path):
         runs_dir = tmp_path / "runs"
         runs_dir.mkdir(parents=True)
-        
+
         # Create completed run
         run_completed = runs_dir / "pubrun-completed"
         run_completed.mkdir()
@@ -886,7 +966,7 @@ raise ValueError("TEST_EXCEPTION")
             "invocation": {"script": {"basename": "train.py"}, "argv": ["train.py", "--lr", "0.01"]},
             "timing": {"started_at_utc": 1782000000.0}
         }), encoding="utf-8")
-        
+
         # Create failed run
         run_failed = runs_dir / "pubrun-failed"
         run_failed.mkdir()
@@ -972,7 +1052,7 @@ raise ValueError("TEST_EXCEPTION")
         import sys
         from unittest.mock import patch
         from pubrun.__main__ import main
-        
+
         with patch.object(sys, 'argv', ['/path/to/pbr', 'me']):
             # Capture stdout
             import io
@@ -988,10 +1068,10 @@ raise ValueError("TEST_EXCEPTION")
         import sys
         from unittest.mock import patch
         from pubrun.__main__ import main
-        
+
         with patch("pubrun.status.scan_runs") as mock_scan:
             mock_scan.return_value = [object()]
-            
+
             with patch.object(sys, 'argv', ['pubrun']):
                 import io
                 from contextlib import redirect_stdout
@@ -1129,4 +1209,3 @@ class TestCliResourcesAliases:
                 metric='cpu',
                 width=60
             )
-

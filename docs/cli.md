@@ -46,7 +46,10 @@ pubrun bug-report
 
 ### `cite` — Academic Citation
 
-Generates a formatted citation for crediting `pubrun` in academic publications.
+Generates a formatted citation for crediting `pubrun` in academic publications. The
+citation includes the archived Zenodo **concept DOI** (all-versions). Until the repository
+is enabled in Zenodo and a release mints the real DOI, the output shows a clearly labeled
+placeholder (`10.5281/zenodo.PENDING`).
 
 ```bash
 pubrun cite [--style apa|mla|chicago|bibtex]

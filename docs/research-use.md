@@ -33,6 +33,25 @@ A public example workflow should be added under `examples/` before public releas
 
 The example should not depend on unpublished data or private project files.
 
+## How to cite pubrun
+
+If you use `pubrun` in research, please cite it. The quickest ways to get a ready-to-use
+citation are the `pubrun cite` command (`pubrun cite --style apa|mla|chicago|bibtex`),
+GitHub's "Cite this repository" button (backed by `CITATION.cff`), or the archived DOI on
+Zenodo. A suggested citation:
+
+> Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research [Computer software]. https://github.com/fariello/pubrun. https://doi.org/10.5281/zenodo.PENDING
+
+<!-- DOI is a PLACEHOLDER until Zenodo mints the real concept DOI; see
+.agents/plans/pending/20260706-citation-doi-and-enforceable-attribution.md (Phase 2). -->
+
+**What is required vs. requested.** Under the Apache License 2.0 (§4(d)), any
+*redistribution or derivative work* of the `pubrun` **software** must retain the `NOTICE`
+file and display its attribution — this is a license condition, not optional. **Citation
+in a publication is requested, not legally required**: a software license governs copying
+the software, not citing it in a paper. Citing the DOI is the practical, community-standard
+way to give that credit.
+
 ## Citation status
 
 No peer-reviewed publication currently cites `pubrun` directly. This statement should be updated as soon as public workflows, preprints, papers, or archived research artifacts cite the software.
