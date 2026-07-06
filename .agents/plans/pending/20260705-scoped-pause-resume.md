@@ -11,9 +11,9 @@
   # capture resumes here
   ```
   Orthogonal to import modes — wanted regardless of which mode is active.
-- Status: PENDING (early proposal — NOT ready to execute; open design questions
-  must be resolved and this should go through `plan-review` and probably an
-  `/advise architect` pass first).
+- Status: PENDING — design RESOLVED via plan-review (2026-07-05) and
+  `/advise architect` (2026-07-06). Ready for a normal `plan-review` of the
+  now-concrete design, then execution on approval. Not auto-executed.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Related: split out of the `full`-mode discussion (2026-07-05) as its own IPD
   because it is orthogonal and materially riskier. A short pointer lives in
@@ -29,6 +29,70 @@ region where the user temporarily wants their real stdout untouched.
 This is an ergonomic convenience, not a correctness feature. It must never
 compromise the golden rule (never crash the host) or leave capture in a broken
 state after the block.
+
+### Use case (the plain end-user story)
+
+A researcher captures everything most of the time, but is about to call a method
+or subprocess whose output is noisy / useless / not wanted in the record. They
+want to NOT capture that part, then resume capturing everything:
+
+```python
+import pubrun  # capturing stdout, subprocesses, etc.
+
+do_normal_work()             # captured
+with pubrun.paused():
+    call_something_noisy()   # runs and prints normally, but NOT recorded
+resume_normal_work()         # captured again
+```
+
+Mental model (stated so it is true across every engine `paused()` touches):
+**"`paused()` stops pubrun from *recording* my program's ambient output and
+subprocesses on this thread; it does not stop my program, does not stop output
+going to my terminal, does not stop my explicit annotations, and does not stop
+resource sampling."**
+
+## Resolved design (plan-review + /advise architect)
+
+- **Thread-local suspension of RECORDING.** `paused()` suspends *recording* on
+  the **calling thread only**. Output still goes to the real terminal and
+  subprocesses still run; other threads keep being captured. This is per-thread
+  because that is the least-surprising semantic and matches the subprocess spy's
+  existing behavior. (For a typical single-threaded research script, per-thread
+  and process-global are indistinguishable; per-thread is chosen so multi-threaded
+  scripts are not silently mis-captured.)
+- **Per-engine `pause()`/`resume()` + a thin façade (NOT a shared flag).** Each
+  pausable engine owns its own thread-local, ref-counted, exception-safe gate.
+  `pubrun.paused()` is a context manager that calls each engine's `pause()` on
+  enter and `resume()` on exit (in a `finally`). No cross-boundary
+  `run._capture_paused` flag (plan-review already killed that; the tee cannot
+  reach the run anyway).
+- **The pausable set is decided by a principle, not a list:** only capture
+  engines that record **synchronously, on the calling thread, of ambient program
+  activity** are pausable. That rule yields exactly:
+  - **Subprocess spy** — IN. Reuse its existing thread-local seam
+    (`_spy_local.bypass` / `disable_spy`), wrapped as ref-counted `pause()`/
+    `resume()`.
+  - **Console tee** — IN. Add a matching thread-local gate to
+    `TqdmSafeTee.write`.
+  - `pubrun.print`/`open`/`popen` — honor the same thread-local flag for
+    consistency (near-free; they already run on the calling thread). They are
+    conveniences over the same paths, not separate engines.
+  - **Resource watcher** — OUT, by the same principle: it samples
+    **asynchronously on its own background thread**, so "pause on the calling
+    thread" is meaningless for it — and that is correct, because RAM/CPU are
+    process-wide facts (the noisy subprocess still used real memory; you want it
+    in the peak).
+  - **Event stream / `annotate()` / `phase()`** — OUT (deliberate): these are the
+    user's *explicit* markers, not ambient capture. Silencing an `annotate()` the
+    user chose to call would be surprising. They keep firing inside `paused()`.
+- **Passthrough is always process-global.** There is one `sys.stdout`; only the
+  *recording decision* is thread-scoped. So a `paused()` block still shows output
+  on the terminal for all threads — only *this thread's* recording is suspended.
+  (Documented so no one expects thread-isolated terminal output.)
+- **Selectivity deferred (KISS).** v1 pauses ALL pausable engines (spy + tee); no
+  per-engine kwargs (`paused(console=..., subprocess=...)`) until a concrete need
+  appears. Adding them later is non-breaking (just choose which engines' `pause()`
+  to call).
 
 ## Why this is riskier than it looks (the core problem)
 
@@ -86,40 +150,53 @@ Net: a public pause/resume is **not** a uniform mechanism. Realistically it is
 "reuse the thread-local spy bypass + add a matching gate to the tee + optionally
 gate events/resources," each with its own thread-scope decision.
 
-## Proposed direction (to be refined in plan-review / advise-architect)
+## Mechanism: "mute" (chosen), not "unpatch"
 
-Not committing to a final shape yet — the point of this IPD is to make the
-design questions explicit. Candidate approaches, cheapest/safest first:
+The "Resolved design" above uses the **mute** approach: keep all monkeypatches
+installed and gate *recording* per-engine at each engine's own thread-local seam.
+Pausing sets the gates; the wrappers still pass real output through to the
+terminal / still let subprocesses run, but skip *recording*. No global
+unwrap/rewrap of `sys.stdout`/`subprocess`, so the interleaving hazard (a third
+party replacing `sys.stdout` mid-block, then a naive restore clobbering it) does
+not arise. The only cost is that the wrappers remain in the call path while
+paused (a cheap per-write thread-local check on the tee — see the Performance
+gate below).
 
-- **Tier 1 (low risk): "mute", not "unpatch".** Keep all monkeypatches installed
-  and gate them per-engine at their existing seams (NOT via one shared
-  `run._capture_paused` flag — the tee does not route through the run, so a
-  run-level flag cannot reach it):
-  - **Subprocess spy:** reuse the existing thread-local `_spy_local.bypass`
-    (`disable_spy()`), the seam already present at `subprocesses.py:99`.
-  - **Console tee:** add a NEW pause gate to `TqdmSafeTee.write` (`console.py:70`)
-    — the tee has none today and holds no run reference. Give the tee a mutable
-    "paused" holder (or have `write()` consult a module-level / thread-local flag
-    at the top and short-circuit the log-write branch, still passing data through
-    to `original_stream`). Thread scope of this gate is the key design choice
-    (process-global mute is simple but silences all threads; thread-local matches
-    the spy but requires a per-write `threading.local()` check).
-  - **Events / resources:** cheap emit-time flag / thread stop-restart as noted.
+The rejected alternative — **true unpatch/repatch** (restore the original
+`sys.stdout`/`subprocess` for the block, re-install after) — would give the block
+a pristine original `sys.stdout` object, but carries the full interleaving +
+identity-guarded-restore + ref-counted-nesting hazards for no benefit the use
+case needs. Not in scope; revisit only if a concrete need for a truly-pristine
+stdout during the block appears.
 
-  Pausing sets the gates; the wrappers pass real output through but skip
-  recording. No global unwrap/rewrap, so the interleaving hazard is avoided.
-  Downside: wrappers stay in the call path (tiny overhead while paused) and this
-  does NOT give the block a pristine original `sys.stdout` object.
-- **Tier 2 (higher risk): true unpatch/repatch.** Actually restore
-  `sys.stdout`/`subprocess` for the block and re-install after. Gives a truly
-  pristine stdout during the block but carries the full interleaving/thread
-  hazards above; needs identity-guarded restore and ref-counted nesting.
+### Concrete implementation seams
 
-Recommendation to evaluate: **Tier 1 (mute)** as the default `pubrun.paused()`
-semantics (covers the common "don't record this" need at low risk), and treat
-true unpatch (Tier 2) as a separate, explicitly-flagged option only if a real
-need emerges. Selective pause (`pubrun.paused(console=True, subprocess=False)`)
-is a nice-to-have to decide on.
+- **Subprocess spy** (`subprocesses.py`): promote the existing thread-local
+  bypass into a public, **ref-counted** `pause()`/`resume()` pair on the pausable
+  contract. `_spy_local.bypass` is a boolean today; the public pause must
+  ref-count (per thread) so that (a) nested `paused()` blocks compose, and (b) it
+  coexists with the internal `disable_spy()` uses (git/hardware/resources capture)
+  without one clobbering the other. `disable_spy()` should be re-expressed in
+  terms of the same ref-counted primitive.
+- **Console tee** (`console.py`): add a thread-local gate that
+  `TqdmSafeTee.write` consults at the top; when paused for the calling thread,
+  pass `data` through to `original_stream` but skip the log-write branch. The gate
+  lives with the interceptor/tee (each owns its state); ref-counted per thread.
+- **Façade** (`core.py`): `pubrun.paused()` context manager (+ optional
+  `pubrun.pause()`/`pubrun.resume()` — see Q5) that calls `pause()` on each
+  registered pausable on enter and `resume()` on exit in a `finally`. A tiny
+  registry or explicit list of pausables; adding a future ambient-synchronous
+  engine means implementing the contract, not editing the façade.
+
+### Performance gate (the one real trade-off)
+
+Thread-local suspension means `TqdmSafeTee.write` does a `threading.local()`
+lookup on **every** stdout write (tight loops, progress bars). It is cheap but
+non-zero. **Before merge, benchmark the tee write path with the gate present vs.
+absent** (the `benchmarks/` harness now exists — add or reuse the `print_loop`
+hot-path scenario) and confirm the overhead is negligible. If it is not, fall
+back to a cheaper representation, but do not abandon thread-local semantics
+without recording why.
 
 ## Anti-regression / invariants to preserve (rubric D)
 
@@ -140,47 +217,56 @@ is a nice-to-have to decide on.
   and that a user `paused()` does not leave `_spy_local.bypass` stuck True after
   an exception (the `finally` restore in `disable_spy` is the pattern to mirror).
 
-## Open questions (must be answered before this is executable)
+## Decisions (resolved) and remaining open questions
 
-1. **Semantics: mute (Tier 1) vs true unpatch (Tier 2)?** Recommend Tier 1
-   default. (Complexity/functionality — this is the central decision.)
-2. **Thread scope (now the hardest question, given the code reality):** the
-   subprocess spy's existing bypass is **thread-local** (`_spy_local`), but the
-   console tee replaces the process-global `sys.stdout`. So there is a genuine
-   *consistency* tension: a naive "process-global pause" would make the tee mute
-   all threads while the spy bypass only affects the calling thread — two
-   different scopes under one `paused()` call, which is exactly the kind of
-   surprise this feature is supposed to avoid. Options:
-   (a) **All thread-local:** reuse `_spy_local` for the spy and add a
-   `threading.local()` gate the tee checks per write. Consistent and least
-   surprising, but adds a per-write thread-local lookup to the tee's hot path and
-   cannot make `sys.stdout` itself thread-specific (only the *recording* is
-   thread-scoped; passthrough is always global). (b) **All process-global:**
-   simplest for the tee, but then the spy pause must also be made process-global
-   for consistency, changing `disable_spy()`'s current semantics. (c) Document
-   the split and accept it (worst for the "stupid simple" principle).
-   Recommend: **(a) thread-local for both**, documented, since it is the least
-   surprising and the spy is already there — but confirm the tee hot-path cost is
-   acceptable. This decision blocks implementation.
-3. **Which engines pause?** All, or a selectable subset
-   (`paused(console=..., subprocess=..., resources=..., events=...)`)? Recommend
-   start with "all capture" for simplicity; add selectivity only if needed.
-4. **Resource-watcher semantics on resume:** does peak RSS/CPU carry over across
-   the pause, or reset? (Recommend carry-over — pausing recording shouldn't lose
-   the run's peak.)
-5. **API surface:** context manager only (`with pubrun.paused():`), or also
-   explicit `pubrun.pause()`/`pubrun.resume()`? Recommend context manager only
-   (guarantees resume even on exception); explicit calls invite unbalanced state.
-6. **Is this worth building at all** given the risk, vs. documenting that users
-   should structure code to avoid capturing noisy blocks, or use `noconsole`/
-   config? (Stakeholder/KISS check — the deferral bar.)
+**Resolved** (plan-review 2026-07-05; `/advise architect` 2026-07-06, maintainer
+confirmed):
 
-## Required tests / validation (once a design is chosen)
+1. **Semantics: MUTE, not unpatch.** Gate recording; keep patches installed.
+2. **Thread scope: THREAD-LOCAL** for both spy and tee (recording is suspended on
+   the calling thread only; passthrough stays process-global). Least surprising;
+   matches the spy's existing behavior.
+3. **Pausable set: subprocess spy + console tee ONLY** (the ambient,
+   synchronous, calling-thread recorders). `print`/`open`/`popen` honor the same
+   flag. **Resource watcher OUT** (async, own thread; RAM/CPU are process-wide
+   and should still count). **Event stream / `annotate` / `phase` OUT** (explicit
+   user markers still fire inside `paused()`).
+4. **Resource watcher on resume: N/A** — it is not paused, so peaks carry over by
+   definition (it never stopped).
+5. **Worth building: YES.** The use case (capture everything, silence a noisy
+   block, resume) is a single coherent stupid-simple story; dropping the tee half
+   would make it incoherent. Not deferred.
+6. **Selectivity: deferred** — v1 pauses all pausable engines; no per-engine
+   kwargs yet (non-breaking to add later).
 
-- Before/during/after state for tee + spy (active → inactive → active), incl. the
-  exception path; nested pauses; thread interaction documented and tested to the
-  extent feasible; event emits suppressed during pause; resource peak behavior
-  per decision #4. Full suite green.
+**Remaining open (small; settle at implementation / next plan-review):**
+
+- **API surface:** context manager `with pubrun.paused():` is required (it
+  guarantees `resume` even on exception). Also expose bare `pubrun.pause()` /
+  `pubrun.resume()`? Risk: unbalanced calls leaving capture off. Recommend
+  context-manager-only in v1; add explicit calls only if a real need appears.
+  CONFIRM at implementation.
+- **Performance:** the tee hot-path thread-local cost must be benchmarked before
+  merge (see the Performance gate). Not a design question, but a merge gate.
+
+## Required tests / validation
+
+- **Before/during/after state** for tee + spy on the **calling thread**: active →
+  suspended → active, including the **exception path** (`__exit__`/`finally`
+  restores).
+- **Nested `paused()`** (and a `paused()` inside a `phase()`) ref-count correctly:
+  the inner exit does not resume early.
+- **Thread isolation:** with the gate present, a `paused()` on thread A does NOT
+  suspend recording on thread B (spawn a second thread that writes/spawns during
+  A's `paused()` block and assert its output/subprocess IS still recorded).
+- **`annotate()`/`phase()` still fire** inside `paused()` (they are NOT paused);
+  **resource sampling continues** (peaks unaffected).
+- **`disable_spy()` coexistence:** internal git/hardware/resources spans still
+  bypass correctly; a user `paused()` (or its exception) never leaves the spy or
+  tee stuck suspended (ref-count returns to zero).
+- **Performance:** tee write path with vs. without the thread-local gate
+  (benchmarks harness), overhead negligible.
+- Full suite green.
 
 ## Spec / documentation sync
 
@@ -189,11 +275,12 @@ New public API → `docs/api.md`, README (mention as an advanced escape hatch),
 
 ## Approval and execution gate
 
-This IPD is an **early proposal and is explicitly not ready to execute.** It
-needs its open questions resolved and should go through `/advise architect` on
-the concurrency model before any code. It MUST be human-approved before
-execution and is NOT auto-executed. On approval of a resolved design: implement,
-validate (with the anti-regression tests above), sync docs, and move to
+The design is now RESOLVED (plan-review + `/advise architect`, maintainer
+confirmed). The recommended next step is a normal `plan-review` of this concrete
+design, then human approval. It MUST be human-approved before execution and is
+NOT auto-executed. On approval: implement (calling-thread state + ref-counted
+per-engine `pause()`/`resume()` + façade), validate with the tests above
+(including the performance gate), sync docs, and move to
 `.agents/plans/executed/`.
 
 ## Plan-review revisions (2026-07-05)
@@ -234,3 +321,32 @@ Not changed (correctly deferred): whether to build it at all (Open question #6,
 the KISS/stakeholder gate) — that is the maintainer's call and the IPD rightly
 poses it rather than presuming. The mute-vs-unpatch choice (Q1) and selectivity
 (Q3) remain open by design; this is an early proposal.
+
+## /advise architect session (2026-07-06)
+
+An architect-persona dialogue with the maintainer resolved the remaining design
+questions; the "Resolved design" and "Decisions" sections above are its output.
+Key points from the session:
+
+- **Coherence (the architect's central concern):** `paused()` was in danger of
+  being a façade over three mechanisms with different scopes/locations. Resolved
+  by defining ONE contract — thread-local, ref-counted, exception-safe
+  `pause()`/`resume()` — implemented identically by each pausable engine, with the
+  façade just walking them. The user's mental model is now true across every
+  engine it touches.
+- **Pausable boundary is a principle, not a list:** only engines that record
+  *synchronously, on the calling thread, of ambient program activity* are
+  pausable → spy + tee IN; resource watcher OUT (async/own thread; RAM/CPU are
+  process-wide) and event markers OUT (explicit user signals). A contributor can
+  apply this rule to any future engine.
+- **Value confirmed and the tee kept in scope:** the architect initially
+  questioned whether the tee (the hard part) was worth it; the maintainer
+  corrected that this conflated implementation cost with user value — the use
+  case (capture all, silence a noisy block, resume) is one coherent stupid-simple
+  story, and dropping console pausing would make it incoherent. The tee is IN.
+- **Thread-local confirmed** as the semantic (output still prints for all threads;
+  only the calling thread's *recording* pauses). The one real trade-off — the
+  per-write thread-local check on the tee — is now an explicit pre-merge
+  benchmark gate rather than an assumption.
+
+Session summary: `workflow-artifacts/advise-architect/<RUN_ID>/session-summary.md`.
