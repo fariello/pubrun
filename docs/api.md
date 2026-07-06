@@ -162,6 +162,40 @@ This emits `phase_start` and `phase_end` events with timing metadata. If an exce
 
 Phase calls are safe to use even without an active run — they become silent no-ops.
 
+### `pubrun.paused() → ContextManager`
+
+Suspend pubrun's **recording** for a block — useful when a section prints noisy
+output or spawns helper processes you don't want in the record:
+
+```python
+import pubrun   # capturing stdout, subprocesses, ...
+
+do_work()                    # captured
+with pubrun.paused():
+    call_something_noisy()   # runs and prints normally, but NOT recorded
+resume_work()                # captured again
+```
+
+Semantics:
+
+- **Mute, not unpatch.** Output still goes to your terminal and subprocesses
+  still run; only *recording* is suspended — the console tee stops writing to
+  `stdout.log`/`stderr.log` and the subprocess spy stops recording spawned
+  processes for the duration of the block.
+- **Thread-local.** Only the calling thread's recording is suspended; other
+  threads keep being captured. (There is one `sys.stdout`, so terminal output
+  still appears for all threads — only the recording decision is per-thread.)
+- **Nestable and exception-safe.** Nested `paused()` blocks compose; recording
+  resumes only when the outermost block exits, and always resumes even if the
+  block raises (it is a context manager for exactly this reason — there is no
+  bare `pause()`/`resume()`).
+- **Does NOT pause:** your explicit `annotate()`/`phase()` markers (they still
+  fire) or background resource sampling (RAM/CPU are process-wide and still
+  counted — the noisy subprocess still used real memory).
+
+Safe in any import mode and even with no active run (a no-op on uninstalled
+engines).
+
 ---
 
 ## 5. Lifecycle Wrappers

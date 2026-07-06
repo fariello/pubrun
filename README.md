@@ -77,6 +77,13 @@ import pubrun.minimal as pubrun   # API only; no auto-start; all monkeypatches a
 >
 > Access it via the top-level package (`import pubrun; pubrun.print(...)`).
 
+> **Silence a noisy block?** Wrap it in `with pubrun.paused(): ...` to suspend
+> *recording* for that block — output still prints and subprocesses still run,
+> but the console tee and subprocess spy don't record them. It's thread-local
+> (other threads keep being captured), nestable, and resumes automatically even
+> on exception. Your `annotate()`/`phase()` markers and resource sampling are not
+> affected. See the [API docs](https://github.com/fariello/pubrun/blob/main/docs/api.md#pubrunpaused--contextmanager).
+
 #### Preset Modes Behavior Matrix
 
 The matrix shows whether each mode **permits** a hook. Whether a permitted hook is
