@@ -64,11 +64,14 @@ Controls import-time behavior. These settings determine what happens when `impor
 > [!NOTE]
 > You can also use namespaced imports as an alternative to config:
 > ```python
+> import pubrun.full as pubrun     # Equivalent to mode = "full"
 > import pubrun.noauto as pubrun   # Equivalent to mode = "noauto"
 > import pubrun.nopatch as pubrun  # Equivalent to mode = "nopatch"
 > import pubrun.noconsole as pubrun # Equivalent to mode = "noconsole"
 > import pubrun.minimal as pubrun  # Equivalent to mode = "minimal"
 > ```
+> An in-code import mode overrides this config key and env vars; only
+> `pubrun run --mode` overrides the in-code import.
 
 ### `[console]`
 

@@ -239,7 +239,7 @@ The execution engine is divided into these key systems:
 - **Import Mode Router** (`__init__.py`) — Target-aware package initializer that detects mode submodule imports and defers core loading when appropriate.
 - **Bootstrap State** (`_bootstrap.py`) — Singleton tracking selected import mode, conflict detection, and provenance metadata.
 - **Boot Config Resolver** (`_config_boot.py`) — Lightweight import-mode resolver that reads env vars and `.pubrun.toml` without importing the full config system.
-- **Mode Definitions** (`_modes.py`) — Five import presets (auto, noauto, nopatch, noconsole, minimal) with behavior flags.
+- **Mode Definitions** (`_modes.py`) — Six import presets (auto, full, noauto, nopatch, noconsole, minimal) with behavior flags.
 - **Core API** (`core.py`) — Public API implementation (start, stop, annotate, phase, diff, audit_run, tracked_run) and boot sequence logic.
 - **Configuration Resolver** (`config.py`) — Merges and applies settings from API > env vars > local config > user config > defaults.
 - **Capture Engine** (`tracker.py`) — Orchestrates individual data collection routines, operating gracefully under partial failures. Respects granular behavior flags (patch_subprocesses, patch_console, signal_hooks).
