@@ -5,8 +5,21 @@
 - Scope: how `pubrun methods` should behave when pointed at, or filtered to,
   MANY runs (100+ is common, e.g. `~/VC/uri-ai-info` has 1600+). Today it emits
   one Computational Methods paragraph from exactly one run.
-- Status: PENDING (early proposal — needs a design decision before execution).
+- Status: PENDING (design decision made 2026-07-06; ready for `plan-review` then
+  execution on approval).
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
+
+## Decisions (maintainer, 2026-07-06)
+
+- **Representation: option (C)** — one representative paragraph + a compact
+  variance note. When the selected runs are environment-homogeneous the output
+  reads exactly like today's single-run methods; when they diverge, a short note
+  discloses which fields varied and how. (Confirmed.)
+- **Trigger: explicit flag** (`--aggregate`/`--all`), preserving the current
+  single-run default of a bare/filtered `pubrun methods` (most-recent wins).
+  (Recommended default; confirm exact flag name at implementation.)
+- Remaining open questions (#3 git.commit handling, #4 large-set cap) still to be
+  settled during `plan-review`/implementation, but they do not block the shape.
 
 ## Problem / motivation
 
