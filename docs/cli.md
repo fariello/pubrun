@@ -171,15 +171,23 @@ pubrun meta --out ./shared/meta.json --deep
 Compiles a run's manifest into a publication-ready "Computational Methods" paragraph in Markdown or LaTeX.
 
 ```bash
-pubrun methods [RUN_DIR] [--format markdown|latex]
+pubrun methods [RUN_DIR] [--format markdown|latex] [--all] [-n N] [-f/-F/-s/-S ...]
 ```
 
-- If `RUN_DIR` is omitted, automatically uses the most recent run in `./runs/`.
+- If `RUN_DIR` is omitted, automatically uses the **most recent** run in `./runs/` (the default, single-run behavior). Run filters (`-f`, `-F`, `-s`, `-S`, `--older-than`, `--exit-code`) still select the most-recent *matching* run.
 - If the manifest references a `meta_ref`, the parent context is hydrated before generating the output.
 
-**Example:**
+**Aggregating many runs (`--all`):** for a study run many times (sweeps, seeds, folds), `pubrun methods --all` aggregates the whole matching set into **one** representative paragraph plus a variance note listing only the fields that differ across runs (OS, CPU, RAM, Python, git commit, pubrun version, packages). If the runs are environment-homogeneous, the output reads like the single-run paragraph with "across N runs" added.
+
+- Bound/curate the set with the shared run filters: `-n N` (most-recent N), `-f`/`-F` (include/exclude by script/args/**run-id**), `-s`/`-S` (by status). A differing git commit across the set is *disclosed as variance*, never an error.
+- A very large or divergent set prints a suggestion to stderr, **clearly marked as not part of the methods section** (so it can never be pasted into a paper); it respects `NO_COLOR`.
+- **Note the difference from `show`:** `pubrun show` (no run dir) prints a *separate report per matching run*; `pubrun methods` stays single-run unless you pass `--all`, and then produces *one aggregated paragraph*. This is deliberate — a methods section is a single publication artifact, so aggregation is opt-in.
+
+**Examples:**
 ```bash
 pubrun methods ./runs/pubrun-train-20260509-a1b2 --format latex
+pubrun methods --all -f train.py            # one paragraph across all train.py runs
+pubrun methods --all -n 20 -s completed      # aggregate the 20 most-recent completed runs
 ```
 
 ---
