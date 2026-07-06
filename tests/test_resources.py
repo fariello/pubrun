@@ -146,3 +146,69 @@ def test_resource_watcher_join(tmp_path, monkeypatch):
 
     tracker.stop()
     assert not watcher.is_alive()
+
+
+def test_cpu_poll_excludes_reaped_children(monkeypatch):
+    """CPU% for the main process must NOT jump when a batch of subprocesses is
+    reaped (children_user/children_system spike). Regression for the observed
+    5233% spike. (uri-ai-info run 31c039d0)"""
+    import os as _os
+    from pubrun.capture.resources import ResourceWatcher
+
+    class FakeTracker:
+        event_stream = None
+
+    w = ResourceWatcher(FakeTracker(), interval_seconds=1)
+
+    # A namedtuple-like times() result. First poll seeds _last_times.
+    class T:
+        def __init__(self, user, system, cu, cs):
+            self.user = user
+            self.system = system
+            self.children_user = cu
+            self.children_system = cs
+
+    clock = [1000.0]
+    times = [T(1.0, 0.5, 0.0, 0.0)]
+    monkeypatch.setattr("pubrun.capture.resources.time.perf_counter", lambda: clock[0])
+    monkeypatch.setattr("pubrun.capture.resources.os.times", lambda: times[0])
+
+    w._poll_cpu()  # seed
+
+    # 1s later: main process barely moved, but 6000s of CHILD cpu was just reaped.
+    clock[0] = 1001.0
+    times[0] = T(1.05, 0.55, 6000.0, 0.0)
+    cpu = w._poll_cpu()
+
+    cores = _os.cpu_count() or 1
+    # Main-process CPU should be ~10% (0.1s over 1s), definitely not thousands.
+    assert cpu <= 100.0 * cores, f"cpu={cpu} exceeded {100.0*cores}"
+    assert cpu < 100.0, f"cpu={cpu} should reflect only the main process, not reaped children"
+
+
+def test_cpu_poll_clamped_to_cores(monkeypatch):
+    """A pathological huge main-process delta is clamped to 100%*cores."""
+    import os as _os
+    from pubrun.capture.resources import ResourceWatcher
+
+    class FakeTracker:
+        event_stream = None
+
+    w = ResourceWatcher(FakeTracker(), interval_seconds=1)
+
+    class T:
+        def __init__(self, user, system):
+            self.user = user
+            self.system = system
+            self.children_user = 0.0
+            self.children_system = 0.0
+
+    clock = [0.0]
+    times = [T(0.0, 0.0)]
+    monkeypatch.setattr("pubrun.capture.resources.time.perf_counter", lambda: clock[0])
+    monkeypatch.setattr("pubrun.capture.resources.os.times", lambda: times[0])
+    w._poll_cpu()
+    clock[0] = 0.001  # 1ms window
+    times[0] = T(100.0, 0.0)  # absurd 100s of cpu in 1ms
+    cpu = w._poll_cpu()
+    assert cpu == 100.0 * (_os.cpu_count() or 1)

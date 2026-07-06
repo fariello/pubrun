@@ -209,14 +209,24 @@ class ResourceWatcher(threading.Thread):
             self._update_metrics()
 
     def _poll_cpu(self) -> float:
+        """CPU% for the MAIN process over the last interval.
+
+        Uses only the process's own user+system time — NOT children_user/
+        children_system. Reaped children's cumulative CPU lands in the
+        children_* counters all at once when a batch of subprocesses exits, which
+        over a short interval produced absurd spikes (e.g. 5000%+) for a
+        mostly-idle orchestrator. Child CPU belongs to the "tree" scope metric,
+        not the main-process CPU%. Result is clamped to a sane ceiling
+        (100% * logical cores) as defense-in-depth against clock/counter jitter.
+        """
         try:
             current_times = os.times()
             current_clock = time.perf_counter()
             cpu_pct = 0.0
 
             if self._last_times is not None and self._last_clock is not None:
-                user_delta = (current_times.user - self._last_times.user) + getattr(current_times, "children_user", 0) - getattr(self._last_times, "children_user", 0)
-                sys_delta = (current_times.system - self._last_times.system) + getattr(current_times, "children_system", 0) - getattr(self._last_times, "children_system", 0)
+                user_delta = current_times.user - self._last_times.user
+                sys_delta = current_times.system - self._last_times.system
                 wall_delta = current_clock - self._last_clock
 
                 if wall_delta > 0:
@@ -224,6 +234,14 @@ class ResourceWatcher(threading.Thread):
 
             self._last_times = current_times
             self._last_clock = current_clock
+
+            # Clamp: negative (counter wrap) -> 0; cap at 100% per logical core.
+            if cpu_pct < 0:
+                cpu_pct = 0.0
+            cores = os.cpu_count() or 1
+            ceiling = 100.0 * cores
+            if cpu_pct > ceiling:
+                cpu_pct = ceiling
             return float(round(cpu_pct, 1))
         except Exception as e:
             logger.debug(f"pubrun failed CPU poll: {e}")
