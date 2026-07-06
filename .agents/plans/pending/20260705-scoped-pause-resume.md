@@ -404,7 +404,7 @@ inside `paused()`" needs no code — only a test; the public name `pause`/`pause
 is free (no collision in `__init__`/`core`); the tee `write` top (line 80) is a
 clean gate seam; passthrough is genuinely process-global (single `sys.stdout`).
 
-Remaining open (unchanged, small): API surface (context-manager-only vs. also
-bare `pause()`/`resume()`) and the pre-merge tee-perf benchmark gate. The
-"whether to build at all" question is settled (yes). Ready for human approval to
-execute.
+All design questions are now settled (API surface = context-manager-only,
+confirmed 2026-07-06; "whether to build at all" = yes). The only non-design item
+outstanding is the **pre-merge tee-perf benchmark gate** (a merge check, not a
+decision). Ready for human approval to execute.

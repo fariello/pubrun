@@ -96,7 +96,7 @@ homogeneous; (C) degrades more gracefully when they are not.
    must be deliberate. Recommend an explicit flag (e.g. `--aggregate` / `--all`)
    so the current single-run default is preserved; a bare `pubrun methods` with a
    filter matching many runs keeps picking the most recent (backward compatible)
-   unless the flag is given. CONFIRM.
+   unless the flag is given. RESOLVED: flag = `--all` (2026-07-06).
 
    **Cross-command consistency note (rubric H):** `pubrun show` already
    auto-iterates the matched run set with NO flag (per-run output; see the
@@ -284,8 +284,10 @@ Revisions:
 - **PR-M4 (LOW):** removed the stale "settle #1/#2 then plan-review" from the gate
   (#1/#2 are decided and this is the plan-review pass).
 
-Left open by design (do not block the shape): #3 (differing git.commit — note vs.
-refuse) and #4 (large-set cap/warn threshold), to be settled at implementation.
+Left open by design at the time of Plan-review 1 (do not block the shape): #3
+(differing git.commit) and #4 (large-set cap/warn threshold). **Both later
+resolved** by the maintainer (2026-07-06) — see "Open questions — ALL RESOLVED"
+and "Plan-review 2".
 
 ## Decisions recorded (maintainer, 2026-07-06)
 
