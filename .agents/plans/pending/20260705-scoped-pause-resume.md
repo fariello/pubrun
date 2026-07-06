@@ -11,9 +11,10 @@
   # capture resumes here
   ```
   Orthogonal to import modes — wanted regardless of which mode is active.
-- Status: PENDING — design RESOLVED via plan-review (2026-07-05) and
-  `/advise architect` (2026-07-06). Ready for a normal `plan-review` of the
-  now-concrete design, then execution on approval. Not auto-executed.
+- Status: PENDING — design RESOLVED and plan-reviewed twice (2026-07-05 early
+  proposal; 2026-07-06 the concrete design) + `/advise architect` (2026-07-06),
+  verdict APPROVE WITH REVISIONS APPLIED. Ready for human approval to execute; two
+  small items remain (API surface, tee-perf benchmark gate). Not auto-executed.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Related: split out of the `full`-mode discussion (2026-07-05) as its own IPD
   because it is orthogonal and materially riskier. A short pointer lives in
@@ -173,15 +174,30 @@ stdout during the block appears.
 
 - **Subprocess spy** (`subprocesses.py`): promote the existing thread-local
   bypass into a public, **ref-counted** `pause()`/`resume()` pair on the pausable
-  contract. `_spy_local.bypass` is a boolean today; the public pause must
-  ref-count (per thread) so that (a) nested `paused()` blocks compose, and (b) it
-  coexists with the internal `disable_spy()` uses (git/hardware/resources capture)
-  without one clobbering the other. `disable_spy()` should be re-expressed in
-  terms of the same ref-counted primitive.
-- **Console tee** (`console.py`): add a thread-local gate that
-  `TqdmSafeTee.write` consults at the top; when paused for the calling thread,
-  pass `data` through to `original_stream` but skip the log-write branch. The gate
-  lives with the interceptor/tee (each owns its state); ref-counted per thread.
+  contract.
+  - ⚠ **Critical correctness note (plan-review):** `disable_spy()` today is NOT a
+    ref-count — it is a per-frame **save/restore** of the boolean
+    (`old = getattr(_spy_local,"bypass",False); _spy_local.bypass = True;
+    finally: _spy_local.bypass = old`, `subprocesses.py:13-20`). That nests
+    correctly on its own, but a ref-counted `pause()` writing the SAME
+    `_spy_local.bypass` field with a different discipline would **clobber** it
+    (e.g. a `disable_spy` that restores `bypass=False` inside a still-open
+    user `pause()` would wrongly re-enable the spy). Therefore: choose ONE
+    discipline — a per-thread **integer depth counter** (`_spy_local.pause_depth`,
+    default 0; "bypass" ⇔ `depth > 0`) — and **re-express `disable_spy()` on top
+    of it too** (increment on enter, decrement in `finally`), so internal bypass
+    spans and user `pause()` compose additively and neither resets the other.
+    Do not leave `disable_spy` on the old boolean while `pause()` uses a counter.
+  - This makes (a) nested `paused()` blocks and (b) internal `disable_spy()` uses
+    (git/hardware/resources capture) compose safely, and resume only truly resumes
+    when depth returns to 0.
+- **Console tee** (`console.py`): there are TWO tee objects — `stdout_tee` and
+  `stderr_tee` (`console.py:190,193`). Add a thread-local, ref-counted gate that
+  BOTH tees' `TqdmSafeTee.write` consult at the top (line 80); when paused for the
+  calling thread, pass `data` through to `original_stream` but skip the log-write
+  branch. Use the same per-thread depth-counter discipline as the spy (a shared
+  `threading.local()` depth, or one per tee kept in lockstep by the façade), so
+  nesting composes and stdout/stderr pause together.
 - **Façade** (`core.py`): `pubrun.paused()` context manager (+ optional
   `pubrun.pause()`/`pubrun.resume()` — see Q5) that calls `pause()` on each
   registered pausable on enter and `resume()` on exit in a `finally`. A tiny
@@ -261,9 +277,13 @@ confirmed):
   A's `paused()` block and assert its output/subprocess IS still recorded).
 - **`annotate()`/`phase()` still fire** inside `paused()` (they are NOT paused);
   **resource sampling continues** (peaks unaffected).
-- **`disable_spy()` coexistence:** internal git/hardware/resources spans still
-  bypass correctly; a user `paused()` (or its exception) never leaves the spy or
-  tee stuck suspended (ref-count returns to zero).
+- **`disable_spy()` coexistence (interleaving, not just isolation):** internal
+  git/hardware/resources spans still bypass correctly; AND the depth-counter
+  composes both nesting orders — (i) a `disable_spy()` opened INSIDE a user
+  `paused()` must not re-enable recording when it exits (outer pause still open),
+  and (ii) a user `paused()` opened inside a `disable_spy()` span behaves
+  correctly. A user `paused()` (or its exception) never leaves the spy or tee
+  stuck suspended (depth returns to 0).
 - **Performance:** tee write path with vs. without the thread-local gate
   (benchmarks harness), overhead negligible.
 - Full suite green.
@@ -350,3 +370,38 @@ Key points from the session:
   benchmark gate rather than an assumption.
 
 Session summary: `workflow-artifacts/advise-architect/<RUN_ID>/session-summary.md`.
+
+## Plan-review 2 (2026-07-06, resolved design)
+
+Verdict: **APPROVE WITH REVISIONS APPLIED**. Reviewed the now-concrete design
+against source (`subprocesses.py:10-20` `_spy_local`/`disable_spy`;
+`console.py:70-80,190,193` tee `write`/dual tees; `core.py` `annotate`). The
+architecture (thread-local mute; per-engine ref-counted `pause()`/`resume()` +
+façade; principled pausable boundary) is sound and ready to build after these
+low-risk precision fixes. Findings:
+
+- **PR2-P1 (HIGH, functionality/D):** the "re-express `disable_spy()` as the same
+  ref-counted primitive" was under-specified and, done naively, a **latent
+  clobber bug**: `disable_spy()` is currently a per-frame save/restore boolean
+  (`subprocesses.py:13-20`), NOT a ref-count. Mixing it with a ref-counted
+  `pause()` on the same `_spy_local.bypass` field would let one reset the other.
+  Fixed the plan to mandate a single per-thread **integer depth counter**
+  (bypass ⇔ depth>0) that `disable_spy()` is ALSO rebuilt on, so internal and
+  user suspensions compose additively.
+- **PR2-P2 (LOW, accuracy):** "the console tee" is actually TWO tees
+  (`stdout_tee` + `stderr_tee`); the gate must cover both and pause them in
+  lockstep. Clarified.
+- **PR2-P3 (LOW, testing/F):** the `disable_spy` coexistence test now must cover
+  BOTH interleaving orders (disable_spy inside paused, and vice versa), not just
+  "not stuck".
+
+Verified-correct (no change): `annotate()`/`phase()` emit straight through
+`get_current_run().event_stream` (`core.py`), so "explicit markers keep firing
+inside `paused()`" needs no code — only a test; the public name `pause`/`paused`
+is free (no collision in `__init__`/`core`); the tee `write` top (line 80) is a
+clean gate seam; passthrough is genuinely process-global (single `sys.stdout`).
+
+Remaining open (unchanged, small): API surface (context-manager-only vs. also
+bare `pause()`/`resume()`) and the pre-merge tee-perf benchmark gate. The
+"whether to build at all" question is settled (yes). Ready for human approval to
+execute.
