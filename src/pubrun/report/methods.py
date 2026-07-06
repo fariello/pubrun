@@ -33,31 +33,44 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
     hw = manifest.get("hardware", {})
     cpu_model = hw.get("cpu", {}).get("model", "unknown CPU")
     ram_gb = bytes_to_gb(hw.get("memory_total_bytes", 0))
-    
+
     # Python
     py = manifest.get("python", {})
     python_version = py.get("version", "unknown").split(" ")[0]
     python_impl = py.get("implementation", "unknown")
-    
+
     # Git
     git = manifest.get("git", {})
     git_commit = git.get("commit", "unknown")
     if not git_commit: git_commit = "unavailable"
-    
+
     remote = git.get("remote_url", {}).get("value")
     git_repo_text = f" (origin: {remote})" if remote else ""
     if format_type == "latex":
         git_repo_text = git_repo_text.replace("_", "\\_")
-    
+
     # Packages
     packages = extract_highlighted_packages(manifest)
     if packages:
         packages_text = f"Key dependencies tracked include {', '.join(packages)}."
     else:
         packages_text = "Standard library dependencies were utilized."
-        
+
+    # pubrun version/commit — the tool that produced this record. Recorded in the
+    # manifest as run.library_version / run.library_commit. Naming the exact
+    # version (and commit) is important for reproducibility of the provenance.
+    run_meta = manifest.get("run", {})
+    pubrun_version = run_meta.get("library_version")
+    pubrun_commit = run_meta.get("library_commit") or ""
+    if pubrun_version and pubrun_commit:
+        pubrun_version_text = f"pubrun v{pubrun_version} (commit {pubrun_commit[:8]})"
+    elif pubrun_version:
+        pubrun_version_text = f"pubrun v{pubrun_version}"
+    else:
+        pubrun_version_text = "pubrun (version unknown)"
+
     template = LATEX_TEMPLATE if format_type == "latex" else MARKDOWN_TEMPLATE
-    
+
     return template.format(
         os_name=os_name,
         cpu_model=cpu_model,
@@ -66,5 +79,6 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
         python_impl=python_impl.capitalize(),
         packages_text=packages_text,
         git_commit=git_commit[:8] if len(git_commit) >= 8 else git_commit,
-        git_repo_text=git_repo_text
+        git_repo_text=git_repo_text,
+        pubrun_version_text=pubrun_version_text
     ).strip()

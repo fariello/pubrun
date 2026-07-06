@@ -26,6 +26,7 @@ def test_extract_highlighted_packages():
 
 def test_generate_report_markdown():
     manifest = {
+        "run": {"library_version": "1.3.1", "library_commit": "0123456789abcdef"},
         "host": {
             "os_name": "Ubuntu_Linux"
         },
@@ -47,7 +48,7 @@ def test_generate_report_markdown():
             ]
         }
     }
-    
+
     report = generate_report(manifest, format_type="markdown")
     assert "Ubuntu_Linux" in report
     assert "Intel Core i7" in report
@@ -58,6 +59,16 @@ def test_generate_report_markdown():
     assert "abcdef12" in report
     assert "https://github.com/user/repo" in report
     assert "Computational Methods" in report
+    # pubrun version + commit are reported for reproducibility.
+    assert "pubrun v1.3.1" in report
+    assert "commit 01234567" in report
+
+
+def test_generate_report_pubrun_version_fallback():
+    """A manifest without run.library_version degrades gracefully (no crash)."""
+    manifest = {"host": {}, "hardware": {}, "python": {}, "git": {}, "packages": {}}
+    report = generate_report(manifest, format_type="markdown")
+    assert "pubrun (version unknown)" in report
 
 def test_generate_report_latex_escaping():
     manifest = {
@@ -80,7 +91,7 @@ def test_generate_report_latex_escaping():
             "records": []
         }
     }
-    
+
     report = generate_report(manifest, format_type="latex")
     # LaTeX template should escape underscores
     assert "Ubuntu\\_Linux" in report

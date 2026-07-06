@@ -111,9 +111,11 @@ class TestGenerateReportLatex:
         text = generate_report(manifest, "latex")
         assert "Linux\\_WSL" in text
 
-    def test_contains_texttt_pubrun(self, sample_manifest):
+    def test_contains_pubrun_citation(self, sample_manifest):
         text = generate_report(sample_manifest, "latex")
-        assert "\\texttt{pubrun}" in text
+        # The methods paragraph names pubrun (now with its version) and cites it.
+        assert "pubrun" in text
+        assert "\\cite{fariello_pubrun_2026}" in text
 
 
 class TestHydrateManifest:
@@ -356,12 +358,12 @@ class TestResourceMonitoring:
         from pubrun.report.diagnostics import draw_ascii_chart
         # Force Unicode support
         monkeypatch.setattr("pubrun.report.diagnostics._supports_unicode", lambda stream: True)
-        
+
         data = [10.0, 20.0, 50.0, 90.0]
         timestamps = [100.0, 110.0, 120.0, 130.0]
         draw_ascii_chart(data, timestamps, "Test Chart", "%", height=5, width=20, use_color=False)
         output = capsys.readouterr().out
-        
+
         # Verify title, labels and Unicode border characters
         assert "Test Chart" in output
         assert "└" in output
@@ -379,12 +381,12 @@ class TestResourceMonitoring:
         from pubrun.report.diagnostics import draw_ascii_chart
         # Force non-Unicode support
         monkeypatch.setattr("pubrun.report.diagnostics._supports_unicode", lambda stream: False)
-        
+
         data = [10.0, 20.0, 50.0, 90.0]
         timestamps = [100.0, 110.0, 120.0, 130.0]
         draw_ascii_chart(data, timestamps, "Test Chart", "%", height=5, width=20, use_color=False)
         output = capsys.readouterr().out
-        
+
         assert "Test Chart" in output
         assert "+" in output
         assert "|" in output
@@ -408,7 +410,7 @@ class TestResourceMonitoring:
         }
         manifest_path = tmp_path / "manifest.json"
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-        
+
         print_resources_report(str(manifest_path))
         output = capsys.readouterr().out
         assert "RESOURCE MONITORING" in output
@@ -420,7 +422,7 @@ class TestResourceMonitoring:
     def test_print_resources_report_with_samples(self, tmp_path, capsys, monkeypatch):
         from pubrun.report.diagnostics import print_resources_report
         monkeypatch.setenv("NO_COLOR", "1")
-        
+
         manifest = {
             "run": {"run_id": "test_res_2"},
             "timing": {"started_at_utc": 100.0},
@@ -430,7 +432,7 @@ class TestResourceMonitoring:
         }
         manifest_path = tmp_path / "manifest.json"
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-        
+
         events = [
             {"type": "resource_sample", "timestamp_utc": 100.0, "payload": {"rss_bytes": int(1024**3), "cpu_percent": 10.0}},
             {"type": "resource_sample", "timestamp_utc": 110.0, "payload": {"rss_bytes": int(1024**3 * 1.5), "cpu_percent": 40.0}},
@@ -440,7 +442,7 @@ class TestResourceMonitoring:
         with open(events_path, "w", encoding="utf-8") as ef:
             for ev in events:
                 ef.write(json.dumps(ev) + "\n")
-                
+
         print_resources_report(str(manifest_path))
         output = capsys.readouterr().out
         assert "RESOURCE MONITORING" in output
@@ -454,18 +456,18 @@ class TestResourceMonitoring:
         from pubrun.report.diagnostics import draw_ascii_chart
         # Force non-Unicode support for simple character asserting
         monkeypatch.setattr("pubrun.report.diagnostics._supports_unicode", lambda stream: False)
-        
+
         data = [0.0, 100.0, 0.0, 0.0, 100.0, 0.0]
         timestamps = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0]
-        
+
         # Test with max (default)
         draw_ascii_chart(data, timestamps, "Max Chart", "%", height=5, width=2, use_color=False, average=False)
         output_max = capsys.readouterr().out
-        
+
         # Test with average
         draw_ascii_chart(data, timestamps, "Avg Chart", "%", height=5, width=2, use_color=False, average=True)
         output_avg = capsys.readouterr().out
-        
+
         assert "Max Chart" in output_max
         assert "Avg Chart" in output_avg
         assert "#" in output_max
@@ -475,7 +477,7 @@ class TestResourceMonitoring:
     def test_print_resources_report_average(self, tmp_path, capsys, monkeypatch):
         from pubrun.report.diagnostics import print_resources_report
         monkeypatch.setenv("NO_COLOR", "1")
-        
+
         manifest = {
             "run": {"run_id": "test_res_avg"},
             "timing": {"started_at_utc": 100.0},
@@ -485,7 +487,7 @@ class TestResourceMonitoring:
         }
         manifest_path = tmp_path / "manifest.json"
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-        
+
         events = [
             {"type": "resource_sample", "timestamp_utc": 100.0, "payload": {"rss_bytes": int(1024**2 * 5), "cpu_percent": 10.0}},
             {"type": "resource_sample", "timestamp_utc": 110.0, "payload": {"rss_bytes": int(1024**2 * 10), "cpu_percent": 90.0}},
@@ -495,11 +497,9 @@ class TestResourceMonitoring:
         with open(events_path, "w", encoding="utf-8") as ef:
             for ev in events:
                 ef.write(json.dumps(ev) + "\n")
-                
+
         # Just verify it executes with average=True without error
         print_resources_report(str(manifest_path), average=True)
         output = capsys.readouterr().out
         assert "RESOURCE MONITORING" in output
         assert "CPU Utilization History" in output
-
-
