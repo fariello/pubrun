@@ -61,6 +61,7 @@ By default, `import pubrun` starts tracking immediately. For more control, use n
 
 ```python
 import pubrun.auto as pubrun      # Explicit form of the default `import pubrun` (auto-start)
+import pubrun.full as pubrun      # Capture everything, incl. console output (forces the console tee on)
 import pubrun.noauto as pubrun    # Load API, start later with pubrun.start()
 import pubrun.nopatch as pubrun   # Auto-start; no subprocess/console monkeypatching; standard hooks active
 import pubrun.noconsole as pubrun # Auto-start; intercepts subprocesses and signals, but skips wrapping console streams
@@ -84,6 +85,7 @@ actually *active* is a separate, per-feature config decision (see the footnotes)
 | Import Mode | Auto-Start | Intercept Subprocesses (`SubprocessSpy`) | Wrap Console Streams (`ConsoleInterceptor`) | Intercept Signals & Exits (`SignalExitCapture`) | Description |
 | :--- | :---: | :---: | :---: | :---: | :--- |
 | **`auto`** *(default)* | ✅ | ✅ | ⚠️ permitted, **off by default** | ✅ | Tracking begins automatically on import. |
+| **`full`** | ✅ | ✅ | ✅ **forced on** | ✅ | Capture everything on import, including console output. Forces the console tee on regardless of config (the mirror of `noconsole`), while still respecting the Jupyter/non-TTY safety guards. |
 | **`noauto`** | ❌ | ✅ | ⚠️ permitted, **off by default** | ✅ | Tracking must be started manually; the same hooks as `auto` apply once `start()` is called. |
 | **`nopatch`** | ✅ | ❌ | ❌ | ✅ | Telemetry tracking begins automatically; no intrusive stdout/stderr wrapping or subprocess patching; standard exit/signal hooks remain active. |
 | **`noconsole`** | ✅ | ✅ | ❌ | ✅ | Telemetry tracking begins automatically; intercepts subprocesses and signals, but skips wrapping stdout/stderr console streams. |
@@ -91,17 +93,24 @@ actually *active* is a separate, per-feature config decision (see the footnotes)
 
 **Footnotes:**
 
-- **Console wrapping is OFF by default in every mode**, including `auto`/`noauto`. The
-  mode only controls whether console wrapping is *permitted*; the tee activates only
-  when `[console].capture_mode` is set to `"basic"`/`"standard"`/`"deep"` (default
-  `"off"`). `nopatch`/`noconsole`/`minimal` forbid it regardless of `capture_mode`.
-- **Subprocess interception** is permitted in `auto`/`noauto`/`noconsole` and is **on by
-  default** there (`[capture.subprocesses].enabled` defaults `true`); disable it via that
-  key. **Signal/exit capture** is likewise on by default where permitted
+- **Console wrapping is OFF by default in every mode EXCEPT `full`.** For the other
+  modes the mode only *permits* console wrapping; the tee activates only when
+  `[console].capture_mode` is set to `"basic"`/`"standard"`/`"deep"` (default `"off"`).
+  `nopatch`/`noconsole`/`minimal` forbid it regardless of `capture_mode`. **`full`
+  forces it on** regardless of `capture_mode` (still subject to the Jupyter/non-TTY
+  guards) — the mirror of how `noconsole` forces it off.
+- **Subprocess interception** is permitted in `auto`/`full`/`noauto`/`noconsole` and is
+  **on by default** there (`[capture.subprocesses].enabled` defaults `true`); disable it
+  via that key. **Signal/exit capture** is likewise on by default where permitted
   (`[capture.signals].enabled` defaults `true`).
 - **Background resource monitoring is NOT gated by import mode.** It samples in every
   mode whenever a run is active and `[capture.resources].depth != "off"` (default
   `"standard"`) — even in `nopatch` and `minimal` once `start()` has been called.
+- **Import mode is an absolute imperative.** An in-code `import pubrun.<mode>` overrides
+  what any environment variable or config file says about scope/hooks (e.g. `full`
+  forces console on even if config sets `capture_mode = "off"`; `noconsole` forces it
+  off even if config sets `"standard"`). Only the launch-time CLI override
+  `pubrun run --mode <mode> -- <script>` sits above the in-code import.
 
 Or configure project-wide in `.pubrun.toml`:
 
