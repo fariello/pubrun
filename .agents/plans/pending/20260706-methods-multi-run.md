@@ -15,11 +15,24 @@
   variance note. When the selected runs are environment-homogeneous the output
   reads exactly like today's single-run methods; when they diverge, a short note
   discloses which fields varied and how. (Confirmed.)
-- **Trigger: explicit flag** (`--aggregate`/`--all`), preserving the current
-  single-run default of a bare/filtered `pubrun methods` (most-recent wins).
-  (Recommended default; confirm exact flag name at implementation.)
-- Remaining open questions (#3 git.commit handling, #4 large-set cap) still to be
-  settled during `plan-review`/implementation, but they do not block the shape.
+- **Trigger: explicit flag `--all`** (`pubrun methods --all`), preserving the
+  current single-run default of a bare/filtered `pubrun methods` (most-recent
+  wins). Confirmed 2026-07-06.
+- **Differing `git.commit` across the set: NOTE as variance, do NOT refuse.**
+  Consistent with option (C): the aggregate paragraph discloses that runs span
+  multiple commits (e.g. "across N runs spanning commits `abc1234`..`def5678`",
+  or lists the distinct commits) rather than blocking. Long projects legitimately
+  span many commits. Confirmed 2026-07-06.
+- **No hard cap on set size, but add run-selection + a non-methods suggestion.**
+  Confirmed 2026-07-06 (expands the original "cap?" question — see
+  "Run selection and large sets" below). Aggregate however many match, state
+  "across N runs", and:
+  1. add `-n <N>` (limit) and an explicit include/exclude run selection so the
+     user can bound/curate the set, and
+  2. when the set is large or divergent, print a suggestion **after** the methods
+     paragraph, **clearly marked as NOT part of the methods text** (e.g. a
+     `# note (not part of the methods section):` line to stderr or a fenced
+     aside), e.g. suggesting a tighter filter or `-n`.
 
 ## Problem / motivation
 
@@ -124,6 +137,55 @@ homogeneous; (C) degrades more gracefully when they are not.
   malformed manifests), and call the multi-run generator.
 - Keep single-run behavior byte-for-byte unchanged when not aggregating (or when
   exactly one run matches).
+- Use `--all` as the aggregate trigger flag; `git.commit` is treated as a
+  variance field (noted, never a refusal).
+
+## Run selection and large sets (resolved 2026-07-06)
+
+`--all` aggregates the full filtered set with **no hard cap**, but the user must
+be able to bound and curate it, and the output must never silently imply a cap:
+
+- **Bounding / curation** (add to the `methods` subcommand):
+  - `-n <N>` / `--limit <N>` — aggregate at most N runs (most-recent N of the
+    matched set; reuses `filter_runs(limit=...)`, which already exists). Note the
+    `methods` parser currently sets `include_limit=False` (`__main__.py`); this
+    flips it on for aggregate mode.
+  - **Include/exclude run selection** — allow explicitly naming runs to include
+    or exclude (e.g. `--include <id|prefix>...` / `--exclude <id|prefix>...`,
+    matched via the existing `find_run`/prefix logic), so a user can curate the
+    exact set that backs the methods claim. (Exact flag shape to finalize at
+    implementation; keep it consistent with the existing run-filter args.)
+- **Non-methods suggestion in output.** When the set is large and/or divergent,
+  print a suggestion AFTER the methods paragraph that is **clearly marked as NOT
+  part of the methods section** — so it can never be copied into a paper as
+  methods text. E.g. a trailing block prefixed like
+  `# pubrun note (not part of the methods section): aggregated N runs; N is large
+  / the environment varied — consider narrowing with -f/--include/-n.` Emit it to
+  stderr, or as an obviously-fenced aside on stdout that the "captured methods"
+  boundary excludes. The methods paragraph itself must remain clean and
+  paste-ready.
+  - **The textual/structural marker is the AUTHORITATIVE, accessible signal.**
+    The labeled line (`# pubrun note (not part of the methods section): ...`),
+    plus keeping the note outside the methods paragraph, is what conveys the
+    boundary. It works with `NO_COLOR`/`--no-color`, when piped to a file, for
+    screen readers, and on any terminal theme. A test asserts the note carries
+    the textual marker with `NO_COLOR` set, and that the paste-ready methods text
+    excludes it.
+  - **Color is OPTIONAL reinforcement only — and must NOT use `DIM`/faint.**
+    WCAG 2.1 AA (1.4.3) requires a measurable ≥ 4.5:1 text/background contrast;
+    `DIM` (ANSI SGR 2) *reduces* the foreground toward the background by an
+    amount the terminal emulator decides, so the resulting ratio is both
+    unknowable at authoring time and frequently below 4.5:1 — it is the exact
+    low-contrast pattern the criterion exists to catch. Do NOT dim the note. If
+    color is used, use a **distinct full-strength color** (e.g. the codebase's
+    existing `YELLOW`/`CYAN` note/warning colors via `_has_color()`), gated on
+    `NO_COLOR`. Because pubrun does not control the user's terminal theme, the
+    plan/docs must **not claim a specific contrast ratio** for colored terminal
+    output; color is decoration, the text marker is the compliant signal. (ADA
+    ≈ WCAG 2.1 AA in practice, so the same reasoning applies.)
+- Still **state "across N runs"** inside the methods text itself (that IS
+  legitimate methods content); the *suggestion* about narrowing is the part that
+  must be marked non-methods.
 
 ## Anti-regression / invariants (rubric D)
 
@@ -147,6 +209,13 @@ homogeneous; (C) degrades more gracefully when they are not.
   per the chosen convention; deterministic ordering.
 - Large set (e.g. 200 synthetic manifests) → completes in reasonable time; a
   malformed manifest in the set is skipped, not fatal.
+- `-n <N>` bounds the aggregated set; include/exclude selection curates it.
+- The "narrow the set" suggestion is emitted OUTSIDE the methods paragraph and is
+  clearly marked non-methods via a textual marker (a test asserts the paste-ready
+  methods text does not contain the suggestion, and that the marker is present
+  under `NO_COLOR`/`--no-color`). Optional color reinforcement is a distinct
+  full-strength color, **never `DIM`** (WCAG 2.1 AA: DIM's contrast ratio is
+  unknowable/likely-failing against an arbitrary terminal theme).
 - Full suite green.
 
 ## Spec / documentation sync
@@ -154,25 +223,25 @@ homogeneous; (C) degrades more gracefully when they are not.
 `docs/cli.md` (`methods` flags), `docs/api.md` (if a public generator is added),
 README if it shows `methods` usage, `CHANGELOG`. Run `/assess documentation`.
 
-## Open questions (for the maintainer)
+## Open questions — ALL RESOLVED (maintainer, 2026-07-06)
 
-1. Which representation — (A) aggregate, (B) per-run, (C) representative+variance
-   [recommended], or (D) refuse-if-divergent?
-2. Trigger: explicit `--aggregate`/`--all` flag [recommended] vs. auto-aggregate
-   when a filter matches many runs (behavior change)?
-3. Is a differing `git.commit` across the set "variance to note" or grounds to
-   refuse/split? (Long projects will span many commits.)
-4. Cap/warn threshold for very large sets, if any?
+1. Representation → **(C) representative + variance note.**
+2. Trigger → **explicit `--all` flag** (single-run stays the default).
+3. Differing `git.commit` → **note as variance, do not refuse.**
+4. Large sets → **no hard cap;** add `-n`/limit + include/exclude run selection,
+   and a clearly-marked non-methods "narrow it" suggestion after the paragraph
+   (see "Run selection and large sets").
+
+Only implementation-level detail remains: the exact spelling of the
+include/exclude selection flags (keep consistent with the existing run-filter
+args). Not blocking.
 
 ## Approval and execution gate
 
 This IPD is a proposal. It MUST be reviewed and approved by a human before
-execution and is NOT auto-executed. The representation (option C) and trigger
-(explicit flag) are decided; plan-review is done (below). Remaining open
-questions #3 (git.commit variance vs. refuse) and #4 (large-set cap) can be
-settled during implementation without blocking the shape. On approval:
-implement (parity test first), validate, sync docs, move to
-`.agents/plans/executed/`.
+execution and is NOT auto-executed. All design questions are resolved; plan-review
+is done (below). On approval: implement (parity test first), validate, sync docs,
+move to `.agents/plans/executed/`.
 
 ## Plan-review revisions (2026-07-06)
 
@@ -202,3 +271,19 @@ Revisions:
 
 Left open by design (do not block the shape): #3 (differing git.commit — note vs.
 refuse) and #4 (large-set cap/warn threshold), to be settled at implementation.
+
+## Decisions recorded (maintainer, 2026-07-06)
+
+All open questions resolved (see the "Decisions" and "Open questions — ALL
+RESOLVED" sections): representation (C), trigger flag `--all`, git.commit noted
+as variance, no hard cap + `-n`/include/exclude selection + a non-methods "narrow
+it" suggestion. The suggestion's boundary is conveyed by an **authoritative
+textual/structural marker** (works under `--no-color`/`NO_COLOR`, in pipes, and
+for screen readers); optional color reinforcement uses a distinct full-strength
+color via the existing `_has_color()` mechanism and **must not use `DIM`** —
+`DIM`/faint is not reliably WCAG 2.1 AA (its contrast against an arbitrary
+terminal theme is unknowable and often below the 4.5:1 minimum), and pubrun does
+not control the terminal theme, so no specific contrast ratio is claimed. The IPD
+shape grew to include run selection (`-n`, include/exclude) per the maintainer's
+note that this "may need an IPD update." Only the exact include/exclude flag
+spelling remains an implementation detail. Ready for approval to execute.
