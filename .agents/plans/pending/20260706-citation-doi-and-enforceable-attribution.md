@@ -37,9 +37,22 @@ metadata) and records the higher-cost options as explicit maintainer decisions.
 ## Current state (verified 2026-07-06)
 
 - `CITATION.cff` exists (`cff-version: 1.2.0`, `license: Apache-2.0`,
-  `date-released: 2026-07-05`) but: (a) `given-names: "Gabriele"` — **not** the full
-  legal name `Gabriele G. R.`; (b) has **no `identifiers`/DOI block**; (c) has no
-  `version` field currently.
+  `date-released: "2026-07-05"`, `email: "gfariello@fariel.com"`) but: (a) `given-names:
+  "Gabriele"`; (b) has **no `identifiers`/DOI block**; (c) has no `version` field
+  currently.
+  - **NAME-CONVENTION CORRECTION (plan-review 2026-07-06):** the original draft called
+    `given-names: "Gabriele"` a *defect* ("not the full legal name"). That is **wrong**
+    for this repo. Per the project's standing convention (see the Apache-2.0 relicense
+    CHANGELOG entry and `AGENTS.md`-level rule): **citation surfaces use the publication
+    name — "Gabriele Fariello" / "Fariello, G." — while ONLY legal surfaces (`LICENSE`,
+    `NOTICE`, `__copyright__`, README copyright line) use the full legal name "Gabriele
+    G. R. Fariello".** `CITATION.cff` is a **citation** surface. `pubrun cite` bibtex
+    already correctly emits `author = {Gabriele Fariello}` (`src/pubrun/__main__.py:687`);
+    APA/MLA/Chicago emit `Fariello, G.` / `Fariello, Gabriele` (`__main__.py:679-683`).
+    Therefore step 2 below is **inverted** from the original draft: do **not** push the
+    legal name onto `CITATION.cff` or `pubrun cite`. The `.zenodo.json` `creators` name
+    is likewise the **publication** form (`Fariello, Gabriele`), with legal name only if
+    Zenodo requires a distinct legal-name field (it does not).
 - **No `.zenodo.json`** in the repo → GitHub↔Zenodo integration would use only default
   metadata and no controlled author/license/keywords.
 - README has a `## Citation` section (README.md:389) that already says *"A Zenodo archive
@@ -51,9 +64,14 @@ metadata) and records the higher-cost options as explicit maintainer decisions.
 - `docs/research-use.md` exists and is the natural home for the "how to cite / why cite"
   guidance.
 - A prior executed IPD (`.agents/plans/executed/20260622-citation_and_release_readiness.md`)
-  already sketched a `preferred-citation` (JOSS) block + placeholder Zenodo concept/version
-  DOIs — this IPD supersedes/*completes* that with a real minting mechanism and reconciles
-  whatever landed from it.
+  *sketched* a `preferred-citation` (JOSS) block + **fabricated placeholder** Zenodo/JOSS
+  DOIs (`10.5281/zenodo.1234567`, `10.5281/zenodo.1234568`, `10.21105/joss.08024`).
+  **VERIFIED (plan-review 2026-07-06): none of those placeholders ever landed** — the
+  current `CITATION.cff` has no `identifiers` block and no `preferred-citation`, and no
+  fake DOI appears anywhere in the repo. So there is **nothing stale to reconcile**; the
+  current state is honest. This IPD simply *adds* the real mechanism from a clean base.
+  The executor must confirm this still holds at execution time and must **never write a
+  fabricated DOI** (the earlier draft's `1234567` pattern is exactly what to avoid).
 - Code license is **Apache-2.0** (LICENSE + NOTICE); that stays.
 
 ## Key strategy decision (must be answered before building the optional parts)
@@ -86,13 +104,18 @@ and Opt-in B (only if data/docs are distributed); recommend AGAINST Opt-in C for
 
 1. **Add `.zenodo.json`** at repo root so the next GitHub release (once the repo is
    enabled in Zenodo) mints a DOI with controlled metadata: `title`, `description`,
-   `creators` (name `Fariello, Gabriele G. R.`, affiliation + ORCID if the maintainer
-   provides one), `license: Apache-2.0`, `keywords`, `upload_type: software`,
-   `related_identifiers` (link to the GitHub repo). Determinism: keep it minimal and
-   hand-maintained (no generated churn).
-2. **Fix the author name in `CITATION.cff`**: `given-names: "Gabriele"` →
-   `given-names: "Gabriele G. R."` (matches LICENSE/NOTICE/pyproject normalization done
-   in the Apache-2.0 relicense). Add `orcid` if provided.
+   `creators` (name **`Fariello, Gabriele`** — the *publication* form, NOT the legal
+   `Gabriele G. R.`; add `affiliation` + `orcid` only if the maintainer provides them),
+   `license: Apache-2.0`, `keywords`, `upload_type: software`, `related_identifiers`
+   (link to the GitHub repo). Determinism: keep it minimal and hand-maintained (no
+   generated churn).
+2. **Do NOT change the author name in `CITATION.cff`.** `given-names: "Gabriele"` is
+   **correct** — `CITATION.cff` is a citation surface and must use the publication name,
+   not the legal name (see the NAME-CONVENTION CORRECTION under "Current state"). The
+   only permitted author edits here are additive: add `orcid:` **if** the maintainer
+   provides one (open question 2). Leave `family-names`/`given-names`/`email` as they
+   are. (This step was inverted in the original draft and would have introduced a
+   convention regression.)
 3. **Add the DOI to `CITATION.cff`** via an `identifiers:` block (Zenodo **concept** DOI =
    all-versions, and optionally the **version** DOI), and set/confirm `version:` +
    `date-released:` for the citing release. Reconcile with the placeholder DOI/
@@ -104,13 +127,31 @@ and Opt-in B (only if data/docs are distributed); recommend AGAINST Opt-in C for
    suggested citation including the DOI; keep it consistent with the
    `## License, Attribution & Citation` section.
 5. **Wire the DOI through `pubrun cite`** so `pubrun cite --style bibtex` (and other
-   styles) emit the DOI in the reference. Verify against how `pubrun cite` currently reads
-   citation metadata (CITATION.cff vs. an internal table) and update whichever is the
-   source of truth so there is a SINGLE source (no drift between `CITATION.cff`, README,
-   and `pubrun cite`).
+   styles) emit the DOI in the reference.
+   - **VERIFIED (plan-review 2026-07-06):** `pubrun cite` does **NOT** read
+     `CITATION.cff`. `_run_cite` (`src/pubrun/__main__.py:661-695`) **hardcodes** the
+     citation strings for all four styles (apa/mla/chicago/bibtex). So there is **no
+     shared source of truth today** — README, `CITATION.cff`, and `_run_cite` are three
+     independent copies. The original draft's "update whichever is the source of truth
+     so there is a SINGLE source" is therefore not a mechanical edit; it is a small
+     design choice. **Decision for the executor: DO NOT introduce a CFF parser/loader.**
+     Parsing YAML at CLI time would add a runtime dependency (zero-dep is a hard project
+     principle) or a hand-rolled parser (complexity), for a string that changes ~once a
+     year. Instead: (a) add the DOI to the hardcoded strings in `_run_cite`, AND (b) add
+     a **consistency test** (see "Required tests") that reads `CITATION.cff` and asserts
+     the DOI/title/author/version substrings appear in each `pubrun cite --style` output.
+     The test is the drift guard; the human edits both places when the DOI lands. This
+     keeps zero-dep and KISS while still preventing silent drift.
 6. **Update `docs/research-use.md`** with a short "How to cite pubrun" subsection (DOI +
    example) and, honestly, what is and isn't required (attribution required under Apache
-   §4(d); citation requested).
+   §4(d); citation requested). **Guardrail:** `docs/research-use.md` already contains
+   specific factual claims (e.g. "four to six researchers at the University of Rhode
+   Island", "over 500 direct downloads on PyPI", and a "Citation status" section stating
+   no publication currently cites pubrun). The executor must **not** alter or contradict
+   those numbers, and must **only add** the how-to-cite text; if the honest citation
+   status changes (e.g. a JOSS DOI exists), update the "Citation status" section
+   truthfully rather than fabricating adoption/impact. Keep the "no publication cites it
+   yet" statement until that is actually false.
 7. **CHANGELOG** entry under `[Unreleased]` describing the DOI/citation metadata addition
    and the name fix.
 
@@ -129,10 +170,13 @@ and Opt-in B (only if data/docs are distributed); recommend AGAINST Opt-in C for
 
 ## Anti-regression / invariants
 
-- **Single source of truth for citation.** After this change, `CITATION.cff`, the README
-  Citation section, `pubrun cite` output, and `.zenodo.json` must agree on author name,
-  DOI, version, and license. Add/adjust a test or a doc-sync check so they cannot silently
-  drift (there is precedent: the repo already assesses documentation).
+- **Single *checked* source for citation (not a single *stored* source).** These four
+  surfaces are stored independently by design (see step 5 — no CFF loader, to preserve
+  zero-dep/KISS): `CITATION.cff`, the README Citation section, the hardcoded strings in
+  `_run_cite` (`src/pubrun/__main__.py:661-695`), and `.zenodo.json`. The invariant is
+  enforced by a **consistency test**, not by a shared data source: the test reads
+  `CITATION.cff` and asserts author name (publication form), DOI, version, and license
+  agree with README and `pubrun cite` output. This is the anti-drift guard.
 - `pubrun cite` output stays paste-ready and deterministic; adding the DOI must not break
   existing `--style` formats. Characterize current `pubrun cite` output first, then assert
   the only diff is the added DOI.
@@ -140,17 +184,28 @@ and Opt-in B (only if data/docs are distributed); recommend AGAINST Opt-in C for
   a test.
 - The code license remains Apache-2.0; NOTICE/attribution unchanged. No OSI-incompatible
   clause added to the code without an explicit Opt-in C decision.
-- Name normalization is consistent everywhere (`Gabriele G. R. Fariello`).
+- **Name convention preserved (two forms, by surface):** legal surfaces (`LICENSE`,
+  `NOTICE`, `__copyright__`, README copyright line) keep the full legal **"Gabriele G. R.
+  Fariello"**; citation surfaces (`CITATION.cff`, `.zenodo.json` creators, `pubrun cite`,
+  README Citation section) keep the publication form **"Gabriele Fariello" / "Fariello,
+  G."**. This change must NOT collapse the two into one form.
 
 ## Required tests / validation
 
 - `CITATION.cff` parses (CFF 1.2.0 schema valid); `.zenodo.json` is valid JSON with the
   required Zenodo fields.
-- `pubrun cite --style bibtex` (and any other styles) includes the DOI and remains
-  well-formed; characterization test shows only the intended additive diff.
-- A consistency test: author name + DOI + version match across `CITATION.cff`,
-  `.zenodo.json`, and the README citation block (guard against drift).
-- Full suite green.
+- `pubrun cite --style bibtex` (and apa/mla/chicago) includes the DOI and remains
+  well-formed; extend the existing `tests/test_cli.py` cite tests
+  (`test_cite_apa`/`_bibtex`/`_mla`/`_chicago`, lines ~127-142) to characterize current
+  output first, then assert the only diff is the added DOI.
+- A **consistency test** (the drift guard, per the revised step 5): read `CITATION.cff`,
+  and assert the author name (**publication form** — bibtex `Gabriele Fariello`, APA
+  `Fariello, G.`, NOT the legal `Gabriele G. R.`), the DOI, the version, and the license
+  agree across `CITATION.cff`, `.zenodo.json`, the README citation block, and each
+  `pubrun cite --style` output. This test also fails if anyone reintroduces the legal
+  name onto a citation surface.
+- Full suite green (baseline this session: 686 passed, 2 skipped, 1 known SIGPIPE flake
+  in `tests/test_status.py` that passes in isolation — do not attribute it to this work).
 
 ## Spec / documentation sync
 
@@ -165,7 +220,10 @@ and Opt-in B (only if data/docs are distributed); recommend AGAINST Opt-in C for
    AGAINST for the code)? Default if unanswered: **Baseline + prepare Opt-in A skeleton**,
    no Opt-in C.
 2. **ORCID / affiliation** for `.zenodo.json` + `CITATION.cff` `creators`/`authors`
-   (strongly recommended for citation disambiguation). Provide, or omit?
+   (strongly recommended for citation disambiguation). Provide, or omit? (These are the
+   ONLY additive author-field edits permitted — the display name stays the publication
+   form per the name-convention correction; ORCID/affiliation disambiguate it without
+   changing it.)
 3. **DOI type in `CITATION.cff`:** cite the **concept DOI** (all versions — recommended so
    the citation never goes stale) and/or the **version DOI**?
 4. **JOSS paper (Opt-in A):** does the existing `~/VC/pubrun-paper` repo cover this? Should
@@ -179,6 +237,28 @@ and Opt-in B (only if data/docs are distributed); recommend AGAINST Opt-in C for
    Zenodo, then (b) cut the release; the agent fills the concept DOI into `CITATION.cff`/
    README **after** the first minted DOI is known (or leaves a clearly-marked placeholder
    + a follow-up task, never a fake DOI).
+
+## Plan-review record (2026-07-06)
+
+Reviewed via `.agents/workflows/plan-review/plan-review.md`. Verdict: **APPROVE WITH
+REVISIONS APPLIED**. Evidence re-opened against the actual repo. Findings fixed in place:
+
+- **PR-1 (BLOCKER, name convention):** original step 2 would have pushed the legal name
+  `Gabriele G. R.` onto `CITATION.cff` (a citation surface), regressing the project's
+  two-form convention. Inverted: citation surfaces keep the publication name; only legal
+  surfaces use the legal name. `pubrun cite` already does this correctly
+  (`__main__.py:679-687`).
+- **PR-2 (HIGH, false premise):** `pubrun cite` does **not** read `CITATION.cff` — it
+  hardcodes strings (`__main__.py:661-695`). "Single source of truth" restated as a
+  single *checked* source (a consistency test), with an explicit KISS/zero-dep decision
+  NOT to add a CFF loader.
+- **PR-3 (MEDIUM, stale claim):** the 2026-06-22 placeholder DOIs never landed; current
+  `CITATION.cff` is clean. "Reconcile" restated as "confirm clean, never fabricate a
+  DOI."
+- **PR-4 (MEDIUM, fabrication risk):** added a guardrail so `docs/research-use.md`'s
+  existing factual adoption claims are not altered/contradicted.
+- **PR-5 (LOW, accuracy):** recorded the `CITATION.cff` `email` field and the concrete
+  test targets (existing `test_cli.py` cite tests) + this session's suite baseline.
 
 ## Approval and execution gate
 
