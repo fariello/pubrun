@@ -4,6 +4,35 @@ Known issues and deferred improvements for future releases.
 
 ---
 
+## Deferred ideas (need their own design pass / IPD)
+
+### Scoped in-code pause/resume of capture
+
+A context manager to temporarily suspend capture for a block, e.g.:
+
+```python
+with pubrun.paused():            # or pubrun.suppress(console=True, ...)
+    noisy_untracked_work()
+# capture resumes here
+```
+
+Desirable ergonomic, but **not trivial and not low-risk**, so it is deferred to its
+own IPD rather than bundled with other work:
+
+- The console tee and subprocess spy are **process-global monkeypatches** on
+  `sys.stdout`/`subprocess`. Pausing means unwrapping and later re-wrapping them; if
+  other code (or another thread) touches `sys.stdout` in the window, streams can be
+  lost or double-wrapped — a correctness hazard.
+- It is **not thread-safe by nature**: a "pause" on the main thread would also blind a
+  worker thread's output during the window (shared global state).
+- The resource watcher / event stream can be paused cleanly; the monkeypatch engines
+  (console, subprocess) are the risky ones and need characterization tests.
+
+Orthogonal to import modes — wanted regardless of which mode is active. Any
+implementation IPD must address the concurrency/global-state hazards explicitly.
+
+---
+
 ## Removed from Roadmap
 
 ### Determinism Tracking (`[capture.determinism]`)
