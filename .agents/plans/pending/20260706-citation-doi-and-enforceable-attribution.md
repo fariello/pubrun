@@ -11,8 +11,9 @@
   path and/or a CC-BY license for any distributed data/docs. Does NOT change the code
   license (stays Apache-2.0) and does NOT add a citation-as-license-condition clause
   unless the maintainer explicitly opts in (see "Open questions").
-- Status: PENDING — awaiting maintainer decisions on the open questions below, then a
-  plan-review pass, then execution on approval. NOT auto-executed.
+- Status: PENDING — plan-reviewed 2026-07-06 (APPROVE WITH REVISIONS APPLIED); all six
+  open questions ANSWERED by the maintainer 2026-07-06 (see below). Execution of Phase 1
+  is unblocked pending the human "go". NOT auto-executed.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Problem / motivation
@@ -116,12 +117,12 @@ and Opt-in B (only if data/docs are distributed); recommend AGAINST Opt-in C for
    provides one (open question 2). Leave `family-names`/`given-names`/`email` as they
    are. (This step was inverted in the original draft and would have introduced a
    convention regression.)
-3. **Add the DOI to `CITATION.cff`** via an `identifiers:` block (Zenodo **concept** DOI =
-   all-versions, and optionally the **version** DOI), and set/confirm `version:` +
-   `date-released:` for the citing release. Reconcile with the placeholder DOI/
-   `preferred-citation` block from the 2026-06-22 IPD (replace placeholders with the real
-   concept DOI; keep `preferred-citation` only if Opt-in A/JOSS is chosen, else remove the
-   stale placeholder so the file is honest).
+3. **Add the DOI to `CITATION.cff`** via an `identifiers:` block — **concept DOI only**
+   (Open Questions #3), not the version DOI — and set/confirm `version:` +
+   `date-released:` for the citing release. Phase 1 uses a clearly-labeled placeholder
+   (never a fake DOI). Do **NOT** add a `preferred-citation` block (Open Questions
+   #1/#4 — no live paper reference). There are no stale placeholders to reconcile (the
+   2026-06-22 fake DOIs never landed; verified).
 4. **Update the README `## Citation` section** (README.md:389): replace the "DOI will be
    added on public release" promise with the real "Cite this DOI" badge + a concrete
    suggested citation including the DOI; keep it consistent with the
@@ -157,10 +158,12 @@ and Opt-in B (only if data/docs are distributed); recommend AGAINST Opt-in C for
 
 ## Optional changes (maintainer-gated — only if the corresponding open question says yes)
 
-- **Opt-in A (JOSS):** add `paper.md` + `paper.bib` (or coordinate with the existing
-  `pubrun-paper` repo), and set `preferred-citation` in `CITATION.cff` to the paper once it
-  has a DOI. (Writing the paper is out of scope for the executing agent unless told to
-  draft a skeleton.)
+- **Opt-in A (JOSS) — DECIDED "JOSS-ready, not live" (see Open Questions #1/#4):** do
+  **NOT** add `paper.md`/`paper.bib` here (they live in `~/VC/pubrun-paper`), and do
+  **NOT** set `preferred-citation` now — that would insinuate a paper that does not yet
+  exist, which the maintainer explicitly refused. The only permitted action is a
+  clearly-marked, commented **follow-up note** documenting how to add `preferred-citation`
+  with the real JOSS DOI *if/when the paper is accepted*.
 - **Opt-in B (CC-BY data/docs):** identify any distributed data/doc artifacts, add a
   `LICENSES/CC-BY-4.0.txt` and a clear statement that *those artifacts* are CC-BY-4.0 while
   the code stays Apache-2.0. Only if such artifacts exist.
@@ -213,30 +216,39 @@ and Opt-in B (only if data/docs are distributed); recommend AGAINST Opt-in C for
 `docs/cli.md` (`pubrun cite` if its output/flags change), `CHANGELOG.md`. Run
 `/assess documentation` after implementation.
 
-## Open questions (maintainer — must answer before execution)
+## Open questions — ANSWERED by maintainer 2026-07-06 (execution unblocked)
 
-1. **Enforcement ladder:** Baseline only, or Baseline + Opt-in A (JOSS), + Opt-in B
-   (CC-BY data/docs), and/or Opt-in C (citation-as-license-condition — recommended
-   AGAINST for the code)? Default if unanswered: **Baseline + prepare Opt-in A skeleton**,
-   no Opt-in C.
-2. **ORCID / affiliation** for `.zenodo.json` + `CITATION.cff` `creators`/`authors`
-   (strongly recommended for citation disambiguation). Provide, or omit? (These are the
-   ONLY additive author-field edits permitted — the display name stays the publication
-   form per the name-convention correction; ORCID/affiliation disambiguate it without
-   changing it.)
-3. **DOI type in `CITATION.cff`:** cite the **concept DOI** (all versions — recommended so
-   the citation never goes stale) and/or the **version DOI**?
-4. **JOSS paper (Opt-in A):** does the existing `~/VC/pubrun-paper` repo cover this? Should
-   the agent draft a `paper.md`/`paper.bib` skeleton here, or leave paper authorship to the
-   maintainer and only wire `preferred-citation` once a DOI exists?
-5. **Does pubrun distribute any DATA/DOCS artifacts** (datasets, figures, generated
-   corpora) that should be CC-BY-4.0 (Opt-in B)? If none, Opt-in B is N/A.
-6. **When does the DOI actually get minted?** Zenodo mints on a *GitHub release* only after
-   the repo is toggled on in Zenodo and the maintainer's Zenodo/ORCID is linked — an
-   operator step the agent cannot do. Confirm the maintainer will (a) enable the repo in
-   Zenodo, then (b) cut the release; the agent fills the concept DOI into `CITATION.cff`/
-   README **after** the first minted DOI is known (or leaves a clearly-marked placeholder
-   + a follow-up task, never a fake DOI).
+All six are now resolved. The executor must follow these answers exactly.
+
+1. **Enforcement ladder → Baseline (live now) + Opt-in A "JOSS-ready" (documented, NOT
+   live). No Opt-in B (N/A). No Opt-in C.** Critical nuance from the maintainer: *"day 1
+   is just baseline… I don't want to cite or insinuate a paper that does not yet exist."*
+   Therefore the executor must **NOT** add a `preferred-citation` block, a JOSS DOI, or
+   any live reference to a paper. "JOSS-ready" means only a clearly-marked, commented
+   follow-up (in this IPD and/or a `TODO`) describing how to flip `preferred-citation` to
+   the real paper DOI *if/when JOSS accepts*. No live paper reference of any kind. Leave
+   `~/VC/pubrun-paper` untouched from this repo (the paper draft already lives there).
+2. **ORCID / affiliation → PROVIDED. Use both.** ORCID `0000-0002-0326-4752`; affiliation
+   `University of Rhode Island`. These are additive only; display name stays the
+   **publication** form `Fariello, Gabriele` / `given-names: "Gabriele"` (per the
+   name-convention correction). Add `orcid: "https://orcid.org/0000-0002-0326-4752"` to
+   `CITATION.cff` authors and the equivalent `orcid`/`affiliation` fields to
+   `.zenodo.json` `creators`.
+3. **DOI type → concept DOI only** (all-versions, never goes stale). Do not add the
+   per-version DOI.
+4. **JOSS (Opt-in A) → the `~/VC/pubrun-paper` repo covers it; do NOT draft a paper here
+   and do NOT wire `preferred-citation`** until a real JOSS DOI exists (see #1). Only the
+   documented follow-up.
+5. **Distributed DATA/DOCS artifacts → NONE.** pubrun ships code + its own docs only (no
+   bundled datasets/figures/corpora; per-run manifests are user-generated, not shipped).
+   **Opt-in B is N/A — do not add any CC-BY license or `LICENSES/` directory.**
+6. **DOI minting → two-phase, placeholder now.** Maintainer confirms they will (a) enable
+   the pubrun repo in Zenodo and (b) cut a GitHub release — operator steps the agent
+   cannot do. **Phase 1 (executable now):** land `.zenodo.json`, the additive
+   ORCID/affiliation, citation scaffolding, docs, and tests using a **clearly-labeled
+   placeholder** (e.g. `DOI: <pending Zenodo mint>`), **never a fabricated DOI**, plus a
+   follow-up task. **Phase 2 (after maintainer enables Zenodo + releases):** fill the real
+   **concept** DOI into `CITATION.cff` / README / `_run_cite` and validate.
 
 ## Plan-review record (2026-07-06)
 
