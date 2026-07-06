@@ -5,10 +5,14 @@
 - Scope: how `pubrun methods` should behave when pointed at, or filtered to,
   MANY runs (100+ is common, e.g. `~/VC/uri-ai-info` has 1600+). Today it emits
   one Computational Methods paragraph from exactly one run.
-- Status: PENDING — decisions recorded + plan-reviewed twice (2026-07-06),
-  latest verdict APPROVE WITH REVISIONS APPLIED. Ready for execution on approval.
-  All design questions resolved; run selection reuses existing run-filter args
-  (no new flags).
+- Status: EXECUTED (2026-07-06). `pubrun methods --all` implemented (option C:
+  representative paragraph + variance note via `generate_report_multi`;
+  single-run parity preserved — the of-one path is byte-identical). Reuses the
+  existing run-filter args (`-n` enabled via `include_limit=True`; `-f`/`-F`/`-s`/
+  `-S` bound/curate); differing git commit noted as variance; non-methods "narrow
+  it"/skip note on stderr with an authoritative textual marker + optional CYAN
+  (never DIM), suppressed under NO_COLOR. 12 tests. Full suite: 686 passed, 2
+  skipped, 1 known-flaky. Docs (cli.md) + CHANGELOG synced.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Decisions (maintainer, 2026-07-06)
