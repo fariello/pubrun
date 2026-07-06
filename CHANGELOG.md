@@ -34,6 +34,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **Citation DOI metadata (Zenodo-ready).** Added `.zenodo.json` so the next GitHub release can mint a
+  Zenodo **concept DOI** (all-versions) with controlled metadata. `CITATION.cff` gained an
+  `identifiers` (DOI) block, a `version` field, and the author's ORCID
+  (`0000-0002-0326-4752`) and affiliation (University of Rhode Island); `pubrun cite` (all styles),
+  the README Citation section, and `docs/research-use.md` now include the DOI. The DOI is a clearly
+  labeled placeholder (`10.5281/zenodo.PENDING`) until the repository is enabled in Zenodo and a
+  release mints the real one; no fabricated DOI is shipped. No `preferred-citation`/paper reference is
+  added — pubrun has no peer-reviewed paper yet and does not imply one. A consistency test guards
+  against author-name/DOI/version drift across these surfaces. Author display name remains the
+  **publication** form (`Gabriele Fariello` / `Fariello, G.`); ORCID/affiliation are additive.
 - **`NOTICE`** file with the required Apache-2.0 attribution string; **`CITATION.cff`** added/updated
   for citation; README gained a License/Attribution/Citation section.
 - **`pubrun init` command**: Creates `.pubrun.toml` and prints getting-started guidance.

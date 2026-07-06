@@ -282,3 +282,50 @@ maintainer enables Zenodo and the first release mints the concept DOI, fill the 
 into `CITATION.cff`/README/`pubrun cite` and validate. On completion, move this IPD to
 `.agents/plans/executed/`. Recommended: run `plan-review` on this IPD, and consult an IP
 attorney before any Opt-in C.
+
+## Execution record — PHASE 1 COMPLETE (2026-07-06)
+
+Executed by opencode after human approval. Phase 1 (everything landable without an
+operator action in Zenodo) is done:
+
+- **`.zenodo.json`** added at repo root: `upload_type: software`, `license: Apache-2.0`,
+  creator `Fariello, Gabriele` (publication name) + ORCID `0000-0002-0326-4752` +
+  affiliation `University of Rhode Island`, keywords, and a `related_identifiers` link to
+  the GitHub repo. Valid JSON.
+- **`CITATION.cff`**: added `orcid` + `affiliation` (additive; name unchanged),
+  `version: "1.3.1"`, and an `identifiers:` DOI block with the **placeholder** concept DOI
+  `10.5281/zenodo.PENDING` (clearly-commented). Explicit inline comment states NO
+  `preferred-citation` by design (no live paper reference).
+- **`pubrun cite`** (`src/pubrun/__main__.py` `_run_cite`): all four styles
+  (apa/mla/chicago/bibtex) now emit the placeholder DOI; publication name preserved
+  (bibtex `Gabriele Fariello`, others `Fariello, G.`/`Fariello, Gabriele`).
+- **README** `## Citation`: replaced the "DOI will be added" promise with the
+  placeholder-DOI citation + a commented Phase-2 follow-up (swap the DOI, add a Zenodo
+  badge); honest "no paper yet" language.
+- **`docs/research-use.md`**: added a "How to cite pubrun" subsection (DOI + required-vs-
+  requested explanation). Existing factual claims (URI researchers, 500+ downloads,
+  "Citation status") left untouched, per the PR-4 guardrail.
+- **`docs/cli.md`**: `cite` entry notes the DOI + placeholder.
+- **`CHANGELOG.md`** `[Unreleased] → Added`: entry describing the Zenodo/DOI metadata,
+  ORCID/affiliation, placeholder discipline, and the no-paper-reference decision.
+- **Tests** (`tests/test_cli.py`): extended `TestCliCite` (DOI present, publication name,
+  no legal name) and added `TestCitationConsistency` (4 tests: `.zenodo.json` validity +
+  publication name; CFF parse via stdlib line-reader — NO PyYAML, to keep zero-dep — +
+  publication name; DOI agreement across CITATION.cff/README/all `cite` styles; CFF
+  `version` == `pubrun.__version__`). This is the drift guard replacing a shared source.
+- **Validation:** 690 passed / 2 skipped; the only failure was the **known pre-existing
+  SIGPIPE flake** `tests/test_status.py::...test_real_sigpipe_via_pipe` (confirmed passes
+  in isolation — not a regression). No fabricated DOI anywhere (grep-verified: every DOI
+  reference is `zenodo.PENDING`).
+
+### PHASE 2 — REMAINING (operator action required; NOT done)
+
+The maintainer must: (a) enable the `fariello/pubrun` repository at
+`zenodo.org` (GitHub settings, ORCID linked), then (b) cut a GitHub Release. Zenodo then
+mints the real **concept** DOI. After that, replace `10.5281/zenodo.PENDING` in
+`CITATION.cff`, `README.md`, `docs/research-use.md`, `docs/cli.md`, and
+`src/pubrun/__main__.py` with the real concept DOI (grep `zenodo.PENDING` to find all
+sites), add a "Cite this DOI" Zenodo badge to the README, update the CHANGELOG, and
+re-run the consistency test. **JOSS-ready follow-up:** if/when a peer-reviewed paper is
+accepted, add a `preferred-citation` block to `CITATION.cff` with the real paper DOI
+(never before it exists).

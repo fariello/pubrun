@@ -8,7 +8,23 @@ authors:
   - family-names: "Fariello"
     given-names: "Gabriele"
     email: "gfariello@fariel.com"
+    affiliation: "University of Rhode Island"
+    orcid: "https://orcid.org/0000-0002-0326-4752"
 repository-code: "https://github.com/fariello/pubrun"
 url: "https://github.com/fariello/pubrun"
 license: Apache-2.0
+version: "1.3.1"
 date-released: "2026-07-05"
+# Zenodo concept DOI (all versions). PLACEHOLDER until the repo is enabled in
+# Zenodo and the first GitHub release mints a real DOI (see
+# .agents/plans/pending/20260706-citation-doi-and-enforceable-attribution.md,
+# Phase 2). Replace "10.5281/zenodo.PENDING" with the real concept DOI and drop
+# this comment. Do NOT ship "PENDING" in a tagged release.
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.PENDING"
+    description: "Concept DOI (all versions) — placeholder pending Zenodo mint."
+# NOTE: no `preferred-citation` block by design — pubrun has no peer-reviewed
+# paper yet, and we do not cite/insinuate one that does not exist. If a JOSS (or
+# other) paper is accepted, add a `preferred-citation` block here with the real
+# paper DOI (see the same IPD, Open Questions #1/#4).
