@@ -5,8 +5,10 @@
 - Scope: how `pubrun methods` should behave when pointed at, or filtered to,
   MANY runs (100+ is common, e.g. `~/VC/uri-ai-info` has 1600+). Today it emits
   one Computational Methods paragraph from exactly one run.
-- Status: PENDING (design decision made 2026-07-06; plan-review done — verdict
-  APPROVE WITH REVISIONS APPLIED; ready for execution on approval).
+- Status: PENDING — decisions recorded + plan-reviewed twice (2026-07-06),
+  latest verdict APPROVE WITH REVISIONS APPLIED. Ready for execution on approval.
+  All design questions resolved; run selection reuses existing run-filter args
+  (no new flags).
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Decisions (maintainer, 2026-07-06)
@@ -27,8 +29,10 @@
   Confirmed 2026-07-06 (expands the original "cap?" question — see
   "Run selection and large sets" below). Aggregate however many match, state
   "across N runs", and:
-  1. add `-n <N>` (limit) and an explicit include/exclude run selection so the
-     user can bound/curate the set, and
+  1. enable the **existing** run-filter args for `methods` (call
+     `_add_run_filter_args(..., include_limit=True)`) so `-n`/`-f`/`-F`/`-s`/`-S`
+     bound and curate the set — no NEW include/exclude flags (they would
+     duplicate `-f`/`-F`; see "Run selection and large sets"), and
   2. when the set is large or divergent, print a suggestion **after** the methods
      paragraph, **clearly marked as NOT part of the methods text** (e.g. a
      `# note (not part of the methods section):` line to stderr or a fenced
@@ -145,16 +149,25 @@ homogeneous; (C) degrades more gracefully when they are not.
 `--all` aggregates the full filtered set with **no hard cap**, but the user must
 be able to bound and curate it, and the output must never silently imply a cap:
 
-- **Bounding / curation** (add to the `methods` subcommand):
-  - `-n <N>` / `--limit <N>` — aggregate at most N runs (most-recent N of the
-    matched set; reuses `filter_runs(limit=...)`, which already exists). Note the
-    `methods` parser currently sets `include_limit=False` (`__main__.py`); this
-    flips it on for aggregate mode.
-  - **Include/exclude run selection** — allow explicitly naming runs to include
-    or exclude (e.g. `--include <id|prefix>...` / `--exclude <id|prefix>...`,
-    matched via the existing `find_run`/prefix logic), so a user can curate the
-    exact set that backs the methods claim. (Exact flag shape to finalize at
-    implementation; keep it consistent with the existing run-filter args.)
+- **Bounding / curation — REUSE the existing run-filter args; do NOT add new
+  include/exclude flags.** Verified against `_add_run_filter_args`
+  (`__main__.py`) and `filter_runs` (`status.py:348`): the `methods` subcommand
+  already gets, via `_add_run_filter_args`, a full include/exclude/bound surface —
+  it just currently passes `include_limit=False`. So:
+  - `-n <N>` / `--limit <N>` — **already implemented** in `_add_run_filter_args`
+    and honored by `filter_runs(limit=...)`; simply call
+    `_add_run_filter_args(methods_parser, include_limit=True)` to enable it for
+    aggregate mode (it is off today).
+  - **Include** = the existing `-f/--filter` (matches script, args, **or run_id**,
+    regex or plain — so `-f "id1|id2|id3"` selects specific runs). **Exclude** =
+    the existing `-F/--not-filter`. Status include/exclude = `-s`/`-S`. These
+    already back the single-run path and need no new flags.
+  - **Over-scope avoided (plan-review):** a dedicated `--include`/`--exclude`
+    flag pair was considered and **rejected** — it would duplicate `-f`/`-F`. The
+    only thing `-f`/`-F` do not do *first-class* is take an explicit multi-run-ID
+    list as separate tokens, but the regex form (`-f "id1|id2"`) covers it; a
+    first-class multi-ID selector, if ever wanted, is a separate later decision,
+    not v1 scope (KISS).
 - **Non-methods suggestion in output.** When the set is large and/or divergent,
   print a suggestion AFTER the methods paragraph that is **clearly marked as NOT
   part of the methods section** — so it can never be copied into a paper as
@@ -209,7 +222,8 @@ be able to bound and curate it, and the output must never silently imply a cap:
   per the chosen convention; deterministic ordering.
 - Large set (e.g. 200 synthetic manifests) → completes in reasonable time; a
   malformed manifest in the set is skipped, not fatal.
-- `-n <N>` bounds the aggregated set; include/exclude selection curates it.
+- `-n <N>` bounds the aggregated set; the existing `-f`/`-F` (and `-s`/`-S`)
+  curate it — verify with those flags, not new ones.
 - The "narrow the set" suggestion is emitted OUTSIDE the methods paragraph and is
   clearly marked non-methods via a textual marker (a test asserts the paste-ready
   methods text does not contain the suggestion, and that the marker is present
@@ -228,13 +242,14 @@ README if it shows `methods` usage, `CHANGELOG`. Run `/assess documentation`.
 1. Representation → **(C) representative + variance note.**
 2. Trigger → **explicit `--all` flag** (single-run stays the default).
 3. Differing `git.commit` → **note as variance, do not refuse.**
-4. Large sets → **no hard cap;** add `-n`/limit + include/exclude run selection,
-   and a clearly-marked non-methods "narrow it" suggestion after the paragraph
-   (see "Run selection and large sets").
+4. Large sets → **no hard cap;** enable the EXISTING run-filter args for
+   `methods` (`-n` via `include_limit=True`, plus `-f`/`-F`/`-s`/`-S`) to bound
+   and curate — no new include/exclude flags — and a clearly-marked non-methods
+   "narrow it" suggestion after the paragraph (see "Run selection and large
+   sets").
 
-Only implementation-level detail remains: the exact spelling of the
-include/exclude selection flags (keep consistent with the existing run-filter
-args). Not blocking.
+No open flag-design detail remains: run selection reuses the existing shared
+run-filter args; only `include_limit` flips on. Not blocking.
 
 ## Approval and execution gate
 
@@ -276,14 +291,40 @@ refuse) and #4 (large-set cap/warn threshold), to be settled at implementation.
 
 All open questions resolved (see the "Decisions" and "Open questions — ALL
 RESOLVED" sections): representation (C), trigger flag `--all`, git.commit noted
-as variance, no hard cap + `-n`/include/exclude selection + a non-methods "narrow
-it" suggestion. The suggestion's boundary is conveyed by an **authoritative
+as variance, no hard cap + reuse the existing run-filter args (`-n`/`-f`/`-F`/
+`-s`/`-S`) for selection + a non-methods "narrow it" suggestion. The suggestion's boundary is conveyed by an **authoritative
 textual/structural marker** (works under `--no-color`/`NO_COLOR`, in pipes, and
 for screen readers); optional color reinforcement uses a distinct full-strength
 color via the existing `_has_color()` mechanism and **must not use `DIM`** —
 `DIM`/faint is not reliably WCAG 2.1 AA (its contrast against an arbitrary
 terminal theme is unknowable and often below the 4.5:1 minimum), and pubrun does
-not control the terminal theme, so no specific contrast ratio is claimed. The IPD
-shape grew to include run selection (`-n`, include/exclude) per the maintainer's
-note that this "may need an IPD update." Only the exact include/exclude flag
-spelling remains an implementation detail. Ready for approval to execute.
+not control the terminal theme, so no specific contrast ratio is claimed. Run
+selection reuses the existing shared run-filter args (only `include_limit` flips
+on for `methods`); no new selection flags are added. Ready for approval to
+execute.
+
+## Plan-review 2 (2026-07-06, post-decisions)
+
+Verdict: **APPROVE WITH REVISIONS APPLIED**. Re-reviewed the material added after
+Plan-review 1 (the `--all`/git-commit decisions and the new run-selection +
+non-methods-note surface), verified against `_add_run_filter_args` and
+`filter_runs` (`status.py:348`).
+
+- **PR3-M1 (MEDIUM, over-scope / rubric G):** the proposed NEW `--include`/
+  `--exclude` run-selection flags duplicate the existing `-f/--filter` (include;
+  matches run_id, so `-f "id1|id2"` selects specific runs) and `-F/--not-filter`
+  (exclude), plus `-s`/`-S` for status. Removed them; the plan now reuses the
+  existing shared run-filter args and only flips `include_limit=True` so `methods`
+  gains `-n`. A first-class multi-run-ID selector is a separate, later decision if
+  ever needed (KISS).
+- **PR3-M2 (LOW, accuracy):** confirmed `-n/--limit` already exists in
+  `_add_run_filter_args` and is honored by `filter_runs(limit=...)`; the only
+  change is enabling it for `methods` (currently `include_limit=False`).
+- **PR3-M3 (LOW, testing/F):** the run-selection tests should exercise the
+  existing `-f`/`-F`/`-n` flags, not new ones.
+
+Verified-correct (no change): the accessibility handling (authoritative textual
+marker + non-`DIM` optional color, no claimed contrast ratio) is sound; the
+`--all` trigger and git-commit-as-variance decisions are consistent with option
+C; the single-run parity gate (write the test first) is intact. The design is now
+free of the over-scoped flag pair and ready for execution on approval.
