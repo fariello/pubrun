@@ -10,8 +10,11 @@ on your own machine.
 ## How overhead is measured
 
 Each scenario launches a **fresh Python subprocess** N times (default 30, plus a
-discarded warmup) and records the median wall-clock time. "Overhead" is the
-median of a scenario minus its group baseline:
+discarded warmup) and records the median wall-clock time. The whole sweep runs
+twice by default (`--passes 2`) and both passes are recorded, so
+startup/filesystem caching effects are visible; the reported numbers use the
+last (warmest) pass. "Overhead" is the median of a scenario minus its group
+baseline:
 
 - **startup** — vs a bare `python noop.py` (no `pubrun` import).
 - **feature** — vs `feature-baseline`; `feature-none` (pubrun active, everything
