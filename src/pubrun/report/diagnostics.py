@@ -55,7 +55,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     except json.JSONDecodeError:
         _print_error(f"The manifest file at '{manifest_path}' is corrupt or contains invalid JSON.")
         sys.exit(1)
-        
+
     # Hydrate!
     manifest, warnings = hydrate_manifest(manifest_path, manifest)
 
@@ -86,7 +86,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         green = Colors.GREEN if use_color else ""
         yellow = Colors.YELLOW if use_color else ""
         rst = Colors.RESET if use_color else ""
-        
+
         print(f"{blue}[ Environment Variables ]{rst}")
         if not envs:
             print("  (None captured)")
@@ -108,7 +108,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         blue = Colors.BLUE if use_color else ""
         green = Colors.GREEN if use_color else ""
         rst = Colors.RESET if use_color else ""
-        
+
         print(f"{blue}[ Packages ]{rst}")
         if not pkgs:
             print("  (None captured)")
@@ -125,7 +125,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         if len(pkgs) % 3 != 0:
             print()
         return
-    
+
     use_color = _has_color()
     bold = Colors.BOLD if use_color else ""
     rst = Colors.RESET if use_color else ""
@@ -134,7 +134,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     green = Colors.GREEN if use_color else ""
     red = Colors.RED if use_color else ""
     yellow = Colors.YELLOW if use_color else ""
-    
+
     if use_color:
         if _supports_unicode(sys.stdout):
             print(f"\n{cyan}{bold}┌─────────────────────────────────────────────────┐{rst}")
@@ -148,25 +148,25 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         print(f"\n=================================================")
         print(f"               PUBRUN DIAGNOSTICS                ")
         print(f"=================================================")
-        
+
     print(f"{cyan}Source{rst}      : {manifest_path}")
-    
+
     meta_ref = manifest.get("meta_ref")
     if meta_ref:
         print(f"{cyan}Parent{rst}      : {meta_ref}")
-        
+
     for w in warnings:
         print(f"\n{yellow}[WARNING]{rst} {w}")
-    
+
     print(f"\n{blue}{bold}--- Basic Information ---{rst}")
     run = manifest.get("run", {})
     timing = manifest.get("timing", {})
     status = manifest.get("status", {})
     python = manifest.get("python", {})
     inv = manifest.get("invocation", {})
-    
+
     script_name = inv.get("script", {}).get("basename", "<interactive or module>")
-    
+
     signals_data = manifest.get("signals", {})
     exit_code = signals_data.get("exit_code")
     exit_exception = signals_data.get("exit_exception")
@@ -209,7 +209,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     if elapsed_val is not None:
         elapsed_str = _format_elapsed(elapsed_val)
         print(f"{cyan}Elapsed{rst}     : {elapsed_str}")
-        
+
     # Read Events if available
     events_path = Path(manifest_path).parent / "events.jsonl"
     if events_path.exists():
@@ -226,43 +226,43 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
                         first_events.append(line)
                     else:
                         last_events.append(line)
-                        
+
                 def _print_ev(raw_line: str) -> None:
                     e = json.loads(raw_line)
                     ts = e.get('timestamp_utc', 0.0)
                     ts_str = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
                     print(f"  [{cyan}{ts_str}{rst}] {green}{e.get('type')}{rst}: {e.get('name', '')} {e.get('payload', '')}")
-                    
+
                 for line in first_events:
                     _print_ev(line)
-                    
+
                 if total_events > 40:
                     print(f"  ... [ {total_events - 40} events logically truncated ] ...")
-                    
+
                 if total_events > 20:
                     # Render the remaining tail
                     for line in last_events:
                         _print_ev(line)
         except Exception:
             print("  (Events file corrupt or unreadable)")
-        
+
     if depth == "basic":
         print()
         return
-        
+
     # --- STANDARD ---
     host = manifest.get("host", {})
     hw = manifest.get("hardware", {})
     git = manifest.get("git", {})
     pkgs = manifest.get("packages", {}).get("records", [])
     envs = manifest.get("environment", {}).get("variables", [])
-    
+
     cpu_model = hw.get("cpu", {}).get("model", "unknown")
     ram_gb = bytes_to_gb(hw.get("memory_total_bytes", 0))
-    
+
     print(f"\n{blue}{bold}--- Standard Information ---{rst}")
     print(f"{cyan}Arguments{rst}   : {' '.join(inv.get('argv', []))}")
-    
+
     # Safely extract python version
     py_ver = python.get("version", "")
     if py_ver:
@@ -270,27 +270,27 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     else:
         v_tag = "unknown"
     print(f"{cyan}Python{rst}      : {python.get('executable')} (v{v_tag})")
-    
+
     hostname = host.get("hostname", "unknown")
     print(f"{cyan}Host{rst}        : {hostname} - {host.get('os_name')} {host.get('os_version')} ({cpu_model}, {ram_gb} GB RAM)")
-    
+
     commit = git.get("commit")
     if commit:
         remote = git.get("remote_url", {}).get("value", "unknown origin")
         print(f"{cyan}Git Commit{rst}  : {commit[:8]} ({remote})")
     else:
         print(f"{cyan}Git Commit{rst}  : Not found or un-tracked")
-        
+
     print(f"{cyan}Packages{rst}    : {len(pkgs)} recorded")
     print(f"{cyan}Env Vars{rst}    : {len(envs)} captured")
-    
+
     if depth == "standard":
         print()
         return
-        
+
     # --- DEEP ---
     print(f"\n{blue}{bold}--- Deep Information ---{rst}")
-    
+
     # Read Config
     cfg_path = Path(manifest_path).parent / "config.resolved.json"
     if cfg_path.exists():
@@ -317,11 +317,11 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
                 print(f"  {green}{name}{rst}={yellow}<{val_obj['representation'].upper()}>{rst}")
         else:
             print(f"  {green}{name}{rst}={val_obj}")
-            
+
     print(f"\n{blue}[ Packages ]{rst}")
     if not pkgs:
         print("  (None captured)")
-    
+
     for i, p in enumerate(pkgs):
         name = p.get('name')
         ver = p.get('version', 'unknown')
@@ -334,7 +334,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
             print()
     if len(pkgs) % 3 != 0:
         print()
-        
+
     subprocs = manifest.get("subprocesses", [])
     print(f"\n{blue}[ Subprocesses ]{rst} ({len(subprocs)} executed)")
     for sp in subprocs:
@@ -351,7 +351,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
             print(f"  [{green if rc == 0 else red}{rc}{rst}] {cmd_str} ({elapsed}s)")
         else:
             print(f"  [{green if rc == 0 else red}{rc}{rst}] {cmd_str}")
-        
+
     print()
 
 
@@ -361,7 +361,7 @@ def format_elapsed_range(total_seconds: float) -> tuple[str, str]:
     hours = (sec_int % 86400) // 3600
     minutes = (sec_int % 3600) // 60
     secs = sec_int % 60
-    
+
     if days > 0:
         return "0d 00:00:00", f"{days}d {hours:02d}:{minutes:02d}:{secs:02d}"
     elif hours > 0:
@@ -387,13 +387,13 @@ def parse_duration(val: str) -> float:
 
 
 def draw_ascii_chart(
-    data: list[float], 
-    timestamps: list[float], 
-    title: str, 
-    unit: str, 
-    height: int = 8, 
-    width: int = 50, 
-    color: str = "", 
+    data: list[float],
+    timestamps: list[float],
+    title: str,
+    unit: str,
+    height: int = 8,
+    width: int = 50,
+    color: str = "",
     use_color: bool = True,
     average: bool = False,
 ) -> None:
@@ -402,7 +402,7 @@ def draw_ascii_chart(
     max_val = max(0.1, max(data))
     if unit == "%":
         max_val = max(100.0, max_val)
-        
+
     n = len(data)
     y_vals = []
     if n <= width:
@@ -416,7 +416,7 @@ def draw_ascii_chart(
         t_start = timestamps[0]
         t_end = timestamps[-1]
         total_time = t_end - t_start
-        
+
         # Initialize bins
         bins = [[] for _ in range(width)]
         for i in range(n):
@@ -428,7 +428,7 @@ def draw_ascii_chart(
             else:
                 bin_idx = 0
             bins[bin_idx].append(data[i])
-            
+
         for x in range(width):
             bin_data = bins[x]
             if not bin_data:
@@ -442,11 +442,11 @@ def draw_ascii_chart(
                 else:
                     val = max(bin_data)
             y_vals.append(val)
-        
+
     grid = [[" " for _ in range(width)] for _ in range(height)]
-    
+
     char = "█" if _supports_unicode(sys.stdout) else "#"
-    
+
     for x in range(width):
         y = y_vals[x]
         pct = (y - min_val) / (max_val - min_val)
@@ -455,14 +455,14 @@ def draw_ascii_chart(
         for r in range(height - 1, height - 1 - fill_height - 1, -1):
             if 0 <= r < height:
                 grid[r][x] = char
-                
+
     bold = Colors.BOLD if use_color else ""
     rst = Colors.RESET if use_color else ""
-    
+
     corner = "└" if _supports_unicode(sys.stdout) else "+"
     pipe = "│" if _supports_unicode(sys.stdout) else "|"
     hline = "─" if _supports_unicode(sys.stdout) else "-"
-    
+
     # Format max value string
     if data:
         max_data_val = max(data)
@@ -478,7 +478,7 @@ def draw_ascii_chart(
 
     title_suffix = f" ({max_str})" if max_str else ""
     print(f"\n{bold}{title}{title_suffix}{rst}")
-    
+
     for r in range(height):
         val = max_val - r * (max_val - min_val) / (height - 1)
         label_str = f"{val:6.1f} {unit}".rjust(10)
@@ -486,7 +486,7 @@ def draw_ascii_chart(
         if use_color and color:
             row_str = f"{color}{row_str}{rst}"
         print(f"  {label_str} {pipe} {row_str}")
-        
+
     # Put ticks at the start, 25%, middle, 75%, and end marks
     ticks_str = list(hline * width)
     if width > 1:
@@ -499,7 +499,7 @@ def draw_ascii_chart(
             ticks_str[(3 * (width - 1)) // 4] = tick_char
     axis_line = "".join(ticks_str)
     print(f"  {' ' * 10} {corner}{axis_line}")
-    
+
     from pubrun.status import _format_elapsed
 
     # Format dates
@@ -529,7 +529,7 @@ def draw_ascii_chart(
 
     # Greedy placement of elapsed labels
     placed = {}  # maps idx -> (start_col, end_col, lbl_str)
-    
+
     # Priority order: End tick, Start tick, Middle tick, then the rest
     priority_order = []
     if tick_indices:
@@ -548,7 +548,7 @@ def draw_ascii_chart(
             lbl_str = start_elapsed_str
         else:
             lbl_str = _format_elapsed((idx / (width - 1)) * duration if width > 1 else 0.0)
-        
+
         L = len(lbl_str)
         if idx == 0:
             start_col = 0
@@ -556,16 +556,16 @@ def draw_ascii_chart(
             start_col = width - L
         else:
             start_col = idx - 1 - (L // 2)
-            
+
         start_col = max(0, min(width - L, start_col))
-        
+
         # Check overlap with gap = 1
         overlap = False
         for p_start, p_end, _ in placed.values():
             if not (start_col + L + 1 <= p_start or p_end + 1 <= start_col):
                 overlap = True
                 break
-                
+
         if not overlap:
             placed[idx] = (start_col, start_col + L, lbl_str)
 
@@ -603,7 +603,7 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
 
     # Hydrate!
     manifest, warnings = hydrate_manifest(manifest_path, manifest)
-    
+
     use_color = _has_color()
     bold = Colors.BOLD if use_color else ""
     rst = Colors.RESET if use_color else ""
@@ -611,16 +611,16 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
     blue = Colors.BLUE if use_color else ""
     yellow = Colors.YELLOW if use_color else ""
     red = Colors.RED if use_color else ""
-    
+
     run = manifest.get("run", {})
     timing = manifest.get("timing", {})
     status = manifest.get("status", {})
     inv = manifest.get("invocation", {})
     resources = manifest.get("resources", {})
-    
+
     script_name = inv.get("script", {}).get("basename", "<interactive or module>")
     outcome = status.get('outcome', 'unknown')
-    
+
     out_color = ""
     if use_color:
         if outcome == "completed":
@@ -647,37 +647,37 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
     print(f"{cyan}Run ID{rst}      : {run.get('run_id')}")
     print(f"{cyan}Script{rst}      : {script_name}")
     print(f"{cyan}Status{rst}      : {out_color}{outcome}{rst}")
-    
+
     peak_rss = resources.get("peak_rss_bytes")
     peak_cpu = resources.get("peak_cpu_percent")
     end_rss = resources.get("end_rss_bytes")
-    
+
     if metric in ("mem", "all") and peak_rss:
         if peak_rss >= 1024**3:
             rss_str = f"{peak_rss / (1024**3):.2f} GB"
         else:
             rss_str = f"{peak_rss / (1024**2):.2f} MB"
         print(f"{cyan}Peak RSS{rst}    : {rss_str}")
-        
+
     if metric in ("mem", "all") and end_rss:
         if end_rss >= 1024**3:
             end_rss_str = f"{end_rss / (1024**3):.2f} GB"
         else:
             end_rss_str = f"{end_rss / (1024**2):.2f} MB"
         print(f"{cyan}End RSS{rst}     : {end_rss_str}")
-        
+
     if metric in ("cpu", "all") and peak_cpu is not None:
         print(f"{cyan}Peak CPU{rst}    : {peak_cpu}%")
-        
+
     events_path = Path(manifest_path).parent / "events.jsonl"
     if not events_path.exists():
         print(f"\n{yellow}No events.jsonl file found. Cannot generate utilization graphs.{rst}\n")
         return
-        
+
     timestamps = []
     rss_values = []
     cpu_values = []
-    
+
     try:
         with open(events_path, "r", encoding="utf-8") as ef:
             for line in ef:
@@ -697,7 +697,7 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
     except Exception:
         print(f"\n{red}Events file corrupt or unreadable.{rst}\n")
         return
-        
+
     last_seconds = None
     if last is not None:
         try:
@@ -719,11 +719,11 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
         timestamps = filtered_timestamps
         rss_values = filtered_rss
         cpu_values = filtered_cpu
-        
+
     if not rss_values:
         print(f"\n{yellow}No resource samples found in events.jsonl.{rst}\n")
         return
-        
+
     if len(rss_values) < 2:
         print(f"\nOnly one resource sample recorded:")
         if metric in ("mem", "all"):
@@ -747,20 +747,27 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
             columns = 80
         chart_width = max(20, columns - 20)
 
-    # Plot CPU (Yellow theme)
+    # Scope label: the RSS/CPU samples are for the MAIN process unless the run
+    # was recorded in "tree" scope. Make the chart title explicit so a reader
+    # isn't misled into thinking a thin orchestrator's RSS is the whole tree.
+    _scope = manifest.get("resources", {}).get("scope", "process")
+    _scope_label = "process tree" if _scope == "tree" else "main process"
+
+    # Plot CPU (Yellow theme). CPU% is always measured for the main process
+    # (child CPU is excluded from the metric), regardless of RSS scope.
     if metric in ("cpu", "all"):
         draw_ascii_chart(
-            cpu_values, 
-            timestamps, 
-            "CPU Utilization History", 
-            "%", 
-            height=8, 
-            width=chart_width, 
-            color=Colors.YELLOW if use_color else "", 
+            cpu_values,
+            timestamps,
+            "CPU Utilization History (main process)",
+            "%",
+            height=8,
+            width=chart_width,
+            color=Colors.YELLOW if use_color else "",
             use_color=use_color,
             average=average
         )
-    
+
     # Plot Memory (Green theme)
     if metric in ("mem", "all"):
         # Determine memory scale
@@ -774,17 +781,17 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
         else:
             mem_scale = 1024
             mem_unit = "KB"
-            
+
         scaled_rss = [r / mem_scale for r in rss_values]
-        
+
         draw_ascii_chart(
-            scaled_rss, 
-            timestamps, 
-            "Memory (RSS) History", 
-            mem_unit, 
-            height=8, 
-            width=chart_width, 
-            color=Colors.GREEN if use_color else "", 
+            scaled_rss,
+            timestamps,
+            f"Memory (RSS) History ({_scope_label})",
+            mem_unit,
+            height=8,
+            width=chart_width,
+            color=Colors.GREEN if use_color else "",
             use_color=use_color,
             average=average
         )
