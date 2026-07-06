@@ -21,7 +21,7 @@ Computational experiments were executed on a machine running {os_name} equipped 
 
 {packages_text}
 
-To facilitate computational reproducibility, the exact state of the source code was archived at Git commit `{git_commit}`{git_repo_text}. Environment and execution provenance were tracked using the `pubrun` library [1].
+To facilitate computational reproducibility, the exact state of the source code was archived at Git commit `{git_commit}`{git_repo_text}. Environment and execution provenance were captured with {pubrun_version_text} [1].
 
 **References:**
 [1] Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research [Computer software]. https://github.com/fariello/pubrun
@@ -34,7 +34,7 @@ Computational experiments were executed on a machine running {os_name} equipped 
 
 {packages_text}
 
-To facilitate computational reproducibility, the exact state of the source code was archived at Git commit \\texttt{{{git_commit}}}{git_repo_text}. Environment and execution provenance were tracked using the \\texttt{{pubrun}} library \\cite{{fariello_pubrun_2026}}.
+To facilitate computational reproducibility, the exact state of the source code was archived at Git commit \\texttt{{{git_commit}}}{git_repo_text}. Environment and execution provenance were captured with {pubrun_version_text} \\cite{{fariello_pubrun_2026}}.
 
 %% Ensure you add the following to your .bib file:
 %% @software{{fariello_pubrun_2026,
