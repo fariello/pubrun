@@ -7,9 +7,15 @@ containing the machine metadata (captured via pubrun itself) and every
 scenario's stats. Import matplotlib/pytest-benchmark is intentionally avoided
 here so the harness runs anywhere pubrun runs (including locked-down HPC nodes).
 
+By default it runs the FULL scenario sweep TWICE (``--passes 2``) and records
+both passes, so any startup / filesystem caching effect is visible (compare
+pass 1 vs pass 2) rather than silently baked in. The top-level ``scenarios`` key
+mirrors the last (warmest) pass for convenience and backward compatibility.
+
 Usage:
-    python benchmarks/harness.py                 # full run (30 iterations)
-    python benchmarks/harness.py --quick         # smoke run (8 iterations)
+    python benchmarks/harness.py                 # full run: 2 passes x 30 iterations
+    python benchmarks/harness.py --quick         # smoke run: 2 passes x 8 iterations
+    python benchmarks/harness.py --passes 1      # single pass (no cache-warming)
     python benchmarks/harness.py --iterations 50 # custom
     python benchmarks/harness.py --out results/my.json
 
@@ -176,60 +182,79 @@ def _stats(samples: list[float]) -> dict:
     }
 
 
-def run(iterations: int, out_path: Path, warmup: int = 1) -> dict:
+def _run_pass(pass_no: int, iterations: int, warmup: int, workdir: Path) -> dict:
+    """Run the whole scenario sweep once, returning {scenario_name: entry}."""
+    scns = _scenarios.all_scenarios()
+    scenarios: dict = {}
+    for scn in scns:
+        skip = scn.skip_if() if scn.skip_if else None
+        if skip:
+            scenarios[scn.name] = {"group": scn.group, "mode": scn.mode,
+                                   "workload": scn.workload, "skipped": skip}
+            print(f"  [pass {pass_no}] {scn.name}: SKIPPED ({skip})", file=sys.stderr)
+            continue
+
+        # Fresh cwd per (pass, scenario) so a stale .pubrun.toml never leaks.
+        scn_cwd = workdir / f"pass{pass_no}" / scn.name
+        scn_cwd.mkdir(parents=True, exist_ok=True)
+        (scn_cwd / "runs").mkdir(exist_ok=True)
+        if scn.config:
+            (scn_cwd / ".pubrun.toml").write_text(_toml_dumps(scn.config), encoding="utf-8")
+
+        argv, env = _build_child_command(scn, scn_cwd)
+        env["PUBRUN_PROFILE"] = env.get("PUBRUN_PROFILE", "default")
+
+        samples: list[float] = []
+        failures = 0
+        for i in range(iterations + warmup):
+            dt = _time_once(argv, env, scn_cwd)
+            if dt is None:
+                failures += 1
+                continue
+            if i >= warmup:
+                samples.append(dt)
+
+        entry = {"group": scn.group, "mode": scn.mode, "workload": scn.workload,
+                 "config": scn.config or {}, "failures": failures, **_stats(samples)}
+        scenarios[scn.name] = entry
+        med = entry.get("median_s")
+        print(f"  [pass {pass_no}] {scn.name}: median={med*1000:.1f} ms "
+              f"(n={entry['n']}, fail={failures})" if med else
+              f"  [pass {pass_no}] {scn.name}: NO DATA (fail={failures})", file=sys.stderr)
+    return scenarios
+
+
+def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2) -> dict:
+    scns = _scenarios.all_scenarios()
     result = {
-        "schema": "pubrun-benchmark/1",
+        "schema": "pubrun-benchmark/2",
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "iterations": iterations,
         "warmup": warmup,
+        "passes": passes,
         "git_commit": _git_commit(),
         "machine": _machine_metadata(),
-        "scenarios": {},
+        # Each pass is the FULL scenario sweep, run in order. Recording every
+        # pass (rather than discarding a warmup pass) makes startup / filesystem
+        # caching effects VISIBLE: compare pass 1 vs pass N. Aggregation/reporting
+        # can prefer the last pass (warmest) or show the spread.
+        "pass_results": [],
     }
 
-    scns = _scenarios.all_scenarios()
-    print(f"Running {len(scns)} scenarios x {iterations} iterations "
-          f"(+{warmup} warmup) ...", file=sys.stderr)
+    print(f"Running {passes} pass(es) x {len(scns)} scenarios x {iterations} "
+          f"iterations (+{warmup} warmup each) ...", file=sys.stderr)
 
     with tempfile.TemporaryDirectory(prefix="pubrun-bench-") as td:
         workdir = Path(td)
-        # Send any pubrun run output away from the benchmark cwd tree.
-        for scn in scns:
-            skip = scn.skip_if() if scn.skip_if else None
-            if skip:
-                result["scenarios"][scn.name] = {"group": scn.group, "mode": scn.mode,
-                                                 "workload": scn.workload, "skipped": skip}
-                print(f"  - {scn.name}: SKIPPED ({skip})", file=sys.stderr)
-                continue
+        for pass_no in range(1, passes + 1):
+            print(f"--- pass {pass_no}/{passes} ---", file=sys.stderr)
+            scenarios = _run_pass(pass_no, iterations, warmup, workdir)
+            result["pass_results"].append({"pass": pass_no, "scenarios": scenarios})
 
-            # Fresh cwd per scenario so a stale .pubrun.toml never leaks across scenarios.
-            scn_cwd = workdir / scn.name
-            scn_cwd.mkdir(parents=True, exist_ok=True)
-            (scn_cwd / "runs").mkdir(exist_ok=True)
-            if scn.config:
-                (scn_cwd / ".pubrun.toml").write_text(_toml_dumps(scn.config), encoding="utf-8")
-
-            argv, env = _build_child_command(scn, scn_cwd)
-            # Point pubrun output_dir into the throwaway cwd.
-            env["PUBRUN_PROFILE"] = env.get("PUBRUN_PROFILE", "default")
-
-            samples: list[float] = []
-            failures = 0
-            for i in range(iterations + warmup):
-                dt = _time_once(argv, env, scn_cwd)
-                if dt is None:
-                    failures += 1
-                    continue
-                if i >= warmup:  # discard warmup iterations
-                    samples.append(dt)
-
-            entry = {"group": scn.group, "mode": scn.mode, "workload": scn.workload,
-                     "config": scn.config or {}, "failures": failures, **_stats(samples)}
-            result["scenarios"][scn.name] = entry
-            med = entry.get("median_s")
-            print(f"  - {scn.name}: median={med*1000:.1f} ms "
-                  f"(n={entry['n']}, fail={failures})" if med else
-                  f"  - {scn.name}: NO DATA (fail={failures})", file=sys.stderr)
+    # Convenience: expose the LAST pass as top-level "scenarios" (warmest, and
+    # backward-compatible with schema/1 consumers that read result["scenarios"]).
+    if result["pass_results"]:
+        result["scenarios"] = result["pass_results"][-1]["scenarios"]
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -253,12 +278,17 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="pubrun overhead benchmark harness")
     ap.add_argument("--quick", action="store_true", help=f"Fast smoke run ({QUICK_ITERATIONS} iters).")
     ap.add_argument("--iterations", type=int, default=None, help="Iterations per scenario.")
+    ap.add_argument("--passes", type=int, default=2,
+                    help="Number of full scenario sweeps to run (default 2, so "
+                         "startup/filesystem caching effects can level out; each "
+                         "pass is recorded so the difference is visible).")
     ap.add_argument("--out", type=str, default=None, help="Output JSON path.")
     args = ap.parse_args()
 
     iterations = args.iterations if args.iterations else (QUICK_ITERATIONS if args.quick else FULL_ITERATIONS)
+    passes = max(1, args.passes)
     out_path = Path(args.out) if args.out else _default_out()
-    run(iterations, out_path)
+    run(iterations, out_path, passes=passes)
 
 
 if __name__ == "__main__":

@@ -28,8 +28,9 @@ Collect data (no extra dependencies needed):
 
 ```bash
 pip install -e .                 # pubrun itself (zero runtime deps on 3.11+)
-python benchmarks/harness.py --quick     # fast smoke run (8 iterations)
-python benchmarks/harness.py             # full run (30 iterations)
+python benchmarks/harness.py --quick     # fast smoke run (2 passes x 8 iterations)
+python benchmarks/harness.py             # full run (2 passes x 30 iterations)
+python benchmarks/harness.py --passes 1  # single pass (skip cache-warming)
 ```
 
 Each run writes `results/<hostname>-<timestamp>.json`.
@@ -65,8 +66,13 @@ distort pytest-benchmark timings.
 
 - Timings are **wall-clock**, measured by launching a fresh Python subprocess
   per iteration (so import/startup cost is real, not warm-cached). The reported
-  statistic is the **median** (plus p95 and stdev); the first iteration is a
-  discarded warmup.
+  statistic is the **median** (plus p95 and stdev); the first iteration of each
+  pass is a discarded warmup.
+- The full sweep runs **twice by default** (`--passes 2`). Both passes are
+  recorded under `pass_results` in the JSON so you can see whether startup /
+  filesystem caching mattered (compare `pass 1` vs `pass 2`). The top-level
+  `scenarios` key mirrors the **last (warmest) pass**, which `aggregate.py`/
+  `plot.py` use.
 - **Overhead** is the median of a scenario minus its group baseline:
   - `startup` scenarios compare against `baseline-noop` (a bare `python noop.py`).
   - `feature` scenarios compare against `feature-baseline`; note `feature-none`
