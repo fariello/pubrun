@@ -29,9 +29,9 @@ PYTHON = sys.executable
 class TestModeDefinitions:
     """Unit tests for _modes.py."""
 
-    def test_four_modes_defined(self):
-        assert len(MODES) == 5
-        assert VALID_MODES == {"auto", "noauto", "nopatch", "noconsole", "minimal"}
+    def test_modes_defined(self):
+        assert len(MODES) == 6
+        assert VALID_MODES == {"auto", "noauto", "nopatch", "noconsole", "minimal", "full"}
 
     def test_auto_mode_behavior(self):
         b = get_mode_behavior("auto")
@@ -818,7 +818,7 @@ class TestModeAliasApiParity:
         "print", "open", "subprocess", "popen",
     ]
 
-    @pytest.mark.parametrize("mode", ["auto", "noauto", "nopatch", "noconsole", "minimal"])
+    @pytest.mark.parametrize("mode", ["auto", "noauto", "nopatch", "noconsole", "minimal", "full"])
     def test_mode_alias_exposes_full_api(self, mode):
         names = json.dumps(self._PUBLIC)
         script = f"""

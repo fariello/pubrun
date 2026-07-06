@@ -1302,7 +1302,7 @@ def main() -> None:
         epilog=f"Examples:\n  {prog_name} run --mode minimal -- python train.py --epochs 10\n  {prog_name} run --mode noconsole -- python evaluate.py",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    run_parser.add_argument("--mode", type=str, choices=["auto", "noauto", "nopatch", "noconsole", "minimal"], default="auto", help="Import mode for the child process (default: auto).")
+    run_parser.add_argument("--mode", type=str, choices=["auto", "noauto", "nopatch", "noconsole", "minimal", "full"], default="auto", help="Import mode for the child process (default: auto).")
     run_parser.add_argument("command_args", nargs=argparse.REMAINDER, metavar="-- COMMAND", help="Command to execute (use -- to separate pubrun flags from the target command).")
 
     # ---------------- Show Subparser ----------------
