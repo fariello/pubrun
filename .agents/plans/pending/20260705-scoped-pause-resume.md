@@ -32,40 +32,59 @@ state after the block.
 
 ## Why this is riskier than it looks (the core problem)
 
-pubrun's capture engines fall into two classes with very different pause safety:
+**Plan-review correction (verified against source):** the capture engines do NOT
+fall into a clean "global patches vs safe" split. There are actually **three
+different gating realities**, and treating them as one class is the mistake that
+makes a "uniform `run._capture_paused` flag" (see Tier 1 below) not work as first
+written:
 
-1. **Process-global monkeypatches — the dangerous ones:**
-   - **Console tee** (`ConsoleInterceptor`, `console.py:151` — has `start()`/
-     `stop()`) replaces `sys.stdout`/`sys.stderr` with a tee wrapper.
-   - **Subprocess spy** (`SubprocessSpy`, `subprocesses.py` — has class-level
-     `install()`/`uninstall()`, plus an existing internal `disable_spy()`
-     context manager used during git/hardware capture) patches
-     `subprocess.Popen.__init__`/`os.system`.
+1. **Subprocess spy — already gated, thread-local.** `SubprocessSpy`
+   (`subprocesses.py`) patches `subprocess.Popen.__init__`/`os.system`, but the
+   `_patched_popen_init` **first checks `getattr(_spy_local, "bypass", False)`**
+   (`subprocesses.py:99`) and passes straight through if set. `_spy_local` is a
+   `threading.local()` (`subprocesses.py:10`), and the existing `disable_spy()`
+   context manager (`subprocesses.py:13-21`) flips it. So the spy's pause is
+   **already built, and it is thread-LOCAL** — pausing on the main thread does
+   NOT blind worker threads (the opposite of what an earlier draft claimed). A
+   public pause can reuse exactly this seam for the subprocess half.
 
-   Pausing these means unwrapping and later re-wrapping global state. Hazards:
-   - **Interleaving:** if other code (or a library) replaced `sys.stdout` while
-     paused, resume must not clobber it or restore a stale wrapper — the same
-     identity-guard problem already handled for restore elsewhere
-     (`console.py`/`signals.py` do identity checks). Naive save/restore can lose
-     a third party's stream.
-   - **Thread-safety:** these are process-global. A "pause on the main thread"
-     also blinds a **worker thread's** output/subprocesses during the window —
-     surprising and hard to reason about. `disable_spy()` today is only used for
-     brief, main-thread, internal spans; a user-facing pause invites concurrent
-     use it was not designed for.
-   - **Re-entrancy / nesting:** nested `with pubrun.paused()` blocks, or a pause
-     inside a `phase()`, must ref-count correctly and not resume early.
+2. **Console tee — the genuinely hard one; no gate, no run reference.** The tee
+   object `TqdmSafeTee` (`console.py:56`) replaces `sys.stdout`/`sys.stderr`. Its
+   `write()` (`console.py:70`) references only `self.original_stream` and
+   `self.log_file` — it does **not** call `get_current_run()` and has **no pause
+   gate at all**. It also intercepts *all* stdout writes, including a plain
+   `print()`, which is exactly the noise a user wants to pause. So the tee needs
+   a **new** gate added (a mutable flag the tee holds a reference to, or a
+   module/thread-local check in `write()`), and there is a real thread-scope
+   decision: `sys.stdout` is process-global, so muting the tee mutes ALL threads'
+   output during the window unless the gate is thread-local (which requires the
+   tee to consult a `threading.local()` on each write). This is the crux of the
+   whole feature.
 
-2. **Non-patch engines — safe(r) to pause:**
-   - **Resource watcher** (`resources.py:279` `stop()`; a thread) — can stop/
-     restart, though restart semantics (peak carry-over) need a decision.
-   - **Event stream** (`events.py:114` `close()`) — can gate emits with a flag
-     cheaply; no global side effect.
+3. **Run-routed explicit wrappers — trivially gatable, but low value.**
+   `pubrun.print`/`open`/`subprocess.run`/`popen` all call `get_current_run()`
+   (`core.py`), so a `run`-level flag would gate them. But these are *explicit*
+   API calls the user already fully controls (they can simply not call them), so
+   pausing them adds little.
 
-The existing `disable_spy()` context manager (`subprocesses.py:13`) is a useful
-precedent for the subprocess half, but it is (a) internal, (b) main-thread-only
-in practice, and (c) does not touch the console tee. A public, general
-pause/resume is a superset with real concurrency exposure.
+4. **Non-patch engines — safe to pause.** Resource watcher (`resources.py:279`
+   `stop()`, a thread; restart/peak-carry-over needs a decision) and event stream
+   (`events.py:114` `close()`; or a cheap emit-time flag) have no global side
+   effect and are the easy part.
+
+**Shared hazards for the patch engines (1 and 2):**
+- **Interleaving (Tier 2 only):** if true unpatch/repatch is used and other code
+  replaced `sys.stdout` while paused, resume must identity-guard the restore (the
+  pattern `console.py`/`signals.py` already use) or it loses the third party's
+  stream. Tier 1 (mute) avoids this entirely.
+- **Thread scope:** must be an explicit, documented decision per engine — the spy
+  is already thread-local; the tee's gate scope is a design choice.
+- **Re-entrancy / nesting:** nested `with pubrun.paused()` (or a pause inside a
+  `phase()`) must ref-count so an inner exit does not resume early.
+
+Net: a public pause/resume is **not** a uniform mechanism. Realistically it is
+"reuse the thread-local spy bypass + add a matching gate to the tee + optionally
+gate events/resources," each with its own thread-scope decision.
 
 ## Proposed direction (to be refined in plan-review / advise-architect)
 
@@ -73,12 +92,24 @@ Not committing to a final shape yet — the point of this IPD is to make the
 design questions explicit. Candidate approaches, cheapest/safest first:
 
 - **Tier 1 (low risk): "mute", not "unpatch".** Keep all monkeypatches installed
-  but add a per-run boolean gate the tee/spy/event-emit check on each call
-  (e.g. `run._capture_paused`). Pausing sets the flag; the wrappers pass through
-  without recording. No global unwrap/rewrap, so the interleaving hazard largely
-  disappears. Downside: the wrappers are still in the call path (tiny overhead
-  while paused) and this does not "unpatch" for someone who literally needs
-  `sys.stdout` to be the original object during the block.
+  and gate them per-engine at their existing seams (NOT via one shared
+  `run._capture_paused` flag — the tee does not route through the run, so a
+  run-level flag cannot reach it):
+  - **Subprocess spy:** reuse the existing thread-local `_spy_local.bypass`
+    (`disable_spy()`), the seam already present at `subprocesses.py:99`.
+  - **Console tee:** add a NEW pause gate to `TqdmSafeTee.write` (`console.py:70`)
+    — the tee has none today and holds no run reference. Give the tee a mutable
+    "paused" holder (or have `write()` consult a module-level / thread-local flag
+    at the top and short-circuit the log-write branch, still passing data through
+    to `original_stream`). Thread scope of this gate is the key design choice
+    (process-global mute is simple but silences all threads; thread-local matches
+    the spy but requires a per-write `threading.local()` check).
+  - **Events / resources:** cheap emit-time flag / thread stop-restart as noted.
+
+  Pausing sets the gates; the wrappers pass real output through but skip
+  recording. No global unwrap/rewrap, so the interleaving hazard is avoided.
+  Downside: wrappers stay in the call path (tiny overhead while paused) and this
+  does NOT give the block a pristine original `sys.stdout` object.
 - **Tier 2 (higher risk): true unpatch/repatch.** Actually restore
   `sys.stdout`/`subprocess` for the block and re-install after. Gives a truly
   pristine stdout during the block but carries the full interleaving/thread
@@ -101,16 +132,36 @@ is a nice-to-have to decide on.
   host; degrade to "capture stays on" rather than crash.
 - Must not weaken the existing identity-guarded restore behavior in
   `console.py`/`signals.py`.
+- **Must not disturb the existing internal `disable_spy()` usage.** git and
+  hardware capture already wrap their own subprocess calls in `disable_spy()`
+  (`with disable_spy():` in `capture/git.py`, `capture/hardware.py`,
+  `capture/resources.py`). If the public pause reuses `_spy_local.bypass`, a
+  characterization test must confirm those internal spans still bypass correctly
+  and that a user `paused()` does not leave `_spy_local.bypass` stuck True after
+  an exception (the `finally` restore in `disable_spy` is the pattern to mirror).
 
 ## Open questions (must be answered before this is executable)
 
 1. **Semantics: mute (Tier 1) vs true unpatch (Tier 2)?** Recommend Tier 1
    default. (Complexity/functionality — this is the central decision.)
-2. **Thread scope:** is pause explicitly documented as process-global (affects
-   all threads), or scoped to the calling thread? Process-global is simpler and
-   matches how the patches actually work; thread-scoped is what users may naively
-   expect but is much harder (thread-local stdout is not a thing pubrun controls).
-   Recommend: process-global, clearly documented, with a warning in the docstring.
+2. **Thread scope (now the hardest question, given the code reality):** the
+   subprocess spy's existing bypass is **thread-local** (`_spy_local`), but the
+   console tee replaces the process-global `sys.stdout`. So there is a genuine
+   *consistency* tension: a naive "process-global pause" would make the tee mute
+   all threads while the spy bypass only affects the calling thread — two
+   different scopes under one `paused()` call, which is exactly the kind of
+   surprise this feature is supposed to avoid. Options:
+   (a) **All thread-local:** reuse `_spy_local` for the spy and add a
+   `threading.local()` gate the tee checks per write. Consistent and least
+   surprising, but adds a per-write thread-local lookup to the tee's hot path and
+   cannot make `sys.stdout` itself thread-specific (only the *recording* is
+   thread-scoped; passthrough is always global). (b) **All process-global:**
+   simplest for the tee, but then the spy pause must also be made process-global
+   for consistency, changing `disable_spy()`'s current semantics. (c) Document
+   the split and accept it (worst for the "stupid simple" principle).
+   Recommend: **(a) thread-local for both**, documented, since it is the least
+   surprising and the spy is already there — but confirm the tee hot-path cost is
+   acceptable. This decision blocks implementation.
 3. **Which engines pause?** All, or a selectable subset
    (`paused(console=..., subprocess=..., resources=..., events=...)`)? Recommend
    start with "all capture" for simplicity; add selectivity only if needed.
@@ -139,8 +190,47 @@ New public API → `docs/api.md`, README (mention as an advanced escape hatch),
 ## Approval and execution gate
 
 This IPD is an **early proposal and is explicitly not ready to execute.** It
-needs its open questions resolved and should go through `plan-review` (and likely
-`/advise architect` on the concurrency model) before any code. It MUST be
-human-approved before execution and is NOT auto-executed. On approval of a
-resolved design: implement, validate (with the anti-regression tests above),
-sync docs, and move to `.agents/plans/executed/`.
+needs its open questions resolved and should go through `/advise architect` on
+the concurrency model before any code. It MUST be human-approved before
+execution and is NOT auto-executed. On approval of a resolved design: implement,
+validate (with the anti-regression tests above), sync docs, and move to
+`.agents/plans/executed/`.
+
+## Plan-review revisions (2026-07-05)
+
+Verdict: **APPROVE WITH REVISIONS APPLIED** (as an early proposal — it correctly
+remains NOT execution-ready; the revisions sharpen its design accuracy so the
+eventual architect pass and implementation start from true premises).
+
+Reviewed against the actual seams (`subprocesses.py:10,13-21,97-110` `_spy_local`
++ `disable_spy`; `console.py:56,70` `TqdmSafeTee.write`; `core.py` run-routed
+wrappers; `resources.py:279`; `events.py:114`). Findings:
+
+- **PR-P1 (HIGH, functionality/accuracy):** the IPD framed the engines as a clean
+  "process-global patches vs safe" split and proposed one shared
+  `run._capture_paused` flag "the tee/spy/event-emit check." Verified FALSE: (a)
+  `TqdmSafeTee.write` holds no run reference and has no gate, so a run-level flag
+  cannot reach the tee — the main use case; (b) the subprocess spy is **already
+  gated and thread-LOCAL** via `_spy_local`/`disable_spy()`, so it does not have
+  the "blinds worker threads" hazard the draft attributed to it. Rewrote the "Why
+  this is riskier" section into the three real gating realities and corrected the
+  Tier 1 description to per-engine seams (reuse `_spy_local`; ADD a new gate to
+  the tee).
+- **PR-P2 (HIGH, functionality):** the thread-scope question was under-weighted.
+  Because the spy is thread-local but the tee is process-global, a naive
+  "process-global pause" gives **two different scopes under one call** — a
+  consistency violation of the "stupid simple" principle. Rewrote Open question #2
+  to make thread scope the blocking decision, with three concrete options and a
+  recommendation (thread-local for both).
+- **PR-P3 (MEDIUM, anti-regression D):** added an invariant/test that the public
+  pause must not disturb the existing internal `disable_spy()` spans (git/
+  hardware/resources capture) and must not leave `_spy_local.bypass` stuck after
+  an exception.
+- **PR-P4 (LOW):** removed the redundant "should go through plan-review" from the
+  gate (this review is that pass); the remaining recommended step is
+  `/advise architect` on the concurrency model.
+
+Not changed (correctly deferred): whether to build it at all (Open question #6,
+the KISS/stakeholder gate) — that is the maintainer's call and the IPD rightly
+poses it rather than presuming. The mute-vs-unpatch choice (Q1) and selectivity
+(Q3) remain open by design; this is an early proposal.
