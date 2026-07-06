@@ -173,7 +173,7 @@ be able to bound and curate it, and the output must never silently imply a cap:
   part of the methods section** — so it can never be copied into a paper as
   methods text. E.g. a trailing block prefixed like
   `# pubrun note (not part of the methods section): aggregated N runs; N is large
-  / the environment varied — consider narrowing with -f/--include/-n.` Emit it to
+  / the environment varied — consider narrowing with -f / -F / -n.` Emit it to
   stderr, or as an obviously-fenced aside on stdout that the "captured methods"
   boundary excludes. The methods paragraph itself must remain clean and
   paste-ready.
