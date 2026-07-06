@@ -56,6 +56,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`pytest-benchmark`, `matplotlib`). New `docs/performance.md` documents how to run it
   and holds a placeholder results table. Does not affect the runtime install (zero deps
   on 3.11+).
+- **`pubrun methods --all`**: aggregate the whole matching run set into ONE
+  representative "Computational Methods" paragraph plus a variance note (only the
+  fields that differ across runs — OS/CPU/RAM/Python/git commit/pubrun/packages).
+  Homogeneous sets read like the single-run output with "across N runs" added; a
+  differing git commit is disclosed as variance, not an error. Bound/curate with
+  the shared run filters (`-n`/`-f`/`-F`/`-s`/`-S`); `-n` is now enabled for
+  `methods`. A large/divergent set prints a "narrow it" suggestion to stderr that
+  is clearly marked as **not part of the methods section** (and respects
+  `NO_COLOR`). Single-run `pubrun methods` is unchanged; aggregation is opt-in via
+  `--all` (unlike `pubrun show`, which iterates per-run — a deliberate difference,
+  since a methods section is one publication artifact).
 - **`pubrun.paused()` context manager**: `with pubrun.paused(): ...` suspends
   pubrun's *recording* for a block — the console tee and subprocess spy stop
   recording while output still prints and subprocesses still run. Thread-local
