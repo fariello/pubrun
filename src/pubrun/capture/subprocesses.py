@@ -9,15 +9,44 @@ from typing import Any, List, Dict, Optional
 
 _spy_local = threading.local()
 
+
+def _spy_depth() -> int:
+    """Current per-thread bypass depth (0 = recording, >0 = bypassed)."""
+    return getattr(_spy_local, "depth", 0)
+
+
+def _spy_bypassed() -> bool:
+    """True if subprocess recording is suspended on the calling thread."""
+    return _spy_depth() > 0
+
+
+def pause_spy() -> None:
+    """Suspend subprocess recording on the CALLING thread (ref-counted).
+
+    Composes with nesting and with disable_spy(): each pause increments a
+    per-thread depth counter; recording resumes only when it returns to 0.
+    """
+    _spy_local.depth = _spy_depth() + 1
+
+
+def resume_spy() -> None:
+    """Undo one pause_spy() on the calling thread (never goes below 0)."""
+    _spy_local.depth = max(0, _spy_depth() - 1)
+
+
 @contextmanager
 def disable_spy():
-    """Context manager to bypass SubprocessSpy for internal pubrun commands."""
-    old = getattr(_spy_local, "bypass", False)
-    _spy_local.bypass = True
+    """Context manager to bypass SubprocessSpy for internal pubrun commands.
+
+    Re-expressed on the same per-thread ref-counted depth as the public
+    pause/resume, so internal bypass spans and user ``pubrun.paused()`` blocks
+    compose additively (neither resets the other).
+    """
+    pause_spy()
     try:
         yield
     finally:
-        _spy_local.bypass = old
+        resume_spy()
 
 
 logger = logging.getLogger("pubrun")
@@ -68,7 +97,18 @@ class SubprocessSpy:
     @classmethod
     def get_records(cls) -> List[Dict[str, Any]]:
         return cls._records
-        
+
+    @staticmethod
+    def pause() -> None:
+        """Pausable contract: suspend subprocess recording on the calling thread."""
+        pause_spy()
+
+    @staticmethod
+    def resume() -> None:
+        """Pausable contract: resume subprocess recording on the calling thread."""
+        resume_spy()
+
+
     @classmethod
     def finalize_all(cls) -> None:
         """Mark any un-waited subprocess records as complete."""
@@ -96,9 +136,9 @@ class SubprocessSpy:
 
     @staticmethod
     def _patched_popen_init(self: Any, args: Any, *sys_args: Any, **kwargs: Any) -> None:
-        if getattr(_spy_local, "bypass", False):
+        if _spy_bypassed():
             return _original_popen_init(self, args, *sys_args, **kwargs)
-            
+
         with SubprocessSpy._lock:
             if len(SubprocessSpy._records) >= SubprocessSpy._max_records:
                 SubprocessSpy._truncated = True
@@ -109,7 +149,7 @@ class SubprocessSpy:
         if not should_record:
             return _original_popen_init(self, args, *sys_args, **kwargs)
 
-            
+
         start_time = time.time()
         argv_list = SubprocessSpy._safe_shlex_split(args)
 
@@ -119,7 +159,7 @@ class SubprocessSpy:
 
         kwargs_cwd = kwargs.get("cwd", None)
         cwd_str = str(kwargs_cwd) if kwargs_cwd else None
-            
+
         try:
             _original_popen_init(self, args, *sys_args, **kwargs)
         except Exception as e:
@@ -131,7 +171,7 @@ class SubprocessSpy:
                     "capture_state": {"status": "failed", "detail": str(e)}
                 })
             raise
-            
+
         # Atomically assign index and append under the same lock
         with SubprocessSpy._lock:
             self._pubrun_idx = len(SubprocessSpy._records)
@@ -161,9 +201,9 @@ class SubprocessSpy:
 
     @staticmethod
     def _patched_os_system(command: str) -> int:
-        if getattr(_spy_local, "bypass", False):
+        if _spy_bypassed():
             return _original_os_system(command)
-            
+
         with SubprocessSpy._lock:
             if len(SubprocessSpy._records) >= SubprocessSpy._max_records:
                 SubprocessSpy._truncated = True
@@ -174,7 +214,7 @@ class SubprocessSpy:
         if not should_record:
             return _original_os_system(command)
 
-            
+
         start_time = time.time()
         argv_list = SubprocessSpy._safe_shlex_split(command)
 
@@ -191,17 +231,17 @@ class SubprocessSpy:
                 "exit_code": None,
                 "capture_state": {"status": "partial"}
             })
-        
+
         try:
             exit_code = _original_os_system(command)
         except Exception as e:
             with SubprocessSpy._lock:
                 SubprocessSpy._records[idx]["capture_state"] = {"status": "failed", "detail": str(e)}
             raise
-            
+
         with SubprocessSpy._lock:
             SubprocessSpy._records[idx]["exit_code"] = exit_code
             SubprocessSpy._records[idx]["ended_at_utc"] = time.time()
             SubprocessSpy._records[idx]["capture_state"]["status"] = "complete" if exit_code == 0 else "failed"
-        
+
         return exit_code
