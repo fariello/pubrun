@@ -256,6 +256,62 @@ class tracked_run:
                 self.run_tracker.stop(outcome="completed")
 
 
+class paused:
+    """Context manager that suspends pubrun *recording* for a block.
+
+    ::
+
+        with pubrun.paused():
+            call_something_noisy()   # runs and prints, but is NOT recorded
+
+    Semantics (see IPD 20260705-scoped-pause-resume):
+
+    - **Mute, not unpatch.** Output still goes to the real terminal and
+      subprocesses still run; only the *recording* is suspended — the console
+      tee stops writing to ``stdout.log``/``stderr.log`` and the subprocess spy
+      stops recording spawned processes.
+    - **Thread-local.** Only the calling thread's recording is suspended; other
+      threads keep being captured. Passthrough to the terminal is process-global
+      (there is one ``sys.stdout``), so output still appears for all threads.
+    - **Ref-counted / nestable.** Nested ``paused()`` blocks (and any internal
+      ``disable_spy`` spans) compose; recording resumes only when the outermost
+      block exits. Resume is guaranteed even if the block raises.
+    - **NOT paused:** ``annotate()``/``phase()`` events (your explicit markers
+      still fire) and background resource sampling (RAM/CPU are process-wide and
+      still counted).
+
+    Safe to use in any import mode and with no active run (it is a no-op on the
+    engines that are not installed). Never raises out of enter/exit.
+    """
+
+    def __enter__(self) -> "paused":
+        try:
+            from pubrun.capture.subprocesses import pause_spy
+            pause_spy()
+        except Exception:
+            pass
+        try:
+            from pubrun.capture.console import pause_console
+            pause_console()
+        except Exception:
+            pass
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        # Resume in reverse order; never let resume failures escape (golden rule).
+        try:
+            from pubrun.capture.console import resume_console
+            resume_console()
+        except Exception:
+            pass
+        try:
+            from pubrun.capture.subprocesses import resume_spy
+            resume_spy()
+        except Exception:
+            pass
+        return None
+
+
 class phase:
     """Context manager that emits ``phase_start``/``phase_end`` events.
 

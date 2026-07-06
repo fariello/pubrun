@@ -67,6 +67,7 @@ __all__ = [
     "stop",
     "annotate",
     "phase",
+    "paused",
     "diff",
     "audit_run",
     "tracked_run",
@@ -93,6 +94,7 @@ if not _is_mode_import():
         stop,
         annotate,
         phase,
+        paused,
         diff,
         audit_run,
         tracked_run,
@@ -121,7 +123,7 @@ else:
         if not hasattr(_pkg, "start"):
             try:
                 from pubrun.core import (
-                    start, stop, annotate, phase, diff,
+                    start, stop, annotate, phase, paused, diff,
                     audit_run, tracked_run, get_current_run,
                     report, artifact, print, open, subprocess, popen,
                     _run_lock,
@@ -130,6 +132,7 @@ else:
                 _pkg.stop = stop
                 _pkg.annotate = annotate
                 _pkg.phase = phase
+                _pkg.paused = paused
                 _pkg.diff = diff
                 _pkg.audit_run = audit_run
                 _pkg.tracked_run = tracked_run

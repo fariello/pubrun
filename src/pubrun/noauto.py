@@ -26,6 +26,7 @@ from pubrun.core import (  # noqa: F401, E402
     stop,
     annotate,
     phase,
+    paused,
     diff,
     audit_run,
     tracked_run,
@@ -52,6 +53,7 @@ _pkg.start = start
 _pkg.stop = stop
 _pkg.annotate = annotate
 _pkg.phase = phase
+_pkg.paused = paused
 _pkg.diff = diff
 _pkg.audit_run = audit_run
 _pkg.tracked_run = tracked_run

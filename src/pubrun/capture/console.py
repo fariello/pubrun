@@ -1,9 +1,36 @@
 import sys
 import logging
+import threading
 from typing import TextIO, Dict, Any, Optional
 from pathlib import Path
 
 logger = logging.getLogger("pubrun")
+
+# Per-thread console-recording pause gate (ref-counted). When depth > 0 on the
+# calling thread, TqdmSafeTee.write still passes data through to the real stream
+# but does NOT record it to the log file. Thread-local so a pause on one thread
+# does not blind another thread's capture. Covers both the stdout and stderr
+# tees (they consult this shared module-level gate). (IPD 20260705.)
+_tee_local = threading.local()
+
+
+def _tee_depth() -> int:
+    return getattr(_tee_local, "depth", 0)
+
+
+def _tee_paused() -> bool:
+    """True if console RECORDING is suspended on the calling thread."""
+    return _tee_depth() > 0
+
+
+def pause_console() -> None:
+    """Suspend console recording on the CALLING thread (ref-counted)."""
+    _tee_local.depth = _tee_depth() + 1
+
+
+def resume_console() -> None:
+    """Undo one pause_console() on the calling thread (never below 0)."""
+    _tee_local.depth = max(0, _tee_depth() - 1)
 
 
 def _is_jupyter_kernel() -> bool:
@@ -93,6 +120,15 @@ class TqdmSafeTee:
 
         # If logging is disabled or file is closed, simply return what was written
         if not self.log_file or self.log_file.closed:
+            return ret
+
+        # Paused on this thread? Output already passed through above; skip
+        # RECORDING it (thread-local, ref-counted). (IPD 20260705 pause/resume.)
+        # Inlined `getattr` (no helper-call indirection) to keep this hot-path
+        # check cheap; the module-level pause_console/resume_console maintain
+        # `_tee_local.depth`. When no pause has ever occurred on this thread the
+        # attribute is absent, so the default-0 getattr is the common fast path.
+        if getattr(_tee_local, "depth", 0):
             return ret
 
         try:
