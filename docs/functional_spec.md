@@ -41,7 +41,7 @@ pubrun is not:
 - **Optional event stream**: Structured JSONL events may be written to `events.jsonl`.
 - **Optional console capture**: Tee-style interception of stdout/stderr.
 - **Hierarchical configuration**: Defaults composed from built-in, user, local, environment, and API sources.
-- **Explicit APIs**: `start()`, `stop()`, `annotate()`, `phase()`, `tracked_run()`, `audit_run()`, `diff()`.
+- **Explicit APIs**: `start()`, `stop()`, `annotate()`, `phase()`, `paused()`, `tracked_run()`, `audit_run()`, `diff()`.
 
 ---
 
@@ -600,6 +600,7 @@ Replay is **advisory, not guaranteed**. Environment differences between the orig
 | `get_current_run()` | Returns `Run \| None` | Returns the active singleton tracker, or `None`. |
 | `annotate(message, **kwargs)` | Returns `None` | Emits an `annotation` event. Behavior with no active run is configurable: `ignore` (default), `warn`, or `error`. |
 | `phase(name)` | Context manager | Emits `phase_start`/`phase_end` events with timing. Records error type in payload if an exception occurs. |
+| `paused()` | Context manager | Suspends *recording* (console tee + subprocess spy) on the calling thread for the block — output still prints, subprocesses still run, but are not recorded. Thread-local, ref-counted/nestable, resumes on exception. Does not pause `annotate()`/`phase()` or resource sampling. |
 | `tracked_run(**overrides)` | Context manager | Wraps `start()`/`stop()`. Sets outcome to `"failed"` on exception. |
 | `audit_run(**overrides)` | Decorator | Wraps a function in `start()`/`stop()`. Preserves return value. Sets outcome to `"failed"` on exception, then re-raises. |
 | `diff(a, b, ignores)` | Returns `dict` | Compares two run directories. Returns `{"added": ..., "removed": ..., "modified": ..., "same": ...}`. |

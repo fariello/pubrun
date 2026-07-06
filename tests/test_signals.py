@@ -396,7 +396,7 @@ class TestMacosHardwareSpying:
     """P3-T8: Verify macOS hardware subprocess calls are wrapped in disable_spy."""
 
     def test_macos_hardware_calls_wrapped_in_disable_spy(self, monkeypatch):
-        from pubrun.capture.subprocesses import _spy_local
+        from pubrun.capture.subprocesses import _spy_bypassed
         import pubrun.capture.hardware as hardware
         import subprocess
 
@@ -405,7 +405,9 @@ class TestMacosHardwareSpying:
         checked_bypass = []
 
         def mock_check_output(*args, **kwargs):
-            checked_bypass.append(getattr(_spy_local, "bypass", False))
+            # disable_spy now maintains a per-thread ref-count; check the
+            # representation-independent helper rather than the raw field.
+            checked_bypass.append(_spy_bypassed())
             return "Apple M3" if "sysctl" in args[0][0] else "SPDisplaysDataType output"
 
         monkeypatch.setattr(subprocess, "check_output", mock_check_output)
@@ -468,4 +470,3 @@ except KeyboardInterrupt:
         assert manifest["status"]["outcome"] == "interrupted", "Outcome should be interrupted"
         assert len(manifest["signals"]["signals_received"]) >= 1
         assert manifest["signals"]["signals_received"][0]["signal_name"] == "SIGTERM"
-
