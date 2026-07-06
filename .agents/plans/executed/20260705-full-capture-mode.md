@@ -7,7 +7,10 @@
   the one thing no current mode turns on by default. New public API surface: a
   `src/pubrun/full.py` submodule, a new `[imports].mode = "full"` value, a new
   `run --mode full` choice, docs, tests.
-- Status: PENDING (awaiting human approval; not executed)
+- Status: EXECUTED (2026-07-05). All steps implemented + tested; the
+  characterization gate (Step 1) stayed green through the seam change. Full suite:
+  654 passed, 2 skipped, 1 known-flaky (`test_real_sigpipe_via_pipe`). All four
+  selection paths (submodule/env/config/`run --mode`) verified.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Plan-review: this IPD was rewritten 2026-07-05 to a simpler, low-risk design
   after a design discussion resolved the precedence model (see "Design decisions
