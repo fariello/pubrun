@@ -144,8 +144,24 @@ def _run_methods(
     exit_code: Optional[int] = None,
     not_filter_str: Optional[str] = None,
     not_status_filter: Optional[str] = None,
+    aggregate: bool = False,
+    limit: Optional[int] = None,
 ) -> None:
-    """Generate and print an academic 'Computational Methods' paragraph."""
+    """Generate and print an academic 'Computational Methods' paragraph.
+
+    Default: the single most-recent matching run (unchanged behavior). With
+    ``aggregate=True`` (the ``--all`` flag): aggregate ALL matching runs into one
+    representative paragraph plus a variance note (IPD 20260706-methods-multi-run).
+    """
+    if aggregate:
+        _run_methods_aggregate(
+            run_dir, format_type,
+            filter_str=filter_str, status_filter=status_filter,
+            older_than=older_than, exit_code=exit_code,
+            not_filter_str=not_filter_str, not_status_filter=not_status_filter,
+            limit=limit,
+        )
+        return
     try:
         from pubrun.report.methods import generate_report
         from pubrun.report.utils import hydrate_manifest
@@ -183,6 +199,102 @@ def _run_methods(
     except Exception as e:
         _print_error(f"Failed to generate methods section: {e}")
         sys.exit(1)
+
+
+# Threshold above which the aggregate note nudges the user to narrow the set.
+_METHODS_LARGE_SET = 25
+
+
+def _run_methods_aggregate(
+    run_dir: str,
+    format_type: str,
+    filter_str: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    older_than: Optional[str] = None,
+    exit_code: Optional[int] = None,
+    not_filter_str: Optional[str] = None,
+    not_status_filter: Optional[str] = None,
+    limit: Optional[int] = None,
+) -> None:
+    """`pubrun methods --all`: aggregate the matching run set into one paragraph.
+
+    Reuses the existing run-filter machinery (scan_runs + filter_runs). Loads each
+    manifest defensively (skips malformed, counts them). Emits the methods
+    paragraph, then a "narrow it" suggestion CLEARLY MARKED as not part of the
+    methods text (authoritative textual marker; optional non-DIM color; safe
+    under NO_COLOR).
+    """
+    import json as _json
+    from pubrun.report.methods import generate_report_multi
+    from pubrun.report.utils import hydrate_manifest
+    from pubrun.status import scan_runs, filter_runs
+
+    if run_dir:
+        _print_error("`pubrun methods --all` aggregates a filtered set; do not also "
+                     "pass a specific run directory. Use -f/-F/-s/-S/-n to select.")
+        sys.exit(1)
+
+    all_runs = scan_runs()
+    matched = filter_runs(
+        all_runs,
+        filter_str=filter_str,
+        status_filter=status_filter,
+        limit=limit,
+        older_than=older_than,
+        exit_code=exit_code,
+        not_filter_str=not_filter_str,
+        not_status_filter=not_status_filter,
+    )
+    if not matched:
+        _print_error("No runs match the filter criteria.")
+        sys.exit(1)
+
+    manifests: list = []
+    skipped = 0
+    for r in matched:
+        mp = r.run_dir / "manifest.json"
+        if not mp.exists():
+            skipped += 1
+            continue
+        try:
+            with open(mp, "r", encoding="utf-8") as f:
+                m = _json.load(f)
+            m, _warnings = hydrate_manifest(str(mp), m)
+            manifests.append(m)
+        except Exception:
+            skipped += 1  # malformed/unreadable manifest — skip, don't abort
+
+    if not manifests:
+        _print_error("No readable manifests among the matching runs.")
+        sys.exit(1)
+
+    text = generate_report_multi(manifests, format_type)
+    print("--- Generated Computational Methods Section ---")
+    print(text)
+    print("-----------------------------------------------\n")
+
+    # Non-methods suggestion: authoritative textual marker (works under NO_COLOR,
+    # pipes, screen readers), optional full-strength color reinforcement (never
+    # DIM — DIM's contrast against an arbitrary terminal theme is unknowable and
+    # not reliably WCAG 2.1 AA). Emitted to stderr so it can never be pasted into
+    # a paper as methods text.
+    n = len(manifests)
+    notes = []
+    if skipped:
+        notes.append(f"{skipped} matching run(s) had no readable manifest and were skipped.")
+    if n > _METHODS_LARGE_SET:
+        notes.append(f"aggregated {n} runs — consider narrowing with -f / -F / -s / -n "
+                     f"if that is broader than the study you mean to report.")
+    if notes:
+        from pubrun.report.diagnostics import Colors, _has_color
+        use_color = _has_color()
+        prefix = "# pubrun note (not part of the methods section):"
+        if use_color:
+            prefix = f"{Colors.CYAN}{prefix}{Colors.RESET}"
+        print(prefix, file=sys.stderr)
+        for note in notes:
+            line = f"#   {note}"
+            print(f"{Colors.CYAN}{line}{Colors.RESET}" if use_color else line, file=sys.stderr)
 
 
 def _run_rerun(
@@ -1249,7 +1361,8 @@ def main() -> None:
     )
     methods_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
     methods_parser.add_argument("--format", type=str, choices=["markdown", "latex"], default="markdown", help="Output format: markdown or latex.")
-    _add_run_filter_args(methods_parser, include_limit=False)
+    methods_parser.add_argument("--all", action="store_true", help="Aggregate ALL matching runs into one methods paragraph (with a variance note where they differ), instead of the single most-recent run. Combine with -f/-F/-s/-S/-n to bound the set.")
+    _add_run_filter_args(methods_parser, include_limit=True)
 
     # ---------------- Hidden Report Subparser ----------------
     report_parser = subparsers.add_parser(
@@ -1442,6 +1555,8 @@ def main() -> None:
             exit_code=getattr(args, "exit_code", None),
             not_filter_str=getattr(args, "not_filter", None),
             not_status_filter=getattr(args, "not_status", None),
+            aggregate=getattr(args, "all", False),
+            limit=getattr(args, "limit", None),
         )
         executed = True
 
