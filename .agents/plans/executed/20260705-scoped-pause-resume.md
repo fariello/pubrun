@@ -11,10 +11,14 @@
   # capture resumes here
   ```
   Orthogonal to import modes — wanted regardless of which mode is active.
-- Status: PENDING — design RESOLVED and plan-reviewed twice (2026-07-05 early
-  proposal; 2026-07-06 the concrete design) + `/advise architect` (2026-07-06),
-  verdict APPROVE WITH REVISIONS APPLIED. Ready for human approval to execute; two
-  small items remain (API surface, tee-perf benchmark gate). Not auto-executed.
+- Status: EXECUTED (2026-07-06). `pubrun.paused()` implemented (thread-local
+  ref-counted mute of console tee + subprocess spy; `disable_spy` re-expressed on
+  the same per-thread depth counter; context-manager only). Exported top-level +
+  all six mode aliases. Benchmark gate passed (inlined tee gate ~100ns/write, down
+  from ~800ns via the double-helper form). 19 new tests incl. thread isolation,
+  exception path, nesting, `disable_spy` interleaving, annotate-still-fires. Full
+  suite: 676 passed, 2 skipped, 1 known-flaky (`test_real_sigpipe_via_pipe`). Docs
+  synced (api/README/functional_spec/CHANGELOG).
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Related: split out of the `full`-mode discussion (2026-07-05) as its own IPD
   because it is orthogonal and materially riskier. A short pointer lives in
