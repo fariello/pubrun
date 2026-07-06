@@ -255,15 +255,18 @@ confirmed):
 6. **Selectivity: deferred** — v1 pauses all pausable engines; no per-engine
    kwargs yet (non-breaking to add later).
 
-**Remaining open (small; settle at implementation / next plan-review):**
+**Remaining open (small):**
 
-- **API surface:** context manager `with pubrun.paused():` is required (it
-  guarantees `resume` even on exception). Also expose bare `pubrun.pause()` /
-  `pubrun.resume()`? Risk: unbalanced calls leaving capture off. Recommend
-  context-manager-only in v1; add explicit calls only if a real need appears.
-  CONFIRM at implementation.
 - **Performance:** the tee hot-path thread-local cost must be benchmarked before
   merge (see the Performance gate). Not a design question, but a merge gate.
+
+**Resolved (maintainer, 2026-07-06):**
+
+- **API surface: CONTEXT MANAGER ONLY** (`with pubrun.paused(): ...`). No bare
+  `pubrun.pause()`/`pubrun.resume()` in v1 — the context manager guarantees
+  resume even on exception, and there is no way to leave capture stuck off via an
+  unbalanced call. Add explicit calls later only if a concrete need appears
+  (non-breaking to add). Do NOT expose bare pause/resume now.
 
 ## Required tests / validation
 
