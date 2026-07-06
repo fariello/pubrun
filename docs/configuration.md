@@ -54,7 +54,7 @@ Controls import-time behavior. These settings determine what happens when `impor
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `mode` | string | `"auto"` | Import behavior preset: `"auto"` (start tracking on import), `"noauto"` (load API only, start manually), `"nopatch"` (start tracking but skip global hooks), `"noconsole"` (start tracking, skip console wrapping), `"minimal"` (load API only, no hooks). |
+| `mode` | string | `"auto"` | Import behavior preset: `"auto"` (start tracking on import), `"full"` (start tracking and force console capture on — the opposite of `"noconsole"`), `"noauto"` (load API only, start manually), `"nopatch"` (start tracking but skip global hooks), `"noconsole"` (start tracking, skip console wrapping), `"minimal"` (load API only, no hooks). An in-code `import pubrun.<mode>` overrides this key and any env var; only `pubrun run --mode` overrides the in-code import. |
 | `on_conflict` | string | `"warn"` | What to do if a later import requests a different mode: `"ignore"`, `"warn"`, or `"error"`. |
 | `record_provenance` | bool | `true` | Record import-mode provenance (caller file, line) in the manifest. |
 | `provenance_depth` | int | `3` | Number of external caller frames to capture for diagnostics. |

@@ -88,15 +88,17 @@ import pubrun.noauto as pubrun   # Load API, start later manually
 import pubrun.nopatch as pubrun  # Auto-start, skip subprocess/console patching, signal hooks active
 import pubrun.noconsole as pubrun # Auto-start, skip console patching, subprocess spying and signals active
 import pubrun.minimal as pubrun  # API only, no auto-start, all patches and hooks disabled
+import pubrun.full as pubrun     # Auto-start, all hooks, and FORCE the console tee on
 ```
 
-| Mode | auto_start | patch_subprocesses | patch_console | signal_hooks | Meaning |
-| --- | --- | --- | --- | --- | --- |
-| `auto` | `true` | `true` | `true` | `true` | Default. Auto-start on import. |
-| `noauto` | `false` | `true` | `true` | `true` | Delay tracking until explicit `start()` call. |
-| `nopatch` | `true` | `false` | `false` | `true` | Start tracking, but skip subprocess and console monkey-patching. Signal handlers remain active. |
-| `noconsole` | `true` | `true` | `false` | `true` | Start tracking, patch subprocesses and signals, but skip stdout/stderr console wrapping. |
-| `minimal` | `false` | `false` | `false` | `false` | Load API only. No auto-start, no patches, no signal hooks. |
+| Mode | auto_start | patch_subprocesses | patch_console | signal_hooks | force_console | Meaning |
+| --- | --- | --- | --- | --- | --- | --- |
+| `auto` | `true` | `true` | `true` | `true` | `false` | Default. Auto-start on import. |
+| `full` | `true` | `true` | `true` | `true` | `true` | Auto-start + all hooks + console tee FORCED on (overrides `capture_mode`; still subject to Jupyter/non-TTY guards). The opposite of `noconsole`. |
+| `noauto` | `false` | `true` | `true` | `true` | `false` | Delay tracking until explicit `start()` call. |
+| `nopatch` | `true` | `false` | `false` | `true` | `false` | Start tracking, but skip subprocess and console monkey-patching. Signal handlers remain active. |
+| `noconsole` | `true` | `true` | `false` | `true` | `false` | Start tracking, patch subprocesses and signals, but skip stdout/stderr console wrapping. |
+| `minimal` | `false` | `false` | `false` | `false` | `false` | Load API only. No auto-start, no patches, no signal hooks. |
 
 These flags express what each mode **permits**, not what is active. Two layers gate
 actual capture:
@@ -110,6 +112,13 @@ the console tee; it does **not** wrap stdout/stderr by default, because
 `capture_mode` is `"basic"`/`"standard"`/`"deep"`. Similarly, `patch_subprocesses`/
 `signal_hooks` are permitted-and-on-by-default via `[capture.subprocesses].enabled` /
 `[capture.signals].enabled` (both default `true`).
+
+The exception is `force_console` (only `full`): it does not merely *permit* the tee, it
+**forces** it on regardless of `capture_mode` (subject only to the Jupyter/non-TTY
+safety guards). An in-code `import pubrun.<mode>` is thus an absolute imperative that
+overrides env/config for the scope it dictates — `full` forces console on even against
+`capture_mode = "off"`, and `noconsole` forces it off even against `"standard"`. Only
+the launch-time `pubrun run --mode <mode>` overrides the in-code import.
 
 When patching or signal hooks are disabled (by mode or config), the corresponding side
 effects (`subprocess.Popen` interception, stdout/stderr wrapping, signal handler

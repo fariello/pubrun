@@ -277,7 +277,7 @@ pubrun run [--mode MODE] -- COMMAND [ARGS...]
 
 | Flag | Description |
 |---|---|
-| `--mode MODE` | Import mode for the child process: `auto` (default), `noauto`, `nopatch`, `noconsole`, or `minimal` |
+| `--mode MODE` | Import mode for the child process: `auto` (default), `full` (capture everything incl. console), `noauto`, `nopatch`, `noconsole`, or `minimal` |
 
 The double dash (`--`) separates pubrun wrapper options from the target command.
 

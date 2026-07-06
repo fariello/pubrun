@@ -56,6 +56,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`pytest-benchmark`, `matplotlib`). New `docs/performance.md` documents how to run it
   and holds a placeholder results table. Does not affect the runtime install (zero deps
   on 3.11+).
+- **`full` import mode**: `import pubrun.full as pubrun` (or `[imports].mode = "full"`, `PUBRUN_IMPORT_MODE=full`, `pubrun run --mode full`) captures everything on import, including console output — it forces the console tee on regardless of `[console].capture_mode` (the mirror of `noconsole`), while still respecting the Jupyter/non-TTY safety guards. An in-code import mode is an absolute imperative over env/config; only `pubrun run --mode` overrides it.
 - **`status`/`show --utc` flag**: Display timestamps in UTC (default remains local time). Timestamps are always stored as UTC epochs; this only affects display.
 - **Capture subprocess timeouts**: `[capture.hardware].timeout` (default 10s), `[capture.resources].poll_timeout` (default 3s), and `[capture.git].timeout` (default 5s) bound hung external tools so they cannot orphan a capture thread/child. A git timeout is recorded as `capture_state.status = "timeout"` (distinct from "not a git repository").
 

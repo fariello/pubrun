@@ -26,6 +26,7 @@ Use namespaced imports to control import-time behavior without config files:
 
 ```python
 import pubrun.auto as pubrun     # Explicit form of the default `import pubrun` (auto-start).
+import pubrun.full as pubrun     # Auto-start and FORCE console capture on (capture everything).
 import pubrun.noauto as pubrun   # Load API only. Start manually later.
 import pubrun.nopatch as pubrun  # Auto-start, skip subprocess/console patches, keep signal hooks.
 import pubrun.noconsole as pubrun # Auto-start, skip console patch, keep subprocess/signal hooks.
@@ -35,10 +36,13 @@ import pubrun.minimal as pubrun  # API only. No auto-start, all hooks/patches di
 | Mode | Auto-start | Global hooks/patches | Use case |
 |------|-----------|-------------|----------|
 | `auto` | Yes | Yes (permitted) | Default. Auto-start on import. Console tee is permitted but off unless `capture_mode` is set (see note above). |
+| `full` | Yes | Yes; **console forced on** | One-import "capture everything," including console output. Forces the console tee on regardless of `capture_mode` (the opposite of `noconsole`), still respecting the Jupyter/non-TTY safety guards. |
 | `noauto` | No | Yes | Libraries or scripts that start tracking explicitly. |
 | `nopatch` | Yes | No patches (signals active) | When monkey-patching conflicts with other tools (debuggers, profilers). |
 | `noconsole` | Yes | Subprocesses/signals active | When stdout/stderr console wrapping is undesirable but subprocesses/signals tracking is needed. |
 | `minimal` | No | No | Shared library code that may or may not want tracking. |
+
+> **Import mode is absolute.** An in-code `import pubrun.<mode>` overrides env vars and config files for the scope/hooks it dictates; only the launch-time `pubrun run --mode <mode>` overrides the in-code import. So `full` forces console capture even if config sets `capture_mode = "off"`, and `noconsole` forbids it even if config sets `"standard"`.
 
 Alternatively, configure project-wide:
 
