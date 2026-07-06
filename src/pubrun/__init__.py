@@ -27,6 +27,8 @@ Usage
 
 4. Import modes::
 
+    import pubrun.auto as pubrun     # Explicit default: auto-start.
+    import pubrun.full as pubrun     # Auto-start; force console capture on (capture everything).
     import pubrun.noauto as pubrun   # No auto-start; start() manually.
     import pubrun.nopatch as pubrun  # Auto-start, no global hooks.
     import pubrun.noconsole as pubrun # Auto-start, no console wrapping.
