@@ -5,8 +5,8 @@
 - Scope: how `pubrun methods` should behave when pointed at, or filtered to,
   MANY runs (100+ is common, e.g. `~/VC/uri-ai-info` has 1600+). Today it emits
   one Computational Methods paragraph from exactly one run.
-- Status: PENDING (design decision made 2026-07-06; ready for `plan-review` then
-  execution on approval).
+- Status: PENDING (design decision made 2026-07-06; plan-review done — verdict
+  APPROVE WITH REVISIONS APPLIED; ready for execution on approval).
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Decisions (maintainer, 2026-07-06)
@@ -36,6 +36,15 @@ computational environment those runs shared — not to hand-pick a single run an
 hope it is representative, and not 100 paragraphs. The hard part is that runs are
 NOT guaranteed identical: different machines (cluster nodes), Python patch
 versions, package versions, git commits, or hardware can vary across the set.
+
+**Existing precedent (verified):** `pubrun show` ALREADY handles the multi-run
+case — when no explicit run dir is given and the filters match many runs, it
+loops `_run_report` over the whole matched set, emitting one report per run
+(option B), with no flag required (`__main__.py:1387-1408`). The plumbing this
+IPD needs (scan → filter → iterate) therefore already exists in the codebase;
+`_get_manifest_path` (`__main__.py`) also already does `scan_runs` + `filter_runs`
+with `limit=1` to pick the most-recent match. The multi-run methods path should
+be modeled on that seam (drop the `limit=1`, collect the full matched set).
 
 ## Key design question (must be answered before building)
 
@@ -71,6 +80,18 @@ homogeneous; (C) degrades more gracefully when they are not.
    so the current single-run default is preserved; a bare `pubrun methods` with a
    filter matching many runs keeps picking the most recent (backward compatible)
    unless the flag is given. CONFIRM.
+
+   **Cross-command consistency note (rubric H):** `pubrun show` already
+   auto-iterates the matched run set with NO flag (per-run output; see the
+   precedent above). Choosing an explicit `--aggregate` flag for `methods` is
+   therefore a *deliberate* divergence from `show`, justified because (a)
+   `methods` produces a single publication paragraph where silently aggregating
+   many runs by default could mislead, and (b) it preserves the current
+   single-run default (no behavior change). This divergence must be documented in
+   `docs/cli.md` so users are not surprised that `show` and `methods` treat a
+   many-run filter differently. If instead auto-aggregation is preferred (to
+   match `show`), that is a conscious behavior change and must be called out in
+   the CHANGELOG. Settle this in `plan-review`/at implementation.
 2. **Which fields are compared for homogeneity?** The methods-relevant ones:
    `host.os_name`, `hardware.cpu.model`, `hardware.memory_total_bytes`,
    `python.version` (+ implementation), highlighted packages + versions,
@@ -106,8 +127,13 @@ homogeneous; (C) degrades more gracefully when they are not.
 
 ## Anti-regression / invariants (rubric D)
 
-- A single selected run (or `--aggregate` over exactly one run) MUST produce
-  identical text to today's single-run output. Characterization test first.
+- **Write the single-run parity characterization test FIRST**, before touching
+  `_run_methods`: capture the exact current output of both a default
+  `pubrun methods <run>` and a filtered single-match `pubrun methods -f <x>`, and
+  assert it is byte-identical after the change. Also assert `--aggregate` over a
+  single matching run produces that same single-run output (the aggregate path
+  must collapse to the single-run text when there is one run). Green before AND
+  after.
 - Aggregation output MUST be deterministic for a fixed run set (sorted).
 - Must not crash on a malformed manifest in the set (skip it, note the count).
 - Honesty: never present a single run's value as if it held for all when it did
@@ -141,7 +167,38 @@ README if it shows `methods` usage, `CHANGELOG`. Run `/assess documentation`.
 ## Approval and execution gate
 
 This IPD is a proposal. It MUST be reviewed and approved by a human before
-execution and is NOT auto-executed. Recommended next step: settle open question
-#1/#2 (optionally via `/advise domain-expert` on what a methods section for a
-multi-run study should say), then `plan-review`, then implement. On approval:
-implement, validate, sync docs, move to `.agents/plans/executed/`.
+execution and is NOT auto-executed. The representation (option C) and trigger
+(explicit flag) are decided; plan-review is done (below). Remaining open
+questions #3 (git.commit variance vs. refuse) and #4 (large-set cap) can be
+settled during implementation without blocking the shape. On approval:
+implement (parity test first), validate, sync docs, move to
+`.agents/plans/executed/`.
+
+## Plan-review revisions (2026-07-06)
+
+Verdict: **APPROVE WITH REVISIONS APPLIED**. Reviewed against the actual code
+(`__main__.py` `_run_methods`, `_get_manifest_path`, the `show`/`report`
+dispatch; `report/methods.py` `generate_report`; `status.py` `scan_runs`/
+`filter_runs`). The approach (option C, explicit flag) is sound; no re-plan.
+Revisions:
+
+- **PR-M1 (MEDIUM, rubric H — consistency):** verified `pubrun show` already
+  auto-iterates a many-run filter with NO flag (`__main__.py:1387-1408`).
+  Choosing an explicit `--aggregate` flag for `methods` is a deliberate
+  divergence from `show`; added a cross-command consistency note requiring it be
+  documented in `docs/cli.md` (or, if auto-aggregation is chosen instead, called
+  out as a behavior change in CHANGELOG).
+- **PR-M2 (LOW, accuracy):** the "reuse scan_runs+filter_runs" description
+  understated that the exact plumbing already exists — `_get_manifest_path` does
+  `scan_runs`+`filter_runs(limit=1)` and `show` already loops the matched set.
+  Added a precedent note pointing the executor at that seam (drop `limit=1`,
+  collect the full set).
+- **PR-M3 (LOW, rubric D/F):** sharpened the parity requirement — write the
+  characterization test FIRST, assert byte-identical output for default AND
+  filtered single-run methods, and that `--aggregate` over one run collapses to
+  the single-run text.
+- **PR-M4 (LOW):** removed the stale "settle #1/#2 then plan-review" from the gate
+  (#1/#2 are decided and this is the plan-review pass).
+
+Left open by design (do not block the shape): #3 (differing git.commit — note vs.
+refuse) and #4 (large-set cap/warn threshold), to be settled at implementation.
