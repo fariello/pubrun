@@ -297,6 +297,7 @@ class Run:
         _patch_subprocesses = True
         _patch_console = True
         _signal_hooks = True
+        _force_console = False
         try:
             from pubrun._bootstrap import get_selected_behavior
             _behavior = get_selected_behavior()
@@ -304,6 +305,7 @@ class Run:
                 _patch_subprocesses = _behavior.get("patch_subprocesses", True)
                 _patch_console = _behavior.get("patch_console", True)
                 _signal_hooks = _behavior.get("signal_hooks", True)
+                _force_console = _behavior.get("force_console", False)
         except Exception:
             pass
 
@@ -316,7 +318,12 @@ class Run:
         # 6. Console tee (monkeypatch — wraps sys.stdout/stderr)
         if _patch_console:
             from pubrun.capture.console import resolve_console_mode
-            console_mode = resolve_console_mode(self.config)
+            # `full` mode forces the console tee on regardless of config
+            # (still subject to the Jupyter/non-TTY safety guards inside
+            # resolve_console_mode).
+            console_mode = resolve_console_mode(
+                self.config, force_base="standard" if _force_console else None
+            )
         else:
             console_mode = "off"
         self.console_interceptor = ConsoleInterceptor(self.run_dir, console_mode)

@@ -7,6 +7,10 @@ Each mode is a named preset controlling:
 - patch_subprocesses: Whether to patch subprocess modules (subprocess spy).
 - patch_console: Whether to redirect sys.stdout/sys.stderr (console tee).
 - signal_hooks: Whether to install signal/excepthook handlers.
+- force_console: Whether the mode FORCES the console tee on regardless of the
+  configured capture_mode (only "full" sets this). The mirror image of a mode
+  that forbids console wrapping (nopatch/noconsole/minimal force it off): a mode
+  is an absolute imperative, not a default that config can override.
 """
 from typing import Dict, Any
 
@@ -47,6 +51,17 @@ MODES: Dict[str, Dict[str, bool]] = {
         "patch_subprocesses": False,
         "patch_console": False,
         "signal_hooks": False,
+    },
+    "full": {
+        # Same permits as "auto", plus force the console tee on regardless of
+        # the configured capture_mode. The one-import "capture everything
+        # including console" preset; the mirror of "noconsole".
+        "auto_start": True,
+        "global_hooks": True,
+        "patch_subprocesses": True,
+        "patch_console": True,
+        "signal_hooks": True,
+        "force_console": True,
     },
 }
 

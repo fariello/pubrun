@@ -262,7 +262,8 @@ def is_mode_submodule_import_in_progress() -> bool:
     if detection is unavailable (safe default: root import behavior).
     """
     _MODE_SUBMODULES = frozenset({
-        "pubrun.auto", "pubrun.noauto", "pubrun.nopatch", "pubrun.noconsole", "pubrun.minimal"
+        "pubrun.auto", "pubrun.noauto", "pubrun.nopatch", "pubrun.noconsole",
+        "pubrun.minimal", "pubrun.full"
     })
     try:
         # Walk up the call stack looking for importlib._bootstrap._find_and_load

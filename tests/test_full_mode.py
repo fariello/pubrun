@@ -92,3 +92,133 @@ print("CONSOLE_MODE=" + str(cc))
         assert result.returncode == 0, f"stderr: {result.stderr}"
         # No existing mode wraps the console with default config.
         assert "CONSOLE_MODE=off" in result.stdout, f"stdout: {result.stdout}"
+
+
+# ---------------------------------------------------------------------------
+# The `full` mode itself (Steps 2-4)
+# ---------------------------------------------------------------------------
+
+class TestFullModeBehavior:
+    """`full` = auto + force console on (respecting Jupyter/non-TTY guards)."""
+
+    def test_mode_defined_with_force_console(self):
+        from pubrun._modes import MODES, VALID_MODES, get_mode_behavior
+        assert "full" in VALID_MODES
+        b = get_mode_behavior("full")
+        assert b["auto_start"] is True
+        assert b["patch_subprocesses"] is True
+        assert b["patch_console"] is True
+        assert b["signal_hooks"] is True
+        assert b["force_console"] is True
+
+    def test_force_base_forces_standard_over_config_off(self, monkeypatch):
+        """force_base overrides an explicit capture_mode='off' (import wins)."""
+        from unittest.mock import MagicMock
+        from pubrun.capture import console as _console
+        monkeypatch.setattr(_console, "_is_jupyter_kernel", lambda: False)
+        monkeypatch.setattr("sys.stdout", MagicMock(isatty=lambda: True))
+        cfg = {"console": {"capture_mode": "off", "jupyter_mode": "off",
+                           "non_tty_mode": "inherit"}}
+        assert _console.resolve_console_mode(cfg, force_base="standard") == "standard"
+
+    def test_force_base_still_respects_jupyter_guard(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from pubrun.capture import console as _console
+        monkeypatch.setattr(_console, "_is_jupyter_kernel", lambda: True)
+        monkeypatch.setattr("sys.stdout", MagicMock(isatty=lambda: True))
+        cfg = {"console": {"capture_mode": "off", "jupyter_mode": "off",
+                           "non_tty_mode": "inherit"}}
+        assert _console.resolve_console_mode(cfg, force_base="standard") == "off"
+
+    def test_force_base_non_tty_off_downgrades(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from pubrun.capture import console as _console
+        monkeypatch.setattr(_console, "_is_jupyter_kernel", lambda: False)
+        monkeypatch.setattr("sys.stdout", MagicMock(isatty=lambda: False))
+        cfg = {"console": {"capture_mode": "off", "jupyter_mode": "off",
+                           "non_tty_mode": "off"}}
+        assert _console.resolve_console_mode(cfg, force_base="standard") == "off"
+
+    def test_full_alias_exposes_full_api(self):
+        names = json.dumps([
+            "start", "stop", "annotate", "phase", "diff", "audit_run",
+            "tracked_run", "get_current_run", "report", "artifact",
+            "print", "open", "subprocess", "popen",
+        ])
+        script = f"""
+import json
+import pubrun.full as pubrun
+names = {names}
+missing = [n for n in names if not hasattr(pubrun, n)]
+print(json.dumps({{"missing": missing}}))
+try:
+    if pubrun.get_current_run():
+        pubrun.stop()
+except Exception:
+    pass
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script], capture_output=True, text=True, timeout=20,
+            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["missing"] == [], f"full alias missing: {data['missing']}"
+
+    def test_full_wraps_console_end_to_end(self, tmp_path):
+        """import pubrun.full → console tee active, output recorded to stdout.log,
+        overriding the default capture_mode='off'."""
+        script = """
+import glob, json
+import pubrun.full as pubrun
+print("SENTINEL_FULL_LINE")
+r = pubrun.get_current_run()
+rd = str(r.run_dir)
+pubrun.stop()
+m = json.load(open(rd + "/manifest.json"))
+logs = glob.glob(rd + "/stdout.log")
+captured = bool(logs) and "SENTINEL_FULL_LINE" in open(logs[0]).read()
+print("EFFECTIVE=" + str(m["console"]["capture_mode"]))
+print("CAPTURED=" + str(captured))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script], capture_output=True, text=True, timeout=30,
+            cwd=str(tmp_path),
+            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert "EFFECTIVE=standard" in result.stdout, f"stdout: {result.stdout}"
+        assert "CAPTURED=True" in result.stdout, f"stdout: {result.stdout}"
+
+    def test_env_selects_full(self):
+        script = """
+from pubrun._bootstrap import get_selected_mode
+import pubrun
+print("SELECTED=" + str(get_selected_mode()))
+if pubrun.get_current_run():
+    pubrun.stop()
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script], capture_output=True, text=True, timeout=20,
+            env={**os.environ, "PUBRUN_IMPORT_MODE": "full", "PUBRUN_AUTO_START": ""},
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert "SELECTED=full" in result.stdout, f"stdout: {result.stdout}"
+
+    def test_run_mode_full_wraps_child_console(self, tmp_path):
+        workload = tmp_path / "w.py"
+        workload.write_text(
+            "import glob, json, pubrun\n"
+            "print('SENTINEL_RUNMODE')\n"
+            "r = pubrun.get_current_run(); rd = str(r.run_dir); pubrun.stop()\n"
+            "m = json.load(open(rd + '/manifest.json'))\n"
+            "print('EFFECTIVE=' + str(m['console']['capture_mode']))\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--mode", "full", "--", PYTHON, str(workload)],
+            capture_output=True, text=True, timeout=40, cwd=str(tmp_path),
+            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert "EFFECTIVE=standard" in result.stdout, f"stdout: {result.stdout}"

@@ -21,18 +21,22 @@ def _is_jupyter_kernel() -> bool:
         return False
 
 
-def resolve_console_mode(config: Dict[str, Any]) -> str:
+def resolve_console_mode(config: Dict[str, Any], force_base: Optional[str] = None) -> str:
     """Resolve the effective console capture mode considering context.
 
     Applies Jupyter and non-TTY overrides on top of the base capture_mode.
 
     Args:
         config: Resolved pubrun configuration.
+        force_base: If given (e.g. ``"standard"`` from the ``full`` import mode),
+            use it as the base instead of reading ``[console].capture_mode`` — the
+            import mode forces the console tee on regardless of config. The
+            Jupyter and non-TTY safety guards below STILL apply on top of it.
 
     Returns:
         The effective capture mode string ("off", "basic", "standard", "deep").
     """
-    base_mode = config.get("console", {}).get("capture_mode", "off")
+    base_mode = force_base if force_base else config.get("console", {}).get("capture_mode", "off")
 
     if base_mode == "off":
         return "off"
