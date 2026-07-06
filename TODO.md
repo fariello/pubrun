@@ -8,28 +8,12 @@ Known issues and deferred improvements for future releases.
 
 ### Scoped in-code pause/resume of capture
 
-A context manager to temporarily suspend capture for a block, e.g.:
-
-```python
-with pubrun.paused():            # or pubrun.suppress(console=True, ...)
-    noisy_untracked_work()
-# capture resumes here
-```
-
-Desirable ergonomic, but **not trivial and not low-risk**, so it is deferred to its
-own IPD rather than bundled with other work:
-
-- The console tee and subprocess spy are **process-global monkeypatches** on
-  `sys.stdout`/`subprocess`. Pausing means unwrapping and later re-wrapping them; if
-  other code (or another thread) touches `sys.stdout` in the window, streams can be
-  lost or double-wrapped — a correctness hazard.
-- It is **not thread-safe by nature**: a "pause" on the main thread would also blind a
-  worker thread's output during the window (shared global state).
-- The resource watcher / event stream can be paused cleanly; the monkeypatch engines
-  (console, subprocess) are the risky ones and need characterization tests.
-
-Orthogonal to import modes — wanted regardless of which mode is active. Any
-implementation IPD must address the concurrency/global-state hazards explicitly.
+A context manager to temporarily suspend capture for a block
+(`with pubrun.paused(): ...`). Desirable ergonomic, but not low-risk — the console
+tee and subprocess spy are process-global monkeypatches, so pausing them raises
+interleaving/thread-safety hazards. Captured as an early proposal IPD (with the
+design questions spelled out) at
+`.agents/plans/pending/20260705-scoped-pause-resume.md` — not yet ready to execute.
 
 ---
 
