@@ -44,10 +44,16 @@ These were settled with the maintainer and drive the design below:
    `resolve_config`, no "unset vs off" ambiguity. (This removes the Medium-High
    risk of the superseded design.)
 3. **`full` forces console base `"standard"` but still respects the SAFETY
-   context-guards.** In a Jupyter kernel the tee still auto-disables (double-
-   wrapping Jupyter's stdout is genuinely broken), and the non-TTY downgrade
-   still applies. These are correctness guards, not user-preference reads, so
-   `full` keeps them.
+   context-guards.** In a Jupyter kernel the tee still auto-disables (returns
+   `jupyter_mode`, default `"off"` — verified `console.py:41-43`), because double-
+   wrapping Jupyter's stdout is genuinely broken. The non-TTY guard also still
+   runs, but note its exact semantics (verified `console.py:46-52`): it only
+   downgrades when the user set a **non-default** `non_tty_mode` (default is
+   `"inherit"`, which means "use the base" — so under `full` a piped/non-TTY run
+   with default config WILL still capture at `"standard"`). That is consistent
+   (inherit == use the forced base); the executor must not "fix" it into an
+   unconditional non-TTY downgrade. These are correctness guards, not
+   user-preference reads, so `full` keeps them as-is.
 4. **`full` does NOT max out capture depth.** It means "all hooks + console," not
    "slowest possible run." Hardware depth, packages mode, etc. keep their normal
    defaults. (A separate max-cost preset can be its own decision later.)
@@ -81,9 +87,9 @@ These were settled with the maintainer and drive the design below:
 | Step | Change | Files | Remediation Risk | Validation |
 |------|--------|-------|------------------|------------|
 | 1 (anti-regression gate, do FIRST) | Characterization tests pinning current behavior so the console-seam change can't regress the other modes: default `import pubrun` + no console config → `resolve_console_mode == "off"`; each existing mode → console off with no config; explicit `capture_mode="standard"` → `"standard"`; **Jupyter/non-TTY guards still downgrade** when base is on. Green before AND after. | `tests/` | Low | Passes on current HEAD; still passes after Steps 2-3. |
-| 2 | Add a `force_console` capability to the console seam. Add `"full"` to `MODES` with the same permits as `auto` (`auto_start/global_hooks/patch_subprocesses/patch_console/signal_hooks = True`) plus a new flag `force_console = True` (other modes: absent/False). Extend `resolve_console_mode(config, force_base=None)`: when `force_base` is given, use it as the base instead of reading `capture_mode` (skip the `"off"` early-return) — the Jupyter/non-TTY guards below still apply unchanged. In `tracker.py:317`, pass `force_base="standard"` when the selected behavior has `force_console`. | `src/pubrun/_modes.py`, `src/pubrun/capture/console.py`, `src/pubrun/tracker.py` | Low (local seam; no `resolve_config` change; guards preserved) | `full` with no/`off` config → tee active as `"standard"`; `full` in a (mocked) Jupyter kernel → still auto-disabled; `full` non-TTY → configured downgrade applies; all five other modes unchanged (Step 1 tests stay green). |
+| 2 | Add a `force_console` capability to the console seam. Add `"full"` to `MODES` with the same permits as `auto` (`auto_start/global_hooks/patch_subprocesses/patch_console/signal_hooks = True`) plus a new flag `force_console = True` (other modes: absent, treated as False). **Exact `resolve_console_mode` change:** add a keyword `force_base: Optional[str] = None`; set `base_mode = force_base if force_base else config.get("console", {}).get("capture_mode", "off")`, then keep the rest verbatim (the `if base_mode == "off": return "off"` early-return, then Jupyter guard, then non-TTY guard, then `return base_mode`). Because `force_base="standard"` is not `"off"`, the early-return is skipped and BOTH guards below still run unchanged — no other edit to that function. In `tracker.py:317`, when `_behavior.get("force_console")` is True (and `_patch_console` is True, which it is for `full`), call `resolve_console_mode(self.config, force_base="standard")`; otherwise call it as today. Do NOT touch `resolve_config`. | `src/pubrun/_modes.py`, `src/pubrun/capture/console.py`, `src/pubrun/tracker.py` | Low (local seam; no `resolve_config` change; guards preserved) | `full` with no console config OR explicit `capture_mode="off"` → tee active as `"standard"` (import overrides config); `full` in a (mocked) Jupyter kernel → still `"off"`; `full` non-TTY with default `non_tty_mode` → still `"standard"` (inherit uses base); `full` non-TTY with `non_tty_mode="off"` → `"off"`; all five other modes unchanged (Step 1 tests stay green). |
 | 3 | Add `src/pubrun/full.py` mirroring the other submodules: `select_mode("full", ...)`, import + rebind the FULL 12-name public API, auto-start boot. | `src/pubrun/full.py` | Low | `import pubrun.full as pubrun` exposes all 12 names (extend `TestModeAliasApiParity` to include `full`); auto-starts; console is wrapped. |
-| 4 | Register `full` in `_MODE_SUBMODULES` (`_bootstrap.py`) and the `run --mode` choices (`__main__.py`). | `_bootstrap.py`, `__main__.py` | Low | `pubrun run --mode full -- python script.py` wraps console in the child; `--help` lists `full`. |
+| 4 | Register `full` in `_MODE_SUBMODULES` (`_bootstrap.py`, used for import-in-progress detection) and add `"full"` to the `run --mode` argparse `choices` (`__main__.py`). Note: `[imports].mode="full"` and `PUBRUN_IMPORT_MODE=full` need NO extra registration — `resolve_import_mode` validates against `VALID_MODES = frozenset(MODES.keys())` (`_config_boot.py:63,75`), which includes `full` once Step 1 adds it. Verify this rather than adding redundant lists. | `_bootstrap.py`, `__main__.py` | Low | `pubrun run --mode full -- python script.py` wraps console in the child; `--help` lists `full`; `PUBRUN_IMPORT_MODE=full python -c "import pubrun; ..."` selects `full`. |
 | 5 | Docs: add `full` to the README Preset Modes matrix (Console column = ✅ **on**, the distinguishing feature; note it forces console regardless of config, like `noconsole` forces it off), the import-mode code blocks, `api.md`, `cli.md` `--mode`, `configuration.md` `[imports].mode`, `functional_spec.md` matrix (add a `force_console` column note). State that import modes are absolute over env/config and only `run --mode` overrides them. Note `full` is name-selectable only (legacy two-bool collision with `auto`). | README, docs/* | Low | Docs consistent; matrix footnotes updated. |
 | 6 | CHANGELOG `[Unreleased]` Added entry. | `CHANGELOG.md` | Low | Present. |
 
@@ -115,9 +121,11 @@ Step 1 (characterization gate) → Step 2 → Step 3 → Step 4 → Steps 5-6.
 
 - `get_mode_behavior("full")` returns the expected dict incl. `force_console`.
 - `import pubrun.full as pubrun` API parity (extend `TestModeAliasApiParity`).
-- Console: `full` → tee on (`"standard"`) with no/`off` config (import overrides
-  config); Jupyter kernel (mocked) → auto-disabled; non-TTY → configured
-  downgrade; all five other modes still default console off (Step 1 regression).
+- Console: `full` → tee on (`"standard"`) with no config AND with explicit
+  `capture_mode="off"` (import overrides config); Jupyter kernel (mocked) →
+  `"off"` (auto-disabled); non-TTY with default `non_tty_mode="inherit"` →
+  `"standard"` (inherit uses the forced base); non-TTY with `non_tty_mode="off"`
+  → `"off"`; all five other modes still default console off (Step 1 regression).
 - `pubrun run --mode full` end-to-end wraps console in the child.
 - `PUBRUN_IMPORT_MODE=full` selects the mode.
 - Full suite green: `~/venv/p3.14/bin/python -m pytest tests/ -q`
@@ -142,3 +150,29 @@ it down explicitly. (Assumed yes; it documents existing behavior.)
 This IPD is a proposal. It MUST be reviewed and approved by a human before
 execution and is NOT auto-executed. On approval: implement in the given order,
 validate, sync docs, and move to `.agents/plans/executed/`.
+
+## Plan-review revisions (2026-07-05, simple design)
+
+Verdict: **APPROVE WITH REVISIONS APPLIED**. Re-reviewed the rewritten low-risk
+design against the actual source (`console.py:24-54`, `tracker.py:296-323`,
+`_bootstrap.py` select_mode/`_MODE_SUBMODULES`, `_config_boot.py:52-75`
+`resolve_import_mode`, `_modes.py` `VALID_MODES`). The mechanism is sound and
+low-risk; no re-plan. Verified-correct claims: the `force_base="standard"` edit
+preserves both context guards (they run after the skipped `"off"` early-return);
+`full`'s extra `force_console` key does not break `select_mode`'s dict-equality
+conflict check; Jupyter path returns `"off"`. Revisions (all LOW):
+
+- **PR2-F1 (accuracy):** Step 4 implied `full` needed explicit registration for
+  env/config selection. Corrected: `PUBRUN_IMPORT_MODE=full` and
+  `[imports].mode="full"` work for free via `VALID_MODES = frozenset(MODES.keys())`
+  once Step 1 adds `full`; only `_MODE_SUBMODULES` and the argparse `choices`
+  need editing. Told the executor to verify, not add redundant lists.
+- **PR2-F2 (accuracy):** the plan overstated "non-TTY downgrade still applies."
+  Corrected in decision #3 and the tests: the non-TTY guard only downgrades when
+  the user set a non-default `non_tty_mode`; with the default `"inherit"`, `full`
+  captures at `"standard"` even when piped. Executor must NOT turn this into an
+  unconditional downgrade.
+- **PR2-F3 (precision):** pinned the exact `resolve_console_mode(force_base=...)`
+  change (one-line base selection + keep the rest verbatim) so the executor
+  cannot reintroduce the `"off"` early-return that would defeat the force. Added
+  the explicit-`off`-config case to the validation matrix.
