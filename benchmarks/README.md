@@ -53,6 +53,35 @@ pytest benchmarks/ -o addopts="" --benchmark-only
 `-o addopts=""` clears the repo's global `--cov` options, which would otherwise
 distort pytest-benchmark timings.
 
+## Running on a Slurm cluster
+
+Two helper scripts submit the harness as a batch job:
+
+- `run_bench.sbatch` — the job itself (single node, ~4 CPUs, few minutes). Writes
+  a node-tagged result to `benchmarks/results/<node>-<timestamp>.json`.
+- `submit_bench.sh` — picks a **random idle CPU node** (via `sinfo`) and submits
+  the job to it; falls back to an unpinned submit if none are idle.
+
+```bash
+# random idle node, full 2-pass run:
+benchmarks/submit_bench.sh
+
+# forward harness args (e.g. a quick smoke run):
+benchmarks/submit_bench.sh --quick
+
+# choose a partition and exclude GPU nodes; use a venv python:
+PUBRUN_PARTITION=compute PUBRUN_EXCLUDE='^gpu' \
+  PUBRUN_PY="$HOME/venv/p3.14/bin/python" benchmarks/submit_bench.sh
+```
+
+Environment knobs (all optional): `PUBRUN_PARTITION`, `PUBRUN_PY` (default
+`python3`), `PUBRUN_REPO`, `PUBRUN_EXCLUDE` (regex of node names to skip). The
+job fails fast with a clear message if `pubrun` is not importable on the node —
+`pip install -e .` into the venv the compute nodes share, if needed. To sample
+several node types, submit repeatedly (each lands on a different random idle
+node) or set `PUBRUN_PARTITION` per node class, then `aggregate.py` over all the
+committed result JSONs.
+
 ## Contributing a result from a new machine
 
 1. `pip install -e .` in a clean environment.
