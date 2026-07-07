@@ -137,13 +137,15 @@ pubrun inspect -f train.py --json       # latest run matching "train.py", as JSO
 Friendly front-end over the benchmark harness (`benchmarks/harness.py`). Runs the suite
 locally by default; on an HPC login node with Slurm detected, it **offers** to submit to a
 compute node (and never submits without confirmation). Writes a **redacted, shareable**
-copy of the results by default and prints how to contribute it.
+copy of the results by default and, after a local run, **offers to contribute it** to the
+public [`pubrun-benchmarks`](https://github.com/fariello/pubrun-benchmarks) repo.
 
 **Requires a source checkout** — the benchmark tooling is intentionally not shipped in the
 pip package (zero-footprint installs). Clone the repo and run from it.
 
 ```bash
 pubrun bench [--quick] [--iterations N] [--passes N] [--local | --submit] [-y|--yes] [--no-redact] [--json]
+pubrun bench --submit-file PATH [--submit-method {gh,http,print}] [--gh-repo O/N] [--gh-token TOKEN] [--print-submission]
 ```
 
 **Options:**
@@ -154,20 +156,49 @@ pubrun bench [--quick] [--iterations N] [--passes N] [--local | --submit] [-y|--
 | `--iterations N` | Iterations per scenario. |
 | `--passes N` | Number of full scenario sweeps (default 2). |
 | `--local` | Run here even if Slurm is detected. |
-| `--submit` | Submit to Slurm without prompting. |
-| `-y`, `--yes` | Assume "yes" to the submit prompt. |
-| `--no-redact` | Do NOT write a redacted share copy (full detail only). |
+| `--submit` | On HPC: submit to Slurm without prompting. Off HPC: contribute the result without prompting. |
+| `-y`, `--yes` | Assume "yes" to the submit/contribute prompt. |
+| `--no-redact` | Do NOT write a redacted share copy (full detail only). Also disables auto-contribution (nothing safe to send). |
 | `--json` | Emit the result/redacted file paths as JSON. |
+| `--submit-file PATH` | Submit an existing **redacted** result file, without running a benchmark (recovery / HPC / batch). |
+| `--no-submit` | Do not offer to contribute the result. |
+| `--submit-method {gh,http,print}` | Force one submission method instead of probing (default: `gh` → `http` → printed floor). |
+| `--gh-repo OWNER/NAME` | Target repo for submission (default `fariello/pubrun-benchmarks`). |
+| `--gh-token TOKEN` | Token for the HTTP submission path (else `$GITHUB_TOKEN`/`$GH_TOKEN` or `gh auth token`). |
+| `--print-submission` | Print a ready-to-paste submission instead of transmitting (offline / power user). |
 
-The redacted copy masks hostname, OS username, and every home-directory path, while
-preserving analysis-relevant data (CPU/GPU model, timings, versions, filesystem type,
-Slurm partition). See [HPC & performance diagnosis](hpc.md) and `benchmarks/README.md` for
-how to contribute a result.
+**Contributing a result (consent-gated).** After a local run, `pubrun bench` prints where
+the redacted copy was written and asks `Contribute this redacted result…? [y/N]` — pressing
+Enter (or any non-`y`) **never transmits**. If you say yes (or pass `--submit`/`--yes`), it
+tries, in order: the GitHub CLI (`gh`, using your existing auth) → a direct GitHub Issues
+API call (needs a token) → printing a ready-to-paste submission. Every automated path files
+a **GitHub issue**, so it requires a GitHub account (GitHub has no anonymous-issue
+mechanism); fully anonymous submission means a throwaway account or a manual paste.
+
+**"Oh, I meant yes."** The redacted file persists on disk, so if you decline you can submit
+it later without re-running:
+
+```bash
+pubrun bench --submit-file benchmarks/results/<host>-<ts>.redacted.json
+```
+
+This is also the **HPC path**: run the benchmark on a compute node (often no network / no
+`gh`), then submit the redacted file later from a login node.
+
+**Safety.** pubrun **never auto-transmits an un-redacted result** to the public repo — the
+`--submit-file` path verifies the file looks redacted (no hostname/username/home-path leak)
+and refuses otherwise. The redacted copy masks hostname, OS username, and every
+home-directory path while preserving analysis-relevant data (CPU/GPU model, timings,
+versions, filesystem type, Slurm partition). Even redacted, a distinctive CPU/GPU model plus
+a named Slurm partition can be re-identifying in a small group. See
+[HPC & performance diagnosis](hpc.md) and `benchmarks/README.md` for more.
 
 **Example:**
 ```bash
-pubrun bench --quick --local            # quick local run
-pubrun bench --submit                   # submit to Slurm (no prompt)
+pubrun bench --quick --local                          # quick local run, then offers to contribute
+pubrun bench --submit                                 # HPC: submit to Slurm; laptop: contribute (no prompt)
+pubrun bench --submit-file res.redacted.json          # submit a previously-produced redacted file
+pubrun bench --submit-file res.redacted.json --print-submission  # just print a copy-paste version
 ```
 
 ---

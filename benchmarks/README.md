@@ -99,11 +99,25 @@ python -m pubrun bench            # runs locally; on an HPC login node, offers t
   analysis-relevant data (CPU/GPU model, core count, timings, versions, filesystem
   type, Slurm partition) is preserved.
 
-To contribute, attach the **redacted** file to a new issue in the
-`pubrun-benchmarks` repository (link printed by `pubrun bench`; the repo is being
-set up). Opening the issue from your own GitHub account lets us follow up with
-questions without any personal data in the file — fully anonymous submission (a
-throwaway account) is fine too.
+After a local run, `pubrun bench` **offers to contribute** the redacted result for
+you (`Contribute this redacted result…? [y/N]` — Enter never transmits). If you say
+yes, it tries the GitHub CLI (`gh`) → the GitHub Issues API → printing a
+ready-to-paste submission, in that order. Every automated path files a **GitHub
+issue**, so it needs a GitHub account (GitHub has no anonymous-issue mechanism);
+opening it from your own account lets us follow up without any personal data in the
+file. Fully anonymous submission (a throwaway account, or a manual paste) is fine too.
+
+If you decline, submit later without re-running:
+
+```bash
+pubrun bench --submit-file results/<host>-<timestamp>.redacted.json
+```
+
+This is also the HPC path: run on a compute node, then submit the redacted file from
+a login node. pubrun **never auto-transmits an un-redacted result** — the submit path
+verifies the file looks redacted and refuses otherwise. You can always submit fully
+manually instead: attach the redacted file to a new issue at
+<https://github.com/fariello/pubrun-benchmarks/issues/new>.
 
 **Privacy caveat (honest):** even redacted, a distinctive CPU/GPU model plus a
 named Slurm partition can be re-identifying in a small group. Share only what you

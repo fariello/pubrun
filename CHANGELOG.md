@@ -44,8 +44,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   methods report, `CITATION.cff`, PyPI author) use the publication name **Gabriele Fariello** so
   citations aggregate with the author's existing record.
 - **`pubrun cite` and generated methods citation corrected**: now cite the software itself
-  (`[Computer software]`, repository URL, version-aware) instead of an unsubmitted placeholder
+  (`[Computer software]`, repository URL, version-aware) instead of an unsubmitted, premature journal
   reference; a single consistent title is used across all surfaces.
+  Will switch to the peer-reviewed citation with DOI once a journal article is accepted.
 - **`pubrun --version`** now prints the required NOTICE attribution line.
 - **Import-mode docs accuracy**: the README "Preset Modes Behavior Matrix" (and
   `functional_spec.md`, `api.md`, and the `auto`/`noauto` docstrings) previously implied
@@ -56,6 +57,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **Low-friction, consent-gated benchmark result submission.** After a local `pubrun bench`
+  run, pubrun now **offers** to contribute the redacted result to the public
+  `pubrun-benchmarks` repo. It never transmits without an explicit yes: the prompt defaults to
+  No (Enter = don't send), and it tries the GitHub CLI (`gh`) → a direct GitHub Issues API call
+  (stdlib `urllib`, needs a token) → printing a ready-to-paste submission, in that order. New
+  `pubrun bench --submit-file <redacted.json>` submits a previously produced file without
+  re-running (the "oh, I meant yes" recovery, and the HPC run-on-compute-node →
+  submit-from-login-node path). New flags: `--submit-file`, `--no-submit`, `--submit-method
+  {gh,http,print}`, `--gh-repo`, `--gh-token`, `--print-submission`. pubrun **never
+  auto-transmits an un-redacted result** — the submit path verifies the file looks redacted
+  (no hostname/username/home-path leak) and refuses otherwise. Zero new runtime dependencies.
 - **Benchmark ground-truth I/O baselines.** New `io_baseline` scenarios establish reference
   floors for I/O so storage-dependent numbers are interpretable: `io-baseline-devnull`
   (write-only null sink — isolates the open/write path from storage; `NUL` on Windows),
