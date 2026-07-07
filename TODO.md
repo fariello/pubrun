@@ -4,6 +4,31 @@ Known issues and deferred improvements for future releases.
 
 ---
 
+## Release-time actions (MUST do when publishing the next PyPI release)
+
+### Yank all BSD-3-Clause versions from PyPI after the next release is up
+
+pubrun ≤ 1.3.0 was published under **BSD-3-Clause**; the project relicensed to
+**Apache-2.0** afterward. When the next Apache-2.0 release (currently targeted as
+**1.4.0**) is published to PyPI, **yank every BSD-era release** so no one keeps
+installing the old-licensed code.
+
+Steps (maintainer / operator — done at release time):
+1. Publish the new Apache-2.0 version to PyPI first (so a valid install target exists;
+   never leave the package with zero installable versions).
+2. Yank the BSD-3-Clause versions: on PyPI → project → "Manage" → each old release →
+   "Options" → **Yank** (or `pip`-side, there's no yank; use the web UI or the PyPI API).
+   Yank — do NOT delete — so existing pinned installs still resolve but new installs skip
+   them.
+3. Confirm `pip install pubrun` resolves to the new Apache-2.0 version and that the
+   yanked versions show the "yanked" banner on PyPI.
+
+Ties in with the pending Zenodo DOI / v1.4.0 release work (concept DOI
+`10.5281/zenodo.20801582` currently points at the old v1.2.0 archive; the new release
+re-points it — see the citation-DOI executed IPD).
+
+---
+
 ## Deferred ideas (need their own design pass / IPD)
 
 ### Scoped in-code pause/resume of capture
