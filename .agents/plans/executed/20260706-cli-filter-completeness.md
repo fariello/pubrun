@@ -6,7 +6,10 @@
   filter set), and that `-f` means the same thing everywhere.
 - Scope: `src/pubrun/__main__.py` only (subparser wiring + `diff` run selection). No change
   to capture/runtime behavior. Small, low-risk.
-- Status: PENDING — plan-review, then execution on human approval. NOT auto-executed.
+- Status: EXECUTED (2026-07-06). All three changes implemented, tested, documented; the
+  intentional `combined -f` breaking change noted in the CHANGELOG. 695 passed / 2 skipped
+  (only the known pre-existing SIGPIPE flake fails, passes in isolation). See the execution
+  record at the end.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Problem / motivation
@@ -127,3 +130,37 @@ smallest/lowest-risk of the five (aside from the intentional `combined` break).
 runs → explicit non-zero error, never a silent unfiltered fallback) — previously
 unspecified. Confirmed freeing `-f` on `combined` collides with no other combined short
 flag (`-y/--yes`, `--dir`, `--output`, `-F` all clear).
+
+## Execution record (2026-07-06)
+
+Executed by opencode after human approval. All three changes landed:
+
+- **`diff` filters:** `_add_run_filter_args(diff_parser, include_limit=False)` added
+  (`__main__.py`); `_run_diff` gained the six filter params and, when no positional run
+  dirs are given, draws its auto-selected pair from the FILTERED candidate set via
+  `filter_runs`. Under-match error paths implemented: 0 matches and the 1-match/no-other
+  case both emit a clear filter-aware error and exit non-zero (never a silent unfiltered
+  fallback). Dispatch updated to pass `filter/not_filter/status/not_status/older_than/
+  exit_code`. No-filter, no-args behavior is byte-for-byte the historical "last two runs".
+- **`combined -f` → `--filter` (BREAKING):** removed `-f` from the force arg (now `--force`
+  long-only); the helper now registers `-f/--filter` normally. `args.force` dest unchanged,
+  so `_run_combined` still reads force correctly; `combined`'s dispatch already read
+  `args.filter`, so `-f` now filters end-to-end. Inline code comment + CHANGELOG breaking
+  entry added.
+- **`clean -f` pinned:** test asserts `-f` maps to `--filter` on `clean` (no pre-existing
+  `-f`), guarding against a future flag silently stealing it.
+
+**Tests (5 new, all green):** `test_diff_help_has_filter_flags`,
+`test_diff_filter_matching_selects_pair` (`-f .` keeps >=2 runs → auto-selects),
+`test_diff_filter_zero_match_errors` (0 matches → non-zero + no silent fallback),
+`test_combined_f_is_filter_not_force`, `test_clean_f_is_filter`. Suite: 695 passed, 2
+skipped; the lone failure is the known pre-existing SIGPIPE flake
+(`tests/test_status.py::...test_real_sigpipe_via_pipe`, passes in isolation — not a
+regression).
+
+**Docs:** `docs/cli.md` `combined` + `diff` sections updated (new flags, the 1.4.0
+`combined -f` breaking note, the diff under-match behavior); `CHANGELOG.md` `[Unreleased]`
+gained a BREAKING entry for `combined -f` and a note for `diff` filters.
+
+**Verification note:** `-n/--limit` intentionally NOT added to `diff` (it selects a pair,
+not a list) via `include_limit=False`, consistent with `cpu`/`mem`/`rerun`/`res`.

@@ -99,7 +99,7 @@ pubrun clean --dry-run                    # Preview without deleting
 Post-execution command that chronologically interleaves stdout and stderr logs from one or more runs using the log-line timestamps written in `standard` or `deep` console mode.
 
 ```bash
-pubrun combined [RUN_ID ...] [--dir PATH] [--output FILE] [-y|--yes] [-f|--force]
+pubrun combined [RUN_ID ...] [--dir PATH] [--output FILE] [-y|--yes] [--force] [-f|--filter QUERY]
 ```
 
 **Options:**
@@ -109,7 +109,10 @@ pubrun combined [RUN_ID ...] [--dir PATH] [--output FILE] [-y|--yes] [-f|--force
 | `--dir PATH` | Override the output directory to scan (default: configured `output_dir` or `./runs`) |
 | `--output FILE` | Write combined logs to this file instead of stdout |
 | `-y`, `--yes` | Skip confirmation prompt for files > 250 MB |
-| `-f`, `--force` | Force execution for files > 500 MB |
+| `--force` | Force execution for files > 500 MB |
+| `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code` | Standard run filters (select which runs to combine when no run IDs are given) |
+
+> **Changed in 1.4.0:** `combined -f` now means `--filter` (consistent with every other command). The force flag is now `--force` (long form only). Previously `-f` meant `--force`.
 
 - If multiple run IDs are supplied, each output line is prefixed with the run ID and stream origin, e.g. `[runA][stdout]`.
 - If a single run is combined, each output line is prefixed with the stream origin only, e.g. `[stdout]`.
@@ -143,10 +146,16 @@ pubrun diff RUN_DIR_A RUN_DIR_B [OPTIONS]
 | `--max-length N` | Maximum character length before truncation |
 | `--no-color` | Disable ANSI color output |
 | `--export [txt\|json]` | Export flattened key-value output for external diff tools (e.g., `meld`, VS Code) |
+| `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code` | Standard run filters. When run directories are omitted, the auto-selected pair is drawn from the runs matching these filters (with no filters, from all runs — the historical behavior) |
+
+When no run directories are given, `diff` compares the two most recent runs in the
+(optionally filtered) set. If a filter matches fewer than two runs, `diff` reports a clear
+error and exits non-zero rather than silently ignoring the filter.
 
 **Example:**
 ```bash
 pubrun diff ./runs/pubrun-A ./runs/pubrun-B --standard --same --wrap
+pubrun diff -f train.py            # diff the two most recent runs whose command matches "train.py"
 ```
 
 ---
