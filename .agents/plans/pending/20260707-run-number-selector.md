@@ -30,19 +30,21 @@ identically across all run-accepting commands and honoring `--dir`.
 - **No numeric Nth-most-recent selector exists.** `-n/--limit` only truncates a list; it does
   not select the Nth item.
 
-## The ambiguity to resolve (design crux)
+## The ambiguity to resolve (design crux) — RESOLVED (maintainer 2026-07-07)
 
-Run ids can themselves be numeric-ish (timestamps, hashes). A bare `3` must not accidentally
-match a run id that *starts with* `3`. Decision needed on the selector SYNTAX so it is
-unambiguous and predictable (see Open Q1). Options:
-- **(a) Bare small integer** (`report 2`): treat a pure-integer arg ≤ some bound as a recency
-  index, BUT only if it does not exactly/prefix match an existing run id (fall back to id
-  match). Most ergonomic, slight ambiguity risk.
-- **(b) Sigil prefix** (`report ^2` or `report @2` or `report -2`): explicit "Nth recent";
-  never collides with an id. Unambiguous, slightly less discoverable.
-- **(c) Bare integer, recency-FIRST** (`report 2` always = 2nd recent; ids must be non-pure-
-  integer or use a longer prefix): simplest mental model, but could shadow a genuinely numeric
-  id.
+**Decision: bare small integer = recency index, with a collision guard.** `pubrun show 2`
+means "the 2nd most recent run". Run ids can be numeric-ish (timestamps, hashes), so a bare
+integer *could* in principle also be a run-id prefix — but in practice a run id that is a
+*pure small integer* is extremely unlikely. Therefore:
+
+- A bare **pure-integer** argument (1..bound) is interpreted as a **recency index**.
+- **Collision guard:** if that same integer ALSO exactly/prefix-matches an existing run id (the
+  rare case), do NOT silently guess. Print a `[WARN ]` explaining the ambiguity ("`2` matches
+  both the 2nd-most-recent run AND run id `2f9c…`") and REQUIRE disambiguation — either
+  `--force`/an explicit flag to take the recency meaning, or an explicit longer id prefix / a
+  prompt for interactive sessions. Non-interactive without the flag → clear error, no guess.
+- Non-integer arguments resolve exactly as today (id-prefix → dir-substring → path); recency
+  is only ever considered for a bare integer.
 
 ## Findings
 
@@ -57,7 +59,7 @@ unambiguous and predictable (see Open Q1). Options:
 |------|----------|--------|-------|-----------|------------|
 | 1 | E1,E2 | Add a single resolver `resolve_run_selector(sel, output_dir)` that centralizes: recency-index (per chosen syntax) → id-prefix → dir substring → path. It sorts via the existing `scan_runs` (most-recent-first) and returns the run dir or a CLEAR error (`"no 3rd most recent run; only 2 runs in ./runs"`). | `status.py` | Low-Med | Given 3 runs, selector "2" (per chosen syntax) resolves the 2nd-newest; out-of-range → clear error; ambiguous id still errors as today. |
 | 2 | E1 | Route ALL run-accepting commands through the resolver (replace direct `find_run`/`_get_manifest_path` id handling with it), honoring `--dir`. | `__main__.py` (all consumers) | Low | Each of report/show/res/cpu/mem/methods/inspect/rerun/diff/status accepts the recency selector and `--dir`; a table test covers each command. |
-| 3 | E2 | Implement the DISAMBIGUATION per Open Q1 decision (sigil vs bare-int-with-fallback), with a documented, tested precedence so a numeric id is never mis-resolved. | `status.py` | Med | A run whose id starts with the selector digits still resolves by id (or per the documented precedence); tests pin both directions. |
+| 3 | E2 | Implement the **collision guard** (decided): bare pure-integer → recency index; if it ALSO matches a run id, emit `[WARN ]` + require `--force` (recency) or an explicit id/prompt; non-interactive without `--force` → clear error, never a silent guess. | `status.py`, `__main__.py` | Med | Recency index resolves for a bare int; a fabricated collision (a run whose id IS/starts-with that integer) triggers the WARN + refusal-without-`--force`; `--force` takes recency; non-integer args resolve exactly as today. |
 
 ## Deferred / out of scope (with reason)
 
@@ -93,14 +95,15 @@ chosen syntax + examples; referenced from each command), `CHANGELOG.md`.
 
 ## Open questions
 
-1. **Selector syntax (the crux):** bare small integer with id-fallback, a sigil (`^N`/`@N`),
-   or recency-first bare integer? (Leaning: a sigil like `^N` for zero ambiguity + a bare
-   small-int convenience that falls back to id match — decide at plan-review with the repo's
-   actual id formats in view.)
+1. **Selector syntax — RESOLVED (maintainer 2026-07-07):** bare small integer = recency index,
+   with a collision guard (`[WARN ]` + require `--force`/explicit disambiguation on the very
+   unlikely event it also matches a numeric run id). See the design crux above.
 2. Should `status` (which lists runs) also print the recency index next to each run so the
-   selector is discoverable? (Leaning: yes — show a `#1/#2/…` column.)
-3. Upper bound on the bare-int interpretation (e.g. treat only 1–999 as indices)? (Leaning:
-   yes, small bound, if bare-int is chosen.)
+   selector is discoverable? (Leaning: yes — show a `#1/#2/…` column. Confirm at execution.)
+3. **Upper bound + `--force` spelling:** treat only 1..N (e.g. 1..999) as indices, and reuse an
+   existing flag name for the override? pubrun already uses `--force` on `combined`; confirm
+   `--force` is the right spelling here (vs `--yes`) for "take the recency meaning". (Leaning:
+   small bound; `--force`.)
 
 ## Approval and execution gate
 
