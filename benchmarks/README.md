@@ -53,14 +53,28 @@ pytest benchmarks/ -o addopts="" --benchmark-only
 `-o addopts=""` clears the repo's global `--cov` options, which would otherwise
 distort pytest-benchmark timings.
 
-## Running on a Slurm cluster
+## Running on an HPC cluster
 
-Two helper scripts submit the harness as a batch job:
+The easiest way is `pubrun bench`, which auto-detects the batch scheduler (**Slurm,
+PBS/Torque, LSF, or SGE/Grid Engine**) and offers to submit to a compute node.
 
-- `run_bench.sbatch` — the job itself (single node, ~4 CPUs, few minutes). Writes
-  a node-tagged result to `benchmarks/results/<node>-<timestamp>.json`.
-- `submit_bench.sh` — picks a **random idle CPU node** (via `sinfo`) and submits
-  the job to it; falls back to an unpinned submit if none are idle.
+For direct use, per-scheduler submit scripts live here:
+
+- `submit_bench.sh` + `run_bench.sbatch` — **Slurm**. Picks a **random idle CPU node**
+  (via `sinfo`) and submits to it; falls back to an unpinned submit if none are idle.
+  Each job writes a node-tagged result to `benchmarks/results/<node>-<timestamp>.json`.
+- `submit_bench_pbs.sh` — **PBS/Torque/OpenPBS** (`qsub`).
+- `submit_bench_lsf.sh` — **LSF** (`bsub`).
+- `submit_bench_sge.sh` — **SGE / Grid Engine** (`qsub`).
+
+The PBS/LSF/SGE scripts submit to the default queue and let the scheduler place the job (no
+site-specific idle-node query). They are **starting points** — real clusters usually need an
+account/allocation and often a queue/walltime, set via env knobs (`PUBRUN_QUEUE`,
+`PUBRUN_ACCOUNT`/`PUBRUN_PROJECT`, `PUBRUN_PE`) or by editing the directives. Only the Slurm
+path is exercised in CI; the others are provided as adaptable templates. Note: PBS and SGE
+both use `qsub` — if `pubrun bench` cannot tell them apart, pass `--scheduler pbs|sge`.
+
+### Slurm details
 
 ```bash
 # random idle node, full 2-pass run:

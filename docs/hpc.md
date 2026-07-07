@@ -67,9 +67,23 @@ Each suggestion comes with an honest performance note; see [Performance](perform
 
 ## Running the benchmark suite on a cluster
 
-The benchmark harness and Slurm submission scripts live under `benchmarks/` (see
-`benchmarks/README.md`). Result JSONs capture filesystem type and Slurm allocation context
+The benchmark harness and scheduler submission scripts live under `benchmarks/` (see
+`benchmarks/README.md`). Result JSONs capture filesystem type and scheduler allocation context
 so results are comparable across nodes.
+
+`pubrun bench` auto-detects the batch scheduler — **Slurm, PBS/Torque, LSF, or SGE/Grid
+Engine** (precedence Slurm > PBS > LSF > SGE) — from environment variables and submit tools on
+`PATH`, and **offers** to submit to a compute node (never without confirmation). Because PBS
+and SGE both use `qsub`, an ambiguous environment is reported; pick one with
+`--scheduler pbs|sge`. The submit scripts (`submit_bench.sh`, `submit_bench_pbs.sh`,
+`submit_bench_lsf.sh`, `submit_bench_sge.sh`) submit to the default queue and let the scheduler
+place the job — treat them as **starting points** and set your site's account/queue/walltime
+(only the Slurm path is exercised in CI). Typical flow on a locked-down compute node (no
+network / no `gh`): run the benchmark there, then submit the redacted result from the login
+node with `pubrun bench --submit-file <result>.redacted.json`.
+
+Tip: `pubrun self-check` on a login node prints an informational nudge suggesting you run the
+benchmark on a compute node for representative numbers.
 
 ---
 

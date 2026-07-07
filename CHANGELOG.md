@@ -57,6 +57,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **HPC multi-scheduler benchmark submission (Slurm/PBS/LSF/SGE).** `pubrun bench` now detects
+  and offers to submit to PBS/Torque, LSF, and SGE/Grid Engine in addition to Slurm (auto-detect
+  order Slurm > PBS > LSF > SGE), with a new `--scheduler {auto,slurm,pbs,lsf,sge,local}` override.
+  Detection is env+PATH only (no scheduler query, no network); the PBS-vs-SGE `qsub` ambiguity is
+  reported and resolved with `--scheduler`. New starting-point submit scripts
+  `submit_bench_pbs.sh`/`_lsf.sh`/`_sge.sh` (submit to the default queue, let the scheduler place
+  the job; adapt account/queue/walltime to your site — not CI-validated against live clusters).
+  Never auto-submits (same consent gate as Slurm; argv-list, no shell injection). `pubrun
+  self-check` now emits an INFO nudge when you appear to be on an HPC login node, suggesting a
+  compute-node `pubrun bench` for representative numbers (INFO, so it does not trip `--strict`).
 - **Benchmark data quality + filesystem-health diagnostics.** Benchmark results now record
   **raw per-iteration timings** (in run order) alongside the summary stats (schema
   `pubrun-benchmark/4`), so distribution shape, warmup drift, and correct cross-submission
