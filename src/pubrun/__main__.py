@@ -734,6 +734,115 @@ def _run_cite(style: str) -> None:
         sys.exit(1)
 
 
+# --- self-check / inspect: environment & capture-completeness diagnostics -----------
+# The findings logic lives in pubrun.report.checks, which is imported ONLY here (the CLI),
+# never by `import pubrun` / the run path, so it cannot affect a user's host script.
+
+_SEV_MARKER = {"warn": "[warn]", "info": "[info]"}
+_SEV_COLOR = {"warn": "33", "info": "36"}  # yellow / cyan (never DIM; WCAG concern)
+
+
+def _fmt_finding(f: dict, use_color: bool) -> str:
+    sev = f.get("severity", "info")
+    marker = _SEV_MARKER.get(sev, "[info]")
+    if use_color:
+        marker = f"\033[{_SEV_COLOR.get(sev, '36')}m{marker}\033[0m"
+    return f"{marker} {f.get('message', '')}"
+
+
+def _emit_findings(findings: list, *, show_suggestions: bool, as_json: bool, header: str) -> None:
+    """Print findings honoring NO_COLOR, terse-by-default, and --json. Never raises."""
+    if as_json:
+        print(json.dumps({"findings": findings}, indent=2))
+        return
+    use_color = not os.environ.get("NO_COLOR", "") and sys.stdout.isatty()
+    warns = [f for f in findings if f.get("severity") == "warn"]
+    if not findings:
+        print(f"{header}: no concerns found.")
+        return
+    if not show_suggestions:
+        # Terse default: one summary line + a single nudge to expand.
+        from pubrun.report.checks import summarize
+        print(f"{header}: {summarize(findings)}")
+        print("Run with --show-suggestions for per-item detail and how to capture more "
+              "(with performance trade-offs).")
+        return
+    print(f"{header}:")
+    for f in findings:
+        print("  " + _fmt_finding(f, use_color))
+        sugg = f.get("suggestion")
+        if sugg:
+            print(f"      -> {sugg}")
+
+
+def _run_self_check(show_suggestions: bool, as_json: bool, strict: bool) -> None:
+    """Check the CURRENT machine for performance/config pitfalls + install health."""
+    try:
+        from pubrun.report.checks import live_findings
+        findings = live_findings()
+    except Exception as e:
+        _print_error(f"self-check failed: {e}")
+        sys.exit(1)
+    _emit_findings(findings, show_suggestions=show_suggestions, as_json=as_json,
+                   header="pubrun self-check")
+    if strict and any(f.get("severity") == "warn" for f in findings):
+        sys.exit(1)
+
+
+def _run_inspect(run_dir: Optional[str], show_suggestions: bool, as_json: bool, strict: bool,
+                 filter_str: Optional[str] = None, not_filter_str: Optional[str] = None,
+                 status_filter: Optional[str] = None, not_status_filter: Optional[str] = None,
+                 older_than: Optional[str] = None, exit_code: Optional[int] = None) -> None:
+    """Diagnose a COMPLETED run's manifest: capture-completeness + recorded I/O signals,
+    with a glaring banner when the inspecting host differs from the run's host."""
+    try:
+        manifest_path = _get_manifest_path(
+            run_dir or "", filter_str=filter_str, status_filter=status_filter,
+            older_than=older_than, exit_code=exit_code, not_filter_str=not_filter_str,
+            not_status_filter=not_status_filter,
+        )
+    except RunInProgressOrCrashedError as e:
+        _print_error(f"Run '{e.run_dir.name}' is still running or crashed (no manifest.json yet).")
+        sys.exit(1)
+    except FileNotFoundError as e:
+        _print_error(str(e))
+        sys.exit(1)
+
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    except Exception as e:
+        _print_error(f"Failed to read manifest: {e}")
+        sys.exit(1)
+
+    import socket
+    try:
+        current_hostname = socket.gethostname()
+    except Exception:
+        current_hostname = None
+
+    from pubrun.report.checks import manifest_findings
+    findings = manifest_findings(manifest, current_hostname=current_hostname)
+
+    # The different-host banner is always shown (never hidden behind --show-suggestions),
+    # because a live-vs-run host mismatch changes how everything else should be read.
+    banner = [f for f in findings if f.get("code") == "different_host"]
+    rest = [f for f in findings if f.get("code") != "different_host"]
+    if banner and not as_json:
+        use_color = not os.environ.get("NO_COLOR", "") and sys.stdout.isatty()
+        line = _fmt_finding(banner[0], use_color)
+        bar = "=" * 60
+        print(bar)
+        print(line)
+        print(bar)
+
+    _emit_findings(rest if not as_json else findings,
+                   show_suggestions=show_suggestions, as_json=as_json,
+                   header="pubrun inspect")
+    if strict and any(f.get("severity") == "warn" for f in findings):
+        sys.exit(1)
+
+
 def _run_status(
     run_id: Optional[str],
     output_dir: Optional[str],
@@ -1290,6 +1399,40 @@ def main() -> None:
     )
     cite_parser.add_argument("--style", type=str, choices=["apa", "mla", "chicago", "bibtex"], default="apa", help="Citation format (default: apa).")
 
+    # ---------------- Self-check Subparser ----------------
+    selfcheck_parser = subparsers.add_parser(
+        "self-check",
+        help="Check THIS machine for pubrun performance/config pitfalls + install health.",
+        description="Report-only checks of the current environment: filesystem types "
+                    "(flagging network filesystems like NFS/Lustre), free RAM, load, pubrun "
+                    "import origin, and install health (config validity, output-dir "
+                    "writability, git availability, Python version). Never modifies anything.",
+        epilog=f"Examples:\n  {prog_name} self-check\n  {prog_name} self-check --show-suggestions\n  {prog_name} self-check --strict",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    selfcheck_parser.add_argument("--show-suggestions", "-v", action="store_true", help="Show per-item detail and how to address each concern.")
+    selfcheck_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit findings as JSON (always full detail).")
+    selfcheck_parser.add_argument("--strict", action="store_true", help="Exit non-zero if any warning fired (useful in CI / HPC job pre-checks).")
+
+    # ---------------- Inspect Subparser ----------------
+    inspect_parser = subparsers.add_parser(
+        "inspect",
+        help="Diagnose a completed run: what was captured, what wasn't, and how to capture more.",
+        description="Report-only, post-hoc diagnosis of a completed run's manifest: recorded "
+                    "I/O/RAM/load/filesystem signals, a capture-completeness assessment (what "
+                    "provenance was NOT captured and why), and how to enable more next time "
+                    "with honest performance trade-offs. Prints a glaring banner when the "
+                    "inspecting host differs from where the run executed (e.g. HPC head node "
+                    "vs compute node).",
+        epilog=f"Examples:\n  {prog_name} inspect\n  {prog_name} inspect runs/pubrun-XYZ --show-suggestions\n  {prog_name} inspect -f train.py",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    inspect_parser.add_argument("run_dir", type=str, nargs="?", help="Run directory to inspect. Defaults to the most recent matching run.")
+    inspect_parser.add_argument("--show-suggestions", "-v", action="store_true", help="Show per-item detail and how to capture more (with perf trade-offs).")
+    inspect_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit findings as JSON (always full detail).")
+    inspect_parser.add_argument("--strict", action="store_true", help="Exit non-zero if any warning fired.")
+    _add_run_filter_args(inspect_parser, include_limit=False)
+
     # ---------------- Clean Subparser ----------------
     clean_parser = subparsers.add_parser(
         "clean",
@@ -1640,6 +1783,29 @@ def main() -> None:
 
     elif args.command == "cite":
         _run_cite(args.style)
+        executed = True
+
+    elif args.command == "self-check":
+        _run_self_check(
+            getattr(args, "show_suggestions", False),
+            getattr(args, "as_json", False),
+            getattr(args, "strict", False),
+        )
+        executed = True
+
+    elif args.command == "inspect":
+        _run_inspect(
+            getattr(args, "run_dir", None),
+            getattr(args, "show_suggestions", False),
+            getattr(args, "as_json", False),
+            getattr(args, "strict", False),
+            filter_str=getattr(args, "filter", None),
+            not_filter_str=getattr(args, "not_filter", None),
+            status_filter=getattr(args, "status", None),
+            not_status_filter=getattr(args, "not_status", None),
+            older_than=getattr(args, "older_than", None),
+            exit_code=getattr(args, "exit_code", None),
+        )
         executed = True
 
     elif args.command == "status":

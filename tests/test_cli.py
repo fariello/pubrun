@@ -1077,7 +1077,7 @@ raise ValueError("TEST_EXCEPTION")
         assert "crash-id" not in res.stdout
 
     def test_subcommand_help_examples(self):
-        for sub in ("report", "methods", "rerun", "diff", "meta", "status", "clean", "combined", "cite", "run", "ui", "tui", "gui"):
+        for sub in ("report", "methods", "rerun", "diff", "meta", "status", "clean", "combined", "cite", "run", "ui", "tui", "gui", "self-check", "inspect"):
             cmd = [sys.executable, "-m", "pubrun", sub, "--help"]
             res = subprocess.run(cmd, capture_output=True, text=True)
             assert res.returncode == 0

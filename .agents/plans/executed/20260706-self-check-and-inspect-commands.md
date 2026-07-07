@@ -11,9 +11,10 @@
   `--show-suggestions` expansion to avoid a wall of text.
 - Scope: `src/pubrun/__main__.py` (two new subcommands) + a new report/check module. Both
   are CLI-only and MUST NOT be on the `import pubrun` code path. No new runtime dependency.
-- Status: PENDING — plan-review, then execution on human approval. NOT auto-executed.
-  Depends on IPD-A for the manifest fields `inspect` surfaces (fstype/free-RAM/load); can
-  land first and simply report "not captured" for runs predating IPD-A.
+- Status: EXECUTED (2026-07-06). Both commands implemented, tested (19 new tests incl. the
+  import-isolation pin and the ambiguity-honesty test), documented (new `docs/hpc.md` + nav).
+  729 passed / 2 skipped (only the known SIGPIPE flake fails, passes in isolation). Built on
+  IPD-A's manifest fields/flags. See the execution record at the end.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Problem / motivation
@@ -242,3 +243,40 @@ pubrun` pulls in ZERO `report` modules (`report/__init__.py` does not eagerly im
 submodules), so the `report/checks.py` placement and the import-isolation test are sound.
 No new findings; the never-claim-"off"-when-only-absent honesty guardrail is the key
 correctness property and is well-specified.
+
+## Execution record (2026-07-06)
+
+Executed by opencode after human approval.
+
+- **`src/pubrun/report/checks.py` (NEW):** pure, printing-free findings functions.
+  `live_findings()` (self-check: network-FS on install/output/tmpdir, low RAM, high load,
+  + install health: config validity, output-dir writability, git availability, Python
+  version); `manifest_findings(manifest, current_hostname)` (inspect: different-host banner,
+  recorded network-FS, capture-completeness). `summarize()` for the terse line. Never raises.
+- **`__main__.py`:** `_run_self_check` + `_run_inspect` + shared `_emit_findings`
+  (NO_COLOR-respecting textual `[warn]`/`[info]` markers, optional non-DIM yellow/cyan; terse
+  by default; `--show-suggestions` expands with honest perf caveats; `--json` always full).
+  Two subparsers registered (`self-check`, `inspect`); `inspect` reuses
+  `_add_run_filter_args(include_limit=False)` + `_get_manifest_path` for run selection.
+  The different-host banner is always shown (boxed), never hidden behind `--show-suggestions`.
+- **Honesty guardrail (verified by test):** with the IPD-A flag `capture.subprocesses_enabled`
+  present, inspect says definitively "subprocess tracking was OFF"; on older manifests lacking
+  the flag it says the honest "either disabled or nothing was spawned — cannot be determined",
+  never a false "off". File-I/O finding explains pubrun does not patch `open()` globally.
+- **Import isolation (verified by test):** `import pubrun` does NOT import
+  `pubrun.report.checks` (empty `sys.modules` check) — the diagnostics can never touch a host
+  script.
+- **Docs:** `docs/cli.md` (`self-check` + `inspect` with the honesty note); **new
+  `docs/hpc.md`** (network-FS pitfall, the two commands, different-system banner,
+  capture-completeness); `[HPC](hpc.md)` added to the nav footer across all docs + README;
+  `CHANGELOG.md` `[Unreleased] → Added`.
+- **Tests (`tests/test_checks_commands.py`, 19 new, all green):** import-isolation pin;
+  manifest findings (banner fires on mismatch / silent on same host; process-scope flagged,
+  tree not; definitive-off with flag vs honest-unknown without; no-file-provenance mentions
+  `pubrun.open`; resources-off; never-raises on garbage); live findings shape; self-check CLI
+  (exit 0, `--json` well-formed, NO_COLOR no ANSI); inspect CLI (terse default,
+  `--show-suggestions` expands, `--json` full, no-runs errors). Also added `self-check`/
+  `inspect` to the subcommand-help-examples test. Full suite: **729 passed**, 2 skipped; lone
+  failure is the known pre-existing SIGPIPE flake (passes in isolation).
+
+**Dropped as planned:** the import-time nudge (no environment check inside `import pubrun`).
