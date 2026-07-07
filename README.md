@@ -163,18 +163,44 @@ pubrun methods --format latex
 
 ## CLI Reference
 
-The `pubrun` CLI (and its convenient shorthand alias `pbr`) provides fourteen commands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs.
+The `pubrun` CLI (and its convenient shorthand alias `pbr`) provides a family of subcommands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs. The most common are covered below; run `pubrun -h` for the full list and see the [CLI Reference](https://github.com/fariello/pubrun/blob/main/docs/cli.md) for exhaustive detail.
 
-### `pubrun bug-report`
-Opens the GitHub issue tracker and prints environment diagnostics for copy-pasting.
+### `pubrun init`
+Initialize pubrun in the current project (writes a commented `.pubrun.toml`) and prints getting-started guidance.
 ```bash
-pubrun bug-report
+pubrun init
+```
+
+### `pubrun report-bug` / `pubrun feedback`
+Open the GitHub issue tracker and print environment diagnostics for copy-pasting. `report-bug` files a bug report or feature request; `feedback` sends general feedback.
+```bash
+pubrun report-bug
+pubrun feedback
 ```
 
 ### `pubrun cite`
 Generates the bibliographic citation for crediting this library in your paper.
 ```bash
 pubrun cite --style bibtex
+```
+
+### `pubrun self-check`
+Report-only checks of the **current machine** for pubrun performance/config pitfalls and install health (network filesystems, low RAM, high load, wedged/slow mounts, config errors). Never modifies anything.
+```bash
+pubrun self-check [--show-suggestions] [--strict]
+```
+
+### `pubrun inspect`
+Diagnose a completed run: what was captured, what wasn't, and how to capture more.
+```bash
+pubrun inspect [RUN_DIR] [--show-suggestions]
+```
+
+### `pubrun bench`
+Run the pubrun overhead benchmark suite (auto-detects Slurm on HPC and offers to submit to a compute node). After a local run, offers to contribute the redacted result. Requires a source checkout.
+```bash
+pubrun bench --quick
+pubrun bench --submit-file result.redacted.json   # submit a previous result
 ```
 
 ### `pubrun clean`
@@ -210,10 +236,10 @@ Translates raw JSON diagnostic payloads into publication-ready methodology parag
 pubrun methods [RUN_DIR] --format markdown|latex
 ```
 
-### `pubrun report`
-A diagnostic viewer that surfaces execution timing, hardware, dependencies, and codebase drift. Accepts multiple run directories for sequential evaluation.
+### `pubrun show`
+A diagnostic viewer that surfaces execution timing, hardware, dependencies, and codebase drift. Accepts multiple run directories for sequential evaluation. (The name `report` remains as a backward-compatible alias.)
 ```bash
-pubrun report ./runs/pubrun-A ./runs/pubrun-B --deep
+pubrun show ./runs/pubrun-A ./runs/pubrun-B --deep
 ```
 
 ### `pubrun rerun`
@@ -222,10 +248,12 @@ Extracts the exact shell command needed to reproduce a run.
 pubrun rerun ./runs/pubrun-A
 ```
 
-### `pubrun resources`
-Renders CPU and memory utilization graphs over the lifecycle of a run.
+### `pubrun res` / `pubrun cpu` / `pubrun mem`
+Render resource-utilization charts over a run's lifecycle: `res` shows the comprehensive picture (CPU + memory + process-tree RSS + system memory/load/iowait + per-process I/O when captured), while `cpu` and `mem` show a single focused chart. (`resources` remains as a backward-compatible alias of `res`.)
 ```bash
-pubrun resources [RUN_DIR]
+pubrun res [RUN_DIR]
+pubrun cpu [RUN_DIR]
+pubrun mem [RUN_DIR]
 ```
 
 ### `pubrun run`
@@ -377,12 +405,11 @@ See [Configuration Reference](https://github.com/fariello/pubrun/blob/main/docs/
 ### Future
 
 1. **Sphinx / MkDocs integration** — Generate hosted API documentation from docstrings.
-2. **GitHub Actions CI** — Automated test matrix on push/PR.
-3. **Plugin / extension model** — Formal extension points for custom capture engines.
-4. **Artifact registration API** — `register_artifact()` for tracking user-produced output files.
-5. **Custom metadata API** — `register_metadata()` for injecting structured data into the manifest.
-6. **Timestamped console capture** — `standard` mode prepends timestamps to log lines, enabling `pubrun combined` (below).
-7. **`pubrun combined` command** — Interleaves stdout and stderr from one or more runs using log timestamps. Requires timestamped capture (item 6).
+2. **Plugin / extension model** — Formal extension points for custom capture engines.
+3. **Artifact registration API** — `register_artifact()` for tracking user-produced output files.
+4. **Custom metadata API** — `register_metadata()` for injecting structured data into the manifest.
+
+Recently shipped (see the [Changelog](https://github.com/fariello/pubrun/blob/main/CHANGELOG.md)): GitHub Actions CI, timestamped console capture, the `pubrun combined` log interleaver, `self-check`/`inspect` diagnostics, and the `pubrun bench` benchmark suite.
 
 ---
 
@@ -392,7 +419,7 @@ If you use `pubrun` in your research, please cite it. Because no peer-reviewed
 publication exists yet, cite the software itself (see `pubrun cite`, the `CITATION.cff`
 file, or GitHub's "Cite this repository" button):
 
-> Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research [Computer software]. https://github.com/fariello/pubrun. https://doi.org/10.5281/zenodo.PENDING
+> Fariello, Gabriele. (2026). *pubrun* [Computer software]. https://github.com/fariello/pubrun. https://doi.org/10.5281/zenodo.PENDING
 
 <!-- The DOI above is a PLACEHOLDER ("zenodo.PENDING") until the repository is enabled in
 Zenodo and the first GitHub release mints a real concept DOI. See
@@ -413,20 +440,11 @@ the required attribution.
 
 `pubrun` was redesigned and rewritten from pre-existing custom libraries, code fragments, scripts, and ideas spanning almost two decades, with the assistance of Google Antigravity for its official release.
 
-## License
+## License & Attribution
 
-Released under the Apache License 2.0. Copyright 2007-2026 Gabriele G. R. Fariello. See the [LICENSE](https://github.com/fariello/pubrun/blob/main/LICENSE) and [NOTICE](https://github.com/fariello/pubrun/blob/main/NOTICE) files for full terms.
-
----
-
-[README](https://github.com/fariello/pubrun/blob/main/README.md) | [Architecture](https://github.com/fariello/pubrun/blob/main/docs/architecture.md) | [Functional Spec](https://github.com/fariello/pubrun/blob/main/docs/functional_spec.md) | [API](https://github.com/fariello/pubrun/blob/main/docs/api.md) | [CLI](https://github.com/fariello/pubrun/blob/main/docs/cli.md) | [Configuration](https://github.com/fariello/pubrun/blob/main/docs/configuration.md) | [Manifest](https://github.com/fariello/pubrun/blob/main/docs/manifest.md) | [Performance](https://github.com/fariello/pubrun/blob/main/docs/performance.md) | [Research Use](https://github.com/fariello/pubrun/blob/main/docs/research-use.md) | [HPC](https://github.com/fariello/pubrun/blob/main/docs/hpc.md) | [Changelog](https://github.com/fariello/pubrun/blob/main/CHANGELOG.md)
-
-
----
-
-## License, Attribution & Citation
-
-`pubrun` is licensed under the **Apache License 2.0** (see `LICENSE` and `NOTICE`).
+`pubrun` is licensed under the **Apache License 2.0**. Copyright 2007–2026 Gabriele G. R.
+Fariello. See the [LICENSE](https://github.com/fariello/pubrun/blob/main/LICENSE) and
+[NOTICE](https://github.com/fariello/pubrun/blob/main/NOTICE) files for full terms.
 
 **Attribution (required).** Under Apache-2.0 §4(d), any distribution of this software or a
 derivative work must retain the `NOTICE` file and display its attribution reasonably
@@ -436,11 +454,10 @@ screen the software presents:
 
 > Based on the original pubrun by Gabriele G. R. Fariello (https://github.com/fariello/pubrun).
 
-**Citation.** If you use `pubrun` in academic or scholarly work, please cite it. GitHub's
-"Cite this repository" button (backed by `CITATION.cff`) provides ready-to-use formats. A
-suggested citation:
+For how to cite `pubrun` in academic work, see the [Citation](#citation) section above. The
+attribution and citation requests impose no warranty or liability on the author; the software
+is provided "AS IS" per the LICENSE.
 
-> Fariello, Gabriele. *pubrun*. 2026. https://github.com/fariello/pubrun
+---
 
-The attribution and citation requests impose no warranty or liability on the author; the
-software is provided "AS IS" per the LICENSE.
+[README](https://github.com/fariello/pubrun/blob/main/README.md) | [Architecture](https://github.com/fariello/pubrun/blob/main/docs/architecture.md) | [Functional Spec](https://github.com/fariello/pubrun/blob/main/docs/functional_spec.md) | [API](https://github.com/fariello/pubrun/blob/main/docs/api.md) | [CLI](https://github.com/fariello/pubrun/blob/main/docs/cli.md) | [Configuration](https://github.com/fariello/pubrun/blob/main/docs/configuration.md) | [Manifest](https://github.com/fariello/pubrun/blob/main/docs/manifest.md) | [Performance](https://github.com/fariello/pubrun/blob/main/docs/performance.md) | [Research Use](https://github.com/fariello/pubrun/blob/main/docs/research-use.md) | [HPC](https://github.com/fariello/pubrun/blob/main/docs/hpc.md) | [Changelog](https://github.com/fariello/pubrun/blob/main/CHANGELOG.md)
