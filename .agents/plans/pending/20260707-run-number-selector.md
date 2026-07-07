@@ -98,12 +98,12 @@ chosen syntax + examples; referenced from each command), `CHANGELOG.md`.
 1. **Selector syntax — RESOLVED (maintainer 2026-07-07):** bare small integer = recency index,
    with a collision guard (`[WARN ]` + require `--force`/explicit disambiguation on the very
    unlikely event it also matches a numeric run id). See the design crux above.
-2. Should `status` (which lists runs) also print the recency index next to each run so the
-   selector is discoverable? (Leaning: yes — show a `#1/#2/…` column. Confirm at execution.)
-3. **Upper bound + `--force` spelling:** treat only 1..N (e.g. 1..999) as indices, and reuse an
-   existing flag name for the override? pubrun already uses `--force` on `combined`; confirm
-   `--force` is the right spelling here (vs `--yes`) for "take the recency meaning". (Leaning:
-   small bound; `--force`.)
+2. **`status` recency column — RESOLVED (accepted lean):** yes — `status` prints a `#1/#2/…`
+   recency index next to each run so the selector is discoverable.
+3. **Override flag — RESOLVED (maintainer 2026-07-07):** reuse **`--force`** (consistent with
+   `combined --force`) to force the recency interpretation on the rare collision. Upper bound:
+   interpret only a small range (e.g. 1..999) as a recency index (larger integers fall through
+   to id resolution). (Confirm exact bound at execution — minor.)
 
 ## Approval and execution gate
 

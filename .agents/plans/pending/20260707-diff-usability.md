@@ -94,10 +94,11 @@ output at those depths may see fewer lines; `--deep` is unchanged).
 1. **Table rendering — RESOLVED (maintainer 2026-07-07):** opt-in `--table`; the current
    `+/-/~` inline output stays the DEFAULT so nothing parsing it breaks. Revisit defaulting
    only after real-world feedback.
-2. Standard-level list summarization format: "N→M (+added/-removed identities)" — confirm the
-   identity to show (subprocess = argv[0]/basename; package = name@version).
-3. Should `invocation.command_line`/`rerun_command` be *collapsed when argv present* (my lean)
-   or simply always ignored below `--deep`? (Collapse is smarter but slightly more code.)
+2. **List-summary identity — RESOLVED (accepted lean):** subprocess = `argv[0]` basename;
+   package = `name@version`. (Confirm exact truncation at execution — minor.)
+3. **command_line/rerun_command — RESOLVED (maintainer 2026-07-07):** COLLAPSE when
+   `invocation.argv` is present (suppress the two derived views in basic/standard so one argv
+   change = one line); `--deep` still shows all three.
 
 ## Approval and execution gate
 

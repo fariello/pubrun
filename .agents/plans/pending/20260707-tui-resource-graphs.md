@@ -76,13 +76,18 @@ numeric summary), reusing pubrun's existing per-sample data — no new capture.
 
 ## Open questions
 
-1. Graph widget: textual `Sparkline` (simple, built-in) vs embedding the existing ASCII chart
-   (consistent with `pubrun res`) vs a richer plot? (Leaning: Sparkline for the live-feel +
-   the numeric summary; reuse ASCII chart as fallback.)
-2. Toggle vs dedicated tab/pane: a key toggle (`r`) vs a persistent resources pane beside
-   metadata? (Leaning: a toggle to start; a pane later if wanted.)
-3. Should the resources view honor the same peak/avg/min/max as IPD-C? (Leaning: yes — sequence
-   F after C so the summary helper is shared.)
+1. **Graph widget — RESOLVED (maintainer 2026-07-07):** reuse the existing `pubrun res` ASCII
+   chart (embedded in a textual `Static`) as the PRIMARY renderer — identical look in CLI and
+   TUI, thinnest code, and it shares the IPD-C resource-series helper. Note: this does not
+   violate zero-runtime-deps — `textual`/`rich` are the OPTIONAL `[tui]` extra, imported ONLY
+   by `pubrun ui` (the core library/CLI never import them), so a textual `Sparkline` would also
+   be *available* here; but the ASCII chart is chosen for consistency. Sparkline may be added
+   later as an optional visual enhancement (still within the already-present `[tui]` extra), not
+   required.
+2. **Access — RESOLVED (maintainer 2026-07-07):** a key toggle (`r`) shows/hides the resource
+   view on the selected run. A persistent pane can come later.
+3. **avg/min/max — RESOLVED:** yes, honor IPD-C's peak/avg/min/max via the shared series helper
+   (sequence F after C).
 
 ## Approval and execution gate
 

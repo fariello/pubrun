@@ -96,10 +96,10 @@ avg/min/max not just peak), a readable timeline, and give `report`/`show` identi
    CPU for avg/min/max, feeding IPD-C step 1 and IPD-F), computed from summed CPU-TIME deltas
    (not instantaneous-% sum), labeled "% of one core (tree)", never clamped. Update the
    "CPU = main process" tests intentionally.
-2. avg/min/max presentation: one dense line (`peak/avg/min/max`) vs separate lines? (Leaning:
-   dense single line per metric.)
-3. `--utc` parity: add the flag to `report`, or unify both commands on one parser builder?
-   (Leaning: unify the builder — removes the whole class of future drift.)
+2. **avg/min/max presentation — RESOLVED (accepted lean):** one dense line per metric
+   (`RSS: peak / avg / min / max`), each shown only when computable.
+3. **`--utc` parity — RESOLVED (accepted lean):** unify `report`/`show` on ONE shared
+   parser-builder so they cannot drift again (rather than just bolting `--utc` onto `report`).
 
 ## Approval and execution gate
 

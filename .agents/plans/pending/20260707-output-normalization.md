@@ -108,13 +108,16 @@ grepping pubrun output in scripts — recommend matching on the level word, not 
 
 ## Open questions
 
-1. DEBUG gating: only under an existing verbose/`PUBRUN_DEBUG` flag? (Leaning: yes — DEBUG is
-   silent unless explicitly enabled, so normal output is unchanged apart from prefix glyphs.)
-2. Do any downstream scripts grep pubrun output for `[OK]`/`[*]`? (Assumption: no stable
-   contract on these; documenting the change in CHANGELOG is sufficient.)
-3. `[FAIL]` in the built-in self-test (`--run-tests`) — map to `[ERROR]` or keep a distinct
-   `[FAIL ]` for test results? (Leaning: keep test pass/fail semantics distinct from log
-   ERROR to avoid confusing a failed *check* with a logged error.)
+1. **DEBUG gating — RESOLVED (maintainer 2026-07-07):** DEBUG is silent unless explicitly
+   enabled (`PUBRUN_DEBUG` env or a `--debug` flag). Normal output is unchanged apart from the
+   prefix-glyph normalization; the `[DEBUG]` style is defined + consistent but never spams a
+   normal run.
+2. **Prefix as a script contract — RESOLVED (assumption accepted):** no stable contract on
+   `[OK]`/`[*]` etc.; the CHANGELOG documents the normalization and recommends matching on the
+   level word if anyone scrapes output.
+3. **Self-test `[FAIL]` — RESOLVED (maintainer 2026-07-07):** keep a DISTINCT `[FAIL ]` (red)
+   for `--run-tests` failures and `[ OK  ]` for passes — a failed test is not a logged runtime
+   ERROR; `[ERROR]` stays reserved for actual error conditions.
 
 ## Approval and execution gate
 
