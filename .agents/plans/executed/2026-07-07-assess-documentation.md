@@ -136,3 +136,42 @@ is NOT auto-executed. Recommended next steps:
 2. On approval, execute the ordered changes, run the validation, and re-run
    `/assess documentation`.
 3. Only then move this IPD from `.agents/plans/pending/` to `.agents/plans/executed/`.
+
+## Execution record (2026-07-07)
+
+Executed by opencode after human approval. All 9 proposed steps applied; open questions
+resolved with the plan's stated assumptions (all Low risk, maintainer-approved as leanings):
+non-brittle count phrasing; a one-line "Recently shipped" note (not silent deletion); README
+kept a condensed index linking to `docs/cli.md`.
+
+- **Step 1 (D1/D2):** replaced "fourteen commands" (README) / "thirteen commands"
+  (`docs/cli.md`) with non-brittle "a family of subcommands" + a pointer to `pubrun -h`.
+- **Step 2 (D3):** removed the `### pubrun bug-report` section; added `### pubrun report-bug /
+  pubrun feedback`. (The `docs/cli.md:47` "Changed in 1.4.0…" note that still says
+  "bug-report" is intentional — it documents the rename, not a live command.)
+- **Step 3 (D4):** README section retitled `### pubrun show`, noting `report` as a
+  backward-compatible alias.
+- **Step 4 (D5):** README `resources` section replaced with `### pubrun res / cpu / mem`
+  (comprehensive vs single-metric), noting `resources` as an alias of `res`.
+- **Step 5 (D6/D7/D8):** removed the three shipped items from Roadmap "Future" (combined,
+  timestamped capture, GitHub Actions CI); added a one-line "Recently shipped (see Changelog)"
+  note. Remaining Future items (Sphinx/MkDocs, plugin model, `register_artifact`,
+  `register_metadata`) verified still unimplemented (`grep` empty).
+- **Step 6 (D9):** added concise README CLI entries for `init`, `self-check`, `inspect`,
+  `bench` (plus the renamed `report-bug`/`feedback`/`show`/`res`/`cpu`/`mem`). Verified all 20
+  `-h` commands now appear in the README CLI section by canonical name.
+- **Step 7 (D10/D11):** consolidated to ONE `## License & Attribution` section (removed the
+  duplicate standalone `## License`) and ONE citation string, aligned to `CITATION.cff`
+  (`Fariello, Gabriele. (2026). pubrun [Computer software]. …`). The bottom section now
+  cross-references the single `## Citation` block instead of repeating a second citation.
+- **Step 8 (D12):** added `Performance` and `HPC` links to the CHANGELOG nav (header +
+  footer), matching the README nav.
+- **Step 9 (D13):** removed the mid-document footer-nav duplicate; the footer nav now sits at
+  the true end of the README (after `## License & Attribution`).
+- **D14:** no-op as planned (intentional internal design note).
+
+**Validation:** `grep` confirms no "fourteen"/"thirteen commands" and no live `bug-report`
+reference remains (only the rename note); all 20 `pubrun -h` commands appear in the README CLI
+section; all README/CHANGELOG nav links resolve; exactly one License section and one citation
+blockquote; `pubrun report-bug/show/res -h` succeed. Documentation-only; no code/tests
+touched. Re-running `/assess documentation` should now find this drift closed.
