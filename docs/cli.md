@@ -1,4 +1,4 @@
-[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Performance](performance.md) | [Research Use](research-use.md) | [Changelog](../CHANGELOG.md)
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Performance](performance.md) | [Research Use](research-use.md) | [HPC](hpc.md) | [Changelog](../CHANGELOG.md)
 
 # pubrun CLI Reference
 
@@ -58,6 +58,71 @@ pubrun cite [--style apa|mla|chicago|bibtex]
 **Example:**
 ```bash
 pubrun cite --style bibtex
+```
+
+---
+
+### `self-check` — Environment / Install Diagnostics
+
+Report-only checks of the **current machine** for pubrun performance/config pitfalls and
+install health. It flags network filesystems (NFS/Lustre/GPFS/CIFS) backing the pubrun
+install, output dir, or `$TMPDIR` (a common cause of slow runs on HPC), low free RAM, high
+load, an unwritable output dir, missing `git`, an unsupported Python, and config errors.
+It never modifies anything.
+
+```bash
+pubrun self-check [--show-suggestions|-v] [--json] [--strict]
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--show-suggestions`, `-v` | Show per-item detail and how to address each concern. |
+| `--json` | Emit findings as JSON (always full detail). |
+| `--strict` | Exit non-zero if any warning fired (useful in CI / HPC job pre-checks). |
+
+See [Research Use & HPC](hpc.md) for guidance on diagnosing slow runs on clusters.
+
+---
+
+### `inspect` — Post-hoc Run Diagnosis
+
+Report-only diagnosis of a **completed run's** manifest. Surfaces the recorded
+I/O/RAM/load/filesystem signals, and — importantly — a **capture-completeness assessment**:
+what provenance was *not* captured (e.g. process-scope only, no subprocess/file-I/O record),
+why that limits insight, and how to capture more next time (with honest performance
+trade-offs). Prints a glaring banner when the inspecting host differs from where the run
+executed (e.g. HPC head node vs compute node), because live re-checks then reflect the
+wrong machine.
+
+Output is **terse by default** (a one-line summary + a nudge); use `--show-suggestions`
+for the full per-item detail, or `--json` for the complete structured findings.
+
+```bash
+pubrun inspect [RUN_DIR] [--show-suggestions|-v] [--json] [--strict] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE]
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `RUN_DIR` | Run directory to inspect. Defaults to the most recent matching run. |
+| `--show-suggestions`, `-v` | Expand into per-item findings + how to capture more (with perf caveats). |
+| `--json` | Emit the full findings as JSON. |
+| `--strict` | Exit non-zero if any warning fired. |
+| `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code` | Standard run selectors (which single run to inspect). |
+
+> **Honesty note:** pubrun does not patch `open()` or subprocess globally, so file-I/O and
+> subprocess provenance are recorded only when the script uses `pubrun.open()` /
+> `pubrun.subprocess`. `inspect` will not claim a feature was "off" when the manifest merely
+> shows no records unless it can determine this definitively.
+
+**Example:**
+```bash
+pubrun inspect                          # diagnose the most recent run
+pubrun inspect runs/pubrun-XYZ -v       # full detail for a specific run
+pubrun inspect -f train.py --json       # latest run matching "train.py", as JSON
 ```
 
 ---
@@ -454,4 +519,4 @@ pubrun --run-tests
 
 ---
 
-[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Performance](performance.md) | [Research Use](research-use.md) | [Changelog](../CHANGELOG.md)
+[README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Performance](performance.md) | [Research Use](research-use.md) | [HPC](hpc.md) | [Changelog](../CHANGELOG.md)

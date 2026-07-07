@@ -44,6 +44,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **`pubrun self-check` and `pubrun inspect` commands (environment & run diagnosis).**
+  `self-check` reports pubrun performance/config pitfalls on the current machine (network
+  filesystems backing the install/output/`$TMPDIR`, low RAM, high load) plus install health
+  (config validity, output-dir writability, `git` availability, Python version) — report-only.
+  `inspect` diagnoses a completed run's manifest: recorded I/O/RAM/load/filesystem signals, a
+  **capture-completeness assessment** (what provenance was NOT captured and how to capture more,
+  with honest performance trade-offs), and a glaring banner when the inspecting host differs
+  from where the run executed (HPC head-node vs compute-node). Both support
+  `--show-suggestions`/`-v` (terse by default), `--json`, and `--strict` (non-zero exit on any
+  warning). The findings logic is CLI-only and is **not** imported by `import pubrun`, so it
+  cannot affect a host script. New [HPC & performance diagnosis](docs/hpc.md) doc.
 - **Run-time I/O / environment capture (enables post-hoc diagnosis of NFS/contention).** A run now
   records the **filesystem type** of its output dir, run dir, and `$TMPDIR` (new `filesystem` manifest
   section) — flagging network filesystems (NFS/Lustre/GPFS/CIFS) that can silently inflate I/O on HPC
