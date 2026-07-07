@@ -47,6 +47,12 @@ duplicate of `show`, both filter-enabled — noted, not changed here.)
    the other commands use) instead of raw `scan_runs()`. Positional `run_dirs` continue to
    override filters when given (explicit beats filter). Preserve current default behavior
    exactly when no filter/positional is supplied (anti-regression).
+   - **Under-match error path (plan-review re-pass, MEDIUM — was unspecified).** `diff`
+     needs a PAIR. Define behavior when the filter yields <2 runs: **0 matches → clear
+     error** "no runs match `<filter>`" (exit non-zero); **1 match → clear error** "diff
+     needs two runs; only one matches `<filter>` (use positional run dirs or widen the
+     filter)" (exit non-zero). Never silently fall back to unfiltered runs (that would
+     violate the user's filter intent). A test covers 0-match and 1-match filters.
 2. **Resolve the `combined -f` collision — DECIDED (maintainer 2026-07-06): option (b),
    hard switch in 1.4.0.** Make `combined`'s `-f` mean `--filter` like every other command;
    the force flag becomes **`--force` long-only** (drop its `-f` short). This is a
@@ -84,6 +90,8 @@ duplicate of `show`, both filter-enabled — noted, not changed here.)
   forces, and there is no `-f` short for force. Regression test that `combined -f X`
   filters (does not force) — the intended behavior change.
 - `clean`: assert `-f` maps to `--filter`.
+- `diff` under-match: `-f` yielding 0 runs → non-zero exit + clear message; 1 run → non-zero
+  exit + "needs two" message; never silent unfiltered fallback.
 - CLI help for `diff`/`combined` reflects reality.
 - Full suite green (baseline 690 passed; known SIGPIPE flake excepted).
 
@@ -114,3 +122,8 @@ period), documented as a breaking change in the CHANGELOG (`[1.4.0]`). Note: pub
 already on PyPI, so the breaking note is required. `ui/tui/gui` pre-seed filter deferred.
 Anti-regression: `diff` no-arg behavior must be characterization-pinned. Standalone;
 smallest/lowest-risk of the five (aside from the intentional `combined` break).
+
+**Stricter re-pass (2026-07-06):** added the `diff` under-match error path (0/1 filtered
+runs → explicit non-zero error, never a silent unfiltered fallback) — previously
+unspecified. Confirmed freeing `-f` on `combined` collides with no other combined short
+flag (`-y/--yes`, `--dir`, `--output`, `-F` all clear).
