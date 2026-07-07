@@ -1,0 +1,15 @@
+id,severity,remediation_risk,remediation_risk_axis,persona,area,finding,evidence,proposed_action,disposition
+D1,High,Low,n/a,novice/engineer,Accuracy,"README claims ""fourteen commands""; there are 20 registered",README.md:166 vs python -m pubrun -h,De-brittle or state 20,propose
+D2,High,Low,n/a,novice/engineer,Accuracy,"docs/cli.md claims ""thirteen commands"" — wrong and self-contradictory (body documents 20)",docs/cli.md:5,De-brittle or state 20,propose
+D3,High,Low,n/a,novice/engineer,Accuracy,README documents removed command pubrun bug-report (now report-bug + feedback),README.md:168-172 vs __main__.py:1854;1860,Replace with report-bug + feedback sections,propose
+D4,Medium,Low,n/a,novice/engineer,Accuracy,README documents pubrun report; canonical command is show (report is hidden alias),README.md:213-217 vs __main__.py:2121;2068,Retitle to show; note report alias,propose
+D5,Medium,Low,n/a,novice/engineer,Accuracy,README documents pubrun resources; canonical are res/cpu/mem,README.md:225-229 vs __main__.py:2096;2225,Document res/cpu/mem; note resources alias,propose
+D6,High,Low,n/a,novice/engineer,Accuracy,"Roadmap ""Future"" lists pubrun combined which already ships",README.md:385 vs README.md:189;__main__.py:1963,Remove from Future or mark shipped,propose
+D7,High,Low,n/a,novice/engineer,Accuracy,"Roadmap ""Future"" lists timestamped console capture which already ships",README.md:384 vs capture/console.py:223;README.md:34,Remove from Future or mark shipped,propose
+D8,Medium,Low,n/a,engineer,Accuracy,"Roadmap ""Future"" lists GitHub Actions CI which already ships",README.md:380 vs .github/workflows/ci.yml,Remove from Future or mark shipped,propose
+D9,Medium,Low,n/a,novice,Completeness,README CLI section omits init/self-check/inspect/bench/report-bug/feedback/show/res/cpu/mem,README.md:164-265 vs -h,Add concise entries linking to docs/cli.md,propose
+D10,Medium,Low,n/a,novice,Consistency,Two separate top-level License sections in README,README.md:416-418 & 427-446,Consolidate to one License section,propose
+D11,Medium,Low,n/a,novice,Consistency,Two differing suggested-citation strings for the same software,README.md:395 & 443,Consolidate to one citation matching CITATION.cff,propose
+D12,Medium,Low,n/a,engineer,Navigation,CHANGELOG nav omits Performance and HPC links present in README nav,CHANGELOG.md:1;542 vs docs/performance.md;docs/hpc.md,Add Performance and HPC to CHANGELOG nav,propose
+D13,Low,Low,n/a,novice,Consistency,README footer nav placed mid-document before License/Attribution,README.md:422,Move footer nav to end of file,propose
+D14,Low,n/a,n/a,engineer,Navigation,docs/design/file-io-provenance-evaluation.md not linked from any nav,docs/design/file-io-provenance-evaluation.md,No change (judged intentional internal design note),no-op
