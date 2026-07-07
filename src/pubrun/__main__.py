@@ -366,17 +366,41 @@ def _run_rerun(
         sys.exit(1)
 
 
-def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_config: Optional[bool] = None, max_length: Optional[int] = None, depth: str = "basic", show_same: Optional[bool] = None) -> None:
-    """Run the semantic diff engine comparing two execution traces."""
+def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_config: Optional[bool] = None, max_length: Optional[int] = None, depth: str = "basic", show_same: Optional[bool] = None,
+              filter_str: Optional[str] = None, not_filter_str: Optional[str] = None,
+              status_filter: Optional[str] = None, not_status_filter: Optional[str] = None,
+              older_than: Optional[str] = None, exit_code: Optional[int] = None) -> None:
+    """Run the semantic diff engine comparing two execution traces.
+
+    When no positional run directories are given, the pair to compare is drawn from
+    the runs matching the shared filter options (``-f/-F/-s/-S/--older-than/--exit-code``);
+    with no filters this is every run with a manifest (the historical behavior).
+    """
     try:
         from pubrun.report.utils import hydrate_manifest
         from pubrun.config import resolve_config
         from pubrun.analysis.diff import compare_manifests, export_manifest
         from pubrun.analysis.render import print_diff
-        from pubrun.status import scan_runs, find_run
+        from pubrun.status import scan_runs, find_run, filter_runs
 
         all_runs = scan_runs()
         valid_runs = [r for r in all_runs if (r.run_dir / "manifest.json").exists()]
+
+        # Apply the shared run filters to narrow the candidate set used for
+        # auto-selection. Explicit positional run_dirs always win over filters.
+        has_filter = any(v is not None for v in (
+            filter_str, not_filter_str, status_filter, not_status_filter, older_than, exit_code
+        ))
+        if has_filter:
+            valid_runs = filter_runs(
+                valid_runs,
+                filter_str=filter_str,
+                status_filter=status_filter,
+                older_than=older_than,
+                exit_code=exit_code,
+                not_filter_str=not_filter_str,
+                not_status_filter=not_status_filter,
+            )
 
         if len(run_dirs) >= 2:
             run_dir_a = run_dirs[0]
@@ -394,15 +418,22 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
                     run_dir_b_path = r.run_dir
                     break
             if not run_dir_b_path:
-                _print_error("Only one run was provided, and no other runs with a manifest.json were found to compare against.")
+                if has_filter:
+                    _print_error("Only one run was provided, and no other runs matching the filter were found to compare against. Widen the filter or pass a second run directory.")
+                else:
+                    _print_error("Only one run was provided, and no other runs with a manifest.json were found to compare against.")
                 sys.exit(1)
 
             run_dir_b = str(run_dir_b_path)
             print(f"[*] Comparing {run_dir_a_path.name} against most recent other run: {run_dir_b_path.name}", file=sys.stderr)
         else:
-            # 0 runs provided: diff the last two runs (second most recent as baseline A, most recent as target B)
+            # 0 runs provided: diff the last two runs from the (optionally filtered)
+            # candidate set: second most recent as baseline A, most recent as target B.
             if len(valid_runs) < 2:
-                _print_error(f"Need at least 2 runs with manifest.json to perform default diff (found {len(valid_runs)}).")
+                if has_filter:
+                    _print_error(f"diff needs two runs, but only {len(valid_runs)} matched the filter. Widen the filter or pass two run directories explicitly.")
+                else:
+                    _print_error(f"Need at least 2 runs with manifest.json to perform default diff (found {len(valid_runs)}).")
                 sys.exit(1)
             run_dir_a = str(valid_runs[1].run_dir)
             run_dir_b = str(valid_runs[0].run_dir)
@@ -1284,7 +1315,10 @@ def main() -> None:
     combined_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
     combined_parser.add_argument("--output", type=str, default=None, metavar="FILE", help="Write combined logs to this file instead of stdout.")
     combined_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt for files > 250 MB.")
-    combined_parser.add_argument("-f", "--force", action="store_true", help="Force execution for files > 500 MB.")
+    # NOTE: as of 1.4.0, `-f` means `--filter` on `combined` (consistent with every other
+    # command); the force flag is `--force` (long-only). This is an intentional breaking
+    # change from prior releases where `combined -f` meant force. See CHANGELOG.
+    combined_parser.add_argument("--force", action="store_true", help="Force execution for files > 500 MB.")
     _add_run_filter_args(combined_parser)
 
     # ---------------- CPU Subparser ----------------
@@ -1328,6 +1362,7 @@ def main() -> None:
     diff_same = diff_parser.add_mutually_exclusive_group()
     diff_same.add_argument("--same", action="store_true", default=None, help="Show keys that are identical between both runs.")
     diff_same.add_argument("--no-same", action="store_false", dest="same", default=None, help="Hide keys that are identical between both runs.")
+    _add_run_filter_args(diff_parser, include_limit=False)
 
     # ---------------- Memory Subparser ----------------
     mem_parser = subparsers.add_parser(
@@ -1588,7 +1623,13 @@ def main() -> None:
             getattr(args, "wrap", None),
             getattr(args, "max_length", None),
             getattr(args, "depth", "basic"),
-            getattr(args, "same", None)
+            getattr(args, "same", None),
+            filter_str=getattr(args, "filter", None),
+            not_filter_str=getattr(args, "not_filter", None),
+            status_filter=getattr(args, "status", None),
+            not_status_filter=getattr(args, "not_status", None),
+            older_than=getattr(args, "older_than", None),
+            exit_code=getattr(args, "exit_code", None),
         )
         executed = True
 

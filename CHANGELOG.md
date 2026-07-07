@@ -9,6 +9,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **BREAKING (`pubrun combined`): `-f` now means `--filter`, not `--force`.** For CLI
+  consistency, `-f`/`--filter` on `combined` now filters runs (as it does on every other
+  command). The force-large-file flag is now **`--force`** (long form only). Scripts that
+  relied on `combined -f` to force must switch to `combined --force`.
+- **`pubrun diff` now accepts the standard run filters** (`-f`/`--filter`,
+  `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`).
+  When run directories are omitted, the auto-selected comparison pair is drawn from the
+  matching runs; if a filter matches fewer than two runs, `diff` errors clearly instead of
+  ignoring the filter. Behavior with no filters and no run directories is unchanged (still
+  compares the two most recent runs).
 - **License changed from BSD-3-Clause to Apache-2.0.** Now licensed under the Apache License 2.0
   (see `LICENSE` and the new `NOTICE`). Apache-2.0 requires redistributions and derivative works to
   retain the `NOTICE` file and display its attribution reasonably prominently ("Based on the original

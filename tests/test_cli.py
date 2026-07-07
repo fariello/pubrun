@@ -499,6 +499,49 @@ class TestCliDiff:
         assert result.returncode != 0
         assert "need at least 2 runs" in result.stderr.lower()
 
+    def test_diff_help_has_filter_flags(self):
+        """diff now exposes the standard run filters (-f/-F)."""
+        result = run_pubrun("diff", "--help")
+        assert result.returncode == 0
+        assert "--filter" in result.stdout and "--not-filter" in result.stdout
+
+    def test_diff_filter_matching_selects_pair(self, two_runs, tmp_path):
+        """-f matching all runs still auto-selects the two most recent."""
+        # `.` is a regex that matches every run (any run_id char), so the pair is
+        # still found and auto-selected — proving the filter plumbing keeps >=2 runs.
+        result = run_pubrun("diff", "-f", ".", cwd=str(tmp_path))
+        assert result.returncode == 0
+        assert "auto-detected" in result.stderr.lower()
+
+    def test_diff_filter_zero_match_errors(self, two_runs, tmp_path):
+        """-f matching no runs errors clearly, never a silent unfiltered fallback."""
+        result = run_pubrun("diff", "-f", "zzz_no_such_run_xyz", cwd=str(tmp_path))
+        assert result.returncode != 0
+        assert "filter" in result.stderr.lower()
+        # must NOT have fallen back to the unfiltered auto-detect pair
+        assert "auto-detected" not in result.stderr.lower()
+
+
+class TestCliFilterFlagConsistency:
+    """1.4.0: `-f` means `--filter` on every filter-capable command, including the
+    breaking change on `combined` (was `--force`)."""
+
+    def test_combined_f_is_filter_not_force(self):
+        """BREAKING (1.4.0): combined -f is now --filter; force is --force (long-only)."""
+        result = run_pubrun("combined", "--help")
+        assert result.returncode == 0
+        out = result.stdout
+        # -f maps to --filter now...
+        assert "-f, --filter" in out
+        # ...and force is long-only (no "-f, --force").
+        assert "--force" in out
+        assert "-f, --force" not in out
+
+    def test_clean_f_is_filter(self):
+        """clean has no pre-existing -f, so -f must map to --filter."""
+        result = run_pubrun("clean", "--help")
+        assert result.returncode == 0
+        assert "-f, --filter" in result.stdout
 
 
 class TestCliRunTests:
