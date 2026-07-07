@@ -166,3 +166,52 @@ class TestBenchCLI:
         finally:
             results.unlink(missing_ok=True)
             redacted.unlink(missing_ok=True)
+
+
+class TestIoBaselineScenarios:
+    """IPD (2026-07-07): /dev/null + /dev/shm + tmpdir ground-truth I/O baselines."""
+
+    def _scenarios(self):
+        import importlib.util
+        path = _REPO / "benchmarks" / "scenarios.py"
+        spec = importlib.util.spec_from_file_location("_bench_scenarios", path)
+        mod = importlib.util.module_from_spec(spec)
+        # Register before exec so the @dataclass decorator can resolve cls.__module__
+        # (Python 3.12+ dataclasses look up sys.modules[cls.__module__] during processing).
+        sys.modules[spec.name] = mod
+        spec.loader.exec_module(mod)
+        return mod.all_scenarios()
+
+    def test_io_baseline_scenarios_registered(self):
+        names = {s.name for s in self._scenarios()}
+        assert {"io-baseline-devnull", "io-baseline-devshm", "io-baseline-tmpdir"} <= names
+
+    def test_devnull_targets_null_device(self):
+        s = next(s for s in self._scenarios() if s.name == "io-baseline-devnull")
+        assert s.env.get("PUBRUN_BENCH_IO_TARGET") in ("/dev/null", "NUL")
+        assert s.group == "io_baseline"
+
+    def test_devshm_skips_when_unavailable(self):
+        s = next(s for s in self._scenarios() if s.name == "io-baseline-devshm")
+        reason = s.skip_if() if s.skip_if else None
+        # On Linux with /dev/shm writable -> not skipped; elsewhere -> a skip reason string.
+        if sys.platform.startswith("linux") and os.path.isdir("/dev/shm") and os.access("/dev/shm", os.W_OK):
+            assert reason is None
+        else:
+            assert isinstance(reason, str) and reason
+
+    def test_io_sink_workload_null_and_tmpdir(self, tmp_path):
+        """The io_sink workload handles both a null sink (write-only) and a dir target."""
+        import importlib.util
+        path = _REPO / "benchmarks" / "workloads" / "io_sink.py"
+        spec = importlib.util.spec_from_file_location("_io_sink", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        null = "NUL" if os.name == "nt" else "/dev/null"
+        os.environ["PUBRUN_BENCH_IO_TARGET"] = null
+        try:
+            assert mod._work() > 0  # write-only sink returns payload size
+            os.environ["PUBRUN_BENCH_IO_TARGET"] = str(tmp_path)
+            assert mod._work() > 0  # dir target writes + reads back
+        finally:
+            os.environ.pop("PUBRUN_BENCH_IO_TARGET", None)

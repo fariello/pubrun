@@ -32,6 +32,8 @@ class Scenario:
     workload: str
     config: Dict = field(default_factory=dict)
     skip_if: Optional[Callable[[], Optional[str]]] = None
+    # Extra environment variables for the child process (e.g. a workload's target path).
+    env: Dict = field(default_factory=dict)
 
     @property
     def is_baseline(self) -> bool:
@@ -109,4 +111,23 @@ def all_scenarios() -> List[Scenario]:
     S.append(Scenario("hotpath-print-tee", "hotpath", "auto", "print_loop.py",
                        config=_off_plus({"console": {"capture_mode": "standard"}})))
 
+    # --- Group 4: ground-truth I/O baselines (reference floors, not overhead pairs) ---
+    # /dev/null: write-only sink; isolates the open()/write path from any storage.
+    _null = "NUL" if sys.platform == "win32" else "/dev/null"
+    S.append(Scenario("io-baseline-devnull", "io_baseline", "baseline", "io_sink.py",
+                      env={"PUBRUN_BENCH_IO_TARGET": _null}))
+    # /dev/shm: RAM-backed tmpfs floor (Linux). Skipped where /dev/shm is unavailable.
+    S.append(Scenario("io-baseline-devshm", "io_baseline", "baseline", "io_sink.py",
+                      env={"PUBRUN_BENCH_IO_TARGET": "/dev/shm"},
+                      skip_if=lambda: None if (sys.platform.startswith("linux")
+                                               and _dir_writable("/dev/shm"))
+                              else "/dev/shm not available on this platform"))
+    # $TMPDIR: the default temp filesystem, for direct comparison against the floors above.
+    S.append(Scenario("io-baseline-tmpdir", "io_baseline", "baseline", "io_sink.py"))
+
     return S
+
+
+def _dir_writable(path: str) -> bool:
+    import os
+    return os.path.isdir(path) and os.access(path, os.W_OK)

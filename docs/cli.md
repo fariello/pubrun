@@ -32,15 +32,20 @@ After init, add `import pubrun` to your script to begin tracking.
 
 ---
 
-### `bug-report` — Feature Request or Bug Reporter
+### `report-bug` / `feedback` — Report a Bug or Send Feedback
 
-Opens the GitHub issue tracker in your default browser and displays system configuration telemetry in the console for easy copying and pasting.
+Two commands (same behavior): open the GitHub issue tracker in your default browser and
+print system-configuration telemetry to the console for easy copy-paste. `report-bug` is
+for bug reports / feature requests; `feedback` is for general feedback — both land as GitHub
+issues.
 
 ```bash
-pubrun bug-report
+pubrun report-bug
+pubrun feedback
 ```
 
-**Aliases:** `feedback`, `issue`
+> **Changed in 1.4.0:** the old `bug-report` command (and its `issue` alias) were renamed to
+> `report-bug`; `feedback` is now its own command rather than an alias.
 
 ---
 
@@ -348,9 +353,19 @@ pubrun rerun ./runs/pubrun-A | bash
 
 ---
 
-### `res` — Resource Monitoring Graphs
+### `res` — Resource Monitoring (comprehensive)
 
-Renders ASCII or Unicode graphs in the terminal showing CPU and memory utilization history over the execution lifecycle of a specific run.
+Renders a **comprehensive** resource summary for a run plus CPU and memory utilization
+graphs. Unlike `cpu`/`mem` (which focus on a single metric), `res` surfaces **all** captured
+resource signals, each shown only when present in the manifest:
+
+- main-process peak/end RSS and peak CPU%,
+- **process-tree** peak RSS (when the run used `[capture.resources].scope = "tree"`),
+- **system memory** — available RAM at start and the lowest point during the run,
+- **load average** (start and 1-min peak),
+- **node iowait** (labeled *node-wide, indicative only* — a whole-node hint, not run-scoped),
+- **per-process I/O volume** — bytes read/written (storage layer and logical), from
+  `/proc/self/io` (Linux).
 
 ```bash
 pubrun res [RUN_DIR] [-w WIDTH] [-l LAST] [--average]
@@ -358,8 +373,9 @@ pubrun res [RUN_DIR] [-w WIDTH] [-l LAST] [--average]
 
 - If `RUN_DIR` is omitted, automatically uses the most recent run in `./runs/`.
 - Parses resource_sample events from `events.jsonl` to render utilization timelines.
+- Older runs (before these fields were captured) simply show fewer lines — no error.
 
-The `cpu` and `mem` commands show individual charts; `res` shows both.
+The `cpu` and `mem` commands show a single focused chart; `res` shows the full picture.
 
 **Example:**
 ```bash

@@ -573,8 +573,9 @@ class TestCliNoCommand:
 
 class TestCliBugReport:
 
-    def test_bug_report_opens_browser_and_prints_diagnostics(self, monkeypatch, capsys):
-        """Test bug-report command outputs diagnostics and opens GitHub URL."""
+    @pytest.mark.parametrize("cmd", ["report-bug", "feedback"])
+    def test_report_bug_and_feedback_open_browser_and_print_diagnostics(self, cmd, monkeypatch, capsys):
+        """report-bug and feedback both print diagnostics and open the GitHub issues URL."""
         import webbrowser
         import sys
         from pubrun.__main__ import main
@@ -587,7 +588,7 @@ class TestCliBugReport:
             return True
 
         monkeypatch.setattr(webbrowser, "open", mock_open)
-        monkeypatch.setattr(sys, "argv", ["pubrun", "bug-report"])
+        monkeypatch.setattr(sys, "argv", ["pubrun", cmd])
 
         try:
             main()
@@ -596,11 +597,16 @@ class TestCliBugReport:
 
         captured = capsys.readouterr()
         stdout_lower = captured.out.lower()
-        assert "bug & feature reporting" in stdout_lower
         assert "python version" in stdout_lower
         assert "platform" in stdout_lower
         assert "github.com/fariello/pubrun/issues/new" in captured.out
         assert browser_opened_url == "https://github.com/fariello/pubrun/issues/new"
+
+    @pytest.mark.parametrize("old", ["bug-report", "issue"])
+    def test_old_bugreport_names_are_gone(self, old):
+        """The pre-1.4.0 names bug-report/issue were removed (hard rename)."""
+        result = run_pubrun(old)
+        assert result.returncode != 0  # argparse invalid-choice
 
 
 class TestCliSubcommandErrors:

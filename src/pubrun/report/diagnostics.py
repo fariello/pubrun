@@ -669,6 +669,74 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
     if metric in ("cpu", "all") and peak_cpu is not None:
         print(f"{cyan}Peak CPU{rst}    : {peak_cpu}%")
 
+    # Comprehensive resource view (only for `pubrun res`; cpu/mem stay single-metric).
+    # Each field is rendered only when present, so older manifests just show less.
+    if metric == "all":
+        def _fmt_bytes(n):
+            try:
+                n = float(n)
+            except (TypeError, ValueError):
+                return None
+            if n >= 1024**3:
+                return f"{n / (1024**3):.2f} GB"
+            if n >= 1024**2:
+                return f"{n / (1024**2):.2f} MB"
+            return f"{n / 1024:.2f} KB"
+
+        # Process-tree RSS (when scope=tree).
+        peak_tree = resources.get("peak_tree_rss_bytes")
+        if peak_tree:
+            print(f"{cyan}Peak Tree RSS{rst} : {_fmt_bytes(peak_tree)} (process tree)")
+
+        # System memory (free/available) at start and worst point.
+        sysmem = resources.get("system_memory")
+        if isinstance(sysmem, dict):
+            start = sysmem.get("start") or {}
+            worst = sysmem.get("min_available") or {}
+            avail = start.get("available_bytes")
+            total = start.get("total_bytes")
+            if avail is not None and total:
+                print(f"{cyan}System RAM{rst}   : {_fmt_bytes(avail)} available of "
+                      f"{_fmt_bytes(total)} at start")
+            worst_avail = worst.get("available_bytes")
+            if worst_avail is not None:
+                print(f"{cyan}Min Avail RAM{rst}: {_fmt_bytes(worst_avail)} (lowest during run)")
+
+        # Load average (start / max 1-min).
+        load = resources.get("load_average")
+        if isinstance(load, dict):
+            start_l = (load.get("start") or {}).get("1min")
+            max_l = load.get("max_1min")
+            parts = []
+            if start_l is not None:
+                parts.append(f"{start_l:.2f} at start")
+            if max_l is not None:
+                parts.append(f"{max_l:.2f} peak (1-min)")
+            if parts:
+                print(f"{cyan}Load Average{rst} : {', '.join(parts)}")
+
+        # Node iowait (labeled node-wide / indicative only).
+        iowait = resources.get("system_iowait_pct")
+        if isinstance(iowait, dict):
+            mx = iowait.get("max")
+            if mx is not None:
+                print(f"{cyan}Node iowait{rst}  : {mx}% peak {yellow}(node-wide, indicative only){rst}")
+
+        # Per-process I/O byte volume (this run), from /proc/self/io.
+        io = resources.get("io_counters")
+        if isinstance(io, dict):
+            delta = io.get("delta") or {}
+            rb = delta.get("read_bytes")
+            wb = delta.get("write_bytes")
+            rc = delta.get("rchar")
+            wc = delta.get("wchar")
+            if rb is not None or wb is not None:
+                print(f"{cyan}Disk I/O{rst}     : read {_fmt_bytes(rb or 0)}, "
+                      f"wrote {_fmt_bytes(wb or 0)} (storage layer)")
+            if rc is not None or wc is not None:
+                print(f"{cyan}Logical I/O{rst}  : read {_fmt_bytes(rc or 0)}, "
+                      f"wrote {_fmt_bytes(wc or 0)} (incl. cache)")
+
     events_path = Path(manifest_path).parent / "events.jsonl"
     if not events_path.exists():
         print(f"\n{yellow}No events.jsonl file found. Cannot generate utilization graphs.{rst}\n")
