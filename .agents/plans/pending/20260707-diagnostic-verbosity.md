@@ -76,12 +76,13 @@ subsumes them (sequence D after B, or share the helper).
 
 ## Open questions
 
-1. Default verbosity: make itemized the DEFAULT (my lean, per your request) with `--quiet` for
-   the old one-liner, or keep terse default and add `--verbose`? (Leaning: itemized default +
-   `--quiet`, since you said "just OK is not good UX".)
-2. Show passed checks always, or only with `--show-suggestions`? (Leaning: always show the
-   one-line-per-check outcomes; `--show-suggestions` adds the remediation detail underneath.)
-3. Timing granularity: total only, or per-check? (Leaning: total + per-check only in `--json`.)
+1. **Default verbosity — RESOLVED (maintainer 2026-07-07):** itemized is the DEFAULT (one line
+   per check with an outcome + a total-time line); `--quiet`/`-q` restores the single-line
+   verdict (for scripts/CI); `--show-suggestions` adds remediation detail.
+2. **Show passed checks — RESOLVED (maintainer 2026-07-07):** ALWAYS show one line per check
+   (pass or fail); `--show-suggestions` adds the remediation detail beneath WARN/INFO items.
+3. Timing granularity: total only, or per-check? (Leaning: total in the human view + per-check
+   only in `--json`. Confirm at execution — minor.)
 
 ## Approval and execution gate
 
