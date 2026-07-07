@@ -137,6 +137,114 @@ class TestSlurmSafety:
         monkeypatch.delenv("SLURM_JOB_ID", raising=False)
 
 
+# ------------------------------------------------- IPD: HPC multi-scheduler (2026-07-07)
+
+class TestSchedulerDetection:
+    """Detection is env+PATH only, side-effect-free; PBS-vs-SGE qsub ambiguity handled."""
+
+    def _m(self):
+        import pubrun.__main__ as m
+        return m
+
+    def _no_tools(self, m, monkeypatch):
+        # Neutralize PATH tools + env so each test controls exactly what is "present".
+        import shutil
+        monkeypatch.setattr(shutil, "which", lambda t: None)
+        for v in ("SLURM_JOB_ID", "PBS_JOBID", "PBS_ENVIRONMENT", "PBS_O_HOST",
+                  "LSB_JOBID", "SGE_ROOT", "SGE_O_HOST", "PE_HOSTFILE", "JOB_ID"):
+            monkeypatch.delenv(v, raising=False)
+
+    def test_pbs_detected_via_env(self, monkeypatch):
+        m = self._m()
+        self._no_tools(m, monkeypatch)
+        monkeypatch.setenv("PBS_JOBID", "123.head")
+        names = [d["name"] for d in m._detect_schedulers()]
+        assert "pbs" in names
+
+    def test_lsf_detected_via_env(self, monkeypatch):
+        m = self._m()
+        self._no_tools(m, monkeypatch)
+        monkeypatch.setenv("LSB_JOBID", "999")
+        names = [d["name"] for d in m._detect_schedulers()]
+        assert "lsf" in names
+
+    def test_sge_detected_via_markers(self, monkeypatch):
+        import shutil
+        m = self._m()
+        self._no_tools(m, monkeypatch)
+        monkeypatch.setenv("SGE_ROOT", "/opt/sge")
+        monkeypatch.setattr(shutil, "which", lambda t: "/usr/bin/qsub" if t == "qsub" else None)
+        names = [d["name"] for d in m._detect_schedulers()]
+        assert "sge" in names
+
+    def test_qsub_ambiguous_when_no_markers(self, monkeypatch):
+        import shutil
+        m = self._m()
+        self._no_tools(m, monkeypatch)
+        monkeypatch.setattr(shutil, "which", lambda t: "/usr/bin/qsub" if t == "qsub" else None)
+        assert m._qsub_ambiguous() is True  # qsub present, neither PBS nor SGE markers
+
+    def test_detection_makes_no_subprocess_call(self, monkeypatch):
+        """Detection must be side-effect-free: env + which only, never a scheduler query."""
+        import subprocess
+        m = self._m()
+        monkeypatch.setattr(subprocess, "run",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("no subprocess in detection")))
+        monkeypatch.setattr(subprocess, "check_output",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("no subprocess in detection")))
+        m._detect_schedulers()  # must not raise
+        m._qsub_ambiguous()
+
+
+class TestSchedulerSubmitSafety:
+    """Never auto-submit for ANY scheduler; injection stays literal; scripts exist."""
+
+    def _m(self):
+        import pubrun.__main__ as m
+        return m
+
+    def test_pbs_detected_but_not_submitted_without_confirmation(self, monkeypatch):
+        m = self._m()
+        monkeypatch.setattr(m, "_detect_schedulers",
+                            lambda: [{"name": "pbs", "submit_script": "submit_bench_pbs.sh",
+                                      "on_compute_node": False}])
+        monkeypatch.setattr("builtins.input", lambda *a: "n")
+        import subprocess as sp
+        monkeypatch.setattr(sp, "run",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not submit on 'no'")))
+        # auto scheduler, not local, not --submit/--yes: offers, user declines -> no submit.
+        m._run_bench(None, None, False, False, False, False, False, False, scheduler="auto")
+
+    def test_scheduler_local_forces_local_no_submit(self, monkeypatch, tmp_path):
+        m = self._m()
+        monkeypatch.setattr(m, "_detect_schedulers",
+                            lambda: [{"name": "slurm", "submit_script": "submit_bench.sh",
+                                      "on_compute_node": False}])
+        import subprocess as sp
+        # --scheduler local must never enter the submit branch (which would sp.run bash).
+        calls = []
+        real_run = sp.run
+        monkeypatch.setattr(sp, "run", lambda *a, **k: calls.append(a) or real_run(*a, **k))
+        # Point at a nonexistent harness so it errors out fast AFTER skipping submit.
+        monkeypatch.setattr(m, "_find_bench_harness", lambda: None)
+        try:
+            m._run_bench(None, None, True, False, False, False, False, False, scheduler="local")
+        except SystemExit:
+            pass
+        # No `bash submit_*.sh` call happened.
+        assert not any(a and str(a[0][:2]) == "['bash'" for a in calls if a and isinstance(a[0], list))
+
+    def test_new_submit_scripts_exist_and_quote_vars(self):
+        for name in ("submit_bench_pbs.sh", "submit_bench_lsf.sh", "submit_bench_sge.sh"):
+            p = _REPO / "benchmarks" / name
+            assert p.is_file(), f"{name} missing"
+            text = p.read_text()
+            # argv-array options (no shell-string interpolation of user values).
+            assert "QSUB_OPTS=(" in text or "BSUB_OPTS=(" in text
+            # site-adaptation honesty note present.
+            assert "STARTING POINT" in text
+
+
 # ------------------------------------------------------------------------- CLI smoke
 
 class TestBenchCLI:

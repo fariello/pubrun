@@ -209,6 +209,57 @@ silently.
 Proposal only; human approval required; NOT auto-executed. Recommended: run `plan-review`.
 On completion move to `.agents/plans/executed/`.
 
+## Execution record (2026-07-07)
+
+Executed by opencode after human approval (third of the three 2026-07-07 IPDs; after
+submission `2b207bc` and data-quality `5a80864`).
+
+- **H2 gate honored:** the existing Slurm characterization tests (`TestSlurmSafety`) were
+  confirmed green BEFORE and AFTER the refactor. `_slurm_available()`/`_on_compute_node()`
+  are kept verbatim (they are the Slurm descriptor's detect functions), so those tests pass
+  unchanged.
+- **Item 1 — scheduler abstraction (`__main__.py`):** `_detect_schedulers()` returns
+  descriptors in precedence order **Slurm > PBS > LSF > SGE** (env + `shutil.which` only; no
+  scheduler query, no network). `_pbs_markers()`/`_sge_markers()` disambiguate the shared
+  `qsub`; `_qsub_ambiguous()` flags the undecidable case.
+- **Item 2 — dispatch + `--scheduler` (`__main__.py`):** `_run_bench` gained `scheduler=`
+  (`auto|slurm|pbs|lsf|sge|local`). `auto` picks the first detected (reporting all when >1,
+  and the qsub-ambiguity note); an explicit value forces one; `local` forces a local run. The
+  Slurm flow is byte-for-byte the prior behavior (same prompt/consent). Argv-list submit, never
+  `shell=True`; `--gh-repo` charset guard unchanged.
+- **Item 3 — batch scripts (`benchmarks/`):** `submit_bench_pbs.sh`, `submit_bench_lsf.sh`,
+  `submit_bench_sge.sh` mirror `submit_bench.sh` — submit to the default queue and let the
+  scheduler place the job (HPC-OQ2), qsub/bsub options built as argv arrays (no unquoted
+  word-splitting of user values), site knobs via `PUBRUN_QUEUE`/`PUBRUN_ACCOUNT`/
+  `PUBRUN_PROJECT`/`PUBRUN_PE`. Each is `chmod +x` and header-labeled "STARTING POINT — adapt
+  to your site; not CI-validated".
+- **Item 4 — self-check nudge (`report/checks.py`):** `_hpc_login_node_findings()` emits an
+  **INFO** (not WARN) `hpc_login_node` finding when a scheduler's submit tool is on PATH but
+  we are not inside an allocation. INFO by design so `self-check --strict` is not tripped on
+  every login node (verified `checks.py:788/842` gate on WARN only).
+- **Tests (+12, green):** per-scheduler detection (PBS/LSF/SGE via env+markers), qsub
+  PBS-vs-SGE ambiguity, detection makes **no** subprocess call (side-effect-free), PBS
+  detected-but-not-submitted-on-"no", `--scheduler local` never enters the submit branch, the
+  new scripts exist + use argv-array options + carry the STARTING POINT note, and the
+  self-check login-node nudge is INFO / absent on a compute node / absent with no scheduler.
+  Slurm characterization tests unchanged.
+- **Docs:** `CHANGELOG.md`, `docs/cli.md` (`--scheduler` + multi-scheduler paragraph),
+  `docs/hpc.md` (multi-scheduler + compute-node→login-node submit + self-check nudge),
+  `benchmarks/README.md` (per-scheduler scripts + site-adaptation caveat).
+- **Validation:** full suite **798 passed / 2 skipped / 1 failed** — the lone failure is the
+  known SIGPIPE flake (passes in isolation, verified). Only the 4 pre-existing benign LSP
+  warnings remain.
+
+### Deferred / notes (unchanged from OQ resolutions)
+
+- Site-adaptation depth (OQ1): minimal adaptable scripts now; `--account`/`--queue`/
+  `--walltime` passthrough and a `[bench.hpc]` config block are a possible fast-follow.
+- Node selection (OQ2): default-queue placement; the Slurm random-idle-node trick stays
+  Slurm-only.
+- PBS/LSF/SGE scripts are NOT validated against live clusters (no such clusters in CI); the
+  detection + argv construction + consent + shell-safety ARE tested. Honest boundary
+  documented.
+
 ## Plan-review record (2026-07-07)
 
 Reviewed via `.agents/workflows/plan-review/plan-review.md`. Verified: the Slurm seam

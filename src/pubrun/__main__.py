@@ -887,6 +887,67 @@ def _on_compute_node() -> bool:
     return bool(os.environ.get("SLURM_JOB_ID"))
 
 
+# --- HPC scheduler abstraction (Slurm/PBS/LSF/SGE) -----------------------------------
+#
+# Detection is best-effort, cheap, and side-effect-free: env vars + `shutil.which` only.
+# No scheduler is QUERIED at detection time (querying, e.g. `sinfo`, happens only inside a
+# submit script AFTER the user confirms), and no network call is made. Submission always
+# uses an argv list, never shell=True; forwarded values are charset-validated. Nothing here
+# runs on the `import pubrun` path — it is reached only via `pubrun bench`.
+
+def _pbs_markers() -> bool:
+    """PBS/Torque/OpenPBS markers (distinct from SGE, which also uses `qsub`)."""
+    import shutil as _sh
+    return bool(os.environ.get("PBS_JOBID") or os.environ.get("PBS_ENVIRONMENT")
+                or os.environ.get("PBS_O_HOST") or _sh.which("pbsnodes"))
+
+
+def _sge_markers() -> bool:
+    """SGE / Grid Engine markers (distinct from PBS, which also uses `qsub`)."""
+    import shutil as _sh
+    return bool(os.environ.get("SGE_ROOT") or os.environ.get("SGE_O_HOST")
+                or os.environ.get("PE_HOSTFILE") or _sh.which("qhost"))
+
+
+def _detect_schedulers():
+    """Return a list of detected scheduler descriptors, in precedence order
+    (Slurm > PBS > LSF > SGE). Each descriptor is a dict:
+        {name, submit_bin, submit_script, on_compute_node: bool}
+    Cheap + side-effect-free (env + which); never queries a scheduler or the network.
+    """
+    import shutil as _sh
+    found = []
+    # Slurm (first, for back-compat). Reuses the existing helpers verbatim.
+    if _slurm_available():
+        found.append({"name": "slurm", "submit_bin": "sbatch",
+                      "submit_script": "submit_bench.sh",
+                      "on_compute_node": _on_compute_node()})
+    # PBS/Torque and SGE both use `qsub`; disambiguate by markers.
+    has_qsub = bool(_sh.which("qsub"))
+    pbs = _pbs_markers()
+    sge = _sge_markers()
+    if (has_qsub and pbs) or os.environ.get("PBS_JOBID"):
+        found.append({"name": "pbs", "submit_bin": "qsub",
+                      "submit_script": "submit_bench_pbs.sh",
+                      "on_compute_node": bool(os.environ.get("PBS_JOBID"))})
+    # LSF.
+    if _sh.which("bsub") or os.environ.get("LSB_JOBID"):
+        found.append({"name": "lsf", "submit_bin": "bsub",
+                      "submit_script": "submit_bench_lsf.sh",
+                      "on_compute_node": bool(os.environ.get("LSB_JOBID"))})
+    if (has_qsub and sge) or os.environ.get("JOB_ID"):
+        found.append({"name": "sge", "submit_bin": "qsub",
+                      "submit_script": "submit_bench_sge.sh",
+                      "on_compute_node": bool(os.environ.get("PE_HOSTFILE") or os.environ.get("JOB_ID"))})
+    return found
+
+
+def _qsub_ambiguous() -> bool:
+    """True when `qsub` is present but neither PBS nor SGE markers disambiguate it."""
+    import shutil as _sh
+    return bool(_sh.which("qsub")) and not _pbs_markers() and not _sge_markers()
+
+
 _DEFAULT_BENCH_REPO = "fariello/pubrun-benchmarks"
 
 # Sensitive keys that a properly-redacted benchmark result must NOT expose as raw strings.
@@ -1163,9 +1224,10 @@ def _print_share_guidance(results_path, redacted_path) -> None:
 
 def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact,
                submit_file=None, submit_method=None, gh_repo=None, gh_token=None,
-               print_submission=False, no_submit=False) -> None:
-    """Friendly front-end over benchmarks/harness.py with optional Slurm submission and
-    consent-gated result submission to the public pubrun-benchmarks repo."""
+               print_submission=False, no_submit=False, scheduler="auto") -> None:
+    """Friendly front-end over benchmarks/harness.py with optional HPC scheduler submission
+    (Slurm/PBS/LSF/SGE) and consent-gated result submission to the public pubrun-benchmarks
+    repo."""
     repo = gh_repo or _DEFAULT_BENCH_REPO
     if not _GH_REPO_RE.match(repo):
         _print_error(f"Invalid --gh-repo {repo!r}; expected OWNER/NAME.")
@@ -1208,15 +1270,42 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact
         sys.exit(1)
     repo_root = harness.parents[1]
 
-    # --- HPC (Slurm) path ---
-    want_submit = submit or (not local and _slurm_available() and not _on_compute_node())
-    if want_submit:
-        submit_script = repo_root / "benchmarks" / "submit_bench.sh"
+    # --- HPC scheduler submission path (Slurm/PBS/LSF/SGE) ---
+    # Pick the scheduler: an explicit --scheduler wins; else auto-detect (Slurm first).
+    chosen: Optional[dict] = None
+    if scheduler and scheduler not in ("auto", "local"):
+        _scripts = {"slurm": "submit_bench.sh", "pbs": "submit_bench_pbs.sh",
+                    "lsf": "submit_bench_lsf.sh", "sge": "submit_bench_sge.sh"}
+        chosen = {"name": scheduler, "submit_script": _scripts.get(scheduler, "submit_bench.sh")}
+        # An explicitly named scheduler is treated as "not on a compute node" unless its env
+        # says otherwise (the user asked to submit).
+        detected = {d["name"]: d for d in _detect_schedulers()}
+        chosen["on_compute_node"] = bool(
+            detected.get(scheduler, {}).get("on_compute_node", False))
+    elif scheduler == "local":
+        chosen = None
+    else:  # auto
+        detected = _detect_schedulers()
+        if detected:
+            if len(detected) > 1:
+                names = ", ".join(d["name"] for d in detected)
+                print(f"Multiple schedulers detected ({names}); using '{detected[0]['name']}'. "
+                      f"Override with --scheduler.", file=sys.stderr)
+            elif _qsub_ambiguous() and detected[0]["name"] in ("pbs", "sge"):
+                print("`qsub` is present but PBS-vs-SGE could not be determined from the "
+                      "environment. Re-run with --scheduler pbs|sge to choose.", file=sys.stderr)
+            chosen = detected[0]
+
+    want_submit = (submit or (not local and chosen is not None and not chosen.get("on_compute_node"))) \
+        and scheduler != "local"
+    if want_submit and chosen is not None:
+        submit_script = repo_root / "benchmarks" / chosen["submit_script"]
         if not submit_script.is_file():
-            _print_error(f"Slurm detected but {submit_script} is missing; re-run with --local.")
+            _print_error(f"{chosen['name']} detected but {submit_script} is missing; "
+                         f"re-run with --local.")
             sys.exit(1)
         # Build the exact command; pass args as discrete argv (never shell=True) so
-        # partition/args cannot inject. submit_bench.sh reads PUBRUN_* env vars.
+        # partition/args cannot inject. The submit script reads PUBRUN_* env vars.
         extra = []
         if quick:
             extra.append("--quick")
@@ -1225,10 +1314,11 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact
         if passes:
             extra += ["--passes", str(int(passes))]
         cmd = ["bash", str(submit_script)] + extra
-        print(f"Slurm detected. Submission command:\n  {' '.join(cmd)}", file=sys.stderr)
+        label = chosen["name"].upper() if chosen["name"] != "slurm" else "Slurm"
+        print(f"{label} detected. Submission command:\n  {' '.join(cmd)}", file=sys.stderr)
         if not (submit or yes):
             try:
-                resp = input("Submit this benchmark job to Slurm? [y/N] ").strip().lower()
+                resp = input(f"Submit this benchmark job to {label}? [y/N] ").strip().lower()
             except (EOFError, KeyboardInterrupt):
                 resp = ""
             if resp not in ("y", "yes"):
@@ -1927,8 +2017,10 @@ def main() -> None:
     bench_parser.add_argument("--iterations", type=int, default=None, help="Override iterations per scenario (takes precedence over --quick/--full).")
     bench_parser.add_argument("--passes", type=int, default=None, help="Number of full scenario sweeps (default 2).")
     bench_group = bench_parser.add_mutually_exclusive_group()
-    bench_group.add_argument("--local", action="store_true", help="Run here even if Slurm is detected.")
-    bench_group.add_argument("--submit", action="store_true", help="Submit to Slurm (no prompt); off HPC, contribute the result without prompting.")
+    bench_group.add_argument("--local", action="store_true", help="Run here even if an HPC scheduler is detected.")
+    bench_group.add_argument("--submit", action="store_true", help="Submit to the detected scheduler (no prompt); off HPC, contribute the result without prompting.")
+    bench_parser.add_argument("--scheduler", choices=("auto", "slurm", "pbs", "lsf", "sge", "local"),
+                              default="auto", help="HPC scheduler to submit to (default: auto-detect; 'local' forces a local run).")
     bench_parser.add_argument("-y", "--yes", action="store_true", help="Assume yes to the submit/contribute prompt.")
     bench_parser.add_argument("--no-redact", action="store_true", help="Do NOT write a redacted share copy (full detail only).")
     bench_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit the result/redacted paths as JSON.")
@@ -2337,6 +2429,7 @@ def main() -> None:
             gh_token=getattr(args, "gh_token", None),
             print_submission=getattr(args, "print_submission", False),
             no_submit=getattr(args, "no_submit", False),
+            scheduler=getattr(args, "scheduler", "auto"),
         )
         executed = True
 

@@ -89,6 +89,33 @@ class TestLiveFsHealthFindings:
         assert checks._live_fs_health_findings(fs_data) == []
 
 
+class TestHpcLoginNodeNudge:
+    """self-check nudges toward compute-node benchmarking on an HPC login node (INFO)."""
+
+    def test_login_node_emits_info_not_warn(self, monkeypatch):
+        import shutil
+        monkeypatch.setattr(shutil, "which", lambda t: "/usr/bin/sbatch" if t == "sbatch" else None)
+        for v in ("SLURM_JOB_ID", "PBS_JOBID", "LSB_JOBID", "JOB_ID"):
+            monkeypatch.delenv(v, raising=False)
+        found = checks._hpc_login_node_findings()
+        assert len(found) == 1
+        f = found[0]
+        # INFO (not WARN) so `self-check --strict` is not tripped on every login node.
+        assert f["severity"] == "info" and f["code"] == "hpc_login_node"
+        assert "pubrun bench" in (f.get("suggestion") or "")
+
+    def test_on_compute_node_no_nudge(self, monkeypatch):
+        import shutil
+        monkeypatch.setattr(shutil, "which", lambda t: "/usr/bin/sbatch" if t == "sbatch" else None)
+        monkeypatch.setenv("SLURM_JOB_ID", "42")
+        assert checks._hpc_login_node_findings() == []
+
+    def test_no_scheduler_no_nudge(self, monkeypatch):
+        import shutil
+        monkeypatch.setattr(shutil, "which", lambda t: None)
+        assert checks._hpc_login_node_findings() == []
+
+
 # ------------------------------------------------------------------- findings unit tests
 
 def _fake_manifest(**over):

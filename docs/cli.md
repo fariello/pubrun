@@ -142,10 +142,11 @@ pubrun inspect -f train.py --json       # latest run matching "train.py", as JSO
 ### `bench` — Overhead Benchmark Runner
 
 Friendly front-end over the benchmark harness (`benchmarks/harness.py`). Runs the suite
-locally by default; on an HPC login node with Slurm detected, it **offers** to submit to a
-compute node (and never submits without confirmation). Writes a **redacted, shareable**
-copy of the results by default and, after a local run, **offers to contribute it** to the
-public [`pubrun-benchmarks`](https://github.com/fariello/pubrun-benchmarks) repo.
+locally by default; on an HPC login node it detects the batch scheduler (**Slurm, PBS/Torque,
+LSF, or SGE/Grid Engine**) and **offers** to submit to a compute node (and never submits
+without confirmation). Writes a **redacted, shareable** copy of the results by default and,
+after a local run, **offers to contribute it** to the public
+[`pubrun-benchmarks`](https://github.com/fariello/pubrun-benchmarks) repo.
 
 **Requires a source checkout** — the benchmark tooling is intentionally not shipped in the
 pip package (zero-footprint installs). Clone the repo and run from it.
@@ -162,8 +163,9 @@ pubrun bench --submit-file PATH [--submit-method {gh,http,print}] [--gh-repo O/N
 | `--quick` | Fast smoke run (fewer iterations). |
 | `--iterations N` | Iterations per scenario. |
 | `--passes N` | Number of full scenario sweeps (default 2). |
-| `--local` | Run here even if Slurm is detected. |
-| `--submit` | On HPC: submit to Slurm without prompting. Off HPC: contribute the result without prompting. |
+| `--local` | Run here even if an HPC scheduler is detected. |
+| `--submit` | On HPC: submit to the detected scheduler without prompting. Off HPC: contribute the result without prompting. |
+| `--scheduler {auto,slurm,pbs,lsf,sge,local}` | Which HPC scheduler to submit to (default `auto`). `local` forces a local run. Use to resolve the PBS-vs-SGE `qsub` ambiguity. |
 | `-y`, `--yes` | Assume "yes" to the submit/contribute prompt. |
 | `--no-redact` | Do NOT write a redacted share copy (full detail only). Also disables auto-contribution (nothing safe to send). |
 | `--json` | Emit the result/redacted file paths as JSON. |
@@ -173,6 +175,18 @@ pubrun bench --submit-file PATH [--submit-method {gh,http,print}] [--gh-repo O/N
 | `--gh-repo OWNER/NAME` | Target repo for submission (default `fariello/pubrun-benchmarks`). |
 | `--gh-token TOKEN` | Token for the HTTP submission path (else `$GITHUB_TOKEN`/`$GH_TOKEN` or `gh auth token`). |
 | `--print-submission` | Print a ready-to-paste submission instead of transmitting (offline / power user). |
+
+**HPC scheduler submission.** On a login node, `pubrun bench` auto-detects the batch scheduler
+(Slurm, PBS/Torque, LSF, or SGE/Grid Engine — precedence Slurm > PBS > LSF > SGE) from
+environment variables and submit tools on `PATH` (no scheduler is queried and no network call
+is made at detection). If one is found and you are not already inside an allocation, it prints
+the exact submit command and prompts before submitting (never submits without `--submit`/`--yes`
+or an interactive "y"). Because PBS and SGE both use `qsub`, an ambiguous environment is
+reported and you resolve it with `--scheduler pbs|sge`. The per-scheduler submit scripts under
+`benchmarks/` (`submit_bench.sh`, `submit_bench_pbs.sh`, `submit_bench_lsf.sh`,
+`submit_bench_sge.sh`) submit to the default queue and let the scheduler place the job; they
+are **starting points** — adapt account/queue/walltime to your site (only the Slurm path is
+exercised in CI).
 
 **Contributing a result (consent-gated).** After a local run, `pubrun bench` prints where
 the redacted copy was written and asks `Contribute this redacted result…? [y/N]` — pressing

@@ -200,6 +200,44 @@ def live_findings() -> List[Dict[str, Any]]:
         pass
 
     findings.extend(_install_health_findings())
+    findings.extend(_hpc_login_node_findings())
+    return findings
+
+
+def _hpc_login_node_findings() -> List[Dict[str, Any]]:
+    """INFO nudge when we appear to be on an HPC login node (a scheduler's submit tools are
+    present but we are NOT inside an allocation). Benchmarking here gives unrepresentative
+    numbers; suggest `pubrun bench` (which offers to submit to a compute node).
+
+    INFO, not WARN, by design: this is advice, not a problem, and `self-check --strict` exits
+    non-zero on any WARN — a WARN here would break --strict on every login node.
+    """
+    import shutil
+    findings: List[Dict[str, Any]] = []
+    try:
+        # (scheduler name, submit-tool on PATH, "inside an allocation" env marker)
+        schedulers = [
+            ("Slurm", "sbatch", "SLURM_JOB_ID"),
+            ("PBS/Torque", "qsub", "PBS_JOBID"),
+            ("LSF", "bsub", "LSB_JOBID"),
+            ("SGE/Grid Engine", "qsub", "JOB_ID"),
+        ]
+        seen = set()
+        for name, tool, alloc_env in schedulers:
+            if not shutil.which(tool) or tool in seen:
+                continue
+            seen.add(tool)
+            on_compute = bool(os.environ.get(alloc_env))
+            if not on_compute:
+                findings.append(_finding(
+                    INFO, "hpc_login_node",
+                    f"you appear to be on an HPC {name} login node "
+                    f"(`{tool}` present, not inside an allocation).",
+                    "Benchmark on a compute node for representative numbers: run "
+                    "`pubrun bench`, which offers to submit to the scheduler."))
+                break  # one nudge is enough
+    except Exception:
+        pass
     return findings
 
 
