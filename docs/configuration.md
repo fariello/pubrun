@@ -224,6 +224,21 @@ The `pubrun.start(profile=..., output_dir=...)` shorthand only flattens the top-
 `[core]` keys; every `[capture.*]` setting must be passed as the nested dict shown
 above.
 
+### `[capture.file_io]`
+
+Controls how much detail `pubrun.open(...)` records for files it wraps. This does **not**
+globally intercept `open()` — pubrun never patches the builtin; it only governs files you
+explicitly route through `pubrun.open()`.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `level` | string | `"stat"` | Progressive detail level: `none` \| `name` \| `stat` \| `realpath` \| `hash`. `stat` records size/mtime/ctime via `fstat` on the open fd (~free, incl. on NFS) + the absolute path. `realpath` adds symlink resolution (**costlier on NFS/Lustre** — walks every path component). `hash` adds a SHA-256 of the file contents (reads every byte). `none` disables recording. |
+| `max_hash_bytes` | int | `0` | At `level = "hash"`, skip hashing files larger than this many bytes (`0` = no cap). |
+
+> **Changed in 1.4.0:** the default level is `stat` (metadata only). Previously
+> `pubrun.open()` always hashed; set `level = "hash"` to restore that. The recorded hash is
+> computed from the on-disk bytes at close, so it is correct regardless of read path.
+
 ### `[capture.profiling]`
 
 Phase-scoped profiling (opt-in). When enabled, `pubrun.phase()` blocks are profiled and stats saved to the run directory.

@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **Behavior change: `pubrun.open()` no longer hashes file contents by default.** The default
+  `[capture.file_io].level` is now `stat` (path + size + mtime/ctime), not content hashing.
+  Hashing is opt-in via `level = "hash"`. Rationale: hashing reads every byte (expensive,
+  especially over NFS) for information that file size + mtime usually already capture. The
+  `data_files` record shape is unchanged; `sha256` is `null` unless the level is `hash`.
 - **BREAKING (`pubrun combined`): `-f` now means `--filter`, not `--force`.** For CLI
   consistency, `-f`/`--filter` on `combined` now filters runs (as it does on every other
   command). The force-large-file flag is now **`--force`** (long form only). Scripts that
@@ -44,6 +49,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **Graded file-I/O provenance for `pubrun.open()` + per-process I/O counters.** `pubrun.open()`
+  now records provenance at a configurable `[capture.file_io].level` — `none | name | stat |
+  realpath | hash` (progressive). `stat` uses `fstat` on the open fd (size/mtime/ctime, ~free
+  even on NFS); `realpath` adds symlink resolution (costlier on network filesystems); `hash`
+  adds a SHA-256 read from the on-disk bytes at close (correct regardless of read path).
+  `max_hash_bytes` caps hashing of large files. Still opt-in and per-file — pubrun never
+  patches the global `open()`. Also: the resource watcher now records per-process I/O byte
+  counters from Linux `/proc/self/io` (`resources.io_counters`, `system_metrics`-gated).
 - **`pubrun bench` command (friendly benchmark runner + HPC submit + shareable results).**
   Runs the overhead benchmark suite locally by default; on an HPC login node with Slurm
   detected it **offers** to submit to a compute node (never submits without confirmation).

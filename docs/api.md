@@ -281,17 +281,38 @@ These APIs are drop-in replacements for standard Python I/O functions that autom
 
 ### `pubrun.open(file, mode="r", **kwargs)`
 
-Drop-in replacement for `builtins.open()`. When a run is active, wraps the returned file object to track SHA-256 hashes and access metadata in the manifest's `data_files` section.
+Drop-in replacement for `builtins.open()`. When a run is active, records provenance for the
+opened file in the manifest's `data_files` section. **pubrun never patches the global
+`open()`** — only files you route through `pubrun.open()` are recorded.
+
+The detail recorded is controlled by `[capture.file_io].level` (progressive; each includes
+the ones before it):
+
+| Level | Records | Cost |
+|---|---|---|
+| `none` | nothing (behaves exactly like `builtins.open`) | — |
+| `name` | the path as given | trivial |
+| `stat` **(default)** | + size, mtime, ctime (via `fstat` on the open fd) and the absolute path | ~free, incl. on NFS |
+| `realpath` | + the symlink-resolved canonical path | higher — walks every path component; **noticeably costlier on NFS/Lustre** |
+| `hash` | + SHA-256 of the file contents | highest — reads every byte |
 
 ```python
 import pubrun
 
-with pubrun.open("data/input.csv", "r") as f:
+with pubrun.open("data/input.csv", "r") as f:   # recorded at the configured level
     df = process(f.read())
 
 with pubrun.open("results/output.json", "w") as f:
     f.write(json.dumps(results))
 ```
+
+> **Changed in 1.4.0:** the default level is now `stat` (metadata only). Previously
+> `pubrun.open()` always computed a SHA-256 hash. To restore content hashing, set
+> `[capture.file_io].level = "hash"` (or `capture={"file_io": {"level": "hash"}}` at
+> `pubrun.start(...)`). The `data_files` record shape is unchanged; `sha256` is `null`
+> unless the level is `hash`. Hashing is also skipped for files larger than
+> `[capture.file_io].max_hash_bytes` (0 = no cap). The recorded hash is always computed
+> from the on-disk bytes at close, so it is correct regardless of how the file was read.
 
 ### `pubrun.print(*args, **kwargs)`
 

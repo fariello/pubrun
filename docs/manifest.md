@@ -313,6 +313,7 @@ Runtime resource utilization, sampled by a background thread.
 | `system_memory` | object \| absent | System-wide memory (Linux), present when `[capture.resources].system_metrics = true`. `{"start": {...}, "last": {...}, "min_available": {...}}`, each with `total_bytes`/`available_bytes`/`free_bytes`/`cached_bytes`. |
 | `load_average` | object \| absent | `{"start": {...}, "last": {...}, "max_1min": float}`, each of start/last being `{"1min","5min","15min"}`. |
 | `system_iowait_pct` | object \| absent | `{"last": float, "max": float}`. **NODE-WIDE, indicative only** — `/proc/stat` iowait is a system-wide counter, not run-scoped, and is unreliable on shared/multi-core nodes. A hint that the *node* was I/O-bound, not a per-run measurement. |
+| `io_counters` | object \| absent | Per-**process** cumulative I/O byte counters from Linux `/proc/self/io`, present when `system_metrics` is on. `{"start": {...}, "last": {...}, "delta": {...}}` with `rchar`/`wchar` (bytes through read()/write(), incl. cache) and `read_bytes`/`write_bytes` (bytes to/from storage). The `delta` is this run's I/O volume. Linux-only; omitted elsewhere. |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
 The `system_memory`/`load_average`/`system_iowait_pct` sections are omitted on platforms
@@ -327,8 +328,12 @@ Provenance-tracked file I/O (populated by `pubrun.open()`).
 
 | Field | Type | Description |
 |---|---|---|
-| `inputs` | list[object] | Files read via `pubrun.open()`. Each entry has `path`, `size_bytes`, `sha256`, `accessed_at_utc`. |
-| `outputs` | list[object] | Files written via `pubrun.open()`. Each entry has `path`, `size_bytes`, `sha256`, `modified_at_utc`. |
+| `inputs` | list[object] | Files read via `pubrun.open()`. Fields depend on `[capture.file_io].level`: always `path` + (`accessed_at_utc`); at `stat`+ also `size_bytes`, `mtime`, `ctime`; at `realpath`+ also `realpath`; `sha256` is present at every level but is **`null` unless the level is `hash`**. |
+| `outputs` | list[object] | Files written via `pubrun.open()`. Same fields as `inputs`, with `modified_at_utc` instead of `accessed_at_utc`. |
+
+> The default `[capture.file_io].level` is `stat` (metadata, no hashing). See
+> [Configuration](configuration.md) → `[capture.file_io]` and the API docs for
+> `pubrun.open()`.
 
 ---
 

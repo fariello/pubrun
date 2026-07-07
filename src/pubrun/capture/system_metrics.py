@@ -77,6 +77,32 @@ def read_proc_stat_cpu_times() -> Optional[Tuple[int, int]]:
         return None
 
 
+def get_proc_io() -> Optional[Dict[str, int]]:
+    """Cumulative I/O byte counters for THIS process from /proc/self/io (Linux only).
+
+    Returns rchar/wchar (bytes passed to read()/write(), incl. cache hits) and
+    read_bytes/write_bytes (bytes actually fetched from/sent to the storage layer).
+    None on non-Linux or on any read failure. Zero interception — a single cheap read.
+    """
+    try:
+        if not sys.platform.startswith("linux") or not os.path.exists("/proc/self/io"):
+            return None
+        wanted = {"rchar", "wchar", "read_bytes", "write_bytes", "syscr", "syscw"}
+        out: Dict[str, int] = {}
+        with open("/proc/self/io", "r", encoding="utf-8") as f:
+            for line in f:
+                key, _, val = line.partition(":")
+                if key in wanted:
+                    try:
+                        out[key] = int(val.strip())
+                    except ValueError:
+                        pass
+        return out or None
+    except Exception as e:
+        logger.debug(f"pubrun failed reading /proc/self/io: {e}")
+        return None
+
+
 def iowait_pct_between(prev: Optional[Tuple[int, int]],
                        curr: Optional[Tuple[int, int]]) -> Optional[float]:
     """Percent of CPU time spent in iowait between two /proc/stat samples.
