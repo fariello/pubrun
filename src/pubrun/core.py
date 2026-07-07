@@ -16,7 +16,7 @@ import logging
 import os
 import sys
 import threading
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 from pubrun.tracker import Run, get_current_run
 
@@ -578,86 +578,48 @@ def print(*args: Any, **kwargs: Any) -> None:
             logging.getLogger("pubrun").warning(f"pubrun.print: failed to write to stdout.log: {e}")
 
 
+# File-I/O provenance detail levels (see [capture.file_io].level). Progressive; each
+# includes the ones before it. Ordered by cost (see docs/design evaluation): fstat on the
+# open fd is ~free even on NFS, but realpath walks every path component (costly on NFS), so
+# realpath sits ABOVE stat.
+_FILE_IO_LEVELS = ("none", "name", "stat", "realpath", "hash")
+
+
+def _file_io_level(run_instance: Any) -> str:
+    """Resolve the effective [capture.file_io].level from the run's config (default 'stat')."""
+    try:
+        cfg = getattr(run_instance, "config", {}) or {}
+        level = cfg.get("capture", {}).get("file_io", {}).get("level", "stat")
+        return level if level in _FILE_IO_LEVELS else "stat"
+    except Exception:
+        return "stat"
+
+
 class ProvenanceFileProxy:
-    """Wraps a standard file stream to compute hash on the fly for reads,
-    and record file size/hashes on close."""
-    def __init__(self, file_obj: Any, path: Path, mode: str, run_instance: Any) -> None:
+    """Wraps a file stream opened via ``pubrun.open()`` to record file provenance at the
+    configured detail level (name/stat/realpath/hash). Records at close().
+
+    This is opt-in and per-file: it wraps ONLY files the user routes through
+    ``pubrun.open()``. pubrun never patches the builtin ``open``.
+    """
+    def __init__(self, file_obj: Any, path: Path, mode: str, run_instance: Any,
+                 level: str = "stat") -> None:
         self._file_obj = file_obj
         self._path = path
         self._mode = mode
         self._run = run_instance
-        self._hash = hashlib.sha256()
-        self._bytes_read = 0
+        self._level = level if level in _FILE_IO_LEVELS else "stat"
         self._closed = False
-        # PERF-08: detect binary mode at construction to skip isinstance per I/O call.
-        self._is_binary = "b" in mode
 
-    def _to_bytes(self, data: Any) -> bytes:
-        """Convert data to bytes for hashing. Skips encode for binary mode."""
-        if self._is_binary:
-            return data
-        return data.encode("utf-8", errors="ignore")
-
-    def read(self, size: int = -1) -> Any:
-        data = self._file_obj.read(size)
-        if data:
-            chunk = self._to_bytes(data)
-            self._hash.update(chunk)
-            self._bytes_read += len(chunk)
-        return data
-
-    def readline(self, limit: int = -1) -> Any:
-        data = self._file_obj.readline(limit)
-        if data:
-            chunk = self._to_bytes(data)
-            self._hash.update(chunk)
-            self._bytes_read += len(chunk)
-        return data
-
-    def readlines(self, hint: int = -1) -> Any:
-        lines = self._file_obj.readlines(hint)
-        for line in lines:
-            chunk = self._to_bytes(line)
-            self._hash.update(chunk)
-            self._bytes_read += len(chunk)
-        return lines
-
-    def __next__(self) -> Any:
-        try:
-            line = self._file_obj.__next__()
-            chunk = self._to_bytes(line)
-            self._hash.update(chunk)
-            self._bytes_read += len(chunk)
-            return line
-        except StopIteration:
-            raise
-
-    def write(self, data: Any) -> int:
-        """Write data and update the incremental hash for write-mode tracking."""
-        result = self._file_obj.write(data)
-        if data:
-            chunk = self._to_bytes(data)
-            self._hash.update(chunk)
-        return result
-
-    def writelines(self, lines: Any) -> None:
-        """Write lines and update the incremental hash for write-mode tracking."""
-        self._file_obj.writelines(lines)
-        for line in lines:
-            if line:
-                chunk = self._to_bytes(line)
-                self._hash.update(chunk)
-
-    def __iter__(self) -> Any:
-        return self
+    def _is_read_mode(self) -> bool:
+        return "r" in self._mode and "w" not in self._mode and "a" not in self._mode
 
     def close(self) -> None:
-        """Close the underlying file and register provenance.
+        """Close the underlying file, then register provenance at the configured level.
 
-        Note: For write-mode files, the hash is computed from the file on disk
-        after close(). This relies on the underlying file object flushing
-        buffered data during close() — which is guaranteed for standard Python
-        file objects (io.FileIO, io.BufferedWriter, io.TextIOWrapper).
+        Recording after close() means write/append buffers are flushed to disk, and read
+        hashes reflect the actual on-disk bytes (correct even for buffered/``readinto``
+        reads that never pass through this proxy's methods).
         """
         if self._closed:
             return
@@ -665,56 +627,74 @@ class ProvenanceFileProxy:
         try:
             self._file_obj.close()
         finally:
-            self._register_provenance()
+            if self._level != "none":
+                self._register_provenance()
+
+    def _compute_hash_on_disk(self) -> Optional[str]:
+        """sha256 of the file's on-disk bytes. This is the honest 'hash of the file' —
+        independent of text/binary mode and of which read path the caller used."""
+        try:
+            if not self._path.exists():
+                return None
+            cap = 0
+            try:
+                cap = int(self._run.config.get("capture", {}).get("file_io", {}).get("max_hash_bytes", 0))
+            except Exception:
+                cap = 0
+            size = os.path.getsize(self._path)
+            if cap and size > cap:
+                return None  # too large to hash under the configured cap
+            h = hashlib.sha256()
+            with builtins.open(self._path, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+        except Exception:
+            return None
 
     def _register_provenance(self) -> None:
         try:
-            size = 0
-            if self._path.exists():
-                size = os.path.getsize(self._path)
+            level = self._level
+            # L1 name: the path as given.
+            record: Dict[str, Any] = {"path": str(self._path)}
 
-            if "r" in self._mode and "w" not in self._mode and "a" not in self._mode:
-                # Read-only: use the incrementally computed hash (avoids re-reading
-                # the entire file just to get a hash we already have). PERF-07.
-                sha = self._hash.hexdigest()
-            elif self._path.exists():
-                # Write/append mode: we didn't see all data go through our proxy
-                # (e.g. the file may have been written by the underlying object),
-                # so compute the hash from the final file on disk.
-                h = hashlib.sha256()
-                with builtins.open(self._path, "rb") as f:
-                    for chunk in iter(lambda: f.read(65536), b""):
-                        h.update(chunk)
-                sha = h.hexdigest()
-            else:
-                sha = None
+            # L2 stat: fstat on the fd we hold (cheap even on NFS), + absolute path.
+            if level in ("stat", "realpath", "hash"):
+                record["path"] = os.path.abspath(str(self._path))
+                try:
+                    st = os.stat(self._path)  # file just closed; attrs cache-hot
+                    record["size_bytes"] = st.st_size
+                    record["mtime"] = st.st_mtime
+                    record["ctime"] = st.st_ctime
+                except OSError:
+                    pass
 
-            if "r" in self._mode and "w" not in self._mode and "a" not in self._mode:
-                record = {
-                    "path": str(self._path.resolve()),
-                    "size_bytes": size,
-                    "sha256": sha or self._hash.hexdigest(),
-                    "accessed_at_utc": time.time()
-                }
-                if not hasattr(self._run, "data_files"):
-                    self._run.data_files = {"inputs": [], "outputs": []}
+            # L3 realpath: resolve symlinks (costlier on NFS — see docs).
+            if level in ("realpath", "hash"):
+                try:
+                    record["realpath"] = os.path.realpath(str(self._path))
+                except OSError:
+                    pass
+
+            # L4 hash: sha256 of on-disk bytes.
+            record["sha256"] = self._compute_hash_on_disk() if level == "hash" else None
+
+            if not hasattr(self._run, "data_files"):
+                self._run.data_files = {"inputs": [], "outputs": []}
+
+            if self._is_read_mode():
+                record["accessed_at_utc"] = time.time()
                 self._run.data_files["inputs"].append(record)
-
-                if getattr(self._run, "event_stream", None):
-                    self._run.event_stream.emit("input_dataset", name=str(self._path.name), payload={"path": record["path"], "sha256": record["sha256"]})
+                event = "input_dataset"
             else:
-                record = {
-                    "path": str(self._path.resolve()),
-                    "size_bytes": size,
-                    "sha256": sha or self._hash.hexdigest(),
-                    "modified_at_utc": time.time()
-                }
-                if not hasattr(self._run, "data_files"):
-                    self._run.data_files = {"inputs": [], "outputs": []}
+                record["modified_at_utc"] = time.time()
                 self._run.data_files["outputs"].append(record)
+                event = "output_artifact"
 
-                if getattr(self._run, "event_stream", None):
-                    self._run.event_stream.emit("output_artifact", name=str(self._path.name), payload={"path": record["path"], "sha256": record["sha256"]})
+            if getattr(self._run, "event_stream", None):
+                self._run.event_stream.emit(
+                    event, name=str(self._path.name),
+                    payload={"path": record["path"], "sha256": record.get("sha256")})
         except Exception as e:
             logging.getLogger("pubrun").warning(f"pubrun: failed to register provenance for '{self._path}': {e}")
 
@@ -724,21 +704,30 @@ class ProvenanceFileProxy:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.close()
 
+    def __iter__(self) -> Any:
+        return iter(self._file_obj)
+
     def __getattr__(self, name: str) -> Any:
+        # Everything not overridden (read/write/readinto/seek/fileno/...) goes straight to
+        # the real file object, so behavior is identical to the builtin.
         return getattr(self._file_obj, name)
 
 
 def open(file: Any, mode: str = "r", **kwargs: Any) -> Any:
-    """Wrapper around Python's built-in open() that intercepts file reads and writes
-    to catalog dataset provenance.
+    """Drop-in wrapper around the built-in ``open()`` that records file provenance for
+    a run at the configured ``[capture.file_io].level`` (default ``stat``: path + size +
+    mtime/ctime, no content hashing). Set the level to ``hash`` for content hashes, or
+    ``none`` to behave exactly like the builtin. pubrun never patches the global ``open``;
+    this only affects files you open via ``pubrun.open()``.
     """
     f_obj = builtins.open(file, mode, **kwargs)
 
     current_run = get_current_run()
     if current_run and current_run.is_active:
         try:
-            f_path = Path(file)
-            return ProvenanceFileProxy(f_obj, f_path, mode, current_run)
+            level = _file_io_level(current_run)
+            if level != "none":
+                return ProvenanceFileProxy(f_obj, Path(file), mode, current_run, level=level)
         except Exception as e:
             logging.getLogger("pubrun").warning(f"pubrun: failed to wrap file for provenance: {e}")
 

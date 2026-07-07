@@ -295,6 +295,32 @@ poll_timeout = 3
 system_metrics = true
 
 
+[capture.file_io]
+# -----------------------------------------------------------------------------
+# File-I/O provenance detail for files opened via `pubrun.open(...)` (the opt-in,
+# per-file API). This does NOT globally intercept open(); pubrun never patches the
+# builtin. It only governs how much is recorded for files you explicitly route
+# through pubrun.open().
+# -----------------------------------------------------------------------------
+# Progressive levels (each includes the ones before it):
+#   "none"     - record nothing (pubrun.open() behaves like the builtin open()).
+#   "name"     - record the path as given.
+#   "stat"     - + fstat on the open fd (size, mtime, ctime) and the absolute path.
+#                Cheap everywhere, including NFS (fstat on an already-open fd needs
+#                no extra round-trip). DEFAULT.
+#   "realpath" - + resolve symlinks to the canonical path. NOTE: this walks every
+#                path component and can be noticeably COSTLIER on network
+#                filesystems (NFS/Lustre) than "stat"; enable only if you need it.
+#   "hash"     - + sha256 of the file contents. Reads every byte, so it is by far
+#                the most expensive level; use only when content-level provenance
+#                matters. Files larger than `max_hash_bytes` are recorded without a
+#                hash.
+level = "stat"
+
+# At level "hash", skip hashing files larger than this (bytes). 0 = no cap.
+max_hash_bytes = 0
+
+
 [capture.profiling]
 # -----------------------------------------------------------------------------
 # Phase-scoped profiling (opt-in).

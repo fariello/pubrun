@@ -500,7 +500,8 @@ class TestProvenanceWriteHash:
         os.environ["PUBRUN_AUTO_START"] = "false"
         import pubrun
 
-        run = pubrun.start(output_dir=str(tmp_path))
+        # level="hash" to exercise content hashing (default is now "stat", no hash).
+        run = pubrun.start(output_dir=str(tmp_path), capture={"file_io": {"level": "hash"}})
 
         test_file = tmp_path / "output.txt"
         with pubrun.open(str(test_file), "w") as f:

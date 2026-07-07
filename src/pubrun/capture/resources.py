@@ -200,6 +200,8 @@ class ResourceWatcher(threading.Thread):
         self._iowait_prev_raw = None       # last /proc/stat (iowait, total) sample
         self._iowait_pct_last = None
         self._iowait_pct_max = None
+        self._proc_io_start = None          # /proc/self/io cumulative counters at start
+        self._proc_io_last = None
         if self._system_metrics:
             self._capture_system_start()
 
@@ -279,6 +281,7 @@ class ResourceWatcher(threading.Thread):
             self._sysmem_start = _sm.get_system_memory()
             self._load_start = _sm.get_load_average()
             self._iowait_prev_raw = _sm.read_proc_stat_cpu_times()
+            self._proc_io_start = _sm.get_proc_io()
         except Exception as e:  # never let baseline capture abort the run
             logger.debug(f"pubrun failed system-metrics baseline: {e}")
 
@@ -296,8 +299,13 @@ class ResourceWatcher(threading.Thread):
             load = _sm.get_load_average()
             curr_raw = _sm.read_proc_stat_cpu_times()
             iowait_pct = _sm.iowait_pct_between(self._iowait_prev_raw, curr_raw)
+            proc_io = _sm.get_proc_io()
 
             with self._lock:
+                if proc_io is not None:
+                    if self._proc_io_start is None:
+                        self._proc_io_start = proc_io
+                    self._proc_io_last = proc_io
                 if mem is not None:
                     if self._sysmem_start is None:
                         self._sysmem_start = mem
@@ -413,6 +421,8 @@ class ResourceWatcher(threading.Thread):
                 load_max = self._load_max_1min
                 iowait_last = self._iowait_pct_last
                 iowait_max = self._iowait_pct_max
+                proc_io_start = self._proc_io_start
+                proc_io_last = self._proc_io_last
             # Only emit sections we actually captured (Linux for memory/iowait; load is
             # broadly available). Absent -> omit rather than emit misleading nulls.
             if sysmem_start or sysmem_last:
@@ -430,4 +440,15 @@ class ResourceWatcher(threading.Thread):
             if iowait_last is not None or iowait_max is not None:
                 # NODE-WIDE, indicative only (see system_metrics module docstring).
                 result["system_iowait_pct"] = {"last": iowait_last, "max": iowait_max}
+            if proc_io_start or proc_io_last:
+                # Cumulative per-PROCESS I/O byte counters (this run's process). The
+                # start->last delta is the run's I/O volume. Linux /proc/self/io.
+                io_obj = {"start": proc_io_start, "last": proc_io_last}
+                if proc_io_start and proc_io_last:
+                    io_obj["delta"] = {
+                        k: proc_io_last.get(k, 0) - proc_io_start.get(k, 0)
+                        for k in ("rchar", "wchar", "read_bytes", "write_bytes")
+                        if k in proc_io_last and k in proc_io_start
+                    }
+                result["io_counters"] = io_obj
         return result
