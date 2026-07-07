@@ -39,6 +39,56 @@ def test_import_pubrun_does_not_import_checks():
     assert res.stdout.strip() == "False"
 
 
+def test_import_and_run_makes_no_statvfs_call(tmp_path):
+    """HANG-SAFETY (IPD data-quality): the always-on `import pubrun` + a tracked run must
+    NOT invoke the blocking live probe (os.statvfs). If it did, a wedged NFS mount could
+    hang a user's host script at import. The live probe is diagnostic/bench-ONLY."""
+    code = (
+        "import os\n"
+        "os.statvfs = lambda *a, **k: (_ for _ in ()).throw(AssertionError('statvfs called on host path'))\n"
+        "import pubrun\n"
+        "pubrun.start(output_dir=r'%s')\n"
+        "pubrun.stop()\n"
+        "print('ok')\n" % str(tmp_path / "runs")
+    )
+    res = subprocess.run([PYTHON, "-c", code], capture_output=True, text=True, timeout=60)
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip().endswith("ok")
+
+
+class TestLiveFsHealthFindings:
+    """self-check surfaces hung/slow mounts as honest, system-wide WARNINGs."""
+
+    def test_hung_probe_emits_systemwide_warning(self):
+        fs_data = {"tmpdir": {"path": "/scratch/tmp", "mount_point": "/scratch",
+                              "fstype": "nfs4", "live": {"status": "pending", "hung": True,
+                                                         "waited_s": 5.0}},
+                   "capture_state": {"status": "complete"}}
+        found = checks._live_fs_health_findings(fs_data)
+        assert len(found) == 1
+        f = found[0]
+        assert f["severity"] == "warn" and f["code"] == "fs_hung_tmpdir"
+        # Honest: system-wide framing, no fabricated slowdown magnitude.
+        text = f"{f['message']} {f.get('suggestion', '')}"
+        assert "not just pubrun" in text
+        assert "%" not in f["message"]  # no invented number
+
+    def test_slow_probe_states_measured_elapsed(self):
+        fs_data = {"tmpdir": {"path": "/scratch/tmp", "mount_point": "/scratch",
+                              "fstype": "nfs4", "live": {"status": "complete", "slow": True,
+                                                         "elapsed_s": 34.0}},
+                   "capture_state": {"status": "complete"}}
+        found = checks._live_fs_health_findings(fs_data)
+        assert len(found) == 1 and found[0]["code"] == "fs_slow_tmpdir"
+        assert "34" in found[0]["message"]  # measured value may be stated
+
+    def test_healthy_probe_emits_nothing(self):
+        fs_data = {"tmpdir": {"path": "/tmp", "mount_point": "/tmp", "fstype": "tmpfs",
+                              "live": {"status": "complete", "elapsed_s": 0.001}},
+                   "capture_state": {"status": "complete"}}
+        assert checks._live_fs_health_findings(fs_data) == []
+
+
 # ------------------------------------------------------------------- findings unit tests
 
 def _fake_manifest(**over):

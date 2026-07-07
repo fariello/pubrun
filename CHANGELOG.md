@@ -44,9 +44,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   methods report, `CITATION.cff`, PyPI author) use the publication name **Gabriele Fariello** so
   citations aggregate with the author's existing record.
 - **`pubrun cite` and generated methods citation corrected**: now cite the software itself
-  (`[Computer software]`, repository URL, version-aware) instead of an unsubmitted, premature journal
+  (`[Computer software]`, repository URL, version-aware) instead of an unsubmitted placeholder
   reference; a single consistent title is used across all surfaces.
-  Will switch to the peer-reviewed citation with DOI once a journal article is accepted.
 - **`pubrun --version`** now prints the required NOTICE attribution line.
 - **Import-mode docs accuracy**: the README "Preset Modes Behavior Matrix" (and
   `functional_spec.md`, `api.md`, and the `auto`/`noauto` docstrings) previously implied
@@ -57,6 +56,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **Benchmark data quality + filesystem-health diagnostics.** Benchmark results now record
+  **raw per-iteration timings** (in run order) alongside the summary stats (schema
+  `pubrun-benchmark/4`), so distribution shape, warmup drift, and correct cross-submission
+  pooling are recoverable. Results also capture non-identifying **environment classification**
+  (`environment_kind` = venv/conda/system/virtualenv/frozen, `in_venv`, `sys_path_len`) and
+  classify more paths (Python install prefix, `/dev/shm`, the I/O-baseline target) — all of
+  which **survive share-redaction** so a slow/odd result stays interpretable after PII
+  masking. Filesystem classification now prefers Linux `/proc/self/mountinfo` (bind/overlay
+  aware) and gains a **Windows** `ctypes` fstype branch. New **diagnostic-only** live probe
+  (`os.statvfs`) surfaces free space, inode counts, read-only mounts, and — crucially —
+  **wedged (hung) or slow** mounts; it runs in a daemon thread with a decoupled wait budget
+  (a slow-but-alive mount is captured with its measured latency, not falsely called hung) and
+  is **never invoked by `import pubrun`** or the startup path. `pubrun self-check` now warns
+  about hung/slow/network-backed mounts as an honest **system-wide** hazard (affects any
+  script, not just pubrun). Zero new runtime dependencies.
 - **Low-friction, consent-gated benchmark result submission.** After a local `pubrun bench`
   run, pubrun now **offers** to contribute the redacted result to the public
   `pubrun-benchmarks` repo. It never transmits without an explicit yes: the prompt defaults to

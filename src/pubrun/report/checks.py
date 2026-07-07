@@ -36,7 +36,8 @@ def _finding(severity: str, code: str, message: str, suggestion: Optional[str] =
 def _live_paths() -> Dict[str, str]:
     """The paths self-check cares about: pubrun install dir, output dir, tmpdir, cwd."""
     import tempfile
-    paths: Dict[str, str] = {"tmpdir": tempfile.gettempdir(), "cwd": os.getcwd()}
+    paths: Dict[str, str] = {"tmpdir": tempfile.gettempdir(), "cwd": os.getcwd(),
+                             "python_prefix": sys.base_prefix}
     try:
         import pubrun
         pkg_file = getattr(pubrun, "__file__", None)
@@ -75,6 +76,39 @@ def _network_fs_findings(fs_data: Dict[str, Any]) -> List[Dict[str, Any]]:
             ft = entry.get("fstype", "?")
             findings.append(_finding(WARN, f"netfs_{label}",
                                      f"{title} ({mp}, {ft}).", sugg))
+    return findings
+
+
+def _live_fs_health_findings(fs_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """WARN on wedged (hung/pending) or slow live probes — a SYSTEM-WIDE hazard, worded
+    honestly (affects any script, not just pubrun; magnitude only stated when measured)."""
+    findings: List[Dict[str, Any]] = []
+    _label = {"tmpdir": "$TMPDIR", "output_dir": "the run output directory",
+              "pubrun_install": "the pubrun install", "python_prefix": "the Python install"}
+    for label, entry in fs_data.items():
+        if label == "capture_state" or not isinstance(entry, dict):
+            continue
+        live = entry.get("live")
+        if not isinstance(live, dict):
+            continue
+        where = _label.get(label, label)
+        mp = entry.get("mount_point", entry.get("path", "?"))
+        ft = entry.get("fstype", "?")
+        status = live.get("status")
+        if status == "pending" or live.get("hung"):
+            findings.append(_finding(
+                WARN, f"fs_hung_{label}",
+                f"a capacity probe of {where} ({mp}, {ft}) did not return within the check "
+                f"(still pending after {live.get('waited_s', '?')}s).",
+                "This mount appears wedged/very slow. Any script doing I/O here — not just "
+                "pubrun — is likely to stall; use node-local storage or a healthy mount."))
+        elif status == "complete" and live.get("slow"):
+            findings.append(_finding(
+                WARN, f"fs_slow_{label}",
+                f"a capacity probe of {where} ({mp}, {ft}) took {live.get('elapsed_s')}s to "
+                f"return.",
+                "I/O on this mount is likely slow for any script, not just pubrun; prefer "
+                "node-local storage for temp/output."))
     return findings
 
 
@@ -129,9 +163,16 @@ def live_findings() -> List[Dict[str, Any]]:
     """Findings about the CURRENT machine (for ``pubrun self-check``). Never raises."""
     findings: List[Dict[str, Any]] = []
     try:
-        from pubrun.capture.filesystem import get_filesystem
+        from pubrun.capture.filesystem import get_filesystem, probe_paths_live
         fs_data = get_filesystem({}, _live_paths())
         findings.extend(_network_fs_findings(fs_data))
+        # Live probe (diagnostic context — self-check is invoked deliberately, never the
+        # import path). Surfaces wedged/slow mounts as a system-wide hazard.
+        try:
+            probe_paths_live(fs_data)
+            findings.extend(_live_fs_health_findings(fs_data))
+        except Exception:
+            pass
     except Exception:
         pass
 

@@ -140,17 +140,28 @@ Advanced / manual:
   filesystem caching mattered (compare `pass 1` vs `pass 2`). The top-level
   `scenarios` key mirrors the **last (warmest) pass**, which `aggregate.py`/
   `plot.py` use.
-- **Schema `pubrun-benchmark/3`** adds cross-machine context so results are
-  comparable across systems and nodes:
-  - `machine.filesystem` — the filesystem type of `$TMPDIR`, the results dir, and
-    the `pubrun` install location (flags **network filesystems** like NFS/Lustre
-    that can silently inflate I/O — the common HPC pitfall).
+- **Schema `pubrun-benchmark/4`** adds cross-machine context + raw data so results
+  are comparable across systems and re-analysable later:
+  - Each scenario entry carries **`timings`** — the raw per-iteration wall times in
+    run order — alongside the summary (`median_s`/`p95_s`/`stdev_s`/…). The raw
+    samples are the source of truth: they let you compute any statistic later, see
+    the distribution shape, and **pool correctly across submissions** (you cannot
+    average medians). The summary is kept for readability.
+  - `machine.python` gains non-identifying `environment_kind` (venv/conda/system/…),
+    `in_venv`, and `sys_path_len` — these **survive share-redaction**, so a result
+    stays interpretable after PII masking.
+  - `machine.filesystem` — the filesystem type of `$TMPDIR`, the results dir, the
+    `pubrun` install, the **Python install prefix**, `/dev/shm`, and the I/O-baseline
+    target (flags **network filesystems** like NFS/Lustre that silently inflate I/O).
+    On `pubrun bench` (a diagnostic context) each entry also gets a `live` sub-dict
+    with capacity/inode/read-only data and a **hung/slow** status from a background
+    `statvfs` probe.
   - `machine.slurm` — Slurm allocation context (`job_id`, `cpus_per_task`,
     `partition`, `node`, …) when running under Slurm.
   - `pass_results[i].pass_env` — the dynamic host state (available RAM, load
     average, node iowait) captured at the **start of each pass**, so a node that
     got loaded between passes is visible rather than silently confounding results.
-  Older `pubrun-benchmark/2` files remain readable by `aggregate.py`/`plot.py`.
+  Older `pubrun-benchmark/2`/`3` files remain readable by `aggregate.py`/`plot.py`.
 - **Overhead** is the median of a scenario minus its group baseline:
   - `startup` scenarios compare against `baseline-noop` (a bare `python noop.py`).
   - `feature` scenarios compare against `feature-baseline`; note `feature-none`
