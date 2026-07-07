@@ -57,6 +57,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **Low-friction, consent-gated benchmark result submission.** After a local `pubrun bench`
+  run, pubrun now **offers** to contribute the redacted result to the public
+  `pubrun-benchmarks` repo. It never transmits without an explicit yes: the prompt defaults to
+  No (Enter = don't send), and it tries the GitHub CLI (`gh`) → a direct GitHub Issues API call
+  (stdlib `urllib`, needs a token) → printing a ready-to-paste submission, in that order. New
+  `pubrun bench --submit-file <redacted.json>` submits a previously produced file without
+  re-running (the "oh, I meant yes" recovery, and the HPC run-on-compute-node →
+  submit-from-login-node path). New flags: `--submit-file`, `--no-submit`, `--submit-method
+  {gh,http,print}`, `--gh-repo`, `--gh-token`, `--print-submission`. pubrun **never
+  auto-transmits an un-redacted result** — the submit path verifies the file looks redacted
+  (no hostname/username/home-path leak) and refuses otherwise. Zero new runtime dependencies.
 - **Benchmark ground-truth I/O baselines.** New `io_baseline` scenarios establish reference
   floors for I/O so storage-dependent numbers are interpretable: `io-baseline-devnull`
   (write-only null sink — isolates the open/write path from storage; `NUL` on Windows),

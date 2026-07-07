@@ -215,3 +215,149 @@ class TestIoBaselineScenarios:
             assert mod._work() > 0  # dir target writes + reads back
         finally:
             os.environ.pop("PUBRUN_BENCH_IO_TARGET", None)
+
+
+# ------------------------------------------------------- IPD: result submission (2026-07-07)
+
+class TestSubmissionVerifier:
+    """The redaction verifier gates EVERY transmit path (never publish PII)."""
+
+    def _m(self):
+        import pubrun.__main__ as m
+        return m
+
+    def test_verifier_passes_redacted(self, tmp_path):
+        m = self._m()
+        p = tmp_path / "g.redacted.json"
+        p.write_text(json.dumps({"schema": "pubrun-benchmark/3",
+                                 "machine": {"hostname": "<redacted>"}, "scenarios": []}))
+        ok, detail = m._verify_redacted(p)
+        assert ok, detail
+
+    def test_verifier_catches_sensitive_key(self, tmp_path):
+        m = self._m()
+        p = tmp_path / "full.json"
+        p.write_text(json.dumps({"machine": {"hostname": "myhost123"}}))
+        ok, detail = m._verify_redacted(p)
+        assert not ok and "hostname" in detail
+
+    def test_verifier_catches_home_and_username_substring(self, tmp_path):
+        m = self._m()
+        home = os.path.expanduser("~")
+        p = tmp_path / "leak.json"
+        # A non-enumerated key still leaks the home dir -> deep substring scan must catch it.
+        p.write_text(json.dumps({"scenarios": [{"note": f"ran in {home}/proj"}]}))
+        ok, detail = m._verify_redacted(p)
+        assert not ok
+
+    def test_verifier_rejects_unparseable(self, tmp_path):
+        m = self._m()
+        p = tmp_path / "bad.json"
+        p.write_text("not json{{{")
+        ok, detail = m._verify_redacted(p)
+        assert not ok and "JSON" in detail
+
+
+class TestSubmissionConsent:
+    """Consent invariant: nothing transmits without an explicit yes in this invocation."""
+
+    def test_submit_file_missing_errors(self):
+        res = run_pubrun("bench", "--submit-file", "/nonexistent/x.json")
+        assert res.returncode == 1
+        assert "no such file" in res.stderr
+
+    def test_submit_file_unredacted_refused(self, tmp_path):
+        full = tmp_path / "full.json"
+        full.write_text(json.dumps({"machine": {"hostname": "realhost", "username": "bob"}}))
+        res = run_pubrun("bench", "--submit-file", str(full))
+        assert res.returncode == 1
+        assert "Refusing to submit" in res.stderr and "un-redacted" in res.stderr
+
+    def test_submit_file_print_makes_no_network(self, tmp_path, monkeypatch):
+        red = tmp_path / "g.redacted.json"
+        red.write_text(json.dumps({"schema": "pubrun-benchmark/3",
+                                   "machine": {"hostname": "<redacted>"}}))
+        # --print-submission must never touch the network.
+        res = run_pubrun("bench", "--submit-file", str(red), "--print-submission", stdin="")
+        assert res.returncode == 0
+        assert "Copy-paste submission" in res.stderr
+        assert "gh issue create" in res.stderr
+
+    def test_gh_repo_injection_is_literal(self, tmp_path):
+        red = tmp_path / "g.redacted.json"
+        red.write_text(json.dumps({"schema": "pubrun-benchmark/3", "machine": {"hostname": "<redacted>"}}))
+        marker = tmp_path / "pwned"
+        res = run_pubrun("bench", "--submit-file", str(red),
+                         "--gh-repo", f"$(touch {marker})")
+        assert res.returncode == 1
+        assert "Invalid --gh-repo" in res.stderr
+        assert not marker.exists()  # never executed as a shell command
+
+
+class TestSubmissionChain:
+    """The gh -> http -> printed-floor fallback chain, with transport stubbed."""
+
+    def _m(self):
+        import pubrun.__main__ as m
+        return m
+
+    def test_gh_success_reports_url(self, tmp_path, monkeypatch, capsys):
+        m = self._m()
+        red = tmp_path / "g.redacted.json"
+        red.write_text(json.dumps({"machine": {"hostname": "<redacted>"}}))
+        monkeypatch.setattr(m, "_submit_via_gh", lambda repo, p: ("https://x/issues/1", None))
+        # HTTP must NOT be attempted once gh succeeds.
+        monkeypatch.setattr(m, "_submit_via_http", lambda *a, **k: (_ for _ in ()).throw(AssertionError("http should not run")))
+        m._submit_benchmark(str(red), "fariello/pubrun-benchmarks", None, None, interactive=False)
+        assert "Submitted. Thank you! https://x/issues/1" in capsys.readouterr().err
+
+    def test_gh_unavailable_falls_to_http(self, tmp_path, monkeypatch, capsys):
+        m = self._m()
+        red = tmp_path / "g.redacted.json"
+        red.write_text(json.dumps({"machine": {"hostname": "<redacted>"}}))
+        monkeypatch.setattr(m, "_submit_via_gh", lambda repo, p: (None, "gh not on PATH"))
+        monkeypatch.setattr(m, "_resolve_gh_token", lambda explicit: ("tok", "$GITHUB_TOKEN"))
+        monkeypatch.setattr(m, "_submit_via_http", lambda repo, p, t: ("https://x/issues/2", None))
+        m._submit_benchmark(str(red), "fariello/pubrun-benchmarks", None, None, interactive=False)
+        assert "https://x/issues/2" in capsys.readouterr().err
+
+    def test_all_fail_reaches_floor_with_reasons(self, tmp_path, monkeypatch, capsys):
+        m = self._m()
+        red = tmp_path / "g.redacted.json"
+        red.write_text(json.dumps({"machine": {"hostname": "<redacted>"}}))
+        monkeypatch.setattr(m, "_submit_via_gh", lambda repo, p: (None, "gh not on PATH"))
+        monkeypatch.setattr(m, "_resolve_gh_token", lambda explicit: (None, None))
+        m._submit_benchmark(str(red), "fariello/pubrun-benchmarks", None, None, interactive=False)
+        err = capsys.readouterr().err
+        assert "Automated submission was not possible" in err
+        assert "gh not on PATH" in err
+        assert "Copy-paste submission" in err  # floor reached (non-interactive -> prints)
+
+    def test_http_error_scrubs_token(self, tmp_path, monkeypatch):
+        m = self._m()
+        red = tmp_path / "g.redacted.json"
+        red.write_text(json.dumps({"machine": {"hostname": "<redacted>"}}))
+        secret = "ghp_SECRETTOKEN123"
+
+        class _Err(Exception):
+            pass
+
+        def boom(req, timeout=None):
+            raise _Err(f"boom with {secret}")
+
+        import urllib.request
+        monkeypatch.setattr(urllib.request, "urlopen", boom)
+        url, reason = m._submit_via_http("o/n", str(red), secret)
+        assert url is None
+        assert secret not in (reason or "")  # token scrubbed from the error text
+
+    def test_no_token_makes_http_unavailable(self, tmp_path, monkeypatch):
+        m = self._m()
+        red = tmp_path / "g.redacted.json"
+        red.write_text(json.dumps({"machine": {"hostname": "<redacted>"}}))
+        # No token -> method reports unavailable BEFORE any urlopen call.
+        import urllib.request
+        monkeypatch.setattr(urllib.request, "urlopen",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not POST")))
+        url, reason = m._submit_via_http("o/n", str(red), None)
+        assert url is None and "token" in (reason or "")

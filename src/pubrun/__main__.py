@@ -1,6 +1,7 @@
 import argparse
 import sys
 import os
+import re
 import json
 import time
 import tempfile
@@ -845,9 +846,9 @@ def _run_inspect(run_dir: Optional[str], show_suggestions: bool, as_json: bool, 
 
 # --- bench: friendly benchmark runner + HPC (Slurm) submit + share guidance ---------
 
-# Placeholder until the public pubrun-benchmarks repo is created (operator step). This is
-# clearly-labeled, NOT a fake live URL. See the IPD Phase-2 follow-up.
-_BENCH_SUBMIT_URL = "https://github.com/fariello/pubrun-benchmarks  (<-- pending: create this repo)"
+# Public repo for community-contributed benchmark results. Submissions arrive as issues
+# (attach the redacted JSON); opening from your own GitHub account is the contact channel.
+_BENCH_SUBMIT_URL = "https://github.com/fariello/pubrun-benchmarks/issues/new"
 
 
 def _find_bench_harness():
@@ -886,6 +887,266 @@ def _on_compute_node() -> bool:
     return bool(os.environ.get("SLURM_JOB_ID"))
 
 
+_DEFAULT_BENCH_REPO = "fariello/pubrun-benchmarks"
+
+# Sensitive keys that a properly-redacted benchmark result must NOT expose as raw strings.
+# Kept in sync with benchmarks/harness.py `_REDACT_KEYS`/`_REDACT_LIST_KEYS`. Duplicated here
+# (not imported) because the benchmark tooling is NOT packaged in the wheel, so the CLI cannot
+# import from benchmarks/.
+_BENCH_SENSITIVE_KEYS = {
+    "hostname", "username", "executable", "prefix", "base_prefix", "virtual_env",
+    "python_executable", "path", "mount_point", "run_dir", "output_base_dir",
+    "results_dir", "pubrun_install", "tmpdir",
+}
+_BENCH_SENSITIVE_LIST_KEYS = {"sys_path", "source_files"}
+# A safe charset for an OWNER/NAME GitHub repo slug (blocks shell metacharacters / injection).
+_GH_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def _pii_needles() -> list:
+    """Home-dir prefix + OS username: the substrings a redacted file must never contain."""
+    needles = []
+    try:
+        home = os.path.expanduser("~")
+        if home and home != "~":
+            needles.append(home)
+    except Exception:
+        pass
+    try:
+        import getpass
+        needles.append(getpass.getuser())
+    except Exception:
+        pass
+    return sorted({n for n in needles if n}, key=len, reverse=True)
+
+
+def _scan_for_pii(obj, needles) -> Optional[str]:
+    """Return the first offending substring found anywhere in the structure, else None."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in _BENCH_SENSITIVE_LIST_KEYS and isinstance(v, list):
+                for item in v:
+                    if isinstance(item, str) and item and item != "<redacted>":
+                        return f"{k}[]={item!r}"
+            elif k in _BENCH_SENSITIVE_KEYS and isinstance(v, str) and v and v != "<redacted>":
+                return f"{k}={v!r}"
+            hit = _scan_for_pii(v, needles)
+            if hit:
+                return hit
+    elif isinstance(obj, list):
+        for item in obj:
+            hit = _scan_for_pii(item, needles)
+            if hit:
+                return hit
+    elif isinstance(obj, str):
+        for n in needles:
+            if n and n in obj:
+                return f"contains {n!r}"
+    return None
+
+
+def _verify_redacted(path) -> tuple:
+    """Return (ok, detail). ok=True iff the file parses as JSON and looks redacted:
+    no enumerated sensitive key holds a raw value and no home-dir/username substring leaks.
+    This gates EVERY transmit path (the never-publish-PII invariant)."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        return (False, f"could not read/parse {path} as JSON: {e}")
+    hit = _scan_for_pii(data, _pii_needles())
+    if hit:
+        return (False, f"file does not look redacted ({hit})")
+    return (True, "")
+
+
+def _bench_issue_title() -> str:
+    import platform as _pf
+    return f"benchmark result: {_pf.system()} / Python {_pf.python_version()}"
+
+
+def _bench_issue_body(redacted_path) -> str:
+    """A short human-readable wrapper + the redacted JSON in a fenced block."""
+    try:
+        content = open(redacted_path, "r", encoding="utf-8").read()
+    except OSError as e:
+        content = f"(could not read {redacted_path}: {e})"
+    return (
+        "Community-contributed pubrun overhead benchmark result (redacted).\n\n"
+        "```json\n" + content.rstrip("\n") + "\n```\n"
+    )
+
+
+def _scrub(text, secrets) -> str:
+    """Remove any secret substring (e.g. a token) from text before printing."""
+    if not text:
+        return text
+    for s in secrets:
+        if s:
+            text = text.replace(s, "<redacted>")
+    return text
+
+
+def _submit_via_gh(repo, redacted_path):
+    """Try `gh issue create`. Return the issue URL on success, or None if gh is
+    unavailable/unauthenticated/failed (caller falls through)."""
+    import shutil as _sh
+    import subprocess as _sp
+    import tempfile as _tf
+    if not _sh.which("gh"):
+        return (None, "gh not on PATH")
+    try:
+        auth = _sp.run(["gh", "auth", "status"], capture_output=True, text=True, timeout=15)
+    except Exception as e:
+        return (None, f"gh auth status failed: {e}")
+    if auth.returncode != 0:
+        return (None, "gh is not authenticated (`gh auth login`)")
+    body = _bench_issue_body(redacted_path)
+    tf = None
+    try:
+        tf = _tf.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
+        tf.write(body)
+        tf.close()
+        # argv list, never shell=True; repo/title/paths are discrete args.
+        cmd = ["gh", "issue", "create", "--repo", repo,
+               "--title", _bench_issue_title(), "--body-file", tf.name]
+        proc = _sp.run(cmd, capture_output=True, text=True, timeout=60)
+        if proc.returncode != 0:
+            return (None, f"gh issue create failed: {(proc.stderr or proc.stdout).strip()}")
+        url = (proc.stdout or "").strip().splitlines()[-1] if proc.stdout.strip() else ""
+        return (url or "created", None)
+    except Exception as e:
+        return (None, f"gh issue create error: {e}")
+    finally:
+        if tf is not None:
+            try:
+                os.unlink(tf.name)
+            except OSError:
+                pass
+
+
+def _resolve_gh_token(explicit):
+    """Token source order: --gh-token > GITHUB_TOKEN/GH_TOKEN > `gh auth token`. Returns
+    (token, source) or (None, None). Never logs the value."""
+    if explicit:
+        return (explicit, "--gh-token")
+    for var in ("GITHUB_TOKEN", "GH_TOKEN"):
+        if os.environ.get(var):
+            return (os.environ[var], f"${var}")
+    try:
+        import shutil as _sh
+        import subprocess as _sp
+        if _sh.which("gh"):
+            proc = _sp.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=15)
+            if proc.returncode == 0 and proc.stdout.strip():
+                return (proc.stdout.strip(), "gh auth token")
+    except Exception:
+        pass
+    return (None, None)
+
+
+def _submit_via_http(repo, redacted_path, token):
+    """POST to the GitHub Issues API via stdlib urllib. Return (url, None) on success or
+    (None, reason) to fall through. HTTPS-only; hardened headers; token never echoed."""
+    import urllib.request
+    import urllib.error
+    if not token:
+        return (None, "no GitHub token (set --gh-token, $GITHUB_TOKEN, or `gh auth login`)")
+    api = f"https://api.github.com/repos/{repo}/issues"
+    payload = json.dumps({"title": _bench_issue_title(),
+                          "body": _bench_issue_body(redacted_path)}).encode("utf-8")
+    req = urllib.request.Request(api, data=payload, method="POST")
+    req.add_header("User-Agent", f"pubrun/{__version__}")  # GitHub rejects requests w/o UA
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        # HTTPS-only + explicit timeout so a stalled connection cannot hang the CLI.
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return (data.get("html_url", "created"), None)
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", "replace")
+        except Exception:
+            pass
+        extra = ""
+        if e.code in (403, 429):
+            ra = e.headers.get("Retry-After") or e.headers.get("X-RateLimit-Reset")
+            extra = f" (rate-limited; retry-after/reset={ra})" if ra else " (rate-limited)"
+        return (None, _scrub(f"GitHub API HTTP {e.code}{extra}: {detail[:200]}", [token]))
+    except Exception as e:
+        return (None, _scrub(f"HTTP submit error: {e}", [token]))
+
+
+def _print_floor(repo, redacted_path, reasons, interactive) -> None:
+    """The always-works manual fallback: explain, then offer a copy-paste submission."""
+    print("", file=sys.stderr)
+    if reasons:
+        print("Automated submission was not possible:", file=sys.stderr)
+        for r in reasons:
+            print(f"  - {r}", file=sys.stderr)
+    do_print = True
+    if interactive:
+        try:
+            resp = input("Print a ready-to-paste submission (issue body + gh command)? [Y/n] ").strip().lower()
+            do_print = resp in ("", "y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            do_print = False
+    if not do_print:
+        print(f"To submit later: pubrun bench --submit-file \"{redacted_path}\"", file=sys.stderr)
+        print(f"Or open an issue manually at: {_BENCH_SUBMIT_URL}", file=sys.stderr)
+        return
+    print("\n--- Copy-paste submission ------------------------------------------", file=sys.stderr)
+    print(f"Open an issue at: {_BENCH_SUBMIT_URL}", file=sys.stderr)
+    print(f"Title: {_bench_issue_title()}", file=sys.stderr)
+    print("Or with the GitHub CLI:", file=sys.stderr)
+    print(f'  gh issue create --repo {repo} --title "{_bench_issue_title()}" '
+          f'--body-file "{redacted_path}"', file=sys.stderr)
+    print("\nIssue body:\n", file=sys.stderr)
+    print(_bench_issue_body(redacted_path), file=sys.stderr)
+    print("--------------------------------------------------------------------", file=sys.stderr)
+
+
+def _submit_benchmark(redacted_path, repo, method, gh_token, interactive) -> None:
+    """Consent-gated submission chain: gh -> HTTP-to-Issues -> printed floor. Callers must
+    have already obtained explicit consent and a REDACTED file (verified). Never raises out."""
+    if not _GH_REPO_RE.match(repo or ""):
+        _print_error(f"Invalid --gh-repo {repo!r}; expected OWNER/NAME.")
+        return
+    reasons = []
+
+    if method == "print":
+        _print_floor(repo, redacted_path, [], interactive)
+        return
+
+    # (a) gh
+    if method in (None, "gh"):
+        url, why = _submit_via_gh(repo, redacted_path)
+        if url:
+            print(f"\nSubmitted. Thank you! {url}", file=sys.stderr)
+            return
+        reasons.append(f"gh: {why}")
+        if method == "gh":
+            _print_floor(repo, redacted_path, reasons, interactive)
+            return
+
+    # (b) HTTP to GitHub Issues API
+    if method in (None, "http"):
+        token, source = _resolve_gh_token(gh_token)
+        if source:
+            print(f"Using GitHub token from {source}.", file=sys.stderr)
+        url, why = _submit_via_http(repo, redacted_path, token)
+        if url:
+            print(f"\nSubmitted. Thank you! {url}", file=sys.stderr)
+            return
+        reasons.append(f"http: {why}")
+
+    # (c) printed floor
+    _print_floor(repo, redacted_path, reasons, interactive)
+
+
 def _print_share_guidance(results_path, redacted_path) -> None:
     print("", file=sys.stderr)
     print("To contribute this benchmark result:", file=sys.stderr)
@@ -900,8 +1161,43 @@ def _print_share_guidance(results_path, redacted_path) -> None:
     print(f"  Full (un-redacted) results for your own analysis are at:\n       {results_path}", file=sys.stderr)
 
 
-def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact) -> None:
-    """Friendly front-end over benchmarks/harness.py with optional Slurm submission."""
+def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact,
+               submit_file=None, submit_method=None, gh_repo=None, gh_token=None,
+               print_submission=False, no_submit=False) -> None:
+    """Friendly front-end over benchmarks/harness.py with optional Slurm submission and
+    consent-gated result submission to the public pubrun-benchmarks repo."""
+    repo = gh_repo or _DEFAULT_BENCH_REPO
+    if not _GH_REPO_RE.match(repo):
+        _print_error(f"Invalid --gh-repo {repo!r}; expected OWNER/NAME.")
+        sys.exit(1)
+    interactive = sys.stdin.isatty()
+
+    # --- Recovery / HPC / batch path: submit an EXISTING file, no benchmark run. ---
+    if submit_file is not None:
+        p = Path(submit_file)
+        if not p.is_file():
+            _print_error(f"--submit-file: no such file: {submit_file}")
+            sys.exit(1)
+        # NEVER auto-transmit an un-redacted result to the PUBLIC repo (verifier gates it).
+        if not no_redact:
+            ok, detail = _verify_redacted(p)
+            if not ok:
+                _print_error(
+                    f"Refusing to submit: {detail}.\n"
+                    "This looks like a full (un-redacted) result, which may contain personal "
+                    "data. Point --submit-file at the '.redacted.json' copy, or, only if you "
+                    "have manually verified it is safe, pass --no-redact to override.")
+                sys.exit(1)
+        else:
+            print("WARNING: --no-redact given; skipping the redaction safety check. Ensure "
+                  "this file contains no personal data before it is published publicly.",
+                  file=sys.stderr)
+        if print_submission:
+            _print_floor(repo, str(p), [], interactive)
+            return
+        _submit_benchmark(str(p), repo, submit_method, gh_token, interactive)
+        return
+
     harness = _find_bench_harness()
     if harness is None:
         _print_error(
@@ -974,14 +1270,46 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact
     if rc != 0:
         _print_error(f"Benchmark harness exited with code {rc}.")
         sys.exit(rc)
+    redacted_path = None if no_redact else out_path.with_suffix(".redacted.json")
     if as_json:
         print(json.dumps({"results": str(out_path),
-                          "redacted": None if no_redact else str(out_path.with_suffix(".redacted.json"))}))
+                          "redacted": None if no_redact else str(redacted_path)}))
         return
-    if no_redact:
+
+    _print_share_guidance(out_path, redacted_path) if not no_redact else \
         print(f"\nResults: {out_path}", file=sys.stderr)
+
+    # --- Consent-gated submission offer (never transmits without an explicit yes) ---
+    if no_redact:
+        # No redacted artifact exists; never auto-transmit a full result to the public repo.
+        if submit or yes:
+            print("\nNot submitting: --no-redact produced no shareable (redacted) copy. Re-run "
+                  "without --no-redact to contribute, or submit a redacted file manually.",
+                  file=sys.stderr)
+        return
+
+    # Explicit consent via flag, else an interactive [y/N] offer (Enter == No).
+    consented = submit or yes
+    if not consented and interactive and not no_submit:
+        try:
+            resp = input("\nContribute this redacted result to help verify pubrun's "
+                         "overhead claims? [y/N] ").strip().lower()
+            consented = resp in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            consented = False
+
+    if consented:
+        # Redacted copy was just written by the harness, but verify before any network call.
+        ok, detail = _verify_redacted(redacted_path)
+        if not ok:
+            _print_error(f"Not submitting: {detail}. Submit manually if you have verified it.")
+            return
+        if print_submission:
+            _print_floor(repo, str(redacted_path), [], interactive)
+        else:
+            _submit_benchmark(str(redacted_path), repo, submit_method, gh_token, interactive)
     else:
-        _print_share_guidance(out_path, out_path.with_suffix(".redacted.json"))
+        print(f'\nTo submit later: pubrun bench --submit-file "{redacted_path}"', file=sys.stderr)
 
 
 def _run_status(
@@ -1589,7 +1917,8 @@ def main() -> None:
                     "redacted, shareable copy by default and prints how to contribute it. "
                     "Requires a source checkout (the benchmark tooling is not shipped in "
                     "the pip package).",
-        epilog=f"Examples:\n  {prog_name} bench --quick\n  {prog_name} bench --local --passes 3\n  {prog_name} bench --submit",
+        epilog=f"Examples:\n  {prog_name} bench --quick\n  {prog_name} bench --local --passes 3\n"
+               f"  {prog_name} bench --submit\n  {prog_name} bench --submit-file runs.redacted.json",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     bench_speed = bench_parser.add_mutually_exclusive_group()
@@ -1599,10 +1928,23 @@ def main() -> None:
     bench_parser.add_argument("--passes", type=int, default=None, help="Number of full scenario sweeps (default 2).")
     bench_group = bench_parser.add_mutually_exclusive_group()
     bench_group.add_argument("--local", action="store_true", help="Run here even if Slurm is detected.")
-    bench_group.add_argument("--submit", action="store_true", help="Submit to Slurm (no prompt).")
-    bench_parser.add_argument("-y", "--yes", action="store_true", help="Assume yes to the submit prompt.")
+    bench_group.add_argument("--submit", action="store_true", help="Submit to Slurm (no prompt); off HPC, contribute the result without prompting.")
+    bench_parser.add_argument("-y", "--yes", action="store_true", help="Assume yes to the submit/contribute prompt.")
     bench_parser.add_argument("--no-redact", action="store_true", help="Do NOT write a redacted share copy (full detail only).")
     bench_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit the result/redacted paths as JSON.")
+    # --- result submission (consent-gated; never transmits without an explicit yes) ---
+    bench_parser.add_argument("--submit-file", metavar="FILE", default=None,
+                              help="Submit an existing (redacted) result file to the pubrun-benchmarks "
+                                   "repo, without running a benchmark. For 'oh, I meant yes' recovery and HPC.")
+    bench_parser.add_argument("--no-submit", action="store_true", help="Do not offer to contribute the result.")
+    bench_parser.add_argument("--submit-method", choices=("gh", "http", "print"), default=None,
+                              help="Force a single submission method instead of probing (gh -> http -> print).")
+    bench_parser.add_argument("--gh-repo", metavar="OWNER/NAME", default=None,
+                              help=f"Target GitHub repo for submission (default {_DEFAULT_BENCH_REPO}).")
+    bench_parser.add_argument("--gh-token", metavar="TOKEN", default=None,
+                              help="GitHub token for the HTTP submission path (else $GITHUB_TOKEN/$GH_TOKEN or `gh auth token`).")
+    bench_parser.add_argument("--print-submission", action="store_true",
+                              help="Print a ready-to-paste submission instead of transmitting (offline/power-user).")
 
     # ---------------- Clean Subparser ----------------
     clean_parser = subparsers.add_parser(
@@ -1989,6 +2331,12 @@ def main() -> None:
             getattr(args, "yes", False),
             getattr(args, "as_json", False),
             getattr(args, "no_redact", False),
+            submit_file=getattr(args, "submit_file", None),
+            submit_method=getattr(args, "submit_method", None),
+            gh_repo=getattr(args, "gh_repo", None),
+            gh_token=getattr(args, "gh_token", None),
+            print_submission=getattr(args, "print_submission", False),
+            no_submit=getattr(args, "no_submit", False),
         )
         executed = True
 
