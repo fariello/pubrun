@@ -73,6 +73,12 @@ unambiguous and predictable (see Open Q1). Options:
 
 ## Required tests / validation
 
+- **Characterization gate (anti-regression):** pin CURRENT `find_run`/`_get_manifest_path`
+  resolution first — id-prefix match, dir-substring fallback, no-arg→latest — with tests, and
+  keep them green after the resolver refactor. The selector must be ADDITIVE: existing
+  id-prefix/path resolution behavior is unchanged (this is the invariant the ambiguity design
+  protects). If the chosen syntax is bare-int, a test proves a run whose id starts with the
+  selector digits still resolves the way it does today (per the documented precedence).
 - Recency resolution: N-run fixture; selector 1..N resolves newest..oldest; N+1 → clear error.
 - `--dir` honored: selector resolves within the specified dir, not cwd.
 - Disambiguation: numeric-looking id not mis-resolved (both precedence directions pinned).
@@ -100,3 +106,16 @@ chosen syntax + examples; referenced from each command), `CHANGELOG.md`.
 
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`.
+
+## Plan-review record (2026-07-07)
+
+Reviewed via `plan-review`. Verified `find_run` prefix→substring resolution (`status.py:582-601`),
+`_get_manifest_path` (`__main__.py:62-136`), most-recent-first `scan_runs`, and that no numeric
+selector exists. Verdict: **APPROVE WITH REVISIONS APPLIED.**
+- **P6 (MEDIUM, anti-regression):** added a characterization gate pinning CURRENT id-prefix /
+  dir-substring / no-arg→latest resolution before the resolver refactor; the selector must be
+  purely ADDITIVE and existing id/path resolution unchanged. This is the invariant the
+  ambiguity design (E2/OQ1) exists to protect.
+The syntax crux (E-OQ1: sigil vs bare-int-with-fallback) is the key maintainer decision — the
+Deferred table already routes an "ambiguous bare-int" outcome to the safe sigil syntax rather
+than shipping an ambiguous default.

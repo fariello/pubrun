@@ -52,8 +52,8 @@ avg/min/max not just peak), a readable timeline, and give `report`/`show` identi
 
 | Step | Findings | Change | Files | Rem. Risk | Validation |
 |------|----------|--------|-------|-----------|------------|
-| 1 | C3 | Compute **avg / min / max** RSS and CPU from the `resource_sample` events at report time and render them alongside peak (e.g. `RSS: peak X / avg Y / min Z` ; `CPU: peak / avg / min / max`). Fall back gracefully to peak-only when no per-sample events exist (older/short runs). | `diagnostics.py` | Low | A run with N samples shows avg/min/max matching a recomputation; a run with no samples shows just the peak line (no crash). |
-| 2 | C1 | **Process-tree CPU: decide + implement.** Option (a) capture tree CPU (sum child CPU%) in `capture/resources.py` and render `Peak Tree CPU` — this CHANGES capture and the "child CPU excluded" invariant, so it is gated behind the existing `scope="tree"` and documented; Option (b) render tree CPU only if already derivable, else state honestly that tree CPU is not measured. **Prefer (a)** since the user explicitly wants it, but flag the invariant change for plan-review (see Open Q1). | `capture/resources.py`, `diagnostics.py` | **Med** | If (a): a multiprocess tree run records + shows a non-zero Peak Tree CPU; single-process run's tree CPU == main CPU. Existing "CPU = main process" tests updated intentionally. |
+| 1 | C3 | Compute **avg / min / max** RSS and CPU from the `resource_sample` events at report time and render them alongside peak (e.g. `RSS: peak X / avg Y / min Z` ; `CPU: peak / avg / min / max`). **Data availability (verified):** each `resource_sample` payload carries `rss_bytes` + `cpu_percent`, and `tree_rss_bytes` when scope=tree (`capture/resources.py:367-369`). So avg/min/max are computable for **main RSS, main CPU, and tree RSS**. There is **no per-sample tree CPU** today — tree-CPU avg/min/max is only possible if step 2(a) additionally emits a per-sample tree-CPU value; otherwise report tree CPU as peak-only (or omit). Fall back gracefully to peak-only when no per-sample events exist (older/short runs). | `diagnostics.py` (+ `capture/resources.py` if step 2(a) adds per-sample tree CPU) | Low | A run with N samples shows main-RSS/main-CPU/tree-RSS avg/min/max matching a recomputation; a run with no samples shows just the peak line (no crash); tree-CPU stats appear only if per-sample tree CPU is emitted. |
+| 2 | C1 | **Process-tree CPU: decide + implement.** Option (a) capture tree CPU in `capture/resources.py` and render `Peak Tree CPU` — this CHANGES capture and the "child CPU excluded" invariant, so it is gated behind the existing `scope="tree"` and documented; Option (b) render tree CPU only if already derivable, else state honestly that tree CPU is not measured. **Prefer (a)** per user request, but flag the invariant change for plan-review (Open Q1). **Correctness note (must not naively sum instantaneous %):** per-process CPU% is a rate over the sample interval; tree CPU must be computed as the delta of summed CPU *time* (jiffies/`utime+stime` across the tree from `/proc/<pid>/stat`, or the darwin equivalent already used for tree RSS) divided by the wall interval — NOT a sum of per-process instantaneous `cpu_percent` (which is window-sensitive and can mislead). It may legitimately exceed 100% (multi-core), so label it "% (of one core; tree)" and do not clamp. Reuse the tree-walk already present for `_poll_tree_rss` (`capture/resources.py:268`). | `capture/resources.py`, `diagnostics.py` | **Med** | If (a): a multiprocess tree run records + shows a plausible Peak Tree CPU computed from summed CPU-time deltas (not instantaneous-% sum); single-process run's tree CPU ≈ main CPU. Existing "CPU = main process" tests updated intentionally. |
 | 3 | C2 | Relabel the resource block so main vs tree is explicit: `Peak RSS (main)` / `Peak RSS (tree)` / `Peak CPU (main)` / `Peak CPU (tree)`, each shown only when present. | `diagnostics.py` | Low | Labels present; a non-tree run shows only `(main)` lines. |
 | 4 | C4 | Format timeline timestamps as `YYYY-MM-DD HH:MM:SS` (drop microseconds + offset in the human view; honor `--utc` vs local like the rest of the report). | `diagnostics.py` | Low | Timeline lines match `[2026-07-07 04:47:49]`; `--utc` toggles tz. |
 | 5 | C5 | Truncate the timeline to **oldest 10 + newest 10** with `[... N events truncated ...]` when total > 20 (down from 40/20+20). | `diagnostics.py` | Low | 25-event run shows 10 + marker + 10; ≤20-event run shows all. |
@@ -103,3 +103,20 @@ avg/min/max not just peak), a readable timeline, and give `report`/`show` identi
 
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`.
+
+## Plan-review record (2026-07-07)
+
+Reviewed via `plan-review`. Verified: `report`/`show` both dispatch to `_run_report`
+(`__main__.py:2284,2291`); `show`/`status` have `--utc`, `report` does not (`:2227,2242`);
+`resource_sample` payload = `rss_bytes`+`cpu_percent` (+`tree_rss_bytes` when tree)
+(`capture/resources.py:367-369`); NO per-sample tree CPU exists; tree RSS via `_poll_tree_rss`
+(`:268`). Verdict: **APPROVE WITH REVISIONS APPLIED.**
+- **P4 (MEDIUM, functionality):** tree-CPU must be computed from summed CPU-TIME deltas over
+  the tree (not a sum of instantaneous per-process `cpu_percent`, which is window-sensitive);
+  may exceed 100% (multi-core) — label "% of one core", don't clamp; reuse the `_poll_tree_rss`
+  tree walk.
+- **P5 (MEDIUM, functionality):** clarified avg/min/max are computable for main-RSS/main-CPU/
+  tree-RSS from existing samples, but tree-CPU avg/min/max needs step-2(a) to emit per-sample
+  tree CPU, else report tree CPU peak-only.
+No deferrals on risk (C1 option-(a) capture cost noted as a Med-High fallback to option (b)).
+Sequence BEFORE IPD-F (shares the resource-series helper).

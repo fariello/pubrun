@@ -39,9 +39,13 @@ styling.
 ## Design decisions (maintainer-confirmed 2026-07-07)
 
 - **Canonical prefixes (fixed 6-char bracket, left-aligned label):**
-  `[INFO ]` (green), `[WARN ]` (yellow), `[ERROR]` (red), `[DEBUG]` (light blue / bright cyan),
-  `[ OK  ]` (green). Textual label is authoritative; color is optional reinforcement, **never
-  DIM**, suppressed under `NO_COLOR` / `--no-color` / non-TTY.
+  `[INFO ]` (green), `[WARN ]` (yellow), `[ERROR]` (red), `[DEBUG]` (light blue), `[ OK  ]`
+  (green). Textual label is authoritative; color is optional reinforcement, **never DIM**,
+  suppressed under `NO_COLOR` / `--no-color` / non-TTY. **"Light blue" = bright cyan/blue
+  (ANSI 96 or 94), NOT dim blue (34)** — plain blue on a dark terminal is low-contrast, which
+  violates the accessibility principle; pick the bright variant and verify legibility on both
+  dark and light backgrounds. INFO/OK share green — that is fine since the textual label
+  disambiguates them (color is never the sole signal).
 - **One central helper module** (no duplication): `info()/warn()/error()/debug()/ok()` (and a
   low-level `emit(level, msg)`), each writing to the right stream (errors/warnings→stderr;
   info/ok→stderr for status chatter so stdout stays clean for data, matching current
@@ -78,14 +82,23 @@ not partially, since a half-migration would leave the very inconsistency we are 
 
 ## Required tests / validation
 
+- **Pre-migration inventory (do first):** grep the WHOLE repo (`src/` AND `tests/`) for every
+  legacy prefix (`[*]`, `[OK]`, `[ERRO]`, `[WARN]`, `[WARNING]`, `[FAIL]`, `[warn]`, `[info]`,
+  `[dry run]`) to enumerate (a) all emit sites and (b) all TEST assertions that will need
+  updating. This inventory is the change's scope-of-blast; it prevents a missed call site
+  leaving the inconsistency, and a missed test assertion failing mysteriously.
+- **Streams must be PRESERVED exactly.** The new helper must send each migrated message to the
+  SAME stream (stdout/stderr) it used before — several tests capture a specific stream
+  (`capsys.readouterr().err` vs `.out`). Changing a message's stream is a behavior change and
+  is out of scope; assert the pre/post stream for each level in the helper's tests.
 - Output helper: prefix exactness per level; `NO_COLOR`/non-TTY suppresses ANSI but keeps the
   textual label; DEBUG only emitted when a debug/verbose flag is set (define the gate).
 - Migration: grep-based test (or a scan test) asserting no legacy prefix strings remain in
-  `src/pubrun`.
-- Streams: errors/warnings go to stderr (existing tests that capture stderr still pass).
+  `src/pubrun` (excluding the changelog note and any string that is intentionally not a prefix).
 - Help ordering: a test parses `pubrun -h` and asserts the visible command list is sorted.
-- Full suite green (several existing tests assert on `[ERRO]`/`[OK]`/`[*]` text — update them
-  to the canonical prefixes as part of this change; that is expected, not a regression).
+- Full suite green. Existing tests asserting `[ERRO]`/`[OK]`/`[*]`/`[warn]`/`[info]` text are
+  updated to the canonical prefixes IN THE SAME COMMIT (expected, not a regression); the
+  pre-migration inventory guarantees none are missed.
 
 ## Spec / documentation sync
 
@@ -107,3 +120,18 @@ grepping pubrun output in scripts — recommend matching on the level word, not 
 
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`.
+
+## Plan-review record (2026-07-07)
+
+Reviewed via `plan-review`. Verified the 8 legacy prefix styles + duplicated `_print_error`
+(`__main__.py:14`, `diagnostics.py:28`) and the insertion-ordered `-h` list. Verdict:
+**APPROVE WITH REVISIONS APPLIED.**
+- **P3 (HIGH, functionality):** added a mandatory pre-migration grep INVENTORY (src/ AND
+  tests/) of every legacy prefix + all test assertions, and required that message STREAMS
+  (stdout/stderr) be preserved exactly (several tests capture a specific stream); a
+  stream change is out of scope.
+- **P7 (LOW, accessibility):** pinned "light blue" to bright cyan/blue (ANSI 96/94), NOT dim
+  blue (34), to satisfy the WCAG/non-DIM principle; noted INFO/OK sharing green is fine since
+  the textual label is authoritative.
+No deferrals on risk. Sequence this FIRST (its helper + prefixes are reused by IPD-D and the
+diagnostic verbosity work).

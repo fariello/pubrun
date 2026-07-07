@@ -61,7 +61,11 @@ numeric summary), reusing pubrun's existing per-sample data — no new capture.
   summary; `pubrun res` still renders identically (regression).
 - TUI: textual test harness (Pilot) — select a run → resource view populated; sample-less run
   → message; toggle binding works. (Marked to skip if `[tui]` deps unavailable, matching
-  existing TUI test gating.)
+  existing TUI test gating.) **Verify these tests actually RUN (not silently skip):** confirm
+  the dev venv has the `[tui]` extra installed before claiming the TUI tests pass — a
+  skipped-everywhere test is false confidence. If textual is absent from the dev env, install
+  `pubrun[tui]` for the test run and note it in the execution record. The **series-helper**
+  tests (step 1) have NO textual dependency and must run unconditionally.
 - Core import unaffected; no new core dependency (`import pubrun` works without textual).
 - Full suite green.
 
@@ -84,3 +88,15 @@ numeric summary), reusing pubrun's existing per-sample data — no new capture.
 
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`. Sequence AFTER IPD-C (shared resource series).
+
+## Plan-review record (2026-07-07)
+
+Reviewed via `plan-review`. Verified the TUI is a small optional-extra app (`tui/app.py`, ~110
+lines) and the per-sample data path exists (`diagnostics.py:754-865`). Verdict: **APPROVE WITH
+REVISIONS APPLIED.**
+- **P8 (MEDIUM, testing):** required the executor to VERIFY the TUI tests actually run (not
+  silently skip) by ensuring the `[tui]` extra is installed in the dev venv for the test run,
+  and to note it in the execution record; the non-textual series-helper tests must run
+  unconditionally. A skipped-everywhere TUI test is false confidence.
+Correctly defers live/streaming graphs (Med-High complexity) and reuses the IPD-C resource
+series (sequenced after C).

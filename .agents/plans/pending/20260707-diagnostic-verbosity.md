@@ -87,3 +87,13 @@ subsumes them (sequence D after B, or share the helper).
 
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`. Sequence AFTER IPD-B (shared prefixes).
+
+## Plan-review record (2026-07-07)
+
+Reviewed via `plan-review`. Verified the findings-only checks model (`checks.py`), the terse
+self-check default (`__main__.py:761-776`), and terse meta (`meta_snapshot.py:19,58,61-72`).
+Verdict: **APPROVE** (no revisions needed). The plan already: keeps `--strict` keyed on WARN
+only (unchanged), preserves the one-line summary behind `--quiet` (so any script relying on the
+terse default is not broken — a real anti-regression concern the plan handles), and depends on
+IPD-B for the canonical prefixes (correctly sequenced). Open questions (default verbosity,
+always-show-passed, timing granularity) are UX calls for execution-time with sensible leanings.
