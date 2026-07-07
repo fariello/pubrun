@@ -10,8 +10,11 @@
   proceed, and even then strictly OPT-IN; Phase-1 code would touch `src/pubrun/core.py` (the
   existing `pubrun.open` wrapper) and potentially a new opt-in patch module. Nothing in
   Phase 0 modifies the codebase.
-- Status: PENDING — this is a research/decision IPD. It requires careful evaluation and
-  explicit maintainer sign-off before ANY implementation. NOT auto-executed.
+- Status: PENDING — **Phase 0 (evaluation) COMPLETE 2026-07-06**; awaiting maintainer
+  Gate-2 decision before ANY implementation. The written evaluation lives at
+  `docs/design/file-io-provenance-evaluation.md`. NOT auto-executed. Stays in `pending/`
+  until a Phase-1 mechanism is chosen and executed (or the IPD is closed as
+  eval-only/deferred). See the Phase-0 outcome at the end.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Problem / motivation
@@ -181,3 +184,42 @@ remains EVALUATION-FIRST with two approval gates; the review does not authorize 
 **Stricter re-pass (2026-07-06):** tightened the Scope line so Phase 0 explicitly touches no
 code/tests/config (removes any implication of code changes before Gate 2). No other findings
 — the evaluation-first structure correctly contains the highest-risk item of the five.
+
+## Phase 0 outcome (2026-07-06) — EVALUATION COMPLETE, no code written
+
+Deliverable: **`docs/design/file-io-provenance-evaluation.md`** (evidence-grounded; read
+the actual `ProvenanceFileProxy` at `core.py:581-728`, verified `/proc/self/io`, verified
+`sys.addaudithook` exists with NO `sys.removeaudithook`, and the `_spy_local` pause pattern).
+
+Key findings:
+- The two goals are **separable**: (1) coarse "was this I/O-heavy / on NFS" vs (2) precise
+  "which files". Keeping them separate lets the high-value low-risk part proceed alone.
+- **Global `builtins.open` monkeypatch is dominated by the audit hook on every axis** (the
+  hook observes rather than replaces, so lower blast radius AND it is not defeated by
+  C-extensions holding the original `open`). Recommend permanently rejecting the global
+  patch. `strace`/`ptrace` rejected (slow, permissioned, Linux-only).
+- **Audit-hook constraint confirmed:** not removable → must be installed only when enabled
+  and gated per-event via the thread-local pause counter; L4 (hashing) is NOT feasible
+  in-hook; needs aggressive path filters + never-raise wrapper + a per-open overhead budget.
+- Current `pubrun.open()` proxy has real correctness gaps to fix if hardened: `readinto`/
+  buffered reads bypass the incremental hash; text-mode re-encode with `errors="ignore"`
+  makes the recorded hash NOT the on-disk hash (honesty issue). Fix = hash on-disk bytes at
+  close + document semantics.
+
+Recommendation (ordered), each gated on maintainer approval (Gate 2):
+1. **DO** coarse `/proc/self/io` read/write byte totals in the existing watcher (≈IPD-A
+   follow-up; ~zero risk; finishes the NFS/contention story; feeds `pubrun inspect`).
+2. **DO** harden opt-in `pubrun.open()` + a graded `level = none|name|realpath|stat|hash`
+   selector (zero global risk; per-file opt-in).
+3. **DEFER** the `sys.addaudithook` automatic path until (1)+(2) are in use and the
+   automatic-capture need is demonstrated; if built, default OFF (no hook installed),
+   L1–L3 only, path filters, pause-gated, never-raise, benchmark-gated.
+4. **REJECT permanently** global `open()` patching and `strace`/`ptrace`.
+
+Proposed config knob (design only): `[capture.file_io].level` (default `none`) +
+`mode = explicit|auto` + `exclude`/`max_hash_bytes`. Default `none` ⇒ no behavior change,
+no hook installed (preserves default-OFF / zero-footprint).
+
+**Gate 2 asks (maintainer):** approve (1), approve (2), decide on (3) [recommend defer],
+confirm (4). No code until then. Recommend re-running `plan-review` on whichever Phase-1
+mechanism is chosen before it is built.
