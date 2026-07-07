@@ -191,6 +191,7 @@ Security policies for preventing secret leakage into manifest files.
 | `sample_interval_seconds` | int | `15` | How often the background thread samples CPU/memory. |
 | `max_consecutive_failures` | int | `3` | Kill the background thread after this many consecutive **unreadable** polls (errors/timeouts). A legitimate reading of 0 does not count, so a transient blip cannot permanently disable telemetry. |
 | `poll_timeout` | int | `3` | Per-poll timeout (seconds) for the macOS/Windows sampling subprocesses (`ps`/`wmic`). Bounds a hung tool so it cannot orphan the sampling thread. |
+| `system_metrics` | bool | `true` | Also sample **system-wide** dynamic metrics alongside per-process RSS/CPU: available memory, load average, and (Linux only) node iowait. These make post-hoc I/O / contention diagnosis possible (e.g. "was this run starved for RAM or on a busy node?"). Cheap (single `/proc` reads) and only sampled when the watcher is running (`depth != "off"`). Adds `system_memory`/`load_average`/`system_iowait_pct` to the `resources` manifest section. Note: `system_iowait_pct` is **node-wide, indicative only** (not run-scoped). Set `false` to omit. |
 
 #### Enabling process-tree memory capture
 

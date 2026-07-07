@@ -104,6 +104,65 @@ def _machine_metadata() -> dict:
     return md
 
 
+def _pass_env() -> dict:
+    """Dynamic host state captured at the START OF EACH PASS.
+
+    A node that gets loaded (or runs low on RAM) between passes would otherwise be
+    invisible. Cheap /proc reads; reuses pubrun's own system-metrics capture.
+    """
+    env: dict = {}
+    try:
+        from pubrun.capture.system_metrics import get_system_memory, get_load_average, read_proc_stat_cpu_times, iowait_pct_between
+        env["system_memory"] = get_system_memory()
+        env["load_average"] = get_load_average()
+        # Sample iowait over a short window so the per-pass value is meaningful.
+        a = read_proc_stat_cpu_times()
+        time.sleep(0.05)
+        b = read_proc_stat_cpu_times()
+        env["system_iowait_pct"] = iowait_pct_between(a, b)  # NODE-WIDE, indicative only
+    except Exception as e:
+        env["capture_error"] = f"{type(e).__name__}: {e}"
+    return env
+
+
+def _filesystem_context() -> dict:
+    """Filesystem type of the harness workdir/$TMPDIR and the results dir.
+
+    Surfaces the "installed/running over NFS" case that confounds cross-machine results.
+    Non-blocking (parses /proc/mounts; never statvfs/df on the target).
+    """
+    try:
+        from pubrun.capture.filesystem import get_filesystem
+        paths = {
+            "tmpdir": tempfile.gettempdir(),
+            "results_dir": str(Path(__file__).resolve().parent / "results"),
+        }
+        try:
+            import pubrun
+            pkg_file = getattr(pubrun, "__file__", None)
+            if pkg_file:
+                paths["pubrun_install"] = str(Path(pkg_file).resolve().parent)
+        except Exception:
+            pass
+        return get_filesystem({}, paths)
+    except Exception as e:
+        return {"capture_error": f"{type(e).__name__}: {e}"}
+
+
+def _slurm_context() -> dict | None:
+    """Slurm allocation context (when running under Slurm), for interpreting cross-node results."""
+    keys = {
+        "SLURM_JOB_ID": "job_id",
+        "SLURM_CPUS_PER_TASK": "cpus_per_task",
+        "SLURM_MEM_PER_NODE": "mem_per_node",
+        "SLURM_JOB_PARTITION": "partition",
+        "SLURMD_NODENAME": "node",
+        "SLURM_JOB_NUM_NODES": "num_nodes",
+    }
+    ctx = {dest: os.environ[src] for src, dest in keys.items() if os.environ.get(src)}
+    return ctx or None
+
+
 def _git_commit() -> str | None:
     try:
         out = subprocess.run(
@@ -226,18 +285,27 @@ def _run_pass(pass_no: int, iterations: int, warmup: int, workdir: Path) -> dict
 
 def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2) -> dict:
     scns = _scenarios.all_scenarios()
+    machine = _machine_metadata()
+    # Enrich the machine block with filesystem type (the NFS signal) and Slurm context
+    # so cross-machine / cross-node results are interpretable.
+    machine["filesystem"] = _filesystem_context()
+    slurm = _slurm_context()
+    if slurm:
+        machine["slurm"] = slurm
     result = {
-        "schema": "pubrun-benchmark/2",
+        "schema": "pubrun-benchmark/3",
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "iterations": iterations,
         "warmup": warmup,
         "passes": passes,
         "git_commit": _git_commit(),
-        "machine": _machine_metadata(),
+        "machine": machine,
         # Each pass is the FULL scenario sweep, run in order. Recording every
         # pass (rather than discarding a warmup pass) makes startup / filesystem
         # caching effects VISIBLE: compare pass 1 vs pass N. Aggregation/reporting
-        # can prefer the last pass (warmest) or show the spread.
+        # can prefer the last pass (warmest) or show the spread. Each pass also
+        # records the dynamic host state (RAM/load/iowait) at its start, so a node
+        # loaded between passes is visible.
         "pass_results": [],
     }
 
@@ -248,8 +316,9 @@ def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2) -> di
         workdir = Path(td)
         for pass_no in range(1, passes + 1):
             print(f"--- pass {pass_no}/{passes} ---", file=sys.stderr)
+            pass_env = _pass_env()
             scenarios = _run_pass(pass_no, iterations, warmup, workdir)
-            result["pass_results"].append({"pass": pass_no, "scenarios": scenarios})
+            result["pass_results"].append({"pass": pass_no, "pass_env": pass_env, "scenarios": scenarios})
 
     # Convenience: expose the LAST pass as top-level "scenarios" (warmest, and
     # backward-compatible with schema/1 consumers that read result["scenarios"]).

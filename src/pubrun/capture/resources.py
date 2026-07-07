@@ -167,12 +167,13 @@ def _get_tree_rss_darwin() -> int:
 
 class ResourceWatcher(threading.Thread):
     def __init__(self, run_tracker: Any, interval_seconds: float, max_failures: int = 3,
-                 scope: str = "process"):
+                 scope: str = "process", system_metrics: bool = True):
         super().__init__(daemon=True)
         self.run_tracker = run_tracker
         self.interval = float(interval_seconds)
         self.max_failures = max_failures
         self._scope = scope
+        self._system_metrics = system_metrics
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
 
@@ -186,6 +187,21 @@ class ResourceWatcher(threading.Thread):
         self._last_clock = None
         self._sys_plat = sys.platform
         self._consecutive_failures = 0
+
+        # System-wide dynamic metrics (available RAM, load average, node iowait).
+        # We track the "worst" observed point (min available RAM, max load) plus the
+        # start and last samples, mirroring the peak/end shape used for RSS/CPU.
+        self._sysmem_start = None
+        self._sysmem_last = None
+        self._sysmem_min_available = None  # tuple carrying the sample at min available
+        self._load_start = None
+        self._load_last = None
+        self._load_max_1min = None
+        self._iowait_prev_raw = None       # last /proc/stat (iowait, total) sample
+        self._iowait_pct_last = None
+        self._iowait_pct_max = None
+        if self._system_metrics:
+            self._capture_system_start()
 
 
     def _poll_rss(self) -> int:
@@ -256,10 +272,63 @@ class ResourceWatcher(threading.Thread):
         # Windows tree not yet implemented; return 0 (graceful fallback).
         return 0
 
+    def _capture_system_start(self) -> None:
+        """Snapshot system memory / load / iowait baseline at watcher construction."""
+        try:
+            from pubrun.capture import system_metrics as _sm
+            self._sysmem_start = _sm.get_system_memory()
+            self._load_start = _sm.get_load_average()
+            self._iowait_prev_raw = _sm.read_proc_stat_cpu_times()
+        except Exception as e:  # never let baseline capture abort the run
+            logger.debug(f"pubrun failed system-metrics baseline: {e}")
+
+    def _sample_system_metrics(self) -> None:
+        """Sample system memory / load / node iowait in the watcher loop (cheap /proc reads).
+
+        Tracks worst-case (min available RAM, max load) plus the last sample. Fully
+        exception-safe: a failure here must never disturb the RSS/CPU sampling or the run.
+        """
+        if not self._system_metrics:
+            return
+        try:
+            from pubrun.capture import system_metrics as _sm
+            mem = _sm.get_system_memory()
+            load = _sm.get_load_average()
+            curr_raw = _sm.read_proc_stat_cpu_times()
+            iowait_pct = _sm.iowait_pct_between(self._iowait_prev_raw, curr_raw)
+
+            with self._lock:
+                if mem is not None:
+                    if self._sysmem_start is None:
+                        self._sysmem_start = mem
+                    self._sysmem_last = mem
+                    avail = mem.get("available_bytes")
+                    if avail is not None:
+                        prev = self._sysmem_min_available
+                        if prev is None or avail < prev.get("available_bytes", avail) + 1:
+                            if prev is None or avail < prev.get("available_bytes", float("inf")):
+                                self._sysmem_min_available = mem
+                if load is not None:
+                    if self._load_start is None:
+                        self._load_start = load
+                    self._load_last = load
+                    one = load.get("1min")
+                    if one is not None and (self._load_max_1min is None or one > self._load_max_1min):
+                        self._load_max_1min = one
+                if curr_raw is not None:
+                    self._iowait_prev_raw = curr_raw
+                if iowait_pct is not None:
+                    self._iowait_pct_last = iowait_pct
+                    if self._iowait_pct_max is None or iowait_pct > self._iowait_pct_max:
+                        self._iowait_pct_max = iowait_pct
+        except Exception as e:
+            logger.debug(f"pubrun failed system-metrics sample: {e}")
+
     def _update_metrics(self) -> None:
         rss = self._poll_rss()
         cpu_pct = self._poll_cpu()
         tree_rss = self._poll_tree_rss() if self._scope == "tree" else 0
+        self._sample_system_metrics()
 
         # rss == -1 means the poll was UNREADABLE (error/timeout); rss >= 0 is a
         # successful reading (0 being a legitimate value). Only unreadable polls
@@ -333,4 +402,32 @@ class ResourceWatcher(threading.Thread):
         if self._scope == "tree":
             result["peak_tree_rss_bytes"] = peak_tree if peak_tree > 0 else None
             result["end_tree_rss_bytes"] = end_tree if end_tree > 0 else None
+
+        if self._system_metrics:
+            with self._lock:
+                sysmem_start = self._sysmem_start
+                sysmem_last = self._sysmem_last
+                sysmem_min = self._sysmem_min_available
+                load_start = self._load_start
+                load_last = self._load_last
+                load_max = self._load_max_1min
+                iowait_last = self._iowait_pct_last
+                iowait_max = self._iowait_pct_max
+            # Only emit sections we actually captured (Linux for memory/iowait; load is
+            # broadly available). Absent -> omit rather than emit misleading nulls.
+            if sysmem_start or sysmem_last:
+                result["system_memory"] = {
+                    "start": sysmem_start,
+                    "last": sysmem_last,
+                    "min_available": sysmem_min,
+                }
+            if load_start or load_last:
+                result["load_average"] = {
+                    "start": load_start,
+                    "last": load_last,
+                    "max_1min": load_max,
+                }
+            if iowait_last is not None or iowait_max is not None:
+                # NODE-WIDE, indicative only (see system_metrics module docstring).
+                result["system_iowait_pct"] = {"last": iowait_last, "max": iowait_max}
         return result
