@@ -280,6 +280,24 @@ Operating system and host identity.
 
 ---
 
+## `filesystem`
+
+Filesystem type of run-relevant paths, so a later `pubrun inspect` can flag when a run
+lived on a slow **network filesystem** (NFS/Lustre/GPFS/CIFS) — a common cause of inflated
+I/O on HPC clusters. Classified by parsing `/proc/mounts` (Linux) or the `mount` table
+(macOS); **never** by `statvfs`/`df`/`stat` on the target, so it cannot hang on a wedged
+network mount. Each entry keyed by path label (`output_dir`, `run_dir`, `tmpdir`):
+
+| Field | Type | Description |
+|---|---|---|
+| `<label>.path` | string | The path that was classified. |
+| `<label>.mount_point` | string | The mount point backing the path (longest-prefix match). |
+| `<label>.fstype` | string | Filesystem type (`ext4`, `xfs`, `tmpfs`, `nfs4`, `lustre`, …). |
+| `<label>.is_network` | bool | Whether the filesystem is a network/remote filesystem. |
+| `capture_state` | object | See [Capture State](#capture-state). `suppressed`/`failed` when unavailable. |
+
+---
+
 ## `resources`
 
 Runtime resource utilization, sampled by a background thread.
@@ -292,7 +310,14 @@ Runtime resource utilization, sampled by a background thread.
 | `peak_cpu_percent` | float | Peak CPU utilization percentage. |
 | `peak_tree_rss_bytes` | int \| null | Peak RSS summed across the process tree (only when `scope = "tree"`). |
 | `end_tree_rss_bytes` | int \| null | Tree RSS at finalization (only when `scope = "tree"`). |
+| `system_memory` | object \| absent | System-wide memory (Linux), present when `[capture.resources].system_metrics = true`. `{"start": {...}, "last": {...}, "min_available": {...}}`, each with `total_bytes`/`available_bytes`/`free_bytes`/`cached_bytes`. |
+| `load_average` | object \| absent | `{"start": {...}, "last": {...}, "max_1min": float}`, each of start/last being `{"1min","5min","15min"}`. |
+| `system_iowait_pct` | object \| absent | `{"last": float, "max": float}`. **NODE-WIDE, indicative only** — `/proc/stat` iowait is a system-wide counter, not run-scoped, and is unreliable on shared/multi-core nodes. A hint that the *node* was I/O-bound, not a per-run measurement. |
 | `capture_state` | object | See [Capture State](#capture-state). |
+
+The `system_memory`/`load_average`/`system_iowait_pct` sections are omitted on platforms
+where they cannot be read cheaply (e.g. non-Linux for memory/iowait) rather than reporting
+misleading nulls.
 
 ---
 
@@ -347,6 +372,8 @@ Run-level capture metadata.
 | `run_dir` | string | Full path to this run's directory. |
 | `event_stream_enabled` | bool | Whether `events.jsonl` was active. |
 | `console_capture_mode` | string | The effective console mode for this run. |
+| `subprocesses_enabled` | bool | Whether the subprocess spy was installed for this run. Lets tooling distinguish "subprocess tracking was OFF" from "on but no subprocesses ran" (an empty `subprocesses` list is otherwise ambiguous). |
+| `file_provenance_available` | bool | Whether file-open provenance was available (a run was active and `pubrun.open` was importable). Note: file I/O is only *recorded* if the user calls `pubrun.open()` — an empty `data_files` means "not used", not "unavailable". |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
 ---

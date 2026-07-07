@@ -269,6 +269,7 @@ class Run:
         # they won't be captured by SubprocessSpy even if it installs first.
         self.hardware_data = {"capture_state": {"status": "pending"}}
         self.host_data = {"capture_state": {"status": "pending"}}
+        self.filesystem_data = {"capture_state": {"status": "pending"}}
         self._hardware_future_done = _threading.Event()
 
         def _collect_hardware():
@@ -278,15 +279,29 @@ class Run:
             except Exception:
                 self.hardware_data = {"capture_state": {"status": "failed"}}
                 self.host_data = {"capture_state": {"status": "failed"}}
-            finally:
-                self._hardware_future_done.set()
-                # BUG-06: Re-write startup manifest so on-disk state includes
-                # hardware data even if the process is killed before stop().
-                try:
-                    if getattr(self, "writer", None) and self.is_active:
-                        self.writer.write_startup_manifest()
-                except Exception:
-                    pass  # Best-effort
+            # Filesystem classification of run-relevant paths. Wrapped separately so a
+            # failure here cannot mask hardware/host capture. NON-BLOCKING by design
+            # (parses /proc/mounts; never statvfs/df/stat on the target) so it cannot
+            # hang on a sick NFS/Lustre mount — the very thing it detects.
+            try:
+                from pubrun.capture.filesystem import get_filesystem
+                import tempfile as _tf
+                paths = {
+                    "output_dir": str(getattr(self, "output_base_dir", "") or ""),
+                    "run_dir": str(getattr(self, "run_dir", "") or ""),
+                    "tmpdir": _tf.gettempdir(),
+                }
+                self.filesystem_data = get_filesystem(self.config, {k: v for k, v in paths.items() if v})
+            except Exception as e:
+                self.filesystem_data = {"capture_state": {"status": "failed", "detail": str(e)}}
+            self._hardware_future_done.set()
+            # BUG-06: Re-write startup manifest so on-disk state includes
+            # hardware data even if the process is killed before stop().
+            try:
+                if getattr(self, "writer", None) and self.is_active:
+                    self.writer.write_startup_manifest()
+            except Exception:
+                pass  # Best-effort
 
         self._hardware_thread = _threading.Thread(
             target=_collect_hardware, daemon=True, name="pubrun-hw"
@@ -339,9 +354,11 @@ class Run:
             interval = res_cfg.get("sample_interval_seconds", 15)
             max_fails = res_cfg.get("max_consecutive_failures", 3)
             scope = res_cfg.get("scope", "process")
+            system_metrics = res_cfg.get("system_metrics", True)
             from pubrun.capture.resources import set_poll_timeout
             set_poll_timeout(res_cfg.get("poll_timeout", 3))
-            self.resource_watcher = ResourceWatcher(self, interval, max_fails, scope=scope)
+            self.resource_watcher = ResourceWatcher(self, interval, max_fails, scope=scope,
+                                                    system_metrics=system_metrics)
             self.resource_watcher.start()
 
         # 9. Signal and exit-code capture (standard registration hook)
@@ -611,6 +628,7 @@ class Run:
 
             "hardware": self.hardware_data,
             "host": self.host_data,
+            "filesystem": getattr(self, "filesystem_data", {"capture_state": {"status": "suppressed"}}),
             "resources": self.resource_watcher.to_manifest_dict() if self.resource_watcher else {"capture_state": {"status": "suppressed"}},
 
             "capture": {
@@ -618,6 +636,11 @@ class Run:
                 "run_dir": str(self.run_dir),
                 "event_stream_enabled": self.config.get("events", {}).get("enabled", False),
                 "console_capture_mode": self.config.get("console", {}).get("capture_mode", "off"),
+                # Definitive enable flags so `pubrun inspect` can distinguish "feature was
+                # OFF" from "feature was on but produced no records" (empty subprocesses /
+                # data_files lists are otherwise ambiguous). Additive; do not remove.
+                "subprocesses_enabled": bool(getattr(self, "_spying_subprocesses", False)),
+                "file_provenance_available": True,  # a run was active and pubrun.open is importable
                 "capture_state": {"status": "complete"}
             },
             "signals": self.signal_capture.get_records() if self.signal_capture else {"capture_state": {"status": "suppressed"}},

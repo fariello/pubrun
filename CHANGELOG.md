@@ -44,6 +44,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **Run-time I/O / environment capture (enables post-hoc diagnosis of NFS/contention).** A run now
+  records the **filesystem type** of its output dir, run dir, and `$TMPDIR` (new `filesystem` manifest
+  section) — flagging network filesystems (NFS/Lustre/GPFS/CIFS) that can silently inflate I/O on HPC
+  clusters. Classification parses `/proc/mounts` (Linux) / the `mount` table (macOS) and **never** calls
+  `statvfs`/`df`/`stat` on the target, so it cannot hang on a sick network mount. The background resource
+  watcher additionally samples **system-wide available memory, load average, and (Linux) node iowait**
+  (new `resources.system_memory`/`load_average`/`system_iowait_pct`), controlled by the new
+  `[capture.resources].system_metrics` key (default `true`; only samples while the watcher runs). All
+  reads are cheap, stdlib-only, exception-safe, and never disturb the host script. Note: `system_iowait_pct`
+  is **node-wide, indicative only** (not run-scoped). Two additive manifest flags
+  (`capture.subprocesses_enabled`, `capture.file_provenance_available`) let tooling distinguish "feature was
+  OFF" from "on but produced no records".
+- **Benchmark schema `pubrun-benchmark/3`.** The harness now captures filesystem context + Slurm allocation
+  context in the `machine` block and the dynamic host state (RAM/load/iowait) at the **start of each pass**
+  (`pass_results[i].pass_env`), so cross-machine/cross-node results are interpretable and a node loaded
+  between passes is visible. `aggregate.py`/`plot.py` still read `/2` files.
 - **Citation DOI metadata (Zenodo-ready).** Added `.zenodo.json` so the next GitHub release can mint a
   Zenodo **concept DOI** (all-versions) with controlled metadata. `CITATION.cff` gained an
   `identifiers` (DOI) block, a `version` field, and the author's ORCID

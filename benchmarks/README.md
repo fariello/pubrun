@@ -102,6 +102,17 @@ committed result JSONs.
   filesystem caching mattered (compare `pass 1` vs `pass 2`). The top-level
   `scenarios` key mirrors the **last (warmest) pass**, which `aggregate.py`/
   `plot.py` use.
+- **Schema `pubrun-benchmark/3`** adds cross-machine context so results are
+  comparable across systems and nodes:
+  - `machine.filesystem` — the filesystem type of `$TMPDIR`, the results dir, and
+    the `pubrun` install location (flags **network filesystems** like NFS/Lustre
+    that can silently inflate I/O — the common HPC pitfall).
+  - `machine.slurm` — Slurm allocation context (`job_id`, `cpus_per_task`,
+    `partition`, `node`, …) when running under Slurm.
+  - `pass_results[i].pass_env` — the dynamic host state (available RAM, load
+    average, node iowait) captured at the **start of each pass**, so a node that
+    got loaded between passes is visible rather than silently confounding results.
+  Older `pubrun-benchmark/2` files remain readable by `aggregate.py`/`plot.py`.
 - **Overhead** is the median of a scenario minus its group baseline:
   - `startup` scenarios compare against `baseline-noop` (a bare `python noop.py`).
   - `feature` scenarios compare against `feature-baseline`; note `feature-none`

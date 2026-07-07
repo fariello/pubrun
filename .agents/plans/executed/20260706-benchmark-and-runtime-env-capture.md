@@ -9,7 +9,10 @@
 - Scope: `benchmarks/harness.py` (metadata timing + new fields) and `src/pubrun/capture/`
   (new lightweight, no-dep filesystem/free-RAM/load capture, wired into the EXISTING
   background threads). No new runtime dependency. No change to host-script behavior.
-- Status: PENDING — plan-review, then execution on human approval. NOT auto-executed.
+- Status: EXECUTED (2026-07-06). Both parts implemented, tested (15 new tests),
+  documented; hang-safe fstype probe and node-wide-iowait honesty labeling per the
+  plan-review re-pass. 710 passed / 2 skipped (only the known SIGPIPE flake fails, passes
+  in isolation). See the execution record at the end.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Problem / motivation
@@ -224,3 +227,50 @@ Sequence: A before B and C.
   run-scoped; relabeled `system_iowait_pct` (indicative only) to avoid over-reading.
 - Verified `import pubrun` does NOT import the `report` package (empty), confirming IPD-B's
   CLI-only isolation holds; and the `pubrun-hw` thread + 2.0s wait semantics.
+
+## Execution record (2026-07-06)
+
+Executed by opencode after human approval. Both parts landed.
+
+**Part 1 — run-time capture enrichment:**
+- `src/pubrun/capture/filesystem.py` (NEW): `get_filesystem(config, paths)` classifies
+  fstype/mount/is_network by PARSING `/proc/mounts` (Linux) / `mount` table (macOS) with
+  a hard subprocess timeout — never `statvfs`/`df`/`stat` on the target, so it cannot hang
+  on a sick NFS/Lustre mount (the A-R1 HIGH finding). Longest-prefix match; octal-escape
+  decoding; per-path + top-level `capture_state`; never raises.
+- `src/pubrun/capture/system_metrics.py` (NEW): `get_system_memory` (`/proc/meminfo`),
+  `get_load_average` (`os.getloadavg`), `read_proc_stat_cpu_times` + `iowait_pct_between`
+  (`/proc/stat` deltas). All None-on-failure, stdlib-only, non-blocking.
+- `ResourceWatcher` (`resources.py`): new `system_metrics` flag; captures a baseline at
+  construction and samples memory/load/node-iowait in the existing 15s loop (worst-case +
+  last); emits `system_memory`/`load_average`/`system_iowait_pct` in `to_manifest_dict`.
+  Fully exception-safe — a system-metrics failure never disturbs RSS/CPU or the run.
+- `tracker.py`: filesystem capture runs in the existing `pubrun-hw` startup thread (well
+  within the 2.0s finalizer budget); manifest gains `filesystem`, plus additive
+  `capture.subprocesses_enabled` (from `_spying_subprocesses`) and
+  `capture.file_provenance_available` (for IPD-B). Watcher wired to the new config key.
+- `resources/default.toml`: new `[capture.resources].system_metrics = true`.
+- **iowait honesty (A-R2):** surfaced as `system_iowait_pct` and documented as node-wide /
+  indicative only in the manifest docs, config docs, and module docstring.
+
+**Part 2 — benchmark harness (`benchmarks/harness.py`):**
+- Schema `pubrun-benchmark/2` → `/3`. `machine.filesystem` (tmpdir/results/pubrun-install
+  fstype) and `machine.slurm` (allocation context) added; `pass_results[i].pass_env`
+  records RAM/load/iowait at the START OF EACH PASS. Top-level `scenarios` mirror preserved;
+  `aggregate.py`/`plot.py` read `/3` and still read `/2` (no schema assertion in either).
+
+**Tests (`tests/test_env_capture.py`, 15 new, all green):** network-fstype detection,
+longest-prefix match, octal unescape, local classification, unsupported-platform,
+**hang-safety (statvfs banned → still classifies via /proc/mounts)**, never-raises;
+meminfo/loadavg parsing, iowait math, meminfo-failure-returns-None; manifest has
+`filesystem` + both capture flags + preserved existing keys + system-metrics section.
+Full suite: **710 passed**, 2 skipped; the lone failure is the known pre-existing SIGPIPE
+flake (`tests/test_status.py::...test_real_sigpipe_via_pipe`, passes in isolation).
+
+**Docs:** `docs/manifest.md` (`filesystem`, `resources.system_*`, `capture` flags),
+`docs/configuration.md` (`system_metrics` key), `benchmarks/README.md` (schema/3),
+`CHANGELOG.md` `[Unreleased] → Added`. Field names verified against real manifest output.
+
+**Deferred (unchanged from plan):** disk-throughput probe is harness-only and NOT yet added
+to the harness workloads (the harness already exercises real file I/O via `file_read.py`);
+can be a follow-up if a dedicated throughput number is wanted.

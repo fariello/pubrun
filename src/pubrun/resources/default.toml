@@ -286,6 +286,14 @@ max_consecutive_failures = 3
 # (ps/wmic). Bounds a hung tool so it cannot orphan the sampling thread.
 poll_timeout = 3
 
+# Also sample SYSTEM-WIDE dynamic metrics alongside per-process RSS/CPU: available
+# memory, load average, and (Linux only) iowait. These make post-hoc I/O / contention
+# diagnosis possible (e.g. "was this run starved for RAM or blocked on a busy node?").
+# They are cheap (single /proc reads) and only sample when the resource watcher is
+# running (depth != "off"). Note: iowait is a NODE-WIDE counter (not run-scoped) and is
+# reported as "system_iowait_pct" -- indicative only. Set false to omit these.
+system_metrics = true
+
 
 [capture.profiling]
 # -----------------------------------------------------------------------------
