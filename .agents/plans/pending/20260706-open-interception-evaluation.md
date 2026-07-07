@@ -4,10 +4,12 @@
 - Concern: provenance / reproducibility / performance / debugging — knowing which files a
   run opens, reads, and writes (paths, hashes, sizes, mount types) is enormously valuable.
   But GLOBAL interception of `builtins.open` is the single riskiest thing pubrun could do.
-- Scope: EVALUATION FIRST. This IPD's first deliverable is a written evaluation + a
-  recommendation, NOT code. Only after explicit maintainer approval of the evaluation does
-  any implementation proceed, and even then strictly OPT-IN. Touches `src/pubrun/core.py`
-  (existing `pubrun.open` wrapper) and potentially a new opt-in patch module.
+- Scope: EVALUATION FIRST. This IPD's first deliverable (Phase 0) is a written evaluation +
+  a recommendation and **touches NO code, tests, or config** — a research/writing
+  deliverable only. Only after explicit maintainer approval (Gate 2) does any implementation
+  proceed, and even then strictly OPT-IN; Phase-1 code would touch `src/pubrun/core.py` (the
+  existing `pubrun.open` wrapper) and potentially a new opt-in patch module. Nothing in
+  Phase 0 modifies the codebase.
 - Status: PENDING — this is a research/decision IPD. It requires careful evaluation and
   explicit maintainer sign-off before ANY implementation. NOT auto-executed.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
@@ -175,3 +177,7 @@ NFS concern with no `open()` work). **New design constraint surfaced during revi
 hooks cannot be removed once added (process-lifetime), so an "opt-in / muted by `pause()`"
 design must gate INSIDE the hook per-event, not by add/remove — recorded for Phase 0. This
 remains EVALUATION-FIRST with two approval gates; the review does not authorize any code.
+
+**Stricter re-pass (2026-07-06):** tightened the Scope line so Phase 0 explicitly touches no
+code/tests/config (removes any implication of code changes before Gate 2). No other findings
+— the evaluation-first structure correctly contains the highest-risk item of the five.

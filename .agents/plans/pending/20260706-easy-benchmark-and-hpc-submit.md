@@ -69,10 +69,26 @@ privacy-respecting path to send results back.
    informed consent.
 4. **Redaction for sharing — DECIDED (maintainer 2026-07-06): redact by default for the
    SHARE artifact; `--no-redact` to opt into full detail.** `pubrun bench` produces the full
-   JSON locally (for the user's own analysis) AND, for sharing, a redacted copy that masks
-   **hostname**, **username**, and **home-directory paths in `python.sys_path`** (and any
-   other identifier fields). Redaction is deterministic and documented (list exactly which
-   fields are masked and how).
+   JSON locally (for the user's own analysis) AND, for sharing, a redacted copy for a
+   **public** repo. Redaction is deterministic and documented.
+   - **COMPLETE field list (plan-review re-pass, MEDIUM — "and any other identifier fields"
+     was too vague for a control feeding a PUBLIC repo).** Home paths leak into MANY string
+     values, not just `sys_path`. Redact/mask ALL of:
+     - `machine.host.hostname` and any `hostname` field;
+     - the OS username wherever it appears (`process.user.username` if present, and as a
+       substring of any path);
+     - **every path that can contain the home dir**: `python.executable`,
+       `python.prefix`, `python.base_prefix`, `python.virtual_env`, every entry of
+       `python.sys_path`, `python_executable`, `machine.filesystem.*` mount points/paths
+       (from IPD-A), and the harness workdir/results paths.
+   - **Belt-and-suspenders:** after field-level redaction, run a final pass that replaces any
+     remaining occurrence of the current user's home-dir prefix and username **anywhere** in
+     the JSON (deep string scan) with a placeholder, so an un-enumerated field cannot leak.
+   - Document exactly what is masked and what is preserved (CPU model, timings, versions,
+     fstype classification, Slurm partition — the analysis-relevant, non-identifying data).
+   - **Residual re-identification caveat (honest disclosure):** even redacted, CPU/GPU model
+     + core count + a distinctive Slurm partition name can be re-identifying in a small
+     group. The contribute guidance must say so plainly rather than promising anonymity.
 5. **Identity via GitHub, not via the data (maintainer's design).** The redacted JSON
    carries NO PII, yet the maintainer can still follow up with a submitter because the
    submission is an issue/PR opened from the submitter's **own GitHub account** — GitHub is
@@ -108,12 +124,22 @@ privacy-respecting path to send results back.
 - **Honest data disclosure.** The share guidance accurately lists every field the result
   JSON contains (cross-check against IPD-A's schema/3), and states plainly which fields the
   default redaction masks vs. leaves.
-- **Redaction actually removes PII.** A test asserts the redacted share artifact contains
-  NO hostname, username, or home-path substring, while `--no-redact` preserves them; and
-  that redaction leaves the analysis-relevant fields (timings, CPU model, fstype, versions)
-  intact.
+- **Redaction actually removes PII (DEEP scan).** A test recursively walks the entire
+  redacted JSON and asserts NO value contains the hostname, the OS username, or the home-dir
+  prefix substring — not merely that the named fields are masked (the belt-and-suspenders
+  pass must catch un-enumerated leaks). `--no-redact` preserves them. Analysis-relevant
+  fields (timings, CPU model, fstype, versions, Slurm partition) survive redaction.
 - **Never crash on a locked-down node** (no scheduler, no network) — degrade to local run +
   print-path, with a clear message.
+- **No shell injection when invoking Slurm (plan-review re-pass, MEDIUM/security).** `pubrun
+  bench` must invoke `submit_bench.sh`/`sbatch` via `subprocess` with an **argv list, never
+  `shell=True`** and never by interpolating user values (partition, exclude regex, extra
+  args) into a shell string. Note the existing `submit_bench.sh:48` sets
+  `PUBRUN_BENCH_ARGS="${*:-}"` which `run_bench.sbatch` later word-splits unquoted into the
+  harness argv — so the friendly command must pass each arg as a separate argv element and
+  document that partition/exclude values are validated (e.g. restrict to a safe charset)
+  before being forwarded. A test passes an arg containing shell metacharacters and asserts
+  it is treated as a literal argument, not executed.
 
 ## Required tests / validation
 
@@ -164,3 +190,14 @@ account (no server/contact DB); NEW public `pubrun-benchmarks` repo as the colle
 documented); `pubrun bench` CLI iff harness-location resolves cleanly, else wrapper.
 Operator step: create `pubrun-benchmarks`; use a placeholder URL + follow-up until then
 (never a fake live URL). Sequence: after IPD-A.
+
+**Stricter re-pass (2026-07-06), findings fixed:**
+- **C-R1 (MEDIUM, privacy):** the redaction list was too vague ("and any other identifier
+  fields") for a control feeding a PUBLIC repo. Enumerated ALL home-path-leaking fields
+  (`python.executable/prefix/base_prefix/virtual_env/sys_path`, `machine.filesystem.*`,
+  workdir/results paths, username, hostname) + a belt-and-suspenders deep-scan pass + a
+  recursive test + an honest residual re-identification caveat.
+- **C-R2 (MEDIUM, security):** invoking `submit_bench.sh`/`sbatch` must use an argv list
+  (never `shell=True`/string interpolation); `submit_bench.sh:48` word-splits
+  `PUBRUN_BENCH_ARGS` unquoted, so forwarded partition/exclude/args must be passed as
+  discrete argv + charset-validated. Added a metacharacter-as-literal test.

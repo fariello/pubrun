@@ -68,9 +68,25 @@ Verified against the code (2026-07-06):
 1. **New `capture/filesystem.py`** (`get_filesystem(config, paths)`): for the run output
    dir and `$TMPDIR` (and optionally `pubrun.__file__`'s dir), report `mount_point`,
    `fstype` (nfs/nfs4/lustre/gpfs/cifs/smb/ext4/xfs/tmpfs/overlay/…), and an
-   `is_network` boolean. Linux: parse `/proc/mounts` (longest-prefix match) or
-   `os.statvfs`. macOS: `df -T`/`mount` best-effort. Windows: drive type best-effort.
-   `capture_state` on failure. Called once from the `pubrun-hw` startup thread.
+   `is_network` boolean.
+   - **CRITICAL (plan-review re-pass 2026-07-06, HIGH): the fstype probe must NEVER block
+     on a sick network mount — the very thing it detects.** `os.statvfs()`, `df`, `stat`,
+     and any path-touching call **block indefinitely on a hung/stale NFS/Lustre mount**.
+     Since this probe runs in the `pubrun-hw` thread whose result the finalizer waits on
+     with only a **2.0s timeout** (`tracker.py:446-447`), a blocking probe would either
+     (a) silently miss the 2s window (fstype stuck `pending`) or (b) wedge a `df`
+     subprocess. **Design mandate:** classify fstype by PARSING `/proc/mounts` +
+     `/proc/self/mountinfo` ONLY (pure file reads that do NOT touch the target mount), doing
+     a longest-prefix match of the resolved path against mount points. Do **NOT** call
+     `os.statvfs`/`df`/`stat` on the target path for fstype. On macOS use the pre-read
+     `mount` table output with a hard subprocess timeout; never a per-path `statvfs`.
+     Windows: drive-type via `GetDriveType`-style lookup (no network round-trip). If the
+     probe cannot classify within budget, record `{"status": "failed", "detail": ...}` and
+     move on. A test simulates a mount whose `statvfs` would hang and asserts the probe
+     still returns via `/proc/mounts` parsing without calling the blocking path.
+   - Called once from the `pubrun-hw` startup thread; must complete well within the 2.0s
+     finalizer budget (`tracker.py:446-447`). If it cannot, the manifest records `pending`/
+     `failed` rather than delaying finalize.
 2. **Extend memory/load capture:** add `MemAvailable`/`MemFree`/`Cached` (Linux
    `/proc/meminfo`) and `os.getloadavg()` — captured once at start (startup thread) AND
    sampled in the `ResourceWatcher` loop (`resources.py`) so the manifest gets a small
@@ -79,6 +95,15 @@ Verified against the code (2026-07-06):
 3. **Optional Linux iowait** from `/proc/stat` deltas in the watcher loop (Linux only;
    omitted elsewhere with a clear "not available"). Gate behind the resource config so it
    is off when resource capture is off.
+   - **Honesty caveat (plan-review re-pass, MEDIUM):** `/proc/stat` `iowait` is a
+     **system-wide, per-CPU** counter, NOT process- or cgroup-scoped, and the Linux kernel
+     docs themselves warn it is unreliable/misleading on multi-core and shared nodes (it
+     can be attributed to the wrong task and reset by scheduler migration). On a shared HPC
+     compute node it reflects the WHOLE node, not this run. Therefore label it in the
+     manifest and docs as **`system_iowait_pct` (node-wide, not run-scoped; indicative
+     only)** so no one over-reads it as "this run's I/O wait". It is a hint, not a
+     measurement. (This is exactly why per-file `open()` provenance in IPD-E is the
+     complementary precise signal.)
 4. **Manifest additions** (new keys, additive, never renaming existing ones):
    `filesystem` (object), and within the resources section `system_memory`
    (total/available/cached at start + last) and `load_average` (start + last) and, when
@@ -123,8 +148,15 @@ Verified against the code (2026-07-06):
 
 ## Required tests / validation
 
-- Unit: `get_filesystem` parses a synthetic `/proc/mounts` and classifies nfs/lustre/local
-  correctly; longest-prefix mount match; `is_network` correct; failure → `capture_state`.
+- Unit: `get_filesystem` parses a synthetic `/proc/mounts`/`mountinfo` and classifies
+  nfs/lustre/local correctly; longest-prefix mount match; `is_network` correct; failure →
+  `capture_state`.
+- **Hang-safety (HIGH):** simulate a target path whose `os.statvfs`/`df` would block
+  (monkeypatch them to raise/sleep) and assert `get_filesystem` still classifies via
+  `/proc/mounts` parsing WITHOUT invoking the blocking call, and returns within budget.
+- **Finalizer budget:** assert fstype capture does not push the `pubrun-hw` thread past the
+  2.0s finalizer wait (`tracker.py:446-447`) on a normal mount; on a pathological mount the
+  manifest records `pending`/`failed`, never hangs.
 - Unit: memory/load parsing from synthetic `/proc/meminfo`/`/proc/loadavg`; iowait delta.
 - Safety: a probe patched to raise does NOT propagate into a run (host-script safety).
 - Manifest: new keys present when capture on; absent/`capture_state` when off or failing;
@@ -181,3 +213,14 @@ REVISIONS APPLIED**. Claims re-verified against source: async watcher/threads
 Added cross-IPD ownership of the two additive manifest flags (`subprocesses_enabled`,
 `file_provenance_available`) here since this IPD already edits manifest assembly.
 Sequence: A before B and C.
+
+**Stricter re-pass (2026-07-06), additional findings fixed:**
+- **A-R1 (HIGH):** the fstype probe could BLOCK on a sick NFS/Lustre mount (via
+  `os.statvfs`/`df`/`stat`) — the exact failure it is meant to detect — and blow the 2.0s
+  finalizer budget (`tracker.py:446-447`) or wedge a subprocess. Mandated pure
+  `/proc/mounts`+`mountinfo` parsing (no path-touching calls) + a hang-safety test.
+  Verified the finalizer-wait timeout via `tracker.py:446-447`.
+- **A-R2 (MEDIUM):** `/proc/stat` iowait is node-wide + kernel-documented-unreliable, not
+  run-scoped; relabeled `system_iowait_pct` (indicative only) to avoid over-reading.
+- Verified `import pubrun` does NOT import the `report` package (empty), confirming IPD-B's
+  CLI-only isolation holds; and the `pubrun-hw` thread + 2.0s wait semantics.

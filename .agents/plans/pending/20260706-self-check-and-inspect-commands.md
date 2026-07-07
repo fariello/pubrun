@@ -236,3 +236,9 @@ with the explicit OVERLAPPING-not-nested Venn note; add + consume the two manife
 (added in IPD-A); read `config.resolved.json` opportunistically; new `docs/hpc.md`; terse
 1-line default + `--show-suggestions`. Honesty guardrail kept: never claim "off" when the
 manifest only shows "no records" unless the flags make it definitive. Depends on IPD-A.
+
+**Stricter re-pass (2026-07-06):** VERIFIED the CLI-only isolation empirically — `import
+pubrun` pulls in ZERO `report` modules (`report/__init__.py` does not eagerly import
+submodules), so the `report/checks.py` placement and the import-isolation test are sound.
+No new findings; the never-claim-"off"-when-only-absent honesty guardrail is the key
+correctness property and is well-specified.
