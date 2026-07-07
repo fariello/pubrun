@@ -343,6 +343,80 @@ def _default_out() -> Path:
     return _HERE / "results" / f"{safe_host}-{stamp}.json"
 
 
+_REDACTED = "<redacted>"
+
+# Keys whose *entire value* is an identifier or a path that can embed the home dir /
+# username. Matched by key name anywhere in the nested structure.
+_REDACT_KEYS = {
+    "hostname", "username", "executable", "prefix", "base_prefix", "virtual_env",
+    "python_executable", "path", "mount_point", "run_dir", "output_base_dir",
+    "results_dir", "pubrun_install", "tmpdir",
+}
+# Keys whose value is a LIST of paths.
+_REDACT_LIST_KEYS = {"sys_path", "source_files"}
+
+
+def _redact_secrets(obj):
+    """Field-level redaction of identifiers/paths, applied recursively."""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if k in _REDACT_LIST_KEYS and isinstance(v, list):
+                out[k] = [_REDACTED for _ in v]
+            elif k in _REDACT_KEYS and isinstance(v, str):
+                out[k] = _REDACTED
+            else:
+                out[k] = _redact_secrets(v)
+        return out
+    if isinstance(obj, list):
+        return [_redact_secrets(x) for x in obj]
+    return obj
+
+
+def _scrub_pii_substrings(obj, needles):
+    """Belt-and-suspenders: replace any home-dir prefix / username substring that leaked
+    into an un-enumerated string value, anywhere in the structure."""
+    if isinstance(obj, dict):
+        return {k: _scrub_pii_substrings(v, needles) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_scrub_pii_substrings(x, needles) for x in obj]
+    if isinstance(obj, str):
+        s = obj
+        for n in needles:
+            if n:
+                s = s.replace(n, _REDACTED)
+        return s
+    return obj
+
+
+def redact_result(result: dict):
+    """Return a redacted copy of a benchmark result safe to share to a PUBLIC repo.
+
+    Masks hostname, OS username, and every path field that can embed the home directory,
+    then does a deep substring scrub of the home-dir prefix and username as a safety net.
+    Preserves the analysis-relevant, non-identifying data (CPU model, timings, versions,
+    fstype classification, Slurm partition).
+    """
+    import copy
+    import getpass
+    redacted = _redact_secrets(copy.deepcopy(result))
+    needles = []
+    try:
+        home = os.path.expanduser("~")
+        if home and home != "~":
+            needles.append(home)
+    except Exception:
+        pass
+    try:
+        needles.append(getpass.getuser())
+    except Exception:
+        pass
+    # Longest first so a home path containing the username is scrubbed whole.
+    needles = sorted({n for n in needles if n}, key=len, reverse=True)
+    scrubbed = _scrub_pii_substrings(redacted, needles)
+    return scrubbed if isinstance(scrubbed, dict) else redacted
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="pubrun overhead benchmark harness")
     ap.add_argument("--quick", action="store_true", help=f"Fast smoke run ({QUICK_ITERATIONS} iters).")
@@ -352,12 +426,19 @@ def main() -> None:
                          "startup/filesystem caching effects can level out; each "
                          "pass is recorded so the difference is visible).")
     ap.add_argument("--out", type=str, default=None, help="Output JSON path.")
+    ap.add_argument("--redacted-out", type=str, default=None,
+                    help="Also write a redacted copy (safe to share publicly) to this path.")
     args = ap.parse_args()
 
     iterations = args.iterations if args.iterations else (QUICK_ITERATIONS if args.quick else FULL_ITERATIONS)
     passes = max(1, args.passes)
     out_path = Path(args.out) if args.out else _default_out()
-    run(iterations, out_path, passes=passes)
+    result = run(iterations, out_path, passes=passes)
+    if args.redacted_out:
+        red_path = Path(args.redacted_out)
+        red_path.parent.mkdir(parents=True, exist_ok=True)
+        red_path.write_text(json.dumps(redact_result(result), indent=2), encoding="utf-8")
+        print(f"Wrote redacted copy {red_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":

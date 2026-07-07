@@ -8,8 +8,11 @@
 - Scope: a new friendly entry point (a `pubrun bench` CLI command and/or a wrapper script)
   over the EXISTING `benchmarks/` harness + Slurm scripts; no change to `src/pubrun/`
   runtime behavior. The `[bench]` extra stays dev-only.
-- Status: PENDING — plan-review, then execution on human approval. NOT auto-executed.
-  Best sequenced AFTER IPD-A (so the richer per-pass/filesystem/Slurm fields are captured).
+- Status: EXECUTED (2026-07-06). `pubrun bench` + redaction + contribute guidance
+  implemented, tested (9 new tests), documented. 738 passed / 2 skipped (only the known
+  SIGPIPE flake fails, passes in isolation). Built on IPD-A schema/3. Remaining OPERATOR
+  step: create the public `pubrun-benchmarks` repo and replace the placeholder URL. See the
+  execution record at the end.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Problem / motivation
@@ -201,3 +204,52 @@ Operator step: create `pubrun-benchmarks`; use a placeholder URL + follow-up unt
   (never `shell=True`/string interpolation); `submit_bench.sh:48` word-splits
   `PUBRUN_BENCH_ARGS` unquoted, so forwarded partition/exclude/args must be passed as
   discrete argv + charset-validated. Added a metacharacter-as-literal test.
+
+## Execution record (2026-07-06)
+
+Executed by opencode after human approval.
+
+- **`pubrun bench` (`__main__.py` `_run_bench` + subparser/dispatch):** friendly front-end
+  over `benchmarks/harness.py`. Locates the harness in a source checkout (`_find_bench_harness`
+  tries the installed package's repo root, then cwd) and errors CLEARLY with the clone command
+  if absent — the benchmark tooling is intentionally NOT packaged (verified: `pyproject.toml`
+  wheel = `src/pubrun` + COMMIT only), keeping installs zero-footprint. Runs locally by
+  default; if Slurm is detected (`SLURM_JOB_ID` or `sbatch` on PATH) and not on a compute
+  node, it prints the exact submit command and PROMPTS (never submits without `--submit`/
+  `--yes`/an interactive "y"). Slurm invocation uses an **argv list, never `shell=True`**
+  (the C-R2 security finding); args passed as discrete argv.
+- **Redaction (`harness.py` `redact_result` + `--redacted-out`):** default local run writes
+  BOTH the full JSON and a `.redacted.json` share copy. Field-level redaction masks
+  hostname/username/all home-path fields (`executable`/`prefix`/`base_prefix`/`virtual_env`/
+  `sys_path`/`path`/`mount_point`/run+output dirs), THEN a belt-and-suspenders deep scrub
+  removes the home-dir prefix and username anywhere they leaked into un-enumerated strings
+  (the C-R1 finding). Analysis fields (CPU/GPU model, timings, versions, fstype, Slurm
+  partition) are preserved. `--no-redact` opts out.
+- **Share guidance:** prints the redacted path, what is masked vs preserved, the honest
+  residual re-identification caveat, and the (placeholder) `pubrun-benchmarks` issue URL,
+  explaining the GitHub-account-as-contact-channel privacy model. No server, no contact DB.
+- **`benchmarks/README.md`:** rewrote the "Contributing a result" section for `pubrun bench`
+  + redaction + the pubrun-benchmarks repo. `submit_bench.sh`/`run_bench.sbatch` env-var
+  interface unchanged (backward compatible; `_run_bench` sets `PUBRUN_REPO`/`PUBRUN_PY`).
+- **Docs:** `docs/cli.md` (`bench` entry), `CHANGELOG.md` `[Unreleased] → Added`.
+- **Tests (`tests/test_bench_command.py`, 9, all green):** redaction removes ALL PII incl.
+  un-enumerated fields (deep scan) + preserves analysis fields + does not mutate input;
+  harness resolution in a checkout + clean error without one; **Slurm detected but NOT
+  submitted on an interactive "no"** (security-critical); Slurm env detection; bench --help;
+  a minimal local `--json` run writing a verified-clean redacted copy. Full suite: **738
+  passed**, 2 skipped; lone failure is the known pre-existing SIGPIPE flake (passes in
+  isolation).
+
+### REMAINING — operator step (maintainer)
+
+Create the public **`pubrun-benchmarks`** repository (with a `benchmark-result` issue
+template), then replace the placeholder `_BENCH_SUBMIT_URL` in `src/pubrun/__main__.py`
+(grep `pubrun-benchmarks`) and the `benchmarks/README.md` reference with the real URL. Until
+then the command prints a clearly-labeled "pending: create this repo" placeholder — never a
+fake live URL.
+
+### Deferred (unchanged)
+
+PBS/LSF schedulers: Slurm-only now; the detection seam is a single helper (`_slurm_available`)
+that a future scheduler can extend. Disk-throughput probe (from IPD-A) remains a possible
+follow-up.

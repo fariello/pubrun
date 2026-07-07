@@ -843,6 +843,147 @@ def _run_inspect(run_dir: Optional[str], show_suggestions: bool, as_json: bool, 
         sys.exit(1)
 
 
+# --- bench: friendly benchmark runner + HPC (Slurm) submit + share guidance ---------
+
+# Placeholder until the public pubrun-benchmarks repo is created (operator step). This is
+# clearly-labeled, NOT a fake live URL. See the IPD Phase-2 follow-up.
+_BENCH_SUBMIT_URL = "https://github.com/fariello/pubrun-benchmarks  (<-- pending: create this repo)"
+
+
+def _find_bench_harness():
+    """Locate benchmarks/harness.py in a source checkout.
+
+    The benchmark tooling is NOT packaged into the wheel (it is dev/reproducibility
+    tooling, kept out of every user install for zero-footprint). So `pubrun bench` requires
+    a source checkout. Returns the Path or None.
+    """
+    candidates = []
+    # 1) alongside the installed package's repo (…/src/pubrun/__main__.py -> repo root)
+    try:
+        here = Path(__file__).resolve()
+        # src/pubrun/__main__.py -> parents[2] == repo root
+        candidates.append(here.parents[2] / "benchmarks" / "harness.py")
+    except Exception:
+        pass
+    # 2) cwd (running from a checkout)
+    candidates.append(Path.cwd() / "benchmarks" / "harness.py")
+    for c in candidates:
+        try:
+            if c.is_file():
+                return c
+        except Exception:
+            continue
+    return None
+
+
+def _slurm_available() -> bool:
+    import shutil as _sh
+    return bool(os.environ.get("SLURM_JOB_ID") or _sh.which("sbatch"))
+
+
+def _on_compute_node() -> bool:
+    """Best-effort: are we already inside a Slurm allocation (a compute node)?"""
+    return bool(os.environ.get("SLURM_JOB_ID"))
+
+
+def _print_share_guidance(results_path, redacted_path) -> None:
+    print("", file=sys.stderr)
+    print("To contribute this benchmark result:", file=sys.stderr)
+    print(f"  1. A redacted, shareable copy was written to:\n       {redacted_path}", file=sys.stderr)
+    print("     (hostname, username, and home-directory paths are masked; CPU/GPU model,", file=sys.stderr)
+    print("      timings, versions, filesystem type, and Slurm partition are preserved.)", file=sys.stderr)
+    print(f"  2. Attach it to a new issue at:\n       {_BENCH_SUBMIT_URL}", file=sys.stderr)
+    print("     Opening the issue from your own GitHub account lets us follow up with", file=sys.stderr)
+    print("     questions without any personal data in the file (fully anonymous", file=sys.stderr)
+    print("     submission is fine too). Note: CPU/GPU model + a distinctive partition", file=sys.stderr)
+    print("     name can still be re-identifying in a small group.", file=sys.stderr)
+    print(f"  Full (un-redacted) results for your own analysis are at:\n       {results_path}", file=sys.stderr)
+
+
+def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact) -> None:
+    """Friendly front-end over benchmarks/harness.py with optional Slurm submission."""
+    harness = _find_bench_harness()
+    if harness is None:
+        _print_error(
+            "Could not find benchmarks/harness.py. `pubrun bench` needs a source checkout "
+            "(the benchmark tooling is not shipped in the pip package). Clone the repo:\n"
+            "  git clone https://github.com/fariello/pubrun && cd pubrun\n"
+            "  python -m pubrun bench")
+        sys.exit(1)
+    repo_root = harness.parents[1]
+
+    # --- HPC (Slurm) path ---
+    want_submit = submit or (not local and _slurm_available() and not _on_compute_node())
+    if want_submit:
+        submit_script = repo_root / "benchmarks" / "submit_bench.sh"
+        if not submit_script.is_file():
+            _print_error(f"Slurm detected but {submit_script} is missing; re-run with --local.")
+            sys.exit(1)
+        # Build the exact command; pass args as discrete argv (never shell=True) so
+        # partition/args cannot inject. submit_bench.sh reads PUBRUN_* env vars.
+        extra = []
+        if quick:
+            extra.append("--quick")
+        if iterations:
+            extra += ["--iterations", str(int(iterations))]
+        if passes:
+            extra += ["--passes", str(int(passes))]
+        cmd = ["bash", str(submit_script)] + extra
+        print(f"Slurm detected. Submission command:\n  {' '.join(cmd)}", file=sys.stderr)
+        if not (submit or yes):
+            try:
+                resp = input("Submit this benchmark job to Slurm? [y/N] ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                resp = ""
+            if resp not in ("y", "yes"):
+                print("Not submitting. Re-run with --submit/--yes to submit, or --local to run here.", file=sys.stderr)
+                return
+        import subprocess as _sp
+        env = dict(os.environ)
+        env.setdefault("PUBRUN_REPO", str(repo_root))
+        env.setdefault("PUBRUN_PY", sys.executable)
+        try:
+            _sp.run(cmd, env=env, check=False)  # argv list; no shell
+        except Exception as e:
+            _print_error(f"Failed to submit: {e}")
+            sys.exit(1)
+        print("Submitted. Results will be written under benchmarks/results/ on the compute node.", file=sys.stderr)
+        return
+
+    # --- Local path ---
+    import subprocess as _sp
+    import tempfile as _tf
+    results_dir = repo_root / "benchmarks" / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    import platform as _pf
+    from datetime import datetime, timezone
+    host = (_pf.node() or "unknown").replace("/", "_")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    out_path = results_dir / f"{host}-{ts}.json"
+    argv = [sys.executable, str(harness), "--out", str(out_path)]
+    if quick:
+        argv.append("--quick")
+    if iterations:
+        argv += ["--iterations", str(int(iterations))]
+    if passes:
+        argv += ["--passes", str(int(passes))]
+    if not no_redact:
+        argv += ["--redacted-out", str(out_path.with_suffix(".redacted.json"))]
+    print(f"Running benchmarks locally (this may take a few minutes)...", file=sys.stderr)
+    rc = _sp.run(argv, check=False).returncode
+    if rc != 0:
+        _print_error(f"Benchmark harness exited with code {rc}.")
+        sys.exit(rc)
+    if as_json:
+        print(json.dumps({"results": str(out_path),
+                          "redacted": None if no_redact else str(out_path.with_suffix(".redacted.json"))}))
+        return
+    if no_redact:
+        print(f"\nResults: {out_path}", file=sys.stderr)
+    else:
+        _print_share_guidance(out_path, out_path.with_suffix(".redacted.json"))
+
+
 def _run_status(
     run_id: Optional[str],
     output_dir: Optional[str],
@@ -1433,6 +1574,29 @@ def main() -> None:
     inspect_parser.add_argument("--strict", action="store_true", help="Exit non-zero if any warning fired.")
     _add_run_filter_args(inspect_parser, include_limit=False)
 
+    # ---------------- Bench Subparser ----------------
+    bench_parser = subparsers.add_parser(
+        "bench",
+        help="Run the pubrun overhead benchmark suite (auto-detects Slurm on HPC).",
+        description="Friendly front-end over the benchmark harness. Runs locally by "
+                    "default; on an HPC login node with Slurm it OFFERS to submit to a "
+                    "compute node (never submits without confirmation). Writes a "
+                    "redacted, shareable copy by default and prints how to contribute it. "
+                    "Requires a source checkout (the benchmark tooling is not shipped in "
+                    "the pip package).",
+        epilog=f"Examples:\n  {prog_name} bench --quick\n  {prog_name} bench --local --passes 3\n  {prog_name} bench --submit",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    bench_parser.add_argument("--quick", action="store_true", help="Fast smoke run (fewer iterations).")
+    bench_parser.add_argument("--iterations", type=int, default=None, help="Iterations per scenario.")
+    bench_parser.add_argument("--passes", type=int, default=None, help="Number of full scenario sweeps (default 2).")
+    bench_group = bench_parser.add_mutually_exclusive_group()
+    bench_group.add_argument("--local", action="store_true", help="Run here even if Slurm is detected.")
+    bench_group.add_argument("--submit", action="store_true", help="Submit to Slurm (no prompt).")
+    bench_parser.add_argument("-y", "--yes", action="store_true", help="Assume yes to the submit prompt.")
+    bench_parser.add_argument("--no-redact", action="store_true", help="Do NOT write a redacted share copy (full detail only).")
+    bench_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit the result/redacted paths as JSON.")
+
     # ---------------- Clean Subparser ----------------
     clean_parser = subparsers.add_parser(
         "clean",
@@ -1805,6 +1969,19 @@ def main() -> None:
             not_status_filter=getattr(args, "not_status", None),
             older_than=getattr(args, "older_than", None),
             exit_code=getattr(args, "exit_code", None),
+        )
+        executed = True
+
+    elif args.command == "bench":
+        _run_bench(
+            getattr(args, "iterations", None),
+            getattr(args, "passes", None),
+            getattr(args, "quick", False),
+            getattr(args, "local", False),
+            getattr(args, "submit", False),
+            getattr(args, "yes", False),
+            getattr(args, "as_json", False),
+            getattr(args, "no_redact", False),
         )
         executed = True
 

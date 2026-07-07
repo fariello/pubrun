@@ -44,6 +44,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **`pubrun bench` command (friendly benchmark runner + HPC submit + shareable results).**
+  Runs the overhead benchmark suite locally by default; on an HPC login node with Slurm
+  detected it **offers** to submit to a compute node (never submits without confirmation).
+  Writes a **redacted, shareable** copy of the results by default (`--no-redact` to opt out)
+  that masks hostname, OS username, and all home-directory paths while preserving the
+  analysis-relevant data (CPU/GPU model, timings, versions, filesystem type, Slurm
+  partition), and prints how to contribute it to the (forthcoming) public `pubrun-benchmarks`
+  repository. Requires a source checkout (the benchmark tooling is not shipped in the pip
+  package). The harness also gained a `--redacted-out` option and a reusable `redact_result`
+  helper (deep-scan scrub of home-dir/username substrings as a safety net).
 - **`pubrun self-check` and `pubrun inspect` commands (environment & run diagnosis).**
   `self-check` reports pubrun performance/config pitfalls on the current machine (network
   filesystems backing the install/output/`$TMPDIR`, low RAM, high load) plus install health

@@ -127,6 +127,46 @@ pubrun inspect -f train.py --json       # latest run matching "train.py", as JSO
 
 ---
 
+### `bench` — Overhead Benchmark Runner
+
+Friendly front-end over the benchmark harness (`benchmarks/harness.py`). Runs the suite
+locally by default; on an HPC login node with Slurm detected, it **offers** to submit to a
+compute node (and never submits without confirmation). Writes a **redacted, shareable**
+copy of the results by default and prints how to contribute it.
+
+**Requires a source checkout** — the benchmark tooling is intentionally not shipped in the
+pip package (zero-footprint installs). Clone the repo and run from it.
+
+```bash
+pubrun bench [--quick] [--iterations N] [--passes N] [--local | --submit] [-y|--yes] [--no-redact] [--json]
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--quick` | Fast smoke run (fewer iterations). |
+| `--iterations N` | Iterations per scenario. |
+| `--passes N` | Number of full scenario sweeps (default 2). |
+| `--local` | Run here even if Slurm is detected. |
+| `--submit` | Submit to Slurm without prompting. |
+| `-y`, `--yes` | Assume "yes" to the submit prompt. |
+| `--no-redact` | Do NOT write a redacted share copy (full detail only). |
+| `--json` | Emit the result/redacted file paths as JSON. |
+
+The redacted copy masks hostname, OS username, and every home-directory path, while
+preserving analysis-relevant data (CPU/GPU model, timings, versions, filesystem type,
+Slurm partition). See [HPC & performance diagnosis](hpc.md) and `benchmarks/README.md` for
+how to contribute a result.
+
+**Example:**
+```bash
+pubrun bench --quick --local            # quick local run
+pubrun bench --submit                   # submit to Slurm (no prompt)
+```
+
+---
+
 ### `clean` — Run Cleanup
 
 Interactively delete old run directories. Lists candidates with their age and size, then prompts for confirmation before removal.

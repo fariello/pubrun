@@ -84,12 +84,36 @@ committed result JSONs.
 
 ## Contributing a result from a new machine
 
-1. `pip install -e .` in a clean environment.
-2. `python benchmarks/harness.py` (full run).
-3. Commit the produced `results/<hostname>-<timestamp>.json` (raw timings and
-   machine metadata are not sensitive; `pubrun`'s own capture is used, which
-   redacts secrets).
-4. Re-run `aggregate.py` over all results and, if helpful, `plot.py`.
+The easy way (from a source checkout):
+
+```bash
+pip install -e .
+python -m pubrun bench            # runs locally; on an HPC login node, offers to submit to Slurm
+```
+
+`pubrun bench` writes two files under `results/`:
+
+- `<host>-<timestamp>.json` — the **full** result, for your own analysis.
+- `<host>-<timestamp>.redacted.json` — a **redacted** copy safe to share publicly:
+  hostname, OS username, and every home-directory path are masked, while the
+  analysis-relevant data (CPU/GPU model, core count, timings, versions, filesystem
+  type, Slurm partition) is preserved.
+
+To contribute, attach the **redacted** file to a new issue in the
+`pubrun-benchmarks` repository (link printed by `pubrun bench`; the repo is being
+set up). Opening the issue from your own GitHub account lets us follow up with
+questions without any personal data in the file — fully anonymous submission (a
+throwaway account) is fine too.
+
+**Privacy caveat (honest):** even redacted, a distinctive CPU/GPU model plus a
+named Slurm partition can be re-identifying in a small group. Share only what you
+are comfortable making public.
+
+Advanced / manual:
+
+- `python benchmarks/harness.py --redacted-out results/shareable.json` runs the
+  harness directly and also writes a redacted copy.
+- Re-run `aggregate.py` over all results and, if helpful, `plot.py`.
 
 ## Interpreting the numbers
 
