@@ -144,6 +144,12 @@ Advanced / manual:
     the *marginal* cost of a single feature is its delta above `feature-none`.
   - `hotpath` scenarios pair with their `*-baseline` (e.g. patched `open()` vs
     `builtins.open`).
+  - `io_baseline` scenarios are **ground-truth reference floors** (not overhead pairs):
+    `io-baseline-devnull` (write-only sink — isolates the open()/write path from any
+    storage), `io-baseline-devshm` (RAM-backed tmpfs, Linux; skipped where `/dev/shm` is
+    unavailable), and `io-baseline-tmpdir` (the default temp filesystem). Comparing these
+    tells you how much of a run's I/O time is storage vs. the write path itself, and lets
+    the storage-dependent `hotpath-open` numbers be interpreted against a known floor.
 - Numbers vary by machine, filesystem, and Python version; that is why results
   carry full machine metadata and are aggregated across systems before any
   representative figure is published.

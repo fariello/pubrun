@@ -1522,10 +1522,15 @@ def main() -> None:
                              help="Destination path (default: .pubrun.toml).")
 
     # ---------------- Bug Report Subparser ----------------
-    bug_parser = subparsers.add_parser(
-        "bug-report",
-        aliases=["feedback", "issue"],
+    report_bug_parser = subparsers.add_parser(
+        "report-bug",
         help="File a bug report or request a feature.",
+        description="Opens the GitHub issue tracker and prints environment diagnostics for copy-pasting.",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    feedback_parser = subparsers.add_parser(
+        "feedback",
+        help="Send feedback about pubrun.",
         description="Opens the GitHub issue tracker and prints environment diagnostics for copy-pasting.",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -1587,8 +1592,10 @@ def main() -> None:
         epilog=f"Examples:\n  {prog_name} bench --quick\n  {prog_name} bench --local --passes 3\n  {prog_name} bench --submit",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    bench_parser.add_argument("--quick", action="store_true", help="Fast smoke run (fewer iterations).")
-    bench_parser.add_argument("--iterations", type=int, default=None, help="Iterations per scenario.")
+    bench_speed = bench_parser.add_mutually_exclusive_group()
+    bench_speed.add_argument("--quick", action="store_true", help="Fast smoke run (8 iterations/scenario) instead of the full run.")
+    bench_speed.add_argument("--full", action="store_true", help="Full run (30 iterations/scenario). This is the default; the flag is for clarity.")
+    bench_parser.add_argument("--iterations", type=int, default=None, help="Override iterations per scenario (takes precedence over --quick/--full).")
     bench_parser.add_argument("--passes", type=int, default=None, help="Number of full scenario sweeps (default 2).")
     bench_group = bench_parser.add_mutually_exclusive_group()
     bench_group.add_argument("--local", action="store_true", help="Run here even if Slurm is detected.")
@@ -1822,7 +1829,7 @@ def main() -> None:
     parser.add_argument("--run-tests", action="store_true", help="Run the built-in test suite and a mock end-to-end script.")
 
     # UX-01: Build the primary commands list (excluding aliases) for clean errors.
-    _known_aliases = {"feedback", "issue", "tui", "gui"}
+    _known_aliases = {"tui", "gui"}
     _PRIMARY_COMMANDS.extend(
         name for name in subparsers.choices if name not in _known_aliases
     )
@@ -2032,7 +2039,7 @@ def main() -> None:
         )
         executed = True
 
-    elif args.command in {"bug-report", "feedback", "issue"}:
+    elif args.command in {"report-bug", "feedback"}:
         _run_bug_report()
         executed = True
 

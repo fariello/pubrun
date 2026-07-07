@@ -184,6 +184,9 @@ def _build_child_command(scn: "_scenarios.Scenario", workdir: Path) -> tuple[lis
     env["PYTHONPATH"] = os.pathsep.join(
         [str(_REPO_ROOT / "src")] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
     )
+    # Scenario-specific env (e.g. a workload's I/O target path).
+    for k, v in getattr(scn, "env", {}).items():
+        env[k] = v
 
     if scn.is_baseline:
         # No pubrun import at all: run the workload directly.

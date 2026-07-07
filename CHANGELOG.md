@@ -9,6 +9,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **BREAKING (command rename): `pubrun bug-report` → `pubrun report-bug`, and `feedback` is
+  now its own command.** The old `bug-report` command and its `issue` alias were removed
+  (hard rename). Use `pubrun report-bug` (bug reports / feature requests) or `pubrun
+  feedback` (general feedback) — both open the GitHub issue tracker and print diagnostics.
+- **`pubrun res` now shows a comprehensive resource summary**, not just single-process
+  CPU%/RSS: it also surfaces process-tree RSS, system available memory (start + lowest),
+  load average, node iowait (labeled indicative-only), and per-process I/O byte volume
+  (`/proc/self/io`) — each shown only when captured. `pubrun cpu`/`mem` remain single-metric.
 - **Behavior change: `pubrun.open()` no longer hashes file contents by default.** The default
   `[capture.file_io].level` is now `stat` (path + size + mtime/ctime), not content hashing.
   Hashing is opt-in via `level = "hash"`. Rationale: hashing reads every byte (expensive,
@@ -49,6 +57,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **Benchmark ground-truth I/O baselines.** New `io_baseline` scenarios establish reference
+  floors for I/O so storage-dependent numbers are interpretable: `io-baseline-devnull`
+  (write-only null sink — isolates the open/write path from storage; `NUL` on Windows),
+  `io-baseline-devshm` (RAM-backed tmpfs, Linux; cleanly skipped where `/dev/shm` is absent),
+  and `io-baseline-tmpdir` (the default temp filesystem). `pubrun bench` gained a `--full`
+  flag (explicit alias of the default) alongside `--quick` for clarity.
 - **Graded file-I/O provenance for `pubrun.open()` + per-process I/O counters.** `pubrun.open()`
   now records provenance at a configurable `[capture.file_io].level` — `none | name | stat |
   realpath | hash` (progressive). `stat` uses `fstat` on the open fd (size/mtime/ctime, ~free

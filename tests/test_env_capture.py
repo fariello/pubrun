@@ -161,3 +161,67 @@ class TestManifestEnrichment:
         # Resource watcher is on by default (depth=standard) with system_metrics=true,
         # so at least the memory/load sections should appear.
         assert "system_memory" in res or "load_average" in res
+
+
+class TestResComprehensiveRender:
+    """`pubrun res` (metric='all') renders the full resource set; cpu/mem stay focused."""
+
+    def _write_manifest(self, tmp_path):
+        import json as _json
+        run = tmp_path / "runs" / "pubrun-x"
+        run.mkdir(parents=True)
+        manifest = {
+            "run_id": "x", "invocation": {"script": {"basename": "s.py"}},
+            "status": {"outcome": "completed"},
+            "resources": {
+                "scope": "tree",
+                "peak_rss_bytes": 50 * 1024 * 1024,
+                "end_rss_bytes": 40 * 1024 * 1024,
+                "peak_cpu_percent": 42.0,
+                "peak_tree_rss_bytes": 120 * 1024 * 1024,
+                "system_memory": {"start": {"total_bytes": 32 * 1024**3, "available_bytes": 20 * 1024**3},
+                                  "min_available": {"available_bytes": 15 * 1024**3}},
+                "load_average": {"start": {"1min": 1.5}, "max_1min": 3.0},
+                "system_iowait_pct": {"last": 2.0, "max": 5.0},
+                "io_counters": {"delta": {"read_bytes": 10 * 1024 * 1024, "write_bytes": 2 * 1024 * 1024,
+                                          "rchar": 12 * 1024 * 1024, "wchar": 3 * 1024 * 1024}},
+                "capture_state": {"status": "complete"},
+            },
+        }
+        mpath = run / "manifest.json"
+        mpath.write_text(_json.dumps(manifest))
+        return str(mpath)
+
+    def test_res_renders_all_fields(self, tmp_path, capsys):
+        from pubrun.report.diagnostics import print_resources_report
+        print_resources_report(self._write_manifest(tmp_path), metric="all")
+        out = capsys.readouterr().out
+        assert "Peak Tree RSS" in out
+        assert "System RAM" in out
+        assert "Load Average" in out
+        assert "Node iowait" in out and "indicative only" in out
+        assert "Disk I/O" in out
+
+    def test_cpu_metric_stays_focused(self, tmp_path, capsys):
+        from pubrun.report.diagnostics import print_resources_report
+        print_resources_report(self._write_manifest(tmp_path), metric="cpu")
+        out = capsys.readouterr().out
+        assert "Peak CPU" in out
+        # The comprehensive-only lines must NOT appear under the single 'cpu' metric.
+        assert "System RAM" not in out
+        assert "Load Average" not in out
+        assert "Disk I/O" not in out
+
+    def test_old_manifest_without_new_fields_renders_cleanly(self, tmp_path, capsys):
+        import json as _json
+        from pubrun.report.diagnostics import print_resources_report
+        run = tmp_path / "runs" / "pubrun-old"
+        run.mkdir(parents=True)
+        m = {"run_id": "old", "invocation": {"script": {"basename": "s.py"}}, "status": {"outcome": "completed"},
+             "resources": {"scope": "process", "peak_rss_bytes": 1024 * 1024,
+                           "peak_cpu_percent": 5.0, "capture_state": {"status": "complete"}}}
+        mpath = run / "manifest.json"; mpath.write_text(_json.dumps(m))
+        print_resources_report(str(mpath), metric="all")  # must not raise
+        out = capsys.readouterr().out
+        assert "Peak RSS" in out
+        assert "System RAM" not in out  # absent field omitted, no crash
