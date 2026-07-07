@@ -47,15 +47,19 @@ duplicate of `show`, both filter-enabled — noted, not changed here.)
    the other commands use) instead of raw `scan_runs()`. Positional `run_dirs` continue to
    override filters when given (explicit beats filter). Preserve current default behavior
    exactly when no filter/positional is supplied (anti-regression).
-2. **Resolve the `combined -f` collision.** Choose ONE (open question, recommend option a):
-   - (a) Keep `combined`'s `-f` = `--force` (backward compatible) and simply document that
-     `combined` uses `--filter` (long form) for filtering. Add a one-line note in help.
-     Lowest risk, but `-f` remains inconsistent across commands.
-   - (b) Rename `combined`'s force flag to `--force` (long only) / a different short (e.g.
-     none), freeing `-f` to mean `--filter` like everywhere else. More consistent, but a
-     breaking change to `combined -f` semantics — needs a deprecation note in CHANGELOG.
-   Whichever is chosen, the outcome must be documented and tested so `-f` behavior on
-   `combined` is unambiguous.
+2. **Resolve the `combined -f` collision — DECIDED (maintainer 2026-07-06): option (b),
+   hard switch in 1.4.0.** Make `combined`'s `-f` mean `--filter` like every other command;
+   the force flag becomes **`--force` long-only** (drop its `-f` short). This is a
+   **breaking change** to `combined -f` semantics (previously force). Rationale accepted:
+   `combined` is a newer/less-used command; consistency across the CLI is worth it.
+   Requirements:
+   - Update `combined_parser` (`__main__.py:1287-1288`): remove `-f` from the force
+     argument (keep `--force`), then call `_add_run_filter_args(combined_parser)` so the
+     helper's collision guard no longer fires and `-f/--filter` is registered normally.
+   - **CHANGELOG:** a clear `### Changed`/**BREAKING** entry under `[1.4.0]`:
+     "`pubrun combined -f` now means `--filter` (was `--force`); use `--force` for force."
+   - No deprecation-warning period (maintainer chose the clean hard switch, not warn-then-
+     flip). Documented breakage only.
 3. **Audit `clean`'s `-f`.** Confirm `clean` (no pre-existing `-f`) gets both `-f` and
    `--filter` (the audit found it does). Add a test pinning this so a future flag addition
    to `clean` cannot silently steal `-f` the way `combined` did.
@@ -64,8 +68,9 @@ duplicate of `show`, both filter-enabled — noted, not changed here.)
 
 - **`diff` default behavior unchanged** when called with no filters/positionals (still
   auto-pairs the last two valid runs). Characterization test BEFORE the change, green after.
-- **No other command's flags change** (only `diff` gains flags; `combined` force/filter
-  clarified per the chosen option).
+- **Only `diff` and `combined` change** — `diff` gains filter flags; `combined -f` flips
+  from force to filter (`--force` remains as long-only). No OTHER command's flags change.
+  This is the one intentional breaking change; it must be in the CHANGELOG breaking note.
 - **`-f` semantics documented and tested** on every filter-capable command, especially
   `combined` and `clean`.
 - Filtering still routes through the shared helper — no new ad hoc filter code (remove
@@ -75,8 +80,9 @@ duplicate of `show`, both filter-enabled — noted, not changed here.)
 
 - `diff -f <query>` restricts the auto-paired candidates; `diff` with no args reproduces
   today's output (characterization).
-- `combined`: assert the chosen `-f` semantics (force or filter) explicitly, plus `--filter`
-  works; add the trap regression test (`combined -f X` behaves as documented, not silently).
+- `combined`: assert `-f`/`--filter` now FILTERS (the new semantics), `--force` still
+  forces, and there is no `-f` short for force. Regression test that `combined -f X`
+  filters (does not force) — the intended behavior change.
 - `clean`: assert `-f` maps to `--filter`.
 - CLI help for `diff`/`combined` reflects reality.
 - Full suite green (baseline 690 passed; known SIGPIPE flake excepted).
@@ -85,15 +91,26 @@ duplicate of `show`, both filter-enabled — noted, not changed here.)
 
 `docs/cli.md` (`diff`, `combined` flag tables), `CHANGELOG.md`. Run `/assess documentation`.
 
-## Open questions (maintainer)
+## Open questions — ANSWERED by maintainer 2026-07-06
 
-1. `combined -f` collision: option (a) keep `-f`=force + document, or (b) free `-f` for
-   filter (breaking change, deprecation note)? (Recommend (a) — least surprise for existing
-   `combined` users; the inconsistency is documented rather than a silent breakage.)
-2. Should `ui/tui/gui` optionally accept `-f`/`-s` to PRE-SEED the dashboard filter? (Nice-
-   to-have, not a correctness gap since the TUI filters interactively. Recommend: defer.)
+1. `combined -f` collision → **option (b), hard switch in 1.4.0** (`-f` = filter, `--force`
+   long-only), documented as a breaking change in the CHANGELOG. No deprecation period.
+2. `ui/tui/gui` pre-seed filter → **defer** (nice-to-have, TUI filters interactively).
 
 ## Approval and execution gate
 
 Proposal only; human approval required; NOT auto-executed. Recommended: run `plan-review`.
 On completion move to `.agents/plans/executed/`.
+
+## Plan-review record (2026-07-06)
+
+Reviewed via `.agents/workflows/plan-review/plan-review.md`. Verdict: **APPROVE WITH
+REVISIONS APPLIED**. Verified `_add_run_filter_args` (`__main__.py:1109-1122`), that
+`combined` defines `-f/--force` then calls the helper (`__main__.py:1287-1288`, collision
+guard fires), that `diff` has NO filter args and hand-rolls selection, and that `clean`
+has no pre-existing `-f`. Maintainer chose the BREAKING change (option b): in 1.4.0
+`combined -f` becomes `--filter`, force → `--force` long-only, hard switch (no deprecation
+period), documented as a breaking change in the CHANGELOG (`[1.4.0]`). Note: pubrun is
+already on PyPI, so the breaking note is required. `ui/tui/gui` pre-seed filter deferred.
+Anti-regression: `diff` no-arg behavior must be characterization-pinned. Standalone;
+smallest/lowest-risk of the five (aside from the intentional `combined` break).

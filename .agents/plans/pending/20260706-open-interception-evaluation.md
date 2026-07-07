@@ -67,8 +67,29 @@ Produce a written evaluation (a doc under `docs/` or an appendix to this IPD) co
    - Audit hooks: `sys.addaudithook` with the `open`/`os.open` audit events (3.8+) — capture
      open events WITHOUT replacing `open`. Lower blast radius than monkeypatching; evaluate
      its overhead and completeness.
-3. **Recommendation:** which path (opt-in wrapper hardening / audit hook / /proc sampling /
-   full global patch / do-nothing), with justification against the principles.
+3. **Graded provenance-detail ladder (maintainer's framing, 2026-07-06).** Evaluate file
+   provenance NOT as all-or-nothing but as escalating levels, cheapest/safest first, so the
+   cost/detail tradeoff is explicit and (once implemented) user-selectable:
+   - **L1 — name only:** the path as given to `open()`. Cheapest.
+   - **L2 — realpath:** canonical/resolved path (symlinks resolved); OS-appropriate
+     equivalent on non-POSIX.
+   - **L3 — +stat metadata:** path (L1/L2) plus `ctime`, `mtime`, `size` (via `stat` or the
+     OS equivalent). **Metadata only — does NOT read file contents**, so still cheap and
+     non-intrusive.
+   - **L4 — +content hashing:** everything above plus a content hash. This is the expensive,
+     most-intrusive level (must read every byte); evaluate hash cost, size caps, and
+     sampling. Evaluate hash *verification* (compare against a prior run) as a sub-capability.
+   The evaluation must recommend, per mechanism (opt-in `pubrun.open()` / audit hook / /proc),
+   which levels are feasible and worth it, and the per-level overhead.
+4. **Recommendation:** which path (opt-in wrapper hardening / audit hook / /proc sampling /
+   full global patch / do-nothing) AND up to which ladder level, with justification against
+   the principles. Also recommend the **config knob** shape (maintainer wants the level to be
+   user-selectable): e.g. `[capture.file_io] level = none|name|realpath|stat|hash`, default
+   `none` (off). Users on fast local disk can raise it; HPC/NFS users stay low or off.
+5. **Cross-platform posture (maintainer, 2026-07-06):** pursue each level as far as each OS
+   cheaply allows; this is NOT all-or-nothing across platforms. Where an OS cannot provide a
+   level cheaply, degrade and **document the shortfall honestly** (per-OS capability table in
+   the evaluation), rather than refusing the feature everywhere or pretending parity.
 
 ## Phase 1 — implementation (ONLY on approval of the Phase-0 recommendation)
 
@@ -81,7 +102,13 @@ Depending on the recommendation, the likely candidates (in increasing risk):
   as a drop-in so users can `from pubrun import open` at file top by choice.
 - **(If approved) `sys.addaudithook`-based open capture**, strictly opt-in via config
   (default OFF), muted by `pause()`, with path/size filters, and a hard "never raise into
-  the host" guarantee. NOT a `builtins.open` replacement.
+  the host" guarantee. NOT a `builtins.open` replacement. **Verified available across the
+  whole supported range:** `pyproject.toml` sets `requires-python = ">=3.8"`, and
+  `sys.addaudithook` + the `open` audit event both exist since 3.8 (confirmed working on
+  the 3.14 dev interpreter). Caveat to evaluate: audit hooks CANNOT be removed once added
+  (process-lifetime), so the "opt-in, muted by `pause()`" design must gate INSIDE the hook,
+  not by adding/removing it — the hook is installed once and checks config/pause state per
+  event. This is a real design constraint for Phase 0 to address.
 - **Global `builtins.open` monkeypatch is the last resort** and only if the evaluation shows
   it is safe AND opt-in AND gated — the maintainer's default remains "nope" unless the
   evaluation overturns it.
@@ -114,17 +141,19 @@ The Phase-0 evaluation doc; then (if implemented) `docs/api.md` (`pubrun.open`),
 `docs/configuration.md` (any opt-in key), `docs/manifest.md` (file-provenance fields),
 `CHANGELOG.md`. Run `/assess documentation`.
 
-## Open questions (maintainer — but Phase 0 will inform these)
+## Open questions — ANSWERED by maintainer 2026-07-06 (Phase 0 will still detail them)
 
-1. Is the goal primarily (a) precise per-file provenance + hashes (favors the opt-in
-   `pubrun.open()`/audit-hook path) or (b) coarse "was this I/O/NFS-heavy" signal (favors
-   `/proc/<pid>/io` sampling in the existing watcher — much cheaper, ties to IPD-A/B)? They
-   may be separable, and (b) might fully satisfy the original NFS concern without any open()
-   work.
-2. Is a Linux-only solution acceptable for the richest signal, with graceful degradation
-   elsewhere?
-3. After reading the Phase-0 evaluation, does the maintainer want to proceed to Phase 1 at
-   all, and via which mechanism?
+1. Primary goal → **both (a) precise per-file provenance and (b) coarse I/O/NFS signal**,
+   and the evaluation must assess whether (b) is fully satisfied by cheap `/proc/<pid>/io`
+   sampling (IPD-A territory) WITHOUT any `open()` work — which could make the risky global
+   interception unnecessary. (a) is to be evaluated via the **graded L1→L4 ladder** above.
+2. Cross-platform → **as cross-platform as possible; NOT all-or-nothing.** Optimize where
+   each OS allows, document per-OS shortfalls honestly.
+3. Config knob → **YES, the ladder level is user-selectable** (`[capture.file_io] level`,
+   default `none`); the evaluation designs the exact knob.
+4. (Still open, informed by Phase 0) After reading the evaluation, which mechanism (opt-in
+   `pubrun.open()` hardening / audit hook / `/proc` sampling / global patch / do-nothing)
+   and up to which ladder level to actually build — decided at Gate 2.
 
 ## Approval and execution gate
 
@@ -132,3 +161,17 @@ Two gates. Gate 1: approve doing the Phase-0 EVALUATION (research/writing only, 
 Gate 2: after reading the evaluation, explicitly approve a specific Phase-1 mechanism (or
 decline). NOT auto-executed at either gate. Recommended: run `plan-review` on this IPD, and
 re-review after the Phase-0 evaluation before any implementation.
+
+## Plan-review record (2026-07-06)
+
+Reviewed via `.agents/workflows/plan-review/plan-review.md`. Verdict: **APPROVE WITH
+REVISIONS APPLIED**. Verified: `builtins.open` is NOT patched today (only the opt-in
+`pubrun.open()` wrapper, `core.py:731`); `requires-python = ">=3.8"`; `sys.addaudithook` +
+`open` audit event confirmed working. Maintainer answers folded in: graded L1→L4 ladder
+(name → realpath → +stat → +hash), user-selectable `[capture.file_io] level` (default
+`none`), cross-platform-as-feasible with honest per-OS shortfall documentation, and
+evaluate both precise-provenance AND coarse `/proc` I/O signal (the latter may satisfy the
+NFS concern with no `open()` work). **New design constraint surfaced during review:** audit
+hooks cannot be removed once added (process-lifetime), so an "opt-in / muted by `pause()`"
+design must gate INSIDE the hook per-event, not by add/remove — recorded for Phase 0. This
+remains EVALUATION-FIRST with two approval gates; the review does not authorize any code.
