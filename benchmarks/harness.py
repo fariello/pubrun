@@ -136,6 +136,9 @@ def _filesystem_context() -> dict:
         paths = {
             "tmpdir": tempfile.gettempdir(),
             "results_dir": str(Path(__file__).resolve().parent / "results"),
+            # Python install (stdlib/interpreter) — a startup-I/O source; on NFS it
+            # dominates import time independent of where the run writes.
+            "python_prefix": sys.base_prefix,
         }
         try:
             import pubrun
@@ -144,7 +147,24 @@ def _filesystem_context() -> dict:
                 paths["pubrun_install"] = str(Path(pkg_file).resolve().parent)
         except Exception:
             pass
-        return get_filesystem({}, paths)
+        # /dev/shm (RAM-backed tmpfs) — a devshm I/O-baseline target when present.
+        if os.path.isdir("/dev/shm"):
+            paths["devshm"] = "/dev/shm"
+        # The actual I/O-baseline target, if the scenarios point PUBRUN_BENCH_IO_TARGET
+        # somewhere non-obvious (e.g. an NFS $TMPDIR) — so a slow baseline is interpretable.
+        io_target = os.environ.get("PUBRUN_BENCH_IO_TARGET")
+        if io_target and io_target not in ("/dev/null", "NUL") and os.path.exists(io_target):
+            paths["io_target"] = io_target
+        fs_data = get_filesystem({}, paths)
+        # Live capacity/health probe (bench is an explicit diagnostic context — NOT the
+        # import path). Deduped by mount; a wedged mount is recorded as pending/hung rather
+        # than hanging the harness. Never raises.
+        try:
+            from pubrun.capture.filesystem import probe_paths_live
+            probe_paths_live(fs_data)
+        except Exception:
+            pass
+        return fs_data
     except Exception as e:
         return {"capture_error": f"{type(e).__name__}: {e}"}
 
@@ -277,7 +297,13 @@ def _run_pass(pass_no: int, iterations: int, warmup: int, workdir: Path) -> dict
                 samples.append(dt)
 
         entry = {"group": scn.group, "mode": scn.mode, "workload": scn.workload,
-                 "config": scn.config or {}, "failures": failures, **_stats(samples)}
+                 "config": scn.config or {}, "failures": failures,
+                 # Raw per-iteration wall times IN RUN ORDER (schema/4): the source of
+                 # truth. Summary stats below are derivable and kept for readability, but
+                 # only the raw samples allow later re-analysis (any statistic, distribution
+                 # shape, order/warmup drift) and CORRECT pooling across submissions.
+                 "timings": list(samples),
+                 **_stats(samples)}
         scenarios[scn.name] = entry
         med = entry.get("median_s")
         print(f"  [pass {pass_no}] {scn.name}: median={med*1000:.1f} ms "
@@ -296,7 +322,7 @@ def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2) -> di
     if slurm:
         machine["slurm"] = slurm
     result = {
-        "schema": "pubrun-benchmark/3",
+        "schema": "pubrun-benchmark/4",
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "iterations": iterations,
         "warmup": warmup,

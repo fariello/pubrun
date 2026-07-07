@@ -361,3 +361,39 @@ class TestSubmissionChain:
                             lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not POST")))
         url, reason = m._submit_via_http("o/n", str(red), None)
         assert url is None and "token" in (reason or "")
+
+
+class TestSchema4RawTimings:
+    """IPD data-quality (2026-07-07): raw per-iteration timings + schema /4."""
+
+    def test_stats_and_timings_coexist(self):
+        h = _load_harness()
+        samples = [0.1, 0.3, 0.2]
+        entry = {"failures": 0, "timings": list(samples), **h._stats(samples)}
+        assert entry["timings"] == samples  # raw, in run order (not sorted)
+        assert entry["n"] == 3
+        assert entry["median_s"] == 0.2  # summary still derivable & present
+
+    def test_schema_is_v4(self):
+        import re
+        src = (_REPO / "benchmarks" / "harness.py").read_text()
+        assert re.search(r'"schema":\s*"pubrun-benchmark/4"', src)
+
+    def test_redactor_preserves_timings(self):
+        h = _load_harness()
+        result = {"machine": {"host": {"hostname": "h"}},
+                  "pass_results": [{"pass": 1, "scenarios": {
+                      "s": {"timings": [0.1, 0.2, 0.3], "median_s": 0.2, "n": 3}}}]}
+        red = h.redact_result(result)
+        got = red["pass_results"][0]["scenarios"]["s"]
+        assert got["timings"] == [0.1, 0.2, 0.3]  # numbers survive redaction
+
+    def test_redactor_preserves_environment_kind(self):
+        h = _load_harness()
+        result = {"machine": {"python": {"environment_kind": "venv", "in_venv": True,
+                                         "sys_path_len": 12, "prefix": "/home/bob/venv"}}}
+        red = h.redact_result(result)
+        py = red["machine"]["python"]
+        assert py["environment_kind"] == "venv"  # non-identifying -> survives
+        assert py["in_venv"] is True and py["sys_path_len"] == 12
+        assert py["prefix"] == "<redacted>"  # the path is still masked

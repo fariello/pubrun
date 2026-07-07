@@ -290,6 +290,63 @@ JSON and `self-check` output, because the probe is diagnostic-only and defaults 
 Proposal only; human approval required; NOT auto-executed. Recommended: run `plan-review`.
 On completion move to `.agents/plans/executed/`.
 
+## Execution record (2026-07-07)
+
+Executed by opencode after human approval (second of the three 2026-07-07 IPDs; after the
+submission IPD `2b207bc`).
+
+- **Item 1 — raw timings + schema/4 (`benchmarks/harness.py`):** each scenario entry now
+  carries `"timings": [...]` (raw, run order) alongside the unchanged `_stats` summary;
+  `"schema"` bumped `pubrun-benchmark/3` → `/4` (backward-compatible superset).
+- **Item 2 — environment kind (`src/pubrun/capture/python_runtime.py`):** new shared
+  `environment_kind()` helper (venv/conda/virtualenv/system/frozen + `in_venv`/`sys_path_len`/
+  `pyenv`), folded into `get_python_runtime()`. Non-identifying → survives redaction. Used by
+  the harness (via `get_python_runtime`).
+- **Item 3 — more classified paths (`harness.py` `_filesystem_context`):** added
+  `python_prefix` (`sys.base_prefix`), `devshm` (`/dev/shm` when present), and the resolved
+  `PUBRUN_BENCH_IO_TARGET` (excluding the `/dev/null` char device). `_live_paths()` in
+  `checks.py` also gained `python_prefix`.
+- **Item 4 — `/proc/self/mountinfo` (`capture/filesystem.py`):** new `_parse_proc_mountinfo()`
+  (super-block fstype, bind/overlay-aware) preferred over `/proc/mounts`, with fallback. Pure
+  file read; still non-blocking.
+- **Item 5 — Windows fstype branch:** `_classify_windows`/`_classify_windows_path` via
+  `GetVolumePathNameW`/`GetVolumeInformationW`/`GetDriveTypeW` (`DRIVE_REMOTE`), guarded by
+  `sys.platform == "win32"`, per-path failures recorded not raised.
+- **Item 6 — threaded live probe (`capture/filesystem.py`):** `probe_filesystem_live()` runs
+  `os.statvfs` (POSIX) / `GetDiskFreeSpaceExW` (Windows) in a **daemon** thread; `LiveProbe`
+  waits only the responsiveness budget, then `.result()` is a non-blocking re-read that reports
+  `complete` / `complete+slow` (returned after budget) / `pending+hung` (never returned).
+  `probe_paths_live()` dedupes by mount and caps concurrency (`_MAX_LIVE_PROBES`,
+  `BoundedSemaphore`). Wired into `harness._filesystem_context` (bench) and `checks.live_findings`
+  (self-check) — NEVER the import path.
+- **Item 7 — self-check fs-health (`report/checks.py`):** `_live_fs_health_findings` emits WARN
+  for `pending`/`hung` (honest, system-wide, no invented magnitude) and `slow` (states the
+  measured `elapsed_s`). Runs only in the diagnostic `live_findings()` path.
+- **Tests (+16, all green in isolation):** raw-timings coexist + schema/4 + redactor preserves
+  `timings`/`environment_kind` while masking `prefix` (`test_bench_command.py`); mountinfo parse
+  (bind/overlay/nfs) + preferred; live probe 3-way (fast/hung-no-block/slow-late-read) + dedupe;
+  environment_kind venv/conda/scalars (`test_env_capture.py`); import+run makes **no** `statvfs`
+  call (hang-safety) + self-check hung/slow/healthy findings (`test_checks_commands.py`). Updated
+  the pre-existing `test_get_filesystem_never_raises` to fail BOTH parsers (mountinfo-first).
+- **Docs:** `CHANGELOG.md`, `docs/cli.md` (`self-check` live probe), `docs/manifest.md`
+  (`python` env-kind fields + the "live fields are diagnostic-only, not in the run manifest"
+  note + mountinfo/Windows sources), `benchmarks/README.md` + `pubrun-benchmarks/README.md`
+  (schema/4: raw timings + env-kind + live block).
+- **Validation:** full suite **786 passed / 2 skipped / 2 failed** — both failures are
+  pre-existing flakes that **pass in isolation** and vary run-to-run: the known SIGPIPE flake,
+  and one rotating `test_file_io_provenance.py` test (`test_io_counters_in_manifest` /
+  `test_hash_level_matches_on_disk` — the *entire file passes 9/9 alone*; cross-test `/proc/self/io`
+  + disk-timing interference, unrelated to this IPD which touches neither io_counters nor hashing).
+
+### Deferred / notes
+
+- **Windows probe/fstype has no unit test** on this Linux CI (mocking `ctypes.windll` cleanly is
+  brittle and the branch is `sys.platform=="win32"`-guarded). Covered by inspection; validate on
+  a Windows host if/when available. Remediation Risk of a brittle mock (Functionality/Complexity)
+  outweighs its value.
+- OQ leanings confirmed: no `[capture.filesystem]` config key (CLI/diagnostic-driven);
+  `environment_kind` in the shared `python_runtime` helper; raw-timings uncapped (no histogram).
+
 ## Plan-review record (2026-07-07)
 
 Reviewed via `.agents/workflows/plan-review/plan-review.md`. Verified code claims: `_stats`

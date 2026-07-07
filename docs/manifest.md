@@ -134,7 +134,15 @@ Python runtime environment.
 | `base_prefix` | string | `sys.base_prefix`. Differs from `prefix` inside a virtual environment. |
 | `virtual_env` | string \| null | Path to the active virtual environment, or `null`. |
 | `sys_path` | list[string] | The Python module search path. |
+| `environment_kind` | string | `"venv"`, `"conda"`, `"virtualenv"`, `"system"`, or `"frozen"` — a non-identifying classification (no path). |
+| `in_venv` | bool | Whether `sys.prefix != sys.base_prefix` (PEP 405). |
+| `sys_path_len` | int | `len(sys.path)` — import time scales with it. |
+| `pyenv` | bool | Whether the interpreter appears pyenv-managed (orthogonal modifier). |
 | `capture_state` | object | See [Capture State](#capture-state). |
+
+> `environment_kind`, `in_venv`, `sys_path_len`, and `pyenv` are deliberately non-identifying
+> (they expose no path, username, or home dir) so they **survive the benchmark share-redaction**
+> that masks `executable`/`prefix`/`virtual_env`/`sys_path`.
 
 ---
 
@@ -284,9 +292,10 @@ Operating system and host identity.
 
 Filesystem type of run-relevant paths, so a later `pubrun inspect` can flag when a run
 lived on a slow **network filesystem** (NFS/Lustre/GPFS/CIFS) — a common cause of inflated
-I/O on HPC clusters. Classified by parsing `/proc/mounts` (Linux) or the `mount` table
-(macOS); **never** by `statvfs`/`df`/`stat` on the target, so it cannot hang on a wedged
-network mount. Each entry keyed by path label (`output_dir`, `run_dir`, `tmpdir`):
+I/O on HPC clusters. Classified by parsing `/proc/self/mountinfo` (preferred) or
+`/proc/mounts` (Linux), the `mount` table (macOS), or `GetVolumeInformationW` (Windows);
+**never** by `statvfs`/`df`/`stat` on the target, so it cannot hang on a wedged network
+mount. Each entry keyed by path label (`output_dir`, `run_dir`, `tmpdir`):
 
 | Field | Type | Description |
 |---|---|---|
@@ -295,6 +304,13 @@ network mount. Each entry keyed by path label (`output_dir`, `run_dir`, `tmpdir`
 | `<label>.fstype` | string | Filesystem type (`ext4`, `xfs`, `tmpfs`, `nfs4`, `lustre`, …). |
 | `<label>.is_network` | bool | Whether the filesystem is a network/remote filesystem. |
 | `capture_state` | object | See [Capture State](#capture-state). `suppressed`/`failed` when unavailable. |
+
+> **Live capacity/health metrics (`<label>.live`) do NOT appear in the normal run manifest.**
+> The blocking `statvfs` probe that produces free-space/inode/read-only data and the
+> hung/slow status is **diagnostic-only** — it runs solely for `pubrun bench` and
+> `pubrun self-check`, never during a tracked run — so those fields surface only in the
+> benchmark result JSON and `self-check` output, keeping the always-on capture path
+> non-blocking.
 
 ---
 

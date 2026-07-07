@@ -71,9 +71,16 @@ pubrun cite --style bibtex
 
 Report-only checks of the **current machine** for pubrun performance/config pitfalls and
 install health. It flags network filesystems (NFS/Lustre/GPFS/CIFS) backing the pubrun
-install, output dir, or `$TMPDIR` (a common cause of slow runs on HPC), low free RAM, high
-load, an unwritable output dir, missing `git`, an unsupported Python, and config errors.
-It never modifies anything.
+install, output dir, `$TMPDIR`, or Python install (a common cause of slow runs on HPC), low
+free RAM, high load, an unwritable output dir, missing `git`, an unsupported Python, and
+config errors. It never modifies anything.
+
+It also runs a short **live filesystem probe** (a `statvfs` capacity check in a background
+daemon thread, with a ~5s wait budget) and warns if a mount is **wedged/hung** or **slow to
+respond**. These warnings are framed honestly as a **system-wide** hazard — a mount that
+takes 34s to answer a capacity query will slow *any* script doing I/O there, not just pubrun.
+This probe runs only when you invoke `self-check` (or `bench`); it is **never** run by
+`import pubrun` or during a normal run, so it can never hang your host script.
 
 ```bash
 pubrun self-check [--show-suggestions|-v] [--json] [--strict]
