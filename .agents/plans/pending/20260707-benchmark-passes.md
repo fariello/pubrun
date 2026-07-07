@@ -64,6 +64,10 @@ its meaning is a small breaking-ish CLI nuance to settle at plan-review.
   numbers); `--quick` unchanged; `--iterations`/`--passes` still override.
 - Result JSON self-describes its pass structure/mode.
 - A light smoke run (1 iter/1 pass) still completes and writes a valid schema/4 result.
+- **Backward-compat:** the added baseline pass must not break schema/4 consumers — `aggregate.py`
+  and `redact_result` must tolerate the new baseline/`pass 0` entry (verified `benchmarks/
+  test_benchmarks.py` has NO pass-count assertion, so this is additive; confirm `aggregate.py`
+  ignores or handles the uncaptured baseline pass rather than mixing it into measured stats).
 - Full suite green (benchmarks self-test `benchmarks/test_benchmarks.py`).
 
 ## Spec / documentation sync
@@ -89,3 +93,15 @@ its meaning is a small breaking-ish CLI nuance to settle at plan-review.
 
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`.
+
+## Plan-review record (2026-07-07)
+
+Reviewed via `plan-review`. Verified `FULL_ITERATIONS=30`/`QUICK_ITERATIONS=8` + `--passes 2`
+default (`harness.py:47-48,10-18`), schema/4 raw timings, and that `benchmarks/test_benchmarks.py`
+has NO pass-count assertion. Verdict: **APPROVE WITH REVISIONS APPLIED.**
+- **P9 (LOW, backward-compat):** required the added uncaptured baseline (`pass 0`) to not break
+  schema/4 consumers — `aggregate.py`/`redact_result` must tolerate/ignore the baseline pass
+  and not fold it into measured stats.
+Correctly honors the maintainer decision (lighter default; 50-iter behind `--rigorous`). Open
+questions (—`--full` vs `--rigorous` naming; exact heavy numbers = 2×50 not 50 passes; default
+iteration bump) are the remaining maintainer calls, flagged clearly.

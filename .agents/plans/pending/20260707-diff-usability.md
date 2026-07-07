@@ -49,7 +49,7 @@ blow-ups from list-valued sections. Preserve `--deep` as the show-everything mod
 |------|----------|--------|-------|-----------|------------|
 | 1 | A1 | **Collapse redundant invocation fields.** In `_normalize_manifest`, when `invocation.argv` is present, DROP `invocation.command_line` and `invocation.rerun_command` from `basic`/`standard` (they are derived views of argv); keep them only at `--deep`. Alternatively add them to `ignore_basic`+`ignore_standard`. Prefer the argv-aware collapse so they show at deep. | `diff.py`, `default.toml` | Low | A run pair differing only by an added argv flag shows ONE `invocation.argv` change at basic (not 3); `--deep` still shows all three. |
 | 2 | A2 | Add `filesystem.run_dir`, `filesystem.*.path`, `filesystem.*.mount_point` (volatile absolute paths) to `ignore_basic` + `ignore_standard`; keep `fstype`/`is_network` visible (those are meaningful). | `default.toml` | Low | Basic diff of two runs on the same fs shows no `run_dir.path` line; an NFS-vs-local difference still shows via `fstype`. |
-| 3 | A3, A4 | **Make `--basic` list-aware and genuinely summarizing.** Add `subprocesses` and `packages` to `ignore_basic` (basic = "did the script/env/user-facing config change?", not "every child process"). At `--standard`, summarize list-valued sections as a COUNT + added/removed identities rather than per-element leaf diffs (e.g. "subprocesses: 618 → 620 (+2 added: …)"). `--deep` keeps full element-by-element. Rebuild the ignore lists so basic ⊇ standard ⊇ deep in what-they-hide (basic hides the most). | `diff.py`, `default.toml` | Med | A subprocess-heavy run pair at `--basic` is < ~40 lines; at `--standard` shows subprocess/package COUNT deltas + identities, not thousands of leaves; `--deep` unchanged (full detail). Add a test with two synthetic manifests each having 300 subprocesses: basic output line count is bounded. |
+| 3 | A3, A4 | **Make `--basic` list-aware and genuinely summarizing.** Add `subprocesses` and `packages` to `ignore_basic` (basic = "did the script/env/user-facing config change?", not "every child process"). At `--standard`, summarize list-valued sections as a COUNT + added/removed identities rather than per-element leaf diffs (e.g. "subprocesses: 618 → 620 (+2 added: …)"). `--deep` keeps full element-by-element. Rebuild the ignore lists so basic ⊇ standard ⊇ deep in what-they-hide (basic hides the most). **Integrate with (do not duplicate) the EXISTING depth-aware array handling** (`_recruit_val`, `diff.py:80-94`, added in commit `eca6117`) — the summarization is a `--standard` presentation over the same normalized data, not a second array code path. | `diff.py`, `default.toml` | Med | A subprocess-heavy run pair at `--basic` is < ~40 lines; at `--standard` shows subprocess/package COUNT deltas + identities, not thousands of leaves; `--deep` unchanged (full detail). Add a test with two synthetic manifests each having 300 subprocesses: basic output line count is bounded. A regression test asserts existing depth-aware array formatting still works at `--deep`. |
 | 4 | A5 | **Optional compact/table rendering** for the summary: a `--table` (or make it the default for basic/standard) two-column "Field | A → B" aligned view, ANSI-colored, NO_COLOR/`--no-color` aware, degrading to the current inline form with `--wrap`/narrow terminals. Keep `_render_inline` available. | `render.py`, `__main__.py` | Med | Table renders aligned columns, wraps safely at small widths, and is byte-identical in content to the inline form (same change set). Manual + a width-parametrized test. |
 
 ## Deferred / out of scope (with reason)
@@ -66,6 +66,13 @@ blow-ups from list-valued sections. Preserve `--deep` as the show-everything mod
 
 ## Required tests / validation
 
+- **Characterization gate (anti-regression):** before changing the ignore lists / renderer,
+  add a test that pins the CURRENT diff output for a fixed pair of sample manifests at each
+  depth (`--basic`/`--standard`/`--deep`) — capture the exact change set. The change is a
+  DELIBERATE behavior change, so the pinned expectations are then updated in the SAME commit
+  to the new (quieter) output, with the diff of expectations visible in review. `--deep` output
+  must be UNCHANGED by this IPD (deep hides nothing new); assert deep is byte-identical
+  before/after.
 - Redundant-collapse: manifests differing only in `argv` → basic shows 1 change, not 3;
   deep shows command_line/rerun_command too.
 - Volatile paths: `run_dir.path` never in basic/standard; `fstype` diff still shown.
@@ -95,3 +102,17 @@ output at those depths may see fewer lines; `--deep` is unchanged).
 
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`.
+
+## Plan-review record (2026-07-07)
+
+Reviewed via `plan-review`. Verified: `render.py` has only `_render_inline`/`print_diff` (no
+table ever existed — `render.py:73,138`); `ignore_basic`/`ignore_standard` (`default.toml:399-411`);
+`invocation` has `argv`/`command_line`/`rerun_command` (`capture/invocation.py`);
+`_recruit_val` array flattening (`diff.py:80-94`). Verdict: **APPROVE WITH REVISIONS APPLIED.**
+- **P1 (HIGH, anti-regression):** added a characterization gate — pin current per-depth diff
+  output before the change, update expectations in the same commit, assert `--deep` byte-identical.
+- **P2 (MEDIUM, functionality):** required the standard-level summarization to integrate with
+  the EXISTING depth-aware array handling (`eca6117`), not add a second array code path; added a
+  deep-array regression test.
+No deferrals on risk. Open questions (table opt-in vs default, identity format, collapse-vs-ignore
+of command_line/rerun_command) remain for execution-time/maintainer.
