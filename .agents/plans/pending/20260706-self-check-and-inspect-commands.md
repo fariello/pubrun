@@ -42,11 +42,26 @@ was an import-time nudge — which is explicitly DROPPED (see "Explicitly out of
 ## Design decisions (agreed with maintainer)
 
 - **Names:** `pubrun self-check` (live, current machine) and `pubrun inspect` (post-hoc,
-  reads a completed run's manifest).
+  reads a completed run's manifest). **Two commands, one shared findings module** — NOT a
+  single command with a `--live/--from-run` flag.
+- **They are OVERLAPPING, not nested (maintainer's Venn observation, 2026-07-06).** Neither
+  is a subset of the other:
+  - **`self-check` only:** "is THIS machine well-configured RIGHT NOW?" — pubrun install on
+    NFS, current free RAM, current load, config file validity, output dir writable, git
+    availability, Python version. None of this needs (or reads) a run manifest.
+  - **`inspect` only:** what a COMPLETED run captured — the capture-completeness assessment,
+    the recorded-at-runtime I/O/RAM/load, the different-host banner. Needs a manifest;
+    self-check has none.
+  - **Overlap (the shared module):** filesystem-type / is-network-FS classification, RAM/
+    load interpretation thresholds, severity/marker formatting, `NO_COLOR` handling — pure
+    functions both commands call. The executor must NOT implement one command as a subset
+    of the other; build the shared findings module + two thin command-specific layers.
+- **Shared module name → `src/pubrun/report/checks.py`** (non-colliding with the existing
+  `report/diagnostics.py`; note the package is `report/`, singular).
 - **Report-only.** Neither command mutates the environment or any run. No auto-fixing.
-- **CLI-only, off the import path.** The check logic lives in a new module imported by
-  `__main__.py`, NOT by `pubrun/__init__.py`. A test asserts `import pubrun` does not
-  import the check module (keeps it impossible to affect the host script).
+- **CLI-only, off the import path.** The check logic lives in `report/checks.py`, imported
+  by `__main__.py`, NOT by `pubrun/__init__.py`. A test asserts `import pubrun` does not
+  import `pubrun.report.checks` (keeps it impossible to affect the host script).
 - **`self-check` scope = perf pitfalls + install health** (maintainer's choice), namely:
   filesystem type of install/output/`$TMPDIR` (flag network FS), free RAM, load average,
   pubrun import origin; PLUS install health: config file validity, output dir writable,
@@ -63,11 +78,11 @@ was an import-time nudge — which is explicitly DROPPED (see "Explicitly out of
 
 ## Proposed changes
 
-1. **New module `src/pubrun/report/checks.py`** (name TBD): pure functions that produce a
-   list of findings `{severity, code, message, suggestion}` from (a) the live environment
-   and (b) a loaded manifest. No printing here — returns data so it is unit-testable.
-   Reuses IPD-A's `capture/filesystem.py`, memory, and load helpers (or, if IPD-A not yet
-   landed, a minimal local `/proc` reader; consolidate later).
+1. **New module `src/pubrun/report/checks.py`**: pure functions that produce a list of
+   findings `{severity, code, message, suggestion}` from (a) the live environment and (b) a
+   loaded manifest. No printing here — returns data so it is unit-testable. Reuses IPD-A's
+   `capture/filesystem.py`, memory, and load helpers (or, if IPD-A not yet landed, a minimal
+   local `/proc` reader; consolidate later).
 2. **`pubrun self-check`** subcommand (`__main__.py`): runs live checks + install-health
    checks, prints findings with an authoritative textual severity marker (e.g. `[warn]`)
    plus optional non-DIM color reinforcement respecting `NO_COLOR`. Suggestions are honest
@@ -118,14 +133,16 @@ was an import-time nudge — which is explicitly DROPPED (see "Explicitly out of
      the exact config keys to set AND the honest performance caveat ("…may add overhead;
      see `docs/performance.md`"). `--json` always includes the full structured findings
      regardless (machines don't have a wall-of-text problem).
-5. **(Optional, coordinate with IPD-A) close the two manifest ambiguities.** To make inspect
-   able to say *definitively* "subprocess tracking was OFF" and "file-open provenance was
-   OFF", add two tiny boolean flags to the manifest at assembly time
-   (`tracker.py:576-632`): e.g. `capture.subprocesses_enabled` (from
-   `self._spying_subprocesses`, `tracker.py:316`) and `capture.file_provenance_available`
-   (whether the `pubrun.open` API path was reachable / any proxy created). Additive, tiny,
-   removes the ambiguity above. If not added, inspect degrades to the honest "either
-   disabled or unused" phrasing. (Open question #5.)
+5. **Close the two manifest ambiguities — DECIDED YES (maintainer 2026-07-06).** Add two
+   tiny additive boolean flags to the manifest at assembly time (`tracker.py:576-632`):
+   `capture.subprocesses_enabled` (from `self._spying_subprocesses`, `tracker.py:316`) and
+   `capture.file_provenance_available` (a run was active and `pubrun.open` was importable —
+   NOT "the user used it"; see IPD-E note). **These flags are added in IPD-A** (which
+   already edits manifest assembly) to avoid two IPDs touching the same dict; this IPD
+   CONSUMES them. `inspect` then reports definitively "subprocess tracking was OFF" rather
+   than the ambiguous phrasing. For runs predating the flags (older manifests), inspect
+   falls back to the honest "disabled OR not used" wording. A test covers both the
+   flag-present (definitive) and flag-absent (ambiguous) manifests.
 6. **Docs:** `docs/cli.md` entries for both; a short "diagnosing performance / HPC" section
    in `docs/research-use.md` or a new `docs/hpc.md`; and a "capture completeness / how to
    capture more" subsection cross-linked from `docs/configuration.md` and
@@ -176,8 +193,9 @@ was an import-time nudge — which is explicitly DROPPED (see "Explicitly out of
 
 ## Spec / documentation sync
 
-`docs/cli.md`, `docs/research-use.md` (or new `docs/hpc.md`), `CHANGELOG.md`. Run
-`/assess documentation` after implementation.
+`docs/cli.md`, **new `docs/hpc.md`** (decided — dedicated HPC/perf/diagnosis guidance,
+not crammed into `research-use.md`; add it to the doc nav footer used across the docs),
+`CHANGELOG.md`. Run `/assess documentation` after implementation.
 
 ## Explicitly out of scope
 
@@ -186,32 +204,35 @@ was an import-time nudge — which is explicitly DROPPED (see "Explicitly out of
   design element that touched the host-script process; removed by decision.)
 - Auto-fixing the environment. Report + suggest only.
 
-## Open questions (maintainer)
+## Open questions — ANSWERED by maintainer 2026-07-06
 
-1. Final module name (`report/checks.py` vs `report/diagnostics.py` — note a
-   `report/diagnostics.py` already exists; pick a non-colliding name).
-2. Should `inspect` and `self-check` share one implementation with a `--live/--from-run`
-   flag, or stay two commands? (Recommend two commands, one shared findings module.)
-3. Add a `docs/hpc.md`, or fold HPC guidance into `docs/research-use.md`?
-4. **Resolved-config source.** To report exact settings (sample interval, packages mode,
-   per-category depth), inspect must read the sibling `config.resolved.json`
-   (`writer.py:69-70`) since they are NOT in the manifest. Should inspect read it when
-   present (and degrade gracefully when absent/moved), or should we rely only on the
-   manifest's coarse `capture_state` sentinels? (Recommend: read `config.resolved.json`
-   opportunistically for richer detail, fall back to manifest sentinels.)
-5. **Close the two ambiguities?** Add tiny additive manifest flags
-   (`capture.subprocesses_enabled`, `capture.file_provenance_available`) so inspect can say
-   definitively "off" rather than "off or unused"? (Recommend YES — trivial, and it makes
-   the completeness report unambiguous. Coordinate with IPD-A which is already touching
-   `tracker.py` manifest assembly.) The flag name for open()-provenance is subtle since it
-   is not a config switch — see IPD-E; `file_provenance_available` should mean "a run was
-   active and `pubrun.open` was importable", not "the user used it".
-6. **Default terseness knob.** Is a single summary line + one nudge the right default, or do
-   you want a 2–3 line "captured / not captured" mini-table by default with
-   `--show-suggestions` for the how-to + caveats? (Recommend: 1 summary line + nudge;
-   keep it minimal.)
+1. Module name → **`src/pubrun/report/checks.py`** (non-colliding with `report/diagnostics.py`).
+2. One command with a flag, or two? → **Two commands, one shared findings module** (they
+   overlap but neither is a subset — see the Venn note in Design decisions).
+3. `docs/hpc.md` vs fold into `research-use.md` → **new `docs/hpc.md`**.
+4. Resolved-config source → **read `config.resolved.json` opportunistically** for exact
+   settings (sample interval, packages mode, per-category depth) when it sits next to the
+   manifest; **fall back gracefully** to the manifest's coarse `capture_state` sentinels
+   when absent/moved.
+5. Close the two ambiguities → **YES, add the two additive manifest flags** (in IPD-A;
+   consumed here). `file_provenance_available` means "a run was active and `pubrun.open`
+   was importable", NOT "the user used it".
+6. Default terseness → **1 summary line + one nudge** by default; full findings behind
+   `--show-suggestions`; `--json` always full.
 
 ## Approval and execution gate
 
 Proposal only; human approval required; NOT auto-executed. Recommended: run `plan-review`.
 On completion move to `.agents/plans/executed/`.
+
+## Plan-review record (2026-07-06)
+
+Reviewed via `.agents/workflows/plan-review/plan-review.md`. Verdict: **APPROVE WITH
+REVISIONS APPLIED**. Manifest-detectability claims re-verified (resource scope
+`resources.py:327`; console mode `console.py:274`; import mode `_bootstrap.py:91-92`;
+ambiguous empty `subprocesses`/`data_files`; `config.resolved.json` at `writer.py:69,100`).
+Maintainer answers folded in: `report/checks.py` module name; TWO commands (not a flag)
+with the explicit OVERLAPPING-not-nested Venn note; add + consume the two manifest flags
+(added in IPD-A); read `config.resolved.json` opportunistically; new `docs/hpc.md`; terse
+1-line default + `--show-suggestions`. Honesty guardrail kept: never claim "off" when the
+manifest only shows "no records" unless the flags make it definitive. Depends on IPD-A.

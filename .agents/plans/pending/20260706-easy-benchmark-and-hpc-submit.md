@@ -64,9 +64,38 @@ privacy-respecting path to send results back.
    from the new command with explicit args instead of only `PUBRUN_*` env vars (keep env
    vars working for backward compat).
 3. **A `CONTRIBUTING`-style note / `benchmarks/README.md` section**: "How to contribute a
-   benchmark data point" — run `pubrun bench`, then attach `benchmarks/results/<file>.json`
-   to an issue at the given URL. State plainly what the JSON contains (host/hardware,
-   timings, filesystem type, Slurm context) so contributors give informed consent.
+   benchmark data point" — run `pubrun bench`, then attach the **redacted** results JSON to
+   an issue at the given URL. State plainly what the JSON contains so contributors give
+   informed consent.
+4. **Redaction for sharing — DECIDED (maintainer 2026-07-06): redact by default for the
+   SHARE artifact; `--no-redact` to opt into full detail.** `pubrun bench` produces the full
+   JSON locally (for the user's own analysis) AND, for sharing, a redacted copy that masks
+   **hostname**, **username**, and **home-directory paths in `python.sys_path`** (and any
+   other identifier fields). Redaction is deterministic and documented (list exactly which
+   fields are masked and how).
+5. **Identity via GitHub, not via the data (maintainer's design).** The redacted JSON
+   carries NO PII, yet the maintainer can still follow up with a submitter because the
+   submission is an issue/PR opened from the submitter's **own GitHub account** — GitHub is
+   the authenticated contact channel. Fully anonymous submission remains possible (redacted
+   JSON + throwaway account). This needs **no server and no contact database** (honors the
+   "manual, no infrastructure" decision). The contribute guidance must explain this so users
+   understand the privacy model.
+6. **Collection home = a separate public `pubrun-benchmarks` repo (DECIDED).** The harness
+   CODE stays in the main repo (`benchmarks/`, for reproducibility/version-matching), but
+   submitted result JSONs + the issue template + aggregation live in a NEW public
+   `pubrun-benchmarks` repo so the main repo stays code-only. `pubrun bench`'s share
+   guidance points at that repo's issue template. **Operator step (maintainer):** create the
+   `pubrun-benchmarks` repo; the executor wires the URL/template reference but cannot create
+   the repo. Until it exists, use a clearly-marked placeholder URL + follow-up (never a fake
+   live URL).
+7. **Analysis-critical fields confirmed present + gaps closed by IPD-A.** Verified
+   (`benchmarks/harness.py:98-99,107-117`): the result JSON already records `pubrun_version`,
+   `pubrun_commit` (package), and repo `git_commit`, plus host/hardware/python,
+   `python_executable`, `platform`, iterations/warmup/passes, and timestamp. The fields
+   needed for cross-machine comparison that are NOT yet captured — per-pass dynamic state,
+   filesystem type (the NFS signal), and Slurm allocation context — are ADDED by IPD-A
+   (schema/3). This IPD's share/analysis flow DEPENDS on IPD-A's schema/3; sequence C after
+   A. The redaction list (change 4) must be kept in sync with schema/3's fields.
 
 ## Anti-regression / invariants
 
@@ -77,7 +106,12 @@ privacy-respecting path to send results back.
 - **Existing scripts keep working** with their `PUBRUN_*` env-var interface (backward compat
   test / documented).
 - **Honest data disclosure.** The share guidance accurately lists every field the result
-  JSON contains (cross-check against IPD-A's schema/3).
+  JSON contains (cross-check against IPD-A's schema/3), and states plainly which fields the
+  default redaction masks vs. leaves.
+- **Redaction actually removes PII.** A test asserts the redacted share artifact contains
+  NO hostname, username, or home-path substring, while `--no-redact` preserves them; and
+  that redaction leaves the analysis-relevant fields (timings, CPU model, fstype, versions)
+  intact.
 - **Never crash on a locked-down node** (no scheduler, no network) — degrade to local run +
   print-path, with a clear message.
 
@@ -90,6 +124,8 @@ privacy-respecting path to send results back.
   submit command unless `--yes/--submit`.
 - Non-interactive safety: default without `--yes` never submits.
 - Share-guidance text lists the actual JSON fields (kept in sync with schema).
+- Redaction test (above): redacted artifact has no hostname/username/home-path; `--no-redact`
+  keeps them; analysis fields survive redaction.
 - Full suite green.
 
 ## Spec / documentation sync
@@ -97,23 +133,34 @@ privacy-respecting path to send results back.
 `docs/cli.md` (`pubrun bench`), `benchmarks/README.md`, `docs/performance.md`,
 `CHANGELOG.md`, and the contribute-a-data-point guidance. Run `/assess documentation`.
 
-## Open questions (maintainer)
+## Open questions — ANSWERED by maintainer 2026-07-06
 
-1. Should `pubrun bench` be a first-class CLI command (requires resolving where the harness
-   lives for an installed user — package the harness as data, or require a source checkout?),
-   or a documented wrapper script `benchmarks/bench.sh` that calls the harness? (Recommend:
-   CLI command IF harness-location resolution is clean; else wrapper. Decide after checking
-   packaging.)
-2. Which GitHub URL for result submission — a dedicated issue template
-   (`.github/ISSUE_TEMPLATE/benchmark-result.md`) so contributions are structured?
-   (Recommend yes — add the template.)
-3. Beyond Slurm, do you want the seam wired for PBS/LSF now, or Slurm-only with a documented
-   extension point? (Recommend Slurm-only now, seam documented.)
-4. Any fields in the result JSON you would NOT want contributors to share by default (e.g.
-   hostname, username, sys_path which may leak home paths)? Consider a `--redact` option or
-   redacting home paths in shared output. (Privacy — worth deciding.)
+1. `pubrun bench` CLI command vs wrapper → **prefer the CLI command IF harness-location
+   resolves cleanly for a pip-installed user** (package the harness as data OR require a
+   source checkout); fall back to a wrapper script only if resolution is messy. Decide with
+   evidence at execution time (check packaging first).
+2. Submission channel → **a dedicated issue template in the new `pubrun-benchmarks` repo**
+   (structured `benchmark-result` template). (Repo creation is an operator step; see change 6.)
+3. PBS/LSF → **Slurm-only now, seam documented** for later schedulers.
+4. Redaction → **redact by default for the share artifact** (mask hostname, username,
+   home-paths in `sys_path`); `--no-redact` for full detail; identity carried by the
+   submitter's GitHub account, not the data (changes 4–5). No server/contact DB.
 
 ## Approval and execution gate
 
 Proposal only; human approval required; NOT auto-executed. Recommended: run `plan-review`.
 On completion move to `.agents/plans/executed/`.
+
+## Plan-review record (2026-07-06)
+
+Reviewed via `.agents/workflows/plan-review/plan-review.md`. Verdict: **APPROVE WITH
+REVISIONS APPLIED**. Verified the harness already records `pubrun_version`/`pubrun_commit`
+(`harness.py:98-99`) + repo `git_commit` (`harness.py:107-117`); the cross-machine fields
+it LACKS (per-pass dynamic state, fstype, Slurm context) are added by IPD-A/schema-3, so C
+depends on A. Maintainer answers folded in: redact-by-default share artifact (mask
+hostname/username/home-paths) with `--no-redact`; identity via the submitter's GitHub
+account (no server/contact DB); NEW public `pubrun-benchmarks` repo as the collection home
+(harness code stays in main repo); dedicated issue template; Slurm-only now (seam
+documented); `pubrun bench` CLI iff harness-location resolves cleanly, else wrapper.
+Operator step: create `pubrun-benchmarks`; use a placeholder URL + follow-up until then
+(never a fake live URL). Sequence: after IPD-A.

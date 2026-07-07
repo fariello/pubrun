@@ -139,18 +139,45 @@ Verified against the code (2026-07-06):
 `benchmarks/README.md` + `docs/performance.md` (new fields, per-pass env, schema/3),
 `CHANGELOG.md`. Run `/assess documentation` after implementation.
 
-## Open questions (maintainer)
+## Open questions — ANSWERED by maintainer 2026-07-06
 
-1. For run-time enrichment, should system free-RAM/load sampling be **on whenever the
-   resource watcher is on** (default `depth="standard"`), or behind a separate opt-in key?
-   (Recommend: on with the watcher — it is cheap and it is the whole point.)
-2. Linux `iowait`: include by default (Linux-only, clearly "not available" elsewhere), or
-   opt-in? (Recommend: include; it is the single most useful I/O-pressure signal.)
-3. Should we also capture a coarse **disk throughput probe** (e.g. timed write of a small
-   temp file) at run start? It is more intrusive (does real I/O) — recommend NO for normal
-   runs, YES only inside the benchmark harness.
+1. **System free-RAM / load / fstype sampling → ON BY DEFAULT, but behind a dedicated
+   config key.** Add a NEW `[capture.resources]` sub-key (e.g. `system_metrics = true`,
+   default `true`) so it is independently controllable and documented, but it only
+   actually samples when the resource watcher is running (`depth != "off"`). So: default
+   on, cheap, gives the I/O/NFS signal for free on normal runs, yet a user can turn it off
+   explicitly. (Sampled in the existing 15s loop; single small `/proc` reads.)
+2. **Linux `iowait` → INCLUDE BY DEFAULT on Linux**, clearly "not available" on
+   macOS/Windows. Sampled from `/proc/stat` deltas in the watcher loop. Gate under the same
+   `system_metrics` key so turning that off also stops iowait.
+3. **Disk throughput probe → BENCHMARK HARNESS ONLY, never on normal runs.** The harness
+   may do a timed small-temp-file write (it is a benchmark; real I/O is expected). Normal
+   pubrun runs must NOT (preserves "never intrude"); they rely on fstype + iowait instead.
+
+## Cross-IPD coordination (added 2026-07-06)
+
+- **IPD-B needs two additive manifest flags** the maintainer approved:
+  `capture.subprocesses_enabled` (from `self._spying_subprocesses`, `tracker.py:316`) and
+  `capture.file_provenance_available`. Since THIS IPD already edits the manifest-assembly
+  dict (`tracker.py:576-632`), add those two booleans HERE too, so `pubrun inspect` can be
+  definitive rather than ambiguous. Keep additive (no existing key renamed).
+- **The new `system_metrics` key** must be documented in `docs/configuration.md` and its
+  default reflected in `src/pubrun/resources/default.toml` (`sample_interval_seconds = 15`
+  lives at `default.toml:278`; add the new key in the same `[capture.resources]` block).
 
 ## Approval and execution gate
 
 Proposal only; human approval required; NOT auto-executed. Recommended: run `plan-review`.
 On completion move to `.agents/plans/executed/`.
+
+## Plan-review record (2026-07-06)
+
+Reviewed via `.agents/workflows/plan-review/plan-review.md`. Verdict: **APPROVE WITH
+REVISIONS APPLIED**. Claims re-verified against source: async watcher/threads
+(`resources.py:168-209`, `tracker.py:291-294`), zero `open()`/fs/load capture today,
+`[capture.resources]` block + `sample_interval_seconds` in `default.toml`,
+`config.resolved.json` written by `writer.py:69,100`. Maintainer answers folded in
+(system-metrics config key default-on; iowait Linux-default; disk probe harness-only).
+Added cross-IPD ownership of the two additive manifest flags (`subprocesses_enabled`,
+`file_provenance_available`) here since this IPD already edits manifest assembly.
+Sequence: A before B and C.
