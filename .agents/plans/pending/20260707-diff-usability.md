@@ -91,8 +91,9 @@ output at those depths may see fewer lines; `--deep` is unchanged).
 
 ## Open questions
 
-1. Table as opt-in `--table` vs default for basic/standard? (Leaning: opt-in first; inline
-   stays default to avoid breaking pipelines — see Deferred.)
+1. **Table rendering — RESOLVED (maintainer 2026-07-07):** opt-in `--table`; the current
+   `+/-/~` inline output stays the DEFAULT so nothing parsing it breaks. Revisit defaulting
+   only after real-world feedback.
 2. Standard-level list summarization format: "N→M (+added/-removed identities)" — confirm the
    identity to show (subprocess = argv[0]/basename; package = name@version).
 3. Should `invocation.command_line`/`rerun_command` be *collapsed when argv present* (my lean)

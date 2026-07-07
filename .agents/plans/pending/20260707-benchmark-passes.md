@@ -13,9 +13,19 @@
 
 ## Goal
 
-A first baseline (uncaptured) warmup pass for a clean pubrun-absent floor + cache warming,
-and a heavier `--rigorous` (50×50) mode — while keeping the DEFAULT light enough for casual
-use (maintainer-confirmed: lighter default, 50×50 behind a flag).
+A first baseline (uncaptured) warmup pass for a clean pubrun-absent floor + cache warming, a
+tuned three-tier pass structure (quick / default / rigorous), and a recorded total wall-time
+for the whole benchmark invocation.
+
+**Decided pass structure (maintainer 2026-07-07):** every mode begins with a **1× uncaptured
+baseline pass**, then N measured passes × M iterations:
+- `--quick`   → baseline 1× + **2 passes × 15 iterations**
+- (default)   → baseline 1× + **3 passes × 30 iterations**
+- `--rigorous`→ baseline 1× + **5 passes × 50 iterations**
+
+`--iterations`/`--passes` still override explicitly. The result JSON must record the **total
+benchmark wall-time** (from harness start to finish, covering the whole invocation, not just
+the summed per-iteration times).
 
 ## Project conventions discovered (Step 0)
 
@@ -41,8 +51,8 @@ use (maintainer-confirmed: lighter default, 50×50 behind a flag).
 | Step | Findings | Change | Files | Rem. Risk | Validation |
 |------|----------|--------|-------|-----------|------------|
 | 1 | G1 | Add an initial **baseline (not-captured) pass**: 1× sweep run WITHOUT pubrun active (the honest "cost floor" + cache warm), recorded as `pass 0` / `baseline_pass` in the result. Its numbers establish the pubrun-absent reference and warm filesystem caches before the measured passes. | `harness.py` | Low | Result contains a labeled uncaptured baseline pass; its per-scenario timings are present; measured passes follow it. |
-| 2 | G2,G3 | Keep the DEFAULT light (proposed: baseline 1× + **2 measured passes × 30** — i.e. current 2×30 plus the new baseline pass). Add **`--rigorous`** (alias `--full` may map here or stay 30 — see Open Q1) = baseline 1× + **2 × 50** (or the maintainer's 50×50). Expose via `pubrun bench --rigorous`. | `harness.py`, `__main__.py` | Low | Default runtime ≈ current + one baseline sweep; `--rigorous` runs the heavier structure; `--quick` unchanged. |
-| 3 | G2 | Record the pass structure (iterations, passes, baseline-pass flag, rigorous flag) in the result JSON so an analyzer knows how the numbers were produced. | `harness.py` | Low | Result JSON documents its own pass/iteration structure and mode. |
+| 2 | G2,G3 | Implement the DECIDED three tiers: `--quick` = baseline 1× + **2×15**; default = baseline 1× + **3×30**; `--rigorous` = baseline 1× + **5×50**. `--iterations`/`--passes` override. `--full` stays a clarity alias of the DEFAULT (not the heavy mode) to avoid a silent redefinition. | `harness.py`, `__main__.py` | Low | `--quick`=2×15+baseline; default=3×30+baseline; `--rigorous`=5×50+baseline; explicit `--iterations/--passes` override; `--full`==default. |
+| 3 | G2 | Record the pass structure (iterations, passes, baseline-pass flag, mode) AND the **total benchmark wall-time** (harness start→end, the whole invocation) in the result JSON. | `harness.py` | Low | Result JSON documents its own pass/iteration structure + mode, and a `total_wall_time_s` (or similar) covering the entire run. |
 
 ## Deferred / out of scope (with reason)
 
@@ -60,9 +70,10 @@ its meaning is a small breaking-ish CLI nuance to settle at plan-review.
 
 - Baseline pass: present, labeled, uncaptured (runs the workload without pubrun active),
   recorded with its timings; measured passes still recorded.
-- Default vs `--rigorous`: default = baseline + 2×30; `--rigorous` = baseline + 2×50 (or agreed
-  numbers); `--quick` unchanged; `--iterations`/`--passes` still override.
-- Result JSON self-describes its pass structure/mode.
+- Tier numbers: `--quick`=baseline+2×15; default=baseline+3×30; `--rigorous`=baseline+5×50;
+  `--iterations`/`--passes` still override; `--full`==default.
+- Result JSON self-describes its pass structure/mode AND records the total benchmark wall-time
+  (harness start→end), distinct from the summed per-iteration timings.
 - A light smoke run (1 iter/1 pass) still completes and writes a valid schema/4 result.
 - **Backward-compat:** the added baseline pass must not break schema/4 consumers — `aggregate.py`
   and `redact_result` must tolerate the new baseline/`pass 0` entry (verified `benchmarks/
@@ -78,16 +89,15 @@ its meaning is a small breaking-ish CLI nuance to settle at plan-review.
 
 ## Open questions
 
-1. **`--full` vs `--rigorous` naming:** redefine `--full` to be the heavy 50×50 (breaking its
-   current "default 30" meaning), or add a distinct `--rigorous` and leave `--full` as the
-   30-iter alias-of-default? (Leaning: distinct `--rigorous`; keep `--full` = current meaning
-   to avoid a silent behavior change.)
-2. **Exact heavy numbers:** maintainer floated 50×50 (50 iters × ... ); confirm "baseline 1× +
-   2 measured × 50" vs literally "1×(uncaptured) + 50×all + 50×all" (i.e. 50 PASSES). 50 full
-   passes is very long; 2 passes × 50 iterations is the likely intent — confirm.
-3. **Default iteration bump:** keep measured default at 2×30, or bump to 2×50 now that raw
-   timings pool across submissions? (Leaning: keep 2×30 default for casual speed; rigorous for
-   tight CIs.)
+1. **Tier numbers + naming — RESOLVED (maintainer 2026-07-07):** `--quick` = baseline+2×15;
+   default = baseline+3×30; `--rigorous` = baseline+5×50. `--full` stays a clarity alias of the
+   default (NOT the heavy mode). All modes begin with a 1× uncaptured baseline pass.
+2. **Total wall-time — RESOLVED (added):** the result JSON records the total benchmark wall-time
+   (harness start→end) covering the whole invocation, in addition to per-iteration timings.
+3. Runtime expectation to document: default is now baseline+3×30 (~1.5× the old 2×30);
+   `--rigorous` (baseline+5×50) is markedly longer — the docs should set expectations
+   ("`--rigorous` may take many minutes; intended for a dedicated/HPC run"). (Confirm wording
+   at execution.)
 
 ## Approval and execution gate
 

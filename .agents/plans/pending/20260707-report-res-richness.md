@@ -90,10 +90,12 @@ avg/min/max not just peak), a readable timeline, and give `report`/`show` identi
 
 ## Open questions
 
-1. **Tree CPU (C1/step 2):** capture it (changes the "child CPU excluded from CPU metric"
-   invariant, adds a `peak_tree_cpu_percent` field + watcher cost) vs. render-only/honest-absent?
-   (Leaning: capture it since you explicitly want it, gated to `scope="tree"`; confirm the
-   invariant change at plan-review.)
+1. **Tree CPU (C1/step 2) — RESOLVED (maintainer 2026-07-07):** CAPTURE real tree CPU
+   (option (a)). This changes the "child CPU excluded from the CPU metric" invariant (gated to
+   `scope="tree"`; main-only runs unaffected), adds `peak_tree_cpu_percent` (+ per-sample tree
+   CPU for avg/min/max, feeding IPD-C step 1 and IPD-F), computed from summed CPU-TIME deltas
+   (not instantaneous-% sum), labeled "% of one core (tree)", never clamped. Update the
+   "CPU = main process" tests intentionally.
 2. avg/min/max presentation: one dense line (`peak/avg/min/max`) vs separate lines? (Leaning:
    dense single line per metric.)
 3. `--utc` parity: add the flag to `report`, or unify both commands on one parser builder?
