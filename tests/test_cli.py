@@ -528,20 +528,23 @@ class TestCliFilterFlagConsistency:
 
     def test_combined_f_is_filter_not_force(self):
         """BREAKING (1.4.0): combined -f is now --filter; force is --force (long-only)."""
+        import re
         result = run_pubrun("combined", "--help")
         assert result.returncode == 0
         out = result.stdout
-        # -f maps to --filter now...
-        assert "-f, --filter" in out
-        # ...and force is long-only (no "-f, --force").
+        # -f maps to --filter now. argparse renders this as "-f, --filter" (Python 3.13+)
+        # or "-f QUERY, --filter QUERY" (<= 3.12), so match version-independently.
+        assert re.search(r"-f(?: \w+)?, --filter", out), out
+        # ...and force is long-only (no short -f alias for --force).
         assert "--force" in out
-        assert "-f, --force" not in out
+        assert not re.search(r"-f(?: \w+)?, --force", out)
 
     def test_clean_f_is_filter(self):
         """clean has no pre-existing -f, so -f must map to --filter."""
+        import re
         result = run_pubrun("clean", "--help")
         assert result.returncode == 0
-        assert "-f, --filter" in result.stdout
+        assert re.search(r"-f(?: \w+)?, --filter", result.stdout), result.stdout
 
 
 class TestCliRunTests:

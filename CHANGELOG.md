@@ -77,6 +77,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **Verbose, transparent `self-check` and `meta`.** `pubrun self-check` is now **itemized by
+  default**: one line per check with its `[ OK  ]`/`[WARN ]`/`[INFO ]` outcome (including the
+  checks that PASSED) plus a `N checks in 0.0Xs` timing footer — instead of a bare one-line
+  verdict. `--quiet`/`-q` restores the terse one-liner (for scripts/CI); `--json` now emits the
+  full structured result (`checks`, `findings`, `elapsed_seconds`); `--show-suggestions` adds
+  remediation detail. `--strict` still keys on WARN only. `pubrun meta` likewise itemizes each
+  gathered section (hardware/python/packages/git/environment/host) with an outcome and
+  per-section timing plus a total, surfacing any failed section as `[WARN ]` (the `meta.json`
+  file remains the source of truth).
 - **Richer `report`/`res` output + `report`/`show` flag parity.** `pubrun res` now shows
   **peak / avg / min** (computed from the per-sample `events.jsonl`) for each metric, with
   explicit `RSS (main)` / `CPU (main)` / `RSS (tree)` / `CPU (tree)` labels. **Process-tree CPU

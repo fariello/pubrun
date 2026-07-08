@@ -204,6 +204,54 @@ def live_findings() -> List[Dict[str, Any]]:
     return findings
 
 
+# The logical checks self-check performs, in display order. Each maps to the finding
+# code(s) it can raise; a check with no matching finding is reported as OK. This makes the
+# "what was checked, and how did each do" view possible without duplicating every probe.
+_CHECK_CATALOG = [
+    ("python_version", "Python version supported", ("python_version",)),
+    ("config_valid", "pubrun configuration is valid", ("config_invalid",)),
+    ("output_writable", "run output directory is writable", ("output_not_writable",)),
+    ("git_available", "git available for source-code provenance", ("git_missing",)),
+    ("filesystems", "run-relevant filesystems are healthy (not network/hung/slow)",
+     ("netfs_", "fs_hung_", "fs_slow_")),
+    ("memory", "sufficient free system memory", ("low_memory",)),
+    ("load", "system load is not excessive", ("high_load",)),
+    ("hpc_context", "HPC allocation context", ("hpc_login_node",)),
+]
+
+
+def live_checks():
+    """Run the live self-check and return ``(checks, findings)``.
+
+    ``findings`` is the existing problem list (unchanged; ``self-check --strict`` still keys
+    on WARN severity). ``checks`` is a list of per-check records
+    ``{"name", "label", "status": "ok"|"warn"|"info", "detail"}`` covering every logical
+    check performed — including the ones that PASSED — so the itemized output can show what
+    was checked and how each did (not only the problems). Never raises.
+    """
+    findings = live_findings()
+    by_prefix = {}
+    for f in findings:
+        by_prefix.setdefault(f.get("code", ""), f)
+    checks = []
+    for name, label, codes in _CHECK_CATALOG:
+        matched = None
+        for f in findings:
+            code = f.get("code", "")
+            if any(code == c or code.startswith(c) for c in codes):
+                matched = f
+                break
+        if matched is None:
+            checks.append({"name": name, "label": label, "status": "ok", "detail": ""})
+        else:
+            checks.append({
+                "name": name, "label": label,
+                "status": matched.get("severity", "info"),
+                "detail": matched.get("message", ""),
+            })
+    return checks, findings
+
+
 def _hpc_login_node_findings() -> List[Dict[str, Any]]:
     """INFO nudge when we appear to be on an HPC login node (a scheduler's submit tools are
     present but we are NOT inside an allocation). Benchmarking here gives unrepresentative

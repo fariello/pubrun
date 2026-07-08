@@ -89,6 +89,41 @@ subsumes them (sequence D after B, or share the helper).
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`. Sequence AFTER IPD-B (shared prefixes).
 
+## Execution record (2026-07-07)
+
+Executed by opencode after human approval (IPD-D, fourth of the batch; after B/A/C).
+
+**Environment note:** the dev machine changed mid-batch (WSL → a dedicated Linux workstation);
+the old `p3.14` venv (editable pubrun + pytest) was gone. Re-established the dev env: installed
+`pytest==8.2.2` + `pytest-cov` and `pip install -e .` into `~/venv/p3.11.8` (pytest 9.1.1 had
+an internal error; pinned to 8.2.x). This surfaced **two pre-existing py3.11-vs-py3.13
+argparse-help-format test failures** (`test_combined_f_is_filter_not_force`, `test_clean_f_is_filter`
+asserted the 3.13+ `-f, --filter` help string; 3.11 renders `-f QUERY, --filter QUERY`). These
+failed at the prior commit too (confirmed via `git stash`), i.e. not caused by this IPD. Fixed
+them to be **version-robust** (regex `-f(?: \w+)?, --filter`), since 3.8–3.14 are all supported.
+
+- **`live_checks()` (`report/checks.py`):** returns `(checks, findings)`. `findings` is the
+  existing problem list (unchanged — `--strict` still keys on it). `checks` is a per-check
+  record list `{name,label,status,detail}` covering EVERY logical check via a `_CHECK_CATALOG`
+  mapping check→finding-code(s); a check with no matching finding is `ok`, else it mirrors the
+  finding's severity/message. No probe duplicated.
+- **`self-check` (`_run_self_check`):** itemized by DEFAULT — one `[ OK ]`/`[WARN ]`/`[INFO ]`
+  line per check + a `N checks in 0.0Xs` timing footer; `--quiet`/`-q` restores the pre-1.4.0
+  one-liner (via the existing `_emit_findings`); `--show-suggestions` adds remediation detail;
+  `--json` emits `{checks, findings, elapsed_seconds}`. `--strict` unchanged (WARN only).
+- **`meta` (`generate_meta_snapshot`):** each section gathered via a timed `_gather()` helper
+  that itemizes `[ OK ] <section>: <summary> (N ms)` (or `[WARN ]` when `capture_state != complete`
+  / capture raised), plus a total-time footer. `meta.json` still written as the source of truth.
+- **Tests (`tests/test_checks_commands.py`, +8, and 2 argparse tests made robust):**
+  `live_checks()` shape + findings-parity-with-`live_findings`; self-check itemized-default +
+  timing, `--quiet` one-liner, `--json` includes checks/elapsed, NO_COLOR; meta itemizes +
+  writes JSON.
+- **Docs:** `docs/cli.md` (`self-check` itemized default + `--quiet`/`--json` shape; `meta`
+  itemized), `CHANGELOG.md`.
+- **Validation:** full suite **830 passed / 2 skipped / 1 failed** on Python 3.11.8 — the lone
+  failure is the known SIGPIPE flake (passes in isolation). Depends on IPD-B's output helper
+  (present). Only the pre-existing benign LSP warnings remain.
+
 ## Plan-review record (2026-07-07)
 
 Reviewed via `plan-review`. Verified the findings-only checks model (`checks.py`), the terse

@@ -100,17 +100,22 @@ takes 34s to answer a capacity query will slow *any* script doing I/O there, not
 This probe runs only when you invoke `self-check` (or `bench`); it is **never** run by
 `import pubrun` or during a normal run, so it can never hang your host script.
 
+**By default it is itemized**: one line per check with its outcome (`[ OK  ]`/`[WARN ]`/
+`[INFO ]`) so you can see *what* was checked and how each did, plus a `N checks in 0.0Xs`
+timing footer — not just a bare "OK".
+
 ```bash
-pubrun self-check [--show-suggestions|-v] [--json] [--strict]
+pubrun self-check [--show-suggestions|-v] [--quiet|-q] [--json] [--strict]
 ```
 
 **Options:**
 
 | Flag | Description |
 |---|---|
-| `--show-suggestions`, `-v` | Show per-item detail and how to address each concern. |
-| `--json` | Emit findings as JSON (always full detail). |
-| `--strict` | Exit non-zero if any warning fired (useful in CI / HPC job pre-checks). |
+| `--show-suggestions`, `-v` | Add per-item remediation detail beneath each WARN/INFO check. |
+| `--quiet`, `-q` | Print only a one-line verdict instead of the itemized per-check list. |
+| `--json` | Emit the full structured result — `checks` (every check + outcome), `findings`, and `elapsed_seconds`. |
+| `--strict` | Exit non-zero if any warning fired (useful in CI / HPC job pre-checks). Keys on WARN only, so the HPC login-node `INFO` nudge does not trip it. |
 
 See [Research Use & HPC](hpc.md) for guidance on diagnosing slow runs on clusters.
 
@@ -363,6 +368,10 @@ pubrun meta [--out PATH] [--basic|--standard|--deep]
 
 - If `--out` is omitted, writes to `./runs/meta.json`.
 - Default depth is `--deep` (captures full virtual environment).
+- The console output **itemizes each gathered section** (hardware, python, packages, git,
+  environment, host) with an `[ OK  ]`/`[WARN ]` outcome and per-section timing, plus a total,
+  so you can see what was collected. A section that fails to capture cleanly is shown as
+  `[WARN ]`. The `meta.json` file remains the complete source of truth.
 
 **Example:**
 ```bash
