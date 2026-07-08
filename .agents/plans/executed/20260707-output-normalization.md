@@ -124,6 +124,40 @@ grepping pubrun output in scripts — recommend matching on the level word, not 
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`.
 
+## Execution record (2026-07-07)
+
+Executed by opencode after human approval (first of the 7-IPD CLI/UX batch, per the B→A→C→…
+sequence).
+
+- **Pre-migration inventory (P3):** grepped src/ + tests/ for all 8 legacy prefixes. Emit
+  sites: `__main__.py` (~15), `status.py` (2), `meta_snapshot.py` (2), `diagnostics.py` (2 incl.
+  the duplicated `_print_error`). Test assertions: 4 (`[WARN]`×3 in test_cli.py, `[OK]` in
+  test_combined.py).
+- **Central helper (`src/pubrun/report/output.py`):** `emit(level,msg,stream)` +
+  `info/warn/error/debug/ok/fail`. Canonical prefixes `[INFO ]`(32) `[WARN ]`(33) `[ERROR]`(31)
+  `[DEBUG]`(94, bright — never dim 34) `[ OK  ]`(32) `[FAIL ]`(31). Color gate =
+  `NO_COLOR` OR non-TTY of the TARGET stream; textual label always present. DEBUG silent unless
+  `PUBRUN_DEBUG`/`set_debug(True)`. Per-level default streams preserve prior behavior
+  (info/warn/error/debug→stderr; ok/fail→stdout).
+- **Migration (streams preserved exactly):** `__main__.py` `_print_error`/`_print_warn` now
+  delegate to the helper (so all ~40 `_print_error` call sites are unchanged); inline
+  `[*]`→info, `[OK]`→ok, `[WARNING]`→warn, `[FAIL]`/`[OK]` run-tests→fail/ok (stdout);
+  `_fmt_finding` findings marker → canonical `[WARN ]`/`[INFO ]`. `status.py` (`[*]`→info,
+  `[dry run]`→info "Dry run:"), `meta_snapshot.py` (`[*]`→info, `[OK]`→ok), `diagnostics.py`
+  (`_print_error`→helper; report-body `[WARNING]`→`[WARN ]` label, kept on stdout as report
+  content). Removed the duplicated `_print_error`.
+- **Alphabetized `-h`:** sorted `subparsers._choices_actions` by `dest` (display only; dispatch
+  + hidden `report` alias unchanged).
+- **Tests:** updated the 4 legacy-prefix assertions to canonical (`[WARN ]`, `[ OK  ]`); new
+  `tests/test_output.py` (10) — prefix exactness, NO_COLOR/non-TTY suppression, TTY color,
+  DEBUG-is-bright-not-dim, DEBUG gate (env + set_debug), default streams, and the
+  alphabetical-help assertion (also asserts hidden `report` absent).
+- **Docs:** `docs/cli.md` "Output conventions" table + "alphabetically" note; `CHANGELOG.md`.
+- **Validation:** full suite **808 passed / 2 skipped / 1 failed** — the failure is the known
+  SIGPIPE flake (passes in isolation, verified). No test references any legacy prefix. Only the
+  4 pre-existing benign LSP warnings remain (+ a pre-existing `status.py:1105` type nit,
+  untouched by this IPD).
+
 ## Plan-review record (2026-07-07)
 
 Reviewed via `plan-review`. Verified the 8 legacy prefix styles + duplicated `_print_error`

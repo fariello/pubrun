@@ -26,10 +26,8 @@ def _has_color() -> bool:
     return not os.environ.get("NO_COLOR", "")
 
 def _print_error(message: str) -> None:
-    if os.environ.get("NO_COLOR", ""):
-        print(f"[ERRO] {message}", file=sys.stderr)
-    else:
-        print(f"\033[31m[ERRO]\033[0m {message}", file=sys.stderr)
+    from pubrun.report import output as _out
+    _out.error(message)
 
 def _supports_unicode(stream) -> bool:
     try:
@@ -156,7 +154,9 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         print(f"{cyan}Parent{rst}      : {meta_ref}")
 
     for w in warnings:
-        print(f"\n{yellow}[WARNING]{rst} {w}")
+        # Report-body warning (stays on stdout as part of the rendered report); label
+        # normalized to the canonical [WARN ] prefix for consistency.
+        print(f"\n{yellow}[WARN ]{rst} {w}")
 
     print(f"\n{blue}{bold}--- Basic Information ---{rst}")
     run = manifest.get("run", {})

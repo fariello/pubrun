@@ -2,7 +2,25 @@
 
 # pubrun CLI Reference
 
-The `pubrun` CLI is accessible via `pubrun <command>`, `pbr <command>` (a convenient shorthand alias), or `python -m pubrun <command>`. It provides a family of subcommands for setup, post-execution analysis, diagnostics, and benchmarking, plus top-level diagnostic flags. Run `pubrun -h` for the authoritative command list.
+The `pubrun` CLI is accessible via `pubrun <command>`, `pbr <command>` (a convenient shorthand alias), or `python -m pubrun <command>`. It provides a family of subcommands for setup, post-execution analysis, diagnostics, and benchmarking, plus top-level diagnostic flags. Run `pubrun -h` for the authoritative command list (shown alphabetically).
+
+### Output conventions
+
+pubrun status lines use a consistent set of prefixes so output is easy to scan and grep:
+
+| Prefix | Meaning |
+|---|---|
+| `[INFO ]` | informational / progress (green) |
+| `[ OK  ]` | success (green) |
+| `[WARN ]` | warning (yellow) |
+| `[ERROR]` | error (red) |
+| `[DEBUG]` | debug detail (light blue) — silent unless `PUBRUN_DEBUG` is set |
+| `[FAIL ]` | a failed built-in self-test (`--run-tests`) (red) |
+
+Color is optional reinforcement only: the textual label is authoritative, colors are never
+dimmed, and all color is suppressed when `NO_COLOR` is set, `--no-color` is passed, or output
+is not a terminal. If you parse pubrun output in a script, match on the level word (e.g.
+`WARN`), not the exact bracketing.
 
 ---
 

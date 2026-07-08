@@ -531,7 +531,8 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
             json.dump(manifest, f, indent=2)
         if lock_path.exists():
             lock_path.unlink()
-        print(f"[*] Closed out crashed run '{run_dir.name}' (process dead). Updated manifest.json.", file=sys.stderr)
+        from pubrun.report import output as _out
+        _out.info(f"Closed out crashed run '{run_dir.name}' (process dead). Updated manifest.json.")
     except Exception as e:
         print(f"Warning: Failed to close out crashed run '{run_dir.name}': {e}", file=sys.stderr)
 
@@ -1118,7 +1119,8 @@ def clean_runs(
     print(f"\n{len(candidates)} run(s) eligible for removal.")
 
     if dry_run:
-        print("[dry run] No files were deleted.")
+        from pubrun.report import output as _out
+        _out.info("Dry run: no files were deleted.", stream=sys.stdout)
         return 0
 
     # Confirmation -- nothing is selected by default, requires explicit choice

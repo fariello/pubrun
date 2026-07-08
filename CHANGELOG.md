@@ -9,6 +9,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **Normalized CLI output prefixes + alphabetized the `-h` command list.** All pubrun status
+  lines now use a consistent, accessible vocabulary — `[INFO ]` (green), `[ OK  ]` (green),
+  `[WARN ]` (yellow), `[ERROR]` (red), `[DEBUG]` (light blue, silent unless `PUBRUN_DEBUG`),
+  `[FAIL ]` (self-test failures) — replacing the previous ad-hoc mix (`[*]`, `[OK]`, `[ERRO]`,
+  `[WARNING]`, lowercase `[warn]`/`[info]`, `[dry run]`). One central helper now emits them;
+  color is optional reinforcement (never dimmed; suppressed under `NO_COLOR`/`--no-color`/non-TTY;
+  the textual label is authoritative). The `pubrun -h` command list is now alphabetical. If you
+  grep pubrun output, match on the level word (e.g. `WARN`), not the exact bracket text.
 - **BREAKING (command rename): `pubrun bug-report` → `pubrun report-bug`, and `feedback` is
   now its own command.** The old `bug-report` command and its `issue` alias were removed
   (hard rename). Use `pubrun report-bug` (bug reports / feature requests) or `pubrun
