@@ -289,14 +289,29 @@ Controls for `pubrun report` and `pubrun methods` manifest hydration.
 
 ### `[diff]`
 
-Configuration for the `pubrun diff` engine.
+Configuration for the `pubrun diff` engine. The three ignore lists control how much each
+depth level hides; they are nested by intent — **`--basic` hides the most, `--deep` hides
+nothing**:
 
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `ignore_basic` | list | `["timing", "run", "process", ...]` | Keys ignored at `--basic` depth. |
-| `ignore_standard` | list | `["timing", "run.run_id", ...]` | Keys ignored at `--standard` depth. |
-| `ignore_deep` | list | `[]` | Keys ignored at `--deep` depth (none by default). |
-| `show_same` | bool | `false` | Show unchanged values in diff output. |
+- **`ignore_basic`** — hides everything `--standard` hides, PLUS the high-volume, low-signal
+  sections (`process`, `hardware`, `resources`, `environment`, `subprocesses`, `packages`) so
+  `--basic` shows only the user-facing changes (script/argv, python, git, config).
+- **`ignore_standard`** — hides volatile / always-different fields: timestamps (`*_utc`), run
+  ids, PIDs, per-run absolute paths (`filesystem.*.path`/`mount_point`, `capture.run_dir`),
+  and import-request timestamps. Keeps meaningful signals like `fstype`/`is_network`. At
+  `--standard`, list-valued sections (subprocesses, packages) are **summarized** (counts +
+  identities) rather than diffed element-by-element.
+- **`ignore_deep`** — empty; `--deep` compares everything, element by element.
+
+The authoritative default lists live in the shipped `default.toml` `[diff]` section (they are
+long); override any of them in your `.pubrun.toml`.
+
+| Key | Type | Description |
+|---|---|---|
+| `ignore_basic` | list | Keys ignored at `--basic` depth (see above; the largest list). |
+| `ignore_standard` | list | Keys ignored at `--standard` depth (see above). |
+| `ignore_deep` | list | Keys ignored at `--deep` depth — `[]` by default. |
+| `show_same` | bool (`false`) | Show unchanged values in diff output. |
 | `export_format` | string | `"txt"` | Output format for `--export`: `"txt"` or `"json"`. |
 | `wrap` | bool | `true` | Wrap long strings instead of truncating with ellipsis. |
 | `max_string_length` | int | `300` | Maximum characters per value before wrapping/truncation. |

@@ -165,6 +165,10 @@ pubrun methods --format latex
 
 The `pubrun` CLI (and its convenient shorthand alias `pbr`) provides a family of subcommands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs. The most common are covered below; run `pubrun -h` for the full list and see the [CLI Reference](https://github.com/fariello/pubrun/blob/main/docs/cli.md) for exhaustive detail.
 
+**Selecting a run.** Any command that takes a run accepts a **recency index** (`1` = most recent run, `2` = second most recent, …), a run-id prefix, or a directory path — e.g. `pubrun show 1`, `pubrun res 2`, `pubrun diff 1 2`. `pubrun status` prints the index in a leading `#` column.
+
+**Output conventions.** Status lines use consistent, `NO_COLOR`-aware prefixes — `[INFO ]`, `[ OK  ]`, `[WARN ]`, `[ERROR]`, `[DEBUG]` — so output is easy to scan and grep (match on the level word, not the brackets).
+
 ### `pubrun init`
 Initialize pubrun in the current project (writes a commented `.pubrun.toml`) and prints getting-started guidance.
 ```bash
@@ -185,9 +189,13 @@ pubrun cite --style bibtex
 ```
 
 ### `pubrun self-check`
-Report-only checks of the **current machine** for pubrun performance/config pitfalls and install health (network filesystems, low RAM, high load, wedged/slow mounts, config errors). Never modifies anything.
+Report-only checks of the **current machine** for pubrun performance/config pitfalls and install health (network filesystems, low RAM, high load, wedged/slow mounts, config errors). Never modifies anything. By default it **itemizes each check** (one `[ OK  ]`/`[WARN ]` line + a timing footer); `--quiet` prints just a one-line verdict.
 ```bash
-pubrun self-check [--show-suggestions] [--strict]
+pubrun self-check                    # itemized: what was checked + each outcome + timing
+pubrun self-check --show-suggestions # add how to address each concern (-v)
+pubrun self-check --quiet            # one-line verdict only
+pubrun self-check --json             # full structured result (checks + findings)
+pubrun self-check --strict           # exit non-zero if any warning fired
 ```
 
 ### `pubrun inspect`
@@ -197,9 +205,11 @@ pubrun inspect [RUN_DIR] [--show-suggestions]
 ```
 
 ### `pubrun bench`
-Run the pubrun overhead benchmark suite (auto-detects Slurm on HPC and offers to submit to a compute node). After a local run, offers to contribute the redacted result. Requires a source checkout.
+Run the pubrun overhead benchmark suite (auto-detects an HPC scheduler — Slurm/PBS/LSF/SGE — and offers to submit to a compute node). Every run starts with an uncaptured **baseline pass** (pubrun absent), then N measured passes: `--quick` (2×15), `--full`/default (3×30), or `--rigorous` (5×50). After a local run, offers to contribute the redacted result. Requires a source checkout.
 ```bash
-pubrun bench --quick
+pubrun bench                        # default: baseline + 3 passes x 30 iterations
+pubrun bench --quick                # baseline + 2 x 15
+pubrun bench --rigorous             # baseline + 5 x 50 (tight CIs; can be slow)
 pubrun bench --submit-file result.redacted.json   # submit a previous result
 ```
 
@@ -219,9 +229,10 @@ pubrun combined [RUN_ID ...] --output combined.log
 ```
 
 ### `pubrun diff`
-Generates a semantic side-by-side comparison between two execution traces, filtering volatile noise (timestamps, PIDs) by default.
+Generates a semantic comparison between two execution traces. `--standard` (the default) filters volatile noise and **summarizes** high-volume sections (e.g. subprocess counts) so it stays concise; `--basic` shows only high-signal user-facing changes; `--deep` shows everything. Add `--table` for a compact aligned view.
 ```bash
-pubrun diff ./runs/pubrun-A ./runs/pubrun-B --same --basic --wrap
+pubrun diff ./runs/pubrun-A ./runs/pubrun-B          # standard (default)
+pubrun diff A B --basic --table                      # concise, tabular
 ```
 
 ### `pubrun meta`
@@ -249,7 +260,7 @@ pubrun rerun ./runs/pubrun-A
 ```
 
 ### `pubrun res` / `pubrun cpu` / `pubrun mem`
-Render resource-utilization charts over a run's lifecycle: `res` shows the comprehensive picture (CPU + memory + process-tree RSS + system memory/load/iowait + per-process I/O when captured), while `cpu` and `mem` show a single focused chart. (`resources` remains as a backward-compatible alias of `res`.)
+Render resource-utilization charts over a run's lifecycle: `res` shows the comprehensive picture — **peak/avg/min** for CPU and memory (main process, and the process tree when captured), plus system memory/load/iowait and per-process I/O — while `cpu` and `mem` show a single focused chart. (`resources` remains as a backward-compatible alias of `res`.)
 ```bash
 pubrun res [RUN_DIR]
 pubrun cpu [RUN_DIR]
@@ -266,8 +277,9 @@ pubrun run --mode nopatch -- python train.py
 ### `pubrun status`
 Lists all runs with their current status (completed, failed, interrupted, running, crashed, ghost), or inspects a specific run in detail. Detects active processes via cross-platform PID liveness checks.
 ```bash
-pubrun status              # Compact table of all runs
+pubrun status              # Compact table of all runs (with a leading # recency index)
 pubrun status -v           # Verbose listing with PID, RSS, CPU, events
+pubrun status 1            # Inspect the most recent run (recency index)
 pubrun status a3f9         # Inspect a specific run by ID prefix
 pubrun status --dir /path  # Scan a non-default output directory
 ```
