@@ -11,18 +11,15 @@ from typing import List, Optional
 
 from pubrun import __version__
 
+from pubrun.report import output as _out
+
+
 def _print_error(message: str) -> None:
-    if os.environ.get("NO_COLOR", ""):
-        print(f"[ERRO] {message}", file=sys.stderr)
-    else:
-        print(f"\033[31m[ERRO]\033[0m {message}", file=sys.stderr)
+    _out.error(message)
 
 
 def _print_warn(message: str) -> None:
-    if os.environ.get("NO_COLOR", ""):
-        print(f"[WARN] {message}", file=sys.stderr)
-    else:
-        print(f"\033[33m[WARN]\033[0m {message}", file=sys.stderr)
+    _out.warn(message)
 
 
 def _create_config(destination: str) -> None:
@@ -40,7 +37,7 @@ def _create_config(destination: str) -> None:
             sys.exit(1)
 
         target_path.write_text(content, encoding="utf-8")
-        print(f"[OK] Successfully created configuration at: {target_path}")
+        _out.ok(f"Successfully created configuration at: {target_path}")
 
     except Exception as e:
         _print_error(f"Failed to create config: {e}")
@@ -125,7 +122,7 @@ def _get_manifest_path(
         latest_run = matched[0].run_dir
         manifest_path = latest_run / "manifest.json"
         if manifest_path.exists():
-            print(f"[*] Auto-detected matching run: {latest_run}", file=sys.stderr)
+            _out.info(f"Auto-detected matching run: {latest_run}")
             return str(manifest_path)
 
         # Check if lock file exists in the latest run
@@ -184,7 +181,7 @@ def _run_methods(
         manifest, warnings = hydrate_manifest(manifest_path, manifest)
         if warnings:
             for w in warnings:
-                print(f"[WARNING] {w}", file=sys.stderr)
+                _out.warn(w)
 
         # Dispatch to structural compilers
         text = generate_report(manifest, format_type)
@@ -426,7 +423,7 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
                 sys.exit(1)
 
             run_dir_b = str(run_dir_b_path)
-            print(f"[*] Comparing {run_dir_a_path.name} against most recent other run: {run_dir_b_path.name}", file=sys.stderr)
+            _out.info(f"Comparing {run_dir_a_path.name} against most recent other run: {run_dir_b_path.name}")
         else:
             # 0 runs provided: diff the last two runs from the (optionally filtered)
             # candidate set: second most recent as baseline A, most recent as target B.
@@ -438,7 +435,7 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
                 sys.exit(1)
             run_dir_a = str(valid_runs[1].run_dir)
             run_dir_b = str(valid_runs[0].run_dir)
-            print(f"[*] Auto-detected last two runs for comparison: {valid_runs[1].run_dir.name} vs {valid_runs[0].run_dir.name}", file=sys.stderr)
+            _out.info(f"Auto-detected last two runs for comparison: {valid_runs[1].run_dir.name} vs {valid_runs[0].run_dir.name}")
 
         manifest_path_a = _get_manifest_path(run_dir_a)
         manifest_path_b = _get_manifest_path(run_dir_b)
@@ -453,7 +450,7 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
         manifest_b, warn_b = hydrate_manifest(manifest_path_b, manifest_b)
 
         for w in (warn_a or []) + (warn_b or []):
-            print(f"[WARNING] {w}", file=sys.stderr)
+            _out.warn(w)
 
         conf = resolve_config().get("diff", {})
 
@@ -482,8 +479,8 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
             Path(out_a).write_text(export_manifest(manifest_a, ignores, fmt, depth=depth), encoding="utf-8")
             Path(out_b).write_text(export_manifest(manifest_b, ignores, fmt, depth=depth), encoding="utf-8")
 
-            print(f"[OK] Successfully exported semantic baseline A to: {out_a}")
-            print(f"[OK] Successfully exported semantic target B to: {out_b}")
+            _out.ok(f"Successfully exported semantic baseline A to: {out_a}")
+            _out.ok(f"Successfully exported semantic target B to: {out_b}")
         else:
             diff_report = compare_manifests(manifest_a, manifest_b, ignores, show_same=ss_target, depth=depth)
             wrap_target = wrap_config if wrap_config is not None else conf.get("wrap", True)
@@ -739,15 +736,13 @@ def _run_cite(style: str) -> None:
 # The findings logic lives in pubrun.report.checks, which is imported ONLY here (the CLI),
 # never by `import pubrun` / the run path, so it cannot affect a user's host script.
 
-_SEV_MARKER = {"warn": "[warn]", "info": "[info]"}
-_SEV_COLOR = {"warn": "33", "info": "36"}  # yellow / cyan (never DIM; WCAG concern)
-
-
 def _fmt_finding(f: dict, use_color: bool) -> str:
+    # Map a finding severity to a canonical prefix ([WARN ]/[INFO ]). Color follows the
+    # central level->color table; suppressed when use_color is False (NO_COLOR/non-TTY).
     sev = f.get("severity", "info")
-    marker = _SEV_MARKER.get(sev, "[info]")
-    if use_color:
-        marker = f"\033[{_SEV_COLOR.get(sev, '36')}m{marker}\033[0m"
+    level = "warn" if sev == "warn" else "info"
+    label, color = _out._LEVELS[level]
+    marker = f"\033[{color}m[{label}]\033[0m" if use_color else f"[{label}]"
     return f"{marker} {f.get('message', '')}"
 
 
@@ -1649,7 +1644,7 @@ def _run_combined(
                 else:
                     print(line)
         if out_file:
-            print(f"[OK] Combined logs written to {output}", file=sys.stderr)
+            _out.ok(f"Combined logs written to {output}", stream=sys.stderr)
     except BrokenPipeError:
         pass
     finally:
@@ -1705,13 +1700,14 @@ def _run_tests() -> None:
     print("==================================================\n")
 
     if Path("tests").exists() and Path("tox.ini").exists():
-        print("[*] Source repository detected. Running PyTest matrix...")
+        _out.info("Source repository detected. Running PyTest matrix...", stream=sys.stdout)
         try:
             subprocess.run(["python", "-m", "pytest", "tests/", "-q"])
         except Exception:
-            print("[WARN] PyTest execution failed.")
+            _out.warn("PyTest execution failed.", stream=sys.stdout)
 
-    print("\n[*] Executing Native End-to-End Mock Script...")
+    print()
+    _out.info("Executing Native End-to-End Mock Script...", stream=sys.stdout)
     MOCK_SCRIPT = """
 import time
 import os
@@ -1744,10 +1740,10 @@ print('Mock Training Complete.')
         result = subprocess.run([sys.executable, str(script_path)], env=env, capture_output=True, text=True, cwd=td)
 
         if result.returncode != 0:
-            print(f"[FAIL] Mock Evaluation Failed. Exit Code: {result.returncode}")
+            _out.fail(f"Mock Evaluation Failed. Exit Code: {result.returncode}")
             return
 
-        print("[OK] Mock script executed without crashing.")
+        _out.ok("Mock script executed without crashing.")
 
         runs_dir = Path(td) / "runs"
         if not runs_dir.exists():
@@ -1766,8 +1762,8 @@ print('Mock Training Complete.')
         try:
             manifest_data = json.loads(manifest_p.read_text(encoding="utf-8"))
             rcs = manifest_data.get("subprocesses", [])
-            print(f"[OK] Subprocess spy captured {len(rcs)} shell commands.")
-            print(f"[OK] Validation complete.")
+            _out.ok(f"Subprocess spy captured {len(rcs)} shell commands.")
+            _out.ok("Validation complete.")
         except Exception as e:
             pass
 
@@ -2253,8 +2249,13 @@ def main() -> None:
     )
     ui_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
 
-    # Hide report subcommand from help listing
-    subparsers._choices_actions = [a for a in subparsers._choices_actions if a.dest != "report"]
+    # Hide the `report` alias from the help listing, then sort the remaining commands
+    # alphabetically so `pubrun -h` presents them in a predictable order. This affects
+    # only the DISPLAY list; dispatch is unaffected (hidden aliases still work).
+    subparsers._choices_actions = sorted(
+        [a for a in subparsers._choices_actions if a.dest != "report"],
+        key=lambda a: a.dest,
+    )
 
     # ---------------- Diagnostic Flags ----------------
     parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Create an annotated `.pubrun.toml` configuration file.")

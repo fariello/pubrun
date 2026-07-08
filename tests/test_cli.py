@@ -357,7 +357,7 @@ class TestCliRerun:
 
         result = run_pubrun("rerun", str(run_dir))
         assert result.returncode == 0
-        assert "[WARN]" in result.stderr
+        assert "[WARN ]" in result.stderr
         assert "is currently running" in result.stderr
         if sys.platform == "win32":
             assert "cd /some/cwd" in result.stdout
@@ -384,7 +384,7 @@ class TestCliRerun:
 
         result = run_pubrun("rerun", str(run_dir))
         assert result.returncode == 0
-        assert "[WARN]" in result.stderr
+        assert "[WARN ]" in result.stderr
         assert "is currently crashed" in result.stderr
         if sys.platform == "win32":
             assert "cd /some/cwd" in result.stdout
@@ -411,7 +411,7 @@ class TestCliRerun:
 
         result = run_pubrun("rerun", str(run_dir), "--no-color")
         assert result.returncode == 0
-        assert "[WARN]" in result.stderr
+        assert "[WARN ]" in result.stderr
         assert "\033[" not in result.stderr
         assert "is currently crashed" in result.stderr
         if sys.platform == "win32":
