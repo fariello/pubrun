@@ -106,6 +106,41 @@ avg/min/max not just peak), a readable timeline, and give `report`/`show` identi
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`.
 
+## Execution record (2026-07-07)
+
+Executed by opencode after human approval (IPD-C, third of the batch after B and A).
+
+- **C1 tree CPU (capture) — option (a), maintainer-confirmed:** added `_get_tree_cpu_jiffies_linux()`
+  (sums utime+stime across the tree from `/proc/<pid>/stat`, splitting on the last `)` to
+  survive comm with spaces) + `ResourceWatcher._poll_tree_cpu()` computing **% from the delta
+  of summed CPU-TIME over the wall interval** (via `SC_CLK_TCK`), NOT a sum of instantaneous
+  per-process `%`. May exceed 100% (multi-core) — not clamped; negative deltas floored to 0;
+  Linux-only (0.0 elsewhere). Wired into `_update_metrics` (peak + per-sample
+  `tree_cpu_percent` in the payload) and `to_manifest_dict` (`peak_tree_cpu_percent`, gated to
+  `scope=="tree"`). The "child CPU excluded" invariant changes intentionally for tree scope.
+- **C3/C1 render:** new `read_resource_series()` + `_series_stats()` helpers (single read of
+  `events.jsonl`, shared by summary/charts and reused by IPD-F). `res` now shows **peak / avg /
+  min** per metric for main-RSS, main-CPU, tree-RSS, and tree-CPU (peak fallback when no
+  per-sample data). The later duplicate sample-read was removed (reuses the same series).
+- **C2 labels:** explicit `RSS (main)` / `CPU (main)` / `RSS (tree)` / `CPU (tree)` (tree lines
+  only when present; tree-CPU carries the "% of one core" caveat).
+- **C4/C5 timeline:** compact `YYYY-MM-DD HH:MM:SS` (honors `--utc`, local by default); shows
+  ALL events when ≤20, else oldest-10 + `... [ N events truncated ] ...` + newest-10. Fixed a
+  latent bug where 11–20 events would have dropped events 11–20 under the old 20/first-only
+  logic. The `Started` line also honors `--utc` now.
+- **C6 report/show parity:** added `--utc` to the `report` parser; `_run_report`/`print_report`
+  thread `utc` through; both commands route through `_run_report` (parity achieved without a
+  full parser-builder rewrite — lower risk, same result).
+- **Tests (+10, `tests/test_env_capture.py`):** tree-CPU computed-from-time (50% / 400% cases,
+  not clamped); series helper + avg/min/max for main & tree; timeline compact-ts + UTC +
+  truncation boundary at 20 (and the 11–20 no-drop case); updated the 3 `TestResComprehensiveRender`
+  label assertions to the new `RSS (main)`/`CPU (main)`/`RSS (tree)` scheme.
+- **Docs:** `docs/cli.md` (`show`/`report` `--utc` + timeline; `res` peak/avg/min + tree CPU),
+  `docs/manifest.md` (`peak_tree_cpu_percent`), `CHANGELOG.md`.
+- **Validation:** full suite **825 passed / 2 skipped / 1 failed** — the failure is the known
+  SIGPIPE flake (passes in isolation). Verified tree CPU on a live tree-scope run (child burning
+  CPU → `peak_tree_cpu ~116–136%`). Only the pre-existing benign LSP warnings remain.
+
 ## Plan-review record (2026-07-07)
 
 Reviewed via `plan-review`. Verified: `report`/`show` both dispatch to `_run_report`

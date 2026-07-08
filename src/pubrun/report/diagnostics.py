@@ -1,6 +1,6 @@
 from __future__ import annotations
 import json
-from typing import Optional
+from typing import Optional, Dict, Any
 import os
 import sys
 from pathlib import Path
@@ -29,6 +29,48 @@ def _print_error(message: str) -> None:
     from pubrun.report import output as _out
     _out.error(message)
 
+
+def read_resource_series(events_path) -> Dict[str, Any]:
+    """Read per-sample resource series from an events.jsonl.
+
+    Returns a dict with time-ordered lists: ``timestamps``, ``rss`` (main), ``cpu`` (main),
+    ``tree_rss``, ``tree_cpu`` (present only when captured). Shared by the ``res``/``report``
+    summary, the ASCII charts, and the TUI. Never raises; returns empty lists on any error.
+    """
+    out = {"timestamps": [], "rss": [], "cpu": [], "tree_rss": [], "tree_cpu": []}
+    try:
+        with open(events_path, "r", encoding="utf-8") as ef:
+            for line in ef:
+                try:
+                    e = json.loads(line)
+                    if e.get("type") != "resource_sample":
+                        continue
+                    p = e.get("payload", {})
+                    ts = e.get("timestamp_utc")
+                    rss = p.get("rss_bytes")
+                    cpu = p.get("cpu_percent")
+                    if ts is None or rss is None or cpu is None:
+                        continue
+                    out["timestamps"].append(ts)
+                    out["rss"].append(rss)
+                    out["cpu"].append(cpu)
+                    if p.get("tree_rss_bytes") is not None:
+                        out["tree_rss"].append(p["tree_rss_bytes"])
+                    if p.get("tree_cpu_percent") is not None:
+                        out["tree_cpu"].append(p["tree_cpu_percent"])
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return out
+
+
+def _series_stats(values):
+    """(peak, avg, min) for a numeric series, or None if empty."""
+    if not values:
+        return None
+    return (max(values), sum(values) / len(values), min(values))
+
 def _supports_unicode(stream) -> bool:
     try:
         "┌".encode(getattr(stream, "encoding", "utf-8") or "utf-8")
@@ -36,13 +78,15 @@ def _supports_unicode(stream) -> bool:
     except UnicodeEncodeError:
         return False
 
-def print_report(manifest_path: str, depth: str = "standard", section: Optional[str] = None) -> None:
+def print_report(manifest_path: str, depth: str = "standard", section: Optional[str] = None,
+                 utc: bool = False) -> None:
     """Print a human-readable diagnostic summary of a recorded run.
 
     Args:
         manifest_path: Path to the manifest.json file.
         depth: Verbosity level (``"basic"``, ``"standard"``, or ``"deep"``).
         section: Optional section to extract (``"logs"``, ``"env"``, or ``"packages"``).
+        utc: Show timestamps in UTC instead of local time.
     """
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
@@ -132,6 +176,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     green = Colors.GREEN if use_color else ""
     red = Colors.RED if use_color else ""
     yellow = Colors.YELLOW if use_color else ""
+    dim = Colors.DIM if use_color else ""
 
     if use_color:
         if _supports_unicode(sys.stdout):
@@ -203,7 +248,13 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         print(f"{cyan}Signals{rst}     : {yellow}{', '.join(sig_names)}{rst}")
 
     start_ts = timing.get('started_at_utc')
-    start_str = datetime.fromtimestamp(start_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if start_ts else "unknown"
+    if start_ts:
+        _sdt = datetime.fromtimestamp(start_ts, tz=timezone.utc)
+        if not utc:
+            _sdt = _sdt.astimezone()
+        start_str = _sdt.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        start_str = "unknown"
     print(f"{cyan}Started{rst}     : {start_str}")
     elapsed_val = timing.get("elapsed_seconds")
     if elapsed_val is not None:
@@ -217,32 +268,35 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         try:
             from collections import deque
             with open(events_path, "r", encoding="utf-8") as ef:
-                first_events = []
-                last_events = deque(maxlen=20)
-                total_events = 0
-                for line in ef:
-                    total_events += 1
-                    if total_events <= 20:
-                        first_events.append(line)
-                    else:
-                        last_events.append(line)
+                # Show ALL events when <= 20; otherwise the OLDEST 10 + NEWEST 10 with a
+                # truncation marker between them.
+                all_lines = ef.readlines()
+                total_events = len(all_lines)
+                if total_events > 20:
+                    first_events = all_lines[:10]
+                    last_events = all_lines[-10:]
+                else:
+                    first_events = all_lines
+                    last_events = []
 
                 def _print_ev(raw_line: str) -> None:
                     e = json.loads(raw_line)
                     ts = e.get('timestamp_utc', 0.0)
-                    ts_str = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+                    # Compact, human timestamp; honor UTC-vs-local like the rest of the report.
+                    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                    if not utc:
+                        dt = dt.astimezone()  # local time
+                    ts_str = dt.strftime("%Y-%m-%d %H:%M:%S")
                     print(f"  [{cyan}{ts_str}{rst}] {green}{e.get('type')}{rst}: {e.get('name', '')} {e.get('payload', '')}")
 
                 for line in first_events:
                     _print_ev(line)
 
-                if total_events > 40:
-                    print(f"  ... [ {total_events - 40} events logically truncated ] ...")
-
                 if total_events > 20:
-                    # Render the remaining tail
+                    print(f"  {dim}... [ {total_events - 20} events truncated ] ...{rst}")
                     for line in last_events:
                         _print_ev(line)
+                del all_lines
         except Exception:
             print("  (Events file corrupt or unreadable)")
 
@@ -652,41 +706,64 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
     peak_cpu = resources.get("peak_cpu_percent")
     end_rss = resources.get("end_rss_bytes")
 
-    if metric in ("mem", "all") and peak_rss:
-        if peak_rss >= 1024**3:
-            rss_str = f"{peak_rss / (1024**3):.2f} GB"
-        else:
-            rss_str = f"{peak_rss / (1024**2):.2f} MB"
-        print(f"{cyan}Peak RSS{rst}    : {rss_str}")
+    def _fmt_bytes(n):
+        try:
+            n = float(n)
+        except (TypeError, ValueError):
+            return None
+        if n >= 1024**3:
+            return f"{n / (1024**3):.2f} GB"
+        if n >= 1024**2:
+            return f"{n / (1024**2):.2f} MB"
+        return f"{n / 1024:.2f} KB"
 
-    if metric in ("mem", "all") and end_rss:
-        if end_rss >= 1024**3:
-            end_rss_str = f"{end_rss / (1024**3):.2f} GB"
-        else:
-            end_rss_str = f"{end_rss / (1024**2):.2f} MB"
-        print(f"{cyan}End RSS{rst}     : {end_rss_str}")
+    # Per-sample series (for avg/min/max). Read once here; reused for the charts below.
+    _events_path = Path(manifest_path).parent / "events.jsonl"
+    series = read_resource_series(_events_path) if _events_path.exists() else \
+        {"timestamps": [], "rss": [], "cpu": [], "tree_rss": [], "tree_cpu": []}
 
-    if metric in ("cpu", "all") and peak_cpu is not None:
-        print(f"{cyan}Peak CPU{rst}    : {peak_cpu}%")
+    def _bytes_stat_line(values, peak_fallback):
+        st = _series_stats(values)
+        if st:
+            pk, avg, mn = st
+            return f"peak {_fmt_bytes(pk)} / avg {_fmt_bytes(avg)} / min {_fmt_bytes(mn)}"
+        if peak_fallback:
+            return f"peak {_fmt_bytes(peak_fallback)}"  # no per-sample data (short/old run)
+        return None
+
+    def _cpu_stat_line(values, peak_fallback):
+        st = _series_stats(values)
+        if st:
+            pk, avg, mn = st
+            return f"peak {pk:.1f}% / avg {avg:.1f}% / min {mn:.1f}%"
+        if peak_fallback is not None:
+            return f"peak {peak_fallback:.1f}%"
+        return None
+
+    # --- Main process: RSS + CPU (peak/avg/min from samples, peak fallback otherwise) ---
+    if metric in ("mem", "all"):
+        line = _bytes_stat_line(series["rss"], peak_rss)
+        if line:
+            print(f"{cyan}RSS (main){rst}   : {line}")
+        if end_rss:
+            print(f"{cyan}End RSS{rst}      : {_fmt_bytes(end_rss)}")
+
+    if metric in ("cpu", "all"):
+        line = _cpu_stat_line(series["cpu"], peak_cpu)
+        if line:
+            print(f"{cyan}CPU (main){rst}   : {line}")
 
     # Comprehensive resource view (only for `pubrun res`; cpu/mem stay single-metric).
     # Each field is rendered only when present, so older manifests just show less.
     if metric == "all":
-        def _fmt_bytes(n):
-            try:
-                n = float(n)
-            except (TypeError, ValueError):
-                return None
-            if n >= 1024**3:
-                return f"{n / (1024**3):.2f} GB"
-            if n >= 1024**2:
-                return f"{n / (1024**2):.2f} MB"
-            return f"{n / 1024:.2f} KB"
-
-        # Process-tree RSS (when scope=tree).
-        peak_tree = resources.get("peak_tree_rss_bytes")
-        if peak_tree:
-            print(f"{cyan}Peak Tree RSS{rst} : {_fmt_bytes(peak_tree)} (process tree)")
+        # Process-tree RSS + CPU (when scope=tree). Explicit "(tree)" labels so the reader
+        # is never misled into thinking the main-process numbers are the whole tree.
+        tree_line = _bytes_stat_line(series["tree_rss"], resources.get("peak_tree_rss_bytes"))
+        if tree_line:
+            print(f"{cyan}RSS (tree){rst}   : {tree_line}")
+        tree_cpu_line = _cpu_stat_line(series["tree_cpu"], resources.get("peak_tree_cpu_percent"))
+        if tree_cpu_line:
+            print(f"{cyan}CPU (tree){rst}   : {tree_cpu_line} {yellow}(% of one core; may exceed 100%){rst}")
 
         # System memory (free/available) at start and worst point.
         sysmem = resources.get("system_memory")
@@ -737,33 +814,16 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
                 print(f"{cyan}Logical I/O{rst}  : read {_fmt_bytes(rc or 0)}, "
                       f"wrote {_fmt_bytes(wc or 0)} (incl. cache)")
 
-    events_path = Path(manifest_path).parent / "events.jsonl"
-    if not events_path.exists():
+    if not _events_path.exists():
         print(f"\n{yellow}No events.jsonl file found. Cannot generate utilization graphs.{rst}\n")
         return
 
-    timestamps = []
-    rss_values = []
-    cpu_values = []
-
-    try:
-        with open(events_path, "r", encoding="utf-8") as ef:
-            for line in ef:
-                try:
-                    e = json.loads(line)
-                    if e.get("type") == "resource_sample":
-                        payload = e.get("payload", {})
-                        ts = e.get("timestamp_utc")
-                        rss = payload.get("rss_bytes")
-                        cpu = payload.get("cpu_percent")
-                        if ts is not None and rss is not None and cpu is not None:
-                            timestamps.append(ts)
-                            rss_values.append(rss)
-                            cpu_values.append(cpu)
-                except Exception:
-                    pass
-    except Exception:
-        print(f"\n{red}Events file corrupt or unreadable.{rst}\n")
+    # Reuse the series already read for the summary above (single read of events.jsonl).
+    timestamps = list(series["timestamps"])
+    rss_values = list(series["rss"])
+    cpu_values = list(series["cpu"])
+    if not timestamps:
+        print(f"\n{yellow}No resource samples found in events.jsonl.{rst}\n")
         return
 
     last_seconds = None

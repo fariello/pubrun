@@ -318,7 +318,8 @@ class TestResComprehensiveRender:
         from pubrun.report.diagnostics import print_resources_report
         print_resources_report(self._write_manifest(tmp_path), metric="all")
         out = capsys.readouterr().out
-        assert "Peak Tree RSS" in out
+        # New comprehensive labels (peak/avg/min from samples, peak fallback with no events.jsonl).
+        assert "RSS (tree)" in out
         assert "System RAM" in out
         assert "Load Average" in out
         assert "Node iowait" in out and "indicative only" in out
@@ -328,11 +329,12 @@ class TestResComprehensiveRender:
         from pubrun.report.diagnostics import print_resources_report
         print_resources_report(self._write_manifest(tmp_path), metric="cpu")
         out = capsys.readouterr().out
-        assert "Peak CPU" in out
+        assert "CPU (main)" in out and "peak 42.0%" in out
         # The comprehensive-only lines must NOT appear under the single 'cpu' metric.
         assert "System RAM" not in out
         assert "Load Average" not in out
         assert "Disk I/O" not in out
+        assert "RSS (tree)" not in out
 
     def test_old_manifest_without_new_fields_renders_cleanly(self, tmp_path, capsys):
         import json as _json
@@ -345,5 +347,128 @@ class TestResComprehensiveRender:
         mpath = run / "manifest.json"; mpath.write_text(_json.dumps(m))
         print_resources_report(str(mpath), metric="all")  # must not raise
         out = capsys.readouterr().out
-        assert "Peak RSS" in out
+        assert "RSS (main)" in out and "peak 1.00 MB" in out
         assert "System RAM" not in out  # absent field omitted, no crash
+
+
+# ------------------------------------------------- IPD-C: report/res richness (2026-07-07)
+
+class TestTreeCpuCapture:
+    """Tree CPU is computed from summed CPU-TIME deltas (not instantaneous-% sum)."""
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux /proc CPU time")
+    def test_tree_cpu_computed_from_time_deltas(self, monkeypatch):
+        from pubrun.capture import resources as R
+        w = R.ResourceWatcher(type("T", (), {"event_stream": None})(), interval_seconds=1.0, scope="tree")
+        w._clk_tck = 100  # 100 jiffies/sec
+        # First poll: establishes the baseline, returns 0 (no delta yet).
+        monkeypatch.setattr(R, "_get_tree_cpu_jiffies_linux", lambda: 1000)
+        monkeypatch.setattr(R.time, "perf_counter", lambda: 10.0)
+        assert w._poll_tree_cpu() == 0.0
+        # Second poll: +50 jiffies over 1.0s wall = 0.5 CPU-seconds / 1s = 50%.
+        monkeypatch.setattr(R, "_get_tree_cpu_jiffies_linux", lambda: 1050)
+        monkeypatch.setattr(R.time, "perf_counter", lambda: 11.0)
+        assert w._poll_tree_cpu() == 50.0
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux /proc CPU time")
+    def test_tree_cpu_can_exceed_100_and_is_not_clamped(self, monkeypatch):
+        from pubrun.capture import resources as R
+        w = R.ResourceWatcher(type("T", (), {"event_stream": None})(), interval_seconds=1.0, scope="tree")
+        w._clk_tck = 100
+        monkeypatch.setattr(R, "_get_tree_cpu_jiffies_linux", lambda: 0)
+        monkeypatch.setattr(R.time, "perf_counter", lambda: 0.0)
+        w._poll_tree_cpu()
+        # +400 jiffies over 1s = 4 CPU-seconds/s = 400% (4 cores busy) -> not clamped.
+        monkeypatch.setattr(R, "_get_tree_cpu_jiffies_linux", lambda: 400)
+        monkeypatch.setattr(R.time, "perf_counter", lambda: 1.0)
+        assert w._poll_tree_cpu() == 400.0
+
+
+class TestResourceSeriesStats:
+    """avg/min/max computed from per-sample events; main + tree; peak fallback with no samples."""
+
+    def _run_with_events(self, tmp_path, samples):
+        import json as _json
+        run = tmp_path / "runs" / "pubrun-s"
+        run.mkdir(parents=True)
+        (run / "manifest.json").write_text(_json.dumps({
+            "run_id": "s", "invocation": {"script": {"basename": "s.py"}},
+            "status": {"outcome": "completed"},
+            "resources": {"scope": "tree", "capture_state": {"status": "complete"}},
+        }))
+        with open(run / "events.jsonl", "w") as f:
+            for i, (rss, cpu, trss, tcpu) in enumerate(samples):
+                p = {"rss_bytes": rss, "cpu_percent": cpu}
+                if trss is not None:
+                    p["tree_rss_bytes"] = trss
+                if tcpu is not None:
+                    p["tree_cpu_percent"] = tcpu
+                f.write(_json.dumps({"type": "resource_sample", "timestamp_utc": 1000.0 + i,
+                                     "name": "", "payload": p}) + "\n")
+        return str(run / "manifest.json")
+
+    def test_avg_min_max_main_and_tree(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("NO_COLOR", "1")  # deterministic (no ANSI) for exact matching
+        from pubrun.report.diagnostics import print_resources_report
+        # rss 10,20,30 MB ; cpu 10,20,30% ; tree cpu 100,200,300%
+        MB = 1024 * 1024
+        samples = [(10 * MB, 10.0, 10 * MB, 100.0),
+                   (20 * MB, 20.0, 20 * MB, 200.0),
+                   (30 * MB, 30.0, 30 * MB, 300.0)]
+        print_resources_report(self._run_with_events(tmp_path, samples), metric="all")
+        out = capsys.readouterr().out
+        assert "CPU (main)   : peak 30.0% / avg 20.0% / min 10.0%" in out
+        assert "CPU (tree)" in out and "peak 300.0% / avg 200.0% / min 100.0%" in out
+        assert "of one core" in out  # tree-cpu caveat label
+        assert "RSS (main)" in out and "peak 30.00 MB / avg 20.00 MB / min 10.00 MB" in out
+
+    def test_series_helper(self, tmp_path):
+        from pubrun.report.diagnostics import read_resource_series, _series_stats
+        m = self._run_with_events(tmp_path, [(1, 5.0, None, None), (3, 15.0, None, None)])
+        from pathlib import Path as _P
+        s = read_resource_series(_P(m).parent / "events.jsonl")
+        assert s["rss"] == [1, 3] and s["cpu"] == [5.0, 15.0]
+        assert _series_stats(s["cpu"]) == (15.0, 10.0, 5.0)
+        assert _series_stats([]) is None  # empty -> None (peak-fallback path)
+
+
+class TestTimelineFormatting:
+    """Compact timestamps + oldest-10/newest-10 truncation above 20 events."""
+
+    def _run_with_n_events(self, tmp_path, n):
+        import json as _json
+        run = tmp_path / "runs" / "pubrun-tl"
+        run.mkdir(parents=True)
+        (run / "manifest.json").write_text(_json.dumps({
+            "run_id": "tl", "invocation": {"script": {"basename": "s.py"}},
+            "status": {"outcome": "completed"},
+            "timing": {"started_at_utc": 1000.0},
+        }))
+        with open(run / "events.jsonl", "w") as f:
+            for i in range(n):
+                f.write(_json.dumps({"type": "annotate", "timestamp_utc": 1000.0 + i,
+                                     "name": f"ev{i}", "payload": {}}) + "\n")
+        return str(run / "manifest.json")
+
+    def test_compact_timestamp_and_utc(self, tmp_path, capsys):
+        from pubrun.report.diagnostics import print_report
+        print_report(self._run_with_n_events(tmp_path, 3), depth="basic", utc=True)
+        out = capsys.readouterr().out
+        # Compact 'YYYY-MM-DD HH:MM:SS' (no microseconds, no +00:00), UTC.
+        assert "1970-01-01 00:16:40" in out  # epoch 1000 in UTC
+        assert "+00:00" not in out and ".0" not in out.split("Event Timeline")[-1][:200]
+
+    def test_truncation_above_20(self, tmp_path, capsys):
+        from pubrun.report.diagnostics import print_report
+        print_report(self._run_with_n_events(tmp_path, 25), depth="basic", utc=True)
+        out = capsys.readouterr().out
+        assert "events truncated" in out
+        assert "ev0" in out and "ev24" in out  # oldest + newest shown
+        assert "ev12" not in out              # middle truncated
+
+    def test_no_truncation_at_or_below_20(self, tmp_path, capsys):
+        from pubrun.report.diagnostics import print_report
+        print_report(self._run_with_n_events(tmp_path, 20), depth="basic", utc=True)
+        out = capsys.readouterr().out
+        assert "truncated" not in out
+        assert "ev0" in out and "ev19" in out

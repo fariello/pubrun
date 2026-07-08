@@ -165,6 +165,48 @@ def _get_tree_rss_darwin() -> int:
         return max(0, _get_rss_darwin())
 
 
+def _get_tree_cpu_jiffies_linux() -> int:
+    """Sum CPU time (utime+stime, in clock ticks/jiffies) across the process tree on Linux.
+
+    Reads fields 14 (utime) + 15 (stime) from /proc/<pid>/stat for self + all descendants.
+    This is CUMULATIVE CPU TIME, not an instantaneous percentage — the watcher turns the
+    delta between two samples into a percentage over the wall interval (the correct way to
+    measure tree CPU; a sum of per-process instantaneous %% would be window-sensitive and
+    can mislead). Returns total jiffies, or -1 if unreadable.
+    """
+    try:
+        pid = os.getpid()
+        total = 0
+        to_visit = [pid]
+        visited = set()
+        while to_visit:
+            p = to_visit.pop()
+            if p in visited:
+                continue
+            visited.add(p)
+            try:
+                with open(f'/proc/{p}/stat', 'r') as f:
+                    # The comm field (2nd) may contain spaces/parens; split on the last ')'.
+                    data = f.read()
+                    rparen = data.rfind(')')
+                    fields = data[rparen + 2:].split() if rparen != -1 else data.split()
+                    # After the '(comm)' the fields are 0-indexed: state=0, ... utime=11, stime=12
+                    utime = int(fields[11])
+                    stime = int(fields[12])
+                    total += utime + stime
+            except (OSError, IndexError, ValueError):
+                continue
+            try:
+                with open(f'/proc/{p}/task/{p}/children', 'r') as f:
+                    to_visit.extend(int(c) for c in f.read().split() if c)
+            except (OSError, ValueError):
+                pass
+        return total
+    except Exception as e:
+        logger.debug(f"pubrun failed Linux tree CPU poll: {e}")
+        return -1
+
+
 class ResourceWatcher(threading.Thread):
     def __init__(self, run_tracker: Any, interval_seconds: float, max_failures: int = 3,
                  scope: str = "process", system_metrics: bool = True):
@@ -183,8 +225,18 @@ class ResourceWatcher(threading.Thread):
         # Tree-level metrics (only populated when scope="tree")
         self.peak_tree_rss_bytes = 0
         self.end_tree_rss_bytes = 0
+        self.peak_tree_cpu_percent = 0.0
         self._last_times = None
         self._last_clock = None
+        # Tree CPU is computed from the delta of summed CPU-TIME (jiffies) over the wall
+        # interval — NOT a sum of per-process instantaneous cpu_percent.
+        self._last_tree_jiffies = None
+        self._last_tree_clock = None
+        self._clk_tck = 0
+        try:
+            self._clk_tck = os.sysconf("SC_CLK_TCK")
+        except (ValueError, OSError, AttributeError):
+            self._clk_tck = 0
         self._sys_plat = sys.platform
         self._consecutive_failures = 0
 
@@ -274,6 +326,36 @@ class ResourceWatcher(threading.Thread):
         # Windows tree not yet implemented; return 0 (graceful fallback).
         return 0
 
+    def _poll_tree_cpu(self) -> float:
+        """Tree CPU% over the last interval, from the delta of summed CPU-TIME across the
+        tree (correct method; see _get_tree_cpu_jiffies_linux). May exceed 100% on
+        multi-core (it is "% of one core"); we do NOT clamp it. Returns 0.0 when unavailable
+        (non-Linux, first sample, or unreadable) — negative deltas (a child exited between
+        samples, dropping cumulative time) are floored to 0.
+
+        Linux only for now: /proc CPU-time accounting is not available cross-platform without
+        a per-process time-delta walk. On other platforms tree CPU stays unmeasured.
+        """
+        if not self._sys_plat.startswith("linux") or not self._clk_tck:
+            return 0.0
+        try:
+            jiffies = _get_tree_cpu_jiffies_linux()
+            clock = time.perf_counter()
+            pct = 0.0
+            if jiffies >= 0 and self._last_tree_jiffies is not None and self._last_tree_clock is not None:
+                jiffy_delta = jiffies - self._last_tree_jiffies
+                wall_delta = clock - self._last_tree_clock
+                if wall_delta > 0 and jiffy_delta > 0:
+                    cpu_seconds = jiffy_delta / self._clk_tck
+                    pct = (cpu_seconds / wall_delta) * 100.0
+            if jiffies >= 0:
+                self._last_tree_jiffies = jiffies
+                self._last_tree_clock = clock
+            return float(round(max(0.0, pct), 1))
+        except Exception as e:
+            logger.debug(f"pubrun failed tree CPU poll: {e}")
+            return 0.0
+
     def _capture_system_start(self) -> None:
         """Snapshot system memory / load / iowait baseline at watcher construction."""
         try:
@@ -336,6 +418,7 @@ class ResourceWatcher(threading.Thread):
         rss = self._poll_rss()
         cpu_pct = self._poll_cpu()
         tree_rss = self._poll_tree_rss() if self._scope == "tree" else 0
+        tree_cpu = self._poll_tree_cpu() if self._scope == "tree" else 0.0
         self._sample_system_metrics()
 
         # rss == -1 means the poll was UNREADABLE (error/timeout); rss >= 0 is a
@@ -364,9 +447,14 @@ class ResourceWatcher(threading.Thread):
             if tree_rss > 0 and tree_rss > self.peak_tree_rss_bytes:
                 self.peak_tree_rss_bytes = tree_rss
 
+            if tree_cpu > self.peak_tree_cpu_percent:
+                self.peak_tree_cpu_percent = tree_cpu
+
         payload = {"rss_bytes": rss_bytes, "cpu_percent": cpu_pct}
         if tree_rss > 0:
             payload["tree_rss_bytes"] = tree_rss
+        if self._scope == "tree" and tree_cpu > 0:
+            payload["tree_cpu_percent"] = tree_cpu
         if updated or cpu_pct > 0:
             if getattr(self.run_tracker, "event_stream", None):
                 self.run_tracker.event_stream.emit("resource_sample", payload=payload)
@@ -400,6 +488,7 @@ class ResourceWatcher(threading.Thread):
             peak_cpu = self.peak_cpu_percent
             peak_tree = self.peak_tree_rss_bytes
             end_tree = self.end_tree_rss_bytes
+            peak_tree_cpu = self.peak_tree_cpu_percent
         result: Dict[str, Any] = {
             "scope": self._scope,
             "peak_rss_bytes": peak_rss if peak_rss > 0 else None,
@@ -410,6 +499,9 @@ class ResourceWatcher(threading.Thread):
         if self._scope == "tree":
             result["peak_tree_rss_bytes"] = peak_tree if peak_tree > 0 else None
             result["end_tree_rss_bytes"] = end_tree if end_tree > 0 else None
+            # Tree CPU% ("of one core"; may exceed 100% on multi-core). Linux-only; None
+            # where unmeasured. Computed from summed CPU-time deltas, not instantaneous %.
+            result["peak_tree_cpu_percent"] = peak_tree_cpu if peak_tree_cpu > 0 else None
 
         if self._system_metrics:
             with self._lock:

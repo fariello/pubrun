@@ -77,6 +77,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **Richer `report`/`res` output + `report`/`show` flag parity.** `pubrun res` now shows
+  **peak / avg / min** (computed from the per-sample `events.jsonl`) for each metric, with
+  explicit `RSS (main)` / `CPU (main)` / `RSS (tree)` / `CPU (tree)` labels. **Process-tree CPU
+  is now captured** (`resources.peak_tree_cpu_percent` + per-sample `tree_cpu_percent`) when
+  `[capture.resources].scope = "tree"` — computed from summed CPU-time deltas across the tree
+  (not a sum of instantaneous percentages), labeled "% of one core" and not clamped (may exceed
+  100% on multiple cores; Linux-only). This intentionally changes the prior "child CPU excluded
+  from the CPU metric" behavior, gated to tree scope. The `report`/`show` **event timeline**
+  now uses a compact `YYYY-MM-DD HH:MM:SS` timestamp (local by default, `--utc` for UTC) and
+  shows the oldest 10 + newest 10 events with a truncation marker above 20 (was full ISO with
+  microseconds, truncating only above 40). `pubrun report` now accepts `--utc` (previously only
+  `show` did — an accidental asymmetry).
 - **HPC multi-scheduler benchmark submission (Slurm/PBS/LSF/SGE).** `pubrun bench` now detects
   and offers to submit to PBS/Torque, LSF, and SGE/Grid Engine in addition to Slurm (auto-detect
   order Slurm > PBS > LSF > SGE), with a new `--scheduler {auto,slurm,pbs,lsf,sge,local}` override.

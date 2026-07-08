@@ -399,16 +399,20 @@ pubrun methods --all -n 20 -s completed      # aggregate the 20 most-recent comp
 
 ### `show` — Diagnostic Viewer
 
-Renders a human-readable diagnostic summary of one or more runs, including timing, hardware, dependencies, and codebase drift.
+Renders a human-readable diagnostic summary of one or more runs, including timing, hardware, dependencies, codebase drift, and an event timeline.
 
 ```bash
-pubrun show [RUN_DIR ...] [--basic|--standard|--deep]
+pubrun show [RUN_DIR ...] [--basic|--standard|--deep] [--utc]
 ```
 
-**Alias:** `report` (backward-compatible)
+**Alias:** `report` (backward-compatible) — `report` accepts the same flags, including `--utc`.
 
 - Pass multiple directories to evaluate them sequentially.
 - If the manifest references a `meta_ref`, the parent context is hydrated automatically.
+- Timestamps display in **local time** by default; pass `--utc` for UTC. They are shown in a
+  compact `YYYY-MM-DD HH:MM:SS` form.
+- The **event timeline** shows all events when there are ≤ 20; above that, it shows the
+  oldest 10 and newest 10 with a `... [ N events truncated ] ...` marker between them.
 
 **Depth Controls:**
 
@@ -440,10 +444,15 @@ pubrun rerun ./runs/pubrun-A | bash
 
 Renders a **comprehensive** resource summary for a run plus CPU and memory utilization
 graphs. Unlike `cpu`/`mem` (which focus on a single metric), `res` surfaces **all** captured
-resource signals, each shown only when present in the manifest:
+resource signals, each shown only when present in the manifest. Where per-sample data exists
+(`events.jsonl`), each metric shows **peak / avg / min** on one line; otherwise it falls back
+to the recorded peak:
 
-- main-process peak/end RSS and peak CPU%,
-- **process-tree** peak RSS (when the run used `[capture.resources].scope = "tree"`),
+- **main-process** RSS (`RSS (main)`) and CPU% (`CPU (main)`), plus end RSS,
+- **process-tree** RSS (`RSS (tree)`) and CPU% (`CPU (tree)`) when the run used
+  `[capture.resources].scope = "tree"`. Tree CPU is computed from summed CPU-time deltas
+  across the tree and is labeled *"% of one core"* — it may legitimately exceed 100% on
+  multiple cores (it is not clamped). Tree CPU is Linux-only; where unmeasured it is omitted.
 - **system memory** — available RAM at start and the lowest point during the run,
 - **load average** (start and 1-min peak),
 - **node iowait** (labeled *node-wide, indicative only* — a whole-node hint, not run-scoped),
