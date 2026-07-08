@@ -308,19 +308,26 @@ pubrun combined a3f9 b2c1 --output all.log  # Combine multiple runs into a file
 
 ### `diff` — Semantic Comparison
 
-Generates a side-by-side structural comparison between two execution traces, filtering volatile noise (timestamps, PIDs) by default.
+Generates a structural comparison between two execution traces, filtering volatile noise
+(timestamps, PIDs, per-run absolute paths) so the *meaningful* differences stand out.
 
 ```bash
 pubrun diff RUN_DIR_A RUN_DIR_B [OPTIONS]
 ```
 
-**Options:**
+**Depth levels** — each level is nested: `--basic` hides the most, `--deep` hides nothing.
+
+| Flag | What it shows |
+|---|---|
+| `--basic` | The user-facing, high-signal differences only: script/argv, packages, python, git, user config. Hides volatile fields and the high-volume sections (subprocesses, packages-as-list, environment, hardware, resources). A single `argv` change is reported once (not also as `command_line`/`rerun_command`, which are derived from it). |
+| `--standard` (default) | The above plus hardware/resource changes and **summarized** list sections — e.g. `subprocesses.count: 300 → 302` and `subprocesses.by_command.bash: +2`, rather than thousands of per-process leaf lines. |
+| `--deep` | No filtering; every field, every subprocess element, and the derived `command_line`/`rerun_command` are compared. |
+
+**Other options:**
 
 | Flag | Description |
 |---|---|
-| `--basic` | Filter heavily; show only script, package, and user telemetry changes (default) |
-| `--standard` | Moderate filtering; include hardware and resource changes |
-| `--deep` | No filtering; compare everything |
+| `--table` | Render a compact aligned table (`change / field / A → B`) instead of the default git-style `+/-/~` lines. |
 | `--same` / `--no-same` | Show or hide unchanged values |
 | `--wrap` / `--no-wrap` | Wrap long strings or truncate with ellipsis |
 | `--max-length N` | Maximum character length before truncation |
@@ -332,10 +339,16 @@ When no run directories are given, `diff` compares the two most recent runs in t
 (optionally filtered) set. If a filter matches fewer than two runs, `diff` reports a clear
 error and exits non-zero rather than silently ignoring the filter.
 
+> **Changed in 1.4.0:** `--basic` and `--standard` are now genuinely concise — they no longer
+> explode subprocess-heavy runs into thousands of lines, and they hide per-run volatile paths
+> and the derived `command_line`/`rerun_command` (shown only at `--deep`). `--deep` output is
+> unchanged. If you parse diff output, use `--deep` for the full element-by-element detail.
+
 **Example:**
 ```bash
-pubrun diff ./runs/pubrun-A ./runs/pubrun-B --standard --same --wrap
+pubrun diff ./runs/pubrun-A ./runs/pubrun-B --same --wrap
 pubrun diff -f train.py            # diff the two most recent runs whose command matches "train.py"
+pubrun diff A B --table            # compact aligned table view
 ```
 
 ---

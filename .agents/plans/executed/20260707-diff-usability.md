@@ -105,6 +105,40 @@ output at those depths may see fewer lines; `--deep` is unchanged).
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`.
 
+## Execution record (2026-07-07)
+
+Executed by opencode after human approval (IPD-A, second of the batch after IPD-B).
+
+- **Ignore lists rebuilt (`default.toml`):** `ignore_standard` now also hides per-run volatile
+  absolute paths (`filesystem.run_dir.path`/`mount_point`, `filesystem.tmpdir.*`,
+  `results_dir.path`, `pubrun_install.path`) while KEEPING `fstype`/`is_network` (the meaningful
+  signal). `ignore_basic` = `ignore_standard` ∪ the high-volume sections
+  (`process`/`hardware`/`resources`/`environment`/`subprocesses`/`packages`). Monotonicity
+  invariant (`standard ⊆ basic`) holds and is tested.
+- **Collapse (`diff.py`):** below `--deep`, when `invocation.argv` is present, `command_line`
+  and `rerun_command` are dropped — a single argv change is reported once. `--deep` keeps all
+  three.
+- **List summarization (`diff.py`):** `subprocesses` is summarized at non-deep depth as
+  `subprocesses.count` + `subprocesses.by_command.<argv0-basename>` (invocation counts),
+  reusing the flat-key shape; `_recruit` skips the element-by-element flatten for it unless
+  `--deep`. Verified on a 300-subprocess pair: `--basic` = 0 noise lines, `--standard` = a
+  handful (count + identity deltas), `--deep` = full per-element detail. (`packages` already
+  flattened to per-name keys, which is a natural identity diff.)
+- **`--table` renderer (`render.py` + CLI):** opt-in `pubrun diff --table` renders an aligned
+  `change / field / A → B` table (`_render_table` + `_summarize_change`); the git-style
+  `+/-/~` inline output stays the DEFAULT (`print_diff(..., table=...)`). Wired `--table`
+  through the subparser, `_run_diff`, and dispatch.
+- **Tests (`tests/test_diff_usability.py`, +10):** argv-collapse (basic=1 line / deep=3);
+  volatile path hidden but fstype visible; blow-up cap (basic=0, standard<20, deep=full);
+  ignore-list monotonicity; table opt-in + content-parity + inline-default. Existing
+  `test_render.py`/`test_edge_cases.py` unchanged and green.
+- **Docs:** `docs/cli.md` `diff` section rewritten (accurate per-depth semantics, `--table`,
+  the "Changed in 1.4.0" note; also fixed a stale claim that `--basic` was the default — it is
+  `--standard`); `CHANGELOG.md`.
+- **Validation:** full suite **818 passed / 2 skipped / 1 failed** — the failure is the known
+  SIGPIPE flake (passes in isolation). Only the 4 pre-existing benign LSP warnings remain (+
+  the pre-existing `status.py:1105` nit, untouched).
+
 ## Plan-review record (2026-07-07)
 
 Reviewed via `plan-review`. Verified: `render.py` has only `_render_inline`/`print_diff` (no

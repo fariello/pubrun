@@ -69,6 +69,33 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str], depth: str
             if not _should_ignore(full_key):
                 flat[full_key] = ver
 
+    # 2b. Subprocesses: at --deep, flatten element-by-element (full detail). At --standard,
+    # SUMMARIZE as a count + per-process identities (argv[0] basename) so a subprocess-heavy
+    # run does not explode into thousands of leaf keys ("basic" already ignores the section).
+    # This reuses the same normalized-dict shape (one flat key per identity) rather than a
+    # second array code path.
+    subs = manifest.get("subprocesses", [])
+    if depth != "deep" and isinstance(subs, list) and subs and not _should_ignore("subprocesses"):
+        import os as _os
+        counts: Dict[str, int] = {}
+        for sp in subs:
+            if not isinstance(sp, dict):
+                continue
+            argv = sp.get("argv")
+            if isinstance(argv, list) and argv:
+                ident = _os.path.basename(str(argv[0]))
+            else:
+                ident = "?"
+            counts[ident] = counts.get(ident, 0) + 1
+        # One key for the total, plus one per distinct identity with its invocation count.
+        tot_key = "subprocesses.count"
+        if not _should_ignore(tot_key):
+            flat[tot_key] = len(subs)
+        for ident, n in counts.items():
+            k = f"subprocesses.by_command.{ident}"
+            if not _should_ignore(k):
+                flat[k] = n
+
     # 3. Recursively flatten everything else
     def _recruit_val(v: Any, full_key: str) -> None:
         if _should_ignore(full_key):
@@ -98,13 +125,29 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str], depth: str
             else:
                 flat[full_key] = v
 
+    # At non-deep depth we already summarized `subprocesses` above, so skip the element-by-
+    # element flatten for it here. At `--deep`, let it flatten fully (full detail).
+    _handled_top = ["environment", "packages"]
+    if depth != "deep":
+        _handled_top.append("subprocesses")
+
     def _recruit(d: Dict[str, Any], prefix: str = "") -> None:
         for k, v in d.items():
-            if k in ["environment", "packages"] and prefix == "":
-                continue # Already handled above
+            if k in _handled_top and prefix == "":
+                continue  # Already handled above
             _recruit_val(v, f"{prefix}{k}")
 
     _recruit(manifest)
+
+    # Collapse derived invocation views: `command_line` and `rerun_command` are both derived
+    # from `argv`, so a single argv change would otherwise be reported three times. Below
+    # `--deep`, when argv is present, drop the two derived views so one argv change = one line.
+    if depth != "deep":
+        has_argv = any(k == "invocation.argv" or k.startswith("invocation.argv.") for k in flat)
+        if has_argv:
+            for derived in ("invocation.command_line", "invocation.rerun_command"):
+                flat.pop(derived, None)
+
     return flat
 
 

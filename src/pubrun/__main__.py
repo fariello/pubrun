@@ -367,7 +367,7 @@ def _run_rerun(
 def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_config: Optional[bool] = None, max_length: Optional[int] = None, depth: str = "basic", show_same: Optional[bool] = None,
               filter_str: Optional[str] = None, not_filter_str: Optional[str] = None,
               status_filter: Optional[str] = None, not_status_filter: Optional[str] = None,
-              older_than: Optional[str] = None, exit_code: Optional[int] = None) -> None:
+              older_than: Optional[str] = None, exit_code: Optional[int] = None, table: bool = False) -> None:
     """Run the semantic diff engine comparing two execution traces.
 
     When no positional run directories are given, the pair to compare is drawn from
@@ -485,7 +485,7 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
             diff_report = compare_manifests(manifest_a, manifest_b, ignores, show_same=ss_target, depth=depth)
             wrap_target = wrap_config if wrap_config is not None else conf.get("wrap", True)
             mlen_target = max_length if max_length is not None else conf.get("max_string_length", 300)
-            print_diff(diff_report, no_color=no_color, wrap=wrap_target, max_length=mlen_target, depth=depth)
+            print_diff(diff_report, no_color=no_color, wrap=wrap_target, max_length=mlen_target, depth=depth, table=table)
 
     except RunInProgressOrCrashedError as e:
         status = e.run_info.status if e.run_info else "crashed/running"
@@ -2096,6 +2096,7 @@ def main() -> None:
     wrap_group.add_argument("--no-wrap", action="store_false", dest="wrap", default=None, help="Force ellipsis truncation for long values.")
 
     diff_parser.add_argument("--max-length", type=int, default=None, help="Max characters per value before truncation.")
+    diff_parser.add_argument("--table", action="store_true", help="Render a compact aligned table instead of the default git-style +/-/~ lines.")
 
     diff_depth = diff_parser.add_mutually_exclusive_group()
     diff_depth.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Structural changes only, filtering most metrics.")
@@ -2379,6 +2380,7 @@ def main() -> None:
             not_status_filter=getattr(args, "not_status", None),
             older_than=getattr(args, "older_than", None),
             exit_code=getattr(args, "exit_code", None),
+            table=getattr(args, "table", False),
         )
         executed = True
 
