@@ -110,6 +110,41 @@ chosen syntax + examples; referenced from each command), `CHANGELOG.md`.
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`.
 
+## Execution record (2026-07-07)
+
+Executed by opencode after human approval (IPD-E, fifth of the batch; after B/A/C/D).
+
+- **Recency resolution in `find_run` (`status.py`) — additive:** a bare positive integer
+  1..999 is a RECENCY INDEX (`1` = most recent, from `scan_runs`' most-recent-first order).
+  The id-prefix and dir-substring paths are unchanged (existing `test_find_run_by_prefix`/
+  `_returns_none_for_no_match` still pass — P6 characterization). Out-of-range index falls
+  through to id/path resolution.
+- **Collision guard refined during execution (better than the IPD's first sketch):** the
+  initial design flagged a collision when a run id merely *started with* the digit — but
+  pubrun ids are hex and commonly start with a digit, so that fired constantly (caught in
+  smoke-testing: `status 3` wrongly collided with id `343468e7`). Corrected to fire ONLY when
+  a run id is **exactly** the integer (`run_id == sel`) AND it is a different run than the
+  recency Nth — i.e. genuinely "the run literally named 3 vs the 3rd most recent". This is
+  practically impossible for real ids, so recency is unambiguous in practice. On a true
+  collision, `AmbiguousRunSelectorError` is raised and the CLI prints a clear WARN pointing at
+  the full-id/path escape (no `--force` flag added — maintainer decision; the escape hatch is
+  giving a longer id or the path, which already works everywhere).
+- **CLI wiring:** `_get_manifest_path` (covers show/report/res/cpu/mem/methods/inspect/rerun/
+  diff) and `_run_status` catch `AmbiguousRunSelectorError` → `_emit_ambiguous_selector` (a
+  clear `[WARN ]`). `--dir` is honored where the command has it (recency counts within the
+  scanned dir). No signatures threaded — the logic lives in the shared `find_run`.
+- **`status` `#` column:** `render_short_list` now shows a leading `#` recency index (from the
+  full unfiltered set, so `#1` is always newest even when filtered) — the number shown is the
+  number you pass.
+- **Tests (`tests/test_status.py::TestRunRecencySelector`, +6):** recency 1..N; out-of-range →
+  None; digit-prefix id does NOT block recency (`3` = 3rd, `3abc` = id); collision only on
+  EXACT integer id (raises) + no-collision when the exact-id run IS the Nth; `--dir` honored.
+- **Docs:** `docs/cli.md` "Selecting a run" table (recency / id-prefix / path) near the top;
+  `CHANGELOG.md`.
+- **Validation:** full suite **836 passed / 2 skipped / 1 failed** on py3.11.8 — the lone
+  failure is the known SIGPIPE flake (passes in isolation). Existing 52 status tests green
+  (the new `#` column did not break them).
+
 ## Plan-review record (2026-07-07)
 
 Reviewed via `plan-review`. Verified `find_run` prefix→substring resolution (`status.py:582-601`),

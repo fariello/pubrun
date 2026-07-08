@@ -22,6 +22,17 @@ def _print_warn(message: str) -> None:
     _out.warn(message)
 
 
+def _emit_ambiguous_selector(e) -> None:
+    """Print a clear, non-guessing message when a bare integer matched both a recency index
+    and a run id. The unambiguous escape hatch is the full id or the directory path."""
+    rec = getattr(e.by_recency, "run_id", "?")
+    other = getattr(e.by_id, "run_id", "?")
+    _out.warn(
+        f"'{e.selector}' is ambiguous: it means both the {e.selector}th-most-recent run "
+        f"(id {rec}) AND run id '{other}'. Refusing to guess. Re-run with the full run id "
+        f"or the run directory path to disambiguate.")
+
+
 def _create_config(destination: str) -> None:
     """Create a default ``.pubrun.toml`` at the given path. Refuses to overwrite."""
     try:
@@ -67,14 +78,17 @@ def _get_manifest_path(
 ) -> str:
     """Resolve the path to a manifest.json, auto-detecting the latest run if needed."""
     if run_dir:
-        # Resolve via find_run first
+        # Resolve via find_run first (supports recency index / id-prefix / dir-substring).
+        from pubrun.status import find_run, AmbiguousRunSelectorError
         try:
-            from pubrun.status import find_run
             run_info = find_run(run_dir)
             if run_info:
                 run_path = run_info.run_dir
             else:
                 run_path = Path(run_dir)
+        except AmbiguousRunSelectorError as e:
+            _emit_ambiguous_selector(e)
+            sys.exit(1)
         except Exception:
             run_path = Path(run_dir)
 
@@ -1460,8 +1474,13 @@ def _run_status(
     )
 
     if run_id:
-        # Inspect a specific run
-        run_info = find_run(run_id, output_dir)
+        # Inspect a specific run (recency index / id-prefix / dir-substring).
+        from pubrun.status import AmbiguousRunSelectorError
+        try:
+            run_info = find_run(run_id, output_dir)
+        except AmbiguousRunSelectorError as e:
+            _emit_ambiguous_selector(e)
+            sys.exit(1)
         if run_info is None:
             _print_error(f"No run found matching '{run_id}'.")
             sys.exit(1)

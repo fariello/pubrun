@@ -266,6 +266,67 @@ pubrun.stop()
         assert result is None
 
 
+class TestRunRecencySelector:
+    """IPD-E: a bare integer selects the Nth most recent run (1 = newest)."""
+
+    def _make_runs(self, tmp_path, ids_newest_first):
+        """Create run dirs with controlled start times so recency order is deterministic.
+        ids_newest_first[0] is the most recent."""
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        n = len(ids_newest_first)
+        for i, rid in enumerate(ids_newest_first):
+            d = runs_dir / f"pubrun-{rid}"
+            d.mkdir()
+            # newest first -> give the first the largest timestamp
+            ts = 1000.0 + (n - i)
+            (d / "manifest.json").write_text(json.dumps({
+                "run": {"run_id": rid},
+                "timing": {"started_at_utc": ts},
+                "status": {"outcome": "completed"},
+            }))
+        return str(runs_dir)
+
+    def test_recency_index_resolves_nth_most_recent(self, tmp_path):
+        from pubrun.status import find_run
+        od = self._make_runs(tmp_path, ["aaaa1111", "bbbb2222", "cccc3333"])
+        assert find_run("1", od).run_id == "aaaa1111"   # newest
+        assert find_run("2", od).run_id == "bbbb2222"
+        assert find_run("3", od).run_id == "cccc3333"   # oldest
+
+    def test_out_of_range_index_returns_none(self, tmp_path):
+        from pubrun.status import find_run
+        od = self._make_runs(tmp_path, ["aaaa1111", "bbbb2222"])
+        assert find_run("9", od) is None  # only 2 runs; no id match either -> None
+
+    def test_id_prefix_still_works_and_digit_prefix_is_recency(self, tmp_path):
+        from pubrun.status import find_run
+        # A hex id starting with '3' must NOT block '3' meaning "3rd most recent".
+        od = self._make_runs(tmp_path, ["3abc0000", "2def1111", "9aaa2222"])
+        assert find_run("3", od).run_id == "9aaa2222"        # recency (3rd), not the '3abc' id
+        assert find_run("3abc", od).run_id == "3abc0000"     # explicit prefix -> id match
+
+    def test_collision_only_on_exact_integer_id(self, tmp_path):
+        from pubrun.status import find_run, AmbiguousRunSelectorError
+        # Run literally named '2' is the NEWEST (recency #1), so selector '2' means BOTH the
+        # 2nd-most-recent run AND the run whose id is exactly '2' -> ambiguous, refuse to guess.
+        od = self._make_runs(tmp_path, ["2", "bbbb2222", "cccc3333"])
+        with pytest.raises(AmbiguousRunSelectorError):
+            find_run("2", od)
+
+    def test_no_collision_when_exact_id_is_also_the_nth(self, tmp_path):
+        from pubrun.status import find_run
+        # Run named '2' happens to be the 2nd-most-recent -> both meanings agree, no error.
+        od = self._make_runs(tmp_path, ["aaaa1111", "2", "cccc3333"])
+        assert find_run("2", od).run_id == "2"
+
+    def test_dir_override_honored(self, tmp_path):
+        from pubrun.status import find_run
+        od = self._make_runs(tmp_path, ["newest01", "older002"])
+        # recency resolves within the specified dir
+        assert find_run("1", od).run_id == "newest01"
+
+
 class TestStatusRendering:
     """Tests for the status rendering functions."""
 

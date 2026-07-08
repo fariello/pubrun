@@ -580,21 +580,69 @@ def scan_runs(output_dir: Optional[str] = None) -> List[RunInfo]:
     return runs
 
 
+# A bare positive integer up to this bound is interpreted as a recency INDEX
+# (1 = most recent, 2 = second most recent, ...). Larger integers fall through to
+# id/path resolution (a genuinely numeric id would be far longer than this).
+_MAX_RECENCY_INDEX = 999
+
+
+class AmbiguousRunSelectorError(Exception):
+    """A bare integer matched BOTH a recency index and an existing run id — refuse to guess.
+
+    Carries the two candidate RunInfos so the CLI can print a clear message pointing the user
+    at the full id / directory path (the unambiguous escape hatch)."""
+    def __init__(self, selector: str, by_recency, by_id):
+        self.selector = selector
+        self.by_recency = by_recency
+        self.by_id = by_id
+        super().__init__(f"run selector {selector!r} is ambiguous (recency index vs run id)")
+
+
 def find_run(run_id_or_prefix: str, output_dir: Optional[str] = None) -> Optional[RunInfo]:
-    """Find a specific run by ID or ID prefix.
+    """Find a specific run by recency index, ID, or ID prefix.
+
+    Resolution order:
+      1. A bare positive integer 1..999 is a RECENCY INDEX (1 = most recent). If that same
+         integer ALSO prefix-matches an existing run id, raise ``AmbiguousRunSelectorError``
+         rather than silently guessing (the collision guard). This is practically impossible
+         since run ids are timestamp+hash, never a bare small integer.
+      2. Otherwise: exact/prefix match on ``run_id`` (single match wins).
+      3. Otherwise: directory-name substring match (single match wins).
 
     Args:
-        run_id_or_prefix: Full run ID or a unique prefix.
+        run_id_or_prefix: Recency index, full run ID, or a unique prefix.
         output_dir: Override the configured output directory.
 
     Returns:
-        RunInfo for the matched run, or None if not found / ambiguous.
+        RunInfo for the matched run, or None if not found / ambiguous by id.
     """
     all_runs = scan_runs(output_dir)
+
+    # (1) Recency index: a bare positive integer within the bound is ALWAYS the recency
+    # meaning (1 = most recent). A run id merely *starting* with the digit does not block
+    # this — run ids are long timestamp+hash strings and many begin with a digit, so a
+    # prefix collision on a single digit is expected and not ambiguous (the user would type
+    # more characters to select by id). The collision guard fires ONLY when a run id is
+    # EXACTLY the integer (a genuine "is this the run literally named '3' or the 3rd run?"),
+    # which is practically impossible for real pubrun ids.
+    sel = run_id_or_prefix.strip()
+    if sel.isdigit():
+        n = int(sel)
+        if 1 <= n <= _MAX_RECENCY_INDEX:
+            by_recency = all_runs[n - 1] if n <= len(all_runs) else None
+            exact_id = [r for r in all_runs if r.run_id == sel]
+            if by_recency is not None and len(exact_id) == 1 and exact_id[0] is not by_recency:
+                # A run is literally named the same as the recency index -> do not guess.
+                raise AmbiguousRunSelectorError(sel, by_recency, exact_id[0])
+            if by_recency is not None:
+                return by_recency
+            # Out of range: fall through to id/path resolution (may still match an id).
+
+    # (2) id / prefix match.
     matches = [r for r in all_runs if r.run_id and r.run_id.startswith(run_id_or_prefix)]
     if len(matches) == 1:
         return matches[0]
-    # Also try matching directory name suffix
+    # (3) directory-name substring match.
     if not matches:
         matches = [r for r in all_runs if run_id_or_prefix in r.run_dir.name]
     if len(matches) == 1:
@@ -784,8 +832,16 @@ def render_short_list(runs: List[RunInfo], all_runs: Optional[List[RunInfo]] = N
     available = term_width - fixed_width
     script_max = max(8, min(available, int(term_width * 0.4)))
 
+    # Recency index (#1 = most recent) from the FULL run set, so the number a user passes
+    # to any command (`pubrun show 2`) matches what this column shows even when filtered.
+    recency_of = {}
+    _order = all_runs if all_runs is not None else runs
+    for i, r in enumerate(_order, start=1):
+        recency_of[id(r)] = i
+
     # Header
     hdr = (
+        f"{'#':<4}"
         f"{'RUN ID':<10}"
         f"{'SCRIPT':<{script_max}}"
         f"{'COMMIT':<9}"
@@ -797,6 +853,8 @@ def render_short_list(runs: List[RunInfo], all_runs: Optional[List[RunInfo]] = N
     lines = [hdr, "-" * min(len(hdr), term_width)]
 
     for r in runs:
+        idx = recency_of.get(id(r))
+        idx_str = f"{idx}" if idx is not None else "-"
         run_id = (r.run_id or "-")[:8]
         # Show script name + args if there's enough space
         script_name = r.script or "-"
@@ -812,6 +870,7 @@ def render_short_list(runs: List[RunInfo], all_runs: Optional[List[RunInfo]] = N
         elapsed = _format_elapsed(r.elapsed)
 
         line = (
+            f"{idx_str:<4}"
             f"{run_id:<10}"
             f"{script:<{script_max}}"
             f"{commit:<9}"
