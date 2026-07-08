@@ -94,6 +94,41 @@ numeric summary), reusing pubrun's existing per-sample data — no new capture.
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`. Sequence AFTER IPD-C (shared resource series).
 
+## Execution record (2026-07-07)
+
+Executed by opencode after human approval (IPD-F, sixth of the batch; after B/A/C/D/E).
+
+- **P8 honored:** installed the `[tui]` extra (textual 8.2.8) into the dev venv (`p3.11.8`)
+  so the TUI tests RUN, not silently skip. Confirmed post-suite that the 2 skips are the
+  PID-liveness ones, not the TUI test.
+- **Shared digest helper (`report/diagnostics.py`):** `format_resource_digest(series)` +
+  `_sparkline(values)` — pure, no textual/ANSI dep, reusing `read_resource_series` (from
+  IPD-C). Renders peak/avg/min + a unicode sparkline per metric (main RSS/CPU, and tree
+  RSS/CPU when present); returns a clear message when there are no samples. Kept the CLI
+  `draw_ascii_chart` untouched (avoided refactoring the heavily-used chart to return a string).
+- **`tui/widgets/resources.py`:** `RunResourcesView(Vertical)` with `display_run(run_info)`
+  that renders the digest into a `Static`; degrades gracefully when there is no `events.jsonl`
+  or on any rendering error (never crashes the TUI).
+- **`tui/app.py`:** new "Resources" `TabPane`; `display_run` wired into `on_tree_node_selected`;
+  a footer `r` binding + `action_show_resources()` that switches to the Resources tab.
+  Decision: `r` is intentionally NOT a priority binding, so it yields to a focused text input
+  (the Config panel has inputs) rather than stealing the key — the common browse-the-tree case
+  works; the action is always reachable.
+- **Tests (`tests/test_tui.py`, +4):** `TestResourceDigest` (summary + sparklines + empty-msg +
+  tree metrics; unconditional, no textual dep) and `TestTuiResourceView` (textual Pilot:
+  `display_run` populates with RSS/CPU, a sample-less run shows the graceful message, and the
+  resources action switches tabs). The Pilot test asserts the action's effect directly (a
+  plain-`r` keypress legitimately depends on focus).
+- **Docs:** `docs/cli.md` (`ui` Resources view + `r` key + `[tui]` extra note), `CHANGELOG.md`.
+- **Validation:** full suite **840 passed / 2 skipped / 1 failed** on py3.11.8 — the failure is
+  the known SIGPIPE flake; the 2 skips are PID-liveness (TUI tests ran). Core `import pubrun`
+  unaffected (textual imported only by `pubrun ui`).
+
+### Deferred (unchanged)
+
+Live/streaming graphs for RUNNING runs (Med-High complexity) remain out of scope — post-hoc
+digest ships now; live streaming is a separate IPD if wanted.
+
 ## Plan-review record (2026-07-07)
 
 Reviewed via `plan-review`. Verified the TUI is a small optional-extra app (`tui/app.py`, ~110

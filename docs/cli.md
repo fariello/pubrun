@@ -615,7 +615,9 @@ For running processes, the inspect view also shows live RSS memory and CPU usage
 
 ### `ui` — Interactive Dashboard
 
-Launches the terminal user interface (TUI) dashboard to browse, inspect, and manage run records interactively.
+Launches the terminal user interface (TUI) dashboard to browse, inspect, and manage run records interactively. Tabs include Run Details, Console Logs, **Resources** (CPU/memory usage), Semantic Diff, Actions, and Settings.
+
+Requires the optional TUI extra: `pip install "pubrun[tui]"`.
 
 ```bash
 pubrun ui [--dir PATH]
@@ -628,6 +630,11 @@ pubrun ui [--dir PATH]
 | Flag | Description |
 |---|---|
 | `--dir PATH` | Override the directory containing the runs (default: configured `output_dir` or `./runs`) |
+
+**Resources view:** selecting a run populates a **Resources** tab showing peak/avg/min for
+CPU and memory (main process, and the process tree when captured) plus a compact sparkline of
+each over the run's lifecycle — the same per-sample data `pubrun res` uses. Press `r` to jump
+to it. Runs with no resource samples (very short runs, or capture off) show a clear message.
 
 **Example:**
 ```bash

@@ -71,6 +71,58 @@ def _series_stats(values):
         return None
     return (max(values), sum(values) / len(values), min(values))
 
+
+def _sparkline(values, width: int = 40) -> str:
+    """A tiny unicode sparkline for a numeric series (no color, no deps). Empty -> ''."""
+    if not values:
+        return ""
+    bars = "▁▂▃▄▅▆▇█"
+    lo = min(values)
+    hi = max(values)
+    span = (hi - lo) or 1.0
+    # Downsample to width by simple bucketed max (keeps spikes visible).
+    n = len(values)
+    if n > width:
+        step = n / width
+        sampled = [max(values[int(i * step):int((i + 1) * step)] or [values[min(int(i * step), n - 1)]])
+                   for i in range(width)]
+    else:
+        sampled = values
+    return "".join(bars[min(len(bars) - 1, int((v - lo) / span * (len(bars) - 1)))] for v in sampled)
+
+
+def format_resource_digest(series, width: int = 40) -> str:
+    """Plain-text resource digest (summary lines + sparklines) for a run's per-sample series.
+
+    ``series`` is the dict returned by :func:`read_resource_series`. Returns a multi-line
+    string with peak/avg/min + a sparkline for each captured metric (main RSS/CPU and, when
+    present, tree RSS/CPU). Used by the TUI resource view; pure, no textual/ANSI dependency,
+    so it is unit-testable. Returns a clear message when there are no samples.
+    """
+    if not series or not series.get("timestamps"):
+        return "No resource samples recorded for this run."
+
+    def _mb(n):
+        return f"{n / (1024**2):.1f} MB" if n < 1024**3 else f"{n / (1024**3):.2f} GB"
+
+    lines = []
+
+    def _row(title, values, fmt, unit=""):
+        st = _series_stats(values)
+        if not st:
+            return
+        pk, avg, mn = st
+        lines.append(f"{title:<12} peak {fmt(pk)}{unit} / avg {fmt(avg)}{unit} / min {fmt(mn)}{unit}")
+        spark = _sparkline(values, width)
+        if spark:
+            lines.append(f"             {spark}")
+
+    _row("RSS (main)", series.get("rss", []), _mb)
+    _row("CPU (main)", series.get("cpu", []), lambda v: f"{v:.1f}", "%")
+    _row("RSS (tree)", series.get("tree_rss", []), _mb)
+    _row("CPU (tree)", series.get("tree_cpu", []), lambda v: f"{v:.1f}", "%")
+    return "\n".join(lines) if lines else "No resource samples recorded for this run."
+
 def _supports_unicode(stream) -> bool:
     try:
         "┌".encode(getattr(stream, "encoding", "utf-8") or "utf-8")
