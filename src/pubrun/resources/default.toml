@@ -395,19 +395,47 @@ meta_ref_allowed_dirs = []
 # Semantic diff engine (pubrun diff).
 # -----------------------------------------------------------------------------
 
-# Keys excluded at each depth level to reduce noise.
-ignore_basic = [
-    "timing", "run", "process", "hardware", "resources", "capture", "environment",
-    "*_utc", "*_utc.*"
-]
-
+# Keys excluded at each depth level to reduce noise. The levels are nested by intent:
+# basic hides the MOST (a short, human-scannable summary of meaningful differences),
+# standard hides less, and deep hides nothing. `basic` therefore extends `standard`.
+#
+# Volatile / always-different fields shared by every level (run ids, PIDs, timestamps,
+# absolute run/tmp paths that differ every run — pure noise in a diff):
 ignore_standard = [
-    "timing", "run.run_id", "process.pid", "hardware.memory_total_bytes",
+    "timing", "run.run_id", "process.pid", "process.ppid",
+    "hardware.memory_total_bytes",
     "resources.end_rss_bytes", "resources.peak_cpu_percent", "resources.peak_rss_bytes",
-    "process.ppid", "invocation.script.size", "invocation.script.path", "capture.run_dir",
+    "invocation.script.size", "invocation.script.path",
+    "capture.run_dir",
+    # Absolute per-run paths (differ every run; the fstype/is_network signal is kept).
+    "filesystem.run_dir.path", "filesystem.run_dir.mount_point",
+    "filesystem.tmpdir.path", "filesystem.tmpdir.mount_point",
+    "filesystem.results_dir.path", "filesystem.pubrun_install.path",
     "pubrun_imports.selected_at_utc", "pubrun_imports.requests.*.timestamp_utc",
     "pubrun_imports.requests.*.caller.line_number",
     "*_utc", "*_utc.*"
+]
+
+# `basic` = everything `standard` hides PLUS the high-volume, low-signal sections. At basic
+# the question is "did the SCRIPT / ENVIRONMENT / user-facing config change?", not "list every
+# child process and package". Subprocess and package LISTS are summarized (count + identities)
+# at standard rather than diffed element-by-element (see the diff engine); at basic they are
+# hidden entirely. `invocation.command_line`/`rerun_command` are DERIVED from `invocation.argv`
+# and collapsed when argv is present (engine-side), so a single argv change is reported once.
+ignore_basic = [
+    "timing", "run.run_id", "process.pid", "process.ppid",
+    "hardware.memory_total_bytes",
+    "resources.end_rss_bytes", "resources.peak_cpu_percent", "resources.peak_rss_bytes",
+    "invocation.script.size", "invocation.script.path",
+    "capture.run_dir",
+    "filesystem.run_dir.path", "filesystem.run_dir.mount_point",
+    "filesystem.tmpdir.path", "filesystem.tmpdir.mount_point",
+    "filesystem.results_dir.path", "filesystem.pubrun_install.path",
+    "pubrun_imports.selected_at_utc", "pubrun_imports.requests.*.timestamp_utc",
+    "pubrun_imports.requests.*.caller.line_number",
+    "*_utc", "*_utc.*",
+    # Basic-only: hide the noisy full sections; standard summarizes, deep shows all.
+    "process", "hardware", "resources", "environment", "subprocesses", "packages",
 ]
 
 ignore_deep = []

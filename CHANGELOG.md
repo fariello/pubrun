@@ -9,6 +9,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **`pubrun diff --basic`/`--standard` are now genuinely concise.** Previously `--basic` could
+  explode a subprocess-heavy run pair into 11,000+ lines and surfaced per-run volatile fields
+  (`filesystem.run_dir.path`) and derived duplicates (`invocation.command_line` /
+  `rerun_command`, both derived from `argv`). Now: `--basic` shows only high-signal, user-facing
+  differences (script/argv, packages, python, git, config) and hides the high-volume sections;
+  `--standard` **summarizes** list sections (e.g. `subprocesses.count: 300 → 302`,
+  `subprocesses.by_command.bash: +2`) instead of diffing every element; a single `argv` change
+  is reported once (the derived `command_line`/`rerun_command` appear only at `--deep`).
+  **`--deep` output is unchanged** (full element-by-element detail). New `pubrun diff --table`
+  renders a compact aligned `change / field / A → B` table (the git-style `+/-/~` inline output
+  remains the default). Also fixed a stale doc claim that `--basic` was the default (it is
+  `--standard`).
 - **Normalized CLI output prefixes + alphabetized the `-h` command list.** All pubrun status
   lines now use a consistent, accessible vocabulary — `[INFO ]` (green), `[ OK  ]` (green),
   `[WARN ]` (yellow), `[ERROR]` (red), `[DEBUG]` (light blue, silent unless `PUBRUN_DEBUG`),

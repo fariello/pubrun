@@ -104,13 +104,13 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int
                 removed_set = set(mod.get("removed", []))
                 val_a = mod.get("old", [])
                 val_b = mod.get("new", [])
-                
+
                 common_a = [x for x in val_a if x in val_b]
                 common_b = [x for x in val_b if x in val_a]
-                
+
                 old_repr = _format_array_diff(val_a, False, added_set, removed_set, common_a, common_b, use_color)
                 new_repr = _format_array_diff(val_b, True, added_set, removed_set, common_a, common_b, use_color)
-                
+
                 print(f"    {grn}+{rst} {_fmt(new_repr, max_length, wrap)}")
                 print(f"    {red}-{rst} {_fmt(old_repr, max_length, wrap)}")
             else:
@@ -135,7 +135,69 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int
             print(f"{dim}= {k}: {_fmt(v, max_length, wrap)}{rst}")
 
 
-def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool = False, max_length: int = 300, depth: str = "basic") -> None:
+def _summarize_change(mod: Dict[str, Any], max_length: int) -> str:
+    """One-cell 'A -> B' summary of a modified entry for the table view."""
+    t = mod.get("type")
+    if t == "path_split":
+        added = mod.get("added", [])
+        removed = mod.get("removed", [])
+        bits = []
+        if added:
+            bits.append(f"+{len(added)}")
+        if removed:
+            bits.append(f"-{len(removed)}")
+        return f"PATH {' '.join(bits)}" if bits else "PATH changed"
+    if t == "list_diff":
+        added = mod.get("added", [])
+        removed = mod.get("removed", [])
+        parts = []
+        if added:
+            parts.append(f"+{len(added)}")
+        if removed:
+            parts.append(f"-{len(removed)}")
+        if mod.get("order_changed"):
+            parts.append("reordered")
+        return f"list [{', '.join(parts)}]" if parts else "list changed"
+    old = str(mod.get("old", ""))
+    new = str(mod.get("new", ""))
+    cell = f"{old}  ->  {new}"
+    if len(cell) > max_length:
+        cell = cell[:max_length] + " ..."
+    return cell
+
+
+def _render_table(diff_report: Dict[str, Any], use_color: bool, max_length: int = 300) -> None:
+    """Aligned two-column table view: 'change | field | A -> B'. Opt-in (--table)."""
+    grn = Colors.GREEN if use_color else ""
+    red = Colors.RED if use_color else ""
+    yel = Colors.YELLOW if use_color else ""
+    bold = Colors.BOLD if use_color else ""
+    rst = Colors.RESET if use_color else ""
+
+    rows = []  # (mark, color, key, detail)
+    for k, v in sorted(diff_report.get("added", {}).items()):
+        rows.append(("+", grn, k, str(v)))
+    for k, v in sorted(diff_report.get("removed", {}).items()):
+        rows.append(("-", red, k, str(v)))
+    for k, mod in sorted(diff_report.get("modified", {}).items()):
+        rows.append(("~", yel, k, _summarize_change(mod, max_length)))
+
+    print("--- Pubrun Diagnostic Difference ---")
+    if not rows:
+        print("(no differences)")
+        return
+
+    # Column widths (based on the uncolored text), capped so a huge key can't blow out.
+    key_w = min(48, max(len("Field"), max(len(k) for _, _, k, _ in rows)))
+    print(f"{bold}{'':1}  {'Field'.ljust(key_w)}  Change{rst}")
+    print(f"{'-' * (key_w + 12)}")
+    for mark, color, k, detail in rows:
+        key_disp = k if len(k) <= key_w else k[: key_w - 1] + "\u2026"
+        detail = detail.replace("\n", " ")
+        print(f"{color}{mark}{rst}  {key_disp.ljust(key_w)}  {color}{detail}{rst}")
+
+
+def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool = False, max_length: int = 300, depth: str = "basic", table: bool = False) -> None:
     """Render a diff report to stdout using ANSI-colored text.
 
     Args:
@@ -144,6 +206,11 @@ def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool =
         wrap: Allow long values to wrap naturally instead of truncating.
         max_length: Max characters before truncation (ignored when wrap=True).
         depth: The diff depth level ("basic", "standard", or "deep").
+        table: If True, render the compact aligned table view instead of the
+            default git-style ``+/-/~`` inline output.
     """
     has_colors = _has_color(no_color)
-    _render_inline(diff_report, has_colors, max_length=max_length, wrap=wrap, depth=depth)
+    if table:
+        _render_table(diff_report, has_colors, max_length=max_length)
+    else:
+        _render_inline(diff_report, has_colors, max_length=max_length, wrap=wrap, depth=depth)
