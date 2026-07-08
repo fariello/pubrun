@@ -1,0 +1,12 @@
+id,severity,remediation_risk,remediation_risk_axis,persona,area,finding,evidence,proposed_action,disposition
+D1,Medium,Low,n/a,engineer,Accuracy,"bench --passes help says (default 2) but effective default tier is 3 passes",__main__ bench --passes help vs harness.py:57 default (30,3),Fix help string to not claim default 2,propose
+D2,Medium,Low,n/a,engineer,Accuracy,"CHANGELOG claims pubrun bench --no-baseline; flag is harness-only not on front-end",CHANGELOG bench bullet vs bench -h; harness.py:524,Expose --no-baseline on bench OR correct CHANGELOG (Open Q1),propose
+D3,High,Low,n/a,novice/engineer,Accuracy,"README self-check missing --quiet/--json/-v and itemized-by-default behavior",README self-check section vs self-check -h; commit e1eafe7,Update README self-check entry,propose
+D4,Medium,Low,n/a,novice/engineer,Accuracy,"README diff omits --table and concise --basic/--standard behavior",README diff section vs diff -h; commit a262232,Update README diff entry,propose
+D5,Medium,Low,n/a,novice/engineer,Accuracy,"README bench omits --rigorous tier + baseline pass",README bench section vs bench -h; commit fb86e84,Update README bench entry,propose
+D6,Medium,Low,n/a,novice/engineer,Completeness,"Recency-index run selector not documented in README",README vs docs/cli.md:25-43; commit 4cd956a,Add recency-selector note to README,propose
+D7,Medium,Low,n/a,engineer,Completeness,"cli.md res/cpu/mem omit --average (+ -l/--last, run filters)",res/cpu/mem -h vs docs/cli.md res/cpu/mem sections,Document --average/-l/filters in cli.md,propose
+D8,Low,Low,n/a,engineer,Accuracy,"configuration.md [diff] ignore lists shown as stale ... placeholders (rebuilt a262232)",configuration.md [diff] vs default.toml ignore_basic/ignore_standard,Show current [diff] defaults (or accurate prose),propose
+D9,Low,Low,n/a,novice,Accuracy,"README res predates peak/avg/min + tree CPU",README res entry vs cli.md; commit 0da1ee5,Refresh README res line,propose
+D10,Low,Low,n/a,novice,Completeness,"README omits normalized output-prefix scheme",README vs docs/cli.md Output conventions,Add one-line pointer in README,propose
+D11,Low,Low,n/a,engineer,Consistency,"cli.md status column list omits new # recency column",docs/cli.md status section vs status -h,Add # column to status section,propose
