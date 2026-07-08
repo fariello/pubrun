@@ -505,3 +505,56 @@ class TestSchema4RawTimings:
         assert py["environment_kind"] == "venv"  # non-identifying -> survives
         assert py["in_venv"] is True and py["sys_path_len"] == 12
         assert py["prefix"] == "<redacted>"  # the path is still masked
+
+
+# ------------------------------------------------- IPD-G: benchmark passes (2026-07-07)
+
+class TestBenchTiers:
+    """Tier presets, uncaptured baseline pass, and total wall-time (schema/4)."""
+
+    def test_tier_presets(self):
+        h = _load_harness()
+        assert h._TIERS["quick"] == (15, 2)
+        assert h._TIERS["default"] == (30, 3)
+        assert h._TIERS["rigorous"] == (50, 5)
+
+    def test_run_records_mode_baseline_and_wall_time(self, tmp_path):
+        h = _load_harness()
+        out = tmp_path / "b.json"
+        # tiny run (1 iter, 1 pass) so it's fast; still exercises baseline + wall-time.
+        result = h.run(1, out, passes=1, mode="default", baseline_pass=True)
+        assert result["mode"] == "default"
+        assert result["passes"] == 1 and result["iterations"] == 1
+        assert result["baseline_pass"] is True
+        assert "total_wall_time_s" in result and result["total_wall_time_s"] >= 0
+        # The uncaptured baseline pass is present and separate from measured passes.
+        assert "baseline" in result
+        assert result["baseline"]["uncaptured"] is True
+        assert result["baseline"]["pass"] == 0
+        bscen = result["baseline"]["scenarios"]
+        assert bscen, "baseline pass should have scenario entries"
+        # Every baseline scenario is marked uncaptured (mode='baseline').
+        for entry in bscen.values():
+            assert entry.get("mode") == "baseline"
+        assert len(result["pass_results"]) == 1  # 1 measured pass
+
+    def test_no_baseline_flag(self, tmp_path):
+        h = _load_harness()
+        result = h.run(1, tmp_path / "nb.json", passes=1, baseline_pass=False)
+        assert result["baseline_pass"] is False
+        assert "baseline" not in result
+
+    def test_aggregate_ignores_baseline_pass(self, tmp_path):
+        # aggregate.build_rows reads only top-level "scenarios"; the baseline pass must not
+        # break it or leak into the overhead rows.
+        h = _load_harness()
+        result = h.run(1, tmp_path / "agg.json", passes=1, baseline_pass=True)
+        import importlib.util
+        ap = _REPO / "benchmarks" / "aggregate.py"
+        spec = importlib.util.spec_from_file_location("_bench_aggregate", ap)
+        agg = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = agg
+        spec.loader.exec_module(agg)
+        rows = agg.build_rows([result])  # must not raise
+        # No row should reference the baseline PASS (rows are per real scenario only).
+        assert all(r.get("scenario") != "baseline" for r in rows)

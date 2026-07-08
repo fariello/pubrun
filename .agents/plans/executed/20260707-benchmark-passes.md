@@ -104,6 +104,43 @@ its meaning is a small breaking-ish CLI nuance to settle at plan-review.
 Proposal only; human-approved before execution; not auto-run. Recommended: `plan-review`.
 On completion move to `.agents/plans/executed/`.
 
+## Execution record (2026-07-07)
+
+Executed by opencode after human approval (IPD-G, seventh and last of the batch; after
+B/A/C/D/E/F).
+
+- **Uncaptured baseline pass (`harness.py`):** new `_run_baseline_pass()` runs every scenario's
+  workload directly (no pubrun import) as a cache-warming + pubrun-absent reference. `run()`
+  runs it first (unless `--no-baseline`) and stores it SEPARATELY under `result["baseline"]`
+  (`{pass:0, uncaptured:true, pass_env, scenarios}`, each scenario `mode:"baseline"`), so it
+  never mixes into the measured pass_results / overhead stats.
+- **Tiers (`_TIERS` + `main()`):** `--quick` = baseline + 2×15, default/`--full` = baseline +
+  3×30, `--rigorous` = baseline + 5×50 (mutually exclusive). `--iterations`/`--passes` override
+  and flip `mode` to `"custom"`. `--full` stays the default's clarity alias (NOT the heavy
+  mode). Result JSON records `mode` and `baseline_pass`.
+- **Total wall-time:** `result["total_wall_time_s"]` = whole-invocation wall time
+  (harness start → end), distinct from summed per-iteration timings.
+- **`pubrun bench --rigorous`:** added to the speed mutex group; threaded through `_run_bench`
+  (both the Slurm-submit `extra` and the local `argv` builders) as `--rigorous`.
+- **P9 verified:** `aggregate.py` reads only top-level `result["scenarios"]` (the warmest
+  measured pass) — it never touches `result["baseline"]`, so the new pass is ignored by
+  aggregation. A test drives `aggregate.build_rows` on a real result and asserts no baseline row.
+- **Tests (`tests/test_bench_command.py::TestBenchTiers`, +4):** tier presets; `run()` records
+  mode/baseline/wall-time + separate uncaptured baseline pass; `--no-baseline`; aggregate
+  ignores the baseline pass.
+- **Docs:** `docs/cli.md` (`bench` tier table + baseline/wall-time note), `benchmarks/README.md`
+  (tier commands + interpreting the baseline pass + wall-time/mode). `CHANGELOG.md`.
+- **Validation:** full suite **844 passed / 2 skipped / 1 failed** on py3.11.8 — the failure is
+  the known SIGPIPE flake. Smoke-tested a real `--iterations 1 --passes 1` run: baseline pass
+  present + uncaptured, `mode=custom`, `total_wall_time_s` recorded.
+
+### Follow-up (out-of-repo)
+
+The public `pubrun-benchmarks` repo is not cloned on this workstation, so its README's
+"what's in a result" section was NOT updated for schema/4's `mode`/`baseline`/`total_wall_time_s`
+(and the earlier raw-timings/env-kind additions). Update it when that repo is next available
+(operator step; grep the result-shape description).
+
 ## Plan-review record (2026-07-07)
 
 Reviewed via `plan-review`. Verified `FULL_ITERATIONS=30`/`QUICK_ITERATIONS=8` + `--passes 2`

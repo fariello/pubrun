@@ -28,9 +28,11 @@ Collect data (no extra dependencies needed):
 
 ```bash
 pip install -e .                 # pubrun itself (zero runtime deps on 3.11+)
-python benchmarks/harness.py --quick     # fast smoke run (2 passes x 8 iterations)
-python benchmarks/harness.py             # full run (2 passes x 30 iterations)
-python benchmarks/harness.py --passes 1  # single pass (skip cache-warming)
+python benchmarks/harness.py --quick     # baseline + 2 passes x 15 iterations
+python benchmarks/harness.py             # default: baseline + 3 passes x 30 iterations
+python benchmarks/harness.py --rigorous  # baseline + 5 passes x 50 iterations (long)
+python benchmarks/harness.py --iterations 1 --passes 1   # tiny custom run
+python benchmarks/harness.py --no-baseline               # skip the baseline pass
 ```
 
 Each run writes `results/<hostname>-<timestamp>.json`.
@@ -149,11 +151,17 @@ Advanced / manual:
   per iteration (so import/startup cost is real, not warm-cached). The reported
   statistic is the **median** (plus p95 and stdev); the first iteration of each
   pass is a discarded warmup.
-- The full sweep runs **twice by default** (`--passes 2`). Both passes are
-  recorded under `pass_results` in the JSON so you can see whether startup /
-  filesystem caching mattered (compare `pass 1` vs `pass 2`). The top-level
-  `scenarios` key mirrors the **last (warmest) pass**, which `aggregate.py`/
-  `plot.py` use.
+- Every run starts with **one uncaptured baseline pass** (pubrun absent) that warms
+  caches and records the cost floor. It is stored separately under `result["baseline"]`
+  (with `uncaptured: true`) and is NEVER mixed into the pubrun-overhead stats.
+- The measured sweep then runs **N times** per the tier (`--quick` = 2, default = 3,
+  `--rigorous` = 5; `--passes` overrides). All measured passes are recorded under
+  `pass_results` so you can see whether startup / filesystem caching mattered (compare
+  `pass 1` vs `pass N`). The top-level `scenarios` key mirrors the **last (warmest) pass**,
+  which `aggregate.py`/`plot.py` use.
+- `result["total_wall_time_s"]` is the whole-invocation wall time (harness start → end),
+  distinct from the summed per-iteration timings. `result["mode"]` records the tier
+  (`quick`/`default`/`rigorous`/`custom`).
 - **Schema `pubrun-benchmark/4`** adds cross-machine context + raw data so results
   are comparable across systems and re-analysable later:
   - Each scenario entry carries **`timings`** — the raw per-iteration wall times in
