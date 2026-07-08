@@ -212,21 +212,80 @@ def one_run(tmp_path):
     return tmp_path
 
 
+class TestLiveChecksModel:
+    """IPD-D: live_checks() reports every logical check (incl. the passing ones)."""
+
+    def test_returns_checks_and_findings(self):
+        check_list, findings = checks.live_checks()
+        assert isinstance(check_list, list) and isinstance(findings, list)
+        assert check_list, "expected a non-empty catalog of checks"
+        for c in check_list:
+            assert set(c) >= {"name", "label", "status", "detail"}
+            assert c["status"] in ("ok", "warn", "info")
+        # A check reported as warn/info must carry a detail message (from its finding).
+        for c in check_list:
+            if c["status"] != "ok":
+                assert c["detail"]
+
+    def test_findings_unchanged_by_live_checks(self):
+        # live_checks() must return the SAME findings live_findings() would (strict keys on it).
+        _, findings = checks.live_checks()
+        from pubrun.report.checks import live_findings
+        assert [f["code"] for f in findings] == [f["code"] for f in live_findings()]
+
+
 class TestSelfCheckCLI:
     def test_self_check_runs_exit_zero_by_default(self):
         res = run_pubrun("self-check")
         assert res.returncode == 0
         assert "self-check" in res.stdout.lower()
 
-    def test_self_check_json_well_formed(self):
+    def test_itemized_default_shows_per_check_and_timing(self):
+        # Default (no flags) itemizes each check and prints a timing footer.
+        res = run_pubrun("self-check", env={"NO_COLOR": "1"})
+        assert res.returncode == 0
+        # one line per check with a canonical prefix
+        assert "[ OK  ]" in res.stdout or "[WARN ]" in res.stdout
+        assert "checks in" in res.stdout and "s —" in res.stdout  # "N checks in 0.01s — ..."
+
+    def test_quiet_is_one_liner(self):
+        res = run_pubrun("self-check", "--quiet", env={"NO_COLOR": "1"})
+        assert res.returncode == 0
+        # terse verdict, NOT the itemized per-check list
+        assert "checks in" not in res.stdout
+        assert "self-check" in res.stdout.lower()
+
+    def test_json_includes_checks_and_elapsed(self):
         res = run_pubrun("self-check", "--json")
         assert res.returncode == 0
-        json.loads(res.stdout)  # must parse
+        data = json.loads(res.stdout)
+        assert "checks" in data and "findings" in data and "elapsed_seconds" in data
+        assert isinstance(data["checks"], list) and data["checks"]
 
-    def test_self_check_help_no_color_marker(self):
+    def test_help_no_color_marker(self):
         # NO_COLOR must be respected (no ANSI escape in output).
         res = run_pubrun("self-check", env={"NO_COLOR": "1"})
         assert "\033[" not in res.stdout
+
+
+class TestMetaVerbose:
+    """IPD-D: meta itemizes each gathered section + outcome + total time; JSON still written."""
+
+    def test_meta_itemizes_and_writes_json(self, tmp_path):
+        out = tmp_path / "meta.json"
+        res = run_pubrun("meta", "--out", str(out), env={"NO_COLOR": "1"}, cwd=str(tmp_path))
+        assert res.returncode == 0
+        # per-section outcomes + total-time footer
+        assert "[ OK  ] hardware:" in res.stdout
+        assert "[ OK  ] python:" in res.stdout
+        assert "packages:" in res.stdout
+        assert "environment sections in" in res.stdout
+        # JSON source-of-truth still written
+        assert out.exists()
+        data = json.loads(out.read_text())
+        assert data["manifest_type"] == "pubrun-meta-snapshot"
+        for sec in ("hardware", "python", "packages", "git", "environment", "host"):
+            assert sec in data
 
 
 class TestInspectCLI:

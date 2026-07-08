@@ -771,16 +771,55 @@ def _emit_findings(findings: list, *, show_suggestions: bool, as_json: bool, hea
             print(f"      -> {sugg}")
 
 
-def _run_self_check(show_suggestions: bool, as_json: bool, strict: bool) -> None:
-    """Check the CURRENT machine for performance/config pitfalls + install health."""
+def _run_self_check(show_suggestions: bool, as_json: bool, strict: bool, quiet: bool = False) -> None:
+    """Check the CURRENT machine for performance/config pitfalls + install health.
+
+    Default: itemized — one line per check (with its OK/WARN/INFO outcome) plus a total-time
+    footer, so it is transparent WHAT was checked and how each did. ``--quiet`` restores the
+    old one-line verdict; ``--show-suggestions`` adds remediation detail; ``--json`` emits the
+    full structured result (checks + findings). ``--strict`` still exits non-zero on any WARN.
+    """
     try:
-        from pubrun.report.checks import live_findings
-        findings = live_findings()
+        from pubrun.report.checks import live_checks
+        t0 = time.perf_counter()
+        checks, findings = live_checks()
+        elapsed = time.perf_counter() - t0
     except Exception as e:
         _print_error(f"self-check failed: {e}")
         sys.exit(1)
-    _emit_findings(findings, show_suggestions=show_suggestions, as_json=as_json,
-                   header="pubrun self-check")
+
+    if as_json:
+        print(json.dumps({"checks": checks, "findings": findings,
+                          "elapsed_seconds": round(elapsed, 3)}, indent=2))
+    elif quiet:
+        # Terse one-liner (the pre-1.4.0 default; kept for scripts/CI).
+        _emit_findings(findings, show_suggestions=show_suggestions, as_json=False,
+                       header="pubrun self-check")
+    else:
+        # Itemized: one line per check + total-time footer.
+        use_color = not os.environ.get("NO_COLOR", "") and sys.stdout.isatty()
+        _level_for = {"ok": "ok", "warn": "warn", "info": "info"}
+        for c in checks:
+            lvl = _level_for.get(c.get("status", "ok"), "info")
+            label_txt, color = _out._LEVELS[lvl]
+            marker = f"\033[{color}m[{label_txt}]\033[0m" if use_color else f"[{label_txt}]"
+            detail = c.get("detail") or ""
+            line = f"  {marker} {c.get('label', c.get('name', ''))}"
+            if detail and c.get("status") != "ok":
+                line += f" — {detail}"
+            print(line)
+            if show_suggestions and c.get("status") != "ok":
+                # Pull the suggestion from the matching finding, if any.
+                for f in findings:
+                    if f.get("message") == detail and f.get("suggestion"):
+                        print(f"      -> {f['suggestion']}")
+                        break
+        warns = sum(1 for c in checks if c.get("status") == "warn")
+        summary = "all clear" if warns == 0 else f"{warns} concern(s)"
+        print(f"\npubrun self-check: {len(checks)} checks in {elapsed:.2f}s — {summary}.")
+        if warns and not show_suggestions:
+            print("Run with --show-suggestions for how to address each concern.")
+
     if strict and any(f.get("severity") == "warn" for f in findings):
         sys.exit(1)
 
@@ -1973,6 +2012,7 @@ def main() -> None:
     selfcheck_parser.add_argument("--show-suggestions", "-v", action="store_true", help="Show per-item detail and how to address each concern.")
     selfcheck_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit findings as JSON (always full detail).")
     selfcheck_parser.add_argument("--strict", action="store_true", help="Exit non-zero if any warning fired (useful in CI / HPC job pre-checks).")
+    selfcheck_parser.add_argument("--quiet", "-q", action="store_true", help="Print only a one-line verdict instead of the itemized per-check output.")
 
     # ---------------- Inspect Subparser ----------------
     inspect_parser = subparsers.add_parser(
@@ -2399,6 +2439,7 @@ def main() -> None:
             getattr(args, "show_suggestions", False),
             getattr(args, "as_json", False),
             getattr(args, "strict", False),
+            quiet=getattr(args, "quiet", False),
         )
         executed = True
 
