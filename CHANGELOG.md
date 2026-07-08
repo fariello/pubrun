@@ -77,6 +77,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **Recency-index run selector.** Every command that takes a run (`show`/`report`,
+  `res`/`cpu`/`mem`, `methods`, `inspect`, `rerun`, `diff`, `status`) now accepts a bare
+  positive integer as a **recency index** — `1` = most recent run, `2` = second most recent,
+  and so on — in addition to the existing run-id/prefix and directory-path forms. `pubrun
+  status` shows the index in a leading `#` column. Resolution is additive (id-prefix and path
+  behavior are unchanged); a run id being a bare small integer is effectively impossible (ids
+  are timestamp+hash), and in the vanishing case one collided, pubrun refuses to guess and
+  points you at the full id / path.
 - **Verbose, transparent `self-check` and `meta`.** `pubrun self-check` is now **itemized by
   default**: one line per check with its `[ OK  ]`/`[WARN ]`/`[INFO ]` outcome (including the
   checks that PASSED) plus a `N checks in 0.0Xs` timing footer — instead of a bare one-line

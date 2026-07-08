@@ -22,6 +22,26 @@ dimmed, and all color is suppressed when `NO_COLOR` is set, `--no-color` is pass
 is not a terminal. If you parse pubrun output in a script, match on the level word (e.g.
 `WARN`), not the exact bracketing.
 
+### Selecting a run
+
+Every command that takes a run (`show`/`report`, `res`/`cpu`/`mem`, `methods`, `inspect`,
+`rerun`, `diff`, `status`) accepts the run argument in three interchangeable forms:
+
+| Form | Example | Meaning |
+|---|---|---|
+| **Recency index** | `pubrun show 1` | `1` = most recent run, `2` = second most recent, … (1-based). A bare positive integer (≤ 999). |
+| **Run id / prefix** | `pubrun show 8b9dc889` | The full run id or a unique leading prefix. |
+| **Directory path** | `pubrun show ./runs/pubrun-…` | A run directory (or its `manifest.json`). |
+
+The recency index counts within the current output directory (or the one given by `--dir`
+where that flag exists). `pubrun status` shows the index in its leading `#` column, so the
+number you see is the number you pass. Omitting the argument entirely selects the most recent
+matching run (equivalent to `1`).
+
+A run id being a bare small integer is effectively impossible (ids are timestamp+hash), so the
+recency index never collides in practice; in the vanishing case it would, pubrun refuses to
+guess and asks you to pass the full id or the directory path.
+
 ---
 
 ## Commands
