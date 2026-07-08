@@ -77,6 +77,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **Benchmark pass tiers + uncaptured baseline pass + total wall-time.** Every `pubrun bench`
+  run now begins with a **baseline (uncaptured) pass** — the workload run without pubrun — that
+  warms caches and records the pubrun-absent cost floor, stored separately so it never mixes
+  into overhead stats. Three tiers replace the old flat 2×30: `--quick` (baseline + 2×15),
+  `--full`/default (baseline + 3×30), and new `--rigorous` (baseline + 5×50, for tight
+  confidence intervals; can take many minutes). `--iterations`/`--passes` still override. The
+  result JSON now records `mode`, `baseline_pass`, the baseline sweep, and `total_wall_time_s`
+  (whole-invocation wall time). `--full` remains the default's clarity alias (not the heavy
+  mode). `--no-baseline` skips the baseline pass.
 - **TUI resource view (`pubrun ui`).** Selecting a run now populates a new **Resources** tab
   showing peak/avg/min for CPU and memory (main process, and the process tree when captured)
   plus a compact sparkline of each over the run's lifecycle — reusing the same per-sample data

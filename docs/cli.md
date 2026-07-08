@@ -195,17 +195,29 @@ after a local run, **offers to contribute it** to the public
 pip package (zero-footprint installs). Clone the repo and run from it.
 
 ```bash
-pubrun bench [--quick] [--iterations N] [--passes N] [--local | --submit] [-y|--yes] [--no-redact] [--json]
+pubrun bench [--quick | --full | --rigorous] [--iterations N] [--passes N] [--local | --submit] [-y|--yes] [--no-redact] [--json]
 pubrun bench --submit-file PATH [--submit-method {gh,http,print}] [--gh-repo O/N] [--gh-token TOKEN] [--print-submission]
 ```
+
+Every run begins with one **uncaptured baseline pass** (pubrun absent) that warms caches and
+records the cost floor, followed by N measured passes of M iterations. Three tiers:
+
+| Tier | Passes × iterations | Use |
+|---|---|---|
+| `--quick` | baseline + 2 × 15 | fast smoke check |
+| `--full` (default) | baseline + 3 × 30 | the standard run |
+| `--rigorous` | baseline + 5 × 50 | tight confidence intervals; can take many minutes |
+
+The result JSON records `mode`, `baseline_pass`, the baseline sweep (separately, so it never
+mixes into pubrun-overhead stats), and `total_wall_time_s` (whole-invocation wall time).
 
 **Options:**
 
 | Flag | Description |
 |---|---|
-| `--quick` | Fast smoke run (fewer iterations). |
-| `--iterations N` | Iterations per scenario. |
-| `--passes N` | Number of full scenario sweeps (default 2). |
+| `--quick` / `--full` / `--rigorous` | Select a tier (see table above; `--full` is the default). |
+| `--iterations N` | Override iterations per scenario (takes precedence over the tier). |
+| `--passes N` | Override the number of measured sweeps (takes precedence over the tier). |
 | `--local` | Run here even if an HPC scheduler is detected. |
 | `--submit` | On HPC: submit to the detected scheduler without prompting. Off HPC: contribute the result without prompting. |
 | `--scheduler {auto,slurm,pbs,lsf,sge,local}` | Which HPC scheduler to submit to (default `auto`). `local` forces a local run. Use to resolve the PBS-vs-SGE `qsub` ambiguity. |

@@ -47,6 +47,17 @@ import scenarios as _scenarios  # noqa: E402
 FULL_ITERATIONS = 30
 QUICK_ITERATIONS = 8
 
+# Tier presets: (iterations, measured passes). Every tier also runs one uncaptured baseline
+# pass first. --iterations/--passes override the preset.
+#   quick    = a fast smoke run       (2 x 15)
+#   default  = the standard run       (3 x 30)
+#   rigorous = tight-CI / overnight   (5 x 50)
+_TIERS = {
+    "quick": (15, 2),
+    "default": (30, 3),
+    "rigorous": (50, 5),
+}
+
 
 def _toml_dumps(data: dict) -> str:
     """Minimal TOML serializer for the nested config dicts we emit.
@@ -312,7 +323,46 @@ def _run_pass(pass_no: int, iterations: int, warmup: int, workdir: Path) -> dict
     return scenarios
 
 
-def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2) -> dict:
+def _run_baseline_pass(iterations: int, warmup: int, workdir: Path) -> dict:
+    """Run every scenario's workload WITHOUT pubrun active (a cache-warming + pubrun-absent
+    reference sweep). Recorded as the baseline pass (pass 0). Reuses the fresh-cwd + timing
+    machinery of a normal pass, forcing the direct-workload command for each scenario."""
+    scns = _scenarios.all_scenarios()
+    scenarios: dict = {}
+    for scn in scns:
+        skip = scn.skip_if() if scn.skip_if else None
+        if skip:
+            scenarios[scn.name] = {"group": scn.group, "mode": "baseline",
+                                   "workload": scn.workload, "skipped": skip}
+            continue
+        scn_cwd = workdir / "pass0" / scn.name
+        scn_cwd.mkdir(parents=True, exist_ok=True)
+        (scn_cwd / "runs").mkdir(exist_ok=True)
+        # Run the workload directly (no pubrun import), regardless of the scenario's mode.
+        workload_path = _HERE / "workloads" / scn.workload
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(_REPO_ROOT / "src")] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+        for k, v in getattr(scn, "env", {}).items():
+            env[k] = v
+        argv = [sys.executable, str(workload_path)]
+        samples: list[float] = []
+        failures = 0
+        for i in range(iterations + warmup):
+            dt = _time_once(argv, env, scn_cwd)
+            if dt is None:
+                failures += 1
+                continue
+            if i >= warmup:
+                samples.append(dt)
+        scenarios[scn.name] = {"group": scn.group, "mode": "baseline",
+                               "workload": scn.workload, "failures": failures,
+                               "timings": list(samples), **_stats(samples)}
+    return scenarios
+
+
+def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2,
+        mode: str = "default", baseline_pass: bool = True) -> dict:
     scns = _scenarios.all_scenarios()
     machine = _machine_metadata()
     # Enrich the machine block with filesystem type (the NFS signal) and Slurm context
@@ -321,12 +371,15 @@ def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2) -> di
     slurm = _slurm_context()
     if slurm:
         machine["slurm"] = slurm
+    _wall_start = time.perf_counter()
     result = {
         "schema": "pubrun-benchmark/4",
         "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "mode": mode,               # quick | default | rigorous | custom
         "iterations": iterations,
         "warmup": warmup,
         "passes": passes,
+        "baseline_pass": baseline_pass,
         "git_commit": _git_commit(),
         "machine": machine,
         # Each pass is the FULL scenario sweep, run in order. Recording every
@@ -338,11 +391,21 @@ def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2) -> di
         "pass_results": [],
     }
 
-    print(f"Running {passes} pass(es) x {len(scns)} scenarios x {iterations} "
-          f"iterations (+{warmup} warmup each) ...", file=sys.stderr)
+    print(f"Running {'baseline (uncaptured) + ' if baseline_pass else ''}{passes} pass(es) x "
+          f"{len(scns)} scenarios x {iterations} iterations (+{warmup} warmup each) ...",
+          file=sys.stderr)
 
     with tempfile.TemporaryDirectory(prefix="pubrun-bench-") as td:
         workdir = Path(td)
+        # Pass 0: an uncaptured baseline sweep (pubrun absent) — warms caches and records the
+        # "cost floor" without pubrun. Kept SEPARATE from the measured passes so aggregation
+        # never mixes it into pubrun-overhead stats.
+        if baseline_pass:
+            print("--- pass 0/baseline (uncaptured) ---", file=sys.stderr)
+            b_env = _pass_env()
+            b_scen = _run_baseline_pass(iterations, warmup, workdir)
+            result["baseline"] = {"pass": 0, "uncaptured": True, "pass_env": b_env,
+                                  "scenarios": b_scen}
         for pass_no in range(1, passes + 1):
             print(f"--- pass {pass_no}/{passes} ---", file=sys.stderr)
             pass_env = _pass_env()
@@ -353,6 +416,10 @@ def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2) -> di
     # backward-compatible with schema/1 consumers that read result["scenarios"]).
     if result["pass_results"]:
         result["scenarios"] = result["pass_results"][-1]["scenarios"]
+
+    # Total wall-time for the WHOLE benchmark invocation (harness start -> now), distinct from
+    # the summed per-iteration timings.
+    result["total_wall_time_s"] = round(time.perf_counter() - _wall_start, 3)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -448,21 +515,31 @@ def redact_result(result: dict):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="pubrun overhead benchmark harness")
-    ap.add_argument("--quick", action="store_true", help=f"Fast smoke run ({QUICK_ITERATIONS} iters).")
-    ap.add_argument("--iterations", type=int, default=None, help="Iterations per scenario.")
-    ap.add_argument("--passes", type=int, default=2,
-                    help="Number of full scenario sweeps to run (default 2, so "
-                         "startup/filesystem caching effects can level out; each "
-                         "pass is recorded so the difference is visible).")
+    tier = ap.add_mutually_exclusive_group()
+    tier.add_argument("--quick", action="store_true", help="Fast smoke run (2 passes x 15 iters).")
+    tier.add_argument("--rigorous", action="store_true", help="Tight-CI run (5 passes x 50 iters); long.")
+    ap.add_argument("--iterations", type=int, default=None, help="Override iterations per scenario.")
+    ap.add_argument("--passes", type=int, default=None,
+                    help="Override the number of measured scenario sweeps.")
+    ap.add_argument("--no-baseline", action="store_true",
+                    help="Skip the initial uncaptured baseline pass.")
     ap.add_argument("--out", type=str, default=None, help="Output JSON path.")
     ap.add_argument("--redacted-out", type=str, default=None,
                     help="Also write a redacted copy (safe to share publicly) to this path.")
     args = ap.parse_args()
 
-    iterations = args.iterations if args.iterations else (QUICK_ITERATIONS if args.quick else FULL_ITERATIONS)
-    passes = max(1, args.passes)
+    # Tier selection: quick / default / rigorous. Every tier runs 1 uncaptured baseline pass
+    # first (unless --no-baseline), then N measured passes of M iterations. --iterations /
+    # --passes override the tier's preset.
+    mode = "quick" if args.quick else ("rigorous" if args.rigorous else "default")
+    tier_iters, tier_passes = _TIERS[mode]
+    iterations = args.iterations if args.iterations else tier_iters
+    passes = max(1, args.passes) if args.passes else tier_passes
+    if args.iterations or args.passes:
+        mode = "custom"
     out_path = Path(args.out) if args.out else _default_out()
-    result = run(iterations, out_path, passes=passes)
+    result = run(iterations, out_path, passes=passes, mode=mode,
+                 baseline_pass=not args.no_baseline)
     if args.redacted_out:
         red_path = Path(args.redacted_out)
         red_path.parent.mkdir(parents=True, exist_ok=True)
