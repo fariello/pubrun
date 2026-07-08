@@ -77,6 +77,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the `noauto` docstring (the mode is `noconsole`).
 
 ### Added
+- **TUI resource view (`pubrun ui`).** Selecting a run now populates a new **Resources** tab
+  showing peak/avg/min for CPU and memory (main process, and the process tree when captured)
+  plus a compact sparkline of each over the run's lifecycle — reusing the same per-sample data
+  as `pubrun res`. Press `r` to jump to it; runs with no resource samples show a clear message.
+  (TUI is the optional `[tui]` extra — the core library gains no dependency.)
 - **Recency-index run selector.** Every command that takes a run (`show`/`report`,
   `res`/`cpu`/`mem`, `methods`, `inspect`, `rerun`, `diff`, `status`) now accepts a bare
   positive integer as a **recency index** — `1` = most recent run, `2` = second most recent,

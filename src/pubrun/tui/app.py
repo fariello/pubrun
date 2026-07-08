@@ -19,6 +19,7 @@ from .widgets.viewer import LogViewer
 from .widgets.diff import DiffView
 from .widgets.actions import ActionsPanel
 from .widgets.config import ConfigPanel
+from .widgets.resources import RunResourcesView
 
 class PubrunTUIApp(App):
     """The main interactive TUI manager application for pubrun."""
@@ -30,6 +31,7 @@ class PubrunTUIApp(App):
         Binding("ctrl+q", "quit", "Quit", show=True),
         Binding("ctrl+s", "toggle_sidebar", "Toggle Sidebar", show=True),
         Binding("ctrl+r", "refresh_all", "Refresh Data", show=True),
+        Binding("r", "show_resources", "Resources", show=True),
     ]
 
     class RefreshSidebar(Message):
@@ -54,6 +56,10 @@ class PubrunTUIApp(App):
                     # Tab 2: Console Logs
                     with TabPane("Console Logs", id="tab-logs"):
                         yield LogViewer(id="logs-view")
+
+                    # Tab: Resource usage (CPU / memory over the run)
+                    with TabPane("Resources", id="tab-resources"):
+                        yield RunResourcesView(id="resources-view")
                     
                     # Tab 3: Semantic Diff
                     with TabPane("Semantic Diff", id="tab-diff"):
@@ -78,6 +84,13 @@ class PubrunTUIApp(App):
         """Toggle the visibility of the sidebar navigation widget."""
         sidebar = self.query_one("#sidebar")
         sidebar.display = not sidebar.display
+
+    def action_show_resources(self) -> None:
+        """Jump to the Resources tab (CPU / memory usage) for the selected run."""
+        try:
+            self.query_one("#workspace-tabs", TabbedContent).active = "tab-resources"
+        except Exception:
+            pass
 
     def action_refresh_all(self) -> None:
         """Refresh the sidebar runs list and diff dropdown options."""
@@ -105,6 +118,9 @@ class PubrunTUIApp(App):
             
             # Update log viewer pane
             self.query_one("#logs-view", LogViewer).display_run_logs(r_info.run_dir)
-            
+
+            # Update resources pane (CPU / memory usage)
+            self.query_one("#resources-view", RunResourcesView).display_run(r_info)
+
             # Update actions pane
             self.query_one("#actions-view", ActionsPanel).display_run(r_info)
