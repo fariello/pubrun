@@ -1272,7 +1272,8 @@ def _print_share_guidance(results_path, redacted_path) -> None:
 
 def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact,
                submit_file=None, submit_method=None, gh_repo=None, gh_token=None,
-               print_submission=False, no_submit=False, scheduler="auto", rigorous=False) -> None:
+               print_submission=False, no_submit=False, scheduler="auto", rigorous=False,
+               no_baseline=False) -> None:
     """Friendly front-end over benchmarks/harness.py with optional HPC scheduler submission
     (Slurm/PBS/LSF/SGE) and consent-gated result submission to the public pubrun-benchmarks
     repo."""
@@ -1359,6 +1360,8 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact
             extra.append("--quick")
         elif rigorous:
             extra.append("--rigorous")
+        if no_baseline:
+            extra.append("--no-baseline")
         if iterations:
             extra += ["--iterations", str(int(iterations))]
         if passes:
@@ -1401,6 +1404,8 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact
         argv.append("--quick")
     elif rigorous:
         argv.append("--rigorous")
+    if no_baseline:
+        argv.append("--no-baseline")
     if iterations:
         argv += ["--iterations", str(int(iterations))]
     if passes:
@@ -2074,8 +2079,9 @@ def main() -> None:
     bench_speed.add_argument("--quick", action="store_true", help="Fast smoke run (baseline + 2 passes x 15 iterations).")
     bench_speed.add_argument("--full", action="store_true", help="Standard run (baseline + 3 passes x 30 iterations). This is the default; the flag is for clarity.")
     bench_speed.add_argument("--rigorous", action="store_true", help="Tight-CI run (baseline + 5 passes x 50 iterations); can take many minutes.")
+    bench_parser.add_argument("--no-baseline", action="store_true", help="Skip the initial uncaptured baseline pass (the pubrun-absent reference sweep).")
     bench_parser.add_argument("--iterations", type=int, default=None, help="Override iterations per scenario (takes precedence over --quick/--full).")
-    bench_parser.add_argument("--passes", type=int, default=None, help="Number of full scenario sweeps (default 2).")
+    bench_parser.add_argument("--passes", type=int, default=None, help="Override the number of measured scenario sweeps (default depends on the tier: quick=2, full=3, rigorous=5).")
     bench_group = bench_parser.add_mutually_exclusive_group()
     bench_group.add_argument("--local", action="store_true", help="Run here even if an HPC scheduler is detected.")
     bench_group.add_argument("--submit", action="store_true", help="Submit to the detected scheduler (no prompt); off HPC, contribute the result without prompting.")
@@ -2500,6 +2506,7 @@ def main() -> None:
             no_submit=getattr(args, "no_submit", False),
             scheduler=getattr(args, "scheduler", "auto"),
             rigorous=getattr(args, "rigorous", False),
+            no_baseline=getattr(args, "no_baseline", False),
         )
         executed = True
 

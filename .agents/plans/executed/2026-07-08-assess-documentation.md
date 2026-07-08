@@ -129,3 +129,38 @@ NOT auto-executed. Recommended next steps:
 2. On approval, execute the ordered changes, run the validation, and re-run
    `/assess documentation`.
 3. Only then move this IPD from `.agents/plans/pending/` to `.agents/plans/executed/`.
+
+## Execution record (2026-07-08)
+
+Executed by opencode after human approval (both open questions resolved: D2 = expose the flag;
+D8 = per-level prose). Validated on `~/venv/p3.11.8`.
+
+- **D1 (`src/pubrun/__main__.py`):** `bench --passes` help no longer says "(default 2)"; now
+  "Override the number of measured scenario sweeps (default depends on the tier: quick=2,
+  full=3, rigorous=5)."
+- **D2 (code, per decision):** added `--no-baseline` to the bench subparser; threaded
+  `no_baseline` through `_run_bench`; forwarded `--no-baseline` to the harness argv in BOTH the
+  local and Slurm-submit builders (like `--rigorous`); documented in `docs/cli.md`; +2 tests in
+  `tests/test_bench_command.py` (`TestBenchNoBaselineFlag`: forwarded when set, absent by
+  default). `bench -h` now shows `--no-baseline`.
+- **D3–D6, D9, D10 (`README.md`):** `self-check` (itemized default + `--quiet`/`--json`/`-v`/
+  `--strict`); `diff` (`--table`, `--standard` default + summarize); `bench` (baseline pass +
+  `--quick`/`--full`/`--rigorous` tiers); `res` (peak/avg/min + tree CPU); added a "Selecting a
+  run" note (recency index) and an "Output conventions" note (prefixes) to the CLI-Reference
+  intro; `status` example shows `status 1`.
+- **D7 (`docs/cli.md`):** `res`/`cpu`/`mem` now have a shared options table documenting
+  `--average`, `-l/--last`, `-w/--width`, and the standard run selectors.
+- **D8 (`docs/configuration.md`):** replaced the stale `[diff]` `...` placeholders with a
+  concise per-level prose description (basic ⊇ standard ⊇ deep; what each hides), pointing at
+  `default.toml` as the authoritative full list.
+- **D11 (`docs/cli.md`):** `status` column list now includes the leading `#` recency index.
+- **Validation:** `bench -h`/`self-check -h`/`diff -h` cross-checked against the docs; no
+  "default 2" remains; full suite **846 passed / 2 skipped / 1 failed** (the known SIGPIPE
+  flake). Re-ran `/assess documentation` conceptually via grep + `-h` — the 11 findings are
+  closed.
+
+### Deferred (unchanged)
+
+- The duplicate `## pubrun_imports` heading in `manifest.md` (pre-existing structural nit) is
+  left for a future general docs cleanup.
+- The external `pubrun-benchmarks` repo README is already current (schema/4) — no action.

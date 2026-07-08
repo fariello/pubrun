@@ -558,3 +558,42 @@ class TestBenchTiers:
         rows = agg.build_rows([result])  # must not raise
         # No row should reference the baseline PASS (rows are per real scenario only).
         assert all(r.get("scenario") != "baseline" for r in rows)
+
+
+class TestBenchNoBaselineFlag:
+    """IPD (assess-docs D2): `pubrun bench --no-baseline` forwards --no-baseline to the harness."""
+
+    def test_no_baseline_forwarded_to_harness_argv(self, tmp_path, monkeypatch):
+        import pubrun.__main__ as m
+        import subprocess as sp
+        captured = {}
+
+        class _Res:
+            returncode = 0
+
+        def _capture(argv, *a, **k):
+            captured["argv"] = argv
+            return _Res()
+        # Local path only (force --local so no scheduler submit); capture the harness argv.
+        monkeypatch.setattr(sp, "run", _capture)
+        # as_json avoids the interactive contribute path after the (stubbed) run.
+        m._run_bench(None, None, False, True, False, False, True, True,
+                     no_baseline=True)
+        assert "argv" in captured, "harness was not invoked"
+        assert "--no-baseline" in captured["argv"]
+
+    def test_no_baseline_absent_by_default(self, tmp_path, monkeypatch):
+        import pubrun.__main__ as m
+        import subprocess as sp
+        captured = {}
+
+        class _Res:
+            returncode = 0
+
+        def _capture(argv, *a, **k):
+            captured["argv"] = argv
+            return _Res()
+        monkeypatch.setattr(sp, "run", _capture)
+        m._run_bench(None, None, False, True, False, False, True, True,
+                     no_baseline=False)
+        assert "--no-baseline" not in captured.get("argv", [])

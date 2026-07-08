@@ -195,7 +195,7 @@ after a local run, **offers to contribute it** to the public
 pip package (zero-footprint installs). Clone the repo and run from it.
 
 ```bash
-pubrun bench [--quick | --full | --rigorous] [--iterations N] [--passes N] [--local | --submit] [-y|--yes] [--no-redact] [--json]
+pubrun bench [--quick | --full | --rigorous] [--no-baseline] [--iterations N] [--passes N] [--local | --submit] [-y|--yes] [--no-redact] [--json]
 pubrun bench --submit-file PATH [--submit-method {gh,http,print}] [--gh-repo O/N] [--gh-token TOKEN] [--print-submission]
 ```
 
@@ -216,6 +216,7 @@ mixes into pubrun-overhead stats), and `total_wall_time_s` (whole-invocation wal
 | Flag | Description |
 |---|---|
 | `--quick` / `--full` / `--rigorous` | Select a tier (see table above; `--full` is the default). |
+| `--no-baseline` | Skip the initial uncaptured baseline pass (the pubrun-absent reference sweep). |
 | `--iterations N` | Override iterations per scenario (takes precedence over the tier). |
 | `--passes N` | Override the number of measured sweeps (takes precedence over the tier). |
 | `--local` | Run here even if an HPC scheduler is detected. |
@@ -501,11 +502,21 @@ to the recorded peak:
   `/proc/self/io` (Linux).
 
 ```bash
-pubrun res [RUN_DIR] [-w WIDTH] [-l LAST] [--average]
+pubrun res [RUN_DIR] [--average] [-l LAST] [-w WIDTH] [run filters]
 ```
 
-- If `RUN_DIR` is omitted, automatically uses the most recent run in `./runs/`.
-- Parses resource_sample events from `events.jsonl` to render utilization timelines.
+**Options** (shared by `res`, `cpu`, and `mem`):
+
+| Flag | Description |
+|---|---|
+| `--average` | Plot average/mean values instead of the default per-bucket maximum. |
+| `-l`, `--last DURATION` | Only chart the last window of the run (e.g. `10m`, `2h`, `30s`). |
+| `-w`, `--width N` | Override the chart width in columns. |
+| `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code` | Standard run selectors (pick which run to chart when no `RUN_DIR` is given). |
+
+- `RUN_DIR` may be a recency index (`1` = most recent), an id prefix, or a path; if omitted,
+  the most recent matching run is used.
+- Parses `resource_sample` events from `events.jsonl` to render utilization timelines.
 - Older runs (before these fields were captured) simply show fewer lines — no error.
 
 The `cpu` and `mem` commands show a single focused chart; `res` shows the full picture.
@@ -521,20 +532,20 @@ pubrun mem -w 120             # Memory chart, custom width
 
 ### `cpu` — CPU Utilization Chart
 
-Renders the CPU utilization history for a run. Standalone shortcut for the CPU portion of `res`.
+Renders the CPU utilization history for a run. Standalone shortcut for the CPU portion of `res`; takes the same options (`--average`, `-l/--last`, `-w/--width`, and the standard run selectors).
 
 ```bash
-pubrun cpu [RUN_DIR] [-w WIDTH] [-l LAST] [--average]
+pubrun cpu [RUN_DIR] [--average] [-l LAST] [-w WIDTH] [run filters]
 ```
 
 ---
 
 ### `mem` — Memory Utilization Chart
 
-Renders the memory (RSS) utilization history for a run. Standalone shortcut for the memory portion of `res`.
+Renders the memory (RSS) utilization history for a run. Standalone shortcut for the memory portion of `res`; takes the same options (`--average`, `-l/--last`, `-w/--width`, and the standard run selectors).
 
 ```bash
-pubrun mem [RUN_DIR] [-w WIDTH] [-l LAST] [--average]
+pubrun mem [RUN_DIR] [--average] [-l LAST] [-w WIDTH] [run filters]
 ```
 
 ---
@@ -579,7 +590,7 @@ pubrun status [RUN_ID] [--dir PATH] [-v|--verbose] [--utc]
 
 | Usage | Description |
 |---|---|
-| `pubrun status` | Compact table listing all runs (ID, script, commit, started, status, exit code, elapsed) |
+| `pubrun status` | Compact table listing all runs (leading `#` recency index, ID, script, commit, started, status, exit code, elapsed) |
 | `pubrun status -v` | Verbose listing with PID, hostname, RSS, CPU, events, signals, and directory |
 | `pubrun status <run-id>` | Detailed inspection of a single run (supports prefix matching) |
 
