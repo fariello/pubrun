@@ -2,10 +2,11 @@
 
 - Date: 2026-07-08
 - Concern: documentation (accuracy-first)
-- Scope: whole project docs, emphasis on `README.md` CLI section, `docs/cli.md`,
-  `docs/configuration.md`, and `CHANGELOG.md`. Triggered by the doc-sync discipline in
-  `AGENTS.md` after the 7-IPD CLI/UX batch (commits `f7ed43c`, `a262232`, `0da1ee5`,
-  `e1eafe7`, `4cd956a`, `ac73c9a`, `fb86e84`).
+- Scope: primarily project docs (`README.md` CLI section, `docs/cli.md`,
+  `docs/configuration.md`, `CHANGELOG.md`), PLUS one small code change (D2, decided): expose
+  `--no-baseline` on `pubrun bench` so the CHANGELOG is truthful. Triggered by the doc-sync
+  discipline in `AGENTS.md` after the 7-IPD CLI/UX batch (commits `f7ed43c`, `a262232`,
+  `0da1ee5`, `e1eafe7`, `4cd956a`, `ac73c9a`, `fb86e84`).
 - Status: PENDING (awaiting human approval; not executed)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
@@ -60,7 +61,7 @@ then completeness/consistency (D7, D8, D10, D11).
 | Step | Findings | Change | Files | Rem. Risk | Validation |
 |------|----------|--------|-------|-----------|------------|
 | 1 | D1 | Fix the `bench --passes` help to not claim "(default 2)"; state it overrides the tier's passes (default tier = 3). | `src/pubrun/__main__.py` (bench `--passes` help), `docs/cli.md` if it echoes "default 2" | Low | `bench -h` no longer says "default 2"; help matches the tier table. |
-| 2 | D2 | Decide + fix the `--no-baseline` discrepancy: EITHER expose `--no-baseline` on `pubrun bench` (forward it to the harness) OR correct the CHANGELOG line to say the flag is on the harness only. (See Open Q1 — leaning: expose it on `bench`, since the CHANGELOG already promises it and it is trivially forwarded, matching how `--rigorous`/`--quick` are forwarded.) | `src/pubrun/__main__.py` (+ maybe a one-line CHANGELOG tweak) OR `CHANGELOG.md` | Low | Either `pubrun bench --no-baseline` works and forwards `--no-baseline`, or the CHANGELOG no longer implies a front-end flag. |
+| 2 | D2 | **DECIDED: expose `--no-baseline` on `pubrun bench`** (add the flag to the bench subparser; thread a `no_baseline` param through `_run_bench`; forward `--no-baseline` to the harness argv in both the local and Slurm-submit builders, exactly like `--rigorous`). Document it in `docs/cli.md` bench options. Keep the CHANGELOG line as-written. | `src/pubrun/__main__.py`, `docs/cli.md` | Low | `pubrun bench --no-baseline` is accepted and forwards `--no-baseline` to the harness argv (test); `bench -h` shows it. |
 | 3 | D3 | Update the README `self-check` entry: itemized-by-default; add `--quiet`/`-q`, `--json`, `-v`. | `README.md` | Low | README matches `self-check -h`; mentions itemized default + `--quiet`. |
 | 4 | D4 | Update the README `diff` entry: `--table`; note `--basic`/`--standard` summarize and `--standard` is the default depth. | `README.md` | Low | README matches `diff -h`; no "wall of text" implication. |
 | 5 | D5 | Update the README `bench` entry: the three tiers (`--quick`/`--full`/`--rigorous`) + the uncaptured baseline pass. | `README.md` | Low | README matches `bench -h` + `cli.md` tier table. |
@@ -108,14 +109,16 @@ and keep the CHANGELOG line; otherwise amend the CHANGELOG line. The external
 
 ## Open questions
 
-1. **D2 (the crux):** expose `--no-baseline` on `pubrun bench` (forward to the harness — makes
-   the CHANGELOG true and gives users the toggle) vs. just correct the CHANGELOG to say it's a
-   harness-only flag? (Leaning: expose it — it's a trivial forward consistent with `--rigorous`,
-   and the baseline pass adds real time so a skip toggle is genuinely useful.)
-2. **D8 presentation:** inline the full (now longer) `[diff]` ignore lists in
-   `configuration.md`, or describe what each depth hides in prose + point at `default.toml`?
-   (Leaning: a concise prose description per level — the lists are long and would bloat the doc;
-   the source is authoritative.)
+1. **D2 — RESOLVED (maintainer 2026-07-08):** EXPOSE `--no-baseline` on `pubrun bench` and
+   forward it to the harness (consistent with how `--quick`/`--rigorous` are forwarded), making
+   the CHANGELOG line true and giving users a real skip toggle. Keep the CHANGELOG text
+   as-written. Add a test that `pubrun bench --no-baseline` forwards `--no-baseline` to the
+   harness argv, and document the flag in `docs/cli.md`'s bench options.
+2. **D8 — RESOLVED (maintainer 2026-07-08):** use a concise per-level PROSE description of what
+   each depth hides (basic hides the most: volatile fields + high-volume sections
+   subprocesses/packages/environment + per-run paths; standard hides less; deep hides nothing),
+   and point at `default.toml` as the authoritative full list. Do NOT inline the verbatim
+   arrays (bloat + re-drift risk).
 
 ## Approval and execution gate
 
