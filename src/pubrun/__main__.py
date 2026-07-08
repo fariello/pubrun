@@ -532,13 +532,13 @@ def _run_resources(
 
 
 
-def _run_report(run_dir: str, depth: str, section: Optional[str] = None) -> None:
+def _run_report(run_dir: str, depth: str, section: Optional[str] = None, utc: bool = False) -> None:
     """Print a human-readable diagnostic report for a recorded run."""
     try:
         from pubrun.report.diagnostics import print_report
         try:
             manifest_path = _get_manifest_path(run_dir)
-            print_report(manifest_path, depth, section)
+            print_report(manifest_path, depth, section, utc=utc)
         except RunInProgressOrCrashedError as e:
             if section == "logs":
                 run_dir_path = e.run_dir
@@ -2168,6 +2168,7 @@ def main() -> None:
     depth_group_report.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Hardware, Git, Python, and dependency summary (default).")
     depth_group_report.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Full environment variables and complete package list.")
     report_parser.set_defaults(depth="standard")
+    report_parser.add_argument("--utc", action="store_true", help="Display timestamps in UTC instead of local time.")
     _add_run_filter_args(report_parser)
 
     # ---------------- Rerun Subparser ----------------
@@ -2311,9 +2312,9 @@ def main() -> None:
             for idx, r in enumerate(matched):
                 if idx > 0:
                     print("\n")
-                _run_report(str(r.run_dir), args.depth, getattr(args, "section", None))
+                _run_report(str(r.run_dir), args.depth, getattr(args, "section", None), utc=getattr(args, "utc", False))
         else:
-            _run_report(run_dir, args.depth, getattr(args, "section", None))
+            _run_report(run_dir, args.depth, getattr(args, "section", None), utc=getattr(args, "utc", False))
         executed = True
 
     elif args.command in {"res", "resources", "monitor", "chart", "stats", "cpu", "mem"}:

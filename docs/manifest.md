@@ -326,6 +326,7 @@ Runtime resource utilization, sampled by a background thread.
 | `peak_cpu_percent` | float | Peak CPU utilization percentage. |
 | `peak_tree_rss_bytes` | int \| null | Peak RSS summed across the process tree (only when `scope = "tree"`). |
 | `end_tree_rss_bytes` | int \| null | Tree RSS at finalization (only when `scope = "tree"`). |
+| `peak_tree_cpu_percent` | float \| null | Peak CPU% summed across the process tree (only when `scope = "tree"`; Linux-only). Computed from summed CPU-time deltas over the sample interval — **"% of one core"**, so it may exceed 100% on multiple cores (not clamped). `null` where unmeasured. Per-sample `tree_cpu_percent` is also emitted to `events.jsonl` for avg/min/max. |
 | `system_memory` | object \| absent | System-wide memory (Linux), present when `[capture.resources].system_metrics = true`. `{"start": {...}, "last": {...}, "min_available": {...}}`, each with `total_bytes`/`available_bytes`/`free_bytes`/`cached_bytes`. |
 | `load_average` | object \| absent | `{"start": {...}, "last": {...}, "max_1min": float}`, each of start/last being `{"1min","5min","15min"}`. |
 | `system_iowait_pct` | object \| absent | `{"last": float, "max": float}`. **NODE-WIDE, indicative only** — `/proc/stat` iowait is a system-wide counter, not run-scoped, and is unreliable on shared/multi-core nodes. A hint that the *node* was I/O-bound, not a per-run measurement. |
