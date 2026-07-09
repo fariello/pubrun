@@ -406,7 +406,9 @@ def _is_pid_alive_windows(pid: int) -> bool:
             return False
         finally:
             kernel32.CloseHandle(handle)
-    except (OSError, AttributeError, ValueError):
+    except (OSError, AttributeError, ValueError, OverflowError):
+        # OverflowError: an absurd PID (e.g. from a corrupt dir name) that can't fit the
+        # Win32 DWORD process-id argument — treat as not-alive rather than raising.
         return False
 
 

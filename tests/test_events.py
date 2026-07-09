@@ -1,6 +1,7 @@
 """Tests for EventStream: creation, throttling, close idempotency, and event format."""
 import json
 import logging
+import sys
 from pathlib import Path
 
 from pubrun import start, annotate, phase
@@ -234,16 +235,21 @@ class TestEventStreamMigration:
         run.event_stream.emit("annotation", name="after_migration")
         run.stop()
 
-        # Check original directory no longer has the run directory (as it was moved)
+        # The run directory ends up in EXACTLY ONE place with both events. On POSIX the move
+        # succeeds (dir2); on Windows a directory cannot be moved while a file inside it is
+        # open, so migration may gracefully abort and stay in dir1 (see _merge_and_migrate,
+        # which now waits for the hardware thread first to minimize this). Either way, the
+        # invariant is: one events.jsonl total, containing both events, never split/lost.
         orig_events = list(dir1.rglob("events.jsonl"))
-        assert len(orig_events) == 0
-
-        # Check new directory has both events (due to dir copy/move + migrate)
         new_events = list(dir2.rglob("events.jsonl"))
-        assert len(new_events) == 1
-        new_content = new_events[0].read_text()
-        assert "before_migration" in new_content
-        assert "after_migration" in new_content
+        all_events = orig_events + new_events
+        assert len(all_events) == 1, f"expected exactly one events.jsonl, found {len(all_events)}"
+        content = all_events[0].read_text()
+        assert "before_migration" in content
+        assert "after_migration" in content
+        # On POSIX we additionally expect the move to have actually relocated to dir2.
+        if sys.platform != "win32":
+            assert len(new_events) == 1 and len(orig_events) == 0
 
 
 class TestEventStreamCriticalCap:

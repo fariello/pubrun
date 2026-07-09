@@ -107,8 +107,9 @@ class TestImportedTransitiveMode:
 # TST-02: tree RSS Linux (mocked /proc)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(not hasattr(os, "sysconf"), reason="Linux /proc + os.sysconf only")
 class TestTreeRssLinux:
-    """Test _get_tree_rss_linux with mocked /proc filesystem."""
+    """Test _get_tree_rss_linux with mocked /proc filesystem (Linux-only)."""
 
     def test_tree_includes_children_and_grandchildren(self, monkeypatch):
         """Verify RSS is summed across self + child + grandchild."""
