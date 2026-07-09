@@ -380,6 +380,17 @@ class Run:
             new_dir = new_base / self.run_dir.name
 
             if new_dir != self.run_dir:
+                # Wait for the background hardware thread to finish first: it re-writes the
+                # startup manifest into run_dir, and on Windows a directory cannot be moved
+                # while any file inside it is open — a concurrent write would make shutil.move
+                # fail and silently abort the migration. (Windows CI: dir-migration bug.)
+                hw = getattr(self, "_hardware_thread", None)
+                if hw is not None and hw.is_alive():
+                    hw.join(timeout=5)
+                done = getattr(self, "_hardware_future_done", None)
+                if done is not None:
+                    done.wait(timeout=5)
+
                 # Close open files before moving the directory (required on Windows)
                 if getattr(self, "event_stream", None):
                     self.event_stream.close()
