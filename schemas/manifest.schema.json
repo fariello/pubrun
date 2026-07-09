@@ -1542,10 +1542,7 @@
         "console_section": {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-                "capture_mode",
-                "capture_state"
-            ],
+            "required": [],
             "properties": {
                 "capture_mode": {
                     "type": "string",
