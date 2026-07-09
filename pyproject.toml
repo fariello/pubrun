@@ -54,7 +54,8 @@ dev = [
     "pytest>=7.0",
     "mypy>=1.0",
     "pytest-cov",
-    "tox>=4.0"
+    "tox>=4.0",
+    "jsonschema>=4.0"
 ]
 tui = [
     "textual>=0.80.0",

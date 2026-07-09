@@ -249,6 +249,7 @@ Configuration provenance.
 | `resolved_config_path` | string | Filename of the resolved config snapshot (e.g., `"config.resolved.json"`). |
 | `sources_path` | string \| null | Filename of config source tracking, if generated. |
 | `source_files` | list[string] | Paths to config files that contributed to the resolved config. |
+| `notices` | list[object] | Non-disruptive config notices recorded at run time (never raised into the host; surfaced by `pubrun status`/`inspect`/`show`). Each: `{"code", "setting", "value", "message"}`. Currently emitted for a deprecated, inert `core.profile` set to a non-default value. Empty list when none. |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
 ---
@@ -458,7 +459,7 @@ Every manifest section includes a `capture_state` object indicating the status o
 - `complete` — Data captured successfully.
 - `partial` — Some data captured, but errors occurred.
 - `unavailable` — The data source was not accessible (e.g., no git repo).
-- `suppressed` — Capture was disabled by configuration or profile.
+- `suppressed` — Capture was disabled by configuration (a `capture.*` `depth`/`mode` set to `off`).
 - `failed` — Capture attempted but failed entirely.
 - `timeout` — The capture's external tool did not respond within its configured timeout (e.g. `git` on a slow/large repository, or a hung GPU query). Distinct from `unavailable` so a slow repo is never mislabeled as "not a git repository". See `[capture.git].timeout` and `[capture.hardware].timeout`.
 

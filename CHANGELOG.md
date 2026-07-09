@@ -9,6 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **Manifest JSON schema now covers `config.notices`, and manifest schema-conformance is now
+  tested.** The new `config.notices` field violated the shipped schema (`additionalProperties:false`
+  on the config section); the schema was updated and `docs/manifest.md` documents the field. A new
+  `tests/test_manifest_schema.py` validates real manifests against `schemas/manifest.schema.json`
+  (via a dev-only `jsonschema` dependency) so schema drift can no longer go unnoticed. A broader,
+  pre-existing schema staleness (several sections added over time without schema updates) is tracked
+  for full reconciliation in a pending IPD and guarded by an `xfail` tripwire.
 - **`import pubrun.report.<submodule>` no longer breaks after selecting an import mode.** Every
   import-mode module (`auto`/`noauto`/`full`/`nopatch`/`noconsole`/`minimal`) and the deferred
   `__init__` bound the top-level `report()` function onto the package as `pubrun.report = report`,

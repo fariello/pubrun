@@ -1307,6 +1307,32 @@
                     },
                     "default": []
                 },
+                "notices": {
+                    "type": "array",
+                    "description": "Non-disruptive config notices recorded at run time (e.g. a deprecated, inert core.profile). Never raised into the host; surfaced by pubrun status/inspect/show.",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "code",
+                            "message"
+                        ],
+                        "properties": {
+                            "code": {
+                                "type": "string"
+                            },
+                            "setting": {
+                                "type": "string"
+                            },
+                            "value": {
+                                "type": "string"
+                            },
+                            "message": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "default": []
+                },
                 "capture_state": {
                     "$ref": "#/$defs/capture_state"
                 }

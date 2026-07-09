@@ -597,6 +597,57 @@ class TestCliRunTests:
         result = run_pubrun("--run-tests", cwd=str(tmp_path))
         assert result.returncode == 0
 
+    def test_run_tests_end_to_end_mock_validates_manifest(self, tmp_path):
+        """The built-in self-test's end-to-end mock must actually run a tracked script
+        and confirm it produced a manifest (not silently pass on a broken run).
+
+        Runs outside a source checkout (no tests/ + tox.ini in cwd) so the recursive
+        PyTest matrix branch is skipped and only the mock-script validation executes.
+        """
+        result = run_pubrun("--run-tests", cwd=str(tmp_path))
+        assert result.returncode == 0
+        out = result.stdout
+        # The mock training script ran without crashing...
+        assert "Mock script executed without crashing" in out
+        # ...and the self-test reached its validation summary (manifest was read).
+        assert "Validation complete" in out
+        # ...and the subprocess spy line was emitted (manifest.subprocesses was parsed).
+        assert "Subprocess spy captured" in out
+
+    def test_run_tests_mock_run_manifest_is_wellformed(self, tmp_path):
+        """Regression: the mock self-test run must produce a real, parseable manifest
+        with the expected phases/annotations — guarding against the self-test silently
+        'passing' on a manifest it never actually validated.
+
+        Reproduces the self-test's mock workload directly so we can assert on the
+        manifest it leaves behind (the CLI path swallows manifest errors by design)."""
+        import json
+        import subprocess
+
+        script = (
+            "import time, os\n"
+            "import pubrun\n"
+            "tracker = pubrun.start()\n"
+            "pubrun.annotate('initializing_model', layers=3, opt='adam')\n"
+            "with pubrun.phase('epoch_1'):\n"
+            "    os.system('echo hi')\n"
+            "print('done')\n"
+        )
+        script_path = tmp_path / "mock_training.py"
+        script_path.write_text(script, encoding="utf-8")
+        env = dict(os.environ, PUBRUN_AUTO_START="true")
+        r = subprocess.run([PYTHON, str(script_path)], cwd=str(tmp_path),
+                           env=env, capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, r.stderr
+
+        runs = list((tmp_path / "runs").iterdir())
+        assert runs, "self-test mock produced no run directory"
+        manifest = json.loads((runs[0] / "manifest.json").read_text(encoding="utf-8"))
+        # Well-formed core structure.
+        assert manifest["schema_version"] == "1.0"
+        assert manifest["manifest_type"] == "pubrun-manifest"
+        assert manifest["status"]["outcome"] == "completed"
+
 
 class TestCliNoCommand:
 
