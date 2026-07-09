@@ -28,18 +28,26 @@ class TestImportedTransitiveMode:
     """Test the imported-transitive package capture mode."""
 
     def test_transitive_deps_discovered(self, monkeypatch):
-        """Verify transitive deps appear with correct source and required_by."""
+        """Verify transitive deps appear with correct source and required_by.
+
+        Uses SYNTHETIC package names (not real installed distributions) and does NOT swap
+        the whole of ``sys.modules`` — an earlier version replaced ``sys.modules`` wholesale
+        and relied on ``tomli`` being resolvable, which broke under CI (Python 3.11+ has no
+        ``tomli`` installed, and the wholesale swap did not reliably cover the module's
+        ``sys.modules`` read). Here we ADD a fake top-level import and fully mock its metadata,
+        then assert only on the synthetic names, so the result is independent of the ambient
+        environment / Python version.
+        """
+        import sys
+        import importlib.metadata
         from pubrun.capture.packages import get_packages
 
-        # Mock sys.modules to contain only 'pubrun' as a top-level import
-        fake_modules = {"pubrun": True, "os": True, "sys": True}
-        monkeypatch.setattr("sys.modules", fake_modules)
-
-        # Mock importlib.metadata to return known data
-        import importlib.metadata
+        # Add a synthetic top-level import (kept alongside the real sys.modules so imports
+        # of pubrun.capture.* still work). Name chosen so it cannot collide with a real dist.
+        monkeypatch.setitem(sys.modules, "pubrun_fake_pkg", object())
 
         def mock_version(name):
-            versions = {"pubrun": "1.3.1", "tomli": "2.0.0"}
+            versions = {"pubrun_fake_pkg": "1.0.0", "pubrun_fake_dep": "2.0.0"}
             if name in versions:
                 return versions[name]
             raise importlib.metadata.PackageNotFoundError(name)
@@ -53,8 +61,10 @@ class TestImportedTransitiveMode:
                 return self._requires
 
         def mock_distribution(name):
-            if name == "pubrun":
-                return MockDist(["tomli>=1.1.0; python_version < '3.11'"])
+            if name == "pubrun_fake_pkg":
+                # An UNCONDITIONAL dep (no environment marker) so the test verifies transitive
+                # DISCOVERY itself, not PEP 508 marker evaluation / Python-version conditions.
+                return MockDist(["pubrun_fake_dep>=1.0.0"])
             raise importlib.metadata.PackageNotFoundError(name)
 
         monkeypatch.setattr("importlib.metadata.version", mock_version)
@@ -65,16 +75,16 @@ class TestImportedTransitiveMode:
 
         assert result["mode"] == "imported-transitive"
         names = {r["name"] for r in result["records"]}
-        assert "pubrun" in names
-        assert "tomli" in names
+        # Assert only on our synthetic names (immune to real ambient packages).
+        assert "pubrun_fake_pkg" in names
+        assert "pubrun_fake_dep" in names
 
-        # Verify source fields
-        pubrun_rec = next(r for r in result["records"] if r["name"] == "pubrun")
-        assert pubrun_rec["source"] == "imported"
+        pkg_rec = next(r for r in result["records"] if r["name"] == "pubrun_fake_pkg")
+        assert pkg_rec["source"] == "imported"
 
-        tomli_rec = next(r for r in result["records"] if r["name"] == "tomli")
-        assert tomli_rec["source"] == "transitive"
-        assert "pubrun" in tomli_rec["required_by"]
+        dep_rec = next(r for r in result["records"] if r["name"] == "pubrun_fake_dep")
+        assert dep_rec["source"] == "transitive"
+        assert "pubrun_fake_pkg" in dep_rec["required_by"]
 
     def test_pep508_parser_edge_cases(self):
         """Verify PEP 508 name extraction from various requirement strings."""
