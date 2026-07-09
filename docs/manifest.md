@@ -462,6 +462,7 @@ Every manifest section includes a `capture_state` object indicating the status o
 - `unavailable` — The data source was not accessible (e.g., no git repo).
 - `suppressed` — Capture was disabled by configuration (a `capture.*` `depth`/`mode` set to `off`).
 - `failed` — Capture attempted but failed entirely.
+- `pending` — Transient: the section is captured asynchronously by the background hardware thread and had not completed when the manifest was written. Seen in the **startup manifest** (written at `start()`) and therefore in a run that **crashed before finalizing** — the `hardware`/`host`/`filesystem` sections are `pending` until the thread fills them in. A normally-finalized manifest never leaves a section `pending`.
 - `timeout` — The capture's external tool did not respond within its configured timeout (e.g. `git` on a slow/large repository, or a hung GPU query). Distinct from `unavailable` so a slow repo is never mislabeled as "not a git repository". See `[capture.git].timeout` and `[capture.hardware].timeout`.
 
 ### Redacted Values

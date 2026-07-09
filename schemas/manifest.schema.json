@@ -243,7 +243,9 @@
                 "partial",
                 "unavailable",
                 "suppressed",
-                "failed"
+                "failed",
+                "timeout",
+                "pending"
             ]
         },
         "capture_state": {
