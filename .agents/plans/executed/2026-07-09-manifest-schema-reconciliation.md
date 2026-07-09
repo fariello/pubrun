@@ -29,6 +29,24 @@
 - **Open Q2 resolved:** the gate validates **freshly-generated** manifests (always current), not
   committed fixtures.
 
+### CI follow-up (Windows) — console section
+
+First push (`0b44c38`) was green locally but **failed on windows-latest/3.12**: the `console`
+section can be an empty `{}` (console capture is optional; the interceptor never populated it in
+that headless path), but the schema *required* `capture_mode`. Fixed by relaxing
+`console_section.required` to `[]` — an empty console section is a legitimate emitted shape. This is
+exactly the cross-platform gap the CI matrix exists to catch (local Linux validation always had a
+populated console).
+
+### Follow-up noted (out of scope here): ghost-manifest section shapes
+
+Ghost mode (filesystem write failure at init) emits `{}` for **every** section
+(`tracker.py:128-134`), so a ghost manifest currently produces ~16 `required: [capture_state]`
+violations against the schema. The reconciliation + gate here target the NORMAL manifest; ghost
+manifests were never schema-validated. Options for a follow-up: either make ghost sections carry a
+`capture_state` (consistent with the "every section has capture_state" intent) or relax the section
+defs to accept the empty-object case. Tracked, not fixed here (separate scope + its own test).
+
 ### Follow-up noted (out of scope here): stale test fixture
 
 `tests/fixtures/sample_manifest.json` is stale vs. current reality (has `git.is_dirty` and
