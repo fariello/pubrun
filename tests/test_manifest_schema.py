@@ -115,12 +115,30 @@ def test_committed_sample_fixture_conforms_to_schema():
     jsonschema.validate(manifest, _schema())
 
 
+@pytest.mark.parametrize("status", ["pending", "timeout"])
+def test_transient_capture_states_are_valid(status):
+    """The schema's capture-state enum must accept the transient statuses the code
+    actually emits: `pending` (async hardware/host/filesystem sections at start(), which
+    persist in a run that crashed before finalizing) and `timeout` (git/hardware
+    external-tool timeout). Deterministic — no thread-timing dependence."""
+    section = {"capture_state": {"status": status}}
+    # capture_state is referenced identically across sections; validate the shared def.
+    schema = _schema()
+    defs = schema.get("$defs", schema.get("definitions", {}))
+    sub = dict(defs["capture_state"])
+    sub["$defs"] = defs
+    jsonschema.validate(section["capture_state"], sub)
+
+
 def test_startup_manifest_conforms_to_schema(tmp_path):
-    """The STARTUP manifest (written at start(), before async capture finishes) must
-    validate. This is the on-disk shape a run that CRASHED before finalizing leaves
-    behind — read by pubrun status/inspect/show. Its hardware/host/filesystem sections
-    carry capture_state.status == "pending" (the background hw thread hasn't filled them
-    in yet), which the schema enum must accept. Guards the crashed-run manifest shape.
+    """The STARTUP manifest (written at start(), before finalization) must validate.
+
+    This is the on-disk shape a run that CRASHED before finalizing leaves behind — read
+    by pubrun status/inspect/show. Whichever state its async hardware/host/filesystem
+    sections are in when read (`pending` if the background hw thread has not finished, or
+    `complete` if it has — a race we deliberately do NOT assert on), the manifest must
+    conform. The `pending`-is-valid guarantee is pinned deterministically by
+    test_transient_capture_states_are_valid above.
     """
     import os
     cwd = os.getcwd()
@@ -136,12 +154,6 @@ def test_startup_manifest_conforms_to_schema(tmp_path):
     finally:
         os.chdir(cwd)
 
-    # At least one section should be mid-flight 'pending' at startup (else this test
-    # is not actually exercising the pending path).
-    statuses = {
-        sec: manifest.get(sec, {}).get("capture_state", {}).get("status")
-        for sec in ("hardware", "host", "filesystem")
-    }
-    assert "pending" in statuses.values(), f"expected a pending section at startup, got {statuses}"
+    jsonschema.validate(manifest, _schema())
 
     jsonschema.validate(manifest, _schema())
