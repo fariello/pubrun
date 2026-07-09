@@ -56,7 +56,7 @@ class ConfigPanel(Vertical):
     def compose(self) -> ComposeResult:
         with VerticalScroll(classes="panel-card"):
             yield Label("CORE SETTINGS", classes="panel-card-title")
-            yield Label("Profile Mode (Controls telemetry depth):", classes="info-label")
+            yield Label("Profile Mode (deprecated; no effect — use capture.* keys):", classes="info-label")
             yield Select([("Default", "default"), ("Minimal", "minimal"), ("Deep", "deep")], id="cfg-profile")
             
             yield Label("Base Output Directory (e.g. ./runs/):", classes="info-label")

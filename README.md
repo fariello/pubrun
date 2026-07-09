@@ -141,7 +141,7 @@ See [Configuration](https://github.com/fariello/pubrun/blob/main/docs/configurat
 ```python
 import pubrun.noauto as pubrun
 
-pubrun.start(output_dir="./custom_storage", profile="deep")
+pubrun.start(output_dir="./custom_storage")
 # ... your code ...
 pubrun.stop()
 ```
@@ -393,7 +393,7 @@ alone does **not** suppress capture; use the explicit `capture.*` keys.
 
 `pubrun` supports a hierarchical configuration system (highest to lowest precedence):
 
-1. **API overrides** — `pubrun.start(profile="deep")`
+1. **API overrides** — `pubrun.start(output_dir="./runs")`
 2. **Environment variables** — `PUBRUN_AUTO_START=false`
 3. **Local project config** — `.pubrun.toml` or `.config/pubrun/config.toml`
 4. **User home config** — `~/.config/pubrun/config.toml`

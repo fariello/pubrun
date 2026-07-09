@@ -323,6 +323,18 @@ def manifest_findings(manifest: Dict[str, Any],
                 f"not where the run ran (common on HPC: run on a compute node, inspect on "
                 f"the head node).", None))
 
+        # --- Recorded config notices (e.g. deprecated core.profile) ---
+        cfg = manifest.get("config", {})
+        if isinstance(cfg, dict):
+            for notice in cfg.get("notices", []) or []:
+                if not isinstance(notice, dict):
+                    continue
+                findings.append(_finding(
+                    WARN,
+                    notice.get("code", "config_notice"),
+                    notice.get("message", "a config setting was ignored or deprecated."),
+                    "Update your pubrun configuration; see docs/configuration.md."))
+
         # --- Recorded network-filesystem signal ---
         fs_data = manifest.get("filesystem", {})
         if isinstance(fs_data, dict):

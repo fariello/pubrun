@@ -59,6 +59,19 @@ class Run:
             )
             from pubrun.config import load_default_config
             self.config = load_default_config()
+
+        # Non-disruptive config notices (recorded in the manifest, never raised into the
+        # host). Currently: the deprecated, inert `core.profile` setting.
+        self.config_notices = []
+        try:
+            from pubrun.config import profile_deprecation_notice
+            _profile_notice = profile_deprecation_notice(self.config)
+            if _profile_notice:
+                self.config_notices.append(_profile_notice)
+        except Exception:
+            # A notice must never break a run; degrade silently.
+            pass
+
         self.ref_count = 1
         self.run_id = uuid.uuid4().hex[:8]
         self.pid = os.getpid()
@@ -634,6 +647,7 @@ class Run:
                 "resolved_config_path": "config.resolved.json",
                 "sources_path": None,
                 "source_files": [],
+                "notices": list(getattr(self, "config_notices", [])),
                 "capture_state": {"status": "complete"}
             },
 

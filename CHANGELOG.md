@@ -9,6 +9,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **`import pubrun.report.<submodule>` no longer breaks after selecting an import mode.** Every
+  import-mode module (`auto`/`noauto`/`full`/`nopatch`/`noconsole`/`minimal`) and the deferred
+  `__init__` bound the top-level `report()` function onto the package as `pubrun.report = report`,
+  which **shadowed the `pubrun.report` subpackage** (a CallableModule that is both the callable
+  `report()` API and the home of `pubrun.report.output/checks/diagnostics/…`). In certain import
+  orders this left `pubrun.report` as a plain function, so `import pubrun.report.diagnostics` raised
+  `ImportError`. Fixed by importing the subpackage (so `pubrun.report` stays the CallableModule —
+  callable **and** submodule-bearing) instead of overwriting it. Added regression tests covering
+  every import mode plus a generalized guard that no mode module shadows any `pubrun` subpackage.
+
+### Deprecated
+- **`core.profile` (and `PUBRUN_PROFILE`, the `start(profile=)` shorthand, and the TUI "Profile
+  Mode" selector) is deprecated because it never worked.** `profile` was documented as a "master
+  capture depth" dial (`minimal`/`default`/`deep`) but was never wired to any capture engine — setting
+  it had **no effect** on what pubrun captured. It is still accepted (so no existing config or script
+  breaks), but is now explicitly inert: setting it to a non-default value records a **deprecation
+  notice in the run manifest** (`config.notices`), surfaced by `pubrun status`, `pubrun status <id>`,
+  `pubrun inspect`, and `pubrun show` so it is not buried in JSON. To control capture depth, set the
+  specific `capture.*` keys (e.g. `[capture.hardware].depth`, `[capture.packages].mode`). The false
+  "controls capture depth" claims in `docs/configuration.md`, `default.toml`, and the TUI label were
+  corrected. A future release may remove `profile` entirely. (Whether to instead *wire* profile to
+  real capture tiers was considered and declined — see the executed decision IPD.)
+
+### Fixed
 - **`pubrun resources` now works as the documented alias of `pubrun res`.** The docs described
   `resources` as a backward-compatible alias, but it errored with "unknown command" because the
   argparse subparser was never registered (only the dispatch handled it). It is now a real alias

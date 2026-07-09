@@ -255,6 +255,11 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         # normalized to the canonical [WARN ] prefix for consistency.
         print(f"\n{yellow}[WARN ]{rst} {w}")
 
+    # Non-disruptive config notices recorded at run time (e.g. deprecated core.profile).
+    for notice in manifest.get("config", {}).get("notices", []) or []:
+        msg = notice.get("message", notice.get("code", "config notice"))
+        print(f"\n{yellow}[WARN ]{rst} {msg}")
+
     print(f"\n{blue}{bold}--- Basic Information ---{rst}")
     run = manifest.get("run", {})
     timing = manifest.get("timing", {})
