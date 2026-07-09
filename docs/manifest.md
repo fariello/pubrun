@@ -164,6 +164,7 @@ Tracked Python dependencies.
 | `version` | string | Installed version. |
 | `location` | string \| null | Install location path, if available. |
 | `editable` | bool \| null | Whether the package is installed in editable (development) mode. |
+| `source` | string \| null | How the record was discovered (e.g. the capture mode / scan that produced it). |
 
 ---
 
