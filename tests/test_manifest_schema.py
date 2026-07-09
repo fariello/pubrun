@@ -77,18 +77,29 @@ def test_schema_is_valid_draft(tmp_path):
     cls.check_schema(schema)  # raises if the schema is malformed
 
 
-@pytest.mark.xfail(
-    reason="Known pre-existing manifest-schema drift (7+ sections added without schema "
-    "updates: filesystem, capture flags, host.os_release, python fields, resources "
-    "fields, packages.source). Tracked for full reconciliation in a pending IPD; when "
-    "that lands this flips to XPASS and becomes a hard gate.",
-    strict=False,
-)
 def test_full_manifest_conforms_to_schema(tmp_path):
-    """A complete real manifest should validate end-to-end against the shipped schema.
+    """A complete real manifest must validate end-to-end against the shipped schema.
 
-    Currently XFAILs due to documented pre-existing drift. This is the anti-regression
-    tripwire for the schema-reconciliation IPD.
+    Hard gate (was an xfail tripwire until the 2026-07-09 schema reconciliation): any
+    future manifest field added without a corresponding schema update fails here, so the
+    published contract cannot silently drift again.
     """
     manifest = _make_manifest(tmp_path)
+    jsonschema.validate(manifest, _schema())
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({}, id="default"),
+        pytest.param({"profile": "minimal"}, id="profile-notice"),
+        pytest.param({"console": {"capture_mode": "standard"}}, id="console-on"),
+        pytest.param({"capture": {"resources": {"scope": "tree"}}}, id="tree-scope"),
+    ],
+)
+def test_manifest_variants_conform_to_schema(tmp_path, kwargs):
+    """Validate several manifest shapes, not just the happy path: the profile-notice
+    variant, console capture on, and process-tree resource scope (which adds tree_*
+    fields). Guards drift a single default manifest would miss."""
+    manifest = _make_manifest(tmp_path, **kwargs)
     jsonschema.validate(manifest, _schema())

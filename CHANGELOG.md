@@ -9,6 +9,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **Manifest JSON schema reconciled with reality; schema-conformance is now a hard test gate.** The
+  shipped `schemas/manifest.schema.json` had drifted — several manifest sections were added over time
+  without schema updates, so a real manifest failed validation (root `filesystem`; `capture` enable
+  flags; the full `host` section incl. `hostname` mistyped as an object when the code emits a string;
+  `packages.records[].source`; `python` env-classification fields; `resources` system/tree metrics).
+  All are reconciled against what pubrun actually emits, `docs/manifest.md` matches field-for-field,
+  and `tests/test_manifest_schema.py` now validates freshly-generated manifests across variants
+  (default, profile-notice, console-on, tree-scope) as a hard gate so the contract cannot silently
+  drift again.
 - **Manifest JSON schema now covers `config.notices`, and manifest schema-conformance is now
   tested.** The new `config.notices` field violated the shipped schema (`additionalProperties:false`
   on the config section); the schema was updated and `docs/manifest.md` documents the field. A new

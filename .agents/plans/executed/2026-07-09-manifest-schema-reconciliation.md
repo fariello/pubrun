@@ -4,8 +4,38 @@
 - Concern: documentation (accuracy) / testing
 - Scope: `schemas/manifest.schema.json`, `docs/manifest.md`, `tests/test_manifest_schema.py`,
   possibly `.github/workflows/ci.yml`
-- Status: PENDING (awaiting human approval; not executed)
+- Status: EXECUTED 2026-07-09 (approved). Schema reconciled; conformance gate live (8 tests, 0
+  xfail); full suite green. See "Execution notes" below.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
+
+## Execution notes (2026-07-09)
+
+- **`host.hostname` question resolved (Open Q1): the implementation is authoritative — it emits a
+  plain string** (`capture/host.py:23` `platform.node() or socket.gethostname()`). The schema was
+  wrong (typed it as a `redacted_value` object). Fixed the schema (no impl change). The whole `host`
+  def was rewritten to the real shape (`os_name`/`os_version`/`os_release`/`hostname`/`capture_state`);
+  the schema had also listed never-emitted fields (`fqdn`/`kernel_version`/`platform`/`architecture`).
+- **Reconciled `$defs`** against the actual emitted shapes: `host` (rewrite), `capture`
+  (`subprocesses_enabled`, `file_provenance_available`), `python_runtime` (`environment_kind`,
+  `in_venv`, `sys_path_len`, `pyenv`), `package_record` (`source`), `resources_section` (`scope`,
+  `peak_cpu_percent`, `system_memory`, `load_average`, `system_iowait_pct`, `io_counters`, `tree_*`),
+  and added the missing root **`filesystem`** section (`filesystem_section` def).
+- **Docs were already the accurate twin** — only `packages.records[].source` needed adding to
+  `docs/manifest.md`; `host`/`python`/`resources`/`capture`/`filesystem` docs already matched reality.
+  The drift was schema-only.
+- **Validated 0 errors across variants**: default, profile-notice, console-capture-on, tree-scope,
+  and a git-repo-populated run. `test_manifest_schema.py`: the full-manifest test is now a **hard
+  gate** (xfail removed) plus a 4-variant parametrized conformance test (8 tests total).
+- **Open Q2 resolved:** the gate validates **freshly-generated** manifests (always current), not
+  committed fixtures.
+
+### Follow-up noted (out of scope here): stale test fixture
+
+`tests/fixtures/sample_manifest.json` is stale vs. current reality (has `git.is_dirty` and
+`invocation.working_directory.basename`, neither of which the code emits — the live git manifest uses
+`dirty`). It is NOT used by the new conformance test (which generates fresh manifests), so it does not
+affect the gate, but it should be refreshed or removed as a separate test-hygiene task. (Low priority;
+recorded here rather than expanding this IPD further.)
 
 ## Origin
 

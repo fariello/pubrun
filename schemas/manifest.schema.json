@@ -112,21 +112,59 @@
             "type": "object",
             "description": "Import-mode provenance metadata.",
             "properties": {
-                "selected_mode": { "type": ["string", "null"] },
+                "selected_mode": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
                 "selected_behavior": {
-                    "type": ["object", "null"],
+                    "type": [
+                        "object",
+                        "null"
+                    ],
                     "properties": {
-                        "auto_start": { "type": "boolean" },
-                        "global_hooks": { "type": "boolean" }
+                        "auto_start": {
+                            "type": "boolean"
+                        },
+                        "global_hooks": {
+                            "type": "boolean"
+                        }
                     }
                 },
-                "selected_by": { "type": ["string", "null"] },
-                "selected_source": { "type": ["string", "null"] },
-                "selected_at_utc": { "type": ["number", "null"] },
-                "core_loaded": { "type": "boolean" },
-                "conflict_policy": { "type": ["string", "null"] },
-                "conflicts_detected": { "type": "integer" },
-                "requests": { "type": "array" }
+                "selected_by": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "selected_source": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "selected_at_utc": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "core_loaded": {
+                    "type": "boolean"
+                },
+                "conflict_policy": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "conflicts_detected": {
+                    "type": "integer"
+                },
+                "requests": {
+                    "type": "array"
+                }
             },
             "additionalProperties": true
         },
@@ -139,12 +177,25 @@
                     "items": {
                         "type": "object",
                         "properties": {
-                            "path": { "type": "string" },
-                            "size_bytes": { "type": "integer" },
-                            "sha256": { "type": "string" },
-                            "accessed_at_utc": { "type": "number" }
+                            "path": {
+                                "type": "string"
+                            },
+                            "size_bytes": {
+                                "type": "integer"
+                            },
+                            "sha256": {
+                                "type": "string"
+                            },
+                            "accessed_at_utc": {
+                                "type": "number"
+                            }
                         },
-                        "required": ["path", "size_bytes", "sha256", "accessed_at_utc"]
+                        "required": [
+                            "path",
+                            "size_bytes",
+                            "sha256",
+                            "accessed_at_utc"
+                        ]
                     }
                 },
                 "outputs": {
@@ -152,17 +203,36 @@
                     "items": {
                         "type": "object",
                         "properties": {
-                            "path": { "type": "string" },
-                            "size_bytes": { "type": "integer" },
-                            "sha256": { "type": "string" },
-                            "modified_at_utc": { "type": "number" }
+                            "path": {
+                                "type": "string"
+                            },
+                            "size_bytes": {
+                                "type": "integer"
+                            },
+                            "sha256": {
+                                "type": "string"
+                            },
+                            "modified_at_utc": {
+                                "type": "number"
+                            }
                         },
-                        "required": ["path", "size_bytes", "sha256", "modified_at_utc"]
+                        "required": [
+                            "path",
+                            "size_bytes",
+                            "sha256",
+                            "modified_at_utc"
+                        ]
                     }
                 }
             },
             "additionalProperties": false,
-            "default": {"inputs": [], "outputs": []}
+            "default": {
+                "inputs": [],
+                "outputs": []
+            }
+        },
+        "filesystem": {
+            "$ref": "#/$defs/filesystem_section"
         }
     },
     "$defs": {
@@ -550,6 +620,12 @@
                 },
                 "capture_state": {
                     "$ref": "#/$defs/capture_state"
+                },
+                "subprocesses_enabled": {
+                    "type": "boolean"
+                },
+                "file_provenance_available": {
+                    "type": "boolean"
                 }
             }
         },
@@ -645,12 +721,6 @@
                 "capture_state"
             ],
             "properties": {
-                "hostname": {
-                    "$ref": "#/$defs/redacted_value"
-                },
-                "fqdn": {
-                    "$ref": "#/$defs/redacted_value"
-                },
                 "os_name": {
                     "type": [
                         "string",
@@ -663,19 +733,13 @@
                         "null"
                     ]
                 },
-                "kernel_version": {
+                "os_release": {
                     "type": [
                         "string",
                         "null"
                     ]
                 },
-                "platform": {
-                    "type": [
-                        "string",
-                        "null"
-                    ]
-                },
-                "architecture": {
+                "hostname": {
                     "type": [
                         "string",
                         "null"
@@ -738,6 +802,30 @@
                 },
                 "capture_state": {
                     "$ref": "#/$defs/capture_state"
+                },
+                "environment_kind": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "in_venv": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "sys_path_len": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "pyenv": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
                 }
             }
         },
@@ -767,6 +855,12 @@
                 "editable": {
                     "type": [
                         "boolean",
+                        "null"
+                    ]
+                },
+                "source": {
+                    "type": [
+                        "string",
                         "null"
                     ]
                 }
@@ -1045,6 +1139,366 @@
                 },
                 "capture_state": {
                     "$ref": "#/$defs/capture_state"
+                },
+                "scope": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "peak_cpu_percent": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "system_memory": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "start": {
+                            "type": [
+                                "object",
+                                "null"
+                            ],
+                            "properties": {
+                                "total_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "free_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "available_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "cached_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                }
+                            }
+                        },
+                        "last": {
+                            "type": [
+                                "object",
+                                "null"
+                            ],
+                            "properties": {
+                                "total_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "free_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "available_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "cached_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                }
+                            }
+                        },
+                        "min_available": {
+                            "type": [
+                                "object",
+                                "null"
+                            ],
+                            "properties": {
+                                "total_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "free_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "available_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "cached_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                },
+                "load_average": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "start": {
+                            "type": [
+                                "object",
+                                "null"
+                            ],
+                            "properties": {
+                                "1min": {
+                                    "type": [
+                                        "number",
+                                        "null"
+                                    ]
+                                },
+                                "5min": {
+                                    "type": [
+                                        "number",
+                                        "null"
+                                    ]
+                                },
+                                "15min": {
+                                    "type": [
+                                        "number",
+                                        "null"
+                                    ]
+                                }
+                            }
+                        },
+                        "last": {
+                            "type": [
+                                "object",
+                                "null"
+                            ],
+                            "properties": {
+                                "1min": {
+                                    "type": [
+                                        "number",
+                                        "null"
+                                    ]
+                                },
+                                "5min": {
+                                    "type": [
+                                        "number",
+                                        "null"
+                                    ]
+                                },
+                                "15min": {
+                                    "type": [
+                                        "number",
+                                        "null"
+                                    ]
+                                }
+                            }
+                        },
+                        "max_1min": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        }
+                    }
+                },
+                "system_iowait_pct": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "last": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "max": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        }
+                    }
+                },
+                "io_counters": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "start": {
+                            "type": [
+                                "object",
+                                "null"
+                            ],
+                            "properties": {
+                                "rchar": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "wchar": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "syscr": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "syscw": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "read_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "write_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                }
+                            }
+                        },
+                        "last": {
+                            "type": [
+                                "object",
+                                "null"
+                            ],
+                            "properties": {
+                                "rchar": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "wchar": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "syscr": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "syscw": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "read_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "write_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                }
+                            }
+                        },
+                        "delta": {
+                            "type": [
+                                "object",
+                                "null"
+                            ],
+                            "properties": {
+                                "rchar": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "wchar": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "syscr": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "syscw": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "read_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                },
+                                "write_bytes": {
+                                    "type": [
+                                        "integer",
+                                        "null"
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                },
+                "peak_tree_rss_bytes": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "end_tree_rss_bytes": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "peak_tree_cpu_percent": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
                 }
             }
         },
@@ -1419,19 +1873,105 @@
                                 "description": "POSIX epoch timestamp when the signal was received."
                             }
                         },
-                        "required": ["signal", "signal_name", "timestamp_utc"],
+                        "required": [
+                            "signal",
+                            "signal_name",
+                            "timestamp_utc"
+                        ],
                         "additionalProperties": false
                     },
                     "default": [],
                     "description": "List of OS signals received during execution."
                 },
                 "exit_code": {
-                    "type": ["integer", "null"],
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
                     "description": "Process exit code captured at finalization. Null if unknown."
                 },
                 "exit_exception": {
-                    "type": ["string", "null"],
+                    "type": [
+                        "string",
+                        "null"
+                    ],
                     "description": "String representation of the exit-causing exception, if any."
+                },
+                "capture_state": {
+                    "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "filesystem_section": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+                "capture_state"
+            ],
+            "properties": {
+                "run_dir": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "path": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "mount_point": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "fstype": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "is_network": {
+                            "type": [
+                                "boolean",
+                                "null"
+                            ]
+                        }
+                    }
+                },
+                "tmpdir": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "path": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "mount_point": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "fstype": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "is_network": {
+                            "type": [
+                                "boolean",
+                                "null"
+                            ]
+                        }
+                    }
                 },
                 "capture_state": {
                     "$ref": "#/$defs/capture_state"
