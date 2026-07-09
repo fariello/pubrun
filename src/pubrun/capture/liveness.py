@@ -388,6 +388,11 @@ def _get_cpu_macos(pid: int) -> Optional[float]:
 
 def _is_pid_alive_windows(pid: int) -> bool:
     """Check PID liveness on Windows using kernel32.OpenProcess."""
+    # A Windows process id is a DWORD (0 .. 2**32-1). An absurd PID from a corrupt dir name
+    # would overflow the ctypes argument (raising ctypes.ArgumentError, which is NOT an
+    # OverflowError subclass), so reject out-of-range ids up front rather than at the call.
+    if pid <= 0 or pid > 0xFFFFFFFF:
+        return False
     try:
         import ctypes
         import ctypes.wintypes
@@ -406,9 +411,9 @@ def _is_pid_alive_windows(pid: int) -> bool:
             return False
         finally:
             kernel32.CloseHandle(handle)
-    except (OSError, AttributeError, ValueError, OverflowError):
-        # OverflowError: an absurd PID (e.g. from a corrupt dir name) that can't fit the
-        # Win32 DWORD process-id argument — treat as not-alive rather than raising.
+    except Exception:
+        # Any failure (incl. ctypes.ArgumentError wrapping an OverflowError for an
+        # out-of-range PID) means "not alive" — never propagate a raise.
         return False
 
 
