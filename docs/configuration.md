@@ -44,7 +44,7 @@ Core behaviors governing run initialization and storage.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `profile` | string | `"default"` | Master capture depth: `"minimal"`, `"default"`, or `"deep"`. Controls default depth for all categories unless overridden. |
+| `profile` | string | `"default"` | **Deprecated and inert.** Accepts `"minimal"`/`"default"`/`"deep"` but has **no effect** — `profile` never controlled capture depth and is not wired to any capture engine. Setting it to a non-default value records a deprecation notice in the run manifest (surfaced by `pubrun status`/`inspect`/`show`). To control capture depth, set the specific `capture.*` keys (e.g. `[capture.hardware].depth`, `[capture.packages].mode`). |
 | `output_dir` | string | `""` | Base directory for run output. Empty string defaults to `./runs/` in the current working directory. |
 | `auto_start` | bool | `true` | If `true`, `import pubrun` automatically starts a trace. If `false`, you must call `pubrun.start()` explicitly. Equivalent to `[imports].mode = "noauto"` when set to `false`. |
 
@@ -323,7 +323,7 @@ long); override any of them in your `.pubrun.toml`.
 | Variable | Description |
 |---|---|
 | `PUBRUN_IMPORT_MODE` | Canonical import mode: `auto`, `noauto`, `nopatch`, `noconsole`, or `minimal`. Takes highest precedence. |
-| `PUBRUN_PROFILE` | Override `[core].profile`. Set to `"minimal"`, `"default"`, or `"deep"`. |
+| `PUBRUN_PROFILE` | **Deprecated and inert.** Sets `[core].profile`, which has no effect on capture (see the `[core]` table). Use the `capture.*` keys instead. |
 | `PUBRUN_AUTO_START` | Legacy alias for import mode. `"false"` maps to `noauto`, `"true"` maps to `auto`. |
 | `PUBRUN_META_REF` | Path to a parent `meta.json` for HPC hydration. Child runs will reference this. |
 | `PUBRUN_IMPORT_CONFLICT` | Override `[imports].on_conflict`. Set to `"ignore"`, `"warn"`, or `"error"`. |
@@ -335,13 +335,20 @@ long); override any of them in your `.pubrun.toml`.
 ```toml
 [core]
 auto_start = false
-profile = "deep"
 
 [console]
 capture_mode = "off"
 
 [events]
 enabled = true
+
+# To reduce capture depth, set the specific capture.* keys (NOT the deprecated
+# core.profile, which has no effect):
+[capture.hardware]
+depth = "off"
+
+[capture.packages]
+mode = "off"
 ```
 
 ---

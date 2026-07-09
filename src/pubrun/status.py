@@ -118,6 +118,7 @@ class RunInfo:
         self.event_count: Optional[int] = None
         self.console_log_size: Optional[int] = None
         self.signals_received: Optional[List[Dict[str, Any]]] = None
+        self.config_notices: List[Dict[str, Any]] = []
 
         if run_dir is not None:
             self._classify()
@@ -229,6 +230,13 @@ class RunInfo:
             signals = data.get("signals", {})
             self.exit_code = _as_int(signals.get("exit_code"))
             self.signals_received = _as_signal_list(signals.get("signals_received", []))
+
+            # Non-disruptive config notices (e.g. deprecated core.profile)
+            cfg = data.get("config", {})
+            if isinstance(cfg, dict):
+                notices = cfg.get("notices", [])
+                if isinstance(notices, list):
+                    self.config_notices = [n for n in notices if isinstance(n, dict)]
 
             # Process
             process = data.get("process", {})
@@ -889,6 +897,16 @@ def render_short_list(runs: List[RunInfo], all_runs: Optional[List[RunInfo]] = N
         summary += f" (showing {len(runs)})"
     lines.append(summary)
 
+    # Discovery hint: point at the per-run detail when any listed run has config
+    # notices (e.g. a deprecated setting), so they are not buried in the manifest.
+    notice_runs = sum(1 for r in runs if getattr(r, "config_notices", None))
+    if notice_runs:
+        plural = "run has" if notice_runs == 1 else "runs have"
+        lines.append(
+            f"[WARN ] {notice_runs} {plural} config notices — see `pubrun status <id>` "
+            f"or `pubrun inspect`."
+        )
+
     return "\n".join(lines)
 
 
@@ -959,6 +977,14 @@ def render_inspect(run_info: RunInfo) -> str:
     lines.append(f"  Elapsed:       {_format_elapsed(run_info.elapsed)}")
     lines.append(f"  Exit Code:     {run_info.exit_code if run_info.exit_code is not None else '-'}")
     lines.append("")
+
+    # Config notices (e.g. deprecated core.profile) — surfaced, not buried in JSON.
+    if run_info.config_notices:
+        lines.append("  Notices:")
+        for notice in run_info.config_notices:
+            msg = notice.get("message", notice.get("code", "config notice"))
+            lines.append(f"    [WARN ] {msg}")
+        lines.append("")
 
     # Process info
     lines.append(f"  PID:           {run_info.pid or '-'}")

@@ -18,9 +18,12 @@
 # Core behaviors for run initialization and storage.
 # -----------------------------------------------------------------------------
 
-# Master profile controlling capture depth across all categories, unless a
-# specific category overrides it.
-# Values: "minimal", "default", "deep"
+# DEPRECATED and INERT: `profile` does NOT control capture depth and never did.
+# It is still accepted (so existing configs/scripts do not break) but has no effect;
+# a notice is recorded in the run manifest if you set it to a non-default value.
+# To control capture depth, set the specific `capture.*` keys below
+# (e.g. capture.hardware.depth, capture.packages.mode).
+# Values (accepted, ignored): "minimal", "default", "deep"
 profile = "default"
 
 # Base directory for run output. pubrun creates timestamped subdirectories

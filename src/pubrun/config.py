@@ -173,3 +173,35 @@ def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         config = _deep_merge(config, overrides)
 
     return config
+
+
+# The only profile value that is a no-op regardless of wiring; setting it never
+# implied a capture change, so it does not warrant a deprecation notice.
+_INERT_PROFILE_DEFAULT = "default"
+
+
+def profile_deprecation_notice(config: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """Return a deprecation notice if `core.profile` was set to a capture-affecting value.
+
+    `core.profile` ("minimal"/"deep") was documented and exposed as a "master capture
+    depth" dial but was never wired to any capture engine — it has no effect on what
+    pubrun captures. Per the Option-D decision it is deprecated: still accepted (so no
+    caller breaks), but explicitly inert. This returns a machine-readable notice to be
+    recorded in the manifest (never raised, never printed here — the caller decides how
+    to surface it, so an imported host script is never disrupted).
+
+    Returns None when `profile` is unset or set to the inert default ``"default"``.
+    """
+    profile = config.get("core", {}).get("profile")
+    if not profile or profile == _INERT_PROFILE_DEFAULT:
+        return None
+    return {
+        "code": "profile_deprecated",
+        "setting": "core.profile",
+        "value": str(profile),
+        "message": (
+            f"core.profile={profile!r} has no effect: profile never controlled capture "
+            f"depth and is deprecated. Set the specific capture.* keys instead "
+            f"(e.g. capture.hardware.depth, capture.packages.mode)."
+        ),
+    }

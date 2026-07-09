@@ -12,7 +12,7 @@ import pubrun
 
 def main() -> None:
     print("Testing 10_hardware_probe...")
-    with pubrun.tracked_run(profile="deep") as active:
+    with pubrun.tracked_run(capture={"hardware": {"depth": "deep"}}) as active:
         run_dir = getattr(getattr(active, "run_tracker", active), "run_dir", None)
 
         # Allocate some memory so resource monitoring has something to see

@@ -4,9 +4,49 @@
 - Concern: functionality / architecture (design decision)
 - Scope: `src/pubrun/tracker.py`, `src/pubrun/capture/*`, `src/pubrun/config.py`,
   `src/pubrun/tui/widgets/config.py` (the profile selector), `docs/configuration.md`, HPC docs
-- Status: PENDING (decision made — Option D, remove `profile` with soft deprecation; awaiting
-  approval to execute. See "Recommendation" and "Architect session outcome" below.)
+- Status: EXECUTED 2026-07-09 (Option D, soft deprecation). Full suite green (877 passed, 2 skipped).
+  Execution surfaced + fixed a pre-existing `pubrun.report` subpackage-shadowing bug (scope expanded
+  with maintainer approval). See "Execution notes" below.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
+
+## Execution notes (2026-07-09)
+
+Executed after `/advise architect` settled Option D and the maintainer approved skipping a redundant
+plan-review. Deprecation notice surfacing was chosen **manifest-only** (never `warnings.warn`/raise,
+per the non-disruption invariant), then surfaced in the human-facing commands so it is not buried.
+
+- **`core.profile` deprecated + inert (as designed).** New `profile_deprecation_notice()`
+  (`config.py`) returns a machine-readable notice for a non-default `profile`; the tracker records it
+  in `manifest.config.notices` (`tracker.py`), never raising into the host (mirrors ghost mode).
+- **Surfaced in `pubrun show`** (diagnostics `[WARN ]` line), **`pubrun inspect`** (a
+  `profile_deprecated` finding via `report/checks.py`, so `--json` too), **`pubrun status <id>`**
+  (a Notices block via `RunInfo.config_notices` + `render_inspect`), and a discovery hint in the
+  **`pubrun status`** list footer.
+- **Honesty fixes:** `default.toml` comment, the TUI selector label (`tui/widgets/config.py`),
+  `docs/configuration.md` (`profile` row + `PUBRUN_PROFILE` + the example), and README `profile=`
+  snippets. `profile`/`PUBRUN_PROFILE`/`start(profile=)` are still accepted (no breakage).
+- **Characterization test** pins the pre-existing reality (profile does not gate capture).
+
+### Scope expansion (maintainer-approved): pre-existing `pubrun.report` shadowing bug
+
+Executing the surfacing tests surfaced an **unrelated, pre-existing** defect: every import-mode module
+and the deferred `__init__` did `_pkg.report = report`, overwriting the `pubrun.report` **subpackage**
+(a CallableModule) with the plain `report()` function. In some import orders this left `pubrun.report`
+as a function, so `import pubrun.report.diagnostics` (`.output`/`.checks`) raised `ImportError`. The
+maintainer approved fixing it in this IPD **with deep tests for the bug class**.
+
+- **Fix:** import the `pubrun.report` subpackage (keeping the CallableModule — callable *and*
+  submodule-bearing) instead of assigning the function, across all 6 mode modules + `__init__.py`.
+  `pubrun.report(...)` remains callable AND `import pubrun.report.<submodule>` works.
+- **Deep tests** (`tests/test_report_subpackage_integrity.py`): `report` is callable + all report
+  submodules import under **every** import mode (auto/noauto/full/nopatch/noconsole/minimal, each in a
+  fresh subprocess); a same-process call+submodule coexistence test; and a **generalized guard** that
+  no mode module shadows *any* `pubrun` subpackage (catches the whole class, not just `report`).
+
+### Environment note
+
+Dev/validate moved to `~/venv/p3.14` (the only venv now present; `p3.11.8` is gone). Installed
+`pytest==8.2.2` there. CI command `pytest tests/ -v` unaffected.
 
 ## Origin
 

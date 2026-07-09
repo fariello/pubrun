@@ -137,7 +137,12 @@ else:
                 _pkg.audit_run = audit_run
                 _pkg.tracked_run = tracked_run
                 _pkg.get_current_run = get_current_run
-                _pkg.report = report
+                # `pubrun.report` is a CallableModule (pubrun/report/__init__.py): BOTH callable
+                # as the report() API AND a subpackage exposing pubrun.report.output/checks/
+                # diagnostics. Import the subpackage so the attribute is that CallableModule; do
+                # NOT do `_pkg.report = report` (the plain function shadows the subpackage and
+                # breaks `import pubrun.report.<submodule>`).
+                import pubrun.report  # noqa: F401
                 _pkg.artifact = artifact
                 _pkg.print = print
                 _pkg.open = open
