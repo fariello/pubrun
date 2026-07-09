@@ -3,8 +3,31 @@
 - Date: 2026-07-09
 - Concern: documentation (accuracy) / testing / bugs
 - Scope: `schemas/manifest.schema.json`, `docs/manifest.md`, `tests/test_manifest_schema.py`
-- Status: PENDING (awaiting human approval; not executed)
+- Status: EXECUTED 2026-07-09 (approved). Enum widened; startup-manifest conformance test added;
+  full suite green. See "Execution notes" below.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
+
+## Execution notes (2026-07-09)
+
+- **Open Q2 resolved (reconcile the WHOLE enum in one pass):** grepped every emitted
+  `capture_state.status` literal. The schema `status_value` enum was missing **two** real values,
+  not one: **`pending`** (async sections at startup) **and `timeout`** (git/hardware external-tool
+  timeout — already documented in `docs/manifest.md` but absent from the schema enum). Added both.
+  Confirmed out of scope: `ok` (self-check *finding* status, not capture_state) and the filesystem
+  live-probe `skipped`/`error` (diagnostic-only `<label>.live` slot, never in the run manifest).
+- **`run_status.outcome` enum checked** and already complete (`running/completed/failed/interrupted/
+  partial/unknown/ghost`) — no parallel gap.
+- Documented `pending` in `docs/manifest.md` Capture State list (`timeout` was already there).
+- Added `test_startup_manifest_conforms_to_schema` — reads the manifest written at `start()` (before
+  `stop()`), asserts a section is `pending`, then validates. This pins the crashed-run manifest shape
+  as a gated case (would fail without the enum fix).
+- Ghost mode confirmed to write no manifest (not touched).
+- **Opportunistic (in-scope, related): refreshed the stale committed fixture.**
+  `tests/fixtures/sample_manifest.json` (used by ~15 report-rendering tests) was itself schema-stale
+  (`git.is_dirty` → `dirty`; console streams missing `captured`; dropped `invocation.
+  working_directory.basename`). Corrected to conform, and added
+  `test_committed_sample_fixture_conforms_to_schema` so the fixture cannot silently drift again. All
+  49 report tests still pass. (This clears the separate "stale fixture" follow-up.)
 
 ## Origin
 

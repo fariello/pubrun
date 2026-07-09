@@ -103,3 +103,45 @@ def test_manifest_variants_conform_to_schema(tmp_path, kwargs):
     fields). Guards drift a single default manifest would miss."""
     manifest = _make_manifest(tmp_path, **kwargs)
     jsonschema.validate(manifest, _schema())
+
+
+def test_committed_sample_fixture_conforms_to_schema():
+    """The committed report-rendering fixture must itself be a schema-valid manifest,
+    so it cannot silently drift from the real manifest shape (it did: it had the old
+    git `is_dirty` and an `invocation.working_directory.basename` the code no longer
+    emits, plus console streams missing `captured`)."""
+    fixture = _SCHEMA_PATH.parent.parent / "tests" / "fixtures" / "sample_manifest.json"
+    manifest = json.loads(fixture.read_text(encoding="utf-8"))
+    jsonschema.validate(manifest, _schema())
+
+
+def test_startup_manifest_conforms_to_schema(tmp_path):
+    """The STARTUP manifest (written at start(), before async capture finishes) must
+    validate. This is the on-disk shape a run that CRASHED before finalizing leaves
+    behind — read by pubrun status/inspect/show. Its hardware/host/filesystem sections
+    carry capture_state.status == "pending" (the background hw thread hasn't filled them
+    in yet), which the schema enum must accept. Guards the crashed-run manifest shape.
+    """
+    import os
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        import pubrun.noauto as pubrun
+        t = pubrun.start()
+        try:
+            # Read the manifest written synchronously at start(), BEFORE stop().
+            manifest = json.loads((t.run_dir / "manifest.json").read_text(encoding="utf-8"))
+        finally:
+            pubrun.stop()
+    finally:
+        os.chdir(cwd)
+
+    # At least one section should be mid-flight 'pending' at startup (else this test
+    # is not actually exercising the pending path).
+    statuses = {
+        sec: manifest.get(sec, {}).get("capture_state", {}).get("status")
+        for sec in ("hardware", "host", "filesystem")
+    }
+    assert "pending" in statuses.values(), f"expected a pending section at startup, got {statuses}"
+
+    jsonschema.validate(manifest, _schema())

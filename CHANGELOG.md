@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **Manifest schema now accepts the transient `pending` and `timeout` capture states, so
+  crashed/startup manifests validate.** The schema's capture-state enum omitted `pending` (async
+  hardware/host/filesystem sections at `start()`, which persist in a run that crashed before
+  finalizing) and `timeout` (git/hardware external-tool timeout — already documented but not in the
+  enum). Both are now in the schema and documented; a new test validates the startup manifest shape.
 - **Manifest JSON schema reconciled with reality; schema-conformance is now a hard test gate.** The
   shipped `schemas/manifest.schema.json` had drifted — several manifest sections were added over time
   without schema updates, so a real manifest failed validation (root `filesystem`; `capture` enable
