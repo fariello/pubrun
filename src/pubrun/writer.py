@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import uuid
 import atexit
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,11 @@ def _atomic_json_write(path: Path, data: Any) -> None:
     This prevents readers (e.g., ``pubrun status``) from seeing a partially
     written file if the process is killed mid-write.
     """
-    tmp_path = path.with_suffix(".json.tmp")
+    # Use a UNIQUE temp filename (pid + random) so two concurrent writers to the same target
+    # (e.g. the synchronous startup write and the hardware-thread re-write of the same file)
+    # never collide on one fixed ".tmp" path — a race that could leave the target missing when
+    # one writer's os.replace consumed the other's temp file. (CI-flaky config.resolved.json.)
+    tmp_path = path.with_suffix(f".json.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
