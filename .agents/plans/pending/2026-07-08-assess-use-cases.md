@@ -59,10 +59,10 @@ Fix by default; each item is safe and well-scoped. Ordered by user impact.
 
 | Step | Source finding IDs | Change | Files | Remediation Risk | Validation |
 |------|--------------------|--------|-------|------------------|------------|
-| 1 | U1, U2 | Make `resources` an actual working alias of `res` (register it via argparse `aliases=["resources"]` on the `res` subparser, matching how `ui` does `aliases=["tui","gui"]`), OR - if the alias is unwanted - remove the claim from README/docs and delete the dead strings. **Recommend making it work** (docs already promise it; least surprise). While here, drop `monitor`/`chart`/`stats` from the dispatch set (U2) since they are undocumented and unreachable. | `src/pubrun/__main__.py` (~:2256 add_parser, :2390 dispatch set), README.md:263, docs/cli.md | Low | `pubrun resources` renders the same chart as `pubrun res` (new test asserting parity); `pubrun monitor` still errors cleanly; existing res/cpu/mem tests pass |
-| 2 | U3 | Add a test for `pubrun init`: fresh dir -> writes `.pubrun.toml`, prints guidance, exits 0; and the safety case of running `init` when `.pubrun.toml` already exists (assert it does not silently clobber, or documents/prompts per current behavior). | `tests/test_cli.py` (or a new `test_init.py`) | Low | New test passes; encodes current behavior; if it reveals a clobber bug, that becomes a follow-up finding |
-| 3 | U4 | Add a SIGHUP interrupted-classification test (mirror the SIGINT test) and a lock-file "crashed" test driven by an actually SIGKILL'd child (POSIX; `skipif(win32)`), not a synthetic dead PID, so the real kill path is covered. | `tests/test_signals.py`, `tests/test_status.py` | Low | New tests pass on Linux/macOS; skipped on Windows with a reason |
-| 4 | U5 | Add one end-to-end HPC-hydration test that spawns a child with `PUBRUN_META_REF=meta.json` (reusing/repairing `tests/scripts/hpc_node.py`), asserts the child skips heavy footprint capture, then asserts `show`/`methods` stitches the parent hardware/deps back in. Wire `hpc_node.py` into this test (or delete it if superseded). | `tests/` (new `test_hpc_hydration_e2e.py` or extend `test_reports.py`), `tests/scripts/hpc_node.py` | Low-Medium | New test passes; asserts child manifest lacks heavy sections AND rendered output contains parent context; the previously-dead fixture is now exercised |
+| 1 | U1, U2 | Make `resources` an actual working alias of `res` (register it via argparse `aliases=["resources"]` on the `res` subparser, matching how `ui` does `aliases=["tui","gui"]` at `__main__.py:2316`), OR - if the alias is unwanted - remove the claim from README/docs and delete the dead strings. **Recommend making it work** (docs already promise it; least surprise). The existing dispatch set at `__main__.py:2390` already contains `"resources"`, so no dispatch change is needed for it to route once the parser alias exists (argparse sets `args.command` to the alias the user typed - confirmed by the `ui`/`tui`/`gui` dispatch at `__main__.py:2564`). **THREE sites must stay consistent (R1):** (a) the `res` `add_parser` `aliases=` at `~__main__.py:2256`; (b) the dispatch set at `__main__.py:2390`; and (c) **the hand-maintained `subcommands` set at `__main__.py:1891`** used for `--no-color` positioning and pre-subcommand run-ID placement (`__main__.py:1909`) - `resources` MUST be added there too or `pubrun resources 1` / `pubrun --no-color resources` positional handling can misbehave. While here, drop `monitor`/`chart`/`stats` from the dispatch set (U2) since they are undocumented and unreachable. | `src/pubrun/__main__.py` (:1891 subcommands set, ~:2256 add_parser, :2390 dispatch set), README.md:263, docs/cli.md | Low | `pubrun resources <run>` renders the same chart as `pubrun res <run>` (new parity test); **`pubrun resources 1` and `pubrun --no-color resources 1` both resolve correctly** (regression test for the `:1891` site); `pubrun monitor` still errors cleanly; existing res/cpu/mem tests pass |
+| 2 | U3 | Add a test for `pubrun init`: fresh dir -> writes `.pubrun.toml`, prints guidance, exits 0. **Also encode the already-correct refuse-to-overwrite safety behavior (R3):** running `init` (or `--create-config`) when `.pubrun.toml` already exists must exit non-zero (currently `sys.exit(1)`) with the "Refusing to overwrite" error and leave the existing file byte-for-byte unchanged (verified current behavior at `__main__.py:46-48`). This is a **characterization test that pins existing safe behavior**, not a bug fix. | `tests/test_cli.py` (or a new `test_init.py`) | Low | Fresh-dir init test passes; overwrite-refusal test asserts exit code 1 + "Refusing to overwrite" on stderr + unchanged file contents |
+| 3 | U4 | Add a lock-file **"crashed"** test driven by an actually SIGKILL'd child process (POSIX; `skipif(win32)`) - the child starts a tracked run, writes its lock, is SIGKILL'd, and `pubrun status` must classify it "crashed" via the real dead-PID lock scan (the current test at `test_status.py:239` uses a *synthetic* dead PID, so the real kill path is unverified). **SIGHUP is explicitly NOT a separate test (R2):** verified SIGHUP shares the exact lethal-finalization path as the already-tested SIGTERM (`capture/signals.py:40` groups `("SIGTERM","SIGHUP")`), so a SIGHUP case would be a near-duplicate. If cheap, add SIGHUP only as an extra `pytest.mark.parametrize` value on the existing SIGTERM finalization test (`test_signals.py:425`) rather than a new test. | `tests/test_status.py` (SIGKILL crashed); optional param on `tests/test_signals.py` | Low | SIGKILL crashed test passes on Linux/macOS, skipped on Windows with a reason; no near-duplicate SIGHUP test is added |
+| 4 | U5 | Add one end-to-end HPC-hydration test that spawns a child with `PUBRUN_META_REF=meta.json`, asserts the child skips heavy footprint capture, then asserts `show`/`methods` stitches the parent hardware/deps back in. **Repairing `tests/scripts/hpc_node.py` is required, not optional (R4):** as written it sets `os.environ["PUBRUN_META_REF"]` at line 5 *after* `import pubrun` at line 2, but default (auto) mode **auto-starts on import**, so the env var is set too late to influence the run - the fixture as-is does not actually exercise hydration. Fix it to set the env var before import (or use `import pubrun.noauto` then `start()`, or set env in the parent before spawning), or replace it with an inline child script and delete the fixture. Whichever is chosen, the test must assert the child manifest genuinely reflects the meta-ref (heavy sections skipped), not merely that it ran. | `tests/` (new `test_hpc_hydration_e2e.py` or extend `test_reports.py`), `tests/scripts/hpc_node.py` | Low-Medium | New test passes; asserts child manifest lacks heavy sections AND that hydration was actually triggered (env var effective before start) AND rendered output contains parent context |
 | 5 | U6 | Add a test that launches two tracked runs as separate subprocesses concurrently against one `./runs/` dir and asserts both produce distinct valid manifests and `pubrun status` lists both without error/corruption. | `tests/` (extend `test_status.py` or new file) | Low-Medium | New test passes reliably (bounded, deterministic sync; no sleeps-as-timing); no lock/listing race |
 | 6 | U7 | Update docs/research-use.md l.22-34 from future-tense "should be added" to present-tense pointing at the existing `examples/minimal-research-workflow/`, listing the 7 steps it already demonstrates. | docs/research-use.md | Low | Doc references the real path; `/assess documentation` (doc-sync) would pass |
 
@@ -93,13 +93,20 @@ support from those out of scope"), so NOT findings:
 - Under-scope (needed capability missing; propose adding): the `resources` alias is *promised*
   but non-functional (U1) - Step 1 adds the real alias. No other missing capabilities found; the
   feature surface matches the documented scenarios.
+- Consistency hazard (R1): the CLI keeps a **second, hand-maintained** command list at
+  `__main__.py:1891` (for `--no-color`/pre-subcommand run-ID parsing) that already drifts from the
+  registered subparsers (it omits `init`/`report-bug`/`feedback`/`self-check`/`inspect`/`bench`).
+  Step 1 must update it for `resources`. A follow-up hardening (out of scope here, low priority)
+  would derive that set from the registered subparsers to prevent future drift.
 
 ## Required tests / validation
 
-- New/changed tests from Steps 1-5 all pass under the project's CI command `pytest tests/ -v`
+- New/changed tests from Steps 1-6 all pass under the project's CI command `pytest tests/ -v`
   across the 3-OS x Python-3.8-3.14 matrix (POSIX-only cases guarded with `skipif(win32)` and a
   reason). Clear `__pycache__` before local runs.
-- Step 1 additionally verified by hand: `pubrun resources <run>` == `pubrun res <run>` output.
+- Step 1 additionally verified by hand: `pubrun resources <run>` == `pubrun res <run>` output, and
+  `pubrun resources 1` / `pubrun --no-color resources 1` resolve the recency index correctly
+  (the `__main__.py:1891` consistency regression).
 - Concurrency (Step 5) and HPC-e2e (Step 4) tests must be deterministic (explicit readiness
   sync, no wall-clock sleeps used as ordering) to avoid the load-sensitive flakes already seen
   on busy runners.
@@ -122,6 +129,29 @@ Behavior/doc changes touch user-visible surface, so per AGENTS.md doc-sync disci
    script and delete the unreferenced fixture? Assumption: reuse/repair it (it exists for this).
 3. Is two-live-runs-in-one-output-dir (U6) an officially supported scenario the project wants to
    guarantee, or best-effort? The fix assumes "supported, should not corrupt listing/locks".
+
+## Plan-review revisions (2026-07-08)
+
+This IPD was hardened by the `plan-review` workflow, which re-opened the source evidence rather
+than trusting the plan's self-description. No finding required deferral (all Remediation Risk Low).
+Revisions applied:
+
+- **R1 (High, under-scope):** Step 1 named only two edit sites; verification found a **third**
+  hand-maintained command set at `__main__.py:1891` that must also learn `resources` or positional/
+  `--no-color` parsing breaks. Added the site, a regression test for `pubrun resources 1` /
+  `pubrun --no-color resources 1`, and a Scope-check note on the drift hazard.
+- **R2 (Medium, scope/KISS):** Step 3 originally added a SIGHUP test; verified SIGHUP shares the
+  same lethal-finalization path as the already-tested SIGTERM (`capture/signals.py:40`), so it was
+  a near-duplicate. Trimmed to an optional parametrize value; the SIGKILL-via-real-kill crashed
+  test (a genuinely uncovered path) is now the focus.
+- **R3 (Medium, precision):** Step 2's overwrite "safety case" was vague. Verified current behavior
+  (`__main__.py:46-48`: refuses, `sys.exit(1)`), so it is a characterization test pinning existing
+  safe behavior; made the assertion concrete (exit 1 + "Refusing to overwrite" + file unchanged).
+- **R4 (Medium, correctness):** Step 4 said "repair" `hpc_node.py` without a reason. Verified the
+  fixture sets `PUBRUN_META_REF` *after* `import pubrun` (`hpc_node.py:2,5`), so auto-start fires
+  before the env var takes effect and hydration is never actually exercised. Named the concrete
+  repair and required the test to assert hydration was genuinely triggered, not merely that the
+  child ran.
 
 ## Approval and execution gate
 
