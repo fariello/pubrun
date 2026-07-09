@@ -4,7 +4,8 @@
 - Concern: functionality / architecture (design decision)
 - Scope: `src/pubrun/tracker.py`, `src/pubrun/capture/*`, `src/pubrun/config.py`,
   `src/pubrun/tui/widgets/config.py` (the profile selector), `docs/configuration.md`, HPC docs
-- Status: PENDING (awaiting human decision; not executed)
+- Status: PENDING (decision made — Option D, remove `profile` with soft deprecation; awaiting
+  approval to execute. See "Recommendation" and "Architect session outcome" below.)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Origin
@@ -106,13 +107,57 @@ Two coupled sub-questions:
 
 ## Recommendation to the maintainer
 
-Decide A vs. C vs. D: either **make `profile` mean something** (A), **keep it inert but describe it
-honestly** (C, docs+TUI corrections only), or **stop offering it** (D). All three fix the "honest
-docs" violation; the real fork is whether `profile` becomes a real feature (A) or is retired (D), with
-C as the minimal honest holding position. Keep `meta_ref` suppression explicit (avoid B) unless there
-is strong demand. This IPD does not execute; it needs a human design decision, ideally via
-`/advise architect` (compat surface of A vs. D) or `/advise domain-expert` (do HPC users want the
-light-child story enough to justify A).
+**Decision (2026-07-08, after `/advise architect`): Option D — remove `profile`, with a soft
+deprecation.** Stop offering a dial that never worked; accept `profile=`/`PUBRUN_PROFILE` for a
+release but ignore it for capture and emit a non-disruptive notice that it was removed because it
+never took effect (use `capture.*` keys instead). Rationale below (Architect session outcome).
+
+Alternatives considered and not chosen:
+- **A (wire `profile` to capture tiers):** only justified with positive evidence that users want a
+  one-line convenience dial — no such demand was identified. A also signs the project up for tracking
+  value-provenance through config resolution to surface conflicts honestly (see below), i.e. real
+  machinery to prop up a feature of unproven value.
+- **C (keep inert, fix docs/TUI only):** the cheap holding position, but leaves a dead knob in the
+  config that does nothing — its own small dishonesty — and defers the decision indefinitely.
+- **B (`meta_ref` implies light child):** rejected — implicit, hard-to-debug capture gaps.
+
+Keep `meta_ref` suppression explicit regardless. A `domain-expert` session could still overturn this
+toward A if HPC users turn out to want the light-child dial, but absent that signal, D is the call.
+
+## Architect session outcome (2026-07-08)
+
+Recorded from the `/advise architect` session that settled the A-vs-D fork.
+
+- **The originating problem (HPC light-child) is separable from `profile`.** Option A would *not* make
+  `meta_ref` children automatically lighter (A keeps `meta_ref` orthogonal); it only fixes the
+  `profile` honesty bug. So A was oversold as "makes the HPC story true by design" — it does not.
+- **The master-dial abstraction is a drift magnet.** `profile` is broken today precisely because a
+  one-dial-fans-out-to-N-settings design rots when someone adds an engine and forgets the tier map.
+  A *manages* that coupling (and must prevent the map drifting out of sync with the engine set); D
+  *deletes* it. D makes the failure mode impossible rather than merely handled — the stronger
+  structural choice, and aligned with the project's KISS / "stupidly simple" principle.
+- **Conflict handling (if A were kept) — the invariant that constrains it:** a config conflict must be
+  **data, not an event**. Never raise, never `logging.warning` into the host; a conflict degrades to a
+  *recorded fact* in the manifest (mirroring ghost mode), so the imported script is never disrupted.
+- **Conflict resolution rule (if A were kept):** the more specific setting wins, silently, at the
+  resolution layer — `profile` expands to per-category defaults at the **bottom** of the stack
+  (built-in → profile expansion → user → local → env → API explicit keys), so any explicit
+  `capture.*` at any layer overrides it. This is the only ordering explainable in one sentence.
+- **Why this reinforces D:** surfacing conflicts *well* requires tracking each key's profile-implied
+  value through the merge and diffing it at the end — real provenance machinery to support a
+  low-demand feature. **D makes conflicts impossible (one source of truth), so there is nothing to
+  surface.** The conflict-handling requirement is therefore an argument *for* D, not for keeping A.
+- **Config is already captured (corrects an assumption):** the fully-resolved config is written per
+  run as `config.resolved.json` (`writer.py:73`, referenced at `tracker.py:633`). What is missing is
+  only *resolution provenance* (which layer won a given key).
+- **Valuable spinoff, `profile`-independent:** recording config *override provenance* in the manifest
+  (e.g. "local config overrode home config's `capture.packages.mode`") is useful reproducibility
+  metadata regardless of A/C/D, and it makes D *easier* (you get the "tell me why my config isn't what
+  I expected" benefit without the drift-prone dial). Captured as a future idea in `TODO.md` under
+  "Deferred ideas" as the **`pubrun show config` family** (`show config` / `show run config [<id>]` /
+  `show default config`, each highlighting ambiguities and how they resolved). That work carries a
+  known CLI-grammar collision to design deliberately (`show <run> <section>` vs. `show <keyword>
+  config`).
 
 ## Plan-review revisions (2026-07-08)
 
@@ -136,15 +181,25 @@ description). No deferrals (all Remediation Risk Low). Revisions:
 
 ## Approval and execution gate
 
-Proposal only. Requires human decision before any execution. On approval, a follow-up execution would:
+Decision made (Option D). Requires approval to **execute**. On approval, execution for D would:
 
-1. **Characterization tests first (rubric D):** add tests pinning the CURRENT per-profile manifests —
-   i.e. assert that today `profile="minimal"`/`"deep"` produce identical `capture_state` outcomes (no
-   effect) — so the intended change is provable as a deliberate behavior diff, not an accident. There
-   is currently **no** test asserting profile's effect (or non-effect) on capture; this is the anti-
-   regression baseline. (For C/D, the characterization test instead pins "profile does not gate
-   capture" as intended.)
-2. Implement the chosen option (wire tiers / correct docs+label / remove-deprecate).
-3. **Spec/doc sync:** `docs/configuration.md:47` and `:326`, the TUI selector label, README/examples
-   `profile=` snippets, and a CHANGELOG entry (behavior change for A; doc/deprecation for C/D).
+1. **Characterization test first (rubric D):** add a test pinning the CURRENT reality — `profile`
+   does **not** gate capture (`profile="minimal"` vs `"deep"` produce identical `capture_state`
+   outcomes). There is currently no such test; it is the anti-regression baseline that documents the
+   pre-removal behavior deliberately.
+2. **Implement D (soft deprecation, non-disruptive):**
+   - `config.py` — continue to *accept* `profile` (config key, `PUBRUN_PROFILE` env at `:156-158`,
+     `start(profile=)` shortcut at `:169`) so no import breaks, but treat it as inert-by-design and
+     emit a **recorded, non-raising** deprecation notice (never an exception into the host; the
+     manifest is the surface, mirroring ghost mode).
+   - `src/pubrun/resources/default.toml:21` — remove/repair the false "Master profile controlling
+     capture depth" comment.
+   - `tui/widgets/config.py:59-60` — remove the "Profile Mode (Controls telemetry depth)" selector or
+     relabel it to stop promising a capture effect.
+3. **Spec/doc sync:** `docs/configuration.md:47` and `:326` (drop/deprecate the capture-depth claim),
+   README/`__init__.py`/examples `profile=` snippets, and a CHANGELOG entry (deprecation + "never
+   worked" note).
 4. Move this IPD to `.agents/plans/executed/`.
+
+Note: the config-provenance / `pubrun show config` spinoff is **out of scope for D** and tracked
+separately in `TODO.md` ("Deferred ideas"); it needs its own IPD.

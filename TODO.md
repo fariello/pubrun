@@ -40,6 +40,35 @@ interleaving/thread-safety hazards. Captured as an early proposal IPD (with the
 design questions spelled out) at
 `.agents/plans/pending/20260705-scoped-pause-resume.md` — not yet ready to execute.
 
+### `pubrun show config` family — inspect resolved config for three contexts
+
+Add a `config` view to `pubrun show` that renders the resolved configuration for three
+distinct contexts, so users can see exactly what settings are (or were) in effect:
+
+- **`pubrun show config`** — the config that *would* be in effect right now if the user
+  ran `import pubrun` in the current directory (i.e. resolve the full 5-layer hierarchy —
+  built-in → user → local → env → API-less — as of now). Answers "what will pubrun do if
+  I import it here?"
+- **`pubrun show run config [<run identifier>]`** — the config as it was *actually
+  resolved for a past run*. Reuse the standard run-selection criteria (recency index /
+  id prefix / path; default to the most recent run when the identifier is omitted). This
+  is already durable per run as `config.resolved.json` in the run dir
+  (`writer.py:73`, referenced from the manifest at `tracker.py:633`), so this view mostly
+  reads and renders that file.
+- **`pubrun show default config`** — the shipped built-in defaults only
+  (`src/pubrun/resources/default.toml`), i.e. what you get with zero user/local/env/API
+  input. (Overlaps the existing `--show-config` flag; unify or cross-reference.)
+
+Requirement across all three: **highlight any ambiguities and how they were resolved**
+— e.g. a local-config key that overrode a home-config key, or (if `profile` is kept) a
+`profile`-implied default that an explicit `capture.*` key overrode. The stretch goal is
+a design where *no* ambiguity is possible (single source of truth), in which case this
+view simply confirms "no conflicts." This ties directly to the config-provenance idea
+raised in the meta-ref/profile decision (recording override provenance in the manifest is
+useful independent of the `profile` outcome). Needs its own design pass / IPD:
+CLI grammar (`show config` vs. `show <run> config` disambiguation with the existing
+`show <run> <section>` form), and the ambiguity-detection/rendering.
+
 ---
 
 ## Removed from Roadmap
