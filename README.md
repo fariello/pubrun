@@ -373,7 +373,19 @@ export PUBRUN_META_REF=meta.json
 python minimal_script.py
 ```
 
-Child scripts automatically skip heavy footprint tracking. When you run `pubrun report` or `pubrun methods`, the orchestrator detects the `PUBRUN_META_REF`, pulls in the parent `meta.json` context, and stitches the complete hardware and dependency picture back together. It also compares script timestamps against the parent snapshot and warns you if **environmental drift** has been detected.
+Setting `PUBRUN_META_REF` records the reference in each child's manifest and enables
+**report-time hydration**: when you run `pubrun show` or `pubrun methods`, the orchestrator
+detects the `PUBRUN_META_REF`, pulls in the parent `meta.json` context, and stitches the
+complete hardware and dependency picture back into any section the child did not capture. It
+also compares script timestamps against the parent snapshot and warns you if **environmental
+drift** has been detected.
+
+To actually reduce per-child overhead (so children don't each re-capture the identical
+hardware/dependency graph), suppress the heavy engines on the child — e.g. run with
+`capture.hardware.depth = "off"` and `capture.packages.mode = "off"` in `.pubrun.toml` (or the
+equivalent `pubrun.start(capture=...)` overrides). Hydration then fills those suppressed
+sections back in from the parent snapshot at report time. Note that the `core.profile` setting
+alone does **not** suppress capture; use the explicit `capture.*` keys.
 
 ---
 

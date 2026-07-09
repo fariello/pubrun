@@ -21,7 +21,9 @@ Current uses include active Python-based computational research workflows where 
 
 ## Public example workflow
 
-A public example workflow should be added under `examples/` before public release. The example should use synthetic or non-sensitive data and should demonstrate:
+A public example workflow lives under [`examples/minimal-research-workflow/`](../examples/minimal-research-workflow/).
+It uses synthetic, non-sensitive data (no unpublished data or private project files) and
+demonstrates the full round trip:
 
 1. Installing `pubrun`
 2. Running a Python analysis with `import pubrun`
@@ -31,7 +33,9 @@ A public example workflow should be added under `examples/` before public releas
 6. Comparing two runs
 7. Extracting a rerun command
 
-The example should not depend on unpublished data or private project files.
+It is exercised by `tests/test_example_minimal_research_workflow.py`, so it stays runnable as
+the code evolves. The `examples/` directory also holds focused single-feature scripts
+(`00_auto_start.py` through `11_cli_report.py`) plus a `verify_all.py` harness.
 
 ## How to cite pubrun
 

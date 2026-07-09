@@ -1888,7 +1888,7 @@ def main() -> None:
     """CLI entrypoint for the ``pubrun`` command."""
     # Handle global --no-color flag regardless of position
     # But do not strip it if it is part of the command run by 'pubrun run'
-    subcommands = {"report", "methods", "rerun", "diff", "meta", "status", "clean", "combined", "cite", "run", "ui", "tui", "gui", "show", "res", "cpu", "mem"}
+    subcommands = {"report", "methods", "rerun", "diff", "meta", "status", "clean", "combined", "cite", "run", "ui", "tui", "gui", "show", "res", "resources", "cpu", "mem"}
     run_idx = -1
     for idx, arg in enumerate(sys.argv):
         if arg in subcommands:
@@ -2255,6 +2255,7 @@ def main() -> None:
     # ---------------- Resources Subparser ----------------
     res_parser = subparsers.add_parser(
         "res",
+        aliases=["resources"],
         help="Display memory and CPU utilization charts over the run lifecycle.",
         description="Display memory and CPU utilization charts over the run lifecycle.",
         epilog=f"Examples:\n  {prog_name} res\n  {prog_name} res runs/pubrun-XYZ",
@@ -2387,7 +2388,7 @@ def main() -> None:
             _run_report(run_dir, args.depth, getattr(args, "section", None), utc=getattr(args, "utc", False))
         executed = True
 
-    elif args.command in {"res", "resources", "monitor", "chart", "stats", "cpu", "mem"}:
+    elif args.command in {"res", "resources", "cpu", "mem"}:
         metric = "all"
         if args.command == "cpu":
             metric = "cpu"

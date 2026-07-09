@@ -484,6 +484,8 @@ pubrun rerun ./runs/pubrun-A | bash
 
 ### `res` — Resource Monitoring (comprehensive)
 
+> `resources` is a backward-compatible alias of `res` (`pubrun resources` behaves identically).
+
 Renders a **comprehensive** resource summary for a run plus CPU and memory utilization
 graphs. Unlike `cpu`/`mem` (which focus on a single metric), `res` surfaces **all** captured
 resource signals, each shown only when present in the manifest. Where per-sample data exists

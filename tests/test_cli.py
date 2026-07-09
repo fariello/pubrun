@@ -122,6 +122,39 @@ class TestCliCreateConfig:
         assert Path(dest).read_text(encoding="utf-8") == "existing content"
 
 
+class TestCliInit:
+    """`pubrun init` is the primary first-use entry point: it writes a commented
+    .pubrun.toml in the current directory and prints getting-started guidance."""
+
+    def test_init_writes_config_and_prints_guidance(self, tmp_path):
+        result = run_pubrun("init", cwd=str(tmp_path))
+        assert result.returncode == 0
+        config = tmp_path / ".pubrun.toml"
+        assert config.exists()
+        content = config.read_text(encoding="utf-8")
+        assert "[core]" in content
+        # Getting-started guidance is printed.
+        assert "Getting started:" in result.stdout
+        assert "import pubrun" in result.stdout
+
+    def test_init_refuses_to_overwrite_existing_config(self, tmp_path):
+        """Characterization test: init must not clobber an existing .pubrun.toml.
+
+        Current behavior (src/pubrun/__main__.py: _create_config) refuses and
+        exits non-zero, leaving the existing file byte-for-byte unchanged.
+        """
+        config = tmp_path / ".pubrun.toml"
+        original = "existing content"
+        config.write_text(original, encoding="utf-8")
+
+        result = run_pubrun("init", cwd=str(tmp_path))
+
+        assert result.returncode == 1
+        assert "Refusing to overwrite" in (result.stdout + result.stderr)
+        # The existing file is untouched.
+        assert config.read_text(encoding="utf-8") == original
+
+
 class TestCliCite:
 
     def test_cite_apa(self):
@@ -1261,3 +1294,120 @@ class TestCliResourcesAliases:
                 metric='cpu',
                 width=60
             )
+
+    def test_resources_alias_routes_like_res(self):
+        """`pubrun resources <run>` must route identically to `pubrun res <run>`.
+
+        README.md documents `resources` as a backward-compatible alias of `res`.
+        Previously the alias was unregistered and errored with "unknown command".
+        """
+        import sys
+        from unittest.mock import patch
+        from pubrun.__main__ import main
+
+        with patch("pubrun.__main__._run_resources") as mock_run_resources:
+            with patch.object(sys, 'argv', ['pbr', 'resources', '16528343']):
+                try:
+                    main()
+                except SystemExit:
+                    pass
+            mock_run_resources.assert_called_once_with(
+                '16528343',
+                filter_str=None,
+                status_filter=None,
+                older_than=None,
+                exit_code=None,
+                not_filter_str=None,
+                not_status_filter=None,
+                average=False,
+                last=None,
+                metric='all',
+                width=None
+            )
+
+    def test_resources_alias_recency_index_and_no_color(self):
+        """Regression for the hand-maintained subcommands set (__main__.py:1891).
+
+        The alias must also be recognized by the pre-subcommand run-ID swapping
+        and the --no-color positioning logic, or `pbr resources 1` / `pbr 1
+        resources` / `pbr --no-color resources 1` mis-parse.
+        """
+        import sys
+        from unittest.mock import patch
+        from pubrun.__main__ import main
+
+        # Recency index as a positional after the alias.
+        with patch("pubrun.__main__._run_resources") as mock_run_resources:
+            with patch.object(sys, 'argv', ['pbr', 'resources', '1']):
+                try:
+                    main()
+                except SystemExit:
+                    pass
+            mock_run_resources.assert_called_once_with(
+                '1',
+                filter_str=None,
+                status_filter=None,
+                older_than=None,
+                exit_code=None,
+                not_filter_str=None,
+                not_status_filter=None,
+                average=False,
+                last=None,
+                metric='all',
+                width=None
+            )
+
+        # Pre-subcommand run-ID swapping: 'pbr 1 resources' -> 'pbr resources 1'.
+        with patch("pubrun.__main__._run_resources") as mock_run_resources:
+            with patch.object(sys, 'argv', ['pbr', '1', 'resources']):
+                try:
+                    main()
+                except SystemExit:
+                    pass
+            mock_run_resources.assert_called_once_with(
+                '1',
+                filter_str=None,
+                status_filter=None,
+                older_than=None,
+                exit_code=None,
+                not_filter_str=None,
+                not_status_filter=None,
+                average=False,
+                last=None,
+                metric='all',
+                width=None
+            )
+
+        # --no-color placed before the alias must be stripped without breaking it.
+        with patch("pubrun.__main__._run_resources") as mock_run_resources:
+            with patch.object(sys, 'argv', ['pbr', '--no-color', 'resources', '1']):
+                try:
+                    main()
+                except SystemExit:
+                    pass
+            mock_run_resources.assert_called_once_with(
+                '1',
+                filter_str=None,
+                status_filter=None,
+                older_than=None,
+                exit_code=None,
+                not_filter_str=None,
+                not_status_filter=None,
+                average=False,
+                last=None,
+                metric='all',
+                width=None
+            )
+
+    def test_dead_dispatch_aliases_error_cleanly(self):
+        """`monitor`/`chart`/`stats` were dead dispatch strings; they must error
+        as unknown commands, not silently route to resources."""
+        import sys
+        from unittest.mock import patch
+        from pubrun.__main__ import main
+
+        for dead in ("monitor", "chart", "stats"):
+            with patch.object(sys, 'argv', ['pbr', dead]):
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+                assert exc_info.value.code != 0, f"'{dead}' should exit non-zero"
