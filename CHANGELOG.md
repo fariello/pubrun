@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **`pubrun resources` now works as the documented alias of `pubrun res`.** The docs described
+  `resources` as a backward-compatible alias, but it errored with "unknown command" because the
+  argparse subparser was never registered (only the dispatch handled it). It is now a real alias
+  (like `ui`/`tui`/`gui`), consistent across the subparser, the dispatch, and the run-ID/`--no-color`
+  pre-parser. The dead, undocumented, unreachable `monitor`/`chart`/`stats` dispatch strings were
+  removed (they now error cleanly as unknown commands).
+- **Honest HPC hydration docs.** The README previously claimed children "automatically skip heavy
+  footprint tracking" when `PUBRUN_META_REF` is set. In fact, `meta_ref` is recorded in the manifest
+  and used for **report-time** hydration (`pubrun show`/`methods` stitch the parent snapshot into any
+  section the child did not capture); it does not by itself suppress capture. To reduce per-child
+  overhead, suppress the heavy engines explicitly (`capture.hardware.depth="off"`,
+  `capture.packages.mode="off"`). Docs corrected; `core.profile`'s (currently inert) relationship to
+  capture is tracked as a separate design decision.
+
 ### Changed
 - **`pubrun diff --basic`/`--standard` are now genuinely concise.** Previously `--basic` could
   explode a subprocess-heavy run pair into 11,000+ lines and surfaced per-run volatile fields

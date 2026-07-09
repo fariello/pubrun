@@ -3,8 +3,35 @@
 - Date: 2026-07-08
 - Concern: use-cases (use-case / scenario coverage)
 - Scope: whole project (pubrun library + CLI + docs + tests)
-- Status: PENDING (awaiting human approval; not executed)
+- Status: EXECUTED 2026-07-08 (human-approved; all 6 steps landed, full suite green: 856 passed, 2 skipped)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
+
+## Execution notes (2026-07-08)
+
+All six steps executed after human approval of the three open questions (make `resources` work;
+repair & wire in `hpc_node.py`; concurrency = guaranteed invariant). +9 tests, all green.
+
+- **Step 1 (U1/U2):** `resources` registered as a real argparse alias of `res`
+  (`__main__.py:2257`); added to the `:1891` subcommands set; `monitor`/`chart`/`stats` dropped
+  from the `:2390` dispatch. Tests: `TestCliResourcesAliases::test_resources_alias_routes_like_res`,
+  `test_resources_alias_recency_index_and_no_color`, `test_dead_dispatch_aliases_error_cleanly`.
+  README.md:263 already accurate; docs/cli.md `res` section notes the alias.
+- **Step 2 (U3):** `TestCliInit` — fresh-dir init + refuse-to-overwrite characterization (verified
+  `_create_config` exits 1 + "Refusing to overwrite", file unchanged).
+- **Step 3 (U4):** `test_scan_crashed_run_via_real_sigkill` (real SIGKILL'd child → "crashed",
+  `skipif win32`). SIGHUP test intentionally omitted (R2: shares SIGTERM's already-tested lethal
+  path).
+- **Step 4 (U5):** repaired `tests/scripts/hpc_node.py` (env var before import; noauto+start; emits
+  RUN_DIR); new `tests/test_hpc_hydration_e2e.py`. **Surfaced a doc/behavior mismatch:** `meta_ref`/
+  `profile` do NOT suppress capture at runtime (verified) — README "automatically skip heavy
+  footprint tracking" corrected to describe record + report-time hydration + explicit `capture.*`
+  suppression. Deeper "should profile/meta_ref auto-suppress" design decision deferred to
+  `.agents/plans/pending/2026-07-08-meta-ref-profile-capture-suppression.md`.
+- **Step 5 (U6):** `TestConcurrentLiveRuns` — two concurrent live runs in one output dir, both
+  listed as distinct RUNNING, renderer OK; guaranteed invariant. **No race found** (5× stable), so
+  no source change was needed.
+- **Step 6 (U7):** docs/research-use.md updated to present-tense, pointing at the existing example.
+- CHANGELOG updated (resources alias fix + honest HPC hydration docs).
 
 ## Goal
 

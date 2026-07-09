@@ -260,6 +260,56 @@ pubrun.stop()
         assert runs[0].status == STATUS_CRASHED
         assert runs[0].run_id == "abcd1234"
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="SIGKILL is not available on Windows")
+    def test_scan_crashed_run_via_real_sigkill(self, tmp_path):
+        """Integration: a tracked child SIGKILL'd mid-run is classified 'crashed'.
+
+        The existing test_scan_crashed_run uses a SYNTHETIC dead PID; this exercises the
+        real path: a live child starts a run (writing a real lock file with its own PID and
+        start time), signals READY, and is then SIGKILL'd. SIGKILL cannot run cleanup, so the
+        lock file persists with a now-dead PID — the exact 'crashed' scenario the feature
+        detects.
+        """
+        import signal
+        import subprocess
+        from pubrun.status import scan_runs, STATUS_CRASHED
+
+        # noauto + explicit start() writes the lock + startup manifest synchronously, then the
+        # child signals READY and blocks forever waiting to be killed.
+        script = f"""
+import os, sys, time
+os.chdir({str(tmp_path)!r})
+import pubrun.noauto as pubrun
+pubrun.start()
+sys.stderr.write("READY\\n"); sys.stderr.flush()
+time.sleep(120)
+"""
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            # Wait until the child confirms the run (and its lock file) is established.
+            while True:
+                line = proc.stderr.readline()
+                if not line or b"READY" in line:
+                    break
+            assert b"READY" in line, "child never established the run"
+
+            # Kill it hard — no cleanup runs, so the lock file is left behind.
+            proc.send_signal(signal.SIGKILL)
+            proc.wait(timeout=15)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
+        runs = scan_runs(str(tmp_path / "runs"))
+        assert len(runs) == 1, "the SIGKILL'd run's directory + lock should remain"
+        assert runs[0].status == STATUS_CRASHED
+        assert runs[0].pid == proc.pid
+
     def test_find_run_by_prefix(self):
         """find_run locates a run by ID prefix."""
         from pubrun.status import find_run
@@ -845,5 +895,94 @@ class TestStatusFormattingHelpers:
         runs_map = {r.run_id: r for r in runs}
         assert runs_map["running-id"].status == STATUS_RUNNING
         assert runs_map["crashed-id"].status == STATUS_CRASHED
+
+
+class TestConcurrentLiveRuns:
+    """Two independent tracked runs writing to one shared ./runs/ directory at the
+    same time (the normal HPC array reality) must both be recorded as distinct,
+    valid runs, and status listing must not error or corrupt.
+
+    This is a GUARANTEED invariant, not best-effort: a discovered race is a bug.
+    The test is deterministic — children signal READY and block until released, so
+    the parent scans while both are provably live, with no wall-clock timing.
+    """
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="uses POSIX-style child control via stdin")
+    def test_two_concurrent_live_runs_are_both_listed(self, tmp_path):
+        import subprocess
+        from pubrun.status import scan_runs, render_short_list, STATUS_RUNNING
+
+        output_dir = tmp_path / "runs"
+
+        # Each child starts a run in the SHARED cwd (so both write to ./runs/),
+        # signals READY with its run_id, then blocks on stdin until told to stop.
+        child_src = f"""
+import os, sys
+os.chdir({str(tmp_path)!r})
+import pubrun.noauto as pubrun
+t = pubrun.start()
+sys.stderr.write("READY " + t.run_id + "\\n"); sys.stderr.flush()
+sys.stdin.readline()   # block until the parent releases us
+pubrun.stop()
+"""
+
+        def spawn():
+            return subprocess.Popen(
+                [sys.executable, "-c", child_src],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+        procs = [spawn(), spawn()]
+        run_ids = []
+        try:
+            # Wait until BOTH children have established their runs.
+            for p in procs:
+                while True:
+                    line = p.stderr.readline()
+                    if not line:
+                        raise AssertionError("child exited before signaling READY")
+                    if line.startswith("READY "):
+                        run_ids.append(line.split()[1])
+                        break
+
+            assert len(run_ids) == 2
+            assert run_ids[0] != run_ids[1], "concurrent runs must get distinct run_ids"
+
+            # Scan while both are provably live.
+            runs = scan_runs(str(output_dir))
+            found = {r.run_id: r for r in runs}
+            for rid in run_ids:
+                assert rid in found, f"run {rid} missing from scan of concurrent runs"
+                assert found[rid].status == STATUS_RUNNING
+
+            # The listing renderer must not error on a multi-run concurrent set.
+            rendered = render_short_list(runs)
+            assert isinstance(rendered, str) and rendered
+            for rid in run_ids:
+                assert rid[:8] in rendered or rid in rendered
+        finally:
+            # Deterministically release both children and reap them.
+            for p in procs:
+                try:
+                    if p.stdin:
+                        p.stdin.write("go\n")
+                        p.stdin.flush()
+                except (BrokenPipeError, ValueError):
+                    pass
+            for p in procs:
+                try:
+                    p.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+                    p.wait(timeout=5)
+
+        # After clean release, both runs finalized to a terminal (non-running) state.
+        final = {r.run_id: r for r in scan_runs(str(output_dir))}
+        for rid in run_ids:
+            assert rid in final
+            assert final[rid].status != STATUS_RUNNING
 
 
