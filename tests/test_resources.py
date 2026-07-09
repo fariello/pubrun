@@ -103,6 +103,13 @@ def test_resource_watcher_legit_zero_does_not_abort(tmp_path, monkeypatch):
 
     # A readable poll that returns 0 (not the -1 unreadable sentinel).
     monkeypatch.setattr(watcher, "_poll_rss", lambda: 0)
+    # Reset any state accrued BEFORE the mock was installed: on a slow runner (e.g. Windows,
+    # where the real RSS poll shells out to wmic and can time out), the watcher thread may have
+    # already recorded real unreadable polls between start() and this monkeypatch. Clearing here
+    # isolates the actual assertion (legit 0 must not count as a failure), not the setup race.
+    with watcher._lock:
+        watcher._consecutive_failures = 0
+    watcher._stop_event.clear()
 
     # Let several intervals elapse; the watcher must NOT self-abort.
     deadline = time.time() + 1.0
