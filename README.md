@@ -2,11 +2,13 @@
 
 # pubrun
 
-> **Reproducible, auditable runs: automatic provenance, environment capture, and run-to-run comparison, from a single `import pubrun`.**
+> **Reproducible runs — know exactly what any run did, and compare any two of them: automatic provenance and environment capture, from a single `import pubrun`.**
 
-`pubrun` is the reproducibility and provenance component you drop into your ML pipeline (or any Python run). With one `import pubrun` — no config, no infrastructure, no framework — it captures the full state of a run (code version, dependency graph, hardware, environment, inputs, logs, exit status, resource usage) into a structured, schema-validated `manifest.json`, then lets you diff any two runs to see exactly what changed. Zero runtime dependencies[^1], non-intrusive (it never alters, slows, or crashes your program), and it scales from a laptop to a thousand-node cluster.
+`pubrun` is the reproducibility and provenance component you drop into any Python run — a one-off script, a nightly job, a data pipeline, or a step in a larger ML or scientific workflow. With one `import pubrun` — no config, no infrastructure, no framework — it captures the full **provenance** of a run (a complete record of how it happened: code version, dependency graph, hardware, environment, inputs, logs, exit status, resource usage) into a structured `manifest.json`, then lets you diff any two runs to see exactly what changed. Zero runtime dependencies[^1], non-intrusive ([it never alters, slows, or crashes your program](https://github.com/fariello/pubrun/blob/main/docs/performance.md)), and it scales from a laptop to a thousand-node cluster.
 
 pubrun does one thing well: it makes runs trustworthy. It is **not** an orchestrator, scheduler, or serving platform — it is the provenance layer you use *inside* your pipeline, alongside whatever runs it.
+
+It grew up in scientific and ML workflows, but it is useful for **any** run you would ever want to reproduce, compare, or explain — from a 20-line script to a thousand-node cluster.
 
 [^1]: On Python 3.11+, pubrun uses only the standard library. On Python 3.8–3.10, the sole runtime dependency is `tomli` (a backport of the standard-library `tomllib`).
 
@@ -30,7 +32,7 @@ or
 pubrun -h  # Lots of info here.
 ```
 That's it. No frameworks, no heavy integrations, no syntax hijacking.
-When the script exits, `pubrun` silently generates a structured, lightweight footprint in your local `./runs/` directory.
+When the script exits, `pubrun` silently writes a structured, lightweight **manifest** for the run into your local `./runs/` directory.
 
 > [!NOTE]
 > **Console capture**: By default, `pubrun` does NOT wrap stdout/stderr (`capture_mode = "off"`). To enable output logging, set `capture_mode = "standard"` in `.pubrun.toml` or via `pubrun.start(console={"capture_mode": "standard"})`. When enabled, your terminal output is unchanged but a timestamped copy is saved alongside the manifest. See [Configuration](https://github.com/fariello/pubrun/blob/main/docs/configuration.md) for details.
@@ -44,12 +46,12 @@ See [CLI Reference](https://github.com/fariello/pubrun/blob/main/docs/cli.md) an
 - **Codebase Drift Detection** — Compares the current code state against a run's snapshot to highlight changes.
 - **Reproduce a Run** — Extracts the initialization commands needed to replicate a run's environment (`pubrun rerun`).
 - **Secret Redaction** — Automatically detects and redacts passwords, tokens, and API keys in environment variables and CLI arguments *before* the manifest is written.
-- **Scales from Laptop to Cluster** — Global parent-child manifest hydration (`PUBRUN_META_REF`) keeps provenance cheap across thousands of array jobs on HPC schedulers.
+- **Scales from Laptop to Cluster** — Keeps provenance cheap across thousands of jobs on an HPC cluster: instead of each job re-recording the shared environment, jobs reference one parent snapshot. (See [HPC](https://github.com/fariello/pubrun/blob/main/docs/hpc.md) for `PUBRUN_META_REF` and the mechanics.)
 - **Publication-Ready Methods** — Optionally generates LaTeX/Markdown methodology blocks from a run (`pubrun methods`), handy when a run needs to become a paper's Methods section.
 
 ## The Problem
 
-Real runs depend on implicit state — the exact code, dependency versions, hardware, and environment that produced a result. When you later need to reproduce a run, compare it against another, debug a regression, or ship a model with confidence, that context has usually evaporated and has to be reconstructed from memory.
+Real runs depend on implicit state — the exact code, dependency versions, hardware, and environment that produced a result. Six months later, when a nightly job starts failing, or you need to know which version of your script produced last quarter's output, or you're comparing two runs to explain why the numbers moved (or shipping a model with confidence), that context has usually evaporated and has to be reconstructed from memory.
 
 ## The Solution
 
