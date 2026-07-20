@@ -4,9 +4,29 @@
 - Concern: documentation (machine-readable contract) / interoperability / testing
 - Scope: add `schemas/benchmark.schema.json`; a conformance test; docs pointer; NO change to the
   harness output shape (it already emits `/5`). Optional intake-validation helper (see step 4).
-- Status: to-review
-- Approval: (set when a human approves; omit until then)
+- Status: executed
+- Approval: approved by maintainer 2026-07-20 (plan-review skipped per maintainer: small, low-risk)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
+
+## Execution notes (2026-07-20)
+
+Executed after approval; commit `290ef0b`. Full CI matrix GREEN (run 29768302463, 21/21 jobs);
+benchmark set 59 passed, 3 skipped locally.
+
+- `schemas/benchmark.schema.json` (Draft 2020-12) authored to the verified `/5` shape: strict
+  top-level + `scenario_defs` + pass/baseline; permissive `machine`/`pass_env` (open question 1 =
+  permissive, confirmed across the matrix - no cross-platform brittleness); `schema` const; timings
+  must be numbers; redacted-tolerant.
+- `TestSchema5Conformance` (4 tests): schema well-formed; committed redacted sample conforms; a fresh
+  `/5` result AND its redacted copy conform; broken results rejected (missing `scenario_defs`, wrong
+  const, string timings).
+- **Committed-sample correction:** the tracked sample was still a `/4`-shape file (predated `/5`); it
+  did NOT validate against the new schema. Replaced it with a real `/5` redacted sample
+  (`pubrun-bench-<hash>-20260720T174137Z.redacted.json`, verified PII-clean); removed the obsolete
+  `/4` file (it was untracked).
+- Step 4 (validator hook) DEFERRED per open question 2: it belongs with whatever community-intake
+  mechanism is chosen (the gpt-5.6 research). The schema + conformance test deliver the value now.
+- Deviation: none material; the permissive-`machine`/`pass_env` recommendation was adopted.
 
 ## Problem / driver
 
