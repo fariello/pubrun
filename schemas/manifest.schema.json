@@ -865,6 +865,16 @@
                         "string",
                         "null"
                     ]
+                },
+                "required_by": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "In imported-transitive mode, the imported packages that require this (transitive) dependency."
                 }
             }
         },
@@ -882,6 +892,7 @@
                     ],
                     "enum": [
                         "imported-only",
+                        "imported-transitive",
                         "top-level-installed",
                         "full-environment",
                         null

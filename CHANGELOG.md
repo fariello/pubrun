@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Manifest schema now accepts the `imported-transitive` packages mode (and its records).** The
+  `packages_section.mode` enum omitted `imported-transitive` (a mode the code supports and writes),
+  and `package_record` rejected the `required_by` field that transitive records carry, so a run with
+  `capture.packages.mode = "imported-transitive"` would have failed the schema conformance gate. Both
+  are now in the schema, documented in `docs/manifest.md`, and covered by a conformance test. Also
+  hid the deprecated `--show-config` flag from `--help` (it still works, still prints the deprecation
+  notice), and corrected several doc inaccuracies (`config.source_files` type in the manifest doc, the
+  config precedence table's local-config tier, and the README `show config` coverage).
+
 ### Added
 - **`pubrun show config` family — inspect resolved configuration.** Three contexts: `pubrun show
   config` (what `import pubrun` would use right now, in the current directory), `pubrun show run

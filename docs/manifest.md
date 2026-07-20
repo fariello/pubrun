@@ -164,7 +164,8 @@ Tracked Python dependencies.
 | `version` | string | Installed version. |
 | `location` | string \| null | Install location path, if available. |
 | `editable` | bool \| null | Whether the package is installed in editable (development) mode. |
-| `source` | string \| null | How the record was discovered (e.g. the capture mode / scan that produced it). |
+| `source` | string \| null | How the record was discovered (e.g. `"imported"`, `"transitive"`). |
+| `required_by` | list[string] \| null | In `imported-transitive` mode, the imported packages that require this (transitive) dependency. Absent/`null` for non-transitive records. |
 
 ---
 
@@ -249,7 +250,7 @@ Configuration provenance.
 |---|---|---|
 | `resolved_config_path` | string | Filename of the resolved config snapshot (e.g., `"config.resolved.json"`). |
 | `sources_path` | string \| null | Filename of config source tracking, if generated. |
-| `source_files` | list[string] | Paths to config files that contributed to the resolved config. |
+| `source_files` | list[object] | Config files that contributed to the resolved config, each `{"path": string, "hash"?: object}`. **Currently always empty** (`[]`): pubrun does not yet record per-file config provenance in the manifest, so `source_files` and `sources_path` are reserved and unpopulated today. |
 | `notices` | list[object] | Non-disruptive config notices recorded at run time (never raised into the host; surfaced by `pubrun status`/`inspect`/`show`). Each: `{"code", "setting", "value", "message"}`. Currently emitted for a deprecated, inert `core.profile` set to a non-default value. Empty list when none. |
 | `capture_state` | object | See [Capture State](#capture-state). |
 

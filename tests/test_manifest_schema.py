@@ -95,14 +95,27 @@ def test_full_manifest_conforms_to_schema(tmp_path):
         pytest.param({"profile": "minimal"}, id="profile-notice"),
         pytest.param({"console": {"capture_mode": "standard"}}, id="console-on"),
         pytest.param({"capture": {"resources": {"scope": "tree"}}}, id="tree-scope"),
+        # imported-transitive is a real packages.mode the code writes to the manifest; the
+        # schema enum omitted it (a run using it would fail this gate). Covers that mode.
+        pytest.param({"capture": {"packages": {"mode": "imported-transitive"}}}, id="packages-transitive"),
     ],
 )
 def test_manifest_variants_conform_to_schema(tmp_path, kwargs):
     """Validate several manifest shapes, not just the happy path: the profile-notice
-    variant, console capture on, and process-tree resource scope (which adds tree_*
-    fields). Guards drift a single default manifest would miss."""
+    variant, console capture on, process-tree resource scope (which adds tree_* fields),
+    and packages.mode='imported-transitive'. Guards drift a single default manifest would miss."""
     manifest = _make_manifest(tmp_path, **kwargs)
     jsonschema.validate(manifest, _schema())
+
+
+def test_packages_mode_written_to_manifest_is_in_schema_enum(tmp_path):
+    """Every packages.mode value the code writes to the manifest must be in the schema enum.
+    Directly asserts the imported-transitive value lands as-configured and validates."""
+    manifest = _make_manifest(tmp_path, capture={"packages": {"mode": "imported-transitive"}})
+    assert manifest["packages"]["mode"] == "imported-transitive"
+    schema = _schema()
+    enum = schema["$defs"]["packages_section"]["properties"]["mode"]["enum"]
+    assert manifest["packages"]["mode"] in enum
 
 
 def test_committed_sample_fixture_conforms_to_schema():

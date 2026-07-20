@@ -253,6 +253,15 @@ A diagnostic viewer that surfaces execution timing, hardware, dependencies, and 
 pubrun show ./runs/pubrun-A ./runs/pubrun-B --deep
 ```
 
+### `pubrun show config`
+Inspect the resolved configuration for three contexts, and see how any ambiguity resolved (keys overridden by a higher-precedence layer are annotated; add `--all` to annotate every key's source).
+```bash
+pubrun show config              # what `import pubrun` would use right now, in this directory
+pubrun show run config [<id>]   # the config a past run actually used (default: most recent)
+pubrun show default config      # the shipped built-in defaults only
+```
+See the [CLI Reference](https://github.com/fariello/pubrun/blob/main/docs/cli.md) for details.
+
 ### `pubrun rerun`
 Extracts the exact shell command needed to reproduce a run.
 ```bash
@@ -298,9 +307,10 @@ pubrun ui --dir /path  # Scan a non-default output directory
 |---|---|
 | `--version` | Print the installed pubrun version and exit |
 | `--create-config` | Bootstrap a fully commented `.pubrun.toml` file |
-| `--show-config` | Print the default configuration to the terminal |
 | `--info` | Display system capabilities and pubrun version |
 | `--run-tests` | Execute the built-in self-test suite |
+
+> `--show-config` is **deprecated** (hidden from `--help`); it still prints the built-in defaults but use [`pubrun show default config`](#pubrun-show-config) instead.
 
 See [CLI Reference](https://github.com/fariello/pubrun/blob/main/docs/cli.md) for full details and examples.
 
