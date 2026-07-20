@@ -4,9 +4,44 @@
 - Concern: testing (reliability of the test suite)
 - Scope: `tests/` (conftest fixtures + several order/timing-sensitive tests); no product behavior
   change intended (characterization: pin real behavior, fix only test isolation/robustness)
-- Status: reviewed
-- Approval: (set when a human approves; omit until then)
+- Status: executed
+- Approval: approved by maintainer 2026-07-20
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
+
+## Execution notes (2026-07-20)
+
+Executed after approval; test-only, no product change (OQ2 path not triggered - see below).
+
+- **Step 1 (repro achieved):** added `pytest-randomly>=3.0` to the `dev` extra. Under randomized
+  order it reproduced the class locally and surfaced MORE order-coupling than the known 5 (as PR-003
+  predicted): e.g. `test_root_import_still_works` (import-mode latch), `test_status_marker`
+  (`assert '\x1b[' in 'completed'` - leaked `NO_COLOR` env), `test_minimal_research_workflow_runs`.
+- **Step 2 (root cause; TEST-only):** all failures were leaked PROCESS-GLOBALS - the `_bootstrap`
+  mode latch, `status._DISPLAY_UTC`, and `os.environ` keys (`NO_COLOR`, `PUBRUN_*`) some tests set
+  directly rather than via monkeypatch. NOT a product bug (a real program does not run 900 tests in
+  one process), so OQ2=A's split was not needed.
+- **Step 3 (fix):** new autouse `pubrun_state_isolation` fixture in `conftest.py` - calls
+  `pubrun._bootstrap.reset_state()` (the library's own testing hook), resets `_active_run` and
+  `status._DISPLAY_UTC`, and snapshots+restores `os.environ` around every test so any test's env leak
+  cannot pollute a successor regardless of order. The 3 previously-failing seeds (1, 42, 1337) now
+  pass (907 passed each); deterministic suite also 907 passed.
+- **Step 4 (PR-002, no masking):** verified the fix did not weaken assertions - the provenance test
+  still asserts a real recorded SHA-256 (its diagnostic setup guard from `d836e22` is a genuine
+  precondition, not a soft skip), and `_status_marker` still distinguishes color-on (`\x1b[` present)
+  from color-off (absent), so it still fails on a real regression. The fix removed the env LEAK, not
+  the assertions' teeth.
+- **Step 5 (CI enforcement DEFERRED, OQ1=C):** CI installs `.[dev,tui]`, and `pytest-randomly`
+  auto-activates on install - which would have silently enabled randomized order in CI and reddened
+  the matrix on the additional latent coupling. Guarded by adding `-p no:randomly` to the pytest
+  `addopts` so the plugin is present-but-inactive by default; randomization is opt-in locally with
+  `-p randomly`. Enabling it in CI (after working through the remaining coupling) is a follow-up.
+
+### Follow-up (deferred): enable randomized order in CI
+
+Once the suite is proven clean under randomized order across the full matrix (not just the 3 seeds
+tried locally), remove `-p no:randomly` from `addopts` so CI shuffles and this class cannot silently
+regress. This will likely require fixing further latent order-coupling first; do it as its own scoped
+change, not folded in here.
 
 ## Goal
 

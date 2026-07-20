@@ -55,7 +55,8 @@ dev = [
     "mypy>=1.0",
     "pytest-cov",
     "tox>=4.0",
-    "jsonschema>=4.0"
+    "jsonschema>=4.0",
+    "pytest-randomly>=3.0"
 ]
 tui = [
     "textual>=0.80.0",
@@ -81,7 +82,11 @@ path = "hatch_build.py"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "--cov=src --cov-report=term-missing --cov-report=xml"
+# `pytest-randomly` is a dev dependency for LOCAL adverse-order testing (opt in with `-p randomly`);
+# it is deliberately DISABLED by default so CI and normal runs stay deterministic. Enabling
+# randomized order in CI is a separate, later step (see the flaky-test-hardening IPD, OQ1=C):
+# it would surface additional latent order-coupling that must be worked through first.
+addopts = "--cov=src --cov-report=term-missing --cov-report=xml -p no:randomly"
 
 [tool.coverage.run]
 source = ["src"]
