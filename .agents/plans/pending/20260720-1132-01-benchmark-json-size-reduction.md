@@ -5,7 +5,7 @@
 - Scope: `benchmarks/harness.py` (result builder + redaction + filenames), `benchmarks/aggregate.py`
   and `benchmarks/plot.py` (readers), the benchmark schema/version, `benchmarks/README.md` +
   `docs/performance.md`, `src/pubrun/__main__.py` (the `pubrun bench` submit path), tests.
-- Status: to-review
+- Status: reviewed
 - Approval: (set when a human approves; omit until then)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
@@ -45,11 +45,18 @@ explicit file naming.
    not strings. NO other numeric field is rounded lossily beyond its own natural precision.
 3. **Define scenarios ONCE.** A run fixes its scenario set at start; today each pass repeats every
    scenario's `group`/`mode`/`workload`/`config` identically. Move the static scenario descriptors to
-   a single top-level `scenarios` map (name -> {group, mode, workload, config}). Passes reference
-   scenarios by name. (Pure redundancy removal.)
-   - **If a scenario's definition can legitimately CHANGE mid-run, it does not today** (scenarios are
-     fixed at run start - confirm in code during execution). If that ever changes, record per-pass
-     overrides only for the changed fields. (Open question 1.)
+   a single top-level map, **named `scenario_defs`** (name -> {group, mode, workload, config}). Passes
+   reference scenarios by name. (Pure redundancy removal.)
+   - **NAMING-COLLISION GUARD (PR-001):** do NOT reuse the key `scenarios` for this map. `harness.py:415-418`
+     already emits a top-level `scenarios` as a *last-pass alias WITH stats* for schema/1 back-compat,
+     and `aggregate.py:68` reads exactly that shape. Reusing `scenarios` for a static-defs map would
+     silently change its meaning and break aggregate. Use `scenario_defs` for the new static map, and
+     in `/5` **remove the schema/1 last-pass `scenarios` alias entirely** (schema/1 is long gone; the
+     `/5` readers use `scenario_defs` + per-pass timings). Any reader that used top-level `scenarios`
+     is updated in the readers step.
+   - Scenario definitions are FIXED per run (resolved: no per-pass definition differences); a single
+     `scenario_defs` map is authoritative. Execution confirms in code that nothing mutates a scenario
+     def mid-run; if something does, that is a bug to fix, not a schema feature to add.
 4. **Merge/relocate timings; index by the fixed run shape.** Iterations and warmup are fixed at start,
    so capture them as small arrays and store timings positionally:
    - `iterations`: array describing the run shape, e.g. `[1, 30, 30, 30]` (warmup pass of 1, then
@@ -65,7 +72,10 @@ explicit file naming.
    generated on the RECEIVING side after ingest (this IPD is about transmission size). This is the one
    step with a reader-compatibility cost (handled in the "readers" step below).
 6. **Per-pass, keep only what VARIES** (timings, and any per-run dynamic env/metrics such as
-   mem/load/io that actually change between passes); do not repeat static scenario descriptors.
+   mem/load/io that actually change between passes); do not repeat static scenario descriptors. Apply
+   the SAME compact shape to the `baseline` block (PR-004): it currently carries the same per-scenario
+   stats+timings redundancy as passes; store baseline timings the same way (by `scenario_defs` name,
+   6 dp, grouped), no repeated static descriptors, no stored stats.
 7. **Keep redaction placeholders.** Dropping the `<redacted>` markers saves only ~394 bytes (26
    values) and would erase the signal that a field existed-but-was-masked - not worth it. Keep them.
 
@@ -86,30 +96,36 @@ explicit file naming.
 
 | Step | Change | Files | Remediation Risk | Validation |
 |------|--------|-------|------------------|------------|
-| 1 | Bump the schema to `pubrun-benchmark/5` and design the compact shape: top-level `scenarios` map (defined once), `iterations`/`warmups` arrays, per-pass `timings` (6 dp) keyed by scenario, per-pass only-varying data, retained raw timings, kept redaction markers. Write JSON compact. | `harness.py`, schema | Medium (functionality: output-shape change) | a produced /5 file is <=~40 KB and round-trips |
+| 1 | Bump the schema to `pubrun-benchmark/5` and build the compact shape: top-level **`scenario_defs`** map (NOT `scenarios` - PR-001), `iterations`/`warmups` arrays, per-pass timings (6 dp) grouped by pass keyed by scenario name, per-pass only-varying data, baseline in the same compact shape (PR-004), retained raw timings, kept redaction markers. **Remove the schema/1 last-pass top-level `scenarios` alias** (`harness.py:415-418`). Write JSON compact. | `harness.py`, schema | Medium (functionality: output-shape change) | a produced /5 file is <=~40 KB, round-trips, and has no top-level `scenarios` alias |
 | 2 | Add `generated_local` (local ISO-8601 + offset) alongside `generated_utc`; keep the UTC filename stamp. | `harness.py` | Low | both fields present; offset correct |
 | 3 | Make the harness write `*.unredacted.json` (full) and `*.redacted.json` (shareable, hostname-hashed filename) - no bare `*.json`. | `harness.py`, `__main__.py` bench path | Low | produced filenames match; redacted name has no hostname |
-| 4 | **Update readers to the /5 shape**: `aggregate.py` (and `plot.py` if it reads stats) recompute `n/min/median/mean/p95/max/stdev` FROM the retained timings instead of reading stored stat fields; read scenarios from the top-level map. Handle BOTH /4 and /5 during transition (version-gated) so old committed/contributed results still aggregate. | `aggregate.py`, `plot.py` | Medium (functionality: readers must not break on old files) | aggregate produces identical stats from a /5 file and from the equivalent /4 file |
-| 5 | Add a **size guard** to the bench submit path: warn/refuse if the redacted file exceeds the GH issue-body budget, pointing at the attach-file alternative. | `__main__.py`, `harness.py` | Low | an over-budget file triggers the guard |
-| 6 | Tests: a /5 result validates + round-trips; stats recomputed from timings match the old stored stats within tolerance; redacted /5 file is <= budget; both-timestamps present; filename conventions. **Contract/output-shape change -> full CI matrix.** | `benchmarks/test_benchmarks.py` (+ schema test if one exists) | Low | new tests green on the full matrix |
-| 7 | Docs: update `benchmarks/README.md` + `docs/performance.md` for the /5 shape, the timestamp fields, and the filename conventions; CHANGELOG entry. | docs, CHANGELOG | Low | `/assess documentation` clean |
+| 4 | **Re-verify redaction against the /5 shape (PR-005):** confirm `redact_result` / `_redact_secrets` / `_scrub_pii_substrings` (`harness.py:455-513`) still find and mask hostname/username/home-paths after the reshape (the deep scan is key/needle based; a moved field must stay covered). Add/extend a redaction test on a /5 result. | `harness.py`, `tests/test_bench_command.py` | Medium (security: a reshape could move a field out from under the redactor) | `TestRedaction` passes on a /5 result; the deep PII scan finds zero needles in the redacted /5 file |
+| 5 | **Update readers to /5**: `aggregate.py` reads `scenario_defs` + recomputes `n/min/median/mean/p95/max/stdev` FROM the retained timings (not stored stat fields); `plot.py` confirmed to read none of these today (verify). Handle BOTH /4 and /5 (version-gated on the `schema` string) so old committed/contributed results still aggregate. **Named anti-regression invariant (PR-003):** aggregate output for a given dataset is IDENTICAL (within float tolerance) whether read from its /4 form (stored stats) or its /5 form (recomputed) - this is the regression test. | `aggregate.py`, `plot.py` | Medium (functionality: readers must not break on old files) | aggregate output identical from a /4 file and the equivalent /5 file; both versions aggregate |
+| 6 | Add a **size guard** to the bench submit path: warn/refuse if the redacted file exceeds the GH issue-body budget, pointing at the attach-file alternative. | `__main__.py`, `harness.py` | Low | an over-budget file triggers the guard |
+| 7 | Tests: a /5 result validates + round-trips; stats recomputed from timings match the /4 stored stats within tolerance; redacted /5 file is <= budget; both-timestamps present; filename conventions; **`tests/test_bench_command.py` redaction + schema-string tests updated for /5 (PR-002)**. **Contract/output-shape change -> full CI matrix.** | `benchmarks/test_benchmarks.py`, `tests/test_bench_command.py` | Low | new + updated tests green on the full matrix |
+| 8 | Docs: update `benchmarks/README.md` + `docs/performance.md` for the /5 shape (`scenario_defs`, grouped timings, no stored stats, both timestamps), the filename conventions; CHANGELOG entry. | docs, CHANGELOG | Low | `/assess documentation` clean |
 
 ## Scope check
 
 - Over-scope: NOT redesigning the metrics collected, only how they are stored. NOT touching the
   history-scrub of the already-leaked file (separate IPD `20260720-1126-01`). NOT changing what
   `pubrun` the library captures - this is benchmark-tooling only.
-- Under-scope: the reader update (step 4) is REQUIRED, not optional - a compact schema that breaks
-  `aggregate.py` is half a fix. Both-version support during transition is required so existing
-  contributed results still work.
+- Under-scope (all now folded into the steps via plan-review): the reader update (step 5) is REQUIRED,
+  not optional; redaction must be re-verified against the reshaped result (step 4, PR-005); the test
+  surface includes `tests/test_bench_command.py` not just `benchmarks/test_benchmarks.py` (step 7,
+  PR-002). Both-version (/4 + /5) reader support during transition is required so existing contributed
+  results still aggregate.
 
 ## Required tests / validation
 
 - A produced `/5` redacted file is comfortably under the GH issue-body cap (target < ~40 KB; measured
-  prototype ~36 KB) and contains every raw timing.
-- Stats recomputed from `/5` timings equal (within float tolerance) the `/4` stored stats for the same
-  data - proves NO data loss.
+  prototype ~36 KB) and contains every raw timing; it has NO top-level `scenarios` alias (PR-001).
+- **Named anti-regression invariant (PR-003):** `aggregate.py` output for a dataset is identical
+  (within float tolerance) whether read from its `/4` form (stored stats) or its `/5` form (recomputed
+  from timings). This proves NO data loss AND reader parity across versions.
 - Readers (`aggregate.py`, `plot.py`) work on both `/4` and `/5` inputs.
+- **Redaction re-verified on the `/5` shape (PR-005):** `tests/test_bench_command.py::TestRedaction`
+  passes on a `/5` result and the deep PII scan finds zero needles in the redacted `/5` file.
 - `generated_utc` + `generated_local` (with offset) both present; filename stamp UTC.
 - Full CI matrix green (output-shape/reader change is contract-shaped, per AGENTS.md matrix discipline).
 
@@ -145,9 +161,29 @@ Proposal only; human-approved before execution; not auto-run. Execution contract
 - Keep the LOCAL `*.unredacted.json` complete; only the redacted/submitted artifact is size-optimized.
 - On completion, `git mv` this IPD to `.agents/plans/executed/` (Status -> executed).
 
+## Plan-review findings (2026-07-20)
+
+Verified the plan's claims against the code (harness/aggregate/tests). All findings FIXED in-plan; none
+deferred; no new human decision required (the three open questions were already resolved).
+
+- **PR-001 (HIGH, in-scope):** the compact design reused the key `scenarios` for the new static-defs
+  map, but `harness.py:415-418` already emits top-level `scenarios` as a last-pass alias WITH stats
+  that `aggregate.py:68` reads - a silent meaning/shape collision. FIXED: new map named `scenario_defs`;
+  the schema/1 `scenarios` alias is removed in /5; readers updated.
+- **PR-002 (MEDIUM, under-scope):** the test surface omitted `tests/test_bench_command.py` (redaction +
+  schema-string tests). FIXED: added to the tests step.
+- **PR-003 (MEDIUM, in-scope):** back-compat was under-specified. FIXED: named the anti-regression
+  invariant - aggregate output identical from a dataset's /4 (stored stats) vs /5 (recomputed) form.
+- **PR-004 (LOW, in-scope):** `baseline` has the same stats+timings redundancy. FIXED: baseline uses
+  the same compact shape.
+- **PR-005 (MEDIUM, security):** a schema reshape could move a field out from under the key/needle-based
+  redactor. FIXED: added an explicit redaction re-verification step against the /5 shape.
+
 ## Workflow history
 - 2026-07-20 (opencode / its_direct/pt3-claude-opus-4.8-1m-us): drafted from measured size analysis;
   6 dp chosen; all no-data-loss levers included; proposed 7 steps.
 - 2026-07-20 (opencode / its_direct/pt3-claude-opus-4.8-1m-us): open questions resolved by maintainer
   - (1) scenarios fixed per run, no per-pass definition differences; (2) timings array-of-arrays
   grouped by pass; (3) drop stored stats, readers recompute, augmented-stats only receiver-side.
+- 2026-07-20 /plan-review (opencode / its_direct/pt3-claude-opus-4.8-1m-us): APPROVE WITH REVISIONS
+  APPLIED; PR-001..PR-005 all FIXED (now 8 steps); readiness GO (pending human approval to execute).
