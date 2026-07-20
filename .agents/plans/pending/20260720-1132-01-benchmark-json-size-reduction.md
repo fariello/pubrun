@@ -55,14 +55,15 @@ explicit file naming.
    - `iterations`: array describing the run shape, e.g. `[1, 30, 30, 30]` (warmup pass of 1, then
      three 30-iteration passes). `warmups`: array of warmup counts, e.g. `[]` = none, `[1]` = first
      iteration is warmup.
-   - Per scenario, timings become a flat array (or an array-of-arrays grouped by pass - see open
-     question 2), 6 dp, in run order. `iterations`/`warmups` tell readers which members are which.
+   - Per scenario, timings are an **array-of-arrays grouped by pass** (resolved: readable form),
+     6 dp, in run order, aligned to `iterations`/`warmups` so readers know which members are which.
 5. **Drop derived stats from the stored file** (`n`, `min_s`, `median_s`, `mean_s`, `p95_s`, `max_s`,
    `stdev_s`). They are all recomputable from the retained raw timings, so this is NO data loss.
-   **BUT readers depend on them** (`aggregate.py:75-76` reads `median_s`/`min_s`): so either (a) have
-   the readers recompute from timings, or (b) keep a tiny derived-stats block. Prefer (a) - single
-   source of truth (the timings). This is the one step with a reader-compatibility cost (handled in
-   step "readers" below). (Open question 3.)
+   **BUT readers depend on them** (`aggregate.py:75-76` reads `median_s`/`min_s`): resolved -> readers
+   RECOMPUTE from the retained timings (single source of truth). No derived-stats block in the
+   transmitted `/5` file. If a richer "augmented" result with precomputed stats is ever wanted, it is
+   generated on the RECEIVING side after ingest (this IPD is about transmission size). This is the one
+   step with a reader-compatibility cost (handled in the "readers" step below).
 6. **Per-pass, keep only what VARIES** (timings, and any per-run dynamic env/metrics such as
    mem/load/io that actually change between passes); do not repeat static scenario descriptors.
 7. **Keep redaction placeholders.** Dropping the `<redacted>` markers saves only ~394 bytes (26
@@ -117,16 +118,21 @@ explicit file naming.
 `benchmarks/README.md`, `docs/performance.md`, schema doc, CHANGELOG (schema /5; timestamp fields;
 filename conventions; size fits GH submission). Run `/assess documentation` after.
 
-## Open questions
+## Open questions (resolved 2026-07-20)
 
-1. Can a scenario's DEFINITION change within a single run? (Believed no - fixed at start.) If yes, the
-   "define once" step needs a per-pass override mechanism for changed fields. Confirm in code.
-2. Timings layout: FLAT array indexed by `iterations`/`warmups` (smallest) vs. ARRAY-OF-ARRAYS grouped
-   by pass (more self-describing, slightly larger). Recommend array-of-arrays for readability since we
-   are well under budget (~36 KB) either way; the local `.unredacted.json` can afford it.
-3. Drop stored stats entirely (readers recompute) vs. keep a tiny derived-stats block for reader
-   convenience. Recommend drop + recompute (single source of truth = raw timings); revisit if a
-   consumer genuinely needs precomputed stats without the timings.
+1. **Scenario definitions change mid-run?** -> RESOLVED: NO. Scenarios are fixed at run start and we
+   will NOT enable per-run definition differences at this time. So "define scenarios once" needs no
+   per-pass override mechanism; a single top-level `scenarios` map is authoritative. (Execution still
+   confirms in code that nothing currently mutates a scenario def mid-run; if something does, that is
+   a bug to fix, not a schema feature to add.)
+2. **Timings layout** -> RESOLVED: ARRAY-OF-ARRAYS, grouped by pass (e.g. `[[warmup...],[pass1...],
+   [pass2...]]`), aligned to the `iterations`/`warmups` arrays. Chosen for readability; the size cost
+   over a flat array is negligible because the whole file is ~36 KB, i.e. well under the ~65 KB
+   GitHub cap (that headroom is the "budget" - we can afford the slightly larger, clearer form).
+3. **Stored stats** -> RESOLVED: DROP them from the transmitted file; readers RECOMPUTE from the raw
+   timings (single source of truth). This IPD is about TRANSMISSION size. If a richer "augmented"
+   JSON with precomputed stats is ever wanted, it is produced on the RECEIVING side after ingest, not
+   stored in the submitted artifact. No precomputed-stats block in the `/5` file.
 
 ## Approval and execution gate
 
@@ -142,3 +148,6 @@ Proposal only; human-approved before execution; not auto-run. Execution contract
 ## Workflow history
 - 2026-07-20 (opencode / its_direct/pt3-claude-opus-4.8-1m-us): drafted from measured size analysis;
   6 dp chosen; all no-data-loss levers included; proposed 7 steps.
+- 2026-07-20 (opencode / its_direct/pt3-claude-opus-4.8-1m-us): open questions resolved by maintainer
+  - (1) scenarios fixed per run, no per-pass definition differences; (2) timings array-of-arrays
+  grouped by pass; (3) drop stored stats, readers recompute, augmented-stats only receiver-side.
