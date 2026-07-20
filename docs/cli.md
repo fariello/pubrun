@@ -464,6 +464,35 @@ pubrun show [RUN_DIR ...] [--basic|--standard|--deep] [--utc]
 | `--standard` | Hardware, Git, Python, and dependency summary (default) |
 | `--deep` | Full environment variables and complete package list |
 
+#### `show config` — inspect resolved configuration
+
+`show` also renders the resolved pubrun **configuration** for three distinct contexts, so you
+can see exactly what settings are (or were) in effect and how any ambiguity resolved:
+
+```bash
+pubrun show config                 # what "import pubrun" would use RIGHT NOW in this directory
+pubrun show run config [<id>]      # the config a PAST run actually used (default: most recent)
+pubrun show default config         # the shipped built-in defaults only
+```
+
+- **`show config`** resolves the full hierarchy (built-in defaults + user config + local
+  `.pubrun.toml` + environment variables) as of now, relative to the current directory. Because
+  it reflects the *ambient* environment at invocation time, a specific run may have differed;
+  use `show run config` for a past run's exact config.
+- **Ambiguity surfacing:** by default, only keys whose value was **overridden** by a
+  higher-precedence layer are annotated, e.g.
+  `capture.hardware.depth = 'off'    [local, overrides built-in 'basic']`. A config with no
+  conflicts prints clean. Add `--all` to annotate every key with its source layer.
+- **`show run config [<id>]`** accepts the same run selectors as other commands (recency index,
+  id prefix, path). A run that **crashed before finalizing** shows its startup snapshot, labeled
+  `from startup snapshot (run did not finalize...)`; a **ghost** run (one that could not write to
+  disk) has no recorded config and reports a clear error.
+- **`show default config`** is the canonical replacement for the deprecated `--show-config` flag.
+
+The keywords `config`, `run`, and `default` are recognized in these forms before run selection,
+so `pubrun show config` shows the current config rather than searching for a run named "config".
+A run whose id genuinely starts with one of these words must be selected by its full id or path.
+
 ---
 
 ### `rerun` — Reproducibility Command
@@ -693,13 +722,18 @@ pubrun --create-config .pubrun.toml       # Direct: writes to specified path
 - If no destination is given, an interactive prompt offers Local (`./.pubrun.toml`) or Global (`~/.config/pubrun/config.toml`).
 - Refuses to overwrite an existing file.
 
-### `--show-config`
+### `--show-config` (deprecated)
 
-Prints the complete default configuration to the terminal.
+Prints the complete built-in default configuration to the terminal.
 
 ```bash
 pubrun --show-config
 ```
+
+> **Deprecated:** use `pubrun show default config` instead. `--show-config` still works but prints
+> a deprecation notice to stderr and will be removed in a future release. To see the *resolved*
+> configuration (defaults plus your overrides) rather than just the defaults, use
+> `pubrun show config`.
 
 ### `--info`
 

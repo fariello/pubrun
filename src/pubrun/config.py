@@ -129,6 +129,52 @@ def load_local_config(start_dir: Optional[Path] = None) -> Optional[Dict[str, An
     return merged if merged else None
 
 
+def _flatten_leaves(d: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
+    """Flatten a nested dict to {dotted.key: value} for leaf (non-dict) values."""
+    out: Dict[str, Any] = {}
+    for k, v in d.items():
+        dotted = f"{prefix}{k}"
+        if isinstance(v, dict):
+            out.update(_flatten_leaves(v, dotted + "."))
+        else:
+            out[dotted] = v
+    return out
+
+
+def _resolve_layers(overrides: Optional[Dict[str, Any]] = None):
+    """Return the ordered list of (layer-name, layer-dict) contributing to a resolve,
+    lowest-precedence first. Single source of truth for both the merge and provenance."""
+    layers = [("built-in", load_default_config())]
+
+    user_conf = load_user_config()
+    if user_conf:
+        layers.append(("user", user_conf))
+
+    local_conf = load_local_config()
+    if local_conf:
+        layers.append(("local", local_conf))
+
+    env_profile = os.environ.get("PUBRUN_PROFILE")
+    if env_profile:
+        layers.append(("env", {"core": {"profile": env_profile}}))
+
+    env_meta_ref = os.environ.get("PUBRUN_META_REF")
+    if env_meta_ref:
+        layers.append(("env", {"core": {"meta_ref": env_meta_ref}}))
+
+    if overrides:
+        # Convenience flattening: allow start(profile="deep", output_dir="./x")
+        # as shorthand for start(core={"profile": "deep", "output_dir": "./x"}).
+        overrides = dict(overrides)
+        _CORE_SHORTCUTS = {"profile", "output_dir", "auto_start", "meta_ref"}
+        flat_core = {k: overrides.pop(k) for k in list(overrides) if k in _CORE_SHORTCUTS}
+        if flat_core:
+            overrides.setdefault("core", {}).update(flat_core)
+        layers.append(("api", overrides))
+
+    return layers
+
+
 def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Build the final configuration by merging all sources.
 
@@ -136,43 +182,49 @@ def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     1. Built-in defaults (``default.toml``)
     2. User home config (``~/.config/pubrun/config.toml``)
     3. Local project config (``.config/pubrun/config.toml`` then ``.pubrun.toml``)
-    4. Environment variables (``PUBRUN_META_REF``)
+    4. Environment variables (``PUBRUN_PROFILE`` / ``PUBRUN_META_REF``)
     5. API overrides (this function's ``overrides`` argument)
 
     Args:
         overrides: Dict of config keys to merge at highest priority.
     """
-    config = load_default_config()
-
-    user_conf = load_user_config()
-    if user_conf:
-        config = _deep_merge(config, user_conf)
-
-    local_conf = load_local_config()
-    if local_conf:
-        config = _deep_merge(config, local_conf)
-
-    # Environment variable overrides (between local config and API overrides)
-    env_profile = os.environ.get("PUBRUN_PROFILE")
-    if env_profile:
-        config = _deep_merge(config, {"core": {"profile": env_profile}})
-
-    env_meta_ref = os.environ.get("PUBRUN_META_REF")
-    if env_meta_ref:
-        config = _deep_merge(config, {"core": {"meta_ref": env_meta_ref}})
-
-    if overrides:
-        # Convenience flattening: allow start(profile="deep", output_dir="./x")
-        # as shorthand for start(core={"profile": "deep", "output_dir": "./x"}).
-        # Copy to avoid mutating the caller's dict.
-        overrides = dict(overrides)
-        _CORE_SHORTCUTS = {"profile", "output_dir", "auto_start", "meta_ref"}
-        flat_core = {k: overrides.pop(k) for k in list(overrides) if k in _CORE_SHORTCUTS}
-        if flat_core:
-            overrides.setdefault("core", {}).update(flat_core)
-        config = _deep_merge(config, overrides)
-
+    config: Dict[str, Any] = {}
+    for _name, layer in _resolve_layers(overrides):
+        config = _deep_merge(config, layer)
     return config
+
+
+def resolve_config_with_provenance(overrides: Optional[Dict[str, Any]] = None):
+    """Like ``resolve_config`` but also return per-key origin provenance.
+
+    Returns ``(config, provenance)`` where the config is byte-identical to
+    ``resolve_config(overrides)`` and provenance maps each leaf dotted-key to
+    ``{"layer": <winning layer>, "value": <winning value>,
+       "overrides": [{"layer","value"}, ...]}`` (lower layers it shadowed, lowest-first).
+    Kept separate from ``resolve_config`` so the hot path keeps a single, non-union return type.
+    """
+    layers = _resolve_layers(overrides)
+
+    config: Dict[str, Any] = {}
+    for _name, layer in layers:
+        config = _deep_merge(config, layer)
+
+    provenance: Dict[str, Any] = {}
+    for layer_name, layer in layers:
+        for dotted, value in _flatten_leaves(layer).items():
+            if dotted in provenance:
+                prior = provenance[dotted]
+                provenance[dotted] = {
+                    "layer": layer_name,
+                    "value": value,
+                    "overrides": prior.get("overrides", []) + [
+                        {"layer": prior["layer"], "value": prior["value"]}
+                    ],
+                }
+            else:
+                provenance[dotted] = {"layer": layer_name, "value": value, "overrides": []}
+
+    return config, provenance
 
 
 # The only profile value that is a no-op regardless of wiring; setting it never

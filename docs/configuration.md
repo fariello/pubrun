@@ -21,6 +21,12 @@
 
 When both `.pubrun.toml` and `.config/pubrun/config.toml` exist in the same directory, `.pubrun.toml` takes precedence (it is applied last).
 
+> **See what actually resolved:** `pubrun show config` prints the fully-resolved configuration and
+> annotates any key that a higher-precedence layer overrode (e.g. a local `.pubrun.toml` value that
+> shadowed a built-in default), so you can see not just the effective value but *why*. Use
+> `pubrun show run config [<id>]` for the exact config a past run used, or `pubrun show default config`
+> for the built-in defaults. See the [CLI reference](cli.md#show-config--inspect-resolved-configuration).
+
 ### Generating a Configuration File
 
 ```bash

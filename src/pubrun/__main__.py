@@ -546,6 +546,135 @@ def _run_resources(
 
 
 
+def _render_config_toml(config: dict, title: str, note: Optional[str] = None,
+                        provenance: Optional[dict] = None, show_all: bool = False) -> None:
+    """Print a resolved config dict as readable, deterministic key=value lines.
+
+    When ``provenance`` is supplied (leaf-key -> {"layer","overrides":[...]}), keys are
+    annotated with their source layer; by default only OVERRIDDEN keys are annotated (a
+    clean, no-conflict config prints without annotations), unless ``show_all`` is set.
+    """
+    print(f"# {title}")
+    if note:
+        print(f"# {note}")
+
+    def walk(d: dict, prefix: str = "") -> None:
+        for key in sorted(d.keys()):
+            val = d[key]
+            dotted = f"{prefix}{key}"
+            if isinstance(val, dict):
+                walk(val, dotted + ".")
+                continue
+            line = f"{dotted} = {val!r}"
+            if provenance is not None:
+                info = provenance.get(dotted)
+                if info:
+                    overrides = info.get("overrides") or []
+                    if overrides:
+                        shadowed = ", ".join(f"{o['layer']} {o['value']!r}" for o in overrides)
+                        line += f"    [{info['layer']}, overrides {shadowed}]"
+                    elif show_all:
+                        line += f"    [{info['layer']}]"
+            print(line)
+
+    walk(config)
+
+
+def _run_show_config(mode: str, run_selector: Optional[str] = None, show_all: bool = False) -> None:
+    """Show resolved configuration for one of three contexts.
+
+    mode: "current"  -> live resolve_config() in the CWD (what `import pubrun` would use now)
+          "run"      -> the resolved config a past run actually used (config.resolved.json)
+          "default"  -> the shipped built-in defaults (raw default.toml)
+    """
+    from pubrun.config import resolve_config_with_provenance, _read_package_resource
+
+    if mode == "default":
+        # Raw packaged defaults, verbatim (same source as the legacy --show-config).
+        print(_read_package_resource("pubrun.resources", "default.toml"), end="")
+        return
+
+    if mode == "current":
+        resolved, provenance = resolve_config_with_provenance()
+        _render_config_toml(
+            resolved,
+            title="pubrun resolved configuration (current, as of now, in this directory)",
+            note="Reflects built-in defaults + user/local config + environment variables present "
+                 "now. A specific run may differ; use `pubrun show run config` for a past run.",
+            provenance=provenance,
+            show_all=show_all,
+        )
+        return
+
+    if mode == "run":
+        from pubrun.status import find_run, AmbiguousRunSelectorError
+        run_path = None
+        if run_selector:
+            try:
+                info = find_run(run_selector)
+                run_path = info.run_dir if info else Path(run_selector)
+            except AmbiguousRunSelectorError as e:
+                _emit_ambiguous_selector(e)
+                sys.exit(1)
+            except Exception:
+                run_path = Path(run_selector)
+        else:
+            # Most recent run.
+            try:
+                from pubrun.status import scan_runs
+                from pubrun.config import resolve_config as _rc
+                out_dir = _rc().get("core", {}).get("output_dir") or "runs"
+                runs = scan_runs(out_dir)
+                if not runs:
+                    _print_error("No runs found to show config for.")
+                    sys.exit(1)
+                run_path = sorted(runs, key=lambda r: r.started_at_utc or 0, reverse=True)[0].run_dir
+            except SystemExit:
+                raise
+            except Exception as e:
+                _print_error(f"Could not locate the most recent run: {e}")
+                sys.exit(1)
+
+        cfg_path = Path(run_path) / "config.resolved.json"
+        if not cfg_path.exists():
+            # Ghost run (never wrote a run dir/config) or otherwise absent.
+            _print_error(
+                f"Run '{Path(run_path).name}' has no recorded config "
+                f"(config.resolved.json not found; likely a ghost run that could not write to disk)."
+            )
+            sys.exit(1)
+
+        try:
+            resolved = json.loads(cfg_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            _print_error(f"Failed to read {cfg_path}: {e}")
+            sys.exit(1)
+
+        # Distinguish a finalized run from a crashed/unfinalized one (startup snapshot).
+        note = None
+        manifest_path = Path(run_path) / "manifest.json"
+        finalized = False
+        if manifest_path.exists():
+            try:
+                mdata = json.loads(manifest_path.read_text(encoding="utf-8"))
+                outcome = mdata.get("status", {}).get("outcome") or mdata.get("run", {}).get("outcome")
+                finalized = outcome not in (None, "running")
+            except Exception:
+                finalized = False
+        if not finalized:
+            note = "from startup snapshot (run did not finalize; this is the config it started with)."
+
+        _render_config_toml(
+            resolved,
+            title=f"pubrun resolved configuration for run {Path(run_path).name}",
+            note=note,
+        )
+        return
+
+    _print_error(f"Unknown show-config mode: {mode!r}")
+    sys.exit(1)
+
+
 def _run_report(run_dir: str, depth: str, section: Optional[str] = None, utc: bool = False) -> None:
     """Print a human-readable diagnostic report for a recorded run."""
     try:
@@ -2283,17 +2412,19 @@ def main() -> None:
         "show",
         help="Analyze and display diagnostic telemetry from a specific run.",
         description="Analyze and display diagnostic telemetry from a specific run.",
-        epilog=f"Examples:\n  {prog_name} show\n  {prog_name} show runs/pubrun-XYZ\n  {prog_name} show runs/pubrun-XYZ env\n  {prog_name} show env",
+        epilog=f"Examples:\n  {prog_name} show\n  {prog_name} show runs/pubrun-XYZ\n  {prog_name} show runs/pubrun-XYZ env\n  {prog_name} show env\n  {prog_name} show config\n  {prog_name} show run config 1\n  {prog_name} show default config",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    show_parser.add_argument("run_dir", type=str, nargs="?", help="Run directory (e.g., runs/pubrun-XYZ). Defaults to the most recent run.")
-    show_parser.add_argument("section", type=str, nargs="?", help="Optional section to view (e.g. 'logs', 'env', 'packages').")
+    show_parser.add_argument("run_dir", type=str, nargs="?", help="Run directory (e.g., runs/pubrun-XYZ). Defaults to the most recent run. Also the keyword 'config' (current resolved config), or 'run'/'default' in the `show <run|default> config` forms.")
+    show_parser.add_argument("section", type=str, nargs="?", help="Optional section to view ('logs', 'env', 'packages'), or 'config' in the `show run config` / `show default config` forms.")
+    show_parser.add_argument("config_extra", type=str, nargs="?", help="Optional run selector for `pubrun show run config <id>` (recency index, id prefix, or path). Defaults to the most recent run.")
 
     depth_group_show = show_parser.add_mutually_exclusive_group()
     depth_group_show.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Timing and outcome only.")
     depth_group_show.add_argument("--standard", action="store_const", dest="depth", const="standard", help="Hardware, Git, Python, and dependency summary (default).")
     depth_group_show.add_argument("--deep", action="store_const", dest="depth", const="deep", help="Full environment variables and complete package list.")
     show_parser.add_argument("--utc", action="store_true", help="Display timestamps in UTC instead of local time.")
+    show_parser.add_argument("--all", action="store_true", help="With `show config`: annotate every key with its source config layer (default: only overridden keys).")
     show_parser.set_defaults(depth="standard")
     _add_run_filter_args(show_parser)
 
@@ -2333,7 +2464,7 @@ def main() -> None:
     # ---------------- Diagnostic Flags ----------------
     parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Create an annotated `.pubrun.toml` configuration file.")
     parser.add_argument("--show-config", action="store_true", help="Print the default configuration to the terminal.")
-    parser.add_argument("--info", action="store_true", help="Display runtime diagnostics: Python version, pubrun version, import mode, detected config files, and capture capabilities.")
+    parser.add_argument("--info", action="store_true", help="Display runtime diagnostics: Python version, pubrun version, import mode, invocation, and hardware/capture capabilities. (To see resolved configuration, use `pubrun show config`.)")
     parser.add_argument("--run-tests", action="store_true", help="Run the built-in test suite and a mock end-to-end script.")
 
     # UX-01: Build the primary commands list (excluding aliases) for clean errors.
@@ -2354,9 +2485,31 @@ def main() -> None:
         from pubrun.status import set_display_utc
         set_display_utc(True)
 
-    # Shifting logic: if run_dir is in {logs, env, packages}, shift it to section and set run_dir = None
+    # `pubrun show config` family (positional grammar), intercepted BEFORE run resolution so
+    # the keyword `config` is not mistaken for a run selector. Three forms:
+    #   show config                -> current resolved config (run_dir == "config", no section)
+    #   show default config        -> shipped defaults      (run_dir == "default", section == "config")
+    #   show run config [<id>]     -> a past run's config    (run_dir == "run",     section == "config")
+    # Precedence note: these keyword forms win over a run whose id literally starts with
+    # config/run/default; such a run must be selected by full id or path.
     if args.command in {"show", "report"}:
-        if getattr(args, "run_dir", None) in {"logs", "env", "packages"}:
+        _rd = getattr(args, "run_dir", None)
+        _sec = getattr(args, "section", None)
+        _extra = getattr(args, "config_extra", None)  # optional run id after `show run config`
+        if _rd == "config" and _sec is None:
+            _run_show_config("current", show_all=getattr(args, "all", False))
+            return
+        if _rd == "default" and _sec == "config":
+            _run_show_config("default")
+            return
+        if _rd == "run" and _sec == "config":
+            _run_show_config("run", run_selector=_extra, show_all=getattr(args, "all", False))
+            return
+
+    # Shifting logic: if run_dir is a bare section name, shift it to section and null run_dir.
+    if args.command in {"show", "report"}:
+        from pubrun.report.diagnostics import SHOW_SECTIONS
+        if getattr(args, "run_dir", None) in SHOW_SECTIONS:
             args.section = args.run_dir
             args.run_dir = None
 
@@ -2653,6 +2806,10 @@ def main() -> None:
         executed = True
 
     if getattr(args, "show_config", False):
+        # Soft-deprecated: `show default config` is the canonical form. Keep --show-config
+        # working (prints the raw defaults, unchanged) but nudge to the new command. The
+        # notice goes to stderr so piping stdout to a file stays clean.
+        print("[WARN ] --show-config is deprecated; use `pubrun show default config`.", file=sys.stderr)
         from pubrun.config import _read_package_resource
         content = _read_package_resource("pubrun.resources", "default.toml")
         print(content)

@@ -8,6 +8,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **`pubrun show config` family — inspect resolved configuration.** Three contexts: `pubrun show
+  config` (what `import pubrun` would use right now, in the current directory), `pubrun show run
+  config [<id>]` (the config a past run actually used, from its `config.resolved.json`; a crashed
+  run shows its labeled startup snapshot, a ghost run reports a clear error), and `pubrun show
+  default config` (built-in defaults). `show config` **surfaces resolution ambiguity**: keys a
+  higher-precedence layer overrode are annotated (e.g. `capture.hardware.depth = 'off' [local,
+  overrides built-in 'basic']`); a no-conflict config prints clean, and `--all` annotates every
+  key with its source layer. Backed by a new opt-in `resolve_config_with_provenance()` that is
+  value-identical to `resolve_config()` (provenance never alters the resolved config).
+
+### Deprecated
+- **`--show-config` is deprecated in favor of `pubrun show default config`.** It still works (prints
+  the built-in defaults) but emits a one-line deprecation notice to stderr; slated for removal in a
+  future release. Also corrected the `--info` help text (it no longer claims to list detected config
+  files, which it never did; use `pubrun show config` for resolved configuration).
+
 ### Fixed
 - **Manifest schema now accepts the transient `pending` and `timeout` capture states, so
   crashed/startup manifests validate.** The schema's capture-state enum omitted `pending` (async
