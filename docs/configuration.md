@@ -14,12 +14,11 @@
 |---|---|---|
 | 1 (highest) | API overrides | `pubrun.start(profile="deep")` |
 | 2 | Environment variables | `PUBRUN_AUTO_START=false` |
-| 3 | Local project `.pubrun.toml` | `./.pubrun.toml` |
-| 4 | Local project deep config | `./.config/pubrun/config.toml` |
-| 5 | User home config | `~/.config/pubrun/config.toml` |
-| 6 (lowest) | Built-in defaults | `default.toml` (shipped with the library) |
+| 3 | Local project config | `./.pubrun.toml` and/or `./.config/pubrun/config.toml` |
+| 4 | User home config | `~/.config/pubrun/config.toml` |
+| 5 (lowest) | Built-in defaults | `default.toml` (shipped with the library) |
 
-When both `.pubrun.toml` and `.config/pubrun/config.toml` exist in the same directory, `.pubrun.toml` takes precedence (it is applied last).
+The local project config is a **single precedence tier** (both `./.pubrun.toml` and `./.config/pubrun/config.toml` are merged into one layer). When both files exist in the same directory, `.pubrun.toml` takes precedence (it is applied last).
 
 > **See what actually resolved:** `pubrun show config` prints the fully-resolved configuration and
 > annotates any key that a higher-precedence layer overrode (e.g. a local `.pubrun.toml` value that

@@ -2463,7 +2463,9 @@ def main() -> None:
 
     # ---------------- Diagnostic Flags ----------------
     parser.add_argument("--create-config", type=str, nargs="?", const="PROMPT", metavar="DEST", help="Create an annotated `.pubrun.toml` configuration file.")
-    parser.add_argument("--show-config", action="store_true", help="Print the default configuration to the terminal.")
+    # Deprecated: hidden from --help (SUPPRESS) but still functional; emits a stderr
+    # deprecation notice at runtime pointing to `pubrun show default config`.
+    parser.add_argument("--show-config", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--info", action="store_true", help="Display runtime diagnostics: Python version, pubrun version, import mode, invocation, and hardware/capture capabilities. (To see resolved configuration, use `pubrun show config`.)")
     parser.add_argument("--run-tests", action="store_true", help="Run the built-in test suite and a mock end-to-end script.")
 

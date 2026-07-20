@@ -177,9 +177,10 @@ depth = "standard"
 [capture.packages]
 # How Python dependency versions are tracked.
 # Values:
-#   "imported-only"       - Scan sys.modules for libraries used by the script.
-#   "top-level-installed" - List packages from pip/conda.
-#   "full-environment"    - Every dependency in the virtual environment.
+#   "imported-only"        - Scan sys.modules for libraries used by the script.
+#   "imported-transitive"  - Imported packages plus their declared dependencies.
+#   "top-level-installed"  - List packages from pip/conda.
+#   "full-environment"     - Every dependency in the virtual environment.
 mode = "imported-only"
 depth = "standard"
 

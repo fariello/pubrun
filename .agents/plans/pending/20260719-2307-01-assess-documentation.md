@@ -108,6 +108,25 @@ auto-executed. Execution contract:
 - Only after CI-green + approval, `git mv` this IPD to `.agents/plans/executed/` and set
   `Status: executed`.
 
+## Execution notes (2026-07-19)
+
+Executed after human approval; local suite 906 passed, 2 skipped. Commit-scoped to the fence.
+
+- **D1:** README `show config` subsection added; `--show-config` hidden from `--help`
+  (`argparse.SUPPRESS`, `__main__.py`) - still functional, still prints the stderr deprecation
+  notice; stale README flag row replaced with a deprecation note. Verified: `pubrun -h` no longer
+  lists `--show-config`; `pubrun --show-config` prints defaults + notice.
+- **D2:** `docs/manifest.md` `source_files` -> `list[object]` `{path, hash?}` + "currently always
+  empty" note.
+- **D3:** `docs/configuration.md` precedence table collapsed the two local files into one tier.
+- **D4:** added `imported-transitive` to the schema `packages_section.mode` enum + completed the
+  `default.toml` comment + a `packages-transitive` conformance variant. **The new conformance test
+  immediately surfaced a SECOND, deeper gap (as PR-001's full-reconciliation mandate anticipated):**
+  transitive package records carry a `required_by` (list[str]) field the schema's `package_record`
+  rejected (`additionalProperties:false`). Added `required_by` to `package_record` and documented it
+  in `docs/manifest.md`. So D4 reconciled BOTH the mode enum and the record shape. CHANGELOG updated.
+- Pending: full CI matrix validation (D4 is a contract change) before moving to `executed/`.
+
 ## Plan-review findings (2026-07-19)
 
 Independent re-verification confirmed all four findings (D1-D4) against current code. Review findings
