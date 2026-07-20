@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Documentation
+- **Reframed the README lead to the trustworthy-ML register (no behavior change).** The opening now
+  leads with what pubrun does — reproducible, auditable runs via automatic provenance, environment
+  capture, and run-to-run comparison from a single `import pubrun` — and states plainly that pubrun is
+  a reproducibility/provenance *component used inside* an ML pipeline, not an orchestrator/scheduler/
+  serving platform. Features and Problem/Solution were reframed accordingly, "scales from laptop to
+  cluster" is now a first-class differentiator, and a short "Built to be Trustworthy" section surfaces
+  existing engineering-maturity signals (cross-platform CI over Python 3.8–3.14, the schema-validated
+  manifest contract, zero runtime deps, a real changelog). The publication/pub-joke framing is demoted
+  (kept as one accurate `pubrun methods` feature bullet plus a light "About the name" note), not
+  removed. Every claim is checkable against the code; no docs were amputated.
+
 ### Added
 - **Machine-readable JSON Schema for benchmark results** (`schemas/benchmark.schema.json`, Draft
   2020-12) defining the `pubrun-benchmark/5` format. Both the full and the redacted result forms
