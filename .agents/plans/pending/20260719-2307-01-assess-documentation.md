@@ -5,7 +5,8 @@
 - Scope: whole project, accuracy-first; concentrated on the CLI/config/manifest docs the recent
   `show config` + schema work touched or exposed (`README.md`, `docs/cli.md`, `docs/configuration.md`,
   `docs/manifest.md`, `schemas/manifest.schema.json`)
-- Status: to-review
+- Status: reviewed
+- Approval: (set when a human approves; omit until then)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Goal
@@ -47,10 +48,10 @@ Ordered inaccuracies-first (highest harm), all Low remediation risk.
 
 | Step | Source | Change | Files | Remediation Risk | Validation |
 |------|--------|--------|-------|------------------|------------|
-| 1 | D1 | Add a short `show config` mention to the README CLI section (the three forms, one line each) and update the `--show-config` diagnostic-flags row to note it is deprecated in favor of `show default config`. Keep it concise (no bloat). | `README.md` | Low | README lists `show config`/`show run config`/`show default config`; `--show-config` row says deprecated |
-| 2 | D2 | Fix `docs/manifest.md` `config.source_files` type: `list[object]` with `{path, hash?}`, matching the schema. | `docs/manifest.md` | Low | doc type matches `schemas/manifest.schema.json` field-for-field |
+| 1 | D1 | Add a short **`show config` subsection** to the README CLI section (the three forms - `show config` / `show run config [<id>]` / `show default config` - one line each, with a one-line example), matching `docs/cli.md`'s detail at a summary level. Separately, **hide `--show-config` from `--help`** (argparse `help=argparse.SUPPRESS` on the flag) so it no longer appears in the diagnostic-flags list; it keeps working but emits the existing stderr deprecation notice naming the alternative (`show default config`). Remove/replace the stale `--show-config` row in the README diagnostic-flags table (since it is now hidden). (Q2 decision.) | `README.md`, `src/pubrun/__main__.py` (the `--show-config` argparse `help`) | Low | README has a `show config` subsection; `pubrun -h` no longer lists `--show-config`; `pubrun --show-config` still prints defaults + a stderr deprecation notice naming `show default config` |
+| 2 | D2 | Fix `docs/manifest.md` `config.source_files` type: `list[object]` with `{path, hash?}`, matching the schema. **Also note it is currently always empty** (`tracker.py:648-649` hardcodes `source_files: []` and `sources_path: null`), so the doc does not imply data that never appears (PR-002). | `docs/manifest.md` | Low | doc type matches `schemas/manifest.schema.json` field-for-field; doc notes the field is presently unpopulated |
 | 3 | D3 | Reword the `docs/configuration.md` precedence table so the two local config files are one tier (e.g. merge rows 3-4 into "Local project config (`.pubrun.toml`, then `.config/pubrun/config.toml`; `.pubrun.toml` wins)"), matching the single merged `local` layer. | `docs/configuration.md` | Low | table tiers match `_resolve_layers` layers; `.pubrun.toml`-wins note preserved |
-| 4 | D4 | Add `"imported-transitive"` to the schema `packages_section.mode` enum (code supports it; doc documents it; only the schema is stale). Also complete the `default.toml` comment that enumerates the modes. **Contract change -> validate on the full CI matrix per AGENTS.md matrix-validation discipline.** Consider a conformance test that runs with `mode="imported-transitive"` so the gate covers it. | `schemas/manifest.schema.json`, `src/pubrun/resources/default.toml`, `tests/` | Low | a manifest produced with `packages.mode="imported-transitive"` passes the schema conformance test; full matrix green |
+| 4 | D4 | **Reconcile the WHOLE `packages_section.mode` enum against every mode the code can emit** (PR-001), not just the one found: grep `capture/packages.py` for all accepted `mode` values (currently `imported-only`, `imported-transitive`, `top-level-installed`, `full-environment`) and ensure each is in the schema enum. `imported-transitive` is the confirmed-missing one. Complete the `default.toml` comment that enumerates the modes. Add a conformance test that produces a manifest with **`packages.mode="imported-transitive"`** (the previously-uncovered value) and validates it against the schema (PR-004). **Contract change -> validate on the full CI matrix per AGENTS.md matrix-validation discipline.** | `schemas/manifest.schema.json`, `src/pubrun/resources/default.toml`, `tests/test_manifest_schema.py` | Low | every mode `capture/packages.py` accepts is in the schema enum; a manifest with `packages.mode="imported-transitive"` passes the conformance test; full matrix green |
 
 ## Deferred / out of scope (with reason)
 
@@ -80,22 +81,50 @@ This IPD *is* documentation sync. D4 additionally touches the manifest contract 
 warrants a CHANGELOG entry ("schema: accept `imported-transitive` packages mode"). Steps 1-3 are
 doc-only (no CHANGELOG needed unless the maintainer prefers one).
 
-## Open questions
+## Open questions (resolved interactively 2026-07-19 during /plan-review)
 
-1. D1 README wording: how prominent should `show config` be - a one-line addition under the existing
-   `show` entry, or its own short subsection? Recommend: one line under `show` + fix the flag row
-   (KISS; the full detail already lives in `docs/cli.md`).
-2. D4: fix the schema enum now (recommended - it is a latent gate failure), or split it to its own
-   tiny contract IPD since it is not strictly "documentation"? Recommend fixing here; it is one line
-   + a test and shares the reconciliation context.
+1. **D1 README prominence** -> RESOLVED (Q2): a short `show config` SUBSECTION in the README (the three
+   forms + a one-line example), AND hide `--show-config` from `--help` (argparse `SUPPRESS`) while it
+   keeps working with the stderr deprecation notice naming `show default config`. Step 1 updated.
+2. **D4 here vs. split** -> RESOLVED (Q1): keep D4 in this IPD (one enum reconciliation + a test;
+   shares the schema context; the CI-matrix run is cheap). The whole IPD's execution is therefore
+   gated on the full CI matrix because of D4.
 
 ## Approval and execution gate
 
 This IPD is a proposal. It MUST be reviewed and approved by a human before execution, and it is NOT
-auto-executed. On approval: apply steps in order; for D4 validate on the CI matrix; commit path-scoped;
-never push without explicit approval; then move this IPD to `.agents/plans/executed/` (Status ->
-`executed`).
+auto-executed. Execution contract:
+
+- Open questions: both resolved above (Q1 keep-D4-here, Q2 subsection + hide `--show-config`).
+- Scope fence: only `README.md`, `docs/manifest.md`, `docs/configuration.md`,
+  `schemas/manifest.schema.json`, `src/pubrun/resources/default.toml`, `src/pubrun/__main__.py`
+  (the `--show-config` help only), `tests/test_manifest_schema.py`, and `CHANGELOG.md` (D4 entry).
+  Do NOT touch the README pub/research framing (owned by the pending README-reframe IPD).
+- **Honesty rule (hard MUST):** when reporting that tests pass, paste the ACTUAL runner output; never
+  claim a pass that was not run.
+- **Matrix rule:** D4 is a contract change; validate on the full CI matrix (3 OS x Python 3.8-3.14)
+  before considering execution complete - local green is not done.
+- Commit **path-scoped** (only the files above); **never push** without explicit human approval.
+- Only after CI-green + approval, `git mv` this IPD to `.agents/plans/executed/` and set
+  `Status: executed`.
+
+## Plan-review findings (2026-07-19)
+
+Independent re-verification confirmed all four findings (D1-D4) against current code. Review findings
+on the PLAN itself (all FIXED in-plan; none deferred):
+
+- **PR-001 (Medium, under-scope):** D4 patched only the one missing mode; widened it to reconcile the
+  WHOLE `packages_section.mode` enum against every mode `capture/packages.py` accepts.
+- **PR-002 (Low, under-scope):** D2 did not note that `source_files`/`sources_path` are hardcoded
+  empty (`tracker.py:648-649`); added the note so the doc does not imply data that never appears.
+- **PR-003 (Low, gate):** execution gate lacked the hard-MUST honesty rule (paste actual runner
+  output); added, plus a scope fence and path-scoped/never-push/lifecycle contract.
+- **PR-004 (Low, in-scope):** D4's test target was vague; specified a conformance test that produces a
+  manifest with `packages.mode="imported-transitive"` (the previously-uncovered value).
 
 ## Workflow history
 - 2026-07-19 /assess documentation (opencode / its_direct/pt3-claude-opus-4.8-1m-us): assessed;
   proposed 4 changes.
+- 2026-07-19 /plan-review (opencode / its_direct/pt3-claude-opus-4.8-1m-us): APPROVE WITH REVISIONS
+  APPLIED; PR-001..PR-004 all FIXED; 2 open questions resolved interactively. Readiness: GO (pending
+  human approval to execute).
