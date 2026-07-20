@@ -4,7 +4,7 @@
 - Concern: testing (reliability of the test suite)
 - Scope: `tests/` (conftest fixtures + several order/timing-sensitive tests); no product behavior
   change intended (characterization: pin real behavior, fix only test isolation/robustness)
-- Status: to-review
+- Status: reviewed
 - Approval: (set when a human approves; omit until then)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
@@ -56,11 +56,11 @@ exactly the 5th flake.
 
 | Step | Change | Files | Remediation Risk | Validation |
 |------|--------|-------|------------------|------------|
-| 1 | **Reproduce the class deterministically.** Run the suite under randomized order (`pytest -p randomly` if available, else a fixed adverse order) and/or run suspect predecessor files immediately before each flaky test, until at least the 5th flake reproduces locally. Record the reproducing order. | (none; investigation) | Low | the flake reproduces locally on demand |
-| 2 | **Confirm the leaked-global root cause** for the provenance flake: is `get_current_run()` stale, or is the mode latch suppressing hooks? Decide whether it is purely a TEST isolation gap or also a PRODUCT isolation bug. If product, split a separate finding. | `tests/`, `src/pubrun/_bootstrap.py`/`core.py` (read-only) | Low | documented cause with evidence |
-| 3 | **Strengthen the autouse isolation fixture** in `conftest.py` to reset ALL relevant process-global state between tests (current-run - already done; plus mode-latch/bootstrap, and joining/stopping any lingering watcher threads), so tests start from a clean pubrun state regardless of order. Keep it minimal and documented. | `tests/conftest.py` | Medium (complexity - must reset the right globals without hiding real bugs; verify by the repro from step 1 going green) | the step-1 repro order now passes; full suite passes under randomized order |
-| 4 | **Make the remaining timing assertions self-contained** (finalize/stop explicitly rather than relying on atexit or a bg thread having run; already done for 4/5) and confirm the 5th's diagnostic guard becomes a real pass under the hardened fixture. Remove the diagnostic-only scaffolding if the root fix makes it moot. | `tests/test_new_features.py` and any others step 1 surfaces | Low | flaky tests pass under adverse ordering |
-| 5 | (Optional, if `pytest-randomly` is acceptable as a dev dep) add randomized test ordering to CI so this class cannot silently regress. Otherwise document the adverse-order check as a manual gate. | `pyproject.toml` (dev extra), `.github/workflows/ci.yml` | Low-Medium (adds a dev dep + surfaces latent order-dependence, which is the point) | CI runs randomized order; suite green across the matrix |
+| 1 | **Add `pytest-randomly` to the dev extra** (OQ1=C: dev-only, NOT enforced in CI yet) and use it locally to reproduce the class via randomized/adverse order (seeded, reproducible). **Fallback (PR-004):** if a flake will not reproduce locally after reasonable effort (several never did - they are CI-load-sensitive), proceed with the code-reasoned root-cause fix and let the CI matrix validate; do NOT block on an environment-impossible local repro. | `pyproject.toml` (dev extra) | Low | randomized order runs locally; reproducing order recorded OR documented as non-reproducible-locally |
+| 2 | **Confirm the leaked-global root cause.** Verified during review: `pubrun._bootstrap` holds module-globals `_selected_mode/_selected_behavior/_selected_by/_selected_source/_selected_at_utc/_core_loaded/_conflict_policy/_requests` that the current autouse `clean_active_run` does NOT reset (it only resets `_active_run`); a purpose-built `_bootstrap.reset_state()` exists (`_bootstrap.py:103`). Determine for the provenance flake whether the stale state is a TEST-isolation gap only, or also a PRODUCT bug (`get_current_run()` returning a stale/finalized run in a real one-process start/stop cycle). **OQ2=A: if it is a PRODUCT bug, STOP and draft a separate product-fix IPD** (with its own review/tests/matrix); do not fix product behavior here. | `tests/`, `src/pubrun/_bootstrap.py`/`core.py` (read-only) | Low | documented cause + product-vs-test determination |
+| 3 | **Strengthen the autouse isolation fixture** (`conftest.py`) to reset pubrun's process-global state between tests, using the existing hook: call `pubrun._bootstrap.reset_state()` (do NOT hand-poke individual globals) plus the existing `_active_run` reset, and join/stop any lingering watcher thread. Keep it minimal + documented. | `tests/conftest.py` | Medium (complexity - reset the right globals via reset_state() without masking a real bug; see PR-002 guard) | the reproducing order (or the known flaky tests) pass; full suite passes under randomized order locally |
+| 4 | **Make the remaining timing assertions self-contained AND prove no assertion was weakened (PR-002).** Finalize/stop explicitly rather than relying on atexit/bg-thread (done for 4/5). Convert the 5th's diagnostic guard (`d836e22`) into a GENUINE assertion under the hardened fixture (it must still assert a real recorded hash - never silently skip/soften). Explicitly verify each previously-flaky test still fails on a real regression (spot-check by breaking the behavior once). | `tests/test_new_features.py` and any others step 1 surfaces | Low | flaky tests pass under adverse ordering AND still fail when the real behavior is broken |
+| 5 | **DEFERRED to a separate follow-up (OQ1=C):** enabling `pytest-randomly` IN CI. Enabling randomized order in CI will likely surface MORE latent order-coupling than the known 5 (PR-003), which would balloon this effort's scope under a matrix gate. Prove the suite clean under randomized order LOCALLY here; institutionalize CI enforcement in its own later step once clean. Document the manual adverse-order check meanwhile. | (none here; a note + a follow-up TODO/IPD) | Low | documented as deferred; local randomized-order run recorded |
 
 ## Scope check
 
@@ -81,14 +81,32 @@ exactly the 5th flake.
 
 None (test-only). If step 5 adds `pytest-randomly` to the dev extra, note it in CONTRIBUTING/dev docs.
 
-## Open questions
+## Open questions (resolved 2026-07-20 during /plan-review)
 
-1. Is adding `pytest-randomly` (dev-only) acceptable to institutionalize order-independence in CI, or
-   keep order-randomization as a manual/periodic check? (Recommend: add it - cheap, dev-only, and it
-   is the durable guard against this whole class.)
-2. If step 2 finds a genuine PRODUCT isolation bug (e.g. `get_current_run()` returning a stale run
-   after another run finalized), fix here or split to its own IPD? (Recommend: split; keep this IPD
-   test-only.)
+1. **`pytest-randomly`** -> RESOLVED (OQ1=C): add it to the dev extra now (dev-only) for local
+   adverse-order testing + the root-cause globals reset; prove the suite clean under randomized order
+   LOCALLY; DEFER CI enforcement to a separate follow-up so this effort is not coupled to chasing
+   every latent order-dependence under a matrix gate.
+2. **Product bug found in step 2** -> RESOLVED (OQ2=A): SPLIT. This IPD stays test-only; if step 2
+   confirms a real product isolation bug, stop and draft a separate product-fix IPD with its own
+   review/tests/matrix.
+
+## Plan-review findings (2026-07-20)
+
+Claims verified against the code (conftest fixtures, `_bootstrap` globals + `reset_state()`,
+`core.open` gate). All findings FIXED in-plan; none deferred.
+
+- **PR-001 (Medium):** step 3 named the leaked globals loosely. FIXED: enumerated the exact
+  `_bootstrap` globals and specified using the existing `_bootstrap.reset_state()` hook (not
+  hand-poking globals).
+- **PR-002 (Medium, anti-regression):** the plan promised "without hiding real bugs" but gave no
+  mechanism. FIXED: step 4 now requires converting the diagnostic guard to a genuine assertion and
+  spot-verifying each previously-flaky test still FAILS on a real regression (proves the fix corrects
+  isolation without weakening assertions).
+- **PR-003 (Low):** enabling `pytest-randomly` in CI could surface more coupling and balloon scope.
+  FIXED: step 5 deferred to a separate follow-up (OQ1=C); local-only proof here.
+- **PR-004 (Low):** step 1 had no fallback if a flake will not reproduce locally (likely). FIXED:
+  added the "reason from code + validate on matrix" fallback.
 
 ## Approval and execution gate
 
@@ -103,3 +121,6 @@ Proposal only; human-approved before execution; not auto-run. Execution contract
 ## Workflow history
 - 2026-07-20 /assess-adjacent (opencode / its_direct/pt3-claude-opus-4.8-1m-us): drafted from the
   flake cluster surfaced during the show-config + assess-documentation executions; proposed 5 steps.
+- 2026-07-20 /plan-review (opencode / its_direct/pt3-claude-opus-4.8-1m-us): APPROVE WITH REVISIONS
+  APPLIED; PR-001..PR-004 all FIXED; OQ1=C (pytest-randomly dev-only, CI enforcement deferred),
+  OQ2=A (split product bug). Readiness: GO pending human approval to execute.
