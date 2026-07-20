@@ -132,21 +132,21 @@ def _is_jupyter_kernel() -> bool:
 def _resolve_console_mode(config: dict) -> str:
     """Resolve the effective console capture mode considering context."""
     base_mode = config.get("console", {}).get("capture_mode", "off")
-    
+
     if base_mode == "off":
         return "off"
-    
+
     # Jupyter override
     if _is_jupyter_kernel():
         jupyter_mode = config.get("console", {}).get("jupyter_mode", "off")
         return jupyter_mode
-    
+
     # Non-TTY override
     if not sys.stdout.isatty():
         non_tty_mode = config.get("console", {}).get("non_tty_mode", "inherit")
         if non_tty_mode != "inherit":
             return non_tty_mode
-    
+
     return base_mode
 ```
 
