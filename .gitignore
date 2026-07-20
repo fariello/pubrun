@@ -92,3 +92,21 @@ venv/
 # Editor state
 *.swp
 .vscode/
+
+# OpenCode agent session-recovery dumps (transcripts / prompts / restart snapshots).
+# These are DURABLE and worth keeping (they hold the full development reasoning), but they
+# must NOT be committed: this repo is public, and the transcripts contain home paths,
+# gh-auth/token discussion, private-repo names (e.g. the private JOSS paper repo), and
+# other private context that a public commit would leak permanently. Kept locally / in a
+# private archive instead; see the maintainer's out-of-repo archive. (OpenCode's own
+# session storage lives globally under ~/.local/share/opencode/, not in the repo; this
+# only guards recovery dumps that get written into the project tree.)
+opencode-recovery/
+# Same class, but landing in the framework's staged-prompts area: opencode session
+# recovery/compacted transcript dumps (named ...-ses_<id>.compacted.md / .restart.md /
+# .transcript.md / .prompt.md). `.agents/prompts/` itself is a LEGITIMATE staged-prompt
+# area (release-review reads it), so ignore ONLY the recovery-dump files, not the dir.
+.agents/prompts/**/*-ses_*.compacted.md
+.agents/prompts/**/*-ses_*.restart.md
+.agents/prompts/**/*-ses_*.transcript.md
+.agents/prompts/**/*-ses_*.prompt.md
