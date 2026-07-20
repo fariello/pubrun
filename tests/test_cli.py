@@ -632,6 +632,10 @@ class TestCliRunTests:
             "with pubrun.phase('epoch_1'):\n"
             "    os.system('echo hi')\n"
             "print('done')\n"
+            # Finalize explicitly so the manifest is deterministically 'completed' before the
+            # process exits; relying on the atexit finalizer races the parent's manifest read on
+            # a contended runner (seen as outcome 'running' on fast CI).
+            "pubrun.stop()\n"
         )
         script_path = tmp_path / "mock_training.py"
         script_path.write_text(script, encoding="utf-8")
