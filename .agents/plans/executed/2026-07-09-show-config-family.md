@@ -5,8 +5,45 @@
 - Scope: `src/pubrun/__main__.py` (show grammar + dispatch), `src/pubrun/config.py`
   (resolution + optional provenance), `src/pubrun/report/diagnostics.py` (renderer),
   `docs/cli.md`, `docs/configuration.md`, tests
-- Status: reviewed (plan-review 2026-07-12; open questions resolved; awaiting human approval to execute)
+- Status: EXECUTED 2026-07-20 (approved). Full CI matrix green (3 OS × Python 3.8–3.14). See
+  "Execution notes" below.
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
+
+## Execution notes (2026-07-20)
+
+All six steps landed as planned (commit `f565b80`); local suite 904 passed, matrix green after a
+flake cleanup (below).
+
+- **Grammar (Q1=B, positional):** `show config` / `show run config [<id>]` / `show default config`
+  recognized before run selection, with explicit precedence over run ids named config/run/default.
+  Regression tests confirm `show 1 env`, `show env`, `show <run>`, and a run id starting with a
+  reserved keyword all still resolve (`tests/test_show_config.py`, 13 tests). PR-006 (the HIGH-risk
+  disambiguation) validated on the full matrix, including arg-parsing across Python 3.8–3.14.
+- **Provenance (Q3=A):** implemented as a SEPARATE `resolve_config_with_provenance()` (not a union
+  return on `resolve_config`, per a review refinement) via a shared `_resolve_layers()` helper;
+  value-identical to `resolve_config()`. Overridden keys annotated by default; `--all` for full.
+- **Degraded runs (Q4=C):** crashed/unfinalized run shows a labeled startup snapshot; ghost run
+  errors clearly.
+- **`--show-config` (Q2=B):** soft-deprecated with a stderr notice pointing to `show default config`;
+  `--info` help doc/impl mismatch corrected.
+- **Section-set dedupe:** `diagnostics.SHOW_SECTIONS` replaces the 3 literals.
+- Docs: `docs/cli.md` (new `show config` subsection + `--show-config` deprecation note),
+  `docs/configuration.md` (cross-link), CHANGELOG. `/assess documentation` to follow.
+
+### Flake cleanup (matrix rule did its job)
+
+The push went red on four SEPARATE, PRE-EXISTING load/timing-sensitive tests (one per CI run, each a
+different job), none from show-config (which passed on every job). All hardened in follow-up commits
+`13f9beb`, `8e9978b`, `753ee76`:
+1. `test_full_wraps_console_end_to_end` (ubuntu-3.8): bracket-access on an un-finalized console
+   section → `.get()` + assert the load-bearing `CAPTURED=True`.
+2. `test_startup_manifest_conforms_to_schema` (windows-3.14): read a live run's manifest → Windows
+   file lock → tolerant retry + skip.
+3. `test_resources` peak-RSS (ubuntu-3.11): asserted a non-None peak before the sampler landed →
+   tolerate None, require positive int when present.
+4. `test_run_tests_mock_run_manifest_is_wellformed` (ubuntu-3.14): subprocess atexit-finalize race →
+   explicit `pubrun.stop()` in the child. Swept the suite for the same class; the rest finalize
+   in-process and are not race-prone.
 
 ## Origin
 
