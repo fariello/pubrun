@@ -2,9 +2,11 @@
 
 # pubrun
 
-> **Let your code monitor itself and write its own Methods section while you go to the pub.**
+> **Reproducible, auditable runs: automatic provenance, environment capture, and run-to-run comparison, from a single `import pubrun`.**
 
-`pubrun` is a stupidly simple, zero-dependency[^1] Python library that eliminates the boilerplate of documenting methodology, tracking versions, recording inputs, and monitoring resources — making it dramatically easier to publish, share, and reproduce your models and research. If you're feeling formal, you can think of "publication-ready runner" as the meaning of the name.
+`pubrun` is the reproducibility and provenance component you drop into your ML pipeline (or any Python run). With one `import pubrun` — no config, no infrastructure, no framework — it captures the full state of a run (code version, dependency graph, hardware, environment, inputs, logs, exit status, resource usage) into a structured, schema-validated `manifest.json`, then lets you diff any two runs to see exactly what changed. Zero runtime dependencies[^1], non-intrusive (it never alters, slows, or crashes your program), and it scales from a laptop to a thousand-node cluster.
+
+pubrun does one thing well: it makes runs trustworthy. It is **not** an orchestrator, scheduler, or serving platform — it is the provenance layer you use *inside* your pipeline, alongside whatever runs it.
 
 [^1]: On Python 3.11+, pubrun uses only the standard library. On Python 3.8–3.10, the sole runtime dependency is `tomli` (a backport of the standard-library `tomllib`).
 
@@ -37,23 +39,32 @@ See [CLI Reference](https://github.com/fariello/pubrun/blob/main/docs/cli.md) an
 
 ## Features
 
-- **Automatic Execution Tracing** — Captures environment variables, hardware specs, and dependency graphs without manual configuration.
-- **Publication-Ready Output** — Generates LaTeX/Markdown methodology blocks ready for academic papers.
-- **Semantic Diffing** — Compares execution footprints to identify subtle but critical differences between runs.
-- **Secret Redaction** — Automatically detects and redacts passwords, tokens, and API keys in environment variables and CLI arguments.
-- **Codebase Drift Detection** — Compares current code state against the execution snapshot to highlight changes.
-- **Cross-Platform Reproducibility** — Extracts initialization commands for seamless environment replication.
-- **HPC Optimized** — Supports global parent-child manifest hydration to minimize overhead on massive clusters.
+- **Automatic Provenance Capture** — Records code version (git), the dependency graph, hardware specs, environment, inputs, logs, exit status, and resource usage into a structured, **schema-validated** `manifest.json` — without manual configuration.
+- **Run-to-Run Comparison** — Semantically diffs two runs (`pubrun diff`, at basic / standard / deep depth) so you can see exactly what changed between them.
+- **Codebase Drift Detection** — Compares the current code state against a run's snapshot to highlight changes.
+- **Reproduce a Run** — Extracts the initialization commands needed to replicate a run's environment (`pubrun rerun`).
+- **Secret Redaction** — Automatically detects and redacts passwords, tokens, and API keys in environment variables and CLI arguments *before* the manifest is written.
+- **Scales from Laptop to Cluster** — Global parent-child manifest hydration (`PUBRUN_META_REF`) keeps provenance cheap across thousands of array jobs on HPC schedulers.
+- **Publication-Ready Methods** — Optionally generates LaTeX/Markdown methodology blocks from a run (`pubrun methods`), handy when a run needs to become a paper's Methods section.
 
 ## The Problem
 
-Modern scientific workflows rely on implicit state. When it's time to publish a paper or ship a model, researchers are forced to retroactively piece together their methodology — PyTorch versions, OS constraints, hardware parameters — from memory.
+Real runs depend on implicit state — the exact code, dependency versions, hardware, and environment that produced a result. When you later need to reproduce a run, compare it against another, debug a regression, or ship a model with confidence, that context has usually evaporated and has to be reconstructed from memory.
 
 ## The Solution
 
-`pubrun` removes this friction by automating execution tracking and metadata compilation.
+`pubrun` removes that friction by capturing the state automatically and making it comparable.
 
-With a single `import pubrun`, the library quietly traces your script execution, hashes your environment dependencies, detects codebase drift, and compiles publication-ready **Computational Methodology** LaTeX/Markdown blocks making your run immediately documentable and ready for publication.
+With a single `import pubrun`, the library quietly traces your run, records the code version and dependency graph, captures hardware and environment, detects codebase drift, and writes it all to a schema-validated manifest — so any run is immediately auditable, reproducible, and diffable against another. (Need a paper's Methods section from a run? `pubrun methods` will render one.)
+
+## Built to be Trustworthy
+
+Provenance tooling is only as trustworthy as its own engineering, so pubrun holds itself to the same bar:
+
+- **Tested on every supported platform** — continuous integration runs the suite across Linux, macOS, and Windows on Python 3.8 through 3.14.
+- **The manifest has a published contract** — its shape is defined by a JSON Schema (`schemas/manifest.schema.json`) that a conformance test enforces, so downstream tooling can rely on the format.
+- **Zero runtime dependencies** on Python 3.11+ (a single `tomli` backport on 3.8–3.10), and non-intrusive by design — it never alters, slows, or crashes the program it observes.
+- **A real changelog** and honest-documentation discipline: every capability claimed here is checkable against the code.
 
 ### Import Modes
 
@@ -469,6 +480,10 @@ imply otherwise. See the consolidated **License, Attribution & Citation** sectio
 the required attribution.
 
 ---
+
+## About the name
+
+"pubrun" is short for *publication-ready runner*. The name also winks at the original pitch — let your code monitor itself and write its own Methods section while you step out to the pub — which is where the project's character (and its `pub`-flavored aliases) comes from.
 
 ## Acknowledgements
 

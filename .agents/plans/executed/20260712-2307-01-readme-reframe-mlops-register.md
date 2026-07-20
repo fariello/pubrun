@@ -4,8 +4,8 @@
 - Concern: documentation (accuracy + getting-started clarity) / self-documentation
 - Scope: `README.md` (primarily the lead: nav, tagline, opening positioning, Features, Problem/
   Solution). Docs under `docs/` stay; some get reframed-not-removed. No source/behavior change.
-- Status: reviewed
-- Approval: (set when a human approves; omit until then)
+- Status: executed
+- Approval: human-approved 2026-07-20 (maintainer "GO" after /plan-review)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Goal
@@ -155,3 +155,15 @@ means the review occurred - it is NOT approval or GO. Execution contract (all MU
   test; CI matrix 3 OS x 3.8-3.14; zero-dep pyproject; "A/B" already grep-clean). Findings PR-001..PR-004
   all FIXED. OQ1/OQ1b/OQ2/OQ3 resolved interactively. Added Acceptance criteria, Non-goals, and an
   execution contract to the gate. Status -> reviewed. Readiness: GO (pending human approval to execute).
+- 2026-07-20 executed (opencode / its_direct/pt3-claude-opus-4.8-1m-us) after human "GO". Reframed
+  README.md lead (LOCKED tagline), Features + Problem/Solution, added "Built to be Trustworthy" (short
+  prose, no badges) and "About the name" (demoted pub joke), kept all 11 nav links x2 rows and the
+  "Research Use" label. CHANGELOG docs entry added. Scope fence held: only README.md + CHANGELOG.md +
+  this IPD changed (no source/test/config/schema/docs). Validation (actual output pasted in session):
+  `grep -rniE "A/B" README.md docs/` -> empty (exit 1); overclaim grep -> only the :9 negation + the
+  :219 factual "HPC scheduler" reference; all 10 nav targets exist; both nav rows = 11 links. Focused
+  doc-sync verification of every NEW claim passed against code (diff basic/standard/deep; _run_rerun/
+  _run_methods; PUBRUN_META_REF; redact_argv @tracker.py:221; schema + conformance test; zero-dep
+  pyproject; CI 3 OS x 3.8-3.14; provenance fields in manifest schema). NOTE: a full `/assess
+  documentation` pass (whole-doc lens) is the recommended follow-up per AGENTS doc-sync; this execution
+  ran the focused per-claim verification, not the full workflow. Status -> executed; git mv to executed/.
