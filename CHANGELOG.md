@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Machine-readable JSON Schema for benchmark results** (`schemas/benchmark.schema.json`, Draft
+  2020-12) defining the `pubrun-benchmark/5` format. Both the full and the redacted result forms
+  validate against it (redaction masks values, not structure); a conformance test enforces it and
+  guards the committed redacted sample from drift. Gives future benchmark-intake tooling something
+  concrete to validate submissions against.
+
 ### Changed
 - **Benchmark result JSON is now compact schema `pubrun-benchmark/5` (fits the GitHub submission
   path, zero data loss).** The shareable redacted result was far too large for the community

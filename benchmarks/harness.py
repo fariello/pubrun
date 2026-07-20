@@ -392,6 +392,8 @@ def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2,
         machine["slurm"] = slurm
     _wall_start = time.perf_counter()
     result = {
+        # The machine-readable contract for this shape lives at schemas/benchmark.schema.json
+        # (const-checks this exact version string). Bump both together when the format changes.
         "schema": "pubrun-benchmark/5",
         # UTC timestamp (canonical) AND local time WITH its UTC offset. Storing local+offset
         # explicitly is more reliable than reconstructing local time from UTC after the fact;

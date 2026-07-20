@@ -41,6 +41,11 @@ add `--redacted-out <path>` to also write a shareable, redacted copy). Files are
 the local copy uses the same form (it parses identically). The timestamp in the filename is
 UTC; the JSON also records `generated_utc` and `generated_local` (local time with its offset).
 
+The result format is `pubrun-benchmark/5`, defined by a machine-readable JSON Schema at
+[`schemas/benchmark.schema.json`](../schemas/benchmark.schema.json). Both the full and the
+redacted forms validate against it (redaction masks string values but never changes the
+structure); a conformance test in `benchmarks/test_benchmarks.py` enforces this.
+
 Aggregate one or many machines' results:
 
 ```bash

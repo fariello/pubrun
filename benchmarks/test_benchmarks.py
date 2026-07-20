@@ -157,6 +157,64 @@ class TestSchema5AggregateParity:
         assert agg.build_rows([run5])       # /5 aggregates
 
 
+# ------------------------------------------------- schema/5 JSON Schema conformance (IPD 20260720-1418)
+
+class TestSchema5Conformance:
+    """The published schemas/benchmark.schema.json must accept real /5 results (full AND
+    redacted) and reject a broken one. Uses the dev-only jsonschema dependency."""
+
+    _SCHEMA_PATH = _REPO / "schemas" / "benchmark.schema.json"
+
+    def _validator(self):
+        jsonschema = pytest.importorskip("jsonschema")
+        schema = json.loads(self._SCHEMA_PATH.read_text(encoding="utf-8"))
+        cls = jsonschema.validators.validator_for(schema)
+        cls.check_schema(schema)  # the schema document itself is well-formed
+        return cls(schema)
+
+    def test_schema_is_well_formed(self):
+        self._validator()  # raises if malformed
+
+    def test_committed_redacted_sample_conforms(self):
+        """The committed redacted /5 sample is a valid, real example (guards it from drift)."""
+        v = self._validator()
+        samples = sorted((_REPO / "benchmarks" / "results").glob("*.redacted.json"))
+        assert samples, "no committed *.redacted.json sample to validate"
+        for s in samples:
+            data = json.loads(s.read_text(encoding="utf-8"))
+            errs = sorted(v.iter_errors(data), key=lambda e: list(e.absolute_path))
+            assert not errs, f"{s.name} does not conform: " + \
+                "; ".join(f"{list(e.absolute_path) or '[root]'}: {e.message}" for e in errs[:5])
+
+    def test_fresh_result_and_redaction_conform(self, tmp_path):
+        """A freshly-produced /5 result AND its redacted copy both validate."""
+        v = self._validator()
+        h = _load("_bench_harness_conf", "benchmarks/harness.py")
+        out = tmp_path / "r.unredacted.json"
+        result = h.run(2, out, passes=1, mode="default", baseline_pass=True)
+        assert not list(v.iter_errors(result)), "fresh unredacted /5 result does not conform"
+        redacted = h.redact_result(result)
+        assert not list(v.iter_errors(redacted)), "redacted /5 result does not conform"
+        # redaction preserves the structure (schema-valid) while masking values
+        assert redacted["schema"] == "pubrun-benchmark/5"
+
+    def test_broken_result_is_rejected(self, tmp_path):
+        """The schema has teeth: structural breakage fails validation."""
+        v = self._validator()
+        h = _load("_bench_harness_conf2", "benchmarks/harness.py")
+        out = tmp_path / "r.unredacted.json"
+        good = h.run(2, out, passes=1, mode="default", baseline_pass=True)
+        import copy
+        bad = copy.deepcopy(good); bad.pop("scenario_defs", None)   # required
+        assert not v.is_valid(bad)
+        bad2 = copy.deepcopy(good); bad2["schema"] = "pubrun-benchmark/4"  # wrong const
+        assert not v.is_valid(bad2)
+        bad3 = copy.deepcopy(good)
+        name = next(iter(bad3["pass_results"][0]["timings"]))
+        bad3["pass_results"][0]["timings"][name] = ["not-a-number"]   # timings must be numbers
+        assert not v.is_valid(bad3)
+
+
 # ---------------------------------------------------------- pytest-benchmark micro-suite
 #
 # The remaining tests need the optional [bench] extra; skip cleanly (per test) if it is
