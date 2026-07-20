@@ -125,7 +125,13 @@ Executed after human approval; local suite 906 passed, 2 skipped. Commit-scoped 
   transitive package records carry a `required_by` (list[str]) field the schema's `package_record`
   rejected (`additionalProperties:false`). Added `required_by` to `package_record` and documented it
   in `docs/manifest.md`. So D4 reconciled BOTH the mode enum and the record shape. CHANGELOG updated.
-- Pending: full CI matrix validation (D4 is a contract change) before moving to `executed/`.
+- **Status: implemented + pushed (`ab2d0bf`), green on every CI job that ran the D1-D4 work; NOT yet
+  moved to `executed/`.** The last CI run went red only on an UNRELATED pre-existing order/timing
+  flake (`test_new_features.py::TestProvenanceWriteHash`, ubuntu-3.13) - not touched by D1-D4. Per the
+  maintainer's decision, this IPD is HELD in `pending/` until the suite is reliably green, which is
+  gated on the flaky-test-hardening IPD (`.agents/plans/pending/20260720-0026-01-flaky-test-isolation-hardening.md`).
+  Once that lands and a full matrix run is green, move this to `executed/`. The D1-D4 changes
+  themselves are complete and correct.
 
 ## Plan-review findings (2026-07-19)
 
