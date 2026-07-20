@@ -5,8 +5,8 @@
 - Scope: whole project, accuracy-first; concentrated on the CLI/config/manifest docs the recent
   `show config` + schema work touched or exposed (`README.md`, `docs/cli.md`, `docs/configuration.md`,
   `docs/manifest.md`, `schemas/manifest.schema.json`)
-- Status: reviewed
-- Approval: (set when a human approves; omit until then)
+- Status: executed
+- Approval: human-approved; executed as ab2d0bf (on origin/main)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Goal
@@ -153,3 +153,7 @@ on the PLAN itself (all FIXED in-plan; none deferred):
 - 2026-07-19 /plan-review (opencode / its_direct/pt3-claude-opus-4.8-1m-us): APPROVE WITH REVISIONS
   APPLIED; PR-001..PR-004 all FIXED; 2 open questions resolved interactively. Readiness: GO (pending
   human approval to execute).
+- 2026-07-20 executed: D1-D4 implemented + pushed as ab2d0bf (confirmed on origin/main). Held in
+  pending/ only until the suite was reliably green, gated on the flaky-test-hardening IPD
+  (20260720-0026-01). That gate cleared: 20260720-0026-01 executed and the full CI matrix ran green
+  (run 29779910507). Gate satisfied -> Status: executed; git mv pending/ -> executed/.
