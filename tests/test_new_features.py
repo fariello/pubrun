@@ -514,6 +514,13 @@ class TestProvenanceWriteHash:
         # level="hash" to exercise content hashing (default is now "stat", no hash).
         run = pubrun.start(output_dir=str(tmp_path), capture={"file_io": {"level": "hash"}})
 
+        # pubrun.open records provenance only when the run it opens against is the CURRENT
+        # active run (core.open -> get_current_run().is_active). Under cross-test ordering the
+        # module-global current-run can be disturbed, leaving open() unwrapped and outputs empty
+        # (an intermittent CI failure). Guard the invariant explicitly rather than assume it.
+        assert pubrun.get_current_run() is run and run.is_active, \
+            "test setup: started run is not the active current run; provenance would not record"
+
         test_file = tmp_path / "output.txt"
         with pubrun.open(str(test_file), "w") as f:
             f.write("hello world\n")
@@ -532,7 +539,8 @@ class TestProvenanceWriteHash:
             manifest = json.load(f)
 
         outputs = manifest["data_files"]["outputs"]
-        assert len(outputs) >= 1
+        assert len(outputs) >= 1, \
+            f"pubrun.open() recorded no output provenance; data_files={manifest['data_files']}"
         recorded_hash = outputs[0]["sha256"]
         assert recorded_hash == expected_hash, \
             f"Expected {expected_hash}, got {recorded_hash}"
