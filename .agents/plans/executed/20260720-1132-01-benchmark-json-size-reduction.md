@@ -5,9 +5,29 @@
 - Scope: `benchmarks/harness.py` (result builder + redaction + filenames), `benchmarks/aggregate.py`
   and `benchmarks/plot.py` (readers), the benchmark schema/version, `benchmarks/README.md` +
   `docs/performance.md`, `src/pubrun/__main__.py` (the `pubrun bench` submit path), tests.
-- Status: reviewed
-- Approval: (set when a human approves; omit until then)
+- Status: executed
+- Approval: approved by maintainer 2026-07-20
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
+
+## Execution notes (2026-07-20)
+
+Executed after approval; implementation delegated to a general agent against the 8-step spec, then
+independently verified. Commit `127375a`. Full CI matrix GREEN (run 29762522784, 3 OS x Python
+3.8-3.14); local suite 907 passed, benchmark set 10 passed.
+
+- Schema `/5` shipped exactly as designed: `scenario_defs` (defined once), per-pass `timings`/
+  `failures`/`skipped` maps (6dp, grouped by pass), stats DROPPED, schema/1 `scenarios` alias REMOVED
+  (PR-001), baseline in the same compact shape, compact write, `<redacted>` markers kept.
+- `generated_local` (+offset) added beside `generated_utc`; UTC filename stamp kept.
+- Filenames: `*.unredacted.json` / hostname-hashed `*.redacted.json`; submit-path size guard added.
+- **Independently verified (not just agent-reported):** a freshly-generated `/5` result has schema /5,
+  `scenario_defs`, NO top-level `scenarios` alias, both timestamps, 6dp timings, compact form; redaction
+  on the `/5` shape scrubs 0 PII needles (home/username/hostname) and `machine.host.hostname` == redacted
+  (PR-005); redacted `/5` compact size ~22 KB (--quick) / ~38 KB (3-pass x 30), well under the 65 KB cap;
+  `aggregate.py` yields identical rows from `/4` and `/5` with 0 median mismatches beyond 6dp rounding
+  (PR-003). The lone ~0.1pp overhead_pct artifact is the IPD-accepted 6dp rounding, not a logic error.
+- Deviation (KISS, spec-endorsed): kept scalar `iterations`/`warmup`/`passes` rather than adding
+  `iters_by_pass`/`warmups` arrays - the run shape is fixed and derivable; no over-engineering.
 
 ## Problem / driver
 
