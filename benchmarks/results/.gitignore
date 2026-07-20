@@ -1,0 +1,7 @@
+# Benchmark results: track ONLY explicitly-redacted, shareable results (`*.redacted.json`).
+# Full results MUST be named `*.unredacted.json` (never a bare `*.json`) so intent is explicit
+# and an unmarked file can never be mistaken for safe-to-share. Unredacted results and derived
+# summaries are local-only: they can contain host-identifying detail and are large.
+*
+!.gitignore
+!*.redacted.json
