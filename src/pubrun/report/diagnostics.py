@@ -7,6 +7,12 @@ from pathlib import Path
 from datetime import datetime, timezone
 from pubrun.report.utils import hydrate_manifest
 
+# The section names `pubrun show <run> <section>` accepts as a bare trailing token.
+# Single source of truth: the CLI shift heuristic, the argparse help, and the render
+# branches below all reference this so the set cannot drift (it did before: it was
+# duplicated as a literal in three places).
+SHOW_SECTIONS = ("logs", "env", "packages")
+
 def bytes_to_gb(bytes_val: int) -> float:
     if not bytes_val: return 0.0
     return round(bytes_val / (1024 ** 3), 1)
