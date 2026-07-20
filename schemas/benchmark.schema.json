@@ -1,0 +1,209 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://raw.githubusercontent.com/fariello/pubrun/main/schemas/benchmark.schema.json",
+    "title": "pubrun Benchmark Result",
+    "description": "Schema for a pubrun benchmark result (schema pubrun-benchmark/5), as produced by benchmarks/harness.py and submitted (redacted) by pubrun bench. Validates the structural contract; machine and pass_env blocks are intentionally permissive because their fields vary by OS and Python version and are not the contract's point. Both the full (*.unredacted.json) and the redacted (*.redacted.json) forms validate against this schema; redaction masks string values (e.g. hostname, paths) but never changes the structure.",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "schema",
+        "generated_utc",
+        "mode",
+        "iterations",
+        "warmup",
+        "passes",
+        "machine",
+        "scenario_defs",
+        "pass_results"
+    ],
+    "properties": {
+        "schema": {
+            "const": "pubrun-benchmark/5"
+        },
+        "generated_utc": {
+            "type": "string",
+            "description": "ISO-8601 UTC timestamp when the result was generated."
+        },
+        "generated_local": {
+            "type": "string",
+            "description": "ISO-8601 local timestamp WITH UTC offset (so the offset is captured in-data)."
+        },
+        "mode": {
+            "type": "string",
+            "description": "Run tier: quick | default | rigorous | custom."
+        },
+        "iterations": {
+            "type": "integer",
+            "minimum": 0
+        },
+        "warmup": {
+            "type": "integer",
+            "minimum": 0
+        },
+        "passes": {
+            "type": "integer",
+            "minimum": 0
+        },
+        "baseline_pass": {
+            "type": "boolean"
+        },
+        "git_commit": {
+            "type": [
+                "string",
+                "null"
+            ]
+        },
+        "machine": {
+            "$ref": "#/$defs/machine"
+        },
+        "scenario_defs": {
+            "type": "object",
+            "description": "Static scenario descriptors, defined ONCE (keyed by scenario name).",
+            "additionalProperties": {
+                "$ref": "#/$defs/scenario_def"
+            }
+        },
+        "pass_results": {
+            "type": "array",
+            "items": {
+                "$ref": "#/$defs/pass_block"
+            }
+        },
+        "baseline": {
+            "$ref": "#/$defs/baseline_block"
+        },
+        "total_wall_time_s": {
+            "type": [
+                "number",
+                "null"
+            ],
+            "minimum": 0
+        }
+    },
+    "$defs": {
+        "scenario_def": {
+            "type": "object",
+            "description": "The fixed descriptor of one scenario. `config` may embed redacted strings.",
+            "additionalProperties": true,
+            "properties": {
+                "group": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "mode": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "workload": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "config": {
+                    "type": [
+                        "object",
+                        "null"
+                    ]
+                }
+            }
+        },
+        "timings_map": {
+            "type": "object",
+            "description": "scenario name -> raw per-iteration wall times (seconds, 6dp), in run order.",
+            "additionalProperties": {
+                "type": "array",
+                "items": {
+                    "type": "number",
+                    "minimum": 0
+                }
+            }
+        },
+        "failures_map": {
+            "type": "object",
+            "description": "scenario name -> count of failed iterations in this pass.",
+            "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+            }
+        },
+        "skipped_map": {
+            "type": "object",
+            "description": "scenario name -> human-readable skip reason (present only for skipped scenarios).",
+            "additionalProperties": {
+                "type": "string"
+            }
+        },
+        "pass_block": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "pass",
+                "timings"
+            ],
+            "properties": {
+                "pass": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "pass_env": {
+                    "$ref": "#/$defs/pass_env"
+                },
+                "timings": {
+                    "$ref": "#/$defs/timings_map"
+                },
+                "failures": {
+                    "$ref": "#/$defs/failures_map"
+                },
+                "skipped": {
+                    "$ref": "#/$defs/skipped_map"
+                }
+            }
+        },
+        "baseline_block": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "pass",
+                "timings"
+            ],
+            "properties": {
+                "pass": {
+                    "type": "integer"
+                },
+                "uncaptured": {
+                    "type": "boolean"
+                },
+                "pass_env": {
+                    "$ref": "#/$defs/pass_env"
+                },
+                "timings": {
+                    "$ref": "#/$defs/timings_map"
+                },
+                "failures": {
+                    "$ref": "#/$defs/failures_map"
+                },
+                "skipped": {
+                    "$ref": "#/$defs/skipped_map"
+                }
+            }
+        },
+        "pass_env": {
+            "type": [
+                "object",
+                "null"
+            ],
+            "description": "Dynamic host state sampled at the start of the pass. Fields vary by OS (Linux-populated); permissive by design.",
+            "additionalProperties": true
+        },
+        "machine": {
+            "type": "object",
+            "description": "Machine/environment metadata. Mirrors run-manifest host/hardware/python sub-blocks; permissive because it varies by OS/Python and carries redacted string values.",
+            "additionalProperties": true
+        }
+    }
+}
