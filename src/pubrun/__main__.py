@@ -1027,6 +1027,24 @@ def _run_inspect(run_dir: Optional[str], show_suggestions: bool, as_json: bool, 
 # (attach the redacted JSON); opening from your own GitHub account is the contact channel.
 _BENCH_SUBMIT_URL = "https://github.com/fariello/pubrun-benchmarks/issues/new"
 
+# GitHub caps an issue body at 65,536 bytes; the in-body submission path embeds the redacted
+# JSON. Warn (never fail) a bit under the hard cap so the fenced-block wrapper still fits.
+_GH_ISSUE_BODY_LIMIT = 65000
+
+
+def _warn_if_over_gh_cap(path) -> None:
+    """Warn (non-fatal) if a redacted result exceeds GitHub's issue-body budget, pointing at
+    the attach-file alternative. Kept in sync with benchmarks/harness.py."""
+    try:
+        size = Path(path).stat().st_size
+    except OSError:
+        return
+    if size > _GH_ISSUE_BODY_LIMIT:
+        _print_warn(
+            f"{Path(path).name} is {size} bytes, over GitHub's ~65 KB issue-body limit "
+            f"({_GH_ISSUE_BODY_LIMIT} byte guard). The in-body submission path will be "
+            "rejected; ATTACH the file to the issue instead of pasting it.")
+
 
 def _find_bench_harness():
     """Locate benchmarks/harness.py in a source checkout.
@@ -1524,10 +1542,16 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact
     results_dir = repo_root / "benchmarks" / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
     import platform as _pf
+    import hashlib as _hashlib
     from datetime import datetime, timezone
     host = (_pf.node() or "unknown").replace("/", "_")
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    out_path = results_dir / f"{host}-{ts}.json"
+    # Full local result -> *.unredacted.json (embeds the hostname; for your own analysis).
+    # Shareable copy -> *.redacted.json with a stable, NON-identifying hostname-hash token
+    # (never embeds the hostname, matching the in-file hostname redaction). Never a bare *.json.
+    out_path = results_dir / f"{host}-{ts}.unredacted.json"
+    _host_token = _hashlib.sha256((_pf.node() or "unknown").encode("utf-8", "replace")).hexdigest()[:8]
+    redacted_target = results_dir / f"pubrun-bench-{_host_token}-{ts}.redacted.json"
     argv = [sys.executable, str(harness), "--out", str(out_path)]
     if quick:
         argv.append("--quick")
@@ -1540,13 +1564,17 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact
     if passes:
         argv += ["--passes", str(int(passes))]
     if not no_redact:
-        argv += ["--redacted-out", str(out_path.with_suffix(".redacted.json"))]
+        argv += ["--redacted-out", str(redacted_target)]
     print(f"Running benchmarks locally (this may take a few minutes)...", file=sys.stderr)
     rc = _sp.run(argv, check=False).returncode
     if rc != 0:
         _print_error(f"Benchmark harness exited with code {rc}.")
         sys.exit(rc)
-    redacted_path = None if no_redact else out_path.with_suffix(".redacted.json")
+    redacted_path = None if no_redact else redacted_target
+    # Non-fatal size guard: warn if the shareable file is too big for GitHub's issue-body
+    # submission path (~65 KB); suggest attaching the file instead.
+    if redacted_path is not None:
+        _warn_if_over_gh_cap(redacted_path)
     if as_json:
         print(json.dumps({"results": str(out_path),
                           "redacted": None if no_redact else str(redacted_path)}))

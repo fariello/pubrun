@@ -20,10 +20,67 @@ import argparse
 import csv
 import glob
 import json
+import statistics
 import sys
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
+
+
+def _stats(samples: list) -> dict:
+    """Recompute summary stats from raw timings. Mirrors ``harness._stats`` so that a schema/5
+    result (which stores NO derived stats) aggregates IDENTICALLY to the equivalent schema/4
+    file (which stored them). Kept as a small local copy: benchmarks/ is not a package and
+    aggregate.py must stay stdlib-only + independently runnable."""
+    s = sorted(samples)
+    n = len(s)
+
+    def _pct(p: float):
+        if not s:
+            return 0.0
+        idx = min(n - 1, int(round(p * (n - 1))))
+        return s[idx]
+
+    return {
+        "n": n,
+        "min_s": s[0] if s else None,
+        "median_s": statistics.median(s) if s else None,
+        "mean_s": statistics.fmean(s) if s else None,
+        "p95_s": _pct(0.95) if s else None,
+        "max_s": s[-1] if s else None,
+        "stdev_s": statistics.pstdev(s) if n > 1 else 0.0,
+    }
+
+
+def _scenarios_view(run: dict) -> dict:
+    """Return a {name: entry} view with group/mode/workload + derived stats, regardless of the
+    result schema version.
+
+    - schema/5: read the static descriptors from ``scenario_defs`` and RECOMPUTE stats from the
+      LAST measured pass's timings (matching the old last-pass alias behavior). Skipped
+      scenarios (present in a pass's ``skipped`` map, absent from ``timings``) are marked.
+    - schema/4 (or older with a top-level ``scenarios``): use the stored last-pass alias with
+      its stored stats verbatim.
+    """
+    schema = run.get("schema") or ""
+    if schema.endswith("/5"):
+        defs = run.get("scenario_defs", {}) or {}
+        passes = run.get("pass_results", []) or []
+        last = passes[-1] if passes else {}
+        timings = last.get("timings", {}) or {}
+        skipped = last.get("skipped", {}) or {}
+        view: dict = {}
+        for name, d in defs.items():
+            entry = {"group": d.get("group"), "mode": d.get("mode"),
+                     "workload": d.get("workload")}
+            if name in skipped:
+                entry["skipped"] = skipped[name]
+            elif name in timings:
+                entry.update(_stats(timings[name]))
+            view[name] = entry
+        return view
+    # schema/4 (and older schema/1 top-level alias): the stored last-pass scenarios map.
+    return run.get("scenarios", {}) or {}
 
 # Which baseline scenario each scenario is compared against.
 _GROUP_BASELINE = {
@@ -65,7 +122,7 @@ def build_rows(runs: list[dict]) -> list[dict]:
     for run in runs:
         label = _machine_label(run)
         pubrun_version = (run.get("machine", {}) or {}).get("pubrun_version")
-        scns = run.get("scenarios", {})
+        scns = _scenarios_view(run)
         for name, s in scns.items():
             if s.get("skipped"):
                 continue

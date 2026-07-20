@@ -35,13 +35,18 @@ python benchmarks/harness.py --iterations 1 --passes 1   # tiny custom run
 python benchmarks/harness.py --no-baseline               # skip the baseline pass
 ```
 
-Each run writes `results/<hostname>-<timestamp>.json`.
+Each run writes `results/<hostname>-<UTC-timestamp>.unredacted.json` (the full result;
+add `--redacted-out <path>` to also write a shareable, redacted copy). Files are written
+**compact** (no indentation): the redacted copy must fit GitHub's ~65 KB issue-body cap, and
+the local copy uses the same form (it parses identically). The timestamp in the filename is
+UTC; the JSON also records `generated_utc` and `generated_local` (local time with its offset).
 
 Aggregate one or many machines' results:
 
 ```bash
 python benchmarks/aggregate.py benchmarks/results/*.json
 # -> benchmarks/results/summary.csv and summary.md
+# (matches both *.unredacted.json and *.redacted.json; mixed /4 and /5 files aggregate together)
 ```
 
 Optional figures and the micro-benchmark suite (needs the extra):
@@ -109,11 +114,15 @@ python -m pubrun bench            # runs locally; on an HPC login node, offers t
 
 `pubrun bench` writes two files under `results/`:
 
-- `<host>-<timestamp>.json` — the **full** result, for your own analysis.
-- `<host>-<timestamp>.redacted.json` — a **redacted** copy safe to share publicly:
-  hostname, OS username, and every home-directory path are masked, while the
-  analysis-relevant data (CPU/GPU model, core count, timings, versions, filesystem
-  type, Slurm partition) is preserved.
+- `<host>-<UTC-timestamp>.unredacted.json` — the **full** result, for your own analysis
+  (embeds the real hostname). Never a bare `*.json`.
+- `pubrun-bench-<hash>-<UTC-timestamp>.redacted.json` — a **redacted** copy safe to share
+  publicly. The filename embeds a stable, non-identifying hostname hash (never the hostname
+  itself, matching the in-file hostname redaction). Inside, hostname, OS username, and every
+  home-directory path are masked, while the analysis-relevant data (CPU/GPU model, core count,
+  raw timings, versions, filesystem type, Slurm partition) is preserved. The file is written
+  compact and, for a full default run, is comfortably under GitHub's ~65 KB issue-body cap; a
+  non-fatal warning is printed if it ever exceeds it (attach the file instead of pasting).
 
 After a local run, `pubrun bench` **offers to contribute** the redacted result for
 you (`Contribute this redacted result…? [y/N]` — Enter never transmits). If you say
@@ -141,8 +150,8 @@ are comfortable making public.
 
 Advanced / manual:
 
-- `python benchmarks/harness.py --redacted-out results/shareable.json` runs the
-  harness directly and also writes a redacted copy.
+- `python benchmarks/harness.py --redacted-out results/shareable.redacted.json` runs the
+  harness directly and also writes a compact redacted copy (with the ~65 KB size guard).
 - Re-run `aggregate.py` over all results and, if helpful, `plot.py`.
 
 ## Interpreting the numbers
@@ -157,18 +166,30 @@ Advanced / manual:
 - The measured sweep then runs **N times** per the tier (`--quick` = 2, default = 3,
   `--rigorous` = 5; `--passes` overrides). All measured passes are recorded under
   `pass_results` so you can see whether startup / filesystem caching mattered (compare
-  `pass 1` vs `pass N`). The top-level `scenarios` key mirrors the **last (warmest) pass**,
-  which `aggregate.py`/`plot.py` use.
+  `pass 1` vs `pass N`). `aggregate.py`/`plot.py` use the **last (warmest) pass**.
 - `result["total_wall_time_s"]` is the whole-invocation wall time (harness start → end),
   distinct from the summed per-iteration timings. `result["mode"]` records the tier
   (`quick`/`default`/`rigorous`/`custom`).
-- **Schema `pubrun-benchmark/4`** adds cross-machine context + raw data so results
-  are comparable across systems and re-analysable later:
-  - Each scenario entry carries **`timings`** — the raw per-iteration wall times in
-    run order — alongside the summary (`median_s`/`p95_s`/`stdev_s`/…). The raw
-    samples are the source of truth: they let you compute any statistic later, see
-    the distribution shape, and **pool correctly across submissions** (you cannot
-    average medians). The summary is kept for readability.
+- **Schema `pubrun-benchmark/5`** is a compact, non-redundant reshape of `/4` that keeps
+  every raw timing while fitting the shared file under GitHub's issue-body cap:
+  - **Static scenario descriptors are defined once**, in a top-level `scenario_defs` map
+    (`{name: {group, mode, workload, config}}`). Passes reference scenarios by name and no
+    longer repeat these descriptors. (There is **no** top-level `scenarios` key anymore — the
+    old schema/1 last-pass alias was removed; readers use `scenario_defs` + per-pass timings.)
+  - **Raw timings are grouped per pass**: each `pass_results[i]` carries only what *varies* —
+    `pass`, `pass_env`, a `timings` map (`{name: [raw wall times in run order]}`), a
+    `failures` map (`{name: int}`), and (if any) a `skipped` map (`{name: reason}`). Timings
+    are stored rounded to **6 decimal places** (microsecond-ish; ample for wall-clock) — the
+    one lossy step, and a deliberate one: it is the decisive size lever and far finer than any
+    real signal. Every raw sample is retained, so you can still compute any statistic, inspect
+    distribution shape, and **pool correctly across submissions** (you cannot average medians).
+  - **Derived stats are NOT stored** (`n`/`min_s`/`median_s`/`mean_s`/`p95_s`/`max_s`/
+    `stdev_s`). They are fully recomputable from the raw timings, so dropping them loses no
+    analytical data; `aggregate.py` recomputes them from the last pass's timings.
+  - The `baseline` block uses the **same compact shape** (`timings`/`failures`/`skipped` maps,
+    no per-scenario descriptors, no stored stats).
+  - Two timestamps are recorded: `generated_utc` (canonical) and `generated_local` (local ISO
+    time **with** its UTC offset). The filename timestamp stays UTC.
   - `machine.python` gains non-identifying `environment_kind` (venv/conda/system/…),
     `in_venv`, and `sys_path_len` — these **survive share-redaction**, so a result
     stays interpretable after PII masking.
@@ -183,7 +204,9 @@ Advanced / manual:
   - `pass_results[i].pass_env` — the dynamic host state (available RAM, load
     average, node iowait) captured at the **start of each pass**, so a node that
     got loaded between passes is visible rather than silently confounding results.
-  Older `pubrun-benchmark/2`/`3` files remain readable by `aggregate.py`/`plot.py`.
+  Older `pubrun-benchmark/2`/`3`/`4` files remain readable by `aggregate.py`/`plot.py`
+  (version-gated: `/4` and earlier use their stored stats; `/5` recomputes from timings —
+  the aggregate output is identical either way).
 - **Overhead** is the median of a scenario minus its group baseline:
   - `startup` scenarios compare against `baseline-noop` (a bare `python noop.py`).
   - `feature` scenarios compare against `feature-baseline`; note `feature-none`
