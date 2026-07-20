@@ -74,7 +74,7 @@ This plan details the design and implementation changes to:
       import sys
       from unittest.mock import patch
       from pubrun.__main__ import main
-      
+
       with patch.object(sys, 'argv', ['/path/to/pbr', 'me']):
           with pytest.raises(SystemExit) as exc_info:
               main()

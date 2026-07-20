@@ -41,7 +41,7 @@ Resolution order for `[capture.packages].mode`:
 if mode == "imported-transitive":
     # 1. Get imported packages (same as imported-only)
     imported = {name: version for name in sys.modules if is_top_level(name)}
-    
+
     # 2. For each imported package, read its declared dependencies
     for name in list(imported):
         try:
