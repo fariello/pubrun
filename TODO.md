@@ -31,6 +31,38 @@ re-points it — see the citation-DOI executed IPD).
 
 ## Deferred ideas (need their own design pass / IPD)
 
+### Benchmark result JSON is too big for the GitHub submission path (needs re-evaluation)
+
+The `pubrun bench` redacted result JSON is roughly **2.5x or more over what the GitHub
+issue-submission flow allows** (GH issue bodies cap around 65 KB; a recent redacted result is
+~200 KB on disk, ~128 KB serialized). The community-contribution flow submits this JSON via a GitHub
+issue, so it currently will not fit. We can very likely cut it to **less than half without losing
+data**; needs a follow-up design pass / IPD.
+
+Where the size goes (measured on `benchmarks/results/<host>-20260711T004237Z.redacted.json`,
+~128 KB serialized):
+
+- `pass_results` 60%, `scenarios` 20%, `baseline` 17% - almost all of it is the raw per-iteration
+  **`timings` arrays** (each scenario keeps a `timings` list of ~30 floats, across 23 scenarios x 3
+  passes + baseline).
+- Each timing float is stored at full `repr` precision (e.g. `0.019290073003503494`, ~18 sig figs),
+  which is meaningless for wall-clock timings and inflates every number ~3x.
+
+Candidate reductions (the IPD decides; all preserve analytical value):
+
+1. **Round timings** to a sane precision (e.g. microseconds / 6-9 sig figs). Alone this likely cuts
+   the raw-timing bytes ~2-3x with zero loss of usable signal.
+2. **Reconsider storing raw per-iteration `timings` at all in the SUBMITTED file** - the per-scenario
+   summary stats (`n/min/median/mean/p95/max/stdev`) are already computed and stored; the raw arrays
+   may be kept in the LOCAL full result but omitted (or heavily downsampled) from the redacted
+   submission. This is the biggest lever.
+3. Deduplicate structure repeated per pass (`scenarios` config/group/mode/workload repeat identically
+   across passes and baseline).
+
+Constraints/notes: keep the schema versioned (bump it), keep the local full result complete (only the
+SUBMITTED/redacted artifact must fit GH), and update `pubrun bench`'s submit guidance + any size check.
+Cross-ref the bench command in `src/pubrun/__main__.py` and the schema in the bench tooling.
+
 ### Scoped in-code pause/resume of capture
 
 A context manager to temporarily suspend capture for a block
