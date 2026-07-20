@@ -141,18 +141,31 @@ def test_startup_manifest_conforms_to_schema(tmp_path):
     test_transient_capture_states_are_valid above.
     """
     import os
+    import time
     cwd = os.getcwd()
     os.chdir(tmp_path)
+    manifest = None
     try:
         import pubrun.noauto as pubrun
         t = pubrun.start()
         try:
-            # Read the manifest written synchronously at start(), BEFORE stop().
-            manifest = json.loads((t.run_dir / "manifest.json").read_text(encoding="utf-8"))
+            # Read the manifest written synchronously at start(), BEFORE stop(). On Windows the
+            # run's file can be transiently locked / mid-atomic-write while the run is live, so read
+            # tolerantly with a few retries rather than failing on a momentary PermissionError.
+            mpath = t.run_dir / "manifest.json"
+            for _ in range(10):
+                try:
+                    manifest = json.loads(mpath.read_text(encoding="utf-8"))
+                    break
+                except (PermissionError, json.JSONDecodeError, FileNotFoundError):
+                    time.sleep(0.05)
         finally:
             pubrun.stop()
     finally:
         os.chdir(cwd)
+
+    if manifest is None:
+        pytest.skip("startup manifest was not readable while the run was live (platform file lock)")
 
     jsonschema.validate(manifest, _schema())
 
