@@ -8,6 +8,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Benchmark result JSON is now compact schema `pubrun-benchmark/5` (fits the GitHub submission
+  path, zero data loss).** The shareable redacted result was far too large for the community
+  submission path (a GitHub issue body caps at ~65 KB; a real redacted `/4` result was ~120 KB
+  compact). Schema `/5` reshapes the file to remove structural redundancy with no analytical data
+  loss: static per-scenario descriptors are defined once in a top-level `scenario_defs` map (the
+  removed schema/1 top-level `scenarios` last-pass alias is gone); each pass stores only what varies
+  (`timings`/`failures`/`skipped` maps keyed by scenario name); raw per-iteration timings are retained
+  but rounded to 6 decimal places (the one deliberate, sub-signal lossy step) and grouped by pass; and
+  the derived stats (`median_s`/`p95_s`/`stdev_s`/…) are no longer stored (they are recomputed on read
+  from the raw timings). The `baseline` block uses the same compact shape. Files are written compact
+  (no indentation); a real default run's redacted copy is ~38 KB, well under the cap. `aggregate.py`
+  reads both `/4` (stored stats) and `/5` (recomputed) and produces identical output either way;
+  `plot.py` is unaffected. The result JSON now records both `generated_utc` and `generated_local`
+  (local time with its UTC offset). Result files are always named `*.unredacted.json` (full, embeds
+  the hostname) and `pubrun-bench-<hostname-hash>-<UTC-timestamp>.redacted.json` (shareable; the
+  filename carries a non-identifying hostname hash, never the hostname) — never a bare `*.json`. The
+  `pubrun bench` submit path and the harness now print a non-fatal warning if a redacted file exceeds
+  the GitHub issue-body budget, suggesting you attach the file instead of pasting it.
+
 ### Fixed
 - **Manifest schema now accepts the `imported-transitive` packages mode (and its records).** The
   `packages_section.mode` enum omitted `imported-transitive` (a mode the code supports and writes),

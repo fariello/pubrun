@@ -89,6 +89,40 @@ class TestRedaction:
         h.redact_result(sample)
         assert json.dumps(sample) == original  # deep-copied, input untouched
 
+    def test_redaction_of_schema5_shape_removes_all_pii(self):
+        """PR-005: after the schema/5 reshape, the key/needle-based redactor must still mask
+        hostname/username/home-paths (a moved field must stay covered) and the deep scan
+        must find zero PII needles in the redacted /5 result."""
+        import re
+        h = _load_harness()
+        home = os.path.expanduser("~")
+        user = getpass.getuser()
+        result = {
+            "schema": "pubrun-benchmark/5",
+            "generated_utc": "2026-07-20T00:00:00+00:00",
+            "generated_local": "2026-07-19T20:00:00-04:00",
+            "machine": {
+                "host": {"hostname": "secret-node-01"},
+                "python": {"executable": f"{home}/venv/bin/python", "prefix": f"{home}/venv",
+                           "sys_path": [f"{home}/src", "/usr/lib/python3"]},
+                "filesystem": {"install": {"path": f"{home}/project", "fstype": "nfs4"}},
+            },
+            # scenario_defs still carries config, which could embed a path.
+            "scenario_defs": {"s": {"group": "startup", "mode": "auto", "workload": "noop.py",
+                                    "config": {"output": {"run_dir": f"{home}/runs"}}}},
+            "pass_results": [{"pass": 1, "pass_env": {"note": f"ran by {user}"},
+                              "timings": {"s": [0.1, 0.2]}, "failures": {"s": 0}}],
+        }
+        red = h.redact_result(result)
+        blob = json.dumps(red)
+        assert user not in blob
+        assert home not in blob
+        assert "secret-node-01" not in blob
+        assert red["machine"]["host"]["hostname"] == "<redacted>"
+        # config path masked (run_dir is an enumerated key), timings preserved.
+        assert red["scenario_defs"]["s"]["config"]["output"]["run_dir"] == "<redacted>"
+        assert red["pass_results"][0]["timings"]["s"] == [0.1, 0.2]
+
 
 # ----------------------------------------------------------------- harness resolution
 
@@ -471,30 +505,33 @@ class TestSubmissionChain:
         assert url is None and "token" in (reason or "")
 
 
-class TestSchema4RawTimings:
-    """IPD data-quality (2026-07-07): raw per-iteration timings + schema /4."""
+class TestSchema5RawTimings:
+    """IPD (2026-07-20): compact schema/5 keeps raw per-iteration timings (6 dp) but drops
+    the derived stats (recomputable). ``_stats`` is still the shared recompute helper."""
 
-    def test_stats_and_timings_coexist(self):
+    def test_stats_helper_still_recomputes(self):
         h = _load_harness()
         samples = [0.1, 0.3, 0.2]
-        entry = {"failures": 0, "timings": list(samples), **h._stats(samples)}
-        assert entry["timings"] == samples  # raw, in run order (not sorted)
-        assert entry["n"] == 3
-        assert entry["median_s"] == 0.2  # summary still derivable & present
+        st = h._stats(samples)
+        assert st["n"] == 3
+        assert st["median_s"] == 0.2  # readers recompute from the retained raw timings
 
-    def test_schema_is_v4(self):
+    def test_schema_is_v5(self):
         import re
         src = (_REPO / "benchmarks" / "harness.py").read_text()
-        assert re.search(r'"schema":\s*"pubrun-benchmark/4"', src)
+        assert re.search(r'"schema":\s*"pubrun-benchmark/5"', src)
 
     def test_redactor_preserves_timings(self):
         h = _load_harness()
+        # schema/5 shape: per-pass timings map keyed by scenario name (numbers survive redaction).
         result = {"machine": {"host": {"hostname": "h"}},
-                  "pass_results": [{"pass": 1, "scenarios": {
-                      "s": {"timings": [0.1, 0.2, 0.3], "median_s": 0.2, "n": 3}}}]}
+                  "scenario_defs": {"s": {"group": "startup", "mode": "auto",
+                                          "workload": "noop.py", "config": {}}},
+                  "pass_results": [{"pass": 1, "pass_env": {},
+                                    "timings": {"s": [0.1, 0.2, 0.3]},
+                                    "failures": {"s": 0}}]}
         red = h.redact_result(result)
-        got = red["pass_results"][0]["scenarios"]["s"]
-        assert got["timings"] == [0.1, 0.2, 0.3]  # numbers survive redaction
+        assert red["pass_results"][0]["timings"]["s"] == [0.1, 0.2, 0.3]
 
     def test_redactor_preserves_environment_kind(self):
         h = _load_harness()
@@ -520,22 +557,26 @@ class TestBenchTiers:
 
     def test_run_records_mode_baseline_and_wall_time(self, tmp_path):
         h = _load_harness()
-        out = tmp_path / "b.json"
+        out = tmp_path / "b.unredacted.json"
         # tiny run (1 iter, 1 pass) so it's fast; still exercises baseline + wall-time.
         result = h.run(1, out, passes=1, mode="default", baseline_pass=True)
         assert result["mode"] == "default"
         assert result["passes"] == 1 and result["iterations"] == 1
         assert result["baseline_pass"] is True
         assert "total_wall_time_s" in result and result["total_wall_time_s"] >= 0
+        # Both timestamps present (schema/5); local carries a UTC offset.
+        assert result["generated_utc"].endswith("+00:00")
+        assert result["generated_local"][-6] in "+-"
+        # Static scenario descriptors are defined ONCE, top-level (no top-level alias).
+        assert result["scenario_defs"] and "scenarios" not in result
         # The uncaptured baseline pass is present and separate from measured passes.
         assert "baseline" in result
         assert result["baseline"]["uncaptured"] is True
         assert result["baseline"]["pass"] == 0
-        bscen = result["baseline"]["scenarios"]
-        assert bscen, "baseline pass should have scenario entries"
-        # Every baseline scenario is marked uncaptured (mode='baseline').
-        for entry in bscen.values():
-            assert entry.get("mode") == "baseline"
+        btim = result["baseline"]["timings"]
+        assert btim, "baseline pass should have per-scenario timings"
+        # Baseline scenarios are the pubrun-absent reference (mode 'baseline' in scenario_defs).
+        assert result["scenario_defs"]["baseline-noop"]["mode"] == "baseline"
         assert len(result["pass_results"]) == 1  # 1 measured pass
 
     def test_no_baseline_flag(self, tmp_path):

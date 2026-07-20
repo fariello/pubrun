@@ -275,15 +275,35 @@ def _stats(samples: list[float]) -> dict:
     }
 
 
+# Timings are rounded to this many decimal places in the STORED file (schema/5). Six places
+# is microsecond-ish on a wall-clock second, far finer than any real signal, and it is the
+# decisive size lever: rounding + de-duplication lands the shared file well under the GitHub
+# issue-body cap with NO analytical data loss (every raw sample is retained, only rounded).
+_TIMING_DECIMALS = 6
+
+
+def _round_timings(samples: list[float]) -> list[float]:
+    return [round(s, _TIMING_DECIMALS) for s in samples]
+
+
 def _run_pass(pass_no: int, iterations: int, warmup: int, workdir: Path) -> dict:
-    """Run the whole scenario sweep once, returning {scenario_name: entry}."""
+    """Run the whole scenario sweep once (schema/5 compact shape).
+
+    Returns ``{"defs": {name: {group, mode, workload, config}}, "timings": {name: [..6dp..]},
+    "failures": {name: int}, "skipped": {name: reason}}``. Static scenario descriptors live in
+    ``defs`` (hoisted to the top-level ``scenario_defs`` map by :func:`run`, defined ONCE);
+    per pass we keep only what VARIES (timings, failures, skips)."""
     scns = _scenarios.all_scenarios()
-    scenarios: dict = {}
+    defs: dict = {}
+    timings: dict = {}
+    failures_map: dict = {}
+    skipped: dict = {}
     for scn in scns:
+        defs[scn.name] = {"group": scn.group, "mode": scn.mode,
+                          "workload": scn.workload, "config": scn.config or {}}
         skip = scn.skip_if() if scn.skip_if else None
         if skip:
-            scenarios[scn.name] = {"group": scn.group, "mode": scn.mode,
-                                   "workload": scn.workload, "skipped": skip}
+            skipped[scn.name] = skip
             print(f"  [pass {pass_no}] {scn.name}: SKIPPED ({skip})", file=sys.stderr)
             continue
 
@@ -307,33 +327,33 @@ def _run_pass(pass_no: int, iterations: int, warmup: int, workdir: Path) -> dict
             if i >= warmup:
                 samples.append(dt)
 
-        entry = {"group": scn.group, "mode": scn.mode, "workload": scn.workload,
-                 "config": scn.config or {}, "failures": failures,
-                 # Raw per-iteration wall times IN RUN ORDER (schema/4): the source of
-                 # truth. Summary stats below are derivable and kept for readability, but
-                 # only the raw samples allow later re-analysis (any statistic, distribution
-                 # shape, order/warmup drift) and CORRECT pooling across submissions.
-                 "timings": list(samples),
-                 **_stats(samples)}
-        scenarios[scn.name] = entry
-        med = entry.get("median_s")
+        # Raw per-iteration wall times IN RUN ORDER (schema/5), rounded to 6 dp: the source of
+        # truth. Derived stats are NOT stored (they are recomputable from these samples);
+        # readers recompute them. Only the raw samples allow later re-analysis (any statistic,
+        # distribution shape, order/warmup drift) and CORRECT pooling across submissions.
+        timings[scn.name] = _round_timings(samples)
+        failures_map[scn.name] = failures
+        st = _stats(samples)
+        med = st.get("median_s")
         print(f"  [pass {pass_no}] {scn.name}: median={med*1000:.1f} ms "
-              f"(n={entry['n']}, fail={failures})" if med else
+              f"(n={st['n']}, fail={failures})" if med else
               f"  [pass {pass_no}] {scn.name}: NO DATA (fail={failures})", file=sys.stderr)
-    return scenarios
+    return {"defs": defs, "timings": timings, "failures": failures_map, "skipped": skipped}
 
 
 def _run_baseline_pass(iterations: int, warmup: int, workdir: Path) -> dict:
     """Run every scenario's workload WITHOUT pubrun active (a cache-warming + pubrun-absent
-    reference sweep). Recorded as the baseline pass (pass 0). Reuses the fresh-cwd + timing
-    machinery of a normal pass, forcing the direct-workload command for each scenario."""
+    reference sweep). Recorded as the baseline pass (pass 0), in the same schema/5 compact
+    shape as a measured pass (timings/failures/skipped maps keyed by scenario name; no
+    per-scenario static descriptors, no stored stats)."""
     scns = _scenarios.all_scenarios()
-    scenarios: dict = {}
+    timings: dict = {}
+    failures_map: dict = {}
+    skipped: dict = {}
     for scn in scns:
         skip = scn.skip_if() if scn.skip_if else None
         if skip:
-            scenarios[scn.name] = {"group": scn.group, "mode": "baseline",
-                                   "workload": scn.workload, "skipped": skip}
+            skipped[scn.name] = skip
             continue
         scn_cwd = workdir / "pass0" / scn.name
         scn_cwd.mkdir(parents=True, exist_ok=True)
@@ -355,10 +375,9 @@ def _run_baseline_pass(iterations: int, warmup: int, workdir: Path) -> dict:
                 continue
             if i >= warmup:
                 samples.append(dt)
-        scenarios[scn.name] = {"group": scn.group, "mode": "baseline",
-                               "workload": scn.workload, "failures": failures,
-                               "timings": list(samples), **_stats(samples)}
-    return scenarios
+        timings[scn.name] = _round_timings(samples)
+        failures_map[scn.name] = failures
+    return {"timings": timings, "failures": failures_map, "skipped": skipped}
 
 
 def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2,
@@ -373,21 +392,31 @@ def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2,
         machine["slurm"] = slurm
     _wall_start = time.perf_counter()
     result = {
-        "schema": "pubrun-benchmark/4",
+        "schema": "pubrun-benchmark/5",
+        # UTC timestamp (canonical) AND local time WITH its UTC offset. Storing local+offset
+        # explicitly is more reliable than reconstructing local time from UTC after the fact;
+        # the offset lives in the data.
         "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_local": datetime.now().astimezone().isoformat(),
         "mode": mode,               # quick | default | rigorous | custom
-        "iterations": iterations,
-        "warmup": warmup,
+        "iterations": iterations,   # iterations per pass (fixed for the run)
+        "warmup": warmup,           # discarded warmup iterations per pass (fixed for the run)
         "passes": passes,
         "baseline_pass": baseline_pass,
         "git_commit": _git_commit(),
         "machine": machine,
+        # Static per-scenario descriptors, defined ONCE (identical across passes): the
+        # decisive de-duplication lever for the shared file size. Passes reference scenarios
+        # by name. NOTE: intentionally NOT named "scenarios" (schema/1's removed last-pass
+        # alias used that key); readers key off scenario_defs + per-pass timings.
+        "scenario_defs": {},
         # Each pass is the FULL scenario sweep, run in order. Recording every
         # pass (rather than discarding a warmup pass) makes startup / filesystem
         # caching effects VISIBLE: compare pass 1 vs pass N. Aggregation/reporting
         # can prefer the last pass (warmest) or show the spread. Each pass also
         # records the dynamic host state (RAM/load/iowait) at its start, so a node
-        # loaded between passes is visible.
+        # loaded between passes is visible. Per pass we store only what VARIES:
+        # {pass, pass_env, timings:{name:[..6dp..]}, failures:{name:int}, skipped:{name:reason}}.
         "pass_results": [],
     }
 
@@ -403,43 +432,106 @@ def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2,
         if baseline_pass:
             print("--- pass 0/baseline (uncaptured) ---", file=sys.stderr)
             b_env = _pass_env()
-            b_scen = _run_baseline_pass(iterations, warmup, workdir)
-            result["baseline"] = {"pass": 0, "uncaptured": True, "pass_env": b_env,
-                                  "scenarios": b_scen}
+            b = _run_baseline_pass(iterations, warmup, workdir)
+            baseline = {"pass": 0, "uncaptured": True, "pass_env": b_env,
+                        "timings": b["timings"], "failures": b["failures"]}
+            if b.get("skipped"):
+                baseline["skipped"] = b["skipped"]
+            result["baseline"] = baseline
         for pass_no in range(1, passes + 1):
             print(f"--- pass {pass_no}/{passes} ---", file=sys.stderr)
             pass_env = _pass_env()
-            scenarios = _run_pass(pass_no, iterations, warmup, workdir)
-            result["pass_results"].append({"pass": pass_no, "pass_env": pass_env, "scenarios": scenarios})
-
-    # Convenience: expose the LAST pass as top-level "scenarios" (warmest, and
-    # backward-compatible with schema/1 consumers that read result["scenarios"]).
-    if result["pass_results"]:
-        result["scenarios"] = result["pass_results"][-1]["scenarios"]
+            p = _run_pass(pass_no, iterations, warmup, workdir)
+            # Static scenario descriptors are identical across passes: define them ONCE
+            # in the top-level scenario_defs map (fixed per run; nothing mutates a def
+            # mid-run). Later passes update in place with identical values (a no-op).
+            result["scenario_defs"].update(p["defs"])
+            entry = {"pass": pass_no, "pass_env": pass_env,
+                     "timings": p["timings"], "failures": p["failures"]}
+            if p.get("skipped"):
+                entry["skipped"] = p["skipped"]
+            result["pass_results"].append(entry)
 
     # Total wall-time for the WHOLE benchmark invocation (harness start -> now), distinct from
     # the summed per-iteration timings.
     result["total_wall_time_s"] = round(time.perf_counter() - _wall_start, 3)
 
+    # Write COMPACT (no indentation): the shared/redacted copy must fit GitHub's issue-body
+    # cap; the local unredacted copy uses the same compact form (parses identically).
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    out_path.write_text(json.dumps(result, separators=(",", ":")), encoding="utf-8")
     print(f"\nWrote {out_path}", file=sys.stderr)
     return result
 
 
-def _default_out() -> Path:
-    host = "unknown"
+def _utc_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+
+def _hostname() -> str:
     try:
         import platform
-        host = platform.node() or "unknown"
+        return platform.node() or "unknown"
     except Exception:
-        pass
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    safe_host = "".join(c if c.isalnum() or c in "-_" else "_" for c in host)
-    return _HERE / "results" / f"{safe_host}-{stamp}.json"
+        return "unknown"
+
+
+def _host_token(host: str) -> str:
+    """A stable, NON-identifying token for the redacted filename: the first 8 hex of the
+    SHA-256 of the hostname. Deterministic per host (so a host's redacted files sort/group)
+    yet does not embed the hostname itself, matching the in-file hostname redaction."""
+    import hashlib
+    return hashlib.sha256(host.encode("utf-8", "replace")).hexdigest()[:8]
+
+
+def _default_out() -> Path:
+    """The FULL (unredacted) result path. Always a ``*.unredacted.json`` name (never a bare
+    ``*.json``); embeds the real hostname (this local copy is for your own analysis)."""
+    safe_host = "".join(c if c.isalnum() or c in "-_" else "_" for c in _hostname())
+    return _HERE / "results" / f"{safe_host}-{_utc_stamp()}.unredacted.json"
+
+
+def _default_redacted_out(unredacted: Path) -> Path:
+    """The shareable (redacted) result path derived from an unredacted path. The filename must
+    NOT embed the hostname: use ``pubrun-bench-<8hexOfSHA256(hostname)>-<utcstamp>.redacted.json``.
+    The UTC stamp is taken from the unredacted name when present so the pair is correlatable."""
+    host = _hostname()
+    stamp = None
+    # Reuse the stamp from the unredacted filename (…-YYYYMMDD-HHMMSS.unredacted.json).
+    name = unredacted.name
+    for suffix in (".unredacted.json", ".json"):
+        if name.endswith(suffix):
+            stem = name[: -len(suffix)]
+            parts = stem.rsplit("-", 2)
+            if len(parts) == 3 and len(parts[1]) == 8 and len(parts[2]) == 6:
+                stamp = f"{parts[1]}-{parts[2]}"
+            break
+    if stamp is None:
+        stamp = _utc_stamp()
+    return unredacted.parent / f"pubrun-bench-{_host_token(host)}-{stamp}.redacted.json"
 
 
 _REDACTED = "<redacted>"
+
+# GitHub caps an issue body at 65,536 bytes; the submission path embeds the redacted JSON in
+# the body. Warn (never fail) a bit under the hard cap so the fenced-block wrapper still fits.
+_GH_ISSUE_BODY_LIMIT = 65000
+
+
+def _warn_if_over_gh_cap(path: Path) -> None:
+    """Warn (non-fatal) if a redacted result exceeds the GitHub issue-body budget, pointing at
+    the attach-file alternative. Shared with the ``pubrun bench`` submit path."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return
+    if size > _GH_ISSUE_BODY_LIMIT:
+        print(
+            f"WARNING: {path.name} is {size} bytes, over GitHub's ~65 KB issue-body limit "
+            f"({_GH_ISSUE_BODY_LIMIT} byte guard). The in-body submission path will be "
+            "rejected; ATTACH the file to the issue instead of pasting it.",
+            file=sys.stderr,
+        )
 
 # Keys whose *entire value* is an identifier or a path that can embed the home dir /
 # username. Matched by key name anywhere in the nested structure.
@@ -543,8 +635,13 @@ def main() -> None:
     if args.redacted_out:
         red_path = Path(args.redacted_out)
         red_path.parent.mkdir(parents=True, exist_ok=True)
-        red_path.write_text(json.dumps(redact_result(result), indent=2), encoding="utf-8")
+        # Compact (no indent): the redacted copy must fit GitHub's issue-body cap.
+        red_path.write_text(json.dumps(redact_result(result), separators=(",", ":")),
+                            encoding="utf-8")
         print(f"Wrote redacted copy {red_path}", file=sys.stderr)
+        # Non-fatal size guard: warn if the shareable file is too big for the GitHub
+        # issue-body submission path (~65 KB); suggest attaching the file instead.
+        _warn_if_over_gh_cap(red_path)
 
 
 if __name__ == "__main__":

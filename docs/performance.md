@@ -11,10 +11,10 @@ on your own machine.
 
 Each scenario launches a **fresh Python subprocess** N times (default 30, plus a
 discarded warmup) and records the median wall-clock time. The whole sweep runs
-twice by default (`--passes 2`) and both passes are recorded, so
-startup/filesystem caching effects are visible; the reported numbers use the
-last (warmest) pass. "Overhead" is the median of a scenario minus its group
-baseline:
+**three times by default** (`--passes 3`, preceded by one uncaptured baseline
+pass) and every pass is recorded, so startup/filesystem caching effects are
+visible; the reported numbers use the last (warmest) pass. "Overhead" is the
+median of a scenario minus its group baseline:
 
 - **startup** — vs a bare `python noop.py` (no `pubrun` import).
 - **feature** — vs `feature-baseline`; `feature-none` (pubrun active, everything
@@ -28,6 +28,24 @@ See [`benchmarks/README.md`](../benchmarks/README.md) to run it:
 python benchmarks/harness.py          # collect (stdlib only)
 python benchmarks/aggregate.py benchmarks/results/*.json
 ```
+
+### Result files (schema `pubrun-benchmark/5`)
+
+Each run writes a **compact** (no-indent) JSON. The full local copy is
+`<host>-<UTC-timestamp>.unredacted.json`; a shareable, redacted copy is
+`pubrun-bench-<hostname-hash>-<UTC-timestamp>.redacted.json` (the filename embeds a
+non-identifying hostname hash, never the hostname). Neither is ever a bare `*.json`.
+
+Schema `/5` is a compact, non-redundant reshape of `/4` with **zero analytical data loss**:
+static per-scenario descriptors live once in a top-level `scenario_defs` map; each pass keeps
+only what varies (`timings`/`failures`/`skipped` maps keyed by scenario name); raw per-iteration
+timings are retained (rounded to 6 decimal places — the one deliberate, sub-signal lossy step)
+grouped by pass; and the derived stats (`median_s`/`p95_s`/`stdev_s`/…) are **not stored** but
+recomputed on read from the raw timings. Both `generated_utc` and `generated_local` (local time
+with UTC offset) are recorded. The redacted copy is written small enough to fit GitHub's ~65 KB
+issue-body submission cap (a full default run is well under it); a non-fatal warning prints if it
+ever exceeds the cap, suggesting you attach the file instead of pasting it. `aggregate.py` reads
+both `/4` (stored stats) and `/5` (recomputed) files, producing identical output either way.
 
 ## Representative results
 
