@@ -68,7 +68,11 @@ class TestExistingModesConsoleOff:
 
     @pytest.mark.parametrize("mode", ["auto", "noauto", "nopatch", "noconsole", "minimal"])
     def test_mode_default_console_off(self, mode, tmp_path):
-        # Start the mode, then inspect the manifest's recorded console_capture_mode.
+        # Start the mode, then inspect the FINAL manifest (read AFTER pubrun.stop(),
+        # which finalizes synchronously). The console section is never an ambiguous
+        # empty {} now: it is written with capture_mode + capture_state at startup and
+        # overwritten with the final result + status "complete" on stop() (IPD
+        # 20260721-1425-01). So capture_mode is deterministically present here.
         module = "pubrun" if mode == "auto" else f"pubrun.{mode}"
         script = f"""
 import glob, json
@@ -80,9 +84,11 @@ if r is None:
 rd = str(r.run_dir)
 pubrun.stop()
 m = json.load(open(rd + "/manifest.json"))
-# console.capture_mode here is the EFFECTIVE mode the interceptor ran with.
-cc = m.get("console", {{}}).get("capture_mode")
+console = m.get("console", {{}})
+cc = console.get("capture_mode")
+status = console.get("capture_state", {{}}).get("status")
 print("CONSOLE_MODE=" + str(cc))
+print("CONSOLE_STATUS=" + str(status))
 """
         result = subprocess.run(
             [PYTHON, "-c", script], capture_output=True, text=True, timeout=30,
@@ -90,8 +96,48 @@ print("CONSOLE_MODE=" + str(cc))
             env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
-        # No existing mode wraps the console with default config.
+        # No existing mode wraps the console with default config; and after stop() the
+        # section is finalized. Both are deterministic now (no CI-load tolerance needed).
         assert "CONSOLE_MODE=off" in result.stdout, f"stdout: {result.stdout}"
+        assert "CONSOLE_STATUS=complete" in result.stdout, f"stdout: {result.stdout}"
+
+    def test_startup_console_section_is_pending_then_complete(self, tmp_path):
+        """Regression (IPD 20260721-1425-01): the STARTUP manifest's console section
+        must be self-describing (capture_mode + capture_state.status == "pending"),
+        never an empty {}; the FINAL manifest must show status "complete". Guards
+        against a revert to the empty-console startup manifest that caused an
+        intermittent CONSOLE_MODE=None read."""
+        script = """
+import json
+import pubrun.nopatch as pubrun
+r = pubrun.get_current_run()
+if r is None:
+    pubrun.start()
+    r = pubrun.get_current_run()
+rd = str(r.run_dir)
+# Read the STARTUP manifest (before stop() finalizes).
+m0 = json.load(open(rd + "/manifest.json"))
+c0 = m0.get("console", {})
+print("STARTUP_MODE=" + str(c0.get("capture_mode")))
+print("STARTUP_STATUS=" + str(c0.get("capture_state", {}).get("status")))
+pubrun.stop()
+m1 = json.load(open(rd + "/manifest.json"))
+c1 = m1.get("console", {})
+print("FINAL_MODE=" + str(c1.get("capture_mode")))
+print("FINAL_STATUS=" + str(c1.get("capture_state", {}).get("status")))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script], capture_output=True, text=True, timeout=30,
+            cwd=str(tmp_path),
+            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        # Startup: self-describing, not empty.
+        assert "STARTUP_MODE=off" in result.stdout, f"stdout: {result.stdout}"
+        assert "STARTUP_STATUS=pending" in result.stdout, f"stdout: {result.stdout}"
+        # Final: finalized.
+        assert "FINAL_MODE=off" in result.stdout, f"stdout: {result.stdout}"
+        assert "FINAL_STATUS=complete" in result.stdout, f"stdout: {result.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -178,8 +224,8 @@ pubrun.stop()
 m = json.load(open(rd + "/manifest.json"))
 logs = glob.glob(rd + "/stdout.log")
 captured = bool(logs) and "SENTINEL_FULL_LINE" in open(logs[0]).read()
-# Use .get(): under load the console section can be momentarily un-finalized; the
-# real signal is CAPTURED (did the tee actually record output?), asserted below.
+# Read AFTER stop(): the console section is finalized and never ambiguously empty
+# (IPD 20260721-1425-01), so the effective mode is deterministic here.
 print("EFFECTIVE=" + str(m.get("console", {}).get("capture_mode")))
 print("CAPTURED=" + str(captured))
 """
@@ -191,10 +237,9 @@ print("CAPTURED=" + str(captured))
         assert result.returncode == 0, f"stderr: {result.stderr}"
         # The load-bearing invariant: `full` mode actually teed console output to stdout.log.
         assert "CAPTURED=True" in result.stdout, f"stdout: {result.stdout}"
-        # The recorded effective mode should be standard; tolerate a momentarily un-finalized
-        # console section under CI load (EFFECTIVE=None) as long as capture provably happened.
-        assert ("EFFECTIVE=standard" in result.stdout
-                or "EFFECTIVE=None" in result.stdout), f"stdout: {result.stdout}"
+        # The recorded effective mode is standard (deterministic post-fix; the earlier
+        # EFFECTIVE=None tolerance is no longer needed now the section is never empty).
+        assert "EFFECTIVE=standard" in result.stdout, f"stdout: {result.stdout}"
 
     def test_env_selects_full(self):
         script = """

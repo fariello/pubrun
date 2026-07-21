@@ -179,6 +179,20 @@ class Run:
             return
         # ---------------------------------------------
 
+        # Seed the console section with a self-describing PENDING marker before the
+        # startup manifest is written. Otherwise the startup manifest emits an empty
+        # `console: {}` (no capture_mode), which a consumer reading before the final
+        # finalize cannot distinguish from a real "off" result (see IPD
+        # .agents/plans/executed/20260721-1425-01). The interceptor (always created by
+        # _bootstrap_engines, even in no-capture modes) already knows the resolved base
+        # mode; record it plus status "pending". stop() overwrites this with the real
+        # result and status "complete".
+        if self.console_interceptor is not None:
+            self.console_data = {
+                "capture_mode": self.console_interceptor.mode,
+                "capture_state": {"status": "pending"},
+            }
+
         # Wire up crash-safety
         self.writer = ArtifactWriter(self)
         self.writer.register_atexit()
