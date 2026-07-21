@@ -83,6 +83,12 @@ Console capture metadata.
 | `stderr` | object | `{"path": "stderr.log", "lines_captured": N}`. |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
+In the startup manifest (written before the run finishes) the `console` section is already
+self-describing: it carries the resolved `capture_mode` plus `capture_state.status = "pending"`. When
+the run finishes it is rewritten with the final result and `capture_state.status = "complete"`. It is
+never emitted as an empty object, so a consumer reading a run before it finishes can tell "not finalized
+yet" (`pending`) from a genuine `"off"` result.
+
 ---
 
 ## `subprocesses`

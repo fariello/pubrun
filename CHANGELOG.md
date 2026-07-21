@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Startup manifest no longer emits an empty `console` section.** The manifest written at startup
+  previously left `console` as `{}` (no `capture_mode`), which a consumer reading a run before it
+  finished could not distinguish from a real `"off"` result, and which caused an intermittent
+  test/CI failure (a `console.capture_mode` read of `None`). The startup manifest now writes the
+  resolved `capture_mode` plus `capture_state.status = "pending"`, and the final write sets
+  `status = "complete"` (matching the other manifest sections). A regression test covers the
+  `pending` to `complete` transition. No schema change (the schema already permitted this shape).
+
 ### Added
 - **Path/hostname/IP sanitizer with a pre-commit hook and CI check
   (`scripts/sanitize_paths.py`).** A stdlib-only guard that blocks commits containing
