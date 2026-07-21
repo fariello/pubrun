@@ -5,7 +5,7 @@
 - Scope: new `scripts/sanitize_paths.py`; a `.pre-commit-config.yaml` hook entry; a CI check; a
   gitignored local-config template; a ONE-TIME `--fix` sweep of the current tree. NO git-history
   rewrite (that is the separate IPD `20260720-1126-01`). NO application-behavior change.
-- Status: to-review
+- Status: reviewed
 - Approval: (set when a human approves; omit until then)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
@@ -61,10 +61,10 @@ The reasoning behind the specific design choices, so an executor need not recons
   block nearly every commit and make the hook be disabled in frustration, defeating the whole guard.
   Shipping it available-but-off, with a whitelist that pre-covers private and documentation ranges, is
   what keeps the guard usable while still offering IP scrubbing to those who want it.
-- **Why the one-time tree sweep must ship WITH the hook.** ~35 tracked files currently contain
-  `/home/<user>/` paths. If the hook were added without first cleaning them, the author's very next
-  commit touching any of those files would be blocked, so the guard would arrive broken. Cleaning the
-  tree and enabling the guard are one coherent change.
+- **Why the one-time tree sweep must ship WITH the hook.** 20 tracked files currently contain
+  `/home/<user>/` paths (35 distinct path STRINGS across them). If the hook were added without first
+  cleaning them, the author's very next commit touching any of those files would be blocked, so the
+  guard would arrive broken. Cleaning the tree and enabling the guard are one coherent change.
 - **Why a consolidated end-of-run summary rather than per-hit messages.** Per-line output on a
   multi-file scan is noise; a single grouped summary with a one-time "how to allow/block" footer is what
   a developer can actually act on, and it keeps CI logs readable.
@@ -174,17 +174,19 @@ fixer. No per-hit spam.
 |----|----------|------------------|---------|------|---------|----------|
 | G1 | Medium | Low | Operator | recurrence prevention | No guard stops a new `/home/<user>/`, hostname, or IP from being committed; the history-scrub only cleans the past | history-scrub IPD Step 6; `.pre-commit-config.yaml` has no such hook |
 | G2 | Low | Low | Operator | local-only enforcement | Pre-commit hooks are per-clone; without a CI check a contributor who skipped `pre-commit install` bypasses the guard | `secret-scan.yml` (CI backstop pattern exists) |
-| G3 | Medium | Low | Novice+Operator | current-tree state | ~35 tracked files still contain `/home/<user>/` paths; enabling the guard without cleaning them first would block ordinary commits immediately | /plan-review inventory (run record 20260720-231511) |
+| G3 | Medium | Low | Novice+Operator | current-tree state | 20 tracked files (35 distinct path strings) still contain `/home/<user>/` paths; enabling the guard without cleaning them first would block ordinary commits immediately | /plan-review inventory (run record 20260720-231511); `git grep -l "/home/<user>"` = 20 |
+| G4 | Medium | Low | QA/Operator | test coverage | The script's whole job is correctness of match/replace and the hard "never match the author name/email" invariant, but no COMMITTED test guards it; a future edit could silently break the identity-preservation anchor | added during /plan-review (PR-002) |
 
 ## Proposed changes (ordered, validatable)
 
 | Step | Src | Change | Files | Remediation Risk | Validation |
 |------|-----|--------|-------|------------------|------------|
-| 1 | G1 | Write `scripts/sanitize_paths.py` (stdlib-only): `--check`/`--fix`, rulesets `home-user`/`home-any`/`hostname`/`ip`, `--scrub`/`--match`/`--replace`/`--dry-run`, consolidated end-of-run summary + allow/block footer, reading needles at runtime and from `.sanitize-local.toml`. | `scripts/sanitize_paths.py` | Low | unit-level: given fixture strings it flags/rewrites the right ones and NEVER the author name/email; `--dry-run` writes nothing |
-| 2 | G1 | Ship `.sanitize-local.toml.example` (schema + commented private/doc-range whitelist sections, no literals) and add `.sanitize-local.toml` to `.gitignore`. | `.sanitize-local.toml.example`, `.gitignore` | Low | example parses; real config is gitignored (git check-ignore confirms) |
-| 3 | G3 | ONE-TIME `--fix` sweep of the current tree (`/home/<user>` -> `~`, hostname -> `<host>`; IP only if enabled). Review the diff; confirm the author name/email are untouched. | many (path strings only) | Medium (functionality: touches source/tests that embed paths) | `git grep "/home/<user>"` returns zero in tree; author name/email intact (grep); FULL TEST SUITE GREEN on the swept tree (paste actual output) |
-| 4 | G1 | Add the pre-commit hook entry running `sanitize_paths.py --check` on staged files (home-user/home-any/hostname by default; ip per config). | `.pre-commit-config.yaml` | Low | `pre-commit run --all-files` passes on the cleaned tree; a deliberately-added `/home/<user>/x` is blocked with the consolidated message |
-| 5 | G2 | Add the same `--check` to CI (a step in `secret-scan.yml` or a sibling job) as the backstop. | `.github/workflows/secret-scan.yml` (or new) | Low | CI job fails on a seeded home-path; passes on the clean tree; matrix not implicated (lint-style check) |
+| 1 | G1 | Write `scripts/sanitize_paths.py` (stdlib-only): `--check`/`--fix`, rulesets `home-user`/`home-any`/`hostname`/`ip`, `--scrub`/`--match`/`--replace`/`--dry-run`, consolidated end-of-run summary + allow/block footer, reading needles at runtime and from `.sanitize-local.toml`. | `scripts/sanitize_paths.py` | Low | see Step 2 (committed tests); `--dry-run` writes nothing |
+| 2 | G4 | Write `tests/test_sanitize_paths.py` (REQUIRED deliverable, PR-002): assert each ruleset flags/rewrites its category; the HARD invariant that a `/home/<user>`-anchored rule NEVER matches the author name `Gabriele Fariello` or `gfariello@fariel.com` (feed those exact strings and assert unchanged); whitelist/blacklist honored for regex AND glob AND literal entries; `ip` ruleset inert unless `[ip] enabled=true`; the consolidated summary is emitted exactly once; `--check` exit codes (0 clean, non-zero on match); `--dry-run` mutates nothing. | `tests/test_sanitize_paths.py` | Low | the new tests pass in the existing suite / CI |
+| 3 | G1 | Ship `.sanitize-local.toml.example` (schema + commented private/doc-range whitelist sections, no literals) and add `.sanitize-local.toml` to `.gitignore`. | `.sanitize-local.toml.example`, `.gitignore` | Low | example parses (tomllib/tomli); real config is gitignored (`git check-ignore` confirms) |
+| 4 | G3 | ONE-TIME `--fix` sweep of the current tree (`/home/<user>` -> `~`, hostname -> `<host>`; IP only if enabled). This touches SOURCE and TEST files (per the inventory: `src/pubrun/__main__.py`, `status.py`, `tracker.py`, `resources/default.toml`, several `tests/test_*.py`), so INSPECT the source/test diff specifically for any absolute path that is behaviorally meaningful (a config default, an expected-output assertion, a fixture) before accepting; do not rely on the suite alone. Commit this sweep SEPARATELY from the tooling (PR-004) so the many-file diff is reviewable on its own. | many (path strings only) | Medium (functionality: touches source/tests that embed paths) | `git grep "/home/<user>"` returns zero in tree; author name/email intact (grep `pyproject.toml:12`, `CITATION.cff:10`); source/test diff manually inspected; FULL TEST SUITE GREEN on the swept tree (paste actual output) |
+| 5 | G1 | Add the pre-commit hook entry running `sanitize_paths.py --check` on staged files (home-user/home-any/hostname on by default per OQ3; ip per config). Order it AFTER the whitespace/EOF fixers and gitleaks so it sees final staged bytes. | `.pre-commit-config.yaml` | Low | `pre-commit run --all-files` passes on the cleaned tree; a deliberately-added `/home/<user>/x` is blocked with the consolidated message |
+| 6 | G2 | Add the same `--check --all` as a STEP in the existing `secret-scan.yml` (OQ1: keep security checks together, not a new workflow). | `.github/workflows/secret-scan.yml` | Low | CI step fails on a seeded home-path; passes on the clean tree; not a matrix concern (lint-style check) |
 
 ## Deferred / out of scope
 
@@ -197,17 +199,21 @@ fixer. No per-hit spam.
 
 - Over-scope: NOT rewriting history; NOT scrubbing the author identity; IP rule gated off by default to
   avoid false-positive friction.
-- Under-scope (added): the one-time tree cleanup (Step 3) is required or the hook blocks immediately (G3).
+- Under-scope (added): the one-time tree cleanup (Step 4) is required or the hook blocks immediately
+  (G3); a committed test (Step 2) is required to guard the identity-preservation invariant (G4/PR-002).
 
 ## Required tests / validation
 
-- Script unit checks: rulesets flag/rewrite the intended categories; author name + `CITATION.cff`/
-  `pyproject.toml` email NEVER matched; whitelist/blacklist (regex + glob) honored; IP rule inert unless
-  enabled; consolidated summary emitted once.
-- `pre-commit run --all-files` green on the cleaned tree; a seeded `/home/<user>/` line is blocked.
-- CI `--check` fails on a seeded needle, passes clean.
-- After Step 3: `git grep` for `/home/<user>` returns zero (tree); identity strings intact; PASTE the
-  ACTUAL full test-suite output showing green.
+- `tests/test_sanitize_paths.py` (Step 2, committed): rulesets flag/rewrite the intended categories; the
+  author name and `pyproject.toml`/`CITATION.cff` email are fed in and asserted NEVER matched;
+  whitelist/blacklist honored for regex + glob + literal; IP rule inert unless enabled; consolidated
+  summary emitted exactly once; `--check` exit codes; `--dry-run` mutates nothing.
+- `pre-commit run --all-files` green on the cleaned tree; a seeded `/home/<user>/` line is blocked with
+  the consolidated message.
+- CI `--check --all` step (in `secret-scan.yml`) fails on a seeded needle, passes clean.
+- After the Step 4 sweep: `git grep "/home/<user>"` returns zero (tree); identity strings intact
+  (grep `pyproject.toml:12`, `CITATION.cff:10`); the SOURCE/TEST diff manually inspected for meaningful
+  absolute paths; PASTE the ACTUAL full test-suite output showing green.
 - Honesty rule (hard MUST): paste real command output for the tree grep, the identity-intact grep, and
   the suite run; no leaked literals in any tracked file, the run record, or commit messages.
 
@@ -218,27 +224,35 @@ fixer. No per-hit spam.
   pre-commit hook, CLI fixer, and CI check; cleaned absolute home paths from the tree (no behavior
   change)." No literals.
 
-## Open questions
+## Open questions (all RESOLVED during /plan-review 2026-07-20)
 
-1. CI placement: extend `secret-scan.yml` with a step, or a new sibling workflow? (Recommend a step in
-   `secret-scan.yml` to keep security checks together.)
-2. Hostname rule in CI: a CI runner's hostname differs from the dev machine, so the auto-detected
-   hostname rule is effectively a no-op in CI (home-path rules still run). Acceptable? (Recommend yes;
-   the hostname guard is primarily local + the harness already redacts it.)
-3. Should `home-any` (generic `/home/<anyuser>/`) be in the default `--check` set, or opt-in? It could
-   flag a legitimate doc example like `/home/alice/...`. (Recommend default-on but easily whitelisted.)
+1. CI placement: RESOLVED - add the check as a STEP in the existing `secret-scan.yml` (keep security
+   checks together), not a new workflow. (Step 6.)
+2. Hostname rule in CI: RESOLVED - accepted as a no-op in CI (runner hostname differs; home-path rules
+   still run; the harness already SHA-tokenizes the hostname). No change needed.
+3. `home-any` default: RESOLVED - default-ON in `--check`; a legitimate doc example like `/home/alice/`
+   is handled by adding it to the whitelist. (Step 5.)
 
 ## Approval and execution gate
 
 This IPD is a proposal; it MUST be human-approved before execution and is NOT auto-run. It records only
 technical rationale. Execution contract:
-- Scope fence: adds the script, the example config + `.gitignore` entry, the pre-commit hook, the CI
-  check, and performs the ONE-TIME tree `--fix`. It does NOT rewrite git history and does NOT push.
+- Resolved open questions: OQ1-OQ3 resolved above; execute to those decisions.
+- Scope fence: adds `scripts/sanitize_paths.py`, `tests/test_sanitize_paths.py`, the example config +
+  `.gitignore` entry, the pre-commit hook, the `secret-scan.yml` CI step, and performs the ONE-TIME tree
+  `--fix`. It does NOT rewrite git history and does NOT push. Anything outside this fence -> STOP and
+  open a separate IPD.
+- Commit separation (PR-004): commit the tooling (script + test + config + hook + CI) separately from
+  the many-file one-time tree sweep, so each diff is reviewable.
+- Identity invariant (hard MUST): the author name and email at `pyproject.toml:12` / `CITATION.cff:10`
+  MUST be byte-unchanged after the sweep; grep-confirm and the committed test guards it.
 - Self-redaction (hard MUST): no hostname/username/IP/home-path literal in any tracked file (script,
   example config, IPD, run record) or commit message; needles are read at runtime or from the gitignored
-  config.
-- Honesty rule (hard MUST): paste actual output for the tree grep, identity-intact grep, and the test
-  suite; never claim a clean sweep unverified.
+  config. NOTE: the committed test (Step 2) may reference the PUBLIC author name/email (they are already
+  public in `pyproject.toml`/`CITATION.cff`) solely to assert they are NOT scrubbed; it must NOT contain
+  any private hostname/home-path literal.
+- Honesty rule (hard MUST): paste actual output for the tree grep, the identity-intact grep, the
+  source/test-diff inspection, and the test suite; never claim a clean sweep unverified.
 - Commits path-scoped; never push without explicit authorization.
 - On completion, `git mv` this IPD to `.agents/plans/executed/` (Status -> executed) with a
   Workflow-history line.
@@ -249,3 +263,14 @@ technical rationale. Execution contract:
   home paths, with a command-line fixer (file/filter/match/replace args), auto-detected FQDN+partial
   hostname and v4/v6 IPs, a gitignored whitelist/blacklist config (regex+glob; commented private-range
   sections), IP rule config-gated, and consolidated end-of-run reporting. Proposed 5 steps, deferred 2.
+- 2026-07-20 enriched (opencode): added Why/Portability/Implementation-details sections for cold-start
+  self-containment.
+- 2026-07-20 /plan-review (opencode / its_direct/pt3-claude-opus-4.8-1m-us): APPROVE WITH REVISIONS
+  APPLIED. Verified claims (gitleaks+fixers present with no path hook; `secret-scan.yml` exists; author
+  identity at `pyproject.toml:12`/`CITATION.cff:10`; `tomli` fallback at `pyproject.toml:40`). Findings:
+  PR-001 file count corrected (20 files, not ~35 - that was distinct path strings); PR-002 added a
+  REQUIRED committed test (`tests/test_sanitize_paths.py`, new Step 2 + finding G4) to guard the
+  identity-preservation invariant; PR-003 sharpened the sweep step to require inspecting the SOURCE/TEST
+  diff, not just a green suite; PR-004 required committing the tooling separately from the tree sweep.
+  All 3 open questions resolved (CI step in secret-scan.yml; hostname no-op in CI accepted; home-any
+  default-on). Now 6 steps, 2 deferred. Status -> reviewed. Readiness: GO - PENDING HUMAN APPROVAL.
