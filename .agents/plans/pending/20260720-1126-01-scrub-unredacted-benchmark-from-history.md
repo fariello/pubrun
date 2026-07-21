@@ -36,13 +36,19 @@ history or from the public remote. Only a history rewrite does.
 The original draft's blast-radius claim was WRONG. A history-wide pre-flight sweep (Step 1, run during
 review with needles read from the target blob at runtime) established the true picture:
 
-- **Hostname needle:** confined to EXACTLY ONE file, the un-redacted benchmark `.json` under
+- **Hostname needle (host A):** confined to EXACTLY ONE file, the un-redacted benchmark `.json` under
   `benchmarks/results/` (whose name begins with a host label and ends `-<timestamp>.json`). The host
   label ALSO appears in that file's NAME (so it is in tree/commit metadata, not only file content).
-  This is the one genuinely host-private string. It has zero `<redacted>` markers.
+  It has zero `<redacted>` markers.
 - That benchmark `.json` was ADDED in one commit and already DELETED from the tree in a later commit
   (two commits touch it; a third touched the directory). It is gone from HEAD but its blob remains in
   history. So the rewrite target is that one path across all history.
+- **Second hostname needle (host B) - added 2026-07-20:** a DIFFERENT machine's host label (the
+  CURRENT dev box) was found in `TODO.md` history, embedded in a stale benchmark filename reference (a
+  `benchmarks/results/<hostB>-<timestamp>.redacted.json` string in prose). It was scrubbed from the
+  WORKING TREE to `<host>` (commit `f51f205`, caught by the new sanitizer's `--check`), but it REMAINS
+  in the history of `TODO.md`. So there are TWO host-label needles to remove from history (host A in the
+  benchmark blob, host B in TODO.md history), not one. Both are read at runtime, never written here.
 - **Username needle:** NOT confined to the benchmark file. It is the maintainer's ALREADY-PUBLIC
   identity (the GitHub handle, and the published author email in `pyproject.toml` and `CITATION.cff`),
   and it appears as `/home/<user>/`-style paths in roughly 65 committed files across all history
@@ -101,7 +107,7 @@ public and stay; the `/home/<user>/...` filesystem paths should not be there.
 | Step | Change | Remediation Risk | Validation |
 |------|--------|------------------|------------|
 | 1 | **Pre-flight sweep + secrets sweep - DONE during /plan-review.** Established the true footprint (see corrected Verified facts + the recorded `uniq -c` inventory) and confirmed via gitleaks (history + tree) and detect-secrets that no credential/token exists. Re-confirm at execution time by reading the hostname needle from a pre-rewrite copy of the target blob (never written into this plan). | Low | recorded inventory; gitleaks clean over `--all`; no credential to rotate |
-| 2 | **Tool + scope (resolved OQ1).** Use `git filter-repo`. Two operations in one rewrite: (a) `--invert-paths --path <the one benchmark json>` to REMOVE the hostname carrier entirely (drops content + host-labeled filename); (b) `--replace-text <expr>` mapping the literal prefix `/home/<user>` to `~` across ALL blobs in history. Read `<user>` and the target path at runtime; do NOT write literals into this plan or the expr file that is committed. | Medium (functionality: rewrites SHAs across history) | dry-run/report shows only the target path removed and only `/home/<user>` prefixes rewritten; topology/commit-count otherwise unchanged |
+| 2 | **Tool + scope (resolved OQ1).** Use `git filter-repo`. In one rewrite: (a) `--invert-paths --path <the one benchmark json>` to REMOVE the host-A carrier entirely (drops content + host-labeled filename); (b) `--replace-text <expr>` mapping the literal prefix `/home/<user>` to `~` across ALL blobs; (c) `--replace-text` ALSO mapping the host-B label (the current dev box's hostname, still in `TODO.md` history) to `<host>`. Read `<user>`, both host labels, and the target path at runtime (e.g. `socket.gethostname()` for host B); do NOT write any host literal into this plan or the committed expr file (the expr file itself is written to a gitignored/temp path, not committed). | Medium (functionality: rewrites SHAs across history) | dry-run/report shows only the target path removed and only the `/home/<user>` prefix + the two host labels rewritten; topology/commit-count otherwise unchanged |
 | 3 | **Execute on a mirror-clone BACKUP first.** `git clone --mirror` backup before rewriting. Run the Step 2 filter-repo invocation on the backup. Then ALSO fix the current working tree (35 paths / 20 files) with the same `/home/<user>` -> `~` replacement so HEAD is clean, not just history. Verify on the rewritten copy before touching the remote. | Medium-High (functionality: irreversible without the backup) | post-rewrite: `git log --all -- <benchmark path>` empty; hostname needle (field AND filename token) absent from all history; `git grep "/home/<user>"` over `--all` returns ZERO; the author name/email are UNCHANGED (grep confirms still present in pyproject.toml/CITATION.cff); test suite green on rewritten HEAD |
 | 4 | **Force-push the rewritten history** to the remote (all refs). **REQUIRES the explicit out-of-band human GO named in the gate; not waived by approving this IPD.** Cost is low here (no open PRs; only `main`; sole maintainer) but it is irreversible on the remote. | High (operational: rewrites public history) | remote has no benchmark path, no hostname needle, and zero `/home/<user>` hits; a fresh clone is clean; author identity intact; GitHub cached views update eventually |
 | 5 | **Post-rewrite hygiene.** No credential to rotate (sweep clean). Confirm recurrence prevention: the `benchmarks/results/.gitignore` (tracks only `*.redacted.json`) and the harness hostname redaction are in place. | Low | `.gitignore` + harness redaction confirmed; a fresh unredacted run is not committed |
@@ -121,9 +127,11 @@ public and stay; the `/home/<user>/...` filesystem paths should not be there.
 ## Required tests / validation
 
 - `git log --all --name-only -- <the one benchmark json path>` returns nothing after the rewrite.
-- A history-wide search for the HOSTNAME needle - BOTH the `machine.host.hostname` field value AND the
+- A history-wide search for the HOST-A needle - BOTH the `machine.host.hostname` field value AND the
   host-label token embedded in the filename - read from a pre-rewrite copy, returns zero hits across
   all commits.
+- A history-wide search for the HOST-B needle (the current dev box's hostname, e.g. from
+  `socket.gethostname()`; it lingers in `TODO.md` history) returns zero hits across all commits.
 - A history-wide AND current-tree search for `/home/<user>` returns ZERO hits after the rewrite.
 - The author name and published email STILL appear in `pyproject.toml` and `CITATION.cff` (identity
   preserved; grep-confirm the exact lines are intact).
@@ -202,3 +210,9 @@ by itself authorize Step 4. Execution contract:
   Scope decision, Verified facts, Non-goals, Steps 2-3 and 6, anti-regression, validation, gate, and
   spec-sync accordingly. Still Status: reviewed; still NO-GO pending human approval + the Step 4 GO.
   Readiness: NO-GO until (a) human approval AND (b) the separate explicit force-push GO for Step 4.
+- 2026-07-20 scope addition (human): the sanitizer IPD (20260720-2331-01) execution surfaced a SECOND
+  host label (the current dev box) leaked in `TODO.md` history via a stale benchmark filename. It was
+  scrubbed from the working tree (commit f51f205) but persists in history. Added it as "host B" to the
+  Verified facts, Step 2 rewrite scope (a second `--replace-text` mapping to `<host>`), and validation
+  (a history-wide zero-hit check for host B). No re-review required by the human beyond this note; the
+  scope grew by one additional replace-text needle of the same kind already planned. Status unchanged.
