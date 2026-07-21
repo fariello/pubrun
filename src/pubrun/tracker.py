@@ -324,9 +324,23 @@ class Run:
             self._hardware_future_done.set()
             # BUG-06: Re-write startup manifest so on-disk state includes
             # hardware data even if the process is killed before stop().
+            #
+            # RACE FIX (IPD 20260721-1425-01): this async re-write must NEVER clobber a
+            # FINALIZED manifest. On a slow/loaded host, hardware collection can outlast
+            # the 2s wait in _finalize_state(); stop() then writes the final manifest and
+            # this thread could fire afterward, overwriting it with a non-finalized
+            # (startup) manifest -> the run reads back as capture_state "pending" forever
+            # (observed intermittently on CI). Guard under the run lock and skip if the
+            # run is already finalized. Checking `_finalized` (set inside _finalize_state
+            # under no lock, but read here under the lock) plus `is_active` closes the
+            # TOCTOU window that the bare `is_active` check left open.
             try:
-                if getattr(self, "writer", None) and self.is_active:
-                    self.writer.write_startup_manifest()
+                from pubrun import _run_lock
+                with _run_lock:
+                    if (getattr(self, "writer", None)
+                            and self.is_active
+                            and not self._finalized):
+                        self.writer.write_startup_manifest()
             except Exception:
                 pass  # Best-effort
 
@@ -492,9 +506,15 @@ class Run:
         If ``sys.exc_info()`` indicates an active exception, outcome is set
         to ``"failed"``.
         """
-        if self._finalized:
-            return
-        self._finalized = True
+        # Set the finalized latch under the run lock so it is mutually exclusive with
+        # the async hardware-thread startup re-write (which also takes _run_lock and
+        # skips when _finalized). This closes the TOCTOU window where that thread could
+        # overwrite the final manifest with a non-finalized one (IPD 20260721-1425-01).
+        from pubrun import _run_lock
+        with _run_lock:
+            if self._finalized:
+                return
+            self._finalized = True
 
         # Wait for deferred hardware collection to complete (PERF-02).
         # Cap at 2s to avoid blocking exit on a stuck nvidia-smi.
