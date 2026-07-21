@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Documentation
+- **Adoption bridges, an examples ladder, and deep-page positioning (no behavior change).** The README
+  now has an "Is pubrun for me?" section with two signpost links (a plain-script/data-job path and an
+  HPC/large-scale/ML path) and an examples ladder pointing into `examples/` from a trivial script up to
+  HPC and ML runs, so a reader can find their own use. `docs/research-use.md` was reframed to lead with
+  why provenance is not optional in high-stakes scientific and ML work (and the unverifiable download
+  count and specific adopter count were removed/generalized for honest docs). `docs/hpc.md` now leads
+  with a laptop-to-cluster thesis and hosts a "Where pubrun fits" note positioning pubrun accurately as
+  a component that complements (does not replace) MLflow, Weights and Biases, and DVC. Em and en dashes
+  were removed from these three files per the house style. Competitor and ML-depth material is kept in
+  the deep pages, never the README front door.
+
 ### Fixed
 - **Startup manifest no longer emits an empty `console` section.** The manifest written at startup
   previously left `console` as `{}` (no `capture_mode`), which a consumer reading a run before it
