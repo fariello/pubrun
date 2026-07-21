@@ -4,13 +4,24 @@
 - Concern: bug / robustness (manifest completeness + a resulting CI test flake)
 - Scope: `src/pubrun/writer.py` (startup vs final manifest), `src/pubrun/tracker.py` (finalize/write
   ordering), and the affected test `tests/test_full_mode.py`. No public-API change intended.
-- Status: to-review
+- Status: reviewed
 - Approval: (set when a human approves; omit until then)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Workflow history
 - 2026-07-21 /assess (opencode / its_direct/pt3-claude-opus-4.8-1m-us): investigated a CI flake, traced
   it to a real manifest-finalization gap; proposed fixes. Written after a wrong initial guess (see Goal).
+- 2026-07-21 /plan-review (opencode / its_direct/pt3-claude-opus-4.8-1m-us): APPROVE WITH REVISIONS
+  APPLIED. Independently re-verified all cited evidence (writer.py:93-106 startup-no-finalize;
+  tracker.py:130/156/542/636 console_data lifecycle; run/timing capture_state at 625/631; the
+  subprocess test at test_full_mode.py:87-94). Findings PR-001..PR-003 FIXED: PR-001 corrected Step 4/5
+  (the schema ALREADY permits `console.capture_state` with a `pending` status via
+  `$defs/console_section` + `$defs/capture_state`, so no schema edit is expected, only verification);
+  PR-002 added a required regression test (new Step 3) for the pending->complete transition; PR-003
+  sharpened Step 2 to note the child already calls stop() (so the fix is Step 1's non-empty section,
+  not merely reordering the read). All 3 open questions resolved interactively (resolved-mode+pending;
+  add regression test; matrix-gated). Now 5 steps, 1 deferral. Status -> reviewed. Readiness: GO -
+  PENDING HUMAN APPROVAL.
 
 ## Goal
 
@@ -56,17 +67,18 @@ off". The startup manifest already models incompleteness elsewhere via `capture_
 | ID | Severity | Remediation Risk | Persona | Area | Finding | Evidence (file:line) |
 |----|----------|------------------|---------|------|---------|----------------------|
 | B1 | Medium | Low | Operator/QA | manifest completeness | The startup manifest emits `console: {}` (no `capture_mode`); a consumer reading before final finalize sees an empty console section indistinguishable from a real value | `writer.py:93-106`; `tracker.py:130,156,636`; local repro (startup `console: {}`, final `off`) |
-| B2 | Medium | Low | QA | flaky test | `test_mode_default_console_off` asserts `CONSOLE_MODE=off` by reading the child manifest, with no wait/guard for finalization, so it flakes if it reads the startup manifest | `tests/test_full_mode.py:70-94` |
-| B3 | Low | Low | Operator | diagnosability | A finalize-only manifest section (`console`) carries no `capture_state`, so "not finalized" vs "off" is not machine-distinguishable | `tracker.py:636`; cf. run/timing sections carry `capture_state` at `tracker.py:625,631` |
+| B2 | Medium | Low | QA | flaky test + missing regression coverage | `test_mode_default_console_off` reads the child manifest and asserts `CONSOLE_MODE=off`, which flakes if it reads the startup (empty-console) manifest; and there is no test guarding the fix against a future revert to empty `console: {}` | `tests/test_full_mode.py:70-94` |
+| B3 | Low | Low | Operator | diagnosability | A finalize-only manifest section (`console`) carries no `capture_state`, so "not finalized" vs "off" is not machine-distinguishable | `tracker.py:636`; cf. run/timing sections carry `capture_state` at `tracker.py:625,631`; `$defs/console_section` already allows a `capture_state` |
 
 ## Proposed changes (ordered, validatable)
 
 | Step | Src | Change | Files | Remediation Risk | Validation |
 |------|-----|--------|-------|------------------|------------|
-| 1 | B1 | Make the startup manifest's `console` section self-describing: instead of an empty `{}`, write `{"capture_mode": <resolved-or-off>, "capture_state": {"status": "pending"}}` at startup (mirroring how run/timing use `capture_state`). The final write overwrites it with the real result + `status: complete`. This removes the ambiguous empty section and gives consumers a truthful "not yet finalized" marker. | `src/pubrun/tracker.py` (initial `console_data`), `src/pubrun/writer.py` (startup path) | Low | a startup manifest has `console.capture_mode` present and `console.capture_state.status == "pending"`; the final manifest has the real mode and `status == "complete"`; schema conformance still passes |
-| 2 | B2 | Harden the test so it is not order/timing dependent: assert on the FINAL manifest deterministically. The child already calls `pubrun.stop()` (which finalizes synchronously before returning), so read the manifest AFTER `stop()` returns in the child and print that; the parent asserts `CONSOLE_MODE=off` for auto/patched modes. Confirm the child does not read a pre-`stop()` manifest. | `tests/test_full_mode.py` | Low | the test passes deterministically across seeds/repeats (loop it locally, e.g. 50x, and under `-p randomly`) |
-| 3 | B1/B3 | Confirm no OTHER finalize-only section shares the empty-vs-real ambiguity (subprocesses, resources, events). If any is emitted empty at startup with no `capture_state`, apply the same `pending` marker for consistency. | `src/pubrun/tracker.py` | Low | audit recorded; any additional sections fixed the same way or explicitly justified as N/A |
-| 4 | B1 | Update `schemas/manifest.schema.json` and `docs/manifest.md` if the startup `console` shape changes (it should already allow `capture_state`; verify the `console` object permits `capture_state` and a `pending` status). | `schemas/manifest.schema.json`, `docs/manifest.md` | Low | schema validates both startup and final manifests; conformance test green |
+| 1 | B1 | Make the startup manifest's `console` section self-describing: instead of an empty `{}`, write the RESOLVED base mode plus a pending marker, i.e. `{"capture_mode": <resolved base, "off" for nopatch/noconsole/minimal>, "capture_state": {"status": "pending"}}` at startup (mirroring how run/timing use `capture_state`; OQ1 resolved -> resolved-mode + pending, not a bare status). The final write overwrites it with the real result + `status: complete`. Removes the ambiguous empty section and gives consumers a truthful "not yet finalized" marker. | `src/pubrun/tracker.py` (initial `console_data`), `src/pubrun/writer.py` (startup path) | Low | a startup manifest has `console.capture_mode` present and `console.capture_state.status == "pending"`; the final manifest has the real mode and `status == "complete"`; schema conformance still passes |
+| 2 | B2 | Harden the flaky test so it is not order/timing dependent. NOTE (verified during /plan-review): the child ALREADY calls `pubrun.stop()` before reading (`tests/test_full_mode.py:81`), and `stop()` finalizes synchronously inline (`tracker.py:581-583`: `_finalize_state()` then `write_artifacts()`). So the flake is NOT the child reading too early; it is that the on-disk manifest the PARENT/child read reflected the startup write in a narrow window (or a finalize that did not complete). The durable fix is Step 1 (no ambiguous empty section); this step additionally makes the test assert the FINAL state explicitly and tolerate the documented `pending`/`complete` distinction so a provisional read can never be mistaken for a failure. | `tests/test_full_mode.py` | Low | the test passes deterministically across seeds/repeats (loop it locally, e.g. 50x, and under `-p randomly`) |
+| 3 | B2/B1 | REGRESSION TEST (required; OQ2/PR-002 resolved -> yes). Add a dedicated test that reproduces the failure mode as positive coverage: read the STARTUP manifest and assert `console.capture_state.status == "pending"`, then after the run finishes assert `console.capture_state.status == "complete"` and a real `capture_mode`. This guards against a future revert to an empty `console: {}`. | `tests/test_full_mode.py` (or a manifest-shape test) | Low | the new test fails if the startup console section is empty or lacks the pending->complete transition; passes on the fixed code |
+| 4 | B1/B3 | Confirm no OTHER finalize-only section shares the empty-vs-real ambiguity (subprocesses, resources, events). If any is emitted empty at startup with no `capture_state`, apply the same `pending` marker for consistency. | `src/pubrun/tracker.py` | Low | audit recorded; any additional sections fixed the same way or explicitly justified as N/A |
+| 5 | B1 | Schema/docs: the schema ALREADY permits the new shape (verified during /plan-review: `$defs/console_section` lists `capture_state` -> `$defs/capture_state`, whose status enum includes `pending`, with `required: []`), so NO schema edit should be needed for Step 1. VERIFY this (validate a startup and a final manifest), and update `docs/manifest.md` to document that `console` carries a `pending` -> `complete` `capture_state` like the other sections. Only edit the schema if the audited shape (Step 4) requires it. | `docs/manifest.md` (schema only if needed) | Low | conformance test green on both startup and final manifests; docs describe the console `capture_state` |
 
 ## Deferred / out of scope
 
@@ -99,17 +111,17 @@ off". The startup manifest already models incompleteness elsewhere via `capture_
   `docs/manifest.md`, and add a CHANGELOG note ("manifest: startup `console` section now carries a
   `capture_state: pending` marker instead of being empty; fixes an intermittent empty-console read").
 
-## Open questions
+## Open questions (all RESOLVED interactively during /plan-review 2026-07-21)
 
-1. B1 marker value: at startup, should `console.capture_mode` be the RESOLVED mode (requires resolving
-   console mode at startup, which `nopatch` etc. would report as "off") or a literal placeholder until
-   finalize? (Recommend the resolved-or-"off" base plus `capture_state: pending`, so it is truthful and
-   consistent with the interceptor always being created.)
-2. B2: is asserting only the FINAL manifest sufficient, or should the test ALSO assert the startup
-   manifest now carries `capture_state: pending` (turning the flake into positive coverage of the fix)?
-   (Recommend the latter: convert the bug into a regression test.)
-3. Matrix-validation: confirm this is treated as a manifest-contract change (it is) and must go green on
-   the full 3-OS x 3.8-3.14 matrix before executed/.
+1. B1 startup marker value: RESOLVED -> write the RESOLVED base mode ("off" for nopatch/noconsole/
+   minimal, the configured/forced value otherwise) PLUS `capture_state: pending`. Truthful, consistent
+   with the interceptor always being created, and already schema-valid. (Step 1.)
+2. B2 regression coverage: RESOLVED -> YES, add a dedicated regression test asserting the startup
+   manifest's `console.capture_state.status == "pending"` and the finished manifest's `== "complete"`
+   with a real `capture_mode`, so a future revert to empty `console: {}` fails loudly. (Step 3.)
+3. Matrix-validation: RESOLVED -> YES, this is a manifest-contract/shape change AND fixes a
+   cross-platform intermittent flake, so it MUST be green on the full 3-OS x Python 3.8-3.14 matrix
+   before moving to `executed/`. (Gate below.)
 
 ## Approval and execution gate
 
