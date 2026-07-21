@@ -5,8 +5,8 @@
 - Scope: new `scripts/sanitize_paths.py`; a `.pre-commit-config.yaml` hook entry; a CI check; a
   gitignored local-config template; a ONE-TIME `--fix` sweep of the current tree. NO git-history
   rewrite (that is the separate IPD `20260720-1126-01`). NO application-behavior change.
-- Status: approved
-- Approval: human-approved 2026-07-20 (maintainer "GO" after /plan-review; executing)
+- Status: executed
+- Approval: human-approved 2026-07-20 (maintainer "GO" after /plan-review)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## SELF-REDACTION NOTICE (read first)
@@ -274,3 +274,13 @@ technical rationale. Execution contract:
   diff, not just a green suite; PR-004 required committing the tooling separately from the tree sweep.
   All 3 open questions resolved (CI step in secret-scan.yml; hostname no-op in CI accepted; home-any
   default-on). Now 6 steps, 2 deferred. Status -> reviewed. Readiness: GO - PENDING HUMAN APPROVAL.
+- 2026-07-20 executed (opencode / its_direct/pt3-claude-opus-4.8-1m-us) after human "GO". Commit A
+  (d3107ab): script + tests (19 pass) + example config + gitignore. Commit B (eed0ca1): one-time sweep
+  of 20 files (/home/<user> -> ~), verified 80/80 balanced path-only diff, no source/test touched, full
+  suite 926 passed / 2 skipped. Commit C (f51f205): pre-commit hook + CI step; plus two refinements
+  found by running the tool: (1) a TRACKED baseline `.sanitize-allow.toml` (so CI shares the
+  known-legitimate generic placeholders) with `exclude` support for the tool's own self-test; (2) the
+  tool caught a REAL hostname leak in TODO.md (a stale benchmark filename) which was scrubbed to <host>.
+  `--check --all` exits 0 clean; the sanitize-paths pre-commit hook passed on its own commit. CONTRIBUTING
+  + CHANGELOG updated. Deferred items unchanged (history rewrite = IPD 20260720-1126-01; aggressive IP
+  default stays off). Status -> executed; git mv pending/ -> executed/. NOT pushed.

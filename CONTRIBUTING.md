@@ -18,6 +18,31 @@ Run the test suite before opening a pull request:
 python -m pytest
 ```
 
+### Local hooks and path hygiene
+
+Install the pre-commit hooks once per clone:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+One of the hooks (`sanitize-paths`) blocks commits that contain absolute home
+directory paths (`/home/<you>/...`), your machine hostname, and (if you enable it)
+IP addresses, so machine-specific strings do not leak into the public repo. It
+reports and blocks; it does not edit your files. To fix flagged content:
+
+```bash
+python3 scripts/sanitize_paths.py --fix          # rewrite staged files
+python3 scripts/sanitize_paths.py --fix path...  # rewrite specific files
+python3 scripts/sanitize_paths.py --check --all  # audit the whole tree
+```
+
+If a flagged value is legitimate (for example a documentation example path), add it
+to the `whitelist` in `.sanitize-local.toml` (copy `.sanitize-local.toml.example` to
+start). Generic placeholder paths used in tests are already allowed in the tracked
+`.sanitize-allow.toml`. The same check runs in CI.
+
 ## Reporting issues
 
 Please use GitHub issues to report bugs, request features, or ask questions about expected behavior. When reporting a bug, include:
