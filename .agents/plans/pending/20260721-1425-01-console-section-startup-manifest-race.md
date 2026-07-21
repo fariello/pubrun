@@ -81,6 +81,29 @@ off". The startup manifest already models incompleteness elsewhere via `capture_
 | 4 | B1/B3 | Confirm no OTHER finalize-only section shares the empty-vs-real ambiguity (subprocesses, resources, events). If any is emitted empty at startup with no `capture_state`, apply the same `pending` marker for consistency. AUDIT RESULT (execution 2026-07-21, `full` mode startup manifest): `resources`, `invocation`, `git`, `packages`, `environment`, `process`, `python` already carry a proper `capture_state`; `hardware`/`host`/`filesystem` are already correctly `pending`; `console` is the only finalize-only OBJECT section that was emitting an ambiguous empty `{}` and is now fixed. Two other sections have DIFFERENT shapes and are NOT the console finalize-race, so they are OUT of scope here (would be larger contract changes): `subprocesses` is a JSON array (empty list at startup, cannot hold a `capture_state`), and `events` is conditional (absent unless the event stream is enabled). Recorded as N/A / separate follow-up. | `src/pubrun/tracker.py` | Low | audit recorded above; only `console` needed the fix; `subprocesses`/`events` justified as out-of-scope shape differences |
 | 5 | B1 | Schema/docs: the schema ALREADY permits the new shape (verified during /plan-review: `$defs/console_section` lists `capture_state` -> `$defs/capture_state`, whose status enum includes `pending`, with `required: []`), so NO schema edit should be needed for Step 1. VERIFY this (validate a startup and a final manifest), and update `docs/manifest.md` to document that `console` carries a `pending` -> `complete` `capture_state` like the other sections. Only edit the schema if the audited shape (Step 4) requires it. | `docs/manifest.md` (schema only if needed) | Low | conformance test green on both startup and final manifests; docs describe the console `capture_state` |
 
+## Deeper root cause found during execution (2026-07-21) - scope expanded
+
+The Step 1 fix (self-describing startup `console`) was correct but INCOMPLETE. Pushing to CI matrix
+turned the old intermittent `CONSOLE_MODE=None` (ubuntu-3.11) into `CONSOLE_MODE=off` +
+`CONSOLE_STATUS=pending` after an explicit `stop()` - i.e. the new regression test (Step 3) exposed a
+DEEPER bug: `stop()` did not reliably leave a FINALIZED manifest.
+
+Root cause: the async hardware-collection thread (`tracker.py` `_collect_hardware`) re-writes the STARTUP
+manifest when it completes (BUG-06, so a killed process still has hardware data). `_finalize_state()`
+only waits 2s for that thread; on a slow/loaded runner the thread finishes AFTER `stop()` has written
+the final manifest, and its bare `is_active` guard had a TOCTOU window, so it overwrote the finalized
+manifest with a non-finalized (startup) one -> the run reads back `capture_state: pending` permanently.
+
+Fix (added this execution):
+- The hardware thread's re-write now runs under `_run_lock` and skips when `self._finalized` is set
+  (in addition to `is_active`), so it can never clobber a finalized manifest.
+- `_finalize_state()` now flips the `_finalized` latch UNDER `_run_lock` (the idempotency check-and-set
+  is inside the lock), making it mutually exclusive with that thread. Verified no deadlock: `stop()`
+  releases `_run_lock` before calling `_finalize_state()`; `write_artifacts` holds no lock; `_run_lock`
+  is a plain non-reentrant Lock.
+- Verified with a forced-race repro (hardware collection artificially slowed to 4s > the 2s wait): the
+  manifest stays `complete` after the thread finishes (pre-fix it would revert to `pending`).
+
 ## Deferred / out of scope
 
 | Item | Risk | Axis | Reason | Later step |
