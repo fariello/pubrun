@@ -1,0 +1,27 @@
+# .sanitize-allow.toml (TRACKED baseline allowlist for scripts/sanitize_paths.py)
+#
+# This file is committed and travels with the repo, so CI (which has no local
+# .sanitize-local.toml) shares the same known-legitimate exceptions. It should contain
+# ONLY generic, non-identifying placeholders that legitimately appear in test fixtures,
+# documentation examples, and the sanitizer's own tests. Never put a real hostname, a
+# real home path, or a real IP here (those belong scrubbed, or in the gitignored
+# .sanitize-local.toml if truly needed locally).
+#
+# Entries are unioned with any .sanitize-local.toml. type = glob|regex|literal.
+
+# Generic placeholder home paths used as test data / doc examples. These are not real
+# user directories; they exist to exercise redaction and to illustrate manifest shapes.
+[[whitelist]]
+type = "regex"
+pattern = "^(?:/home|/Users)/(?:user|users|x|alice|bob|carol|dave|tester|example|researcher|ci|runner)(?:/|$)"
+
+# Files EXCLUDED from scanning entirely: the sanitizer's own unit test and its example
+# config legitimately embed real-looking needles (incl. the maintainer's own home path)
+# purely as test data / documentation of the format. Scanning them would always flag.
+[[exclude]]
+type = "glob"
+pattern = "tests/test_sanitize_paths.py"
+
+[[exclude]]
+type = "glob"
+pattern = ".sanitize-local.toml.example"
