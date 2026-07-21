@@ -4,10 +4,9 @@
 - Concern: security / privacy (information disclosure remediation)
 - Scope: git history rewrite of one committed artifact under `benchmarks/results/`; a force-push;
   post-rewrite hygiene. NOT application code.
-- Status: reviewed
-- Approval: (set when a human approves; omit until then. This plan REQUIRES explicit human approval
-  because it rewrites history and force-pushes, which the project's rules otherwise forbid. NOTE: the
-  Step 4 force-push additionally needs a SEPARATE explicit out-of-band GO.)
+- Status: executed
+- Approval: human-approved 2026-07-20 (maintainer "GO" to execute, then a SEPARATE explicit "Force-push.
+  Go." for Step 4, which was performed).
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## SELF-REDACTION NOTICE (read first)
@@ -216,3 +215,14 @@ by itself authorize Step 4. Execution contract:
   Verified facts, Step 2 rewrite scope (a second `--replace-text` mapping to `<host>`), and validation
   (a history-wide zero-hit check for host B). No re-review required by the human beyond this note; the
   scope grew by one additional replace-text needle of the same kind already planned. Status unchanged.
+- 2026-07-20 EXECUTED (opencode / its_direct/pt3-claude-opus-4.8-1m-us) after human GO + a separate
+  explicit force-push GO. Ran on a mirror-clone backup (/tmp/opencode/pubrun-backup.git) + a working
+  clone: `git filter-repo` removed the one benchmark `.json` and `--replace-text` mapped /home/<user>
+  -> ~ and all three host labels (host A field + filename token, host B) -> <host> across all 409
+  commits (rewritten to 408; one now-empty path-sweep commit was pruned, end-state tree identical).
+  Verified on the clone (actual): all needles 0 across ALL history; all 1932 blobs (incl. binary)
+  scanned = 0 needle hits; 12 tags rewritten to needle-free SHAs (0 tag-reachable needles); author
+  name/email preserved; HEAD file list identical to pre-rewrite; full suite 926 passed / 2 skipped.
+  Applied to live main (reset --hard) and FORCE-PUSHED main + all 12 tags to origin. Post-push:
+  origin/main has 0 needles; main == origin/main; sanitizer --check --all exits clean. Backup retained
+  at /tmp/opencode/pubrun-backup.git. Status -> executed; git mv pending/ -> executed/.
