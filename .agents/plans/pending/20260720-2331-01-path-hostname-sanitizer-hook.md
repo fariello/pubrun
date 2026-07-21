@@ -5,8 +5,8 @@
 - Scope: new `scripts/sanitize_paths.py`; a `.pre-commit-config.yaml` hook entry; a CI check; a
   gitignored local-config template; a ONE-TIME `--fix` sweep of the current tree. NO git-history
   rewrite (that is the separate IPD `20260720-1126-01`). NO application-behavior change.
-- Status: reviewed
-- Approval: (set when a human approves; omit until then)
+- Status: approved
+- Approval: human-approved 2026-07-20 (maintainer "GO" after /plan-review; executing)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## SELF-REDACTION NOTICE (read first)

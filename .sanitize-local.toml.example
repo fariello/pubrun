@@ -1,0 +1,84 @@
+# .sanitize-local.toml (EXAMPLE)
+#
+# Local, machine-specific config for scripts/sanitize_paths.py. Copy this file to
+# `.sanitize-local.toml` (which is gitignored) and edit. This example file is tracked
+# and MUST contain no machine-specific literals (no real hostname, home path, or IP).
+#
+# The sanitizer scrubs absolute home paths, the machine hostname, and (optionally) IP
+# addresses from files, so they are not committed. Home paths and the hostname are
+# auto-detected at runtime; you rarely need to configure them. The two things you may
+# want to set are: whether the IP ruleset runs, and allow/block entries.
+
+[rules]
+# Which rulesets run in --check by default. Options: "home-user", "home-any",
+# "hostname", "ip". (The "ip" ruleset also requires [ip].enabled = true below.)
+enabled = ["home-user", "home-any", "hostname"]
+
+[ip]
+# IP scrubbing is OFF by default. IPv4/IPv6 regexes false-positive on version numbers,
+# timings, and hashes, so enabling this may flag many benign strings. Turn it on only
+# if you know your content, and lean on the whitelist below for legitimate addresses.
+enabled = false
+
+# ---------------------------------------------------------------------------
+# whitelist: values that must NEVER be flagged/scrubbed even if a rule matches.
+# blacklist: extra values that must ALWAYS be scrubbed (with an optional replace).
+#
+# Each entry has:
+#   type    = "glob" (default) | "regex" | "literal"
+#   pattern = the glob/regex/literal to match
+#   replace = (blacklist only) the replacement string (default "<redacted>")
+# ---------------------------------------------------------------------------
+
+# --- whitelist examples (uncomment / adapt) --------------------------------
+
+# A documentation example home path you intentionally show in the docs:
+# [[whitelist]]
+# type = "glob"
+# pattern = "/home/alice/*"
+
+# --- private / non-Internet-routable IP ranges ------------------------------
+# If you enable the IP ruleset, you almost certainly want to whitelist these so
+# loopback / private / documentation addresses are not scrubbed. Uncomment as needed.
+#
+# Loopback:
+# [[whitelist]]
+# type = "regex"
+# pattern = "^127\\.(?:\\d{1,3}\\.){2}\\d{1,3}$"
+# [[whitelist]]
+# type = "literal"
+# pattern = "::1"
+#
+# RFC1918 private ranges:
+# [[whitelist]]
+# type = "regex"
+# pattern = "^10\\.(?:\\d{1,3}\\.){2}\\d{1,3}$"
+# [[whitelist]]
+# type = "regex"
+# pattern = "^192\\.168\\.\\d{1,3}\\.\\d{1,3}$"
+# [[whitelist]]
+# type = "regex"
+# pattern = "^172\\.(?:1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}$"
+#
+# Link-local:
+# [[whitelist]]
+# type = "regex"
+# pattern = "^169\\.254\\.\\d{1,3}\\.\\d{1,3}$"
+# [[whitelist]]
+# type = "glob"
+# pattern = "fe80:*"
+#
+# Documentation ranges (RFC5737 / RFC3849):
+# [[whitelist]]
+# type = "regex"
+# pattern = "^(?:192\\.0\\.2|198\\.51\\.100|203\\.0\\.113)\\.\\d{1,3}$"
+# [[whitelist]]
+# type = "glob"
+# pattern = "2001:db8:*"
+
+# --- blacklist example (uncomment / adapt) ---------------------------------
+# An extra needle to always scrub (e.g. an old machine name not auto-detected):
+# [[blacklist]]
+# type = "literal"
+# pattern = "old-build-box"
+# replace = "<host>"
