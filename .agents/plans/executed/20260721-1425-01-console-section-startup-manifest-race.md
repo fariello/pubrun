@@ -4,9 +4,8 @@
 - Concern: bug / robustness (manifest completeness + a resulting CI test flake)
 - Scope: `src/pubrun/writer.py` (startup vs final manifest), `src/pubrun/tracker.py` (finalize/write
   ordering), and the affected test `tests/test_full_mode.py`. No public-API change intended.
-- Status: approved
-- Approval: human-approved 2026-07-21 (maintainer "GO" after /plan-review; executing; matrix-gated
-  before executed/)
+- Status: executed
+- Approval: human-approved 2026-07-21 (maintainer "GO" after /plan-review; executed and matrix-green)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Workflow history
@@ -21,8 +20,16 @@
   PR-002 added a required regression test (new Step 3) for the pending->complete transition; PR-003
   sharpened Step 2 to note the child already calls stop() (so the fix is Step 1's non-empty section,
   not merely reordering the read). All 3 open questions resolved interactively (resolved-mode+pending;
-  add regression test; matrix-gated). Now 5 steps, 1 deferral. Status -> reviewed. Readiness: GO -
+  add regression   test; matrix-gated). Now 5 steps, 1 deferral. Status -> reviewed. Readiness: GO -
   PENDING HUMAN APPROVAL.
+- 2026-07-21 EXECUTED (opencode / its_direct/pt3-claude-opus-4.8-1m-us) after human "GO". Step 1
+  (self-describing startup console) implemented in `tracker.py`; committed `cd32ad4` with the hardened
+  test + regression test (Steps 2-3), docs (Step 5), CHANGELOG; local suite green. First matrix run was
+  20/21: the regression test correctly exposed a DEEPER bug (the async hardware thread clobbering the
+  finalized manifest). Per human "investigate + fix", root-caused and fixed the TOCTOU clobber
+  (`_run_lock` guard + `_finalized`-under-lock), committed `93f9e18`, verified with a forced-race repro.
+  Re-ran the full matrix: 21/21 GREEN (CI + Secret Scan + Dependency Audit) on `93f9e18`. Matrix gate
+  satisfied. Status -> executed; git mv pending/ -> executed/.
 
 ## Goal
 
