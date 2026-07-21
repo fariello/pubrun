@@ -1,7 +1,7 @@
 # Agent Workflows
 
-<!-- WORKFLOWS-VERSION: 1.1.0 -->
-Version: `1.1.0` (source of truth: `.agents/workflows/VERSION`). Scheme:
+<!-- WORKFLOWS-VERSION: 1.2.1 -->
+Version: `1.2.1` (source of truth: `.agents/workflows/VERSION`). Scheme:
 git-tag-driven semantic versioning (baseline `v1.0.0`); `VERSION` is DERIVED from the
 tag, not hand-edited. The installer stamps this into each target so `/list-workflows`
 and `setup-repo` can report the installed version.
@@ -70,6 +70,7 @@ focusing on different concerns; leave it `-` when not used.
 | assess-compliance-readiness | .agents/workflows/assess/assess.md | .agents/workflows/assess/lenses/compliance-readiness.md | Assess readiness for a formal regime (FIPS / NIST 800-171 / CMMC L2, parameterized) - repo-slice only, not a certification - and propose an IPD. |
 | assess-generalization | .agents/workflows/assess/assess.md | .agents/workflows/assess/lenses/generalization.md | Assess generalization/extensibility/configurability (productization for reuse across orgs/tenants/deployments) and propose an IPD. |
 | assess-secrets | .agents/workflows/assess/assess.md | .agents/workflows/assess/lenses/secrets.md | Scan the working tree and git history for committed secrets/keys/PII/PHI (via tools/scan_secrets.py, read-only, redacted) and propose a rotate-first remediation IPD. |
+| assess-local-leaks | .agents/workflows/assess/assess.md | .agents/workflows/assess/lenses/local-leaks.md | Detect maintainer/machine identifying info that must not be in a public artifact (home paths, usernames, other local accounts, private repo names, hostnames, session ids) across the working tree, git history, and the built wheel (via `aw check-local-leaks`); enumerate emails/usernames and ask which are intended-public; propose a scrub/allowlist IPD. The class ordinary secret scanners miss (D92/D93). |
 | assess-prose | .agents/workflows/assess/assess.md | .agents/workflows/assess/lenses/prose.md | Assess prose quality/style across ALL prose (docs, comments/docstrings, UI strings, error/help/CLI text, commit messages) against the distilled nonfiction style guide - quiet force, no mechanical fingerprints, modifier restraint, no em dashes. IPD by default; supports an optional author-in-the-loop interactive mode. |
 | advise | .agents/workflows/advise/advise.md | - | Interrogate and coach: an expert persona examines the current context or a named artifact (spec/plan/design/decision), asks probing questions, surfaces gaps and assumptions, and coaches the author. `/advise <persona> [artifact]` (e.g. `/advise skeptic`, `/advise spec-editor plan.md`); bare `/advise` lists personas and asks. Interactive; edits planning/prose only with per-change consent; never runs code. The `advise-<persona>` rows below are the persona catalog, not separate commands. |
 | advise-skeptic | .agents/workflows/advise/advise.md | .agents/workflows/advise/personas/skeptic.md | The "grill me": assume the artifact is flawed; interrogate assumptions, missing cases, and unstated risks. |
@@ -199,14 +200,14 @@ for the full catalog rather than duplicating it or the README.
   sibling (`../release-review/...`).
 - The installer copies these workflows into a target repository, generates the
   per-tool command shims from this manifest (passing the `lens` to shared-body
-  commands), and adds a one-line pointer to `AGENTS.md`. See
-  `install-workflows.py`.
+  commands), and adds a one-line pointer to `AGENTS.md`. See the `aw install` CLI
+  (`agent_workflows/engine.py`).
 - **Parameterized command surface (assess and advise):** the single `assess` and `advise`
   rows each generate one parameterized command (`/assess <concern>`, `/advise <persona>`).
   The `assess-<concern>` and `advise-<persona>` rows are the **catalog** (the source of
   truth for each concern's lens / each persona's charter); the installer does NOT generate
   a shim per catalog row (`is_concern_catalog_row` / `CATALOG_ROW_PREFIXES` in
-  `install-workflows.py`). Re-running the installer on an older install prunes retired
+  `agent_workflows/engine.py`). Re-running the installer on an older install prunes retired
   per-item shims automatically. The run-record directory conventions remain
   `workflow-artifacts/assess-<concern>/<RUN_ID>/` and
   `workflow-artifacts/advise-<persona>/<RUN_ID>/`.
