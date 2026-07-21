@@ -26,6 +26,62 @@ one-time cleanup of the current tree so the guard does not immediately block ord
 "going-forward guard" (Step 6) of the history-scrub IPD, promoted to its own plan. Rationale is purely
 technical: hygiene, recurrence prevention, and reviewer-facing polish.
 
+## Why (rationale, for a cold reader)
+
+The reasoning behind the specific design choices, so an executor need not reconstruct it:
+
+- **Why a guard at all, separate from the history rewrite.** The history-scrub IPD removes existing
+  leaks but does nothing to stop the NEXT one. Absolute developer paths recur naturally: agent tools
+  and IDEs paste `file:///home/<user>/...` links into plan/doc Markdown, tracebacks and test fixtures
+  embed absolute paths, and benchmark/capture output records the host. Without a standing guard the
+  tree re-accumulates exactly what the rewrite just removed. A guard is the durable half of the fix; the
+  rewrite is the one-time half.
+- **Why block, not auto-rewrite, in the commit hook.** A hook that silently mutates staged source is
+  genuinely risky: an absolute path can be MEANINGFUL inside code or a test (a fixture, an expected
+  output assertion, a config default). Rewriting it under the author can silently change behavior and
+  turn tests red after the commit lands, and it surprises the author by editing files out from under
+  them. The safe, conventional choice (this is how the existing gitleaks hook behaves) is detect and
+  reject, with the author making the edit. Convenience is provided instead by an explicit, opt-in CLI
+  fixer (`--fix`) the author runs deliberately, plus `--dry-run` to preview.
+- **Why anchor rules on the `/home/<user>` PREFIX, never the bare username token.** The maintainer's
+  username also legitimately appears as the author name and the published author email in
+  `pyproject.toml` and `CITATION.cff`. Those are intentional, public identity and MUST be preserved;
+  scrubbing them would corrupt package metadata and is self-defeating (the identity is public by
+  design). Anchoring every rule on the `/home/<user>` path prefix means the rules match filesystem
+  paths only and never touch the name or email. This is a hard invariant, not a nicety.
+- **Why one anchored path rule instead of enumerating project names.** The leaked paths include not
+  just this repo but a virtualenv tree and the directories of two OTHER, unrelated projects (one
+  private, one public) that happen to live under the same home. A single `/home/<user>` -> `~` rule
+  scrubs all of them, plus anything future, in one deterministic pass, WITHOUT naming any project in a
+  committed file (which would itself be a small leak). `home-any` (`/home/<anyuser>/`) extends the same
+  logic to contributor paths.
+- **Why the IP ruleset is config-gated OFF by default.** IPv4/IPv6 regexes false-positive heavily on
+  ordinary content: version numbers (`1.2.3.4`), benchmark timings (this repo's `pass_results` are full
+  of decimal sequences), hashes, dependency pins, and `::` in code. An always-on IP `--check` would
+  block nearly every commit and make the hook be disabled in frustration, defeating the whole guard.
+  Shipping it available-but-off, with a whitelist that pre-covers private and documentation ranges, is
+  what keeps the guard usable while still offering IP scrubbing to those who want it.
+- **Why the one-time tree sweep must ship WITH the hook.** ~35 tracked files currently contain
+  `/home/<user>/` paths. If the hook were added without first cleaning them, the author's very next
+  commit touching any of those files would be blocked, so the guard would arrive broken. Cleaning the
+  tree and enabling the guard are one coherent change.
+- **Why a consolidated end-of-run summary rather than per-hit messages.** Per-line output on a
+  multi-file scan is noise; a single grouped summary with a one-time "how to allow/block" footer is what
+  a developer can actually act on, and it keeps CI logs readable.
+- **Why stdlib-only.** pubrun is a zero-runtime-dependency library; a hygiene tool that dragged in a
+  dependency would contradict the project's own defining constraint. `re`, `ipaddress`, `socket`,
+  `pathlib`, `tomllib`/`tomli`, and `argparse` cover everything needed.
+
+## Portability note (upstream candidate for agent-workflows)
+
+Nothing in this design is pubrun-specific except a couple of defaults. The same script + hook + CI check
++ example-config pattern is useful in ANY repository (absolute home paths and hostnames in committed
+files are a near-universal hygiene issue, especially in agent-assisted repos where tools paste
+`file:///home/...` links). This IPD was accompanied by a message to the `agent-workflows` project
+proposing that an equivalent be offered as an OPTIONAL component of `setup-repo` / the installer. If
+agent-workflows ships a canonical version, pubrun should prefer adopting/tracking that over maintaining
+a private fork, keeping only local config in `.sanitize-local.toml`.
+
 ## Project conventions discovered (Step 0)
 
 - Stack: zero-runtime-dependency Python library; the sanitizer MUST be stdlib-only to match that ethos.
@@ -82,6 +138,35 @@ Collect all findings across all scanned files, then emit ONE summary at the end:
 with `file:line` and the matched CATEGORY (never the raw secret in CI logs where possible). End with a
 SINGLE footer: how to whitelist (add to `.sanitize-local.toml`), how to blacklist, and how to run the
 fixer. No per-hit spam.
+
+### Implementation details (implicit decisions, made explicit)
+
+- **Hostname detection specifics:** derive up to three needles at runtime and match any: the FQDN
+  (`socket.getfqdn()`), the node name (`socket.gethostname()`), and the SHORT label (everything before
+  the first `.` of either). Matching both FQDN and short label is deliberate: capture output may embed
+  either form. All are auto-detected, never written into a tracked file. In CI the runner's hostname
+  differs from a dev machine, so the hostname rule is effectively inert there (by design; home-path
+  rules still run, and the benchmark harness already SHA-tokenizes the hostname in redacted output).
+- **How `--check` reads content:** default target is the STAGED blob content (what will actually be
+  committed), obtained via `git diff --cached` / `git show :<path>`, not the working-tree file, so the
+  guard judges exactly what is being committed. `--all` scans all tracked files (for the CI backstop and
+  ad-hoc audits). Explicit `[files ...]` overrides both.
+- **Exit-code semantics:** `--check` exits `0` when clean, non-zero when any un-whitelisted needle is
+  found (so it works as a pre-commit and CI gate). `--fix` exits `0` after rewriting (and, in hook
+  context, re-stages the fixed files); `--dry-run` always exits `0` and only prints proposed diffs.
+- **Config schema (`.sanitize-local.toml`):** stdlib TOML (`tomllib` on 3.11+, `tomli` fallback,
+  matching pubrun's existing dependency shape). Shape (illustrative, no literals):
+  `[rules] enabled = ["home-user","home-any","hostname"]`; `[ip] enabled = false`;
+  `[[whitelist]] type = "glob"|"regex"|"literal"; pattern = "..."`; `[[blacklist]] type = ...; pattern
+  = ...; replace = "..."`. Whitelist entries suppress a match; blacklist entries add always-scrub
+  needles with an optional per-entry replacement. Missing config = defaults (home rules + hostname on,
+  IP off, empty allow/block lists).
+- **Replacement safety:** replacements are literal-string substitutions on a matched span, not
+  free-form regex backrefs in the default rules, to avoid accidental broadening. Custom `--match`/
+  `--replace` allows backrefs for power users, explicitly opt-in per run.
+- **Ordering vs. other hooks:** place the `--check` hook AFTER the whitespace/EOF fixers and gitleaks in
+  `.pre-commit-config.yaml` so it evaluates the final staged bytes; it is independent of gitleaks (which
+  targets secrets, not hygiene paths) and complements it.
 
 ## Findings (drivers)
 
