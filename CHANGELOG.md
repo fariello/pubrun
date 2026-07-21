@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Path/hostname/IP sanitizer with a pre-commit hook and CI check
+  (`scripts/sanitize_paths.py`).** A stdlib-only guard that blocks commits containing
+  absolute home-directory paths (`/home/<user>/...`), the machine hostname, and
+  (opt-in) IP addresses, so machine-specific strings do not leak into the repo. It has
+  a `--check` mode (block, used by the pre-commit hook and a CI step in the secret-scan
+  workflow) and a `--fix` mode (rewrite on demand), with `--scrub`/`--match`/`--replace`/
+  `--dry-run`. Rules anchor on the home-path prefix, so author name and email are never
+  touched. Allow/block lists live in a tracked baseline `.sanitize-allow.toml` (generic
+  test placeholders) unioned with a gitignored `.sanitize-local.toml`
+  (`.sanitize-local.toml.example` documents the schema, including commented private and
+  documentation IP ranges). A one-time sweep replaced existing absolute home paths in
+  tracked files with `~` (docs and plans only; no behavior change).
+
 ### Documentation
 - **Reframed the README lead to the trustworthy-ML register (no behavior change).** The opening now
   leads with what pubrun does — reproducible, auditable runs via automatic provenance, environment
