@@ -110,3 +110,8 @@ opencode-recovery/
 .agents/prompts/**/*-ses_*.restart.md
 .agents/prompts/**/*-ses_*.transcript.md
 .agents/prompts/**/*-ses_*.prompt.md
+
+# Local machine-specific config for scripts/sanitize_paths.py (may contain a real
+# hostname / home path / IP in its allow/block lists). The tracked template is
+# .sanitize-local.toml.example.
+.sanitize-local.toml
