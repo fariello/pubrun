@@ -2,15 +2,15 @@
 
 # pubrun
 
-> **Reproducible runs — know exactly what any run did, and compare any two of them: automatic provenance and environment capture, from a single `import pubrun`.**
+> **Reproducible runs: know exactly what any run did, and compare any two of them. Automatic provenance and environment capture, from a single `import pubrun`.**
 
-`pubrun` is the reproducibility and provenance component you drop into any Python run — a one-off script, a nightly job, a data pipeline, or a step in a larger ML or scientific workflow. With one `import pubrun` — no config, no infrastructure, no framework — it captures the full **provenance** of a run (a complete record of how it happened: code version, dependency graph, hardware, environment, inputs, logs, exit status, resource usage) into a structured `manifest.json`, then lets you diff any two runs to see exactly what changed. Zero runtime dependencies[^1], non-intrusive ([it never alters, slows, or crashes your program](https://github.com/fariello/pubrun/blob/main/docs/performance.md)), and it scales from a laptop to a thousand-node cluster.
+`pubrun` is the reproducibility and provenance component you drop into any Python run: a one-off script, a nightly job, a data pipeline, or a step in a larger ML or scientific workflow. With one `import pubrun` (no config, no infrastructure, no framework) it captures the full **provenance** of a run (a complete record of how it happened: code version, dependency graph, hardware, environment, inputs, logs, exit status, resource usage) into a structured `manifest.json`, then lets you diff any two runs to see exactly what changed. Zero runtime dependencies[^1], non-intrusive ([it never alters, slows, or crashes your program](https://github.com/fariello/pubrun/blob/main/docs/performance.md)), and it scales from a laptop to a thousand-node cluster.
 
-pubrun does one thing well: it makes runs trustworthy. It is **not** an orchestrator, scheduler, or serving platform — it is the provenance layer you use *inside* your pipeline, alongside whatever runs it.
+pubrun does one thing well: it makes runs trustworthy. It is **not** an orchestrator, scheduler, or serving platform. It is the provenance layer you use *inside* your pipeline, alongside whatever runs it.
 
-It grew up in scientific and ML workflows, but it is useful for **any** run you would ever want to reproduce, compare, or explain — from a 20-line script to a thousand-node cluster.
+It grew up in scientific and ML workflows, but it is useful for **any** run you would ever want to reproduce, compare, or explain, from a 20-line script to a thousand-node cluster.
 
-[^1]: On Python 3.11+, pubrun uses only the standard library. On Python 3.8–3.10, the sole runtime dependency is `tomli` (a backport of the standard-library `tomllib`).
+[^1]: On Python 3.11+, pubrun uses only the standard library. On Python 3.8-3.10, the sole runtime dependency is `tomli` (a backport of the standard-library `tomllib`).
 
 ## Installation
 
@@ -20,7 +20,7 @@ Available on [PyPI](https://pypi.org/project/pubrun/):
 pip install pubrun
 ```
 
-On Python 3.8–3.10, this also installs `tomli` (a backport of the standard-library `tomllib`). On Python 3.11+, there are zero runtime dependencies.
+On Python 3.8-3.10, this also installs `tomli` (a backport of the standard-library `tomllib`). On Python 3.11+, there are zero runtime dependencies.
 
 ## Quick Start
 
@@ -39,33 +39,53 @@ When the script exits, `pubrun` silently writes a structured, lightweight **mani
 
 See [CLI Reference](https://github.com/fariello/pubrun/blob/main/docs/cli.md) and [API Reference](https://github.com/fariello/pubrun/blob/main/docs/api.md) for full details.
 
+## Is pubrun for me?
+
+Almost certainly yes, if you run Python and would ever want to reproduce, compare, or explain a run:
+
+- **New here, or running an everyday script, data job, or scraper?** See [why pubrun helps a plain script or data job](https://github.com/fariello/pubrun/blob/main/docs/research-use.md), then try the worked example below.
+- **Running HPC array jobs, large pipelines, or ML training and evaluation?** See [using pubrun at scale and in ML/scientific pipelines](https://github.com/fariello/pubrun/blob/main/docs/hpc.md).
+
+### Examples
+
+The [`examples/`](https://github.com/fariello/pubrun/tree/main/examples) directory has runnable scripts, from trivial to real, so you can find your own use and climb from there:
+
+- **A trivial script:** [`examples/01_minimal_start_stop.py`](https://github.com/fariello/pubrun/blob/main/examples/01_minimal_start_stop.py) (add provenance to any script in one import).
+- **A data or analysis run:** [`examples/minimal-research-workflow/`](https://github.com/fariello/pubrun/tree/main/examples/minimal-research-workflow) (a full round trip on synthetic data: run, inspect, diff two runs, extract a rerun command).
+- **Recording inputs and outputs** (ETL, scrapers, file-producing jobs): [`examples/07_file_capture.py`](https://github.com/fariello/pubrun/blob/main/examples/07_file_capture.py).
+- **Comparing two runs:** [`examples/08_diff_engine.py`](https://github.com/fariello/pubrun/blob/main/examples/08_diff_engine.py).
+- **An HPC array job:** no dedicated worked example yet; see [HPC](https://github.com/fariello/pubrun/blob/main/docs/hpc.md) for the parent-child `PUBRUN_META_REF` pattern.
+- **An ML training and evaluation run:** no dedicated worked example yet; the pattern is the same one import, plus the deep-dive links above.
+
+See [`examples/`](https://github.com/fariello/pubrun/tree/main/examples) for the full set (`00_*` through `11_*`, plus a `verify_all.py` harness).
+
 ## Features
 
-- **Automatic Provenance Capture** — Records code version (git), the dependency graph, hardware specs, environment, inputs, logs, exit status, and resource usage into a structured, **schema-validated** `manifest.json` — without manual configuration.
-- **Run-to-Run Comparison** — Semantically diffs two runs (`pubrun diff`, at basic / standard / deep depth) so you can see exactly what changed between them.
-- **Codebase Drift Detection** — Compares the current code state against a run's snapshot to highlight changes.
-- **Reproduce a Run** — Extracts the initialization commands needed to replicate a run's environment (`pubrun rerun`).
-- **Secret Redaction** — Automatically detects and redacts passwords, tokens, and API keys in environment variables and CLI arguments *before* the manifest is written.
-- **Scales from Laptop to Cluster** — Keeps provenance cheap across thousands of jobs on an HPC cluster: instead of each job re-recording the shared environment, jobs reference one parent snapshot. (See [HPC](https://github.com/fariello/pubrun/blob/main/docs/hpc.md) for `PUBRUN_META_REF` and the mechanics.)
-- **Publication-Ready Methods** — Optionally generates LaTeX/Markdown methodology blocks from a run (`pubrun methods`), handy when a run needs to become a paper's Methods section.
+- **Automatic Provenance Capture**: Records code version (git), the dependency graph, hardware specs, environment, inputs, logs, exit status, and resource usage into a structured, **schema-validated** `manifest.json`, without manual configuration.
+- **Run-to-Run Comparison**: Semantically diffs two runs (`pubrun diff`, at basic / standard / deep depth) so you can see exactly what changed between them.
+- **Codebase Drift Detection**: Compares the current code state against a run's snapshot to highlight changes.
+- **Reproduce a Run**: Extracts the initialization commands needed to replicate a run's environment (`pubrun rerun`).
+- **Secret Redaction**: Automatically detects and redacts passwords, tokens, and API keys in environment variables and CLI arguments *before* the manifest is written.
+- **Scales from Laptop to Cluster**: Keeps provenance cheap across thousands of jobs on an HPC cluster: instead of each job re-recording the shared environment, jobs reference one parent snapshot. (See [HPC](https://github.com/fariello/pubrun/blob/main/docs/hpc.md) for `PUBRUN_META_REF` and the mechanics.)
+- **Publication-Ready Methods**: Optionally generates LaTeX/Markdown methodology blocks from a run (`pubrun methods`), handy when a run needs to become a paper's Methods section.
 
 ## The Problem
 
-Real runs depend on implicit state — the exact code, dependency versions, hardware, and environment that produced a result. Six months later, when a nightly job starts failing, or you need to know which version of your script produced last quarter's output, or you're comparing two runs to explain why the numbers moved (or shipping a model with confidence), that context has usually evaporated and has to be reconstructed from memory.
+Real runs depend on implicit state: the exact code, dependency versions, hardware, and environment that produced a result. Six months later, when a nightly job starts failing, or you need to know which version of your script produced last quarter's output, or you're comparing two runs to explain why the numbers moved (or shipping a model with confidence), that context has usually evaporated and has to be reconstructed from memory.
 
 ## The Solution
 
 `pubrun` removes that friction by capturing the state automatically and making it comparable.
 
-With a single `import pubrun`, the library quietly traces your run, records the code version and dependency graph, captures hardware and environment, detects codebase drift, and writes it all to a schema-validated manifest — so any run is immediately auditable, reproducible, and diffable against another. (Need a paper's Methods section from a run? `pubrun methods` will render one.)
+With a single `import pubrun`, the library quietly traces your run, records the code version and dependency graph, captures hardware and environment, detects codebase drift, and writes it all to a schema-validated manifest, so any run is immediately auditable, reproducible, and diffable against another. (Need a paper's Methods section from a run? `pubrun methods` will render one.)
 
 ## Built to be Trustworthy
 
 Provenance tooling is only as trustworthy as its own engineering, so pubrun holds itself to the same bar:
 
-- **Tested on every supported platform** — continuous integration runs the suite across Linux, macOS, and Windows on Python 3.8 through 3.14.
-- **The manifest has a published contract** — its shape is defined by a JSON Schema (`schemas/manifest.schema.json`) that a conformance test enforces, so downstream tooling can rely on the format.
-- **Zero runtime dependencies** on Python 3.11+ (a single `tomli` backport on 3.8–3.10), and non-intrusive by design — it never alters, slows, or crashes the program it observes.
+- **Tested on every supported platform**: continuous integration runs the suite across Linux, macOS, and Windows on Python 3.8 through 3.14.
+- **The manifest has a published contract**: its shape is defined by a JSON Schema (`schemas/manifest.schema.json`) that a conformance test enforces, so downstream tooling can rely on the format.
+- **Zero runtime dependencies** on Python 3.11+ (a single `tomli` backport on 3.8-3.10), and non-intrusive by design: it never alters, slows, or crashes the program it observes.
 - **A real changelog** and honest-documentation discipline: every capability claimed here is checkable against the code.
 
 ### Import Modes
@@ -83,7 +103,7 @@ import pubrun.minimal as pubrun   # API only; no auto-start; all monkeypatches a
 
 > **Not wrapping console streams?** In `noconsole`/`nopatch`/`minimal` (and by default in
 > any mode, since `capture_mode` is `"off"`), pubrun does not tee stdout/stderr. To still
-> record output, use `pubrun.print(...)` — a drop-in `print` replacement that writes to
+> record output, use `pubrun.print(...)`, a drop-in `print` replacement that writes to
 > the run's `stdout.log` **without** monkeypatching your streams. The import mode is
 > chosen once per process (first import wins); a mode that forbids console wrapping
 > (`noconsole`/`nopatch`/`minimal`) cannot be re-enabled later via `start(console=...)`.
@@ -91,7 +111,7 @@ import pubrun.minimal as pubrun   # API only; no auto-start; all monkeypatches a
 > Access it via the top-level package (`import pubrun; pubrun.print(...)`).
 
 > **Silence a noisy block?** Wrap it in `with pubrun.paused(): ...` to suspend
-> *recording* for that block — output still prints and subprocesses still run,
+> *recording* for that block. Output still prints and subprocesses still run,
 > but the console tee and subprocess spy don't record them. It's thread-local
 > (other threads keep being captured), nestable, and resumes automatically even
 > on exception. Your `annotate()`/`phase()` markers and resource sampling are not
@@ -118,14 +138,14 @@ actually *active* is a separate, per-feature config decision (see the footnotes)
   `[console].capture_mode` is set to `"basic"`/`"standard"`/`"deep"` (default `"off"`).
   `nopatch`/`noconsole`/`minimal` forbid it regardless of `capture_mode`. **`full`
   forces it on** regardless of `capture_mode` (still subject to the Jupyter/non-TTY
-  guards) — the mirror of how `noconsole` forces it off.
+  guards), the mirror of how `noconsole` forces it off.
 - **Subprocess interception** is permitted in `auto`/`full`/`noauto`/`noconsole` and is
   **on by default** there (`[capture.subprocesses].enabled` defaults `true`); disable it
   via that key. **Signal/exit capture** is likewise on by default where permitted
   (`[capture.signals].enabled` defaults `true`).
 - **Background resource monitoring is NOT gated by import mode.** It samples in every
   mode whenever a run is active and `[capture.resources].depth != "off"` (default
-  `"standard"`) — even in `nopatch` and `minimal` once `start()` has been called.
+  `"standard"`), even in `nopatch` and `minimal` once `start()` has been called.
 - **Import mode is an absolute imperative.** An in-code `import pubrun.<mode>` overrides
   what any environment variable or config file says about scope/hooks (e.g. `full`
   forces console on even if config sets `capture_mode = "off"`; `noconsole` forces it
@@ -178,9 +198,9 @@ pubrun methods --format latex
 
 The `pubrun` CLI (and its convenient shorthand alias `pbr`) provides a family of subcommands and diagnostic flags, all designed to work equally well on a developer laptop or across a Slurm array of thousands of HPC jobs. The most common are covered below; run `pubrun -h` for the full list and see the [CLI Reference](https://github.com/fariello/pubrun/blob/main/docs/cli.md) for exhaustive detail.
 
-**Selecting a run.** Any command that takes a run accepts a **recency index** (`1` = most recent run, `2` = second most recent, …), a run-id prefix, or a directory path — e.g. `pubrun show 1`, `pubrun res 2`, `pubrun diff 1 2`. `pubrun status` prints the index in a leading `#` column.
+**Selecting a run.** Any command that takes a run accepts a **recency index** (`1` = most recent run, `2` = second most recent, and so on), a run-id prefix, or a directory path, e.g. `pubrun show 1`, `pubrun res 2`, `pubrun diff 1 2`. `pubrun status` prints the index in a leading `#` column.
 
-**Output conventions.** Status lines use consistent, `NO_COLOR`-aware prefixes — `[INFO ]`, `[ OK  ]`, `[WARN ]`, `[ERROR]`, `[DEBUG]` — so output is easy to scan and grep (match on the level word, not the brackets).
+**Output conventions.** Status lines use consistent, `NO_COLOR`-aware prefixes (`[INFO ]`, `[ OK  ]`, `[WARN ]`, `[ERROR]`, `[DEBUG]`) so output is easy to scan and grep (match on the level word, not the brackets).
 
 ### `pubrun init`
 Initialize pubrun in the current project (writes a commented `.pubrun.toml`) and prints getting-started guidance.
@@ -218,7 +238,7 @@ pubrun inspect [RUN_DIR] [--show-suggestions]
 ```
 
 ### `pubrun bench`
-Run the pubrun overhead benchmark suite (auto-detects an HPC scheduler — Slurm/PBS/LSF/SGE — and offers to submit to a compute node). Every run starts with an uncaptured **baseline pass** (pubrun absent), then N measured passes: `--quick` (2×15), `--full`/default (3×30), or `--rigorous` (5×50). After a local run, offers to contribute the redacted result. Requires a source checkout.
+Run the pubrun overhead benchmark suite (auto-detects an HPC scheduler, Slurm/PBS/LSF/SGE, and offers to submit to a compute node). Every run starts with an uncaptured **baseline pass** (pubrun absent), then N measured passes: `--quick` (2×15), `--full`/default (3×30), or `--rigorous` (5×50). After a local run, offers to contribute the redacted result. Requires a source checkout.
 ```bash
 pubrun bench                        # default: baseline + 3 passes x 30 iterations
 pubrun bench --quick                # baseline + 2 x 15
@@ -282,7 +302,7 @@ pubrun rerun ./runs/pubrun-A
 ```
 
 ### `pubrun res` / `pubrun cpu` / `pubrun mem`
-Render resource-utilization charts over a run's lifecycle: `res` shows the comprehensive picture — **peak/avg/min** for CPU and memory (main process, and the process tree when captured), plus system memory/load/iowait and per-process I/O — while `cpu` and `mem` show a single focused chart. (`resources` remains as a backward-compatible alias of `res`.)
+Render resource-utilization charts over a run's lifecycle: `res` shows the comprehensive picture (**peak/avg/min** for CPU and memory for the main process, and the process tree when captured, plus system memory/load/iowait and per-process I/O), while `cpu` and `mem` show a single focused chart. (`resources` remains as a backward-compatible alias of `res`.)
 ```bash
 pubrun res [RUN_DIR]
 pubrun cpu [RUN_DIR]
@@ -351,7 +371,7 @@ If a process is killed (`SIGKILL`, OOM, power loss), the lock file persists. `pu
 
 ### Signal and Exit Code Capture
 
-`pubrun` installs non-intrusive signal handlers that record OS signals (`SIGINT`, `SIGTERM`, `SIGHUP`, etc.) received during execution. These handlers **chain to any pre-existing handlers** — if the importing script has its own `SIGINT` handler, it is called normally after `pubrun` records the signal.
+`pubrun` installs non-intrusive signal handlers that record OS signals (`SIGINT`, `SIGTERM`, `SIGHUP`, etc.) received during execution. These handlers **chain to any pre-existing handlers**: if the importing script has its own `SIGINT` handler, it is called normally after `pubrun` records the signal.
 
 The process exit code is also captured at finalization. All signal and exit data appears in the `"signals"` section of the manifest:
 
@@ -404,7 +424,7 @@ also compares script timestamps against the parent snapshot and warns you if **e
 drift** has been detected.
 
 To actually reduce per-child overhead (so children don't each re-capture the identical
-hardware/dependency graph), suppress the heavy engines on the child — e.g. run with
+hardware/dependency graph), suppress the heavy engines on the child, e.g. run with
 `capture.hardware.depth = "off"` and `capture.packages.mode = "off"` in `.pubrun.toml` (or the
 equivalent `pubrun.start(capture=...)` overrides). Hydration then fills those suppressed
 sections back in from the parent snapshot at report time. Note that the `core.profile` setting
@@ -416,11 +436,11 @@ alone does **not** suppress capture; use the explicit `capture.*` keys.
 
 `pubrun` supports a hierarchical configuration system (highest to lowest precedence):
 
-1. **API overrides** — `pubrun.start(output_dir="./runs")`
-2. **Environment variables** — `PUBRUN_AUTO_START=false`
-3. **Local project config** — `.pubrun.toml` or `.config/pubrun/config.toml`
-4. **User home config** — `~/.config/pubrun/config.toml`
-5. **Built-in defaults** — `default.toml` (shipped with the library)
+1. **API overrides**: `pubrun.start(output_dir="./runs")`
+2. **Environment variables**: `PUBRUN_AUTO_START=false`
+3. **Local project config**: `.pubrun.toml` or `.config/pubrun/config.toml`
+4. **User home config**: `~/.config/pubrun/config.toml`
+5. **Built-in defaults**: `default.toml` (shipped with the library)
 
 ### Generate a Configuration File
 ```bash
@@ -433,7 +453,7 @@ See [Configuration Reference](https://github.com/fariello/pubrun/blob/main/docs/
 
 ## Security & Redaction
 
-`pubrun` automatically detects and redacts sensitive values (passwords, tokens, API keys, credentials) in both environment variables and CLI arguments before writing them to the manifest. Redaction is **destructive by default** — raw values are replaced with `{"representation": "redacted"}`, and no hashes are generated, to prevent brute-force attacks.
+`pubrun` automatically detects and redacts sensitive values (passwords, tokens, API keys, credentials) in both environment variables and CLI arguments before writing them to the manifest. Redaction is **destructive by default**: raw values are replaced with `{"representation": "redacted"}`, and no hashes are generated, to prevent brute-force attacks.
 
 Both environment variable and argv redaction are independently configurable:
 
@@ -451,10 +471,10 @@ See [Configuration Reference](https://github.com/fariello/pubrun/blob/main/docs/
 
 ### Future
 
-1. **Sphinx / MkDocs integration** — Generate hosted API documentation from docstrings.
-2. **Plugin / extension model** — Formal extension points for custom capture engines.
-3. **Artifact registration API** — `register_artifact()` for tracking user-produced output files.
-4. **Custom metadata API** — `register_metadata()` for injecting structured data into the manifest.
+1. **Sphinx / MkDocs integration**: Generate hosted API documentation from docstrings.
+2. **Plugin / extension model**: Formal extension points for custom capture engines.
+3. **Artifact registration API**: `register_artifact()` for tracking user-produced output files.
+4. **Custom metadata API**: `register_metadata()` for injecting structured data into the manifest.
 
 Recently shipped (see the [Changelog](https://github.com/fariello/pubrun/blob/main/CHANGELOG.md)): GitHub Actions CI, timestamped console capture, the `pubrun combined` log interleaver, `self-check`/`inspect` diagnostics, and the `pubrun bench` benchmark suite.
 
@@ -477,7 +497,7 @@ concept DOI, then add a "Cite this DOI" Zenodo badge. -->
 The DOI is archived via [Zenodo](https://zenodo.org/); citing the **concept DOI**
 (`10.5281/zenodo.PENDING`, above) always resolves to the latest archived version. This
 citation will be updated to a peer-reviewed reference only *if and when* a journal article
-(e.g. JOSS) is actually accepted — pubrun does not yet have one, and this section will not
+(e.g. JOSS) is actually accepted; pubrun does not yet have one, and this section will not
 imply otherwise. See the consolidated **License, Attribution & Citation** section below for
 the required attribution.
 
@@ -485,7 +505,7 @@ the required attribution.
 
 ## About the name
 
-"pubrun" is short for *publication-ready runner*. The name also winks at the original pitch — let your code monitor itself and write its own Methods section while you step out to the pub — which is where the project's character (and its `pub`-flavored aliases) comes from.
+"pubrun" is short for *publication-ready runner*. The name also winks at the original pitch (let your code monitor itself and write its own Methods section while you step out to the pub), which is where the project's character (and its `pub`-flavored aliases) comes from.
 
 ## Acknowledgements
 
@@ -493,7 +513,7 @@ the required attribution.
 
 ## License & Attribution
 
-`pubrun` is licensed under the **Apache License 2.0**. Copyright 2007–2026 Gabriele G. R.
+`pubrun` is licensed under the **Apache License 2.0**. Copyright 2007-2026 Gabriele G. R.
 Fariello. See the [LICENSE](https://github.com/fariello/pubrun/blob/main/LICENSE) and
 [NOTICE](https://github.com/fariello/pubrun/blob/main/NOTICE) files for full terms.
 

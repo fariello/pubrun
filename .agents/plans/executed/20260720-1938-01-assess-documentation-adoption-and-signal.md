@@ -3,8 +3,8 @@
 - Date: 2026-07-20
 - Concern: documentation (adoption/getting-started clarity + accurate positioning; honest-docs)
 - Scope: `README.md` (bridge links, breadth, examples pointer) and `docs/` (reframe research-use.md and hpc.md as deep pages; add complement-positioning; examples ladder). No source/behavior change. Assess-and-propose only.
-- Status: reviewed
-- Approval: (set when a human approves; omit until then)
+- Status: executed
+- Approval: human-approved 2026-07-21 (maintainer "GO" after light /plan-review; executed)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Workflow history
@@ -19,6 +19,18 @@
   still hold exactly as written. README anchors :9 (component-not-platform) and :11 (breadth) intact, so
   the "Layer 0 already done" premise and the A5 98%-protection gate remain valid. No new findings; no
   edits needed. Verdict unchanged: APPROVE WITH REVISIONS APPLIED. Readiness: GO - PENDING HUMAN APPROVAL.
+- 2026-07-21 EXECUTED (opencode / its_direct/pt3-claude-opus-4.8-1m-us) after human "GO". Step 1: added
+  the README "Is pubrun for me?" bridge section (everyday-script link + HPC/ML deep link). Step 2: added
+  the examples ladder into examples/ (trivial to data to file-capture/ETL to diff to HPC to ML; HPC/ML
+  rungs honestly marked "no dedicated worked example yet"). Step 3: reframed docs/research-use.md to a
+  high-stakes provenance thesis, generalized the adopter line, and REMOVED the unverifiable "over 500
+  downloads" metric (F7). Step 4: reframed docs/hpc.md lead to a laptop-to-cluster thesis + added the
+  canonical "Where pubrun fits (MLflow/Weights and Biases/DVC)" note, cross-linked from research-use.md
+  (OQ5). Step 5: removed ALL em/en dashes from the three touched files (now 0 each). Step 6 guard held.
+  Validation (actual): A5 grep (no MLflow/W&B/DVC in README) clean; A/B grep clean; hype grep clean; all
+  example links resolve; hpc "Where pubrun fits" anchor matches the cross-link slug; nav intact; doc-sync
+  spot-check maps to code. Persona four-tests all PASS. CHANGELOG entry added. Scope fence honored (only
+  README + research-use.md + hpc.md + CHANGELOG). Docs-only, no CI-matrix trigger. Status -> executed.
 
 ## Goal
 
