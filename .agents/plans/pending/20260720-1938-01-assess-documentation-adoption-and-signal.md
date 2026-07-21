@@ -10,6 +10,15 @@
 ## Workflow history
 - 2026-07-20 /assess documentation (opencode / its_direct/pt3-claude-opus-4.8-1m-us): assessed through the "adoption-and-signal documentation strategist" lead-persona pairing (Casual Scientist/Engineer + Senior ML/MLOps Evaluator) layered on the standard documentation lens; proposed 6 changes, deferred 1.
 - 2026-07-20 /plan-review (opencode / its_direct/pt3-claude-opus-4.8-1m-us): APPROVE WITH REVISIONS APPLIED. Re-verified all material claims against code/docs (F1 examples/ unlinked; F2 single HPC deep link; F3 doc leads; F4 zero MLflow/W&B/DVC hits; F5 dash counts re-counted README 41/functional_spec 48; research example test present). Findings PR-001..PR-004 FIXED: added F7 (unverified "over 500 downloads" metric on research-use.md:5 must be verified/qualified/removed), corrected stale dash counts, added Acceptance criteria (A1-A7) incl. the A5 98%-protection hard gate, hardened the gate with an execution contract + scope fence. All 6 open questions resolved interactively. Status -> reviewed. Readiness: GO (pending human approval).
+- 2026-07-21 /plan-review (light re-verify, opencode / its_direct/pt3-claude-opus-4.8-1m-us): re-checked
+  the plan's material claims against CURRENT main after the intervening history-scrub and sanitizer
+  commits landed. NO drift: F1 (README still has no examples/ link), F2 (only the one HPC deep link at
+  README.md:49; research-use reachable only via nav rows :1/:514), F4 (still zero MLflow/W&B/DVC across
+  README+docs), F7 (the "over 500 downloads" + "four to six researchers at URI" line still at
+  research-use.md:5), and F5 dash counts (README 41, functional_spec 48, hpc 7, research-use 1) all
+  still hold exactly as written. README anchors :9 (component-not-platform) and :11 (breadth) intact, so
+  the "Layer 0 already done" premise and the A5 98%-protection gate remain valid. No new findings; no
+  edits needed. Verdict unchanged: APPROVE WITH REVISIONS APPLIED. Readiness: GO - PENDING HUMAN APPROVAL.
 
 ## Goal
 
