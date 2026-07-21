@@ -70,8 +70,9 @@ class Rule:
 class Config:
     enabled: list = field(default_factory=lambda: list(DEFAULT_RULESETS))
     ip_enabled: bool = False
-    whitelist: list = field(default_factory=list)  # list of (kind, pattern)
+    whitelist: list = field(default_factory=list)  # list of (kind, pattern, _)
     blacklist: list = field(default_factory=list)  # list of (kind, pattern, replace)
+    exclude: list = field(default_factory=list)    # list of (kind, pattern, _) - skip file
 
 
 def _entry_list(raw):
@@ -87,19 +88,50 @@ def _entry_list(raw):
 
 
 def load_config(repo_root: Path) -> Config:
+    """Load config from two layers, both optional:
+
+    - `.sanitize-allow.toml` (TRACKED): a committed baseline allow/block list that
+      travels with the repo, so CI (which has no local config) shares the same
+      known-legitimate exceptions, e.g. generic placeholder paths in test fixtures.
+    - `.sanitize-local.toml` (GITIGNORED): machine-specific additions.
+
+    `rules.enabled` / `ip.enabled` from the local file win; whitelist/blacklist entries
+    from both files are merged (allow is a union, which is the safe direction).
+    """
     cfg = Config()
-    path = repo_root / ".sanitize-local.toml"
-    if _toml is None or not path.is_file():
+    if _toml is None:
         return cfg
-    with path.open("rb") as fh:
-        data = _toml.load(fh)
-    rules = data.get("rules", {})
-    if "enabled" in rules:
-        cfg.enabled = list(rules["enabled"])
-    cfg.ip_enabled = bool(data.get("ip", {}).get("enabled", False))
-    cfg.whitelist = _entry_list(data.get("whitelist"))
-    cfg.blacklist = _entry_list(data.get("blacklist"))
+    for name in (".sanitize-allow.toml", ".sanitize-local.toml"):
+        path = repo_root / name
+        if not path.is_file():
+            continue
+        with path.open("rb") as fh:
+            data = _toml.load(fh)
+        rules = data.get("rules", {})
+        if "enabled" in rules:
+            cfg.enabled = list(rules["enabled"])
+        if "ip" in data and "enabled" in data["ip"]:
+            cfg.ip_enabled = bool(data["ip"]["enabled"])
+        cfg.whitelist.extend(_entry_list(data.get("whitelist")))
+        cfg.blacklist.extend(_entry_list(data.get("blacklist")))
+        cfg.exclude.extend(_entry_list(data.get("exclude")))
     return cfg
+
+
+def _path_excluded(path: str, cfg: Config) -> bool:
+    norm = path.replace("\\", "/")
+    for kind, pat, *_ in cfg.exclude:
+        try:
+            if kind == "regex" and re.search(pat, norm):
+                return True
+            if kind == "literal" and pat == norm:
+                return True
+            if kind == "glob" and (fnmatch.fnmatch(norm, pat)
+                                   or fnmatch.fnmatch(norm, "*/" + pat)):
+                return True
+        except re.error:
+            continue
+    return False
 
 
 def _hostname_needles() -> list:
@@ -258,6 +290,8 @@ def main(argv=None) -> int:
     all_findings = []
     fixed_paths = []
     for path in targets:
+        if _path_excluded(path, cfg):
+            continue
         content = read(path)
         if content is None or _looks_binary(content):
             continue

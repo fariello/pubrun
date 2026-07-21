@@ -13,3 +13,16 @@ repos:
     rev: v8.21.2
     hooks:
       - id: gitleaks
+
+  # Local hygiene guard: block absolute home paths / hostname (and, if enabled in
+  # .sanitize-local.toml, IPs) from being committed. Runs after the fixers and gitleaks
+  # so it sees the final staged bytes. See scripts/sanitize_paths.py and
+  # .sanitize-local.toml.example. To auto-fix: python3 scripts/sanitize_paths.py --fix
+  - repo: local
+    hooks:
+      - id: sanitize-paths
+        name: sanitize home paths / hostname / IPs
+        entry: python3 scripts/sanitize_paths.py --check
+        language: system
+        pass_filenames: true
+        require_serial: true
