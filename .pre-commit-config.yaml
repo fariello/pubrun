@@ -26,3 +26,15 @@ repos:
         language: system
         pass_filenames: true
         require_serial: true
+
+      # Post-commit: stamp src/pubrun/COMMIT with the just-made HEAD so the packaged
+      # fallback stays current (pubrun.__commit__ prefers live git in a checkout). Runs
+      # after the commit; the refreshed file rides along with the next commit. Install with
+      # `pre-commit install --hook-type post-commit`.
+      - id: update-commit-file
+        name: stamp src/pubrun/COMMIT with HEAD
+        entry: python3 scripts/update_commit_file.py
+        language: system
+        stages: [post-commit]
+        always_run: true
+        pass_filenames: false

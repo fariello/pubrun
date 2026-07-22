@@ -25,7 +25,12 @@ Install the pre-commit hooks once per clone:
 ```bash
 pip install pre-commit
 pre-commit install
+pre-commit install --hook-type post-commit
 ```
+
+The `post-commit` hook stamps `src/pubrun/COMMIT` with the just-made commit hash, so the
+packaged commit fallback stays current (at runtime `pubrun --version` prefers the live
+`git rev-parse HEAD` in a checkout and uses this file for installed wheels).
 
 One of the hooks (`sanitize-paths`) blocks commits that contain absolute home
 directory paths (`/home/<you>/...`), your machine hostname, and (if you enable it)

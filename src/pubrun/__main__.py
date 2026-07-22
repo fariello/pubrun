@@ -2007,12 +2007,14 @@ def main() -> None:
         description=f"{prog_name}: Zero-dependency execution telemetry and publication engine.",
         epilog=f"Use '{prog_name} <command> --help' for detailed information on a specific command."
     )
+    from pubrun import __commit__ as _commit
+    _commit_line = f" (commit {_commit})" if _commit else ""
     parser.add_argument(
         "--version",
         action="version",
         version=(
-            f"pubrun {__version__}\n"
-            "Based on the original pubrun by Gabriele G. R. Fariello "
+            f"pubrun {__version__}{_commit_line}\n"
+            "Based on the original pubrun by Gabriele Fariello "
             "(https://github.com/fariello/pubrun).\n"
             "Licensed under Apache-2.0; see the NOTICE file for the required attribution."
         ),

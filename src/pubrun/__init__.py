@@ -46,20 +46,44 @@ try:
 except Exception:
     __version__ = "1.0.0"  # fallback for editable installs / dev
 
-try:
-    import importlib.resources as _pkg_resources
-    if sys.version_info >= (3, 9):
-        __commit__ = _pkg_resources.files("pubrun").joinpath("COMMIT").read_text(encoding="utf-8").strip()
-    else:
-        __commit__ = _pkg_resources.read_text("pubrun", "COMMIT").strip()
-except Exception:
-    __commit__ = None
+# Commit hash resolution. A file cannot contain its own commit's hash, so prefer the LIVE
+# HEAD when running from a git checkout (always exact, never one commit behind), and fall
+# back to the packaged COMMIT file for installed wheels (stamped by the post-commit hook and
+# the build). Both paths are best-effort and stdlib-only, preserving the zero-runtime-dep
+# invariant; any failure yields None rather than raising at import time.
+def _resolve_commit():
+    # 1) Live git HEAD from the checkout containing this file (dev / source use).
+    try:
+        import os as _os
+        import subprocess as _sp
+        _repo = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+        _proc = _sp.run(
+            ["git", "-C", _repo, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if _proc.returncode == 0:
+            _head = _proc.stdout.strip()
+            if _head:
+                return _head
+    except Exception:
+        pass
+    # 2) Packaged COMMIT file (installed wheel / no git available).
+    try:
+        import importlib.resources as _pkg_resources
+        if sys.version_info >= (3, 9):
+            return _pkg_resources.files("pubrun").joinpath("COMMIT").read_text(encoding="utf-8").strip()
+        return _pkg_resources.read_text("pubrun", "COMMIT").strip()
+    except Exception:
+        return None
+
+
+__commit__ = _resolve_commit()
 
 # Publication name (matches the author's existing academic publication record so
 # citations aggregate correctly). The full legal name appears in LICENSE/NOTICE.
 __author__ = "Gabriele Fariello"
 __license__ = "Apache-2.0"
-__copyright__ = "Copyright 2007-2026 Gabriele G. R. Fariello"
+__copyright__ = "Copyright 2007-2026 Gabriele Fariello"
 __credit__ = __author__  # backward-compatible alias
 
 __all__ = [

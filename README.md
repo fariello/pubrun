@@ -531,7 +531,7 @@ prominently. Concretely, derived/redistributed works must include the following,
 in the project README (or equivalent top-level documentation) and in any "About"/credits
 screen the software presents:
 
-> Based on the original pubrun by Gabriele G. R. Fariello (https://github.com/fariello/pubrun).
+> Based on the original pubrun by Gabriele Fariello (https://github.com/fariello/pubrun).
 
 For how to cite `pubrun` in academic work, see the [Citation](#citation) section above. The
 attribution and citation requests impose no warranty or liability on the author; the software

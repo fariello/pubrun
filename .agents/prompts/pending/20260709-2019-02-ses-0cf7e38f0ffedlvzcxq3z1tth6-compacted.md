@@ -26,7 +26,7 @@ The project is **`pubrun`**, a zero-runtime-dependency Python execution-provenan
 
 ### 4.1 Strategic Objective
 
-Harden, extend, and document `pubrun` for a v1.4.0 release, while ensuring the library is reliable, honest, and cross-platform correct. The tool's purpose is trustworthy execution provenance for researchers, including HPC/cluster users.
+Harden, extend, and document `pubrun` for a v1.4.0 release and an accompanying paper, while ensuring the library is reliable, honest, and cross-platform correct. The tool's purpose is trustworthy execution provenance for researchers, including HPC/cluster users.
 
 ### 4.2 Guiding Principles
 
@@ -36,7 +36,7 @@ Harden, extend, and document `pubrun` for a v1.4.0 release, while ensuring the l
 - **Honest docs** — no fabricated DOIs/URLs (use clearly-labeled placeholders); no claims a feature works when it doesn't.
 - **Accessibility** — do not rely on ANSI `DIM` (not reliably WCAG 2.1 AA); textual/structural markers are authoritative; color is optional non-DIM reinforcement respecting `NO_COLOR`.
 - **Matrix-validation discipline** (now a standing rule in `AGENTS.md`): changes to cross-platform contracts/shapes (manifest JSON schema, capture output shapes, anything with per-OS/per-Python differences) are NOT "done" on local green — they must pass the full CI matrix. Evidence: CI caught Windows-only and race-condition bugs three-plus times.
-- **Citation name convention:** publication name **"Gabriele Fariello" / "Fariello, G."** for all citation surfaces; full legal **"Gabriele G. R. Fariello"** only for LICENSE/NOTICE/`__copyright__`.
+- **Citation name convention:** publication name **"Gabriele Fariello" / "Fariello, G."** for all citation surfaces; full legal **"Gabriele Fariello"** only for LICENSE/NOTICE/`__copyright__`.
 
 ### 4.3 Design Principles
 

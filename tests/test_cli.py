@@ -77,6 +77,15 @@ class TestCliHelp:
         import re
         assert re.search(r"\d+\.\d+", result.stdout)
 
+    def test_version_includes_commit_when_available(self):
+        # In a git checkout / packaged wheel, --version surfaces the resolved commit hash.
+        from pubrun import __commit__
+        result = run_pubrun("--version")
+        if __commit__:
+            assert f"commit {__commit__}" in result.stdout
+        else:
+            assert "commit " not in result.stdout  # no stray/empty commit marker
+
 
 class TestCliInfo:
 
