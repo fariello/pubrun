@@ -7,8 +7,9 @@
   to a dedicated `benchmark-data` branch and aggregates rebuilt; consolidate intake into the MAIN pubrun
   repo and retire `pubrun-benchmarks` as the primary destination. Phased (see below). Touches
   `pubrun bench` client UX (`src/pubrun/__main__.py`), `.github/`, docs, and repo/branch settings.
-- Status: reviewed
-- Approval: (set when a human approves; omit until then)
+- Status: approved
+- Approval: human-approved 2026-07-21 (maintainer "GO" on the APPROACH; each phase child IPD still
+  separately reviewed + approved per this orchestrator's per-phase gate)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Set: benchmark-intake
 - Order: 0
@@ -240,3 +241,6 @@ orchestrator: approving it is not approving all phases at once. Execution contra
   `Set: benchmark-intake` per plans-README D82. This orchestrator is `Order: 0` and was renamed
   `-2002-01-` to `-2002-00-` so the filename `NN=00`-reserved-for-orchestrator convention holds. The
   three phase child IPDs, when created, will carry `Set: benchmark-intake` with `Order: 1/2/3`.
+- 2026-07-21 approved (human): maintainer approved the APPROACH. Status -> approved; stays in pending/
+  as the umbrella (moves to executed/ only when all phases are done). Per the per-phase gate, the Phase 1
+  child IPD (Order 1) is being drafted next and will be separately reviewed + approved before execution.
