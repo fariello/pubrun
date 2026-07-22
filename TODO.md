@@ -63,6 +63,29 @@ Constraints/notes: keep the schema versioned (bump it), keep the local full resu
 SUBMITTED/redacted artifact must fit GH), and update `pubrun bench`'s submit guidance + any size check.
 Cross-ref the bench command in `src/pubrun/__main__.py` and the schema in the bench tooling.
 
+### Full repo-wide em/en-dash sweep
+
+`AGENTS.md` forbids em/en dashes in authored Markdown, but many docs and CHANGELOG entries predate that
+rule and still contain them (CHANGELOG alone has roughly 50 dash lines; several `docs/*.md` files too).
+The README, `docs/research-use.md`, and `docs/hpc.md` were cleaned as part of executed IPDs, but a
+repo-wide sweep is still outstanding, ideally with a scripted, reviewable transform plus a follow-up
+grep gate and a pre-commit or CI check to prevent regressions. Deferred from the sanitizer and
+adoption-and-signal IPDs. Needs its own IPD.
+
+### Enable pytest-randomly in CI
+
+The flaky-test isolation work added `pytest-randomly` to `[dev]` but disabled it by default via
+`-p no:randomly` in `addopts`, so CI stays deterministic. Enabling randomized test order in CI (or a
+dedicated CI job) would catch cross-test state leaks that a fixed order hides. Deferred as OQ1=C in
+`.agents/plans/executed/20260720-0026-01-flaky-test-isolation-hardening.md`.
+
+### Prune stale already-shipped entries from this TODO
+
+Two entries in this file describe work that is already executed and shipped, and should be verified then
+removed or annotated as done: the "Benchmark result JSON is too big" item (shipped via
+`20260720-1132-01-benchmark-json-size-reduction`) and the "`pubrun show config` family" item (shipped
+via `20260709-2019-01-show-config-family`).
+
 ### Scoped in-code pause/resume of capture
 
 A context manager to temporarily suspend capture for a block
