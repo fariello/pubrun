@@ -3,7 +3,7 @@
 - Date: 2026-07-21
 - Concern: feature / usability / security (community benchmark submission, low-risk first slice)
 - Scope: `src/pubrun/__main__.py` (bench client UX: paste -> attach), a new `.github/ISSUE_TEMPLATE/benchmark-result.yml`, a new VALIDATE-ONLY GitHub Actions workflow + a first-party validator script + adversarial fixtures, and a shared share-safety checker reused by client and Action. NO writes to any data branch, NO archival, NO repo-settings changes. Docs/CHANGELOG.
-- Status: to-review
+- Status: reviewed
 - Approval: (set when a human approves; omit until then)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Set: benchmark-intake
@@ -25,6 +25,22 @@ Stop pasting benchmark JSON into a GitHub issue body (which hits GitHub's ~65 KB
 a contributor runs `pubrun bench`, gets an unmistakable safe-file printout and a link to a main-repo
 Issue Form, attaches the `.redacted.json` file, checks a privacy box, and submits. A validate-only Action
 posts a pass/fail receipt (schema v5 + share-safety + semantic checks). No archival yet.
+
+### Honest trade-off this phase introduces (review finding, recorded)
+
+The SCRIPT is not ambiguous about which file to share: the harness already writes two distinctly-named
+files, a `*.unredacted.json` (embeds the real hostname; local analysis only) and a de-hostnamed
+`pubrun-bench-<hashtoken>-<stamp>.redacted.json` (`benchmarks/harness.py:490-513`). The OLD paste flow had
+ZERO file-selection risk because the script generated the issue body from the redacted file itself; the
+human never picked a file. The NEW attach flow ADDS a human file-picker step (drag a file into GitHub),
+which is where "wrong file" risk is born, and because a public GitHub attachment uploads IMMEDIATELY
+(before the Action validates), a wrong pick has already leaked. Therefore the LOCAL mitigations are the
+real privacy defense, not the server validator (which is only a backstop that cannot un-leak an early
+upload). Consequently `--prepare-submission` is PROMOTED to the primary, default-surfaced path (copy only
+the redacted file into a clean `pubrun-share/` dir so the folder the human browses contains only the safe
+file), and the end-of-run block leads the user there. This is the deliberate cost of the attach flow
+(traded for size/UX and JOSS visibility); it is accepted, with these mitigations, per human decision
+2026-07-21.
 
 ## Project conventions discovered (Step 0)
 
@@ -55,15 +71,20 @@ posts a pass/fail receipt (schema v5 + share-safety + semantic checks). No archi
   Submit (attach the SAFE file): <issue-form URL>
   ```
 - Run the shared share-safety check on the redacted file before printing PASSED.
-- Optional `pubrun bench --prepare-submission`: copy ONLY the checked redacted file into a `pubrun-share/`
-  dir (stdlib only). (MAY be deferred to a follow-up if it grows scope; decide in review.)
+- `pubrun bench --prepare-submission` (INCLUDED in Phase 1, OQ1 resolved; primary file-pick mitigation):
+  copy ONLY the checked redacted file into a clean `pubrun-share/` dir (stdlib only). The end-of-run
+  block points the user at that dir so the folder they browse to attach contains only the safe file.
 
 ### Issue Form (`.github/ISSUE_TEMPLATE/benchmark-result.yml`)
 
+- Integrates with the EXISTING issue-template chooser: `.github/ISSUE_TEMPLATE/` already holds
+  `config.yml` (`blank_issues_enabled: true`, Discussions `contact_links`) plus sibling forms
+  (`bug.yml`, `feature.yml`, `support.yml`, ...). The new form follows the sibling convention: front-matter
+  `name:`, a `title:` prefix (e.g. `"[BENCH]: "`), and `labels: ["type:benchmark-submission", "status:pending"]`.
+  No `config.yml` change is required (do not disable blank issues); just add the new form file.
 - Short instructions, a required attachment guidance area, a REQUIRED privacy-acknowledgment checkbox
   ("I attached the redacted file shown by pubrun and did not attach the unredacted file"), optional notes.
-- Auto-applies labels `type:benchmark-submission` + `status:pending` (labels created by the human;
-  cannot-do-unilaterally).
+- Labels themselves are created by the human (cannot-do-unilaterally); the form only references them.
 
 ### Validate-only Action (`.github/workflows/benchmark-intake.yml` + a first-party validator)
 
@@ -72,18 +93,41 @@ posts a pass/fail receipt (schema v5 + share-safety + semantic checks). No archi
 - A FIRST-PARTY Python validator (repo-owned; reuses `schemas/benchmark.schema.json` + the shared
   share-safety checker) runs the ordered checks from the orchestrator's security section: submission-shape
   -> safe-download (one attachment, GitHub host allowlist, redirect/timeout/byte cap ~1 MiB, `.json`) ->
-  JSON parse (data only) -> schema v5 -> share-safety -> semantic (scenario ids, iteration counts, finite
-  nonnegative timings, supported pubrun version). Never interpolate contributor content into a shell;
-  pass via files/env; never print the payload; pin any third-party action to a full commit SHA.
+  JSON parse (data only) -> schema v5 -> share-safety -> semantic. Never interpolate contributor content
+  into a shell; pass via files/env; never print the payload; pin any third-party action to a full commit SHA.
+- Schema-v5 check is CONCRETE (PR-003): the `/5` schema (`schemas/benchmark.schema.json`) has
+  `properties.schema = {const: "pubrun-benchmark/5"}` and `required = [schema, generated_utc, mode,
+  iterations, warmup, passes, machine, scenario_defs, pass_results]`. The validator asserts
+  `schema == "pubrun-benchmark/5"` and validates against the committed schema; semantic checks use the
+  schema's own `required` fields (not an invented list) plus finite/nonnegative timings and a supported
+  `pubrun_version`.
 - Output: comment a pass receipt (`status:accepted` label) or specific repair instructions
   (`status:needs-fix`). NO archival, NO close automation in Phase 1 (manual accept, to tune false
   positives per the research's Phase 1 plan).
 
-### Shared share-safety checker
+### Shared share-safety checker (corrected design; PR-002 / PR-004)
 
-Factor the share-safety rules (reject absolute home paths, user-profile paths, unredacted hostname/
-username, forbidden keys/representations) into ONE versioned module reused by the local client and the
-Action validator, so local and server checks stay in lockstep. Reuse the sanitizer's patterns.
+This is NEW validation logic, not a reuse of `src/pubrun/capture/redaction.py`. That module REDACTS
+(produces redacted output); it does not VERIFY that a file is already share-safe. The checker is a
+STRUCTURAL VALIDATOR that rejects a result unless privacy-sensitive fields already carry the expected
+redaction marker:
+- `machine.host.hostname` (and other known host/user fields) MUST equal `<redacted>`; reject any value
+  that is not the marker.
+- Reject any absolute home/user path anywhere in the document (`/home/<x>/`, `/Users/<x>/`,
+  `C:\\Users\\<x>\\`) and any forbidden key/representation.
+- It MAY reuse the sanitizer's regex PATTERNS (`scripts/sanitize_paths.py`: home-path/IP shapes) for
+  detection, but MUST NOT reuse its live-hostname AUTO-DETECTION: server-side the CI runner is a different
+  machine, so comparing to a live hostname is meaningless. The check is structural (is-it-redacted),
+  not identity-based (does-it-match-this-host).
+- ONE versioned module, imported by both the local client (pre-share gate) and the Action validator, so
+  they stay in lockstep; the version is recorded with any accepted result.
+
+NOTE (maintainer, 2026-07-21): agent-workflows will soon ship a commit-hook + optional CI that performs
+share-safety/path-hostname scrubbing of this kind repo-wide (cf. the executed sanitizer IPD
+`20260720-2331-01`). Where that lands, this checker should PREFER adopting/reusing the canonical
+agent-workflows implementation over maintaining a private fork, keeping only benchmark-result-specific
+rules (e.g. the `machine.host.hostname == <redacted>` structural assertion) local. Track that overlap so
+the two do not diverge.
 
 ## Findings (drivers)
 
@@ -93,6 +137,9 @@ Action validator, so local and server checks stay in lockstep. Reuse the sanitiz
 | P1-2 | High | Medium | Security | untrusted parsing (read-only) | Even validate-only, the Action parses attacker-controlled attachments; must obey the injection/host/byte-cap rules | orchestrator security section |
 | P1-3 | Medium | Low | Privacy | share-safety parity | Local and server checks must share ONE versioned rule set; local redaction is the boundary | orchestrator B4 |
 | P1-4 | High | Low | Security/QA | adversarial coverage | The validator needs a committed adversarial fixture corpus (accept 1 valid; reject unredacted/oversized/0-or-many-attachments/wrong-schema/tampered/injection) | orchestrator B5 |
+| P1-5 | Medium | Low | Security/UX | new file-pick risk | The attach flow ADDS a human file-selection step the paste flow lacked, and a public attachment uploads before validation; local mitigation (`--prepare-submission` + unmistakable naming/printout), not the server backstop, is the real defense | `harness.py:490-513`; /plan-review 2026-07-21 |
+| P1-6 | Medium | Low | Security/Arch | checker design | The share-safety checker must be a NEW structural is-it-redacted validator (not `redaction.py` reuse; not live-hostname detection, which is meaningless on the CI runner) | `redaction.py:46-185`; `sanitize_paths.py` |
+| P1-7 | Low | Low | Architecture | issue-form integration | The new form must fit the EXISTING `.github/ISSUE_TEMPLATE/config.yml` chooser + sibling-form convention | `.github/ISSUE_TEMPLATE/config.yml`, `bug.yml` |
 
 ## Proposed changes (ordered, validatable)
 
@@ -137,14 +184,16 @@ Action validator, so local and server checks stay in lockstep. Reuse the sanitiz
 - README "Contribute a benchmark" pointer + CONTRIBUTING note (attach, do not paste); CHANGELOG entry.
   Keep pubrun framed as a provenance component; no overclaim about what the corpus proves.
 
-## Open questions
+## Open questions (all RESOLVED during /plan-review 2026-07-21)
 
-1. Include `--prepare-submission` in Phase 1, or defer it to a small follow-up? (Recommend include if
-   cheap; defer if it grows the client change.)
-2. Where should the shared share-safety checker live: a dev-only module under `benchmarks/` / a repo
-   script, or inside `src/pubrun/` guarded so it is not a runtime import? (Recommend NOT in the installed
-   runtime surface; a repo/dev module reused by both the client's dev path and the Action.)
-3. Confirm the exact Issue Form URL + label names before wiring the client string.
+1. `--prepare-submission`: RESOLVED - INCLUDE in Phase 1 and PROMOTE it to the primary file-pick
+   mitigation (see the trade-off note); it directly reduces the wrong-file risk the attach flow adds.
+2. Checker location: RESOLVED - a dev/repo module reused by both the client submission path and the
+   Action; NOT imported at `import pubrun` time (preserve the zero-runtime-dependency installed surface).
+3. Form URL + labels: RESOLVED - form URL
+   `github.com/fariello/pubrun/issues/new?template=benchmark-result.yml`; labels
+   `type:benchmark-submission` + `status:{pending,accepted,needs-fix}` (matching the sibling-form
+   convention). Label creation stays a human/settings action.
 
 ## Approval and execution gate
 
@@ -166,3 +215,14 @@ Proposal; MUST be human-approved before execution; NOT auto-run. Execution contr
   orchestrator `20260721-2002-00` (`Set: benchmark-intake`, `Order: 1`). Lowest-risk slice: client
   paste -> attach, main-repo Issue Form, a validate-only (no-write) Action with a first-party validator +
   adversarial fixtures, and a shared share-safety checker. Not executed; awaiting review/approval.
+- 2026-07-21 /plan-review (opencode / its_direct/pt3-claude-opus-4.8-1m-us): APPROVE WITH REVISIONS
+  APPLIED. Verified cited code (paste-embed `_bench_issue_body` :1224; `_submit_via_gh` :1246; submit flags
+  :2244-2255; `/5` schema marker `const "pubrun-benchmark/5"`; distinct `.unredacted`/`.redacted` naming
+  `harness.py:490-513`; existing ISSUE_TEMPLATE chooser). Findings PR-001..PR-004 FIXED (recorded as
+  P1-5..P1-7 + edits): reframed the file-pick risk as one the attach flow ADDS (not a script bug) and
+  promoted `--prepare-submission` to the primary local mitigation (human decision); CORRECTED the
+  share-safety checker to a NEW structural is-it-redacted validator (not `redaction.py` reuse; not
+  live-hostname detection); integrated the new Issue Form with the existing chooser/sibling convention;
+  pinned the exact schema-v5 marker. Recorded the maintainer note that agent-workflows will soon ship an
+  overlapping commit-hook/CI to prefer over a private fork. All 3 open questions resolved. Status ->
+  reviewed. Readiness: GO - PENDING HUMAN APPROVAL.
