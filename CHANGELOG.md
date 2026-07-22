@@ -9,6 +9,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **`pubrun --version` now shows the commit hash.** The version line reads
+  `pubrun <version> (commit <hash>)` when a commit is resolvable. The hash is resolved live from
+  `git rev-parse HEAD` when running from a source checkout (always exact), falling back to the packaged
+  `src/pubrun/COMMIT` file for installed wheels. A `post-commit` git hook
+  (`scripts/update_commit_file.py`, wired through pre-commit) stamps `src/pubrun/COMMIT` with the
+  just-made commit so the packaged fallback stays current. Both paths are best-effort and stdlib-only
+  (the zero-runtime-dependency invariant is preserved). Enable the hook with
+  `pre-commit install --hook-type post-commit`.
 - **Community benchmark intake: attach a file, not paste (Phase 1).** Contributing a benchmark result
   now works by ATTACHING the redacted file to a GitHub Issue Form on the main repo, instead of pasting
   the JSON into an issue body (which hit GitHub's ~65 KB cap and embedded the file into a request the
@@ -240,12 +248,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **License changed from BSD-3-Clause to Apache-2.0.** Now licensed under the Apache License 2.0
   (see `LICENSE` and the new `NOTICE`). Apache-2.0 requires redistributions and derivative works to
   retain the `NOTICE` file and display its attribution reasonably prominently ("Based on the original
-  pubrun by Gabriele G. R. Fariello — https://github.com/fariello/pubrun"), and adds an explicit
-  patent grant. Copyright holder normalized to the full legal name **Gabriele G. R. Fariello**
+  pubrun by Gabriele Fariello — https://github.com/fariello/pubrun"), and adds an explicit
+  patent grant. Copyright holder normalized to the full legal name **Gabriele Fariello**
   (copyright span 2007–2026 preserved); author email set to gfariello@fariel.com.
 - **Package metadata license fixed**: `pubrun.__license__` now reports `Apache-2.0` (was still
   `BSD-3-Clause`). Legal/copyright surfaces (`LICENSE`, `NOTICE`, `__copyright__`, README copyright)
-  use the full legal name **Gabriele G. R. Fariello**; **citation** surfaces (`pubrun cite`, generated
+  use the full legal name **Gabriele Fariello**; **citation** surfaces (`pubrun cite`, generated
   methods report, `CITATION.cff`, PyPI author) use the publication name **Gabriele Fariello** so
   citations aggregate with the author's existing record.
 - **`pubrun cite` and generated methods citation corrected**: now cite the software itself
