@@ -57,6 +57,17 @@ Please use GitHub issues to report bugs, request features, or ask questions abou
 
 Please do not include secrets, credentials, private file paths, unpublished data, or other sensitive information in issue reports.
 
+## Contributing a benchmark result
+
+Benchmark results help verify pubrun's overhead claims across real hardware, filesystems, and schedulers. To contribute one, ATTACH the redacted file to the benchmark Issue Form; do not paste JSON into an issue body.
+
+1. From a source checkout, run `pubrun bench` (or `pubrun bench --quick`).
+2. It writes two files and prints a safe-file block: a private `*.unredacted.json` (keep this; it embeds your hostname) and a shareable `*.redacted.json`. It also runs a share-safety check.
+3. Run `pubrun bench --prepare-submission` to copy only the redacted file into a clean `pubrun-share/` folder, so the folder you browse to attach contains only the file that is safe to share.
+4. Open the benchmark Issue Form (the command prints the link), attach the `*.redacted.json` file, and check the privacy box.
+
+A validate-only automated check will post a pass/fail receipt on the issue. It parses the attachment only as data and cannot un-share a file, so please attach the redacted file (never the unredacted one).
+
 ## Pull requests
 
 Pull requests should be focused and reviewable. Before opening a pull request:

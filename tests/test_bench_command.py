@@ -400,34 +400,59 @@ class TestSubmissionVerifier:
         assert not ok and "JSON" in detail
 
 
-class TestSubmissionConsent:
-    """Consent invariant: nothing transmits without an explicit yes in this invocation."""
+class TestAttachFlowSubmitFile:
+    """Attach flow (IPD 20260721-2255-01): `--submit-file` share-checks a file and shows how
+    to ATTACH it; it NEVER transmits the result. A failing share check exits non-zero."""
 
     def test_submit_file_missing_errors(self):
         res = run_pubrun("bench", "--submit-file", "/nonexistent/x.json")
         assert res.returncode == 1
         assert "no such file" in res.stderr
 
-    def test_submit_file_unredacted_refused(self, tmp_path):
+    def test_submit_file_redacted_shows_attach_block(self, tmp_path):
+        red = tmp_path / "g.redacted.json"
+        red.write_text(json.dumps({"schema": "pubrun-benchmark/5",
+                                   "machine": {"host": {"hostname": "<redacted>"}}}))
+        res = run_pubrun("bench", "--submit-file", str(red))
+        assert res.returncode == 0
+        # The unmistakable safe-file block + the Issue Form URL, never a transmit.
+        assert "SAFE TO SUBMIT" in res.stderr
+        assert "Share check:" in res.stderr and "PASSED" in res.stderr
+        assert "issues/new?template=benchmark-result.yml" in res.stderr
+
+    def test_submit_file_unredacted_share_check_fails(self, tmp_path):
+        # An unredacted hostname must FAIL the structural share check (non-zero exit).
         full = tmp_path / "full.json"
-        full.write_text(json.dumps({"machine": {"hostname": "realhost", "username": "bob"}}))
+        full.write_text(json.dumps({"schema": "pubrun-benchmark/5",
+                                    "machine": {"host": {"hostname": "realhost-01"}}}))
         res = run_pubrun("bench", "--submit-file", str(full))
         assert res.returncode == 1
-        assert "Refusing to submit" in res.stderr and "un-redacted" in res.stderr
+        assert "FAILED" in res.stderr
 
-    def test_submit_file_print_makes_no_network(self, tmp_path, monkeypatch):
-        red = tmp_path / "g.redacted.json"
-        red.write_text(json.dumps({"schema": "pubrun-benchmark/3",
-                                   "machine": {"hostname": "<redacted>"}}))
-        # --print-submission must never touch the network.
-        res = run_pubrun("bench", "--submit-file", str(red), "--print-submission", stdin="")
-        assert res.returncode == 0
-        assert "Copy-paste submission" in res.stderr
-        assert "gh issue create" in res.stderr
+    def test_prepare_submission_copies_only_safe_file(self, tmp_path):
+        red = tmp_path / "pubrun-bench-abcd1234-x.redacted.json"
+        red.write_text(json.dumps({"schema": "pubrun-benchmark/5",
+                                   "machine": {"host": {"hostname": "<redacted>"}}}))
+        res = run_pubrun("bench", "--submit-file", str(red), "--prepare-submission")
+        assert res.returncode == 0, res.stderr
+        share_dir = tmp_path / "pubrun-share"
+        assert (share_dir / red.name).is_file()
+        # Only the safe file lands in the clean folder.
+        assert [p.name for p in share_dir.iterdir()] == [red.name]
+
+    def test_prepare_submission_refuses_unsafe_file(self, tmp_path):
+        full = tmp_path / "full.json"
+        full.write_text(json.dumps({"schema": "pubrun-benchmark/5",
+                                    "machine": {"host": {"hostname": "realhost-01"}}}))
+        res = run_pubrun("bench", "--submit-file", str(full), "--prepare-submission")
+        assert res.returncode == 1
+        assert "Refusing to prepare" in res.stderr
+        assert not (tmp_path / "pubrun-share").exists()
 
     def test_gh_repo_injection_is_literal(self, tmp_path):
         red = tmp_path / "g.redacted.json"
-        red.write_text(json.dumps({"schema": "pubrun-benchmark/3", "machine": {"hostname": "<redacted>"}}))
+        red.write_text(json.dumps({"schema": "pubrun-benchmark/5",
+                                   "machine": {"host": {"hostname": "<redacted>"}}}))
         marker = tmp_path / "pwned"
         res = run_pubrun("bench", "--submit-file", str(red),
                          "--gh-repo", f"$(touch {marker})")
@@ -436,73 +461,50 @@ class TestSubmissionConsent:
         assert not marker.exists()  # never executed as a shell command
 
 
-class TestSubmissionChain:
-    """The gh -> http -> printed-floor fallback chain, with transport stubbed."""
+class TestAttachFlowClient:
+    """The client prints the safe-file block and stages a clean folder; it never transmits."""
 
     def _m(self):
         import pubrun.__main__ as m
         return m
 
-    def test_gh_success_reports_url(self, tmp_path, monkeypatch, capsys):
+    def test_share_check_prefers_structural_validator(self, tmp_path):
         m = self._m()
-        red = tmp_path / "g.redacted.json"
-        red.write_text(json.dumps({"machine": {"hostname": "<redacted>"}}))
-        monkeypatch.setattr(m, "_submit_via_gh", lambda repo, p: ("https://x/issues/1", None))
-        # HTTP must NOT be attempted once gh succeeds.
-        monkeypatch.setattr(m, "_submit_via_http", lambda *a, **k: (_ for _ in ()).throw(AssertionError("http should not run")))
-        m._submit_benchmark(str(red), "fariello/pubrun-benchmarks", None, None, interactive=False)
-        assert "Submitted. Thank you! https://x/issues/1" in capsys.readouterr().err
+        # A redacted /5 result passes; an unredacted hostname fails (reason names the field).
+        good = tmp_path / "ok.redacted.json"
+        good.write_text(json.dumps({"schema": "pubrun-benchmark/5",
+                                    "machine": {"host": {"hostname": "<redacted>"}}}))
+        ok, reasons = m._share_check(good)
+        assert ok and reasons == []
+        bad = tmp_path / "bad.json"
+        bad.write_text(json.dumps({"machine": {"host": {"hostname": "leaky-host"}}}))
+        ok, reasons = m._share_check(bad)
+        assert not ok and any("hostname" in r for r in reasons)
 
-    def test_gh_unavailable_falls_to_http(self, tmp_path, monkeypatch, capsys):
+    def test_safe_file_block_reports_verdict_and_url(self, tmp_path, capsys):
         m = self._m()
         red = tmp_path / "g.redacted.json"
-        red.write_text(json.dumps({"machine": {"hostname": "<redacted>"}}))
-        monkeypatch.setattr(m, "_submit_via_gh", lambda repo, p: (None, "gh not on PATH"))
-        monkeypatch.setattr(m, "_resolve_gh_token", lambda explicit: ("tok", "$GITHUB_TOKEN"))
-        monkeypatch.setattr(m, "_submit_via_http", lambda repo, p, t: ("https://x/issues/2", None))
-        m._submit_benchmark(str(red), "fariello/pubrun-benchmarks", None, None, interactive=False)
-        assert "https://x/issues/2" in capsys.readouterr().err
-
-    def test_all_fail_reaches_floor_with_reasons(self, tmp_path, monkeypatch, capsys):
-        m = self._m()
-        red = tmp_path / "g.redacted.json"
-        red.write_text(json.dumps({"machine": {"hostname": "<redacted>"}}))
-        monkeypatch.setattr(m, "_submit_via_gh", lambda repo, p: (None, "gh not on PATH"))
-        monkeypatch.setattr(m, "_resolve_gh_token", lambda explicit: (None, None))
-        m._submit_benchmark(str(red), "fariello/pubrun-benchmarks", None, None, interactive=False)
+        red.write_text(json.dumps({"schema": "pubrun-benchmark/5",
+                                   "machine": {"host": {"hostname": "<redacted>"}}}))
+        m._print_safe_file_block(str(tmp_path / "g.unredacted.json"), str(red))
         err = capsys.readouterr().err
-        assert "Automated submission was not possible" in err
-        assert "gh not on PATH" in err
-        assert "Copy-paste submission" in err  # floor reached (non-interactive -> prints)
+        assert "PRIVATE, DO NOT SHARE" in err
+        assert "SAFE TO SUBMIT" in err
+        assert "PASSED" in err
+        assert m._BENCH_SUBMIT_URL in err
 
-    def test_http_error_scrubs_token(self, tmp_path, monkeypatch):
+    def test_no_auto_post_helpers_remain(self):
+        """The paste/auto-post machinery is retired; its symbols must be gone (no leak path)."""
         m = self._m()
-        red = tmp_path / "g.redacted.json"
-        red.write_text(json.dumps({"machine": {"hostname": "<redacted>"}}))
-        secret = "ghp_SECRETTOKEN123"
+        for gone in ("_submit_via_gh", "_submit_via_http", "_submit_benchmark",
+                     "_bench_issue_body", "_print_floor", "_resolve_gh_token"):
+            assert not hasattr(m, gone), f"{gone} should have been removed (attach flow)"
 
-        class _Err(Exception):
-            pass
-
-        def boom(req, timeout=None):
-            raise _Err(f"boom with {secret}")
-
-        import urllib.request
-        monkeypatch.setattr(urllib.request, "urlopen", boom)
-        url, reason = m._submit_via_http("o/n", str(red), secret)
-        assert url is None
-        assert secret not in (reason or "")  # token scrubbed from the error text
-
-    def test_no_token_makes_http_unavailable(self, tmp_path, monkeypatch):
+    def test_submit_url_points_at_main_repo_form(self):
         m = self._m()
-        red = tmp_path / "g.redacted.json"
-        red.write_text(json.dumps({"machine": {"hostname": "<redacted>"}}))
-        # No token -> method reports unavailable BEFORE any urlopen call.
-        import urllib.request
-        monkeypatch.setattr(urllib.request, "urlopen",
-                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not POST")))
-        url, reason = m._submit_via_http("o/n", str(red), None)
-        assert url is None and "token" in (reason or "")
+        assert "fariello/pubrun/issues/new" in m._BENCH_SUBMIT_URL
+        assert "template=benchmark-result.yml" in m._BENCH_SUBMIT_URL
+        assert m._DEFAULT_BENCH_REPO == "fariello/pubrun"
 
 
 class TestSchema5RawTimings:

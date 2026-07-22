@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Community benchmark intake: attach a file, not paste (Phase 1).** Contributing a benchmark result
+  now works by ATTACHING the redacted file to a GitHub Issue Form on the main repo, instead of pasting
+  the JSON into an issue body (which hit GitHub's ~65 KB cap and embedded the file into a request the
+  client transmitted). `pubrun bench` prints an unmistakable safe-file block at the end of a run: which
+  file is PRIVATE (`*.unredacted.json`), which is SAFE to submit (`*.redacted.json`), a share-check
+  verdict, and the Issue Form URL to attach the safe file. A new `pubrun bench --prepare-submission`
+  copies ONLY the redacted file into a clean `pubrun-share/` folder, so the folder you browse to attach
+  contains only the file that is safe to share (the primary mitigation for picking the wrong file).
+  `pubrun bench --submit-file <file>` now share-checks an existing redacted file and shows how to attach
+  it (it no longer transmits). A shared structural share-safety validator (`benchmarks/share_safety.py`)
+  is used both locally (the pre-share gate) and server-side, so local and server checks agree. A
+  validate-only GitHub Actions workflow (`.github/workflows/benchmark-intake.yml`, `contents: read` +
+  `issues: write`, no write access) parses a submitted attachment as data only (host allowlist, byte
+  cap, schema `/5`, share-safety, semantic checks; never executes or echoes the payload) and comments a
+  pass/fail receipt. Archival/aggregation is a later, separately gated phase.
+
+### Changed
+- **`pubrun bench` no longer auto-posts a result to a GitHub issue.** The old `gh`/HTTP submission chain
+  (and its `--submit-method`, `--gh-token`, and `--print-submission` flags, plus the JSON-in-issue-body
+  path) is retired in favor of the attach flow above; this client never transmits the result itself.
+  `--submit`/`--yes` now govern HPC scheduler JOB submission only. The default contribution target moved
+  from the satellite `fariello/pubrun-benchmarks` repo to a main-repo Issue Form.
+
 ### Documentation
 - **Adoption bridges, an examples ladder, and deep-page positioning (no behavior change).** The README
   now has an "Is pubrun for me?" section with two signpost links (a plain-script/data-job path and an
