@@ -3,9 +3,9 @@
 - Date: 2026-07-21
 - Concern: feature / usability / security (community benchmark submission, low-risk first slice)
 - Scope: `src/pubrun/__main__.py` (bench client UX: paste -> attach), a new `.github/ISSUE_TEMPLATE/benchmark-result.yml`, a new VALIDATE-ONLY GitHub Actions workflow + a first-party validator script + adversarial fixtures, and a shared share-safety checker reused by client and Action. NO writes to any data branch, NO archival, NO repo-settings changes. Docs/CHANGELOG.
-- Status: approved
-- Approval: human-approved 2026-07-21 (maintainer "GO" after /plan-review; executing; matrix-gated
-  before executed/; labels/settings + push are human actions)
+- Status: executed
+- Approval: human-approved 2026-07-21 (maintainer "GO" after /plan-review); executed 2026-07-22 after a
+  full CI matrix pass (21/21 green, run 29922109354); labels/settings remain human actions
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Set: benchmark-intake
 - Order: 1
@@ -227,3 +227,14 @@ Proposal; MUST be human-approved before execution; NOT auto-run. Execution contr
   pinned the exact schema-v5 marker. Recorded the maintainer note that agent-workflows will soon ship an
   overlapping commit-hook/CI to prefer over a private fork. All 3 open questions resolved. Status ->
   reviewed. Readiness: GO - PENDING HUMAN APPROVAL.
+- 2026-07-22 executed (opencode / its_direct/pt3-claude-opus-4.8-1m-us): completed the Phase 1 remainder
+  on top of the security core (`ee54e0e`). Step 2 client (attach flow; retired the auto-post chain and the
+  `--submit-method`/`--gh-token`/`--print-submission` flags; safe-file block; `--prepare-submission`;
+  repointed to the main-repo Issue Form). Step 3 Issue Form `.github/ISSUE_TEMPLATE/benchmark-result.yml`.
+  Step 5 validate-only workflow `.github/workflows/benchmark-intake.yml` (contents:read + issues:write, no
+  writes) plus `extract_attachment_url.py`. Step 6 docs (README/CONTRIBUTING/CHANGELOG). Two commits:
+  `ee54e0e` (core) + `7b81f71` (remainder). Full local suite 983 passed / 7 skipped; full CI matrix 21/21
+  green (run 29922109354). Labels (type:benchmark-submission, status:{pending,accepted,needs-fix}) and the
+  Issue Form enablement remain human/settings actions; the workflow does not fire on real issues until
+  those exist. Status -> executed; moved to executed/. Phase 2 (data branch + archival) needs its own
+  child IPD AND a HARD /assess security gate before the Action gets any write permission.
