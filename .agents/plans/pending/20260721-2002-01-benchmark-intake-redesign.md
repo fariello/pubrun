@@ -7,7 +7,7 @@
   to a dedicated `benchmark-data` branch and aggregates rebuilt; consolidate intake into the MAIN pubrun
   repo and retire `pubrun-benchmarks` as the primary destination. Phased (see below). Touches
   `pubrun bench` client UX (`src/pubrun/__main__.py`), `.github/`, docs, and repo/branch settings.
-- Status: to-review
+- Status: reviewed
 - Approval: (set when a human approves; omit until then)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
@@ -66,10 +66,26 @@ Per the research's security section and GitHub's script-injection guidance, the 
 - Canonicalize + SHA-256; dedupe; write only to FIXED paths derived from the validated hex digest +
   numeric issue id, on the `benchmark-data` branch; serialize archive writes with a concurrency group.
 - Split jobs by permission: validation `contents: read`; receipt `issues: write`; archive `contents: write`.
-  Pin any third-party actions to full commit SHAs (prefer first-party + a repo Python script).
+- **Validator is FIRST-PARTY (OQ4 resolved):** a repo-owned Python script reusing
+  `schemas/benchmark.schema.json` (the `/5` schema) and the SAME versioned share-safety checker the local
+  client uses (factored out per P1.4). Any unavoidable third-party action is pinned to a full commit SHA.
+  This minimizes supply-chain surface and keeps local and server checks in lockstep.
 - Never print the payload in Actions logs.
 - Privacy is decided by LOCAL redaction: a public attachment uploads immediately and cannot be un-shared;
   server-side rejection is a backstop, not the boundary. The client UX must make the safe file unmistakable.
+
+### Abuse and first-contributor handling (added during /plan-review; PR-002)
+
+Because this is a public, issue-triggered, eventually write-capable surface:
+- Account for GitHub's first-time-contributor workflow-approval behavior (a new account's issue-triggered
+  workflow may require maintainer approval to run); document the expected contributor experience for that
+  case rather than assuming instant automation.
+- Anti-spam / abuse: gate substantive work behind the exact template marker/label; the validate-only
+  Phase 1 posts a receipt but grants no write; junk or non-conforming issues are labeled `status:needs-fix`
+  or closed, never archived. Consider a simple per-issue idempotency (one accepted digest per issue) and
+  rely on GitHub's native rate limiting; do not build a bespoke rate limiter.
+- The archive job (Phase 2) runs only after validation passes and only writes fixed digest-derived paths,
+  so a malicious submission cannot cause writes outside the accepted-results namespace.
 
 ## Phased rollout (each phase is separately reviewed/approved before execution)
 
@@ -117,6 +133,7 @@ records the shape and the gates. Do NOT execute a later phase before the earlier
 | B2 | High | Medium-High | Security | untrusted-input parsing | An issue-triggered Action parses attacker-controlled attachments; script-injection and over-broad token perms are real risks if built naively | research security section; GitHub script-injection guidance |
 | B3 | Medium | Low | Maintainer/JOSS | discoverability + signal | Intake on a satellite repo is low-visibility for JOSS; consolidating into the main repo (data on a branch) is the recommended balance | research Part B |
 | B4 | Medium | Low | Privacy | share-safety parity | The local checker and the server checker must use the SAME versioned rules; local redaction is the real boundary | research design requirements |
+| B5 | High | Low | Security/QA | adversarial test coverage | The security case rests on the validator rejecting tampered/oversized/multi-attachment/injection-shaped payloads, so a COMMITTED adversarial fixture corpus is required, not just "test the logic" | added during /plan-review (PR-001) |
 
 ## Proposed changes
 
@@ -145,11 +162,16 @@ partly irreversible, hence separately gated.
 
 - Client: unit tests for the safe-file printout, the reused share-safety checker (reject absolute home
   paths / unredacted host/user; accept a properly redacted `/5` result), and `--prepare-submission`.
-- Action: test the validator logic from FIXTURES (a valid redacted `/5` result passes; a tampered/
-  unredacted/oversized/multi-attachment/wrong-schema payload is rejected) without needing a live issue.
-- Security: assert no contributor-controlled string reaches a shell; byte cap + host allowlist enforced.
+- Action validator: a COMMITTED adversarial fixture corpus is a required deliverable (PR-001), not just
+  "test the logic". At minimum: a valid redacted `/5` result (accept); and rejects for each of an
+  unredacted result, an oversized payload (over the byte cap), zero and multiple attachments, a
+  wrong/absent schema version, a tampered digest, and an injection-shaped filename/title/body. The
+  first-party validator is unit-tested against these fixtures with NO live issue required.
+- Security: assert no contributor-controlled string reaches a shell; byte cap + host allowlist enforced;
+  the archive job writes only fixed digest-derived paths.
 - Matrix-validation: the `pubrun bench` client change is a CLI-grammar/behavior change, so it is NOT done
-  on local green alone; push and validate on the full CI matrix before the phase moves to executed/.
+  on local green alone; push and validate on the full CI matrix before the (Phase 1) child IPD moves to
+  executed/.
 - Honesty rule: paste ACTUAL test/CI output; never claim green unrun.
 
 ## Spec / documentation sync
@@ -158,35 +180,57 @@ partly irreversible, hence separately gated.
   "Contribute a benchmark" entry point; CHANGELOG entries per phase. Keep pubrun's role framed as a
   provenance component; no overclaim about what the corpus proves (per the research's honesty note).
 
-## Open questions
+## Open questions (all RESOLVED during /plan-review 2026-07-21)
 
-1. Slice Phase 1 into its own child IPD for execution, or execute directly from this orchestrator?
-2. Confirm the main-repo issue-form URL / label taxonomy (`type:benchmark-submission`, `status:*`).
-3. Timing of retiring `pubrun-benchmarks` (Phase 3) relative to when the new path is proven; and whether
-   to migrate the one existing submission (issue #1 on the satellite repo) into the new path.
-4. Should the validator be a first-party repo Python script (reusing `schemas/benchmark.schema.json` +
-   the shared share-safety checker) rather than third-party actions, to minimize supply-chain surface?
-   (Recommend yes.)
+1. Execution slicing: RESOLVED - split EACH phase into its own dated child IPD; this file stays the
+   orchestrator and moves to `executed/` only when all phases are done or explicitly closed. Each risky
+   slice is reviewed/approved on its own. (See the gate.)
+2. Label taxonomy / form URL: RESOLVED - adopt the research taxonomy as proposed:
+   `type:benchmark-submission` + `status:{pending,accepted,needs-fix,rejected}` + optional
+   `platform:{linux,macos,windows}` applied by automation; issue-form URL is the MAIN repo
+   (`github.com/fariello/pubrun/issues/new?template=benchmark-result.yml`). Label creation is a
+   human/settings action (cannot-do-unilaterally list).
+3. Retire timing + existing submission: RESOLVED - keep `pubrun-benchmarks` live until Phase 1+2 are
+   validated with real submissions; retire it only in Phase 3 (archive + redirect README, history
+   preserved) AND migrate the one existing submission (issue #1 on the satellite) through the new
+   validated path so no community data is lost.
+4. Validator implementation: RESOLVED - FIRST-PARTY repo Python script reusing the `/5` schema + the
+   shared share-safety checker; third-party actions pinned to full commit SHAs. (See Security boundaries.)
 
 ## Approval and execution gate
 
 This IPD is a proposal; it MUST be human-approved before ANY execution and is NOT auto-run. It is an
 orchestrator: approving it is not approving all phases at once. Execution contract:
-- Per-phase gate: each phase (1, 2, 3) requires its own explicit go before execution; do not start a
-  later phase before the earlier one is validated (and, for Phase 1's CLI change, matrix-green).
-- Security gate (Phase 1 Action / Phase 2 archival): the ingestion workflow is treated as an
-  Internet-facing parser; a `/plan-review` (and ideally an `/assess security` pass) on the workflow is
-  strongly recommended before it is enabled with any write permission.
+- **Child-IPD lifecycle (OQ1 resolved):** each phase is executed via its OWN dated child IPD
+  (`YYYYMMDD-HHMM-NN-benchmark-intake-phase-{1,2,3}-...`), reviewed and approved on its own. This
+  orchestrator stays in `pending/` as the umbrella and is moved to `executed/` only when all phases are
+  done or explicitly closed (retire to `not-executed/`/`superseded/` if a phase is dropped). Default:
+  do NOT execute directly from this file; spin the Phase 1 child IPD first.
+- Per-phase gate: each phase requires its own explicit human go before execution; do not start a later
+  phase before the earlier one is validated (and, for Phase 1's CLI change, matrix-green).
+- **Security gate (HARD, PR-002):** the ingestion workflow is an Internet-facing parser. A dedicated
+  `/assess security` (or a security-focused `/plan-review`) pass on the workflow is a REQUIRED gate
+  BEFORE the Action is granted ANY write permission (i.e. before Phase 2 archival). Phase 1's
+  validate-only Action (no write) may proceed under ordinary review; write access waits for the security
+  pass. The committed adversarial fixture corpus (B5) must be green before write access too.
 - Cannot-do-unilaterally list above: the agent writes in-repo files only; the human performs
-  settings/branch/repo actions and authorizes every push.
+  settings/branch/repo actions (branch creation, labels, Issue Forms, Pages, token permissions,
+  retiring/archiving `pubrun-benchmarks`, migrating issue #1) and authorizes every push.
 - Honesty rule: paste actual runner output for tests/CI; never claim unrun.
 - Commits path-scoped; never push without explicit authorization.
-- Lifecycle: as each phase completes + is approved + (where applicable) matrix-green, record it in
-  Workflow history; move this orchestrator to `executed/` only when all approved phases are done (or
-  split per-phase child IPDs and move each independently).
 
 ## Workflow history
 - 2026-07-21 drafted (opencode / its_direct/pt3-claude-opus-4.8-1m-us): turned the maintainer-endorsed
   benchmark-intake research (`.agents/docs/research/20260720-1422-01-...` and `...-1406-01-...`) into a
   phased orchestrator IPD. Adopts Option 1 + the Part B main-repo/data-branch hybrid on the merits.
   Proposed 3 phases, deferred 3 alternative intake mechanisms. Not executed; awaiting review/approval.
+- 2026-07-21 /plan-review (opencode / its_direct/pt3-claude-opus-4.8-1m-us): APPROVE WITH REVISIONS
+  APPLIED. Verified cited evidence against code (paste-in-body flow at `__main__.py:1224` `_bench_issue_body`;
+  `_BENCH_SUBMIT_URL` :1028; 65 KB warning :1030/:1044; `/5` schema + redaction/sanitizer present). Findings
+  PR-001..PR-004 FIXED: PR-001 required a committed adversarial fixture corpus (new finding B5) and named it
+  in validation; PR-002 upgraded the security review to a HARD gate before any write access and added
+  abuse/first-contributor handling; PR-003 recorded migrating the existing satellite issue #1; PR-004 set
+  the per-phase child-IPD lifecycle as the default. All 4 open questions resolved interactively (split into
+  child IPDs; adopt the research label taxonomy + main-repo form URL; retire the satellite only in Phase 3
+  and migrate issue #1; first-party validator). Status -> reviewed. Readiness: GO - PENDING HUMAN APPROVAL
+  (orchestrator; each phase still separately approved and gated).
