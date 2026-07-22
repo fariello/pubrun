@@ -10,6 +10,8 @@
 - Status: reviewed
 - Approval: (set when a human approves; omit until then)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
+- Set: benchmark-intake
+- Order: 0
 
 ## Provenance and authority note
 
@@ -234,3 +236,7 @@ orchestrator: approving it is not approving all phases at once. Execution contra
   child IPDs; adopt the research label taxonomy + main-repo form URL; retire the satellite only in Phase 3
   and migrate issue #1; first-party validator). Status -> reviewed. Readiness: GO - PENDING HUMAN APPROVAL
   (orchestrator; each phase still separately approved and gated).
+- 2026-07-21 set-tagged (opencode / its_direct/pt3-claude-opus-4.8-1m-us): grouped this work as
+  `Set: benchmark-intake` per plans-README D82. This orchestrator is `Order: 0` and was renamed
+  `-2002-01-` to `-2002-00-` so the filename `NN=00`-reserved-for-orchestrator convention holds. The
+  three phase child IPDs, when created, will carry `Set: benchmark-intake` with `Order: 1/2/3`.
