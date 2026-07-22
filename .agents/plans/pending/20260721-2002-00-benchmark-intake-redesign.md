@@ -244,3 +244,9 @@ orchestrator: approving it is not approving all phases at once. Execution contra
 - 2026-07-21 approved (human): maintainer approved the APPROACH. Status -> approved; stays in pending/
   as the umbrella (moves to executed/ only when all phases are done). Per the per-phase gate, the Phase 1
   child IPD (Order 1) is being drafted next and will be separately reviewed + approved before execution.
+- 2026-07-22 Phase 1 (Order 1) executed (opencode / its_direct/pt3-claude-opus-4.8-1m-us): the child IPD
+  `20260721-2255-01` (attach-a-file client + Issue Form + validate-only Action) is complete and moved to
+  executed/. Commits `ee54e0e` (security core) + `7b81f71` (client/form/workflow/docs); full CI matrix
+  21/21 green (run 29922109354). Orchestrator stays in pending/ (umbrella). NEXT: Phase 2 (Order 2, data
+  branch + archival/aggregation) requires its own child IPD AND a HARD /assess security gate BEFORE the
+  Action is granted any `contents: write`; labels + Issue Form enablement remain human/settings actions.
