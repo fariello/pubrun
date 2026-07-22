@@ -1023,27 +1023,14 @@ def _run_inspect(run_dir: Optional[str], show_suggestions: bool, as_json: bool, 
 
 # --- bench: friendly benchmark runner + HPC (Slurm) submit + share guidance ---------
 
-# Public repo for community-contributed benchmark results. Submissions arrive as issues
-# (attach the redacted JSON); opening from your own GitHub account is the contact channel.
-_BENCH_SUBMIT_URL = "https://github.com/fariello/pubrun-benchmarks/issues/new"
-
-# GitHub caps an issue body at 65,536 bytes; the in-body submission path embeds the redacted
-# JSON. Warn (never fail) a bit under the hard cap so the fenced-block wrapper still fits.
-_GH_ISSUE_BODY_LIMIT = 65000
-
-
-def _warn_if_over_gh_cap(path) -> None:
-    """Warn (non-fatal) if a redacted result exceeds GitHub's issue-body budget, pointing at
-    the attach-file alternative. Kept in sync with benchmarks/harness.py."""
-    try:
-        size = Path(path).stat().st_size
-    except OSError:
-        return
-    if size > _GH_ISSUE_BODY_LIMIT:
-        _print_warn(
-            f"{Path(path).name} is {size} bytes, over GitHub's ~65 KB issue-body limit "
-            f"({_GH_ISSUE_BODY_LIMIT} byte guard). The in-body submission path will be "
-            "rejected; ATTACH the file to the issue instead of pasting it.")
+# Community benchmark results are contributed by ATTACHING the redacted JSON file to a
+# GitHub Issue Form on the MAIN repo (Phase 1 of benchmark-intake, IPD 20260721-2255-01).
+# The old paste-the-JSON-into-the-issue-body path (and its gh/HTTP auto-post) is retired:
+# it hit GitHub's ~65 KB issue-body cap and it embedded the file into a request the client
+# transmitted. Attaching a file is a deliberate human action in the browser, so the LOCAL
+# mitigations (unmistakable naming + `--prepare-submission`) are the real privacy defense.
+_BENCH_SUBMIT_URL = (
+    "https://github.com/fariello/pubrun/issues/new?template=benchmark-result.yml")
 
 
 def _find_bench_harness():
@@ -1143,7 +1130,7 @@ def _qsub_ambiguous() -> bool:
     return bool(_sh.which("qsub")) and not _pbs_markers() and not _sge_markers()
 
 
-_DEFAULT_BENCH_REPO = "fariello/pubrun-benchmarks"
+_DEFAULT_BENCH_REPO = "fariello/pubrun"
 
 # Sensitive keys that a properly-redacted benchmark result must NOT expose as raw strings.
 # Kept in sync with benchmarks/harness.py `_REDACT_KEYS`/`_REDACT_LIST_KEYS`. Duplicated here
@@ -1216,245 +1203,149 @@ def _verify_redacted(path) -> tuple:
     return (True, "")
 
 
-def _bench_issue_title() -> str:
-    import platform as _pf
-    return f"benchmark result: {_pf.system()} / Python {_pf.python_version()}"
+def _load_share_safety():
+    """Import benchmarks/share_safety.py (the shared structural is-it-redacted validator).
 
-
-def _bench_issue_body(redacted_path) -> str:
-    """A short human-readable wrapper + the redacted JSON in a fenced block."""
+    That module lives under benchmarks/ (dev/reproducibility tooling), which is NOT packaged
+    into the wheel, so it cannot be imported normally from the installed package. Load it by
+    path from the source checkout, next to harness.py. Returns the module, or None if this is
+    not a checkout (the caller then falls back to the local key/needle verifier)."""
+    harness = _find_bench_harness()
+    if harness is None:
+        return None
+    ss = harness.parent / "share_safety.py"
+    if not ss.is_file():
+        return None
     try:
-        content = open(redacted_path, "r", encoding="utf-8").read()
-    except OSError as e:
-        content = f"(could not read {redacted_path}: {e})"
-    return (
-        "Community-contributed pubrun overhead benchmark result (redacted).\n\n"
-        "```json\n" + content.rstrip("\n") + "\n```\n"
-    )
-
-
-def _scrub(text, secrets) -> str:
-    """Remove any secret substring (e.g. a token) from text before printing."""
-    if not text:
-        return text
-    for s in secrets:
-        if s:
-            text = text.replace(s, "<redacted>")
-    return text
-
-
-def _submit_via_gh(repo, redacted_path):
-    """Try `gh issue create`. Return the issue URL on success, or None if gh is
-    unavailable/unauthenticated/failed (caller falls through)."""
-    import shutil as _sh
-    import subprocess as _sp
-    import tempfile as _tf
-    if not _sh.which("gh"):
-        return (None, "gh not on PATH")
-    try:
-        auth = _sp.run(["gh", "auth", "status"], capture_output=True, text=True, timeout=15)
-    except Exception as e:
-        return (None, f"gh auth status failed: {e}")
-    if auth.returncode != 0:
-        return (None, "gh is not authenticated (`gh auth login`)")
-    body = _bench_issue_body(redacted_path)
-    tf = None
-    try:
-        tf = _tf.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
-        tf.write(body)
-        tf.close()
-        # argv list, never shell=True; repo/title/paths are discrete args.
-        cmd = ["gh", "issue", "create", "--repo", repo,
-               "--title", _bench_issue_title(), "--body-file", tf.name]
-        proc = _sp.run(cmd, capture_output=True, text=True, timeout=60)
-        if proc.returncode != 0:
-            return (None, f"gh issue create failed: {(proc.stderr or proc.stdout).strip()}")
-        url = (proc.stdout or "").strip().splitlines()[-1] if proc.stdout.strip() else ""
-        return (url or "created", None)
-    except Exception as e:
-        return (None, f"gh issue create error: {e}")
-    finally:
-        if tf is not None:
-            try:
-                os.unlink(tf.name)
-            except OSError:
-                pass
-
-
-def _resolve_gh_token(explicit):
-    """Token source order: --gh-token > GITHUB_TOKEN/GH_TOKEN > `gh auth token`. Returns
-    (token, source) or (None, None). Never logs the value."""
-    if explicit:
-        return (explicit, "--gh-token")
-    for var in ("GITHUB_TOKEN", "GH_TOKEN"):
-        if os.environ.get(var):
-            return (os.environ[var], f"${var}")
-    try:
-        import shutil as _sh
-        import subprocess as _sp
-        if _sh.which("gh"):
-            proc = _sp.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=15)
-            if proc.returncode == 0 and proc.stdout.strip():
-                return (proc.stdout.strip(), "gh auth token")
+        import importlib.util as _ilu
+        spec = _ilu.spec_from_file_location("_pubrun_share_safety", ss)
+        if spec is None or spec.loader is None:
+            return None
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
     except Exception:
-        pass
-    return (None, None)
+        return None
 
 
-def _submit_via_http(repo, redacted_path, token):
-    """POST to the GitHub Issues API via stdlib urllib. Return (url, None) on success or
-    (None, reason) to fall through. HTTPS-only; hardened headers; token never echoed."""
-    import urllib.request
-    import urllib.error
-    if not token:
-        return (None, "no GitHub token (set --gh-token, $GITHUB_TOKEN, or `gh auth login`)")
-    api = f"https://api.github.com/repos/{repo}/issues"
-    payload = json.dumps({"title": _bench_issue_title(),
-                          "body": _bench_issue_body(redacted_path)}).encode("utf-8")
-    req = urllib.request.Request(api, data=payload, method="POST")
-    req.add_header("User-Agent", f"pubrun/{__version__}")  # GitHub rejects requests w/o UA
-    req.add_header("Accept", "application/vnd.github+json")
-    req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("Content-Type", "application/json")
-    try:
-        # HTTPS-only + explicit timeout so a stalled connection cannot hang the CLI.
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return (data.get("html_url", "created"), None)
-    except urllib.error.HTTPError as e:
-        detail = ""
+def _share_check(redacted_path):
+    """Run the shared structural share-safety check on a redacted result file.
+
+    Returns (passed, reasons). Prefers the shared benchmarks/share_safety.py validator (the
+    same rules the server-side Action enforces, so local and server agree). Falls back to the
+    local key/needle verifier (`_verify_redacted`) when the shared module is unavailable (e.g.
+    a non-checkout install). Never echoes a potential leak: reasons name fields, not values."""
+    ss = _load_share_safety()
+    if ss is not None:
         try:
-            detail = e.read().decode("utf-8", "replace")
-        except Exception:
-            pass
-        extra = ""
-        if e.code in (403, 429):
-            ra = e.headers.get("Retry-After") or e.headers.get("X-RateLimit-Reset")
-            extra = f" (rate-limited; retry-after/reset={ra})" if ra else " (rate-limited)"
-        return (None, _scrub(f"GitHub API HTTP {e.code}{extra}: {detail[:200]}", [token]))
-    except Exception as e:
-        return (None, _scrub(f"HTTP submit error: {e}", [token]))
+            text = Path(redacted_path).read_text(encoding="utf-8")
+        except OSError as e:
+            return (False, [f"could not read {redacted_path}: {e}"])
+        return ss.check_share_safe_text(text)
+    # Fallback: the local verifier (returns a single reason string).
+    ok, detail = _verify_redacted(redacted_path)
+    return (ok, [] if ok else [detail])
 
 
-def _print_floor(repo, redacted_path, reasons, interactive) -> None:
-    """The always-works manual fallback: explain, then offer a copy-paste submission."""
+def _print_safe_file_block(unredacted_path, redacted_path) -> None:
+    """Print the unmistakable end-of-run block: which file is PRIVATE, which is SAFE to
+    submit, the share-check verdict, and where to submit (attach the SAFE file). This is the
+    primary user-facing privacy signal for the attach flow (IPD 20260721-2255-01)."""
+    passed, reasons = _share_check(redacted_path)
+    verdict = "PASSED" if passed else "FAILED"
     print("", file=sys.stderr)
-    if reasons:
-        print("Automated submission was not possible:", file=sys.stderr)
+    print("=" * 68, file=sys.stderr)
+    print("  Benchmark result written. To contribute it:", file=sys.stderr)
+    print("", file=sys.stderr)
+    if unredacted_path is not None:
+        print(f"  PRIVATE, DO NOT SHARE:  {unredacted_path}", file=sys.stderr)
+    print(f"  SAFE TO SUBMIT:         {redacted_path}", file=sys.stderr)
+    print(f"  Share check:            {verdict}", file=sys.stderr)
+    print("", file=sys.stderr)
+    if passed:
+        print("  Submit (attach the SAFE file, do NOT paste it):", file=sys.stderr)
+        print(f"    {_BENCH_SUBMIT_URL}", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("  Tip: `pubrun bench --prepare-submission` copies ONLY the safe file into a", file=sys.stderr)
+        print("  clean pubrun-share/ folder, so the folder you browse to attach contains", file=sys.stderr)
+        print("  only the file that is safe to share.", file=sys.stderr)
+    else:
+        print("  The share check FAILED, so this file is NOT safe to submit as-is:", file=sys.stderr)
         for r in reasons:
-            print(f"  - {r}", file=sys.stderr)
-    do_print = True
-    if interactive:
-        try:
-            resp = input("Print a ready-to-paste submission (issue body + gh command)? [Y/n] ").strip().lower()
-            do_print = resp in ("", "y", "yes")
-        except (EOFError, KeyboardInterrupt):
-            do_print = False
-    if not do_print:
-        print(f"To submit later: pubrun bench --submit-file \"{redacted_path}\"", file=sys.stderr)
-        print(f"Or open an issue manually at: {_BENCH_SUBMIT_URL}", file=sys.stderr)
-        return
-    print("\n--- Copy-paste submission ------------------------------------------", file=sys.stderr)
-    print(f"Open an issue at: {_BENCH_SUBMIT_URL}", file=sys.stderr)
-    print(f"Title: {_bench_issue_title()}", file=sys.stderr)
-    print("Or with the GitHub CLI:", file=sys.stderr)
-    print(f'  gh issue create --repo {repo} --title "{_bench_issue_title()}" '
-          f'--body-file "{redacted_path}"', file=sys.stderr)
-    print("\nIssue body:\n", file=sys.stderr)
-    print(_bench_issue_body(redacted_path), file=sys.stderr)
-    print("--------------------------------------------------------------------", file=sys.stderr)
+            print(f"    - {r}", file=sys.stderr)
+        print("  Do not attach it. Re-run without --no-redact, or open an issue for help.", file=sys.stderr)
+    print("=" * 68, file=sys.stderr)
 
 
-def _submit_benchmark(redacted_path, repo, method, gh_token, interactive) -> None:
-    """Consent-gated submission chain: gh -> HTTP-to-Issues -> printed floor. Callers must
-    have already obtained explicit consent and a REDACTED file (verified). Never raises out."""
-    if not _GH_REPO_RE.match(repo or ""):
-        _print_error(f"Invalid --gh-repo {repo!r}; expected OWNER/NAME.")
-        return
-    reasons = []
+def _prepare_submission(redacted_path, dest_dir=None) -> Optional[Path]:
+    """Copy ONLY the checked redacted file into a clean `pubrun-share/` directory, so the
+    folder the contributor browses to attach contains only the file that is safe to share.
 
-    if method == "print":
-        _print_floor(repo, redacted_path, [], interactive)
-        return
-
-    # (a) gh
-    if method in (None, "gh"):
-        url, why = _submit_via_gh(repo, redacted_path)
-        if url:
-            print(f"\nSubmitted. Thank you! {url}", file=sys.stderr)
-            return
-        reasons.append(f"gh: {why}")
-        if method == "gh":
-            _print_floor(repo, redacted_path, reasons, interactive)
-            return
-
-    # (b) HTTP to GitHub Issues API
-    if method in (None, "http"):
-        token, source = _resolve_gh_token(gh_token)
-        if source:
-            print(f"Using GitHub token from {source}.", file=sys.stderr)
-        url, why = _submit_via_http(repo, redacted_path, token)
-        if url:
-            print(f"\nSubmitted. Thank you! {url}", file=sys.stderr)
-            return
-        reasons.append(f"http: {why}")
-
-    # (c) printed floor
-    _print_floor(repo, redacted_path, reasons, interactive)
-
-
-def _print_share_guidance(results_path, redacted_path) -> None:
+    This is the PRIMARY file-pick mitigation for the attach flow: the unredacted sibling is
+    never copied here, so a drag-and-drop from this folder cannot pick the wrong file. stdlib
+    only. Returns the destination path on success, or None (after printing an error) on
+    failure or a failed share check."""
+    src = Path(redacted_path)
+    if not src.is_file():
+        _print_error(f"--prepare-submission: no such file: {redacted_path}")
+        return None
+    passed, reasons = _share_check(src)
+    if not passed:
+        _print_error(
+            "Refusing to prepare a submission folder: the share check FAILED.\n"
+            + "\n".join(f"  - {r}" for r in reasons)
+            + "\nThis file does not look safe to publish; do not share it.")
+        return None
+    import shutil as _sh
+    dest = Path(dest_dir) if dest_dir else (src.parent / "pubrun-share")
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        target = dest / src.name
+        _sh.copy2(str(src), str(target))
+    except OSError as e:
+        _print_error(f"--prepare-submission: could not copy into {dest}: {e}")
+        return None
     print("", file=sys.stderr)
-    print("To contribute this benchmark result:", file=sys.stderr)
-    print(f"  1. A redacted, shareable copy was written to:\n       {redacted_path}", file=sys.stderr)
-    print("     (hostname, username, and home-directory paths are masked; CPU/GPU model,", file=sys.stderr)
-    print("      timings, versions, filesystem type, and Slurm partition are preserved.)", file=sys.stderr)
-    print(f"  2. Attach it to a new issue at:\n       {_BENCH_SUBMIT_URL}", file=sys.stderr)
-    print("     Opening the issue from your own GitHub account lets us follow up with", file=sys.stderr)
-    print("     questions without any personal data in the file (fully anonymous", file=sys.stderr)
-    print("     submission is fine too). Note: CPU/GPU model + a distinctive partition", file=sys.stderr)
-    print("     name can still be re-identifying in a small group.", file=sys.stderr)
-    print(f"  Full (un-redacted) results for your own analysis are at:\n       {results_path}", file=sys.stderr)
+    print(f"Prepared a clean submission folder containing ONLY the safe file:", file=sys.stderr)
+    print(f"  {target}", file=sys.stderr)
+    print("Attach that file (from that folder) at:", file=sys.stderr)
+    print(f"  {_BENCH_SUBMIT_URL}", file=sys.stderr)
+    return target
 
 
 def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact,
-               submit_file=None, submit_method=None, gh_repo=None, gh_token=None,
-               print_submission=False, no_submit=False, scheduler="auto", rigorous=False,
+               submit_file=None, gh_repo=None, prepare_submission=False,
+               no_submit=False, scheduler="auto", rigorous=False,
                no_baseline=False) -> None:
     """Friendly front-end over benchmarks/harness.py with optional HPC scheduler submission
-    (Slurm/PBS/LSF/SGE) and consent-gated result submission to the public pubrun-benchmarks
-    repo."""
+    (Slurm/PBS/LSF/SGE).
+
+    Community results are contributed by ATTACHING the redacted file to a GitHub Issue Form
+    (see _BENCH_SUBMIT_URL); this client never transmits the result itself. It prints an
+    unmistakable safe-file block (which file is private, which is safe, the share-check
+    verdict, where to attach) and can `--prepare-submission` a clean folder holding only the
+    safe file. `--submit`/`--yes` govern HPC scheduler job submission only."""
     repo = gh_repo or _DEFAULT_BENCH_REPO
     if not _GH_REPO_RE.match(repo):
         _print_error(f"Invalid --gh-repo {repo!r}; expected OWNER/NAME.")
         sys.exit(1)
     interactive = sys.stdin.isatty()
 
-    # --- Recovery / HPC / batch path: submit an EXISTING file, no benchmark run. ---
+    # --- Recovery / HPC / batch path: check an EXISTING redacted file, no benchmark run. ---
+    # In the attach flow this never transmits: it share-checks the file and shows how to
+    # submit it (attach), and with --prepare-submission stages a clean folder for it.
     if submit_file is not None:
         p = Path(submit_file)
         if not p.is_file():
             _print_error(f"--submit-file: no such file: {submit_file}")
             sys.exit(1)
-        # NEVER auto-transmit an un-redacted result to the PUBLIC repo (verifier gates it).
-        if not no_redact:
-            ok, detail = _verify_redacted(p)
-            if not ok:
-                _print_error(
-                    f"Refusing to submit: {detail}.\n"
-                    "This looks like a full (un-redacted) result, which may contain personal "
-                    "data. Point --submit-file at the '.redacted.json' copy, or, only if you "
-                    "have manually verified it is safe, pass --no-redact to override.")
-                sys.exit(1)
-        else:
-            print("WARNING: --no-redact given; skipping the redaction safety check. Ensure "
-                  "this file contains no personal data before it is published publicly.",
-                  file=sys.stderr)
-        if print_submission:
-            _print_floor(repo, str(p), [], interactive)
-            return
-        _submit_benchmark(str(p), repo, submit_method, gh_token, interactive)
-        return
+        if prepare_submission:
+            target = _prepare_submission(p)
+            sys.exit(0 if target is not None else 1)
+        # Show the safe-file block for this file (the share check gates the PASSED verdict).
+        _print_safe_file_block(None, str(p))
+        passed, _ = _share_check(p)
+        sys.exit(0 if passed else 1)
 
     harness = _find_bench_harness()
     if harness is None:
@@ -1571,49 +1462,31 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact
         _print_error(f"Benchmark harness exited with code {rc}.")
         sys.exit(rc)
     redacted_path = None if no_redact else redacted_target
-    # Non-fatal size guard: warn if the shareable file is too big for GitHub's issue-body
-    # submission path (~65 KB); suggest attaching the file instead.
-    if redacted_path is not None:
-        _warn_if_over_gh_cap(redacted_path)
     if as_json:
         print(json.dumps({"results": str(out_path),
                           "redacted": None if no_redact else str(redacted_path)}))
         return
 
-    _print_share_guidance(out_path, redacted_path) if not no_redact else \
-        print(f"\nResults: {out_path}", file=sys.stderr)
-
-    # --- Consent-gated submission offer (never transmits without an explicit yes) ---
+    # --- Attach flow: print the unmistakable safe-file block (never transmits). ---
     if no_redact:
-        # No redacted artifact exists; never auto-transmit a full result to the public repo.
-        if submit or yes:
-            print("\nNot submitting: --no-redact produced no shareable (redacted) copy. Re-run "
-                  "without --no-redact to contribute, or submit a redacted file manually.",
-                  file=sys.stderr)
+        # No redacted artifact exists; there is nothing safe to contribute from this run.
+        print(f"\nResults: {out_path}", file=sys.stderr)
+        print("\nNo redacted (shareable) copy was written (--no-redact). Re-run without "
+              "--no-redact to produce a file you can contribute.", file=sys.stderr)
         return
 
-    # Explicit consent via flag, else an interactive [y/N] offer (Enter == No).
-    consented = submit or yes
-    if not consented and interactive and not no_submit:
-        try:
-            resp = input("\nContribute this redacted result to help verify pubrun's "
-                         "overhead claims? [y/N] ").strip().lower()
-            consented = resp in ("y", "yes")
-        except (EOFError, KeyboardInterrupt):
-            consented = False
+    if no_submit:
+        # Suppress the contribution guidance; just point at both files.
+        print(f"\nResults: {out_path}", file=sys.stderr)
+        print(f"Redacted (shareable) copy: {redacted_path}", file=sys.stderr)
+        return
 
-    if consented:
-        # Redacted copy was just written by the harness, but verify before any network call.
-        ok, detail = _verify_redacted(redacted_path)
-        if not ok:
-            _print_error(f"Not submitting: {detail}. Submit manually if you have verified it.")
-            return
-        if print_submission:
-            _print_floor(repo, str(redacted_path), [], interactive)
-        else:
-            _submit_benchmark(str(redacted_path), repo, submit_method, gh_token, interactive)
-    else:
-        print(f'\nTo submit later: pubrun bench --submit-file "{redacted_path}"', file=sys.stderr)
+    _print_safe_file_block(str(out_path), str(redacted_path))
+
+    # --prepare-submission stages a clean folder holding ONLY the safe file (primary
+    # file-pick mitigation). It never transmits; the human attaches the file in the browser.
+    if prepare_submission:
+        _prepare_submission(redacted_path)
 
 
 def _run_status(
@@ -2223,13 +2096,16 @@ def main() -> None:
         "bench",
         help="Run the pubrun overhead benchmark suite (auto-detects Slurm on HPC).",
         description="Friendly front-end over the benchmark harness. Runs locally by "
-                    "default; on an HPC login node with Slurm it OFFERS to submit to a "
-                    "compute node (never submits without confirmation). Writes a "
-                    "redacted, shareable copy by default and prints how to contribute it. "
-                    "Requires a source checkout (the benchmark tooling is not shipped in "
-                    "the pip package).",
+                    "default; on an HPC login node with Slurm it OFFERS to submit the JOB "
+                    "to a compute node (never submits without confirmation). Writes a "
+                    "redacted, shareable copy by default and prints an unmistakable safe-file "
+                    "block: which file is PRIVATE, which is SAFE, the share-check verdict, "
+                    "and where to ATTACH the safe file (a GitHub Issue Form). This client "
+                    "never transmits the result itself. Requires a source checkout (the "
+                    "benchmark tooling is not shipped in the pip package).",
         epilog=f"Examples:\n  {prog_name} bench --quick\n  {prog_name} bench --local --passes 3\n"
-               f"  {prog_name} bench --submit\n  {prog_name} bench --submit-file runs.redacted.json",
+               f"  {prog_name} bench --prepare-submission\n"
+               f"  {prog_name} bench --submit-file runs.redacted.json",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     bench_speed = bench_parser.add_mutually_exclusive_group()
@@ -2241,25 +2117,22 @@ def main() -> None:
     bench_parser.add_argument("--passes", type=int, default=None, help="Override the number of measured scenario sweeps (default depends on the tier: quick=2, full=3, rigorous=5).")
     bench_group = bench_parser.add_mutually_exclusive_group()
     bench_group.add_argument("--local", action="store_true", help="Run here even if an HPC scheduler is detected.")
-    bench_group.add_argument("--submit", action="store_true", help="Submit to the detected scheduler (no prompt); off HPC, contribute the result without prompting.")
+    bench_group.add_argument("--submit", action="store_true", help="Submit the benchmark JOB to the detected HPC scheduler without prompting (no effect off HPC).")
     bench_parser.add_argument("--scheduler", choices=("auto", "slurm", "pbs", "lsf", "sge", "local"),
                               default="auto", help="HPC scheduler to submit to (default: auto-detect; 'local' forces a local run).")
-    bench_parser.add_argument("-y", "--yes", action="store_true", help="Assume yes to the submit/contribute prompt.")
+    bench_parser.add_argument("-y", "--yes", action="store_true", help="Assume yes to the HPC scheduler submit prompt.")
     bench_parser.add_argument("--no-redact", action="store_true", help="Do NOT write a redacted share copy (full detail only).")
     bench_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit the result/redacted paths as JSON.")
-    # --- result submission (consent-gated; never transmits without an explicit yes) ---
+    # --- contribution (attach flow; this client never transmits the result) ---
+    bench_parser.add_argument("--prepare-submission", action="store_true",
+                              help="Copy ONLY the redacted (safe) file into a clean pubrun-share/ folder, so the "
+                                   "folder you browse to attach contains only the file that is safe to share.")
     bench_parser.add_argument("--submit-file", metavar="FILE", default=None,
-                              help="Submit an existing (redacted) result file to the pubrun-benchmarks "
-                                   "repo, without running a benchmark. For 'oh, I meant yes' recovery and HPC.")
-    bench_parser.add_argument("--no-submit", action="store_true", help="Do not offer to contribute the result.")
-    bench_parser.add_argument("--submit-method", choices=("gh", "http", "print"), default=None,
-                              help="Force a single submission method instead of probing (gh -> http -> print).")
+                              help="Share-check an existing redacted result file and show how to attach it "
+                                   "(no benchmark run, no transmit). Combine with --prepare-submission to stage it.")
+    bench_parser.add_argument("--no-submit", action="store_true", help="Skip the end-of-run 'how to contribute' block.")
     bench_parser.add_argument("--gh-repo", metavar="OWNER/NAME", default=None,
-                              help=f"Target GitHub repo for submission (default {_DEFAULT_BENCH_REPO}).")
-    bench_parser.add_argument("--gh-token", metavar="TOKEN", default=None,
-                              help="GitHub token for the HTTP submission path (else $GITHUB_TOKEN/$GH_TOKEN or `gh auth token`).")
-    bench_parser.add_argument("--print-submission", action="store_true",
-                              help="Print a ready-to-paste submission instead of transmitting (offline/power-user).")
+                              help=f"Target GitHub repo for the Issue Form URL (default {_DEFAULT_BENCH_REPO}).")
 
     # ---------------- Clean Subparser ----------------
     clean_parser = subparsers.add_parser(
@@ -2683,10 +2556,8 @@ def main() -> None:
             getattr(args, "as_json", False),
             getattr(args, "no_redact", False),
             submit_file=getattr(args, "submit_file", None),
-            submit_method=getattr(args, "submit_method", None),
             gh_repo=getattr(args, "gh_repo", None),
-            gh_token=getattr(args, "gh_token", None),
-            print_submission=getattr(args, "print_submission", False),
+            prepare_submission=getattr(args, "prepare_submission", False),
             no_submit=getattr(args, "no_submit", False),
             scheduler=getattr(args, "scheduler", "auto"),
             rigorous=getattr(args, "rigorous", False),

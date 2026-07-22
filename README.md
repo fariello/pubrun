@@ -238,13 +238,21 @@ pubrun inspect [RUN_DIR] [--show-suggestions]
 ```
 
 ### `pubrun bench`
-Run the pubrun overhead benchmark suite (auto-detects an HPC scheduler, Slurm/PBS/LSF/SGE, and offers to submit to a compute node). Every run starts with an uncaptured **baseline pass** (pubrun absent), then N measured passes: `--quick` (2×15), `--full`/default (3×30), or `--rigorous` (5×50). After a local run, offers to contribute the redacted result. Requires a source checkout.
+Run the pubrun overhead benchmark suite (auto-detects an HPC scheduler, Slurm/PBS/LSF/SGE, and offers to submit the job to a compute node). Every run starts with an uncaptured **baseline pass** (pubrun absent), then N measured passes: `--quick` (2x15), `--full`/default (3x30), or `--rigorous` (5x50). Requires a source checkout.
 ```bash
 pubrun bench                        # default: baseline + 3 passes x 30 iterations
 pubrun bench --quick                # baseline + 2 x 15
 pubrun bench --rigorous             # baseline + 5 x 50 (tight CIs; can be slow)
-pubrun bench --submit-file result.redacted.json   # submit a previous result
+pubrun bench --prepare-submission   # stage the safe file in a clean pubrun-share/ folder
 ```
+
+**Contribute a benchmark result (attach, do not paste).** Each run writes two files: a private
+`*.unredacted.json` (for your own analysis; embeds your hostname) and a shareable `*.redacted.json`.
+`pubrun bench` prints which file is which, runs a share-safety check, and gives you a link to a GitHub
+Issue Form. Attach the `*.redacted.json` file to that form (do not paste the JSON). The easiest safe
+path is `pubrun bench --prepare-submission`, which copies only the redacted file into a clean
+`pubrun-share/` folder so you cannot pick the wrong file. A validate-only check on the issue posts a
+pass/fail receipt.
 
 ### `pubrun clean`
 Interactively delete old run directories. Lists candidates with age and size, then prompts for confirmation.

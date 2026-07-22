@@ -1,0 +1,59 @@
+name: Benchmark Result
+description: Contribute a pubrun overhead benchmark result (attach the redacted file)
+title: "[BENCH]: "
+labels: ["type:benchmark-submission", "status:pending"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for contributing a benchmark result! This helps verify pubrun's overhead
+        claims across real hardware, filesystems, and schedulers.
+
+        **How to submit (attach, do NOT paste):**
+        1. Run `pubrun bench` (or `pubrun bench --quick`). It writes two files and prints a
+           safe-file block telling you which is which.
+        2. `pubrun bench --prepare-submission` copies ONLY the redacted (safe) file into a
+           clean `pubrun-share/` folder.
+        3. Drag the `*.redacted.json` file from that folder into the attachment box below.
+
+        **Never attach the `*.unredacted.json` file** (it contains your hostname and paths).
+        An automated check will validate the attachment and comment a pass/fail receipt; it
+        cannot un-share a file, so please double-check before you attach.
+  - type: textarea
+    id: attachment
+    attributes:
+      label: Redacted result file (attach it here)
+      description: >
+        Drag the `*.redacted.json` file into this box to attach it. GitHub uploads it and
+        inserts a link. Do NOT paste the JSON contents inline; attach the file.
+      placeholder: Attach pubrun-bench-XXXXXXXX-...redacted.json here (drag and drop).
+    validations:
+      required: true
+  - type: dropdown
+    id: environment_kind
+    attributes:
+      label: Environment (optional context)
+      description: Roughly where did this run? This is optional and non-identifying.
+      options:
+        - Laptop / desktop
+        - Workstation / server
+        - HPC cluster (Slurm/PBS/LSF/SGE)
+        - Cloud VM / container
+        - Other / prefer not to say
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes (optional)
+      description: Anything worth knowing (unusual filesystem, tuning, caveats). Optional.
+    validations:
+      required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy acknowledgment
+      description: Required. The redacted file masks hostname, username, and home paths.
+      options:
+        - label: I attached the redacted (`*.redacted.json`) file shown by pubrun and did NOT attach the unredacted file.
+          required: true
