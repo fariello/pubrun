@@ -11,7 +11,9 @@
   (`.github/workflows/benchmark-intake.yml` trigger; `.github/scripts/extract_attachment_url.py` and
   `validate_benchmark_submission.py` to accept gist host + inline JSON), and docs/CHANGELOG/tests. NO
   Gist discovery/reconciliation, NO `--cleanup-submissions`, NO data-branch/archival, NO `contents:write`.
-- Status: reviewed
+- Status: executed
+- Approval: human-approved 2026-07-22 (maintainer "Go" after /plan-review); executed 2026-07-23 after a
+  full CI matrix pass (21/21 green, run 29972628892); label creation remains a human action
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Set: benchmark-intake
 - Order: 4
@@ -366,3 +368,17 @@ Proposal; MUST be human-approved before execution; NOT auto-run. Execution contr
   timeout fallback; PR-004 documented the forgeable-marker abuse surface as accepted-low; PR-005 set
   `Status: reviewed`. No open questions (all three resolved earlier in session). No BLOCKER/HIGH
   unresolved. Verdict: APPROVE WITH REVISIONS APPLIED; Readiness: GO - PENDING HUMAN APPROVAL.
+- 2026-07-22 approved (human): maintainer approved after /plan-review. Status -> approved; executing.
+- 2026-07-23 executed (opencode / its_direct/pt3-claude-opus-4.8-1m-us): implemented all steps.
+  Redacted-only default (harness.run() write optional; --unredacted opt-in; --no-redact removed; redaction
+  self-check). Client gist/inline contribution (_probe_gh, _run_gh argv/no-shell, _create_result_gist
+  unlisted + host-validated raw url, _submit_benchmark_result gist->inline->web with orphan rollback,
+  --contribute/--no-contribute, [Y/n] TTY-only prompt). Slurm submit-and-wait (sbatch --parsable,
+  deterministic redacted-out, squeue/sacct polling tolerant of missing/lagging tools, --wait-timeout,
+  graceful --submit-file fallback; submit_bench.sh + run_bench.sbatch updated). Server intake (workflow
+  label-or-marker trigger, self-applied labels, idempotent receipt; extractor kind=url|inline|none via
+  $GITHUB_EVENT_PATH; gist.githubusercontent.com added exact-host to both scripts). Docs
+  (README/CONTRIBUTING/CHANGELOG). Commit f6dfc32. Full local suite 1014 passed / 7 skipped; full CI
+  matrix 21/21 green (run 29972628892). Labels (type:benchmark-submission, status:{pending,accepted,
+  needs-fix}) remain a human/settings action. Status -> executed; moved to executed/. Slice B (Gist
+  discovery/reconciliation + --cleanup-submissions) remains a separate future IPD.
