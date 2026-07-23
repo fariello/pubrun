@@ -64,14 +64,14 @@ Please do not include secrets, credentials, private file paths, unpublished data
 
 ## Contributing a benchmark result
 
-Benchmark results help verify pubrun's overhead claims across real hardware, filesystems, and schedulers. To contribute one, ATTACH the redacted file to the benchmark Issue Form; do not paste JSON into an issue body.
+Benchmark results help verify pubrun's overhead claims across real hardware, filesystems, and schedulers.
 
-1. From a source checkout, run `pubrun bench` (or `pubrun bench --quick`).
-2. It writes two files and prints a safe-file block: a private `*.unredacted.json` (keep this; it embeds your hostname) and a shareable `*.redacted.json`. It also runs a share-safety check.
-3. Run `pubrun bench --prepare-submission` to copy only the redacted file into a clean `pubrun-share/` folder, so the folder you browse to attach contains only the file that is safe to share.
-4. Open the benchmark Issue Form (the command prints the link), attach the `*.redacted.json` file, and check the privacy box.
+1. From a source checkout, run `pubrun bench` (or `pubrun bench --quick`). By default it writes only a redacted, share-safe file (`*.redacted.json`); add `--unredacted` if you also want the identifying copy for your own analysis. It runs a share-safety check on the redacted file.
+2. On an interactive terminal, pubrun then offers to publish the redacted result to GitHub (press Enter to accept). This uses the GitHub CLI (`gh`): it creates an unlisted Gist of the redacted file and opens an issue linking it, or embeds the JSON inline when small. Install and authenticate `gh` first (`gh auth login`) for the one-command path; pubrun tells you if it is missing.
+3. No `gh`, or prefer the browser? Use `pubrun bench --prepare-submission` to copy only the redacted file into a clean `pubrun-share/` folder, then attach that `*.redacted.json` file to the benchmark Issue Form (the command prints the link) and check the privacy box.
+4. On an HPC login node, pubrun offers to submit the job to Slurm and, if you accept, waits for it to finish and then contributes from the login node. If the wait is interrupted, finish later with `pubrun bench --submit-file <path>`.
 
-A validate-only automated check will post a pass/fail receipt on the issue. It parses the attachment only as data and cannot un-share a file, so please attach the redacted file (never the unredacted one).
+A validate-only automated check posts a pass/fail receipt on the issue. It parses the submission only as data and cannot un-share a file, so only ever submit the redacted result (never the unredacted one). Note the published Gist is unlisted, not private: anyone with its URL can read it (the file is redacted, so this is expected).
 
 ## Pull requests
 

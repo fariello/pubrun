@@ -243,16 +243,20 @@ Run the pubrun overhead benchmark suite (auto-detects an HPC scheduler, Slurm/PB
 pubrun bench                        # default: baseline + 3 passes x 30 iterations
 pubrun bench --quick                # baseline + 2 x 15
 pubrun bench --rigorous             # baseline + 5 x 50 (tight CIs; can be slow)
-pubrun bench --prepare-submission   # stage the safe file in a clean pubrun-share/ folder
+pubrun bench --contribute           # publish the result to GitHub after the run (no prompt)
+pubrun bench --unredacted           # also keep a private, identifying copy for local debugging
 ```
 
-**Contribute a benchmark result (attach, do not paste).** Each run writes two files: a private
-`*.unredacted.json` (for your own analysis; embeds your hostname) and a shareable `*.redacted.json`.
-`pubrun bench` prints which file is which, runs a share-safety check, and gives you a link to a GitHub
-Issue Form. Attach the `*.redacted.json` file to that form (do not paste the JSON). The easiest safe
-path is `pubrun bench --prepare-submission`, which copies only the redacted file into a clean
-`pubrun-share/` folder so you cannot pick the wrong file. A validate-only check on the issue posts a
-pass/fail receipt.
+**Contribute a benchmark result.** By default `pubrun bench` writes only a redacted, share-safe file
+(`*.redacted.json`); pass `--unredacted` if you also want the identifying copy for your own analysis.
+After a run pubrun runs a share-safety check and, on an interactive terminal, offers to publish the
+redacted result to GitHub for you (press Enter to accept). Publishing uses the GitHub CLI (`gh`): it
+creates an unlisted Gist of the redacted file and opens an issue linking it, or embeds the JSON inline
+when small. If `gh` is not installed or authenticated, pubrun tells you how to set it up or attach the
+file in a browser instead. On an HPC login node it offers to submit the job to Slurm and, if you accept,
+waits for the job and then contributes from the login node. A validate-only check on the issue posts a
+pass/fail receipt. Use `--no-contribute` to never offer publishing, or `--prepare-submission` to stage
+the safe file in a clean `pubrun-share/` folder for a manual browser attach.
 
 ### `pubrun clean`
 Interactively delete old run directories. Lists candidates with age and size, then prompts for confirmation.

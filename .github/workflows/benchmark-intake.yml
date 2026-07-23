@@ -1,18 +1,19 @@
 name: Benchmark intake (validate-only)
 
-# Phase 1 of benchmark-intake (IPD 20260721-2255-01): a VALIDATE-ONLY intake for
-# community benchmark submissions. It parses an attacker-controlled attachment from a
-# public issue as DATA ONLY, then comments a pass/fail receipt. It writes NOTHING to any
-# branch (contents permission is read-only); archival/aggregation is Phase 2, gated behind a
-# hard security review. The issue body is never interpolated into a shell: it is passed via
-# an environment variable and parsed by Python.
+# Benchmark-intake (IPD 20260721-2255-01 + 20260722-1930-01): a VALIDATE-ONLY intake for
+# community benchmark submissions. It parses an attacker-controlled submission from a public
+# issue as DATA ONLY (an attached/gist .json URL, or an inline JSON block from an automated
+# `pubrun bench --contribute`), then comments a pass/fail receipt. It writes NOTHING to any
+# branch (contents permission is read-only); archival/aggregation is a later phase, gated
+# behind a hard security review. The issue body is never interpolated into a shell: it is read
+# from the checked event JSON by Python; only an enumerated source kind selects the command.
 
 on:
   issues:
     types: [opened, edited]
 
 # Least privilege: read the repo (for the checked-out validator/schema) and write issue
-# comments/labels. NO contents:write in Phase 1.
+# comments/labels. NO write to repo contents.
 permissions:
   contents: read
   issues: write
@@ -20,9 +21,13 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    # Gate on the benchmark-submission label the Issue Form applies. This keeps the workflow
-    # from running on unrelated issues and only acts on the intended template.
-    if: contains(join(github.event.issue.labels.*.name, ','), 'type:benchmark-submission')
+    # Route on EITHER the Issue Form label OR the automated-submission marker in the body. An
+    # outside contributor cannot set a label via the API, so a client (`pubrun bench`) submission
+    # is routed by the marker; the workflow self-applies the label below. The marker is routing
+    # only; the JSON stays untrusted and is fully revalidated.
+    if: >-
+      contains(join(github.event.issue.labels.*.name, ','), 'type:benchmark-submission')
+      || contains(github.event.issue.body, '<!-- pubrun-benchmark-submission:v1 -->')
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -32,61 +37,81 @@ jobs:
       - name: Install validator dependencies (jsonschema only)
         run: pip install jsonschema
 
-      - name: Extract the attachment URL from the issue body
+      - name: Self-apply routing labels (external callers cannot set labels)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue_number = context.issue.number;
+            const { owner, repo } = context.repo;
+            for (const label of ['type:benchmark-submission', 'status:pending']) {
+              try {
+                await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [label] });
+              } catch (e) {}
+            }
+
+      - name: Resolve the submission source (URL or inline JSON) from the issue body
         id: extract
-        env:
-          # The issue body is UNTRUSTED. Pass it as an env var (not a shell arg) so nothing
-          # in it is shell-evaluated; Python reads it from the environment.
-          ISSUE_BODY: ${{ github.event.issue.body }}
+        # The extractor reads the UNTRUSTED body from $GITHUB_EVENT_PATH (data only, no shell)
+        # and resolves to kind=url|inline|none. For inline it writes submission.json (byte-capped).
         run: python3 .github/scripts/extract_attachment_url.py
 
-      - name: Validate the submission (validate-only; no writes)
-        id: validate
-        if: steps.extract.outputs.url != ''
+      - name: Validate a URL submission (validate-only; no writes)
+        id: validate_url
+        if: steps.extract.outputs.kind == 'url'
         env:
           ATTACHMENT_URL: ${{ steps.extract.outputs.url }}
         run: |
-          # ATTACHMENT_URL comes from an allowlisted-host extractor and is passed via env;
-          # the validator re-checks the host allowlist, byte cap, and redirects and fails
-          # closed. It never echoes the payload. Capture the verdict for the receipt.
+          # URL comes from the allowlisted-host extractor and is passed via env; the validator
+          # re-checks host allowlist, byte cap, and redirects and fails closed. Never echoes payload.
           python3 .github/scripts/validate_benchmark_submission.py \
             --url "$ATTACHMENT_URL" --out verdict.json || true
 
-      - name: Comment a pass/fail receipt and set a status label
+      - name: Validate an inline submission (validate-only; no writes)
+        id: validate_inline
+        if: steps.extract.outputs.kind == 'inline'
+        run: |
+          # The extractor already wrote submission.json (fixed path, byte-capped). Validate the file.
+          python3 .github/scripts/validate_benchmark_submission.py \
+            --file submission.json --out verdict.json || true
+
+      - name: Comment a pass/fail receipt and set a status label (idempotent)
         uses: actions/github-script@v7
         env:
+          EXTRACT_KIND: ${{ steps.extract.outputs.kind }}
           EXTRACT_ERROR: ${{ steps.extract.outputs.error }}
         with:
           script: |
             const fs = require('fs');
+            const RECEIPT_MARKER = '<!-- pubrun-benchmark-receipt:v1 -->';
             let verdict = null;
             try {
               verdict = JSON.parse(fs.readFileSync('verdict.json', 'utf8'));
             } catch (e) {
               verdict = null;
             }
+            const kind = process.env.EXTRACT_KIND || 'none';
             const extractError = process.env.EXTRACT_ERROR || '';
             const issue_number = context.issue.number;
             const { owner, repo } = context.repo;
 
-            let body, addLabel, removeLabel;
+            let msg, addLabel, removeLabel;
             if (!verdict) {
               const why = extractError
                 ? extractError
-                : 'no valid `.json` attachment was found on an allowlisted GitHub host';
-              body = [
+                : 'no valid `.json` submission was found (attach the redacted file, or submit with `pubrun bench --contribute`)';
+              msg = [
                 'Automated benchmark-result check: **needs fix**.',
                 '',
                 'I could not validate a submission because ' + why + '.',
                 '',
-                'Please attach the `*.redacted.json` file that `pubrun bench` produced',
-                '(drag the file into the issue; do not paste the JSON inline), then edit',
-                'the issue to re-run the check.',
+                'Attach the `*.redacted.json` file that `pubrun bench` produced (drag it into the',
+                'issue; do not paste the JSON), or run `pubrun bench --contribute`, then edit the',
+                'issue to re-run the check.',
               ].join('\n');
               addLabel = 'status:needs-fix';
               removeLabel = 'status:accepted';
             } else if (verdict.accepted) {
-              body = [
+              msg = [
                 'Automated benchmark-result check: **passed**. Thank you for contributing!',
                 '',
                 '- schema: pubrun-benchmark/5',
@@ -97,24 +122,36 @@ jobs:
               addLabel = 'status:accepted';
               removeLabel = 'status:needs-fix';
             } else {
-              body = [
+              msg = [
                 'Automated benchmark-result check: **needs fix**.',
                 '',
                 '- failing stage: `' + verdict.stage + '`',
                 '- reason: ' + verdict.reason,
                 '',
-                'Re-run `pubrun bench` (which writes a redacted file and share-checks it),',
-                'attach the `*.redacted.json` file, and edit the issue to re-run the check.',
+                'Re-run `pubrun bench` (which writes a redacted file and share-checks it), then',
+                'attach it or re-run `pubrun bench --contribute`, and edit the issue to re-check.',
               ].join('\n');
               addLabel = 'status:needs-fix';
               removeLabel = 'status:accepted';
             }
+            const body = RECEIPT_MARKER + '\n\n' + msg;
 
-            await github.rest.issues.createComment({ owner, repo, issue_number, body });
-            // Best-effort label hygiene (labels are created by a maintainer; ignore misses).
+            // Idempotence: update our existing receipt comment (marker) instead of piling on.
+            const comments = await github.paginate(github.rest.issues.listComments,
+              { owner, repo, issue_number, per_page: 100 });
+            const mine = comments.find(c => (c.body || '').includes(RECEIPT_MARKER));
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+            // Status label hygiene: keep exactly one of accepted/needs-fix; drop pending.
             try {
               await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [addLabel] });
             } catch (e) {}
-            try {
-              await github.rest.issues.removeLabel({ owner, repo, issue_number, name: removeLabel });
-            } catch (e) {}
+            for (const stale of [removeLabel, 'status:pending']) {
+              try {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number, name: stale });
+              } catch (e) {}
+            }

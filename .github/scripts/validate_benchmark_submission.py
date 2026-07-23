@@ -52,6 +52,7 @@ ALLOWED_ATTACHMENT_HOSTS = (
     "user-images.githubusercontent.com",
     "private-user-images.githubusercontent.com",
     "raw.githubusercontent.com",
+    "gist.githubusercontent.com",
 )
 
 SCHEMA_MARKER = "pubrun-benchmark/5"
