@@ -96,3 +96,16 @@ def test_verdict_never_contains_payload():
     # Even the accepted verdict is a small fixed structure, not the payload.
     verdict = _verdict("valid.json")
     assert set(verdict.keys()) <= {"accepted", "stage", "reason", "share_safety_version"}
+
+
+def test_gist_raw_host_on_allowlist():
+    # IPD 20260722-1930-01: gist raw host is accepted (exact match, never suffix-matched).
+    assert "gist.githubusercontent.com" in v.ALLOWED_ATTACHMENT_HOSTS
+
+
+def test_gist_lookalike_host_rejected():
+    # A lookalike that merely ends with githubusercontent.com must NOT be accepted.
+    with pytest.raises(v.Reject) as ei:
+        v._download("https://evil-gist.githubusercontent.com.attacker.tld/x.json",
+                    Path("/tmp/x.json"))
+    assert ei.value.stage == "shape"

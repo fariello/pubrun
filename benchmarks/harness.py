@@ -380,8 +380,15 @@ def _run_baseline_pass(iterations: int, warmup: int, workdir: Path) -> dict:
     return {"timings": timings, "failures": failures_map, "skipped": skipped}
 
 
-def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2,
+def run(iterations: int, out_path=None, warmup: int = 1, passes: int = 2,
         mode: str = "default", baseline_pass: bool = True) -> dict:
+    """Run the benchmark and return the (unredacted) result dict.
+
+    If ``out_path`` is given, the UNREDACTED result is also written there (compact JSON); if it
+    is ``None``, nothing is written and the caller decides what to persist. As of the
+    redacted-only default (IPD 20260722-1930-01), ``main()`` no longer passes ``out_path`` unless
+    the user asked for the unredacted copy with ``--unredacted``; the redacted file is written
+    from the returned dict instead. Callers that pass a path (e.g. tests) still get a file."""
     scns = _scenarios.all_scenarios()
     machine = _machine_metadata()
     # Enrich the machine block with filesystem type (the NFS signal) and Slurm context
@@ -459,10 +466,14 @@ def run(iterations: int, out_path: Path, warmup: int = 1, passes: int = 2,
     result["total_wall_time_s"] = round(time.perf_counter() - _wall_start, 3)
 
     # Write COMPACT (no indentation): the shared/redacted copy must fit GitHub's issue-body
-    # cap; the local unredacted copy uses the same compact form (parses identically).
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(result, separators=(",", ":")), encoding="utf-8")
-    print(f"\nWrote {out_path}", file=sys.stderr)
+    # cap; the local unredacted copy uses the same compact form (parses identically). Only
+    # write the UNREDACTED result when a path was requested (redacted-only default: main()
+    # persists the redacted file separately).
+    if out_path is not None:
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(result, separators=(",", ":")), encoding="utf-8")
+        print(f"\nWrote {out_path}", file=sys.stderr)
     return result
 
 
@@ -617,9 +628,17 @@ def main() -> None:
                     help="Override the number of measured scenario sweeps.")
     ap.add_argument("--no-baseline", action="store_true",
                     help="Skip the initial uncaptured baseline pass.")
-    ap.add_argument("--out", type=str, default=None, help="Output JSON path.")
+    # Redacted-only by default (IPD 20260722-1930-01): every run writes the redacted, share-safe
+    # file. The identifying UNREDACTED copy is written only when explicitly requested via
+    # --unredacted (or an explicit --out path), for local debugging.
     ap.add_argument("--redacted-out", type=str, default=None,
-                    help="Also write a redacted copy (safe to share publicly) to this path.")
+                    help="Redacted (share-safe) output path (default: an auto-named "
+                         "pubrun-bench-<hash>-<stamp>.redacted.json under results/).")
+    ap.add_argument("--unredacted", action="store_true",
+                    help="ALSO write the identifying, un-redacted result (embeds hostname/paths; "
+                         "for local debugging only, do NOT share).")
+    ap.add_argument("--out", type=str, default=None,
+                    help="Explicit path for the UN-redacted result (implies --unredacted).")
     args = ap.parse_args()
 
     # Tier selection: quick / default / rigorous. Every tier runs 1 uncaptured baseline pass
@@ -631,19 +650,44 @@ def main() -> None:
     passes = max(1, args.passes) if args.passes else tier_passes
     if args.iterations or args.passes:
         mode = "custom"
-    out_path = Path(args.out) if args.out else _default_out()
-    result = run(iterations, out_path, passes=passes, mode=mode,
+
+    # Decide the unredacted destination: an explicit --out, else the default name only if the
+    # user opted into the unredacted copy. None => run() writes no unredacted file.
+    want_unredacted = bool(args.unredacted or args.out)
+    unredacted_path = None
+    if want_unredacted:
+        unredacted_path = Path(args.out) if args.out else _default_out()
+
+    result = run(iterations, unredacted_path, passes=passes, mode=mode,
                  baseline_pass=not args.no_baseline)
+
+    # Always write the redacted, share-safe file (the default artifact). Derive its name from
+    # the unredacted path when present so a pair is correlatable; otherwise auto-name it.
     if args.redacted_out:
         red_path = Path(args.redacted_out)
-        red_path.parent.mkdir(parents=True, exist_ok=True)
-        # Compact (no indent): the redacted copy must fit GitHub's issue-body cap.
-        red_path.write_text(json.dumps(redact_result(result), separators=(",", ":")),
-                            encoding="utf-8")
-        print(f"Wrote redacted copy {red_path}", file=sys.stderr)
-        # Non-fatal size guard: warn if the shareable file is too big for the GitHub
-        # issue-body submission path (~65 KB); suggest attaching the file instead.
-        _warn_if_over_gh_cap(red_path)
+    elif unredacted_path is not None:
+        red_path = _default_redacted_out(unredacted_path)
+    else:
+        red_path = _default_redacted_out(_default_out())
+    red_path.parent.mkdir(parents=True, exist_ok=True)
+    redacted = redact_result(result)
+    # Redaction self-check (defense in depth): confirm the redacted result is structurally
+    # share-safe before writing it. A failure means a redaction bug; warn loudly (never write a
+    # file that claims to be safe but is not). Best-effort import (dev/CI tooling, not the wheel).
+    try:
+        import share_safety as _ss  # same directory
+        ok, reasons = _ss.check_share_safe(redacted)
+        if not ok:
+            print("WARNING: redaction self-check FAILED; the redacted output may not be "
+                  "share-safe. Do NOT share it. Reasons: " + "; ".join(reasons), file=sys.stderr)
+    except Exception:
+        pass  # self-check is best-effort; absence must not block a run
+    # Compact (no indent): the redacted copy must fit GitHub's issue-body cap.
+    red_path.write_text(json.dumps(redacted, separators=(",", ":")), encoding="utf-8")
+    print(f"Wrote redacted result {red_path}", file=sys.stderr)
+    # Non-fatal size guard: warn if the shareable file is too big for the GitHub issue-body
+    # submission path (~65 KB); suggest attaching the file / using the gist path instead.
+    _warn_if_over_gh_cap(red_path)
 
 
 if __name__ == "__main__":

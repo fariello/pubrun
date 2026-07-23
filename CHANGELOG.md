@@ -9,6 +9,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **One-command benchmark contribution to GitHub (gist-and-link, inline fallback).** `pubrun bench` can
+  now publish a share-checked redacted result to `fariello/pubrun` in one command, no browser required.
+  It uses the GitHub CLI (`gh`): it creates an UNLISTED Gist of the redacted file and opens an issue
+  linking the raw `.json` URL, falling back to embedding the JSON inline in the issue body when the
+  complete body is under GitHub's ~65 KB cap, and finally to the browser Issue Form when `gh` is
+  unavailable. A non-blocking `gh` preflight before the run tells you if `gh` needs installing or
+  authenticating (it never runs `gh auth login`, never blocks the benchmark). New flags:
+  `--contribute` / `--no-contribute` (pre-decide publication; distinct from the HPC scheduler
+  `--submit`/`--yes`), and on an interactive terminal a post-run prompt offers to publish (Enter
+  accepts). `--submit-file` now contributes an existing redacted file the same way. All transport uses
+  argv lists / stdin (never a shell), re-runs the share-safety check immediately before sending, never
+  prints the token or payload, and rolls back an orphaned Gist if issue creation fails. The intake
+  workflow now also routes on a body marker (so client submissions, which cannot set a label, are
+  picked up) and accepts Gist raw URLs and inline JSON; it self-applies labels and updates a single
+  receipt comment idempotently.
+- **Slurm submit-and-wait.** On a Slurm login node, `pubrun bench` offers to run by submitting the job
+  to the queue and, if you accept, keeps the login-node process alive polling for completion (bounded
+  default wait, `--wait-timeout` to extend or disable), then runs the interactive share-check and
+  contribution from the login node (which has your terminal and network). Any interruption, timeout, or
+  job failure falls back to `pubrun bench --submit-file <path>`; the result is always written to the
+  shared filesystem, so nothing is lost.
 - **`pubrun --version` now shows the commit hash.** The version line reads
   `pubrun <version> (commit <hash>)` when a commit is resolvable. The hash is resolved live from
   `git rev-parse HEAD` when running from a source checkout (always exact), falling back to the packaged
@@ -34,11 +55,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pass/fail receipt. Archival/aggregation is a later, separately gated phase.
 
 ### Changed
-- **`pubrun bench` no longer auto-posts a result to a GitHub issue.** The old `gh`/HTTP submission chain
-  (and its `--submit-method`, `--gh-token`, and `--print-submission` flags, plus the JSON-in-issue-body
-  path) is retired in favor of the attach flow above; this client never transmits the result itself.
-  `--submit`/`--yes` now govern HPC scheduler JOB submission only. The default contribution target moved
-  from the satellite `fariello/pubrun-benchmarks` repo to a main-repo Issue Form.
+- **`pubrun bench` writes only a redacted result by default (behavior change).** Previously every run
+  wrote both a full `*.unredacted.json` (embedding hostname/paths) and a redacted `*.redacted.json`.
+  Now only the redacted, share-safe file is written by default; pass `--unredacted` to also write the
+  identifying copy for local debugging. This removes the wrong-file risk at the source (the dangerous
+  file no longer exists unless you ask for it). The `--no-redact` flag is removed (it is contradictory
+  under a redacted-only default); `--unredacted` covers the "keep full detail" case. The Slurm batch
+  scripts (`submit_bench.sh`, `run_bench.sbatch`) follow the same default and now emit a parseable job
+  id via `sbatch --parsable`.
+- **`pubrun bench` contribution replaces the earlier attach-only flow.** The attach-a-file Issue Form
+  path introduced earlier this cycle (which required leaving the terminal and could not work on a
+  browserless HPC node) is superseded by the one-command gist/inline contribution above; attaching in a
+  browser remains supported as a fallback. `--submit`/`--yes` govern HPC scheduler JOB submission only
+  and never imply consent to publish. The default contribution target is `fariello/pubrun`.
 
 ### Documentation
 - **Adoption bridges, an examples ladder, and deep-page positioning (no behavior change).** The README

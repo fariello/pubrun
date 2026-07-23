@@ -1273,7 +1273,7 @@ def _print_safe_file_block(unredacted_path, redacted_path) -> None:
         print("  The share check FAILED, so this file is NOT safe to submit as-is:", file=sys.stderr)
         for r in reasons:
             print(f"    - {r}", file=sys.stderr)
-        print("  Do not attach it. Re-run without --no-redact, or open an issue for help.", file=sys.stderr)
+        print("  Do not attach it; please open an issue for help.", file=sys.stderr)
     print("=" * 68, file=sys.stderr)
 
 
@@ -1313,27 +1313,421 @@ def _prepare_submission(redacted_path, dest_dir=None) -> Optional[Path]:
     return target
 
 
-def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact,
+# --- GitHub contribution (gist-and-link, inline fallback) via `gh` (IPD 20260722-1930-01) ---
+#
+# A script cannot reproduce the browser drag-drop "attachment" (GitHub's create-issue API has no
+# file parameter), so the automated transport is: publish the redacted file as an UNLISTED gist
+# and open an issue linking its raw .json URL; if that fails, fall back to embedding the JSON
+# inline in the issue body when the COMPLETE body is under the cap; else fall back to the browser
+# Issue Form. Every path re-runs the share-safety check first, passes untrusted content only via
+# argv lists / stdin (never a shell), and never prints the token or the payload.
+
+# Routing marker placed at the very start of an automated submission's issue body. Not a security
+# boundary (a public issue body is attacker-controlled); it only lets the intake workflow route.
+_BENCH_SUBMISSION_MARKER = "<!-- pubrun-benchmark-submission:v1 -->"
+
+# The complete issue body must stay under GitHub's ~65,536-byte cap; use a margin so wrappers fit.
+_GH_INLINE_BODY_LIMIT = 65_000
+
+# The only host a validated gist raw-file URL may live on (exact match; never suffix-matched).
+_GIST_RAW_HOST = "gist.githubusercontent.com"
+
+
+class _GhError(Exception):
+    """A `gh`/submission failure carrying a payload-free, human-readable reason."""
+
+
+def _bench_issue_title() -> str:
+    """A NON-identifying issue title from OS family, arch, Python version, and mode only.
+    Never embeds hostname/username/home path/job id. Whitespace-normalized and capped."""
+    import platform as _pf
+    osname = (_pf.system() or "?").strip()
+    arch = (_pf.machine() or "?").strip()
+    py = (_pf.python_version() or "?").strip()
+    raw = f"[BENCH]: {osname} {arch}, Python {py}"
+    raw = " ".join(raw.split())  # normalize whitespace / strip newlines
+    return raw[:120]
+
+
+def _redacted_json_bytes(path) -> str:
+    """Read the redacted file's exact bytes as text (do NOT reparse/reserialize: the file was
+    validated as-is, and preserving bytes avoids changing the artifact after the share check)."""
+    return Path(path).read_text(encoding="utf-8")
+
+
+def _json_fence(content: str) -> str:
+    """Wrap JSON in a fenced code block, using a backtick run longer than any run inside the
+    content so a payload containing ``` cannot break out of the fence."""
+    longest = 0
+    run = 0
+    for ch in content:
+        if ch == "`":
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 0
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}json\n{content}\n{fence}"
+
+
+def _build_gist_issue_body(path, raw_url: str) -> str:
+    """Issue body for the gist route: the marker + a link to the raw gist .json URL."""
+    name = Path(path).name
+    return (
+        f"{_BENCH_SUBMISSION_MARKER}\n\n"
+        "## Benchmark result\n\n"
+        "Automated submission from `pubrun bench`.\n\n"
+        f"- Result: [{name}]({raw_url})\n"
+        "- Submission method: `gh-gist-v1`\n"
+        "- Share-safety check: passed\n\n"
+        "The submitter confirmed this is the redacted result.\n"
+    )
+
+
+def _build_inline_issue_body(path) -> str:
+    """Issue body for the inline route: the marker + the redacted JSON in a fenced block."""
+    content = _redacted_json_bytes(path).rstrip("\n")
+    return (
+        f"{_BENCH_SUBMISSION_MARKER}\n\n"
+        "## Benchmark result\n\n"
+        "Automated submission from `pubrun bench`.\n\n"
+        "- Submission method: `gh-inline-v1`\n"
+        "- Share-safety check: passed\n\n"
+        "The submitter confirmed this is the redacted result.\n\n"
+        "<details>\n<summary>Redacted benchmark JSON</summary>\n\n"
+        f"{_json_fence(content)}\n\n</details>\n"
+    )
+
+
+def _inline_body_fits(body: str) -> bool:
+    """True iff the COMPLETE body is under the cap, measured in UTF-8 bytes (not characters)."""
+    return len(body.encode("utf-8")) < _GH_INLINE_BODY_LIMIT
+
+
+class GhReadiness:
+    """Result of the non-blocking `gh` preflight probe."""
+
+    __slots__ = ("installed", "authenticated", "detail")
+
+    def __init__(self, installed: bool, authenticated: bool, detail: str = ""):
+        self.installed = installed
+        self.authenticated = authenticated
+        self.detail = detail
+
+    @property
+    def ready(self) -> bool:
+        return self.installed and self.authenticated
+
+
+class SubmissionResult:
+    """Outcome of a contribution attempt."""
+
+    __slots__ = ("submitted", "method", "issue_url", "detail")
+
+    def __init__(self, submitted: bool, method: str, issue_url=None, detail: str = ""):
+        self.submitted = submitted
+        self.method = method  # gist | inline | web-fallback | none
+        self.issue_url = issue_url
+        self.detail = detail
+
+
+def _run_gh(args, *, input_text=None, timeout=30) -> str:
+    """Run `gh` with an argv list (never shell), prompts disabled. Return stdout (stripped).
+    Raise _GhError with a sanitized reason on failure. Never echoes the token or the payload."""
+    import subprocess as _sp
+    env = dict(os.environ)
+    env["GH_PROMPT_DISABLED"] = "1"
+    try:
+        proc = _sp.run(["gh", *args], input=input_text, text=True,
+                       capture_output=True, timeout=timeout, env=env)
+    except FileNotFoundError:
+        raise _GhError("GitHub CLI (gh) is not installed")
+    except Exception as e:
+        raise _GhError(f"gh invocation failed: {type(e).__name__}")
+    if proc.returncode != 0:
+        # Report only a short, generic stderr tail; never the full contributor/tool output.
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        msg = detail[-1][:200] if detail else "gh returned a non-zero exit"
+        raise _GhError(msg)
+    return (proc.stdout or "").strip()
+
+
+def _probe_gh() -> GhReadiness:
+    """Non-blocking readiness probe: is `gh` installed and authenticated? Never runs
+    `gh auth login`/`refresh`, never prints/requests a token, never blocks the benchmark."""
+    import shutil as _sh
+    if _sh.which("gh") is None:
+        return GhReadiness(False, False, "GitHub CLI (gh) is not installed")
+    try:
+        _run_gh(["auth", "status"], timeout=10)
+    except _GhError:
+        return GhReadiness(True, False, "GitHub CLI (gh) is not authenticated")
+    return GhReadiness(True, True)
+
+
+def _validate_gist_raw_url(url: str) -> bool:
+    """A gist raw URL is acceptable only if scheme https, host EXACTLY gist.githubusercontent.com
+    (no suffix match), and path ends with .json."""
+    from urllib.parse import urlparse
+    try:
+        u = urlparse(url)
+    except Exception:
+        return False
+    return (u.scheme == "https" and (u.hostname or "").lower() == _GIST_RAW_HOST
+            and (u.path or "").lower().endswith(".json"))
+
+
+def _create_result_gist(path):
+    """Create an UNLISTED gist of the redacted file (omit --public). Return (gist_id, raw_url).
+    Validates the raw URL host/shape; raises _GhError on any problem."""
+    from urllib.parse import urlparse
+    page_url = _run_gh(["gist", "create", str(path),
+                        "--desc", "pubrun redacted benchmark result"])
+    # `gh gist create` prints the gist page URL (https://gist.github.com/<user>/<hexid>).
+    gist_id = urlparse(page_url.strip().splitlines()[-1]).path.rstrip("/").split("/")[-1] if page_url else ""
+    if not gist_id or not all(c in "0123456789abcdefABCDEF" for c in gist_id):
+        raise _GhError("could not parse a gist id from gh output")
+    metadata = json.loads(_run_gh(["api", f"/gists/{gist_id}"]))
+    files = metadata.get("files", {}) if isinstance(metadata, dict) else {}
+    if len(files) != 1:
+        raise _GhError("unexpected gist file count")
+    raw_url = next(iter(files.values())).get("raw_url", "")
+    if not _validate_gist_raw_url(raw_url):
+        raise _GhError("gist raw URL failed host/shape validation")
+    return (gist_id, raw_url)
+
+
+def _delete_gist_best_effort(gist_id: str) -> bool:
+    """Delete a gist, swallowing errors. Return True iff deletion appears to have succeeded."""
+    try:
+        _run_gh(["gist", "delete", gist_id, "--yes"], timeout=20)
+        return True
+    except _GhError:
+        return False
+
+
+def _create_benchmark_issue(title: str, body: str, repo: str) -> str:
+    """Create the issue via `gh issue create`, body through stdin (never argv). NO label args
+    (external callers cannot set labels; the intake workflow applies them). Return the issue URL."""
+    out = _run_gh(["issue", "create", "--repo", repo, "--title", title, "--body-file", "-"],
+                  input_text=body, timeout=60)
+    url = out.strip().splitlines()[-1] if out.strip() else ""
+    return url or "created"
+
+
+def _submit_benchmark_result(path, repo: str) -> SubmissionResult:
+    """Consent already obtained by the caller. Re-share-check, then gist->inline->web-fallback.
+    Never raises out; returns a SubmissionResult describing the outcome honestly."""
+    if not _GH_REPO_RE.match(repo or ""):
+        return SubmissionResult(False, "none", detail=f"invalid repo {repo!r}")
+    passed, reasons = _share_check(path)
+    if not passed:
+        return SubmissionResult(False, "none",
+                                detail="share-safety check failed: " + "; ".join(reasons))
+    readiness = _probe_gh()
+    if not readiness.ready:
+        return SubmissionResult(False, "web-fallback", detail=readiness.detail)
+
+    title = _bench_issue_title()
+    # (a) gist route, with immediate orphan rollback if issue creation fails.
+    gist_id = None
+    try:
+        gist_id, raw_url = _create_result_gist(path)
+        body = _build_gist_issue_body(path, raw_url)
+        issue_url = _create_benchmark_issue(title, body, repo)
+        return SubmissionResult(True, "gist", issue_url)
+    except _GhError as e:
+        if gist_id:
+            # The issue was not confirmed created; roll back the gist we just made.
+            _delete_gist_best_effort(gist_id)
+        gist_detail = str(e)
+
+    # (b) inline route, only if the complete body fits.
+    body = _build_inline_issue_body(path)
+    if not _inline_body_fits(body):
+        return SubmissionResult(False, "web-fallback",
+                                detail=f"gist failed ({gist_detail}); inline body too large")
+    try:
+        issue_url = _create_benchmark_issue(title, body, repo)
+        return SubmissionResult(True, "inline", issue_url)
+    except _GhError as e:
+        return SubmissionResult(False, "web-fallback",
+                                detail=f"gist failed ({gist_detail}); inline failed ({e})")
+
+
+def _print_contribute_fallback(readiness, path) -> None:
+    """Print browser/install/auth guidance appropriate to the detected `gh` state. Never claims
+    something was published."""
+    print("", file=sys.stderr)
+    if readiness is not None and not readiness.installed:
+        print("Automatic GitHub submission is unavailable: GitHub CLI (gh) is not installed.",
+              file=sys.stderr)
+        print("  Install it (https://cli.github.com/), then: gh auth login", file=sys.stderr)
+    elif readiness is not None and not readiness.authenticated:
+        print("Automatic GitHub submission is unavailable: gh is not authenticated.",
+              file=sys.stderr)
+        print("  Authenticate with: gh auth login", file=sys.stderr)
+    print("You can finish the submission later with:", file=sys.stderr)
+    print(f'  pubrun bench --submit-file "{path}"', file=sys.stderr)
+    print("Or attach the SAFE file in your browser at:", file=sys.stderr)
+    print(f"  {_BENCH_SUBMIT_URL}", file=sys.stderr)
+
+
+def _contribute(path, repo, interactive, *, consented=False, no_submit=False) -> None:
+    """Offer (or, with consent, perform) a GitHub contribution of the redacted file. Prompt is
+    shown ONLY on an interactive TTY; Enter defaults to YES (maintainer decision 2026-07-22).
+    Never transmits without a yes; never prompts on a non-TTY (no accidental publish)."""
+    if no_submit:
+        return
+    do_submit = consented
+    if not do_submit:
+        if not interactive:
+            # No TTY: do not hang and do not publish. Point at how to submit later.
+            print(f'\nTo contribute later: pubrun bench --submit-file "{path}"', file=sys.stderr)
+            return
+        try:
+            resp = input(
+                "Publish the share-checked redacted benchmark result to GitHub? [Y/n] "
+            ).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            resp = "n"
+        do_submit = resp in ("", "y", "yes")  # Enter = YES
+    if not do_submit:
+        print(f'\nNot submitting. To contribute later: pubrun bench --submit-file "{path}"',
+              file=sys.stderr)
+        return
+    result = _submit_benchmark_result(path, repo)
+    if result.submitted and result.method == "gist":
+        print(f"\nSubmitted via GitHub CLI and an unlisted gist:\n  {result.issue_url}",
+              file=sys.stderr)
+    elif result.submitted and result.method == "inline":
+        print(f"\nGist upload was unavailable; submitted the result inline:\n  {result.issue_url}",
+              file=sys.stderr)
+    else:
+        # web-fallback / none: explain honestly and show how to finish.
+        if result.detail:
+            print(f"\nAutomatic submission did not complete ({result.detail}).", file=sys.stderr)
+        _print_contribute_fallback(_probe_gh(), path)
+
+
+# --- Slurm submit-and-wait (IPD 20260722-1930-01, Slurm-only this slice) ------------------
+#
+# Submit the benchmark JOB to Slurm from a login node, then keep THIS (login-node) process
+# alive polling for completion, so the interactive share-check + GitHub contribution can run
+# from the login node (which has the TTY and network the compute node lacks). Best-effort:
+# any interruption/timeout/tool-absence falls back to "finish later with --submit-file"; the
+# result always lands on the shared filesystem, so no data is lost.
+
+_SLURM_DEFAULT_WAIT_S = 30 * 60  # 30 minutes; override with --wait-timeout (0 = wait forever)
+
+
+def _slurm_job_state(job_id: str):
+    """Best-effort terminal-state probe for a Slurm job. Returns one of:
+      "RUNNING"   - still queued/running (per squeue), or state undeterminable but job seen
+      "COMPLETED" - finished successfully (per sacct)
+      "FAILED"    - finished unsuccessfully (per sacct: FAILED/CANCELLED/TIMEOUT/...)
+      None        - state could not be determined (neither tool usable)
+    Tolerates squeue/sacct being absent or sacct accounting being disabled/lagging."""
+    import shutil as _sh
+    import subprocess as _sp
+    # squeue: if the job still appears, it is not finished yet.
+    if _sh.which("squeue"):
+        try:
+            q = _sp.run(["squeue", "-h", "-j", job_id, "-o", "%T"],
+                        capture_output=True, text=True, timeout=15)
+            if q.returncode == 0 and q.stdout.strip():
+                return "RUNNING"
+        except Exception:
+            pass
+    # sacct: terminal state once the job has left the queue.
+    if _sh.which("sacct"):
+        try:
+            a = _sp.run(["sacct", "-n", "-P", "-j", job_id, "-o", "State"],
+                        capture_output=True, text=True, timeout=15)
+            if a.returncode == 0 and a.stdout.strip():
+                states = {ln.strip().split()[0] for ln in a.stdout.splitlines() if ln.strip()}
+                if any(s.startswith("COMPLETED") for s in states) and not (
+                        states - {"COMPLETED"}):
+                    return "COMPLETED"
+                if any(s.startswith(("FAILED", "CANCELLED", "TIMEOUT", "OUT_OF", "NODE_FAIL",
+                                     "BOOT_FAIL", "DEADLINE", "PREEMPTED")) for s in states):
+                    return "FAILED"
+                # Mixed/pending accounting -> treat as still running.
+                return "RUNNING"
+        except Exception:
+            pass
+    return None
+
+
+def _slurm_wait_and_contribute(job_id, redacted_target, repo, interactive, *,
+                               wait_timeout=None, contribute=None, no_submit=False) -> None:
+    """Poll the login-node parent for job completion, then run the share-check + contribution.
+    Graceful on Ctrl-C / timeout / FAILED / undeterminable state: point at --submit-file."""
+    import time as _time
+    budget = _SLURM_DEFAULT_WAIT_S if wait_timeout is None else int(wait_timeout)
+    started = _time.monotonic()
+    poll_s = 10
+    print(f"Submitted Slurm job {job_id}. Waiting for it to finish "
+          f"({'no timeout' if budget == 0 else f'up to ~{budget // 60} min'}); "
+          "press Ctrl-C to stop waiting (the result is still written to the shared "
+          "filesystem and you can finish later with --submit-file).", file=sys.stderr)
+    redacted_target = Path(redacted_target)
+    try:
+        while True:
+            state = _slurm_job_state(str(job_id))
+            if state == "COMPLETED" or (state is None and redacted_target.is_file()):
+                break
+            if state == "FAILED":
+                _print_error(f"Slurm job {job_id} did not complete successfully.")
+                _print_slurm_finish_later(redacted_target)
+                return
+            if budget and (_time.monotonic() - started) > budget:
+                print(f"\nStopped waiting after ~{budget // 60} min; the job may still be "
+                      "queued or running.", file=sys.stderr)
+                _print_slurm_finish_later(redacted_target)
+                return
+            _time.sleep(poll_s)
+    except KeyboardInterrupt:
+        print("\nStopped waiting.", file=sys.stderr)
+        _print_slurm_finish_later(redacted_target)
+        return
+
+    if not redacted_target.is_file():
+        _print_error("The job finished but the expected redacted result was not found on the "
+                     "shared filesystem.")
+        _print_slurm_finish_later(redacted_target)
+        return
+    _print_safe_file_block(None, str(redacted_target))
+    _contribute(str(redacted_target), repo, interactive,
+                consented=bool(contribute), no_submit=(no_submit or contribute is False))
+
+
+def _print_slurm_finish_later(redacted_target) -> None:
+    print("When the job has finished, submit the redacted result from this login node with:",
+          file=sys.stderr)
+    print(f'  pubrun bench --submit-file "{redacted_target}"', file=sys.stderr)
+
+
+def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacted,
                submit_file=None, gh_repo=None, prepare_submission=False,
                no_submit=False, scheduler="auto", rigorous=False,
-               no_baseline=False) -> None:
+               no_baseline=False, contribute=None, wait_timeout=None) -> None:
     """Friendly front-end over benchmarks/harness.py with optional HPC scheduler submission
-    (Slurm/PBS/LSF/SGE).
+    (Slurm/PBS/LSF/SGE) and one-command GitHub contribution.
 
-    Community results are contributed by ATTACHING the redacted file to a GitHub Issue Form
-    (see _BENCH_SUBMIT_URL); this client never transmits the result itself. It prints an
-    unmistakable safe-file block (which file is private, which is safe, the share-check
-    verdict, where to attach) and can `--prepare-submission` a clean folder holding only the
-    safe file. `--submit`/`--yes` govern HPC scheduler job submission only."""
+    By default only the redacted, share-safe file is written; `--unredacted` also writes the
+    identifying copy for local debugging. After a run pubrun prints the safe-file block and, on
+    an interactive terminal, OFFERS to contribute the redacted result to GitHub (gist-and-link,
+    inline fallback, browser fallback); `--contribute`/`--no-contribute` pre-decide, and
+    `--prepare-submission` stages a clean folder for a manual browser attach. `--submit`/`--yes`
+    govern HPC scheduler JOB submission only (NOT GitHub publication)."""
     repo = gh_repo or _DEFAULT_BENCH_REPO
     if not _GH_REPO_RE.match(repo):
         _print_error(f"Invalid --gh-repo {repo!r}; expected OWNER/NAME.")
         sys.exit(1)
     interactive = sys.stdin.isatty()
 
-    # --- Recovery / HPC / batch path: check an EXISTING redacted file, no benchmark run. ---
-    # In the attach flow this never transmits: it share-checks the file and shows how to
-    # submit it (attach), and with --prepare-submission stages a clean folder for it.
+    # --- Recovery / HPC / batch path: contribute an EXISTING redacted file, no benchmark run. ---
     if submit_file is not None:
         p = Path(submit_file)
         if not p.is_file():
@@ -1342,10 +1736,15 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact
         if prepare_submission:
             target = _prepare_submission(p)
             sys.exit(0 if target is not None else 1)
-        # Show the safe-file block for this file (the share check gates the PASSED verdict).
+        # Share-check + show the safe-file block, then offer/perform the GitHub contribution
+        # (unless --no-contribute). Same consent rules as after a fresh run.
         _print_safe_file_block(None, str(p))
         passed, _ = _share_check(p)
-        sys.exit(0 if passed else 1)
+        if not passed:
+            sys.exit(1)
+        _contribute(str(p), repo, interactive,
+                    consented=bool(contribute), no_submit=(no_submit or contribute is False))
+        sys.exit(0)
 
     harness = _find_bench_harness()
     if harness is None:
@@ -1406,25 +1805,67 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact
             extra += ["--passes", str(int(passes))]
         cmd = ["bash", str(submit_script)] + extra
         label = chosen["name"].upper() if chosen["name"] != "slurm" else "Slurm"
+        is_slurm = chosen["name"] == "slurm"
         print(f"{label} detected. Submission command:\n  {' '.join(cmd)}", file=sys.stderr)
         if not (submit or yes):
+            prompt = (f"Run by submitting to the {label} queue? [y/N] " if is_slurm
+                      else f"Submit this benchmark job to {label}? [y/N] ")
             try:
-                resp = input(f"Submit this benchmark job to {label}? [y/N] ").strip().lower()
+                resp = input(prompt).strip().lower()
             except (EOFError, KeyboardInterrupt):
                 resp = ""
             if resp not in ("y", "yes"):
                 print("Not submitting. Re-run with --submit/--yes to submit, or --local to run here.", file=sys.stderr)
                 return
         import subprocess as _sp
+        import hashlib as _hashlib
+        import platform as _pf
+        from datetime import datetime, timezone
         env = dict(os.environ)
         env.setdefault("PUBRUN_REPO", str(repo_root))
         env.setdefault("PUBRUN_PY", sys.executable)
+
+        # For Slurm submit-and-wait, pass a DETERMINISTIC redacted-out path (on the shared FS)
+        # so this login-node process can find and contribute the result after the job finishes.
+        redacted_target = None
+        if is_slurm:
+            results_dir = repo_root / "benchmarks" / "results"
+            results_dir.mkdir(parents=True, exist_ok=True)
+            _tok = _hashlib.sha256((_pf.node() or "unknown").encode("utf-8", "replace")).hexdigest()[:8]
+            _ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            redacted_target = results_dir / f"pubrun-bench-{_tok}-{_ts}.redacted.json"
+            env["PUBRUN_REDACTED_OUT"] = str(redacted_target)
+            if unredacted:
+                env["PUBRUN_UNREDACTED"] = "1"
         try:
-            _sp.run(cmd, env=env, check=False)  # argv list; no shell
+            proc = _sp.run(cmd, env=env, check=False,
+                           capture_output=is_slurm, text=True)  # argv list; no shell
         except Exception as e:
             _print_error(f"Failed to submit: {e}")
             sys.exit(1)
-        print("Submitted. Results will be written under benchmarks/results/ on the compute node.", file=sys.stderr)
+        if not is_slurm:
+            print("Submitted. Results will be written under benchmarks/results/ on the compute node.", file=sys.stderr)
+            return
+        if proc.returncode != 0:
+            _print_error(f"Slurm submission failed: {(proc.stderr or proc.stdout or '').strip()[:200]}")
+            sys.exit(1)
+        # submit_bench.sh (with --parsable) prints the bare job id as its last stdout line.
+        job_id = ""
+        for line in reversed((proc.stdout or "").splitlines()):
+            tok = line.strip().split(";")[0]  # `--parsable` may emit jobid;cluster
+            if tok.isdigit():
+                job_id = tok
+                break
+        if proc.stdout:
+            print(proc.stdout.strip(), file=sys.stderr)
+        if not job_id:
+            print("Could not determine the Slurm job id; not waiting.", file=sys.stderr)
+            if redacted_target is not None:
+                _print_slurm_finish_later(redacted_target)
+            return
+        _slurm_wait_and_contribute(job_id, redacted_target, repo, interactive,
+                                   wait_timeout=wait_timeout, contribute=contribute,
+                                   no_submit=no_submit)
         return
 
     # --- Local path ---
@@ -1437,13 +1878,15 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact
     from datetime import datetime, timezone
     host = (_pf.node() or "unknown").replace("/", "_")
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    # Full local result -> *.unredacted.json (embeds the hostname; for your own analysis).
-    # Shareable copy -> *.redacted.json with a stable, NON-identifying hostname-hash token
-    # (never embeds the hostname, matching the in-file hostname redaction). Never a bare *.json.
-    out_path = results_dir / f"{host}-{ts}.unredacted.json"
+    # Redacted-only by default: the shareable *.redacted.json uses a stable NON-identifying
+    # hostname-hash token (never the hostname). The identifying *.unredacted.json is written
+    # ONLY with --unredacted (local debugging). Never a bare *.json.
     _host_token = _hashlib.sha256((_pf.node() or "unknown").encode("utf-8", "replace")).hexdigest()[:8]
     redacted_target = results_dir / f"pubrun-bench-{_host_token}-{ts}.redacted.json"
-    argv = [sys.executable, str(harness), "--out", str(out_path)]
+    out_path = results_dir / f"{host}-{ts}.unredacted.json" if unredacted else None
+    argv = [sys.executable, str(harness), "--redacted-out", str(redacted_target)]
+    if unredacted:
+        argv += ["--out", str(out_path)]
     if quick:
         argv.append("--quick")
     elif rigorous:
@@ -1454,39 +1897,37 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, no_redact
         argv += ["--iterations", str(int(iterations))]
     if passes:
         argv += ["--passes", str(int(passes))]
-    if not no_redact:
-        argv += ["--redacted-out", str(redacted_target)]
     print(f"Running benchmarks locally (this may take a few minutes)...", file=sys.stderr)
     rc = _sp.run(argv, check=False).returncode
     if rc != 0:
         _print_error(f"Benchmark harness exited with code {rc}.")
         sys.exit(rc)
-    redacted_path = None if no_redact else redacted_target
+    redacted_path = redacted_target
     if as_json:
-        print(json.dumps({"results": str(out_path),
-                          "redacted": None if no_redact else str(redacted_path)}))
-        return
-
-    # --- Attach flow: print the unmistakable safe-file block (never transmits). ---
-    if no_redact:
-        # No redacted artifact exists; there is nothing safe to contribute from this run.
-        print(f"\nResults: {out_path}", file=sys.stderr)
-        print("\nNo redacted (shareable) copy was written (--no-redact). Re-run without "
-              "--no-redact to produce a file you can contribute.", file=sys.stderr)
+        print(json.dumps({"redacted": str(redacted_path),
+                          "unredacted": str(out_path) if unredacted else None}))
         return
 
     if no_submit:
-        # Suppress the contribution guidance; just point at both files.
-        print(f"\nResults: {out_path}", file=sys.stderr)
-        print(f"Redacted (shareable) copy: {redacted_path}", file=sys.stderr)
+        # Suppress the contribution guidance; just point at the file(s).
+        print(f"\nRedacted (shareable) result: {redacted_path}", file=sys.stderr)
+        if unredacted:
+            print(f"Unredacted (PRIVATE, do not share): {out_path}", file=sys.stderr)
         return
 
-    _print_safe_file_block(str(out_path), str(redacted_path))
+    # Print the safe-file block (PRIVATE line only when an unredacted copy exists).
+    _print_safe_file_block(str(out_path) if unredacted else None, str(redacted_path))
 
-    # --prepare-submission stages a clean folder holding ONLY the safe file (primary
-    # file-pick mitigation). It never transmits; the human attaches the file in the browser.
+    # --prepare-submission stages a clean folder holding ONLY the safe file (browser attach).
     if prepare_submission:
         _prepare_submission(redacted_path)
+        return
+
+    # Offer / perform the GitHub contribution (interactive TTY prompt defaults to YES; a
+    # non-TTY never prompts; --contribute/--no-contribute pre-decide). Never transmits an
+    # unredacted file; _submit_benchmark_result re-share-checks first.
+    _contribute(str(redacted_path), repo, interactive,
+                consented=bool(contribute), no_submit=(contribute is False))
 
 
 def _run_status(
@@ -2123,18 +2564,29 @@ def main() -> None:
     bench_parser.add_argument("--scheduler", choices=("auto", "slurm", "pbs", "lsf", "sge", "local"),
                               default="auto", help="HPC scheduler to submit to (default: auto-detect; 'local' forces a local run).")
     bench_parser.add_argument("-y", "--yes", action="store_true", help="Assume yes to the HPC scheduler submit prompt.")
-    bench_parser.add_argument("--no-redact", action="store_true", help="Do NOT write a redacted share copy (full detail only).")
-    bench_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit the result/redacted paths as JSON.")
-    # --- contribution (attach flow; this client never transmits the result) ---
+    bench_parser.add_argument("--unredacted", action="store_true",
+                              help="ALSO write the identifying, un-redacted result (embeds hostname/paths; for local "
+                                   "debugging only, do NOT share). By default only the redacted, share-safe file is written.")
+    bench_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit the redacted/unredacted paths as JSON.")
+    # --- contribution to GitHub (gist-and-link, inline fallback, browser fallback) ---
+    contrib = bench_parser.add_mutually_exclusive_group()
+    contrib.add_argument("--contribute", dest="contribute", action="store_true", default=None,
+                         help="Publish the share-checked redacted result to GitHub after the run (no prompt). "
+                              "Uses `gh`: an unlisted gist linked from an issue, or inline if small.")
+    contrib.add_argument("--no-contribute", dest="contribute", action="store_false",
+                         help="Never offer or attempt GitHub publication.")
     bench_parser.add_argument("--prepare-submission", action="store_true",
-                              help="Copy ONLY the redacted (safe) file into a clean pubrun-share/ folder, so the "
-                                   "folder you browse to attach contains only the file that is safe to share.")
+                              help="Instead of publishing, copy ONLY the redacted (safe) file into a clean "
+                                   "pubrun-share/ folder for a manual browser attach.")
     bench_parser.add_argument("--submit-file", metavar="FILE", default=None,
-                              help="Share-check an existing redacted result file and show how to attach it "
-                                   "(no benchmark run, no transmit). Combine with --prepare-submission to stage it.")
-    bench_parser.add_argument("--no-submit", action="store_true", help="Skip the end-of-run 'how to contribute' block.")
+                              help="Contribute an existing redacted result file (share-check + publish/prepare), "
+                                   "without running a benchmark.")
+    bench_parser.add_argument("--wait-timeout", type=int, default=None, metavar="SECONDS",
+                              help="For Slurm submit-and-wait: how long the login-node process waits for the "
+                                   "queued job before pointing you at --submit-file (default ~1800s; 0 = wait forever).")
+    bench_parser.add_argument("--no-submit", action="store_true", help="Skip the end-of-run contribution offer entirely.")
     bench_parser.add_argument("--gh-repo", metavar="OWNER/NAME", default=None,
-                              help=f"Target GitHub repo for the Issue Form URL (default {_DEFAULT_BENCH_REPO}).")
+                              help=f"Target GitHub repo for the contribution (default {_DEFAULT_BENCH_REPO}).")
 
     # ---------------- Clean Subparser ----------------
     clean_parser = subparsers.add_parser(
@@ -2556,7 +3008,7 @@ def main() -> None:
             getattr(args, "submit", False),
             getattr(args, "yes", False),
             getattr(args, "as_json", False),
-            getattr(args, "no_redact", False),
+            getattr(args, "unredacted", False),
             submit_file=getattr(args, "submit_file", None),
             gh_repo=getattr(args, "gh_repo", None),
             prepare_submission=getattr(args, "prepare_submission", False),
@@ -2564,6 +3016,8 @@ def main() -> None:
             scheduler=getattr(args, "scheduler", "auto"),
             rigorous=getattr(args, "rigorous", False),
             no_baseline=getattr(args, "no_baseline", False),
+            contribute=getattr(args, "contribute", None),
+            wait_timeout=getattr(args, "wait_timeout", None),
         )
         executed = True
 

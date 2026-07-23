@@ -88,3 +88,77 @@ def test_host_allowlist_matches_validator():
     sys.modules["validate_benchmark_submission"] = v
     vspec.loader.exec_module(v)
     assert set(x.ALLOWED_ATTACHMENT_HOSTS) == set(v.ALLOWED_ATTACHMENT_HOSTS)
+
+
+# --- gist host + kind-based source resolution + inline extraction (IPD 20260722-1930-01) ---
+
+def test_gist_raw_host_allowed():
+    body = "https://gist.githubusercontent.com/user/abc/raw/xyz/result.redacted.json"
+    url, error = x.find_attachment_url(body)
+    assert url == body and error == ""
+
+
+def test_gist_html_page_rejected_as_data_url():
+    # The gist HTML PAGE host is not the raw host and the page path is not .json.
+    body = "https://gist.github.com/user/deadbeef"
+    url, error = x.find_attachment_url(body)
+    assert url == ""
+
+
+def test_resolve_source_url_kind():
+    body = "see https://gist.githubusercontent.com/u/a/raw/z/r.json"
+    kind, url, file, error = x.resolve_source(body)
+    assert kind == "url" and url.endswith(".json") and error == ""
+
+
+def test_resolve_source_inline_kind():
+    body = (
+        x.SUBMISSION_MARKER + "\n\n"
+        "```json\n{\"schema\": \"pubrun-benchmark/5\"}\n```\n"
+    )
+    kind, url, file, error = x.resolve_source(body)
+    assert kind == "inline" and file == x.INLINE_OUT and error == ""
+
+
+def test_inline_requires_marker():
+    body = "```json\n{\"schema\": \"pubrun-benchmark/5\"}\n```\n"  # no marker
+    payload, error = x.find_inline_json(body)
+    assert payload == "" and "marker" in error
+
+
+def test_inline_rejects_multiple_blocks():
+    body = (
+        x.SUBMISSION_MARKER + "\n"
+        "```json\n{\"a\":1}\n```\n"
+        "```json\n{\"b\":2}\n```\n"
+    )
+    payload, error = x.find_inline_json(body)
+    assert payload == "" and "multiple" in error
+
+
+def test_inline_rejects_zero_blocks():
+    body = x.SUBMISSION_MARKER + "\n\n(no code block here)"
+    payload, error = x.find_inline_json(body)
+    assert payload == "" and "no ```json" in error
+
+
+def test_inline_rejects_oversize_before_parse():
+    big = "x" * (x.MAX_INLINE_BYTES + 10)
+    body = x.SUBMISSION_MARKER + "\n```json\n" + big + "\n```\n"
+    payload, error = x.find_inline_json(body)
+    assert payload == "" and "size cap" in error
+
+
+def test_url_wins_over_inline_when_both_present():
+    body = (
+        x.SUBMISSION_MARKER + "\n"
+        "link https://gist.githubusercontent.com/u/a/raw/z/r.json\n"
+        "```json\n{\"schema\":\"pubrun-benchmark/5\"}\n```\n"
+    )
+    kind, url, file, error = x.resolve_source(body)
+    assert kind == "url"
+
+
+def test_resolve_source_none_when_empty():
+    kind, url, file, error = x.resolve_source("nothing useful here")
+    assert kind == "none" and error

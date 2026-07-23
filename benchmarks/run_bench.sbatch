@@ -36,14 +36,19 @@ mkdir -p "$RESULTS_DIR"
 
 NODE="${SLURMD_NODENAME:-$(hostname)}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
-OUT="$RESULTS_DIR/${NODE}-${STAMP}.json"
+# Redacted-only by default (matches `pubrun bench`): always write a share-safe redacted file;
+# write the identifying unredacted copy only when PUBRUN_UNREDACTED is set. A caller (pubrun
+# bench submit-and-wait) may pin PUBRUN_REDACTED_OUT so it can find the result deterministically.
+REDACTED_OUT="${PUBRUN_REDACTED_OUT:-$RESULTS_DIR/pubrun-bench-${NODE}-${STAMP}.redacted.json}"
+UNREDACTED_OUT="$RESULTS_DIR/${NODE}-${STAMP}.unredacted.json"
 
 echo "=== pubrun benchmark ==="
-echo "node        : $NODE"
-echo "repo        : $PUBRUN_REPO"
-echo "python      : $PUBRUN_PY"
-echo "harness args: ${PUBRUN_BENCH_ARGS:-<full run>}"
-echo "output      : $OUT"
+echo "node          : $NODE"
+echo "repo          : $PUBRUN_REPO"
+echo "python        : $PUBRUN_PY"
+echo "harness args  : ${PUBRUN_BENCH_ARGS:-<full run>}"
+echo "redacted out  : $REDACTED_OUT"
+[ -n "$PUBRUN_UNREDACTED" ] && echo "unredacted out: $UNREDACTED_OUT"
 
 # Fail early with a clear message if pubrun isn't importable on this node.
 if ! "$PUBRUN_PY" -c "import pubrun" 2>/dev/null; then
@@ -56,7 +61,12 @@ if ! "$PUBRUN_PY" -c "import pubrun" 2>/dev/null; then
     fi
 fi
 
-# shellcheck disable=SC2086
-"$PUBRUN_PY" benchmarks/harness.py --out "$OUT" $PUBRUN_BENCH_ARGS
+HARNESS_OUT_ARGS=(--redacted-out "$REDACTED_OUT")
+if [ -n "$PUBRUN_UNREDACTED" ]; then
+    HARNESS_OUT_ARGS+=(--out "$UNREDACTED_OUT")
+fi
 
-echo "Done. Result: $OUT"
+# shellcheck disable=SC2086
+"$PUBRUN_PY" benchmarks/harness.py "${HARNESS_OUT_ARGS[@]}" $PUBRUN_BENCH_ARGS
+
+echo "Done. Redacted result: $REDACTED_OUT"

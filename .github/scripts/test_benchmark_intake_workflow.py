@@ -63,22 +63,33 @@ def test_calls_validator_and_is_validate_only():
     assert "git commit" not in text
 
 
-def test_untrusted_body_passed_via_env_not_shell_arg():
+def test_untrusted_body_never_interpolated_into_shell():
     text = _text()
-    # The issue body reaches the extractor through an env var (ISSUE_BODY), never as an
-    # inline shell argument like $(...) interpolation of github.event.issue.body.
-    assert "ISSUE_BODY: ${{ github.event.issue.body }}" in text
-    # The body expression must not appear inside a `run:` shell line.
+    # The extractor reads the untrusted body from the checked event JSON ($GITHUB_EVENT_PATH),
+    # not a shell arg. The raw body expression must never appear in a `run:` shell line.
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped.startswith("python3") or stripped.startswith("- run") or stripped.startswith("run:"):
+        if stripped.startswith("python3") or stripped.startswith("run:"):
             assert "github.event.issue.body" not in line, line
+    # Only an enumerated source kind (url|inline) selects the validate command; the URL is
+    # passed via env, never spliced into the command by issue text.
+    assert "steps.extract.outputs.kind == 'url'" in text
+    assert "steps.extract.outputs.kind == 'inline'" in text
+    assert "ATTACHMENT_URL: ${{ steps.extract.outputs.url }}" in text
 
 
-def test_label_gated():
+def test_routes_on_label_or_marker():
     text = _text()
     assert "type:benchmark-submission" in text
+    assert "pubrun-benchmark-submission:v1" in text  # marker route (external callers)
     assert "if:" in text
+
+
+def test_receipt_is_idempotent():
+    text = _text()
+    # A hidden receipt marker + update-existing-comment keeps edits from piling up comments.
+    assert "pubrun-benchmark-receipt:v1" in text
+    assert "updateComment" in text
 
 
 def test_pyyaml_crosscheck_when_available():

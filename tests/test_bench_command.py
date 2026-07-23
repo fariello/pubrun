@@ -289,7 +289,8 @@ class TestBenchCLI:
         assert "Examples:" in res.stdout
 
     def test_bench_quick_local_json(self, tmp_path):
-        """A minimal local run writes results + a redacted copy (verified clean).
+        """A minimal local run writes ONLY the redacted copy by default (verified clean); no
+        unredacted sibling is produced unless --unredacted is passed.
 
         Kept as light as possible (1 iteration, 1 pass) but still launches many fresh
         Python subprocesses, so it is a slower end-to-end test (generous timeout).
@@ -298,16 +299,36 @@ class TestBenchCLI:
                          cwd=str(_REPO), timeout=180)
         assert res.returncode == 0, res.stderr
         data = json.loads(res.stdout)
-        results = Path(data["results"])
+        assert data["unredacted"] is None  # redacted-only by default
         redacted = Path(data["redacted"])
         try:
-            assert results.exists() and redacted.exists()
+            assert redacted.exists()
             blob = redacted.read_text()
             assert getpass.getuser() not in blob
             assert os.path.expanduser("~") not in blob
         finally:
-            results.unlink(missing_ok=True)
             redacted.unlink(missing_ok=True)
+
+    def test_bench_unredacted_writes_both(self, tmp_path):
+        """--unredacted also writes the identifying copy alongside the default redacted one."""
+        res = run_pubrun("bench", "--iterations", "1", "--passes", "1", "--local", "--json",
+                         "--unredacted", cwd=str(_REPO), timeout=180)
+        assert res.returncode == 0, res.stderr
+        data = json.loads(res.stdout)
+        redacted = Path(data["redacted"])
+        unredacted = Path(data["unredacted"])
+        try:
+            assert redacted.exists() and unredacted.exists()
+            assert unredacted.name.endswith(".unredacted.json")
+        finally:
+            redacted.unlink(missing_ok=True)
+            unredacted.unlink(missing_ok=True)
+
+    def test_no_redact_flag_removed(self):
+        """--no-redact was removed (contradictory under redacted-only default)."""
+        res = run_pubrun("bench", "--no-redact", "--local")
+        assert res.returncode != 0
+        assert "no-redact" in res.stderr or "unrecognized" in res.stderr.lower()
 
 
 class TestIoBaselineScenarios:
@@ -505,6 +526,190 @@ class TestAttachFlowClient:
         assert "fariello/pubrun/issues/new" in m._BENCH_SUBMIT_URL
         assert "template=benchmark-result.yml" in m._BENCH_SUBMIT_URL
         assert m._DEFAULT_BENCH_REPO == "fariello/pubrun"
+
+
+class TestHarnessRedactedOnlyDefault:
+    """IPD 20260722-1930-01: the harness writes ONLY the redacted file by default; the
+    unredacted copy is opt-in, and run(out_path=None) writes nothing."""
+
+    def test_run_without_out_path_writes_nothing(self, tmp_path):
+        h = _load_harness()
+        before = set(tmp_path.iterdir())
+        result = h.run(1, None, passes=1, baseline_pass=False)  # out_path=None
+        assert isinstance(result, dict) and result["schema"] == "pubrun-benchmark/5"
+        assert set(tmp_path.iterdir()) == before  # nothing written
+
+    def test_default_main_writes_only_redacted(self, tmp_path, monkeypatch):
+        import subprocess
+        # Invoke the harness CLI in a subprocess with a fresh results dir via --redacted-out.
+        red = tmp_path / "only.redacted.json"
+        res = subprocess.run(
+            [PYTHON, str(_REPO / "benchmarks" / "harness.py"),
+             "--iterations", "1", "--passes", "1", "--no-baseline",
+             "--redacted-out", str(red)],
+            capture_output=True, text=True, timeout=120)
+        assert res.returncode == 0, res.stderr
+        assert red.exists()
+        # No unredacted sibling was created for this run.
+        assert not list(tmp_path.glob("*.unredacted.json"))
+
+    def test_unredacted_flag_writes_both(self, tmp_path):
+        import subprocess
+        red = tmp_path / "both.redacted.json"
+        unred = tmp_path / "both.unredacted.json"
+        res = subprocess.run(
+            [PYTHON, str(_REPO / "benchmarks" / "harness.py"),
+             "--iterations", "1", "--passes", "1", "--no-baseline",
+             "--redacted-out", str(red), "--out", str(unred)],
+            capture_output=True, text=True, timeout=120)
+        assert res.returncode == 0, res.stderr
+        assert red.exists() and unred.exists()
+
+
+class TestGistInlineContribution:
+    """IPD 20260722-1930-01: gist-and-link -> inline -> web-fallback via gh, mocked."""
+
+    def _m(self):
+        import pubrun.__main__ as m
+        return m
+
+    def _redacted(self, tmp_path):
+        p = tmp_path / "g.redacted.json"
+        p.write_text(json.dumps({"schema": "pubrun-benchmark/5",
+                                 "machine": {"host": {"hostname": "<redacted>"},
+                                             "pubrun_version": "1.4.0"}}))
+        return p
+
+    def test_inline_body_marker_and_fence(self, tmp_path):
+        m = self._m()
+        red = self._redacted(tmp_path)
+        body = m._build_inline_issue_body(str(red))
+        assert body.startswith(m._BENCH_SUBMISSION_MARKER)
+        assert "```json" in body
+
+    def test_json_fence_survives_triple_backticks(self):
+        m = self._m()
+        content = 'value with ``` inside'
+        fenced = m._json_fence(content)
+        # The opening fence must be longer than any backtick run in the content.
+        assert fenced.startswith("````")
+
+    def test_inline_size_boundary(self, tmp_path):
+        m = self._m()
+        # A body of exactly 65000 bytes is NOT allowed; 64999 is.
+        assert m._inline_body_fits("x" * 64999)
+        assert not m._inline_body_fits("x" * 65000)
+        # Multibyte: measured in UTF-8 bytes, not characters.
+        assert not m._inline_body_fits("\u00e9" * 33000)  # 2 bytes each = 66000
+
+    def test_validate_gist_raw_url(self):
+        m = self._m()
+        assert m._validate_gist_raw_url("https://gist.githubusercontent.com/u/a/raw/z/r.json")
+        assert not m._validate_gist_raw_url("https://gist.github.com/u/a")          # html page
+        assert not m._validate_gist_raw_url("http://gist.githubusercontent.com/x.json")  # http
+        assert not m._validate_gist_raw_url("https://evil.githubusercontent.com/x.json")  # host
+        assert not m._validate_gist_raw_url("https://gist.githubusercontent.com/x.png")   # not json
+
+    def test_title_is_non_identifying(self):
+        m = self._m()
+        title = m._bench_issue_title()
+        assert title.startswith("[BENCH]:")
+        assert "\n" not in title and len(title) <= 120
+
+    def test_gist_route_success(self, tmp_path, monkeypatch):
+        m = self._m()
+        red = self._redacted(tmp_path)
+        raw = "https://gist.githubusercontent.com/u/a/raw/z/r.json"
+        monkeypatch.setattr(m, "_probe_gh", lambda: m.GhReadiness(True, True))
+        monkeypatch.setattr(m, "_create_result_gist", lambda p: ("deadbeef", raw))
+        monkeypatch.setattr(m, "_create_benchmark_issue",
+                            lambda t, b, r: "https://github.com/fariello/pubrun/issues/1")
+        res = m._submit_benchmark_result(str(red), "fariello/pubrun")
+        assert res.submitted and res.method == "gist"
+        assert res.issue_url.endswith("/issues/1")
+
+    def test_gist_fail_falls_back_to_inline(self, tmp_path, monkeypatch):
+        m = self._m()
+        red = self._redacted(tmp_path)
+        monkeypatch.setattr(m, "_probe_gh", lambda: m.GhReadiness(True, True))
+
+        def _boom(p):
+            raise m._GhError("gist scope missing")
+        monkeypatch.setattr(m, "_create_result_gist", _boom)
+        monkeypatch.setattr(m, "_create_benchmark_issue",
+                            lambda t, b, r: "https://github.com/fariello/pubrun/issues/2")
+        res = m._submit_benchmark_result(str(red), "fariello/pubrun")
+        assert res.submitted and res.method == "inline"
+
+    def test_gist_created_but_issue_fails_rolls_back(self, tmp_path, monkeypatch):
+        m = self._m()
+        red = self._redacted(tmp_path)
+        deleted = {"id": None}
+        monkeypatch.setattr(m, "_probe_gh", lambda: m.GhReadiness(True, True))
+        monkeypatch.setattr(m, "_create_result_gist",
+                            lambda p: ("cafed00d", "https://gist.githubusercontent.com/u/a/raw/z/r.json"))
+
+        calls = {"n": 0}
+
+        def _issue(t, b, r):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise m._GhError("issue create failed")  # gist route
+            return "https://github.com/fariello/pubrun/issues/3"  # inline route
+        monkeypatch.setattr(m, "_create_benchmark_issue", _issue)
+        monkeypatch.setattr(m, "_delete_gist_best_effort",
+                            lambda gid: deleted.__setitem__("id", gid) or True)
+        res = m._submit_benchmark_result(str(red), "fariello/pubrun")
+        assert deleted["id"] == "cafed00d"  # orphan gist rolled back
+        assert res.submitted and res.method == "inline"
+
+    def test_share_check_failure_blocks_submission(self, tmp_path, monkeypatch):
+        m = self._m()
+        bad = tmp_path / "bad.json"
+        bad.write_text(json.dumps({"machine": {"host": {"hostname": "leaky-host"}}}))
+        # Must refuse before any gh call.
+        monkeypatch.setattr(m, "_probe_gh",
+                            lambda: (_ for _ in ()).throw(AssertionError("must not probe gh")))
+        res = m._submit_benchmark_result(str(bad), "fariello/pubrun")
+        assert not res.submitted and res.method == "none"
+
+    def test_gh_not_ready_is_web_fallback(self, tmp_path, monkeypatch):
+        m = self._m()
+        red = self._redacted(tmp_path)
+        monkeypatch.setattr(m, "_probe_gh", lambda: m.GhReadiness(False, False, "gh not installed"))
+        res = m._submit_benchmark_result(str(red), "fariello/pubrun")
+        assert not res.submitted and res.method == "web-fallback"
+
+    def test_run_gh_uses_argv_no_shell_and_disables_prompt(self, tmp_path, monkeypatch):
+        m = self._m()
+        seen = {}
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def _fake_run(argv, **kw):
+            seen["argv"] = argv
+            seen["env"] = kw.get("env", {})
+            assert "shell" not in kw or kw["shell"] is False
+            return _Proc()
+        import subprocess as sp
+        monkeypatch.setattr(sp, "run", _fake_run)
+        m._run_gh(["issue", "list"])
+        assert seen["argv"][0] == "gh"
+        assert seen["env"].get("GH_PROMPT_DISABLED") == "1"
+
+    def test_contribute_non_tty_never_prompts_or_publishes(self, tmp_path, monkeypatch, capsys):
+        m = self._m()
+        red = self._redacted(tmp_path)
+        monkeypatch.setattr(m, "_submit_benchmark_result",
+                            lambda p, r: (_ for _ in ()).throw(AssertionError("must not submit")))
+        monkeypatch.setattr("builtins.input",
+                            lambda *a: (_ for _ in ()).throw(AssertionError("must not prompt")))
+        # interactive=False, no pre-consent -> points at --submit-file, no publish, no prompt.
+        m._contribute(str(red), "fariello/pubrun", interactive=False)
+        assert "--submit-file" in capsys.readouterr().err
 
 
 class TestSchema5RawTimings:

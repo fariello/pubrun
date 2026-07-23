@@ -49,24 +49,32 @@ export PUBRUN_BENCH_ARGS="${*:-}"
 # Pass through repo/python so the job doesn't have to guess.
 export PUBRUN_REPO="${PUBRUN_REPO:-$(cd "$HERE/.." && pwd)}"
 export PUBRUN_PY="${PUBRUN_PY:-python3}"
+# Optional deterministic output paths (set by `pubrun bench` submit-and-wait so the login
+# node can find the redacted result). PUBRUN_UNREDACTED=1 also writes the identifying copy.
+export PUBRUN_REDACTED_OUT="${PUBRUN_REDACTED_OUT:-}"
+export PUBRUN_UNREDACTED="${PUBRUN_UNREDACTED:-}"
 
-SBATCH_OPTS=()
+# Emit the bare job id on stdout (sbatch --parsable) so a caller can capture it and poll for
+# completion. --parsable prints "<jobid>" (or "<jobid>;<cluster>").
+SBATCH_OPTS=(--parsable)
 [ -n "$PARTITION" ] && SBATCH_OPTS+=(--partition "$PARTITION")
+
+_EXPORT="ALL,PUBRUN_REPO,PUBRUN_PY,PUBRUN_BENCH_ARGS,PUBRUN_REDACTED_OUT,PUBRUN_UNREDACTED"
 
 if [ "${#IDLE_NODES[@]}" -gt 0 ]; then
     # Pick a uniformly random idle node.
     IDX=$(( RANDOM % ${#IDLE_NODES[@]} ))
     TARGET="${IDLE_NODES[$IDX]}"
-    echo "Idle nodes (${#IDLE_NODES[@]}): ${IDLE_NODES[*]}"
-    echo "Submitting to random idle node: $TARGET"
+    echo "Idle nodes (${#IDLE_NODES[@]}): ${IDLE_NODES[*]}" >&2
+    echo "Submitting to random idle node: $TARGET" >&2
     sbatch "${SBATCH_OPTS[@]}" --nodelist="$TARGET" \
-        --export=ALL,PUBRUN_REPO,PUBRUN_PY,PUBRUN_BENCH_ARGS \
+        --export="$_EXPORT" \
         "$SBATCH_FILE"
 else
     # No idle node right now — let the scheduler place it whenever one frees up.
     echo "No idle nodes found${PARTITION:+ in partition '$PARTITION'}; submitting" \
-         "without pinning (scheduler will place it)."
+         "without pinning (scheduler will place it)." >&2
     sbatch "${SBATCH_OPTS[@]}" \
-        --export=ALL,PUBRUN_REPO,PUBRUN_PY,PUBRUN_BENCH_ARGS \
+        --export="$_EXPORT" \
         "$SBATCH_FILE"
 fi
