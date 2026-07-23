@@ -9,7 +9,7 @@
   (`benchmarks/aggregate.py`); a committed local data dir under `benchmarks/` for accepted results;
   docs/CHANGELOG. NO changes to `.github/workflows/*` permissions, NO `contents: write` for any Action,
   NO server-side archival/aggregation/Pages/auto-close.
-- Status: pending
+- Status: reviewed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Set: benchmark-intake
 - Order: 2
@@ -77,19 +77,31 @@ Nothing is automatic on GitHub. Anything that does not validate, or exceeds 256 
   glue, not new validation logic, so local and server stay in lockstep (same rejections).
 - Reuse the validator's `_download()` (host allowlist, bounded redirects, byte cap, timeout) for fetching
   attachment/gist URLs; reuse the extractor's `resolve_source()` shape for inline vs URL.
+- Import mechanism (PR-001): `validate_benchmark_submission` and `extract_attachment_url` live in
+  `.github/scripts/` (loose scripts, not a package) and `share_safety`/`aggregate` live in `benchmarks/`.
+  The pull script imports them the SAME way the validator already imports `share_safety`, prepend the two
+  dirs to `sys.path` and `import` by module name (mirroring `validate_benchmark_submission.py:60-61`).
+  Load with `importlib` by explicit path if a name clash is a concern. This cross-dir coupling
+  (`benchmarks/ -> .github/scripts/`) is deliberate reuse (one validation implementation, no fork) and
+  MUST be covered by an import smoke test so a moved/renamed module is caught.
 
 ### Tightened acceptance gate
 - Add a `MAX_STORE_BYTES = 256 * 1024` cap applied by the pull script (stricter than the validator's
-  1 MiB network cap); refuse anything larger BEFORE parsing. Everything else (schema `/5`, share-safety,
-  semantic) is the existing fail-closed validation. A file that fails ANY check is never stored and the
-  issue is marked `status:needs-fix` (with a short, payload-free reason comment).
+  1 MiB network cap). Apply it UNIFORMLY before parse to BOTH sources (PR-004): a URL download AND an
+  inline block (whose extractor cap is 1 MiB), so no source can smuggle a 256KB..1MiB payload past the
+  store gate. Everything else (schema `/5`, share-safety, semantic) is the existing fail-closed
+  validation. A file that fails ANY check is never stored and the issue is marked `status:needs-fix`
+  (with a short, payload-free reason comment).
 
 ### Local storage (content-addressed, deduped)
 - Store accepted results at `benchmarks/data/accepted/<sha256>.json` (the sha256 of the exact validated
   bytes; content-addressed so re-pulling is idempotent and duplicates collapse). Write a sidecar
-  `benchmarks/data/accepted/<sha256>.meta.json` with: issue number, issue URL, submitter login, the
-  submission `kind` (url|inline), source host (for a URL), fetch timestamp (UTC), sha256, validator
-  version, and `share_safety_version`. NEVER store the unredacted anything; the stored file is the
+  `benchmarks/data/accepted/<sha256>.meta.json` with: submission `kind` (url|inline), source host (for a
+  URL), fetch timestamp (UTC), sha256, validator version, `share_safety_version`, and a `sources` LIST of
+  {issue_number, issue_url, submitter_login} (PR-002): the SAME redacted bytes can legitimately arrive
+  from more than one issue, so the meta records ALL contributing issues (append on a dedupe hit; do not
+  overwrite/lose the earlier attribution). The result JSON itself is written once (content-addressed);
+  only the `sources` list grows. NEVER store the unredacted anything; the stored file is the
   already-redacted, share-checked result. A `.gitignore`-tracked `benchmarks/data/` with a README
   explaining the corpus; the maintainer commits accepted results deliberately (the script writes them to
   the working tree; committing/pushing is a separate maintainer action, path-scoped).
@@ -101,9 +113,10 @@ Nothing is automatic on GitHub. Anything that does not validate, or exceeds 256 
 ### Issue re-tagging (maintainer's gh; explicit --apply)
 - Default `--dry-run`: print the plan (which issues would become accepted/needs-fix, which results would
   be stored, dedupe hits) and change NOTHING. With `--apply`: set `status:accepted` / `status:needs-fix`
-  via `gh issue edit ... --add-label/--remove-label` (argv list, never a shell), and on a rejection post
-  a short, payload-free comment with the failing stage/reason. All GitHub writes are the maintainer's own
-  authenticated actions, not an Action.
+  via `gh issue edit ... --add-label/--remove-label` (argv list, never a shell), ALWAYS removing
+  `status:pending` on a decision (PR-003; mirrors the Phase 1 workflow's label hygiene), and on a
+  rejection post a short, payload-free comment with the failing stage/reason. All GitHub writes are the
+  maintainer's own authenticated actions, not an Action.
 
 ### CLI shape
 - `benchmarks/pull_submissions.py [--repo OWNER/NAME] [--label type:benchmark-submission] [--state open]
@@ -175,8 +188,16 @@ the same fail-closed rigor as the server validator.
 - Validation reuse: a genuine redacted `/5` fixture is accepted; adversarial fixtures (unredacted host,
   home path, wrong schema, missing required, negative timing, oversized >256 KB, non-JSON) are refused
   with the correct stage, reusing the committed corpus in `.github/scripts/test_fixtures/`.
+- Import smoke (PR-001): `pull_submissions` can import `validate_benchmark_submission`,
+  `extract_attachment_url`, `share_safety`, and `aggregate` via the documented path-injection; a
+  moved/renamed module fails this test loudly.
 - Store: content-addressed filename == sha256 of bytes; re-store of identical bytes is a no-op (dedupe);
   a filename/path-traversal attempt never escapes `benchmarks/data/accepted/`; sidecar fields present.
+- Multi-issue dedupe (PR-002): the SAME bytes submitted from two different issues yields ONE result file
+  and a meta `sources` list of length 2 (both issues recorded); no attribution lost.
+- Label hygiene (PR-003): a decision removes `status:pending` and leaves exactly one of
+  `status:accepted`/`status:needs-fix` (assert the emitted `gh` argv).
+- Uniform cap (PR-004): an inline payload of 256KB+1 is rejected before parse (not just the URL path).
 - Aggregation: `build_rows` over >=2 stored fixtures yields rows and non-empty csv/md.
 - gh interaction (mock `subprocess`): `--dry-run` performs NO gh write; `--apply` issues the expected
   argv (`gh issue edit ... --add-label status:accepted` etc.); a `$(...)`/backtick-shaped issue field is
@@ -196,16 +217,16 @@ the same fail-closed rigor as the server validator.
   documenting the layout and that stored files are redacted + validated. No overclaim about what the
   corpus proves.
 
-## Open questions
+## Open questions (all RESOLVED 2026-07-22)
 
-1. Corpus location + tracking: proposed `benchmarks/data/accepted/*.json` committed to `main` (small,
-   redacted, human-reviewable) with `summary.*` regenerated. ALT: a `benchmark-data` branch kept off
-   `main`. Proposed: commit under `benchmarks/data/` on `main` for simplicity (it is small and redacted).
-   (Maintainer to confirm.)
-2. Store cap exactly 256 KB (maintainer-stated) vs deriving from the schema's realistic max: proposed
-   keep 256 KB as an explicit constant with a comment. (Maintainer to confirm.)
-3. Should `--apply` also post a "thank you / accepted" comment on acceptance, or only re-label? Proposed:
-   re-label on acceptance (quiet), comment only on rejection (actionable). (Maintainer to confirm.)
+1. Corpus location: RESOLVED. Commit accepted results under `benchmarks/data/accepted/*.json` on `main`
+   (small, redacted, human-reviewable in a normal diff; travels with a clone), with `summary.csv`/
+   `summary.md` regenerated alongside and a `benchmarks/data/README.md`. NOT a separate branch.
+2. Store cap: RESOLVED. Keep an explicit `MAX_STORE_BYTES = 256 * 1024` constant (commented: a real
+   redacted `/5` result is ~38 KB, so ~6x headroom), applied uniformly to URL and inline sources before
+   parse. NOT schema-derived.
+3. Comment on acceptance: RESOLVED. Re-label quietly on acceptance (label only, no comment); post a
+   short, payload-free, actionable comment ONLY on rejection (failing stage/reason).
 
 ## Approval and execution gate
 
@@ -233,3 +254,18 @@ Proposal; MUST be human-approved before execution; NOT auto-run. Execution contr
   apply; a lighter security pass (S2-1..S2-7) on the untrusted-JSON handling is required instead. `Set:
   benchmark-intake`, `Order: 2`. Not executed; awaiting review/approval (maintainer's default is to run
   /plan-review).
+- 2026-07-22 /plan-review (opencode / its_direct/pt3-claude-opus-4.8-1m-us): APPROVE WITH REVISIONS
+  APPLIED. Verified every reuse claim against the tree: validator exports
+  (`validate_benchmark_submission.py:79,91,105,124,130,159`), `_download` host-allowlist/redirect/cap
+  (`:174-201`), `MAX_BYTES` (`:45`), `ALLOWED_ATTACHMENT_HOSTS` (`:49`); aggregate `_load/build_rows/
+  write_csv/write_markdown` (`aggregate.py:97,120,158,168`) and `_scenarios_view` `/5` recompute
+  (`:55-83`); extractor `resolve_source/find_inline_json/find_attachment_url` + marker + inline cap
+  (`extract_attachment_url.py:40,43,67,95,127`); fixture corpus present; wheel excludes benchmarks/ +
+  .github/ (`pyproject.toml:71`). Findings PR-001..PR-005 FIXED in place: PR-001 named the cross-dir
+  import mechanism (sys.path-injection mirroring the validator) + an import smoke test; PR-002 made the
+  meta sidecar record a `sources` LIST so the same bytes from multiple issues keep all attribution;
+  PR-003 made a decision always drop `status:pending`; PR-004 applied the 256 KB store cap uniformly to
+  URL AND inline before parse; PR-005 set `Status: reviewed`. All 3 open questions resolved with the
+  maintainer (corpus on main under benchmarks/data/; explicit 256 KB constant; quiet accept, comment on
+  reject). No BLOCKER/HIGH unresolved. Verdict: APPROVE WITH REVISIONS APPLIED; Readiness: GO - PENDING
+  HUMAN APPROVAL.
