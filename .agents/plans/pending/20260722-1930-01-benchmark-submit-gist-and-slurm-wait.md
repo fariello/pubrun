@@ -11,7 +11,7 @@
   (`.github/workflows/benchmark-intake.yml` trigger; `.github/scripts/extract_attachment_url.py` and
   `validate_benchmark_submission.py` to accept gist host + inline JSON), and docs/CHANGELOG/tests. NO
   Gist discovery/reconciliation, NO `--cleanup-submissions`, NO data-branch/archival, NO `contents:write`.
-- Status: pending
+- Status: reviewed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Set: benchmark-intake
 - Order: 4
@@ -88,11 +88,23 @@ unredacted file adds only identity (hostname, username, home paths), which is no
 - `pubrun bench --unredacted` (harness: still `--out`) ALSO writes the identifying
   `*.unredacted.json` for local debugging, keeping the unmistakable naming + "do not share" guidance
   for THAT file only.
-- Harness change: today `harness.py` always writes the full `--out` and optionally `--redacted-out`
-  (`:620-646`). Flip it: default = write the redacted file; the unredacted `--out` is produced only when
-  requested. Preserve `redact_result` and the compact serialization; keep a redaction self-check so an
-  under-redaction bug is caught (the one real cost of not keeping raw data by default is mitigated by
-  `--unredacted` for deliberate debugging + the share-safety validator).
+- Harness change (PR-001): note that the unredacted file is written UNCONDITIONALLY inside
+  `harness.run()` itself (`harness.py:463-465` `out_path.write_text(...)`), not only by the `--out`
+  handling in `main()` (`:634-646`); `--redacted-out` currently writes an ADDITIONAL redacted copy after.
+  The flip therefore restructures `run()`/`main()` so the DEFAULT written artifact is the redacted file
+  (`redact_result(...)` serialized) and the unredacted file is written ONLY when `--unredacted` is given
+  (an executor must not assume changing only the `--out` flag suffices). Preserve `redact_result` and
+  the compact serialization; keep a redaction self-check so an under-redaction bug is caught (the one
+  real cost of not keeping raw data by default is mitigated by `--unredacted` for deliberate debugging +
+  the share-safety validator).
+- CLI grammar (PR-002): the EXISTING `--no-redact` flag (`__main__.py:1457,1464`; referenced in
+  `_print_safe_file_block:1276`) means "write NO redacted copy, full detail only," which is contradictory
+  once redacted-only is the default. Resolve it explicitly: REMOVE `--no-redact` and replace its intent
+  with `--unredacted` (which now ALSO writes the identifying copy alongside the default redacted one).
+  A run that passed `--no-redact` for "full detail" is served by `--unredacted`; there is no longer a
+  mode that produces an unredacted file WITHOUT a redacted sibling (there is no use case for it, and it
+  would reintroduce a bare unshareable artifact). Update the harness `--redacted-out`/`--out` wiring and
+  the `_run_bench(no_redact=...)` signature/dispatch accordingly.
 - Downstream simplification (reflected in the steps below): `_print_safe_file_block` no longer needs a
   PRIVATE line in the common case (only when `--unredacted` was used); `--prepare-submission` mostly
   becomes redundant (the results dir already holds only the safe file) but is retained as a harmless
@@ -153,15 +165,23 @@ unredacted file adds only identity (hostname, username, home paths), which is no
 - On a Slurm login node (probe = existing detection: `SLURM_JOB_ID` / `sbatch` on PATH), when a submit
   is offered, ask `Run by submitting to the Slurm queue? [y/N]`. (Existing multi-scheduler detection
   for PBS/LSF/SGE is untouched; submit-and-wait is built for Slurm only this slice.)
-- If yes: capture the job id (prefer `sbatch --parsable`, else parse `Submitted batch job <id>` from
-  stdout) and pass DETERMINISTIC output paths so the login-node parent can find the artifacts:
-  set explicit `--out <.../pubrun-bench-<token>-<stamp>.unredacted.json>` and
-  `--redacted-out <....redacted.json>` through the submit env. This CLOSES the current gap where the
-  Slurm run produced no redacted file.
-- The login-node parent then POLLS `sacct`/`squeue` for the job id with a visible waiting indicator,
-  a bounded default max-wait plus a `--wait-timeout` override, and clean handling of Ctrl-C / dropped
-  session. On completion (COMPLETED): verify the expected redacted file exists on the shared FS, then
-  run the SAME interactive share-check + `_submit_benchmark_result` contribution from the login node.
+- If yes: capture the job id and pass DETERMINISTIC output paths so the login-node parent can find the
+  artifacts. Concrete sub-changes (PR-003): (a) `submit_bench.sh` must emit a parseable id, use
+  `sbatch --parsable` (returns the bare job id on stdout) and echo/return it so the caller captures it
+  deterministically instead of scraping the human `Submitted batch job <id>` string; (b) the submit env
+  passes an explicit `--redacted-out <.../pubrun-bench-<token>-<stamp>.redacted.json>` (and `--out
+  ...unredacted.json` ONLY when `--unredacted` was requested), so the redacted file is produced with a
+  known name (this CLOSES the current gap where `run_bench.sbatch:39` writes a bare `.json` and no
+  redacted copy).
+- The login-node parent then POLLS for completion with a visible waiting indicator, a bounded default
+  max-wait plus a `--wait-timeout` override, and clean handling of Ctrl-C / dropped session. Polling
+  robustness (PR-003): prefer `squeue -h -j <id>` for liveness (returns nothing once the job leaves the
+  queue) and `sacct -j <id> -o State` for the terminal state; TOLERATE either tool being absent or
+  `sacct` accounting being disabled/lagging on a cluster, if the terminal state cannot be determined,
+  fall back to "poll for the expected redacted file to appear on the shared FS, then time out to the
+  `--submit-file` guidance", never hang forever and never assume `sacct` exists. On a confirmed
+  completion: verify the expected redacted file exists on the shared FS, then run the SAME interactive
+  share-check + `_submit_benchmark_result` contribution from the login node.
 - Graceful fallback (never lose data): if the wait is interrupted, times out, the job FAILED, or `gh`
   is not ready, print exactly where the result is and
   `pubrun bench --submit-file <path>` to finish from the login node. The shared-FS artifact is always
@@ -173,6 +193,12 @@ unredacted file adds only identity (hostname, username, home paths), which is no
   '<!-- pubrun-benchmark-submission:v1 -->')` to the job `if:`. The marker is routing only; the JSON
   stays untrusted. The workflow (with its `issues: write`) applies `type:benchmark-submission` +
   `status:pending` itself, then sets the final status.
+- Abuse surface (PR-004): a body marker is attacker-forgeable, so ANY public issue containing the
+  marker string will trigger a workflow run (a spam/resource vector). This is ACCEPTED as low risk
+  because: the validator is fail-closed and cheap (byte cap before parse, no payload execution, bounded
+  download), the workflow has no write access to contents, and GitHub Actions already rate-limits/queues
+  per repo. Do NOT add the marker as a security boundary; it only routes. (If abuse is observed later, a
+  follow-up can gate on issue-author association or a minimum body shape; out of scope here.)
 - Accept gist raw URLs: add `gist.githubusercontent.com` to `ALLOWED_ATTACHMENT_HOSTS` in BOTH
   `extract_attachment_url.py` and `validate_benchmark_submission.py` (exact host, https, bounded
   redirects, timeout, 1 MiB cap; NO suffix matching).
@@ -201,6 +227,12 @@ unredacted file adds only identity (hostname, username, home paths), which is no
 | S4-8 | Medium | Low | Security | gist host allowlist | Add exact `gist.githubusercontent.com`; never suffix-match `githubusercontent.com` | reference S7.2 |
 | S4-9 | Medium | Low | Correctness | inline size/fence | Measure UTF-8 bytes over the FULL body (`< 65_000`); handle triple-backtick JSON | reference S5.5 / test 13 |
 | S4-10 | Low | Low | Honesty | partial publish | A created-then-failed gist/issue must be reported honestly, never a false "nothing published" | reference S9/S11 |
+
+Plan-review findings applied 2026-07-22 (see Workflow history): PR-001 (harness `run()` is the
+unconditional unredacted writer, not just `--out`; restructure named in A0); PR-002 (retire the
+contradictory `--no-redact` flag in favor of `--unredacted`; named in A0); PR-003 (use `sbatch
+--parsable`, and make polling tolerate missing/lagging `sacct` with a file-appearance + timeout
+fallback; named in D); PR-004 (document the forgeable-marker abuse surface as accepted-low; named in E).
 
 ## Proposed changes (ordered, validatable)
 
@@ -235,18 +267,23 @@ unredacted file adds only identity (hostname, username, home paths), which is no
 ## Required tests / validation
 
 - Redacted-only default (Step 0): a default `pubrun bench` / harness run writes ONLY the
-  `*.redacted.json` and NO `*.unredacted.json`; `--unredacted` writes both (with do-not-share naming);
-  the redacted default still conforms to schema `/5`; the safe-file block omits the PRIVATE line unless
-  `--unredacted` was used. Update/retire existing tests that assumed an unredacted file always exists
-  (e.g. `tests/test_bench_command.py::TestBenchCLI::test_bench_quick_local_json` asserts a `redacted`
-  key AND an unredacted `results` path).
+  `*.redacted.json` and NO `*.unredacted.json` (assert the unredacted sibling does NOT exist after a
+  default run, since `harness.run()` no longer force-writes it, PR-001); `--unredacted` writes both
+  (with do-not-share naming); the redacted default still conforms to schema `/5`; the safe-file block
+  omits the PRIVATE line unless `--unredacted` was used. `--no-redact` is REMOVED (PR-002): assert it is
+  no longer an accepted flag (argparse error) and that `--unredacted` covers the old "full detail" need.
+  Update/retire existing tests that assumed an unredacted file always exists (e.g.
+  `tests/test_bench_command.py::TestBenchCLI::test_bench_quick_local_json` asserts a `redacted` key AND
+  an unredacted `results` path; `TestBenchNoBaselineFlag` and others call `_run_bench(..., no_redact=...)`
+  positionally and must be updated to the new signature).
 - Client unit tests (mock `subprocess.run`; no live GitHub): the reference S12.1 cases 1-17 that fall in
   this slice (preflight, consent, share-check refusal, gist success, gist->inline fallback, orphan
   rollback, 64999/65000 boundary, multibyte UTF-8, triple-backtick, title sanitization, no token/JSON
   leak, `--submit-file` parity, HPC path never publishes an unredacted/login-node result).
-- Slurm submit-and-wait unit tests (mock sbatch/sacct/squeue): job-id capture; COMPLETED -> contribute;
-  interrupt/timeout/FAILED -> `--submit-file` fallback with data intact; sbatch invocation now passes
-  `--redacted-out`.
+- Slurm submit-and-wait unit tests (mock sbatch/sacct/squeue): job-id capture via `sbatch --parsable`;
+  COMPLETED -> contribute; interrupt/timeout/FAILED -> `--submit-file` fallback with data intact; sbatch
+  invocation now passes `--redacted-out`; AND the sacct-absent/lagging case (PR-003) -> falls back to
+  file-appearance polling then the `--submit-file` timeout guidance, never hangs, never assumes `sacct`.
 - Server extractor/validator tests: existing web attachment still accepted; gist raw `.json` accepted;
   gist HTML page + lookalike host rejected; redirect-off-allowlist rejected; single inline block
   accepted; missing marker / 0 / multiple blocks rejected; oversize rejected before parse; identical
@@ -316,3 +353,16 @@ Proposal; MUST be human-approved before execution; NOT auto-run. Execution contr
   `--unredacted` (local debugging). Keeps the `.redacted.json` filename. This removes the wrong-file
   risk at the source and simplifies the safe-file block, `--prepare-submission`, and submit-and-wait.
   Added `benchmarks/harness.py` to scope. Still pending; awaiting review/approval.
+- 2026-07-22 /plan-review (opencode / its_direct/pt3-claude-opus-4.8-1m-us): APPROVE WITH REVISIONS
+  APPLIED. Verified the cited evidence against the tree (Slurm fire-and-forget `__main__.py:1409-1428`;
+  harness `run()` unconditional unredacted write `harness.py:463-465` + `--out`/`--redacted-out` wiring
+  `:634-646`; bare `.json` name `run_bench.sbatch:39`; `submit_bench.sh` sbatch calls `:62,:69` without
+  `--parsable`; workflow label-only trigger `.github/workflows/benchmark-intake.yml:25` with perms
+  contents:read + issues:write `:17-18`; `ALLOWED_ATTACHMENT_HOSTS` present in both scripts, no gist
+  host yet). Findings PR-001..PR-005 FIXED in place: PR-001 named `run()` (not just `--out`) as the
+  writer to restructure; PR-002 resolved the fate of the now-contradictory `--no-redact` flag (removed,
+  superseded by `--unredacted`) incl. the `_run_bench` signature + positional-call test updates; PR-003
+  pinned `sbatch --parsable` and made polling tolerate missing/lagging `sacct` with a file-appearance +
+  timeout fallback; PR-004 documented the forgeable-marker abuse surface as accepted-low; PR-005 set
+  `Status: reviewed`. No open questions (all three resolved earlier in session). No BLOCKER/HIGH
+  unresolved. Verdict: APPROVE WITH REVISIONS APPLIED; Readiness: GO - PENDING HUMAN APPROVAL.
