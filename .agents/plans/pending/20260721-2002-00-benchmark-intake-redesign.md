@@ -250,3 +250,10 @@ orchestrator: approving it is not approving all phases at once. Execution contra
   21/21 green (run 29922109354). Orchestrator stays in pending/ (umbrella). NEXT: Phase 2 (Order 2, data
   branch + archival/aggregation) requires its own child IPD AND a HARD /assess security gate BEFORE the
   Action is granted any `contents: write`; labels + Issue Form enablement remain human/settings actions.
+- 2026-07-23 Order 4 executed (opencode / its_direct/pt3-claude-opus-4.8-1m-us): child IPD
+  `20260722-1930-01` (restore one-command gist/inline GitHub contribution + Slurm submit-and-wait;
+  redacted-only default output) is complete and moved to executed/. Corrective work: Phase 1's
+  attach-only client dropped the browserless one-command path (bad for adoption + unusable on HPC compute
+  nodes), which the maintainer reversed. Commit `f6dfc32`; full CI matrix 21/21 green (run 29972628892).
+  Slice A of research `20260722-1547-01`; Slice B (Gist discovery/reconciliation + --cleanup-submissions)
+  is a separate future IPD. Orchestrator stays in pending/ (umbrella).
