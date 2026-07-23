@@ -9,7 +9,10 @@
   (`benchmarks/aggregate.py`); a committed local data dir under `benchmarks/` for accepted results;
   docs/CHANGELOG. NO changes to `.github/workflows/*` permissions, NO `contents: write` for any Action,
   NO server-side archival/aggregation/Pages/auto-close.
-- Status: reviewed
+- Status: executed
+- Approval: human-approved 2026-07-22 (maintainer "Go" after /plan-review); executed 2026-07-22
+  (commit 784289f; full local suite 1034 passed / 7 skipped). No server write path, so no matrix gate;
+  local-green sufficient (dev tooling not shipped in the wheel).
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Set: benchmark-intake
 - Order: 2
@@ -269,3 +272,16 @@ Proposal; MUST be human-approved before execution; NOT auto-run. Execution contr
   maintainer (corpus on main under benchmarks/data/; explicit 256 KB constant; quiet accept, comment on
   reject). No BLOCKER/HIGH unresolved. Verdict: APPROVE WITH REVISIONS APPLIED; Readiness: GO - PENDING
   HUMAN APPROVAL.
+- 2026-07-22 approved (human): maintainer approved after /plan-review. Status -> approved; executing.
+- 2026-07-22 executed (opencode / its_direct/pt3-claude-opus-4.8-1m-us): implemented all steps as the
+  local pull model. `benchmarks/pull_submissions.py` reuses the existing validator (schema /5 +
+  share-safety + semantic) + `_download` (host allowlist/cap) + extractor (url/inline) + aggregator via
+  sys.path-injection; adds a uniform 256 KB store cap (url + inline, before parse); content-addressed
+  store at `benchmarks/data/accepted/<sha256>.redacted.json` + `.meta.json` sidecar with a `sources` list
+  (multi-issue attribution); dedupe by hash; path confinement; aggregation to summary.csv/md; gh re-tag
+  (dry-run default, --apply, always drops status:pending, quiet accept + reject comment), argv-only,
+  never pushes/prints tokens, no eval/exec/shell. Added tracked `benchmarks/data/` (README + .gitignore),
+  CONTRIBUTING maintainer section, CHANGELOG entry, and +20 tests (`benchmarks/test_pull_submissions.py`).
+  Commit 784289f; full local suite 1034 passed / 7 skipped; sanitizer clean; end-to-end dry-run/apply
+  smoke verified (dry-run writes nothing + only `gh issue list`; apply stores + aggregates + `gh issue
+  edit`). No server write path -> no CI-matrix gate. Status -> executed; moved to executed/.
