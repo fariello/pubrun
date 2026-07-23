@@ -1,0 +1,15 @@
+# Collected community benchmark corpus (IPD 20260722-2209-01, Phase 2 local pull model).
+#
+# Track ONLY the accepted, redacted results + their metadata sidecars + the README, and the
+# regenerated summaries. Every stored result is a `*.redacted.json` that passed schema /5 +
+# share-safety validation and the 256 KB store cap; an unmarked or non-redacted file must never
+# land here. Anything else (scratch, temp downloads) stays local-only.
+*
+!.gitignore
+!README.md
+!accepted/
+accepted/*
+!accepted/*.redacted.json
+!accepted/*.meta.json
+!summary.csv
+!summary.md

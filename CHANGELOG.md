@@ -9,6 +9,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Maintainer tool to collect benchmark submissions locally (`benchmarks/pull_submissions.py`).** A
+  maintainer-run script that fetches benchmark-submission issues via `gh`, runs the SAME fail-closed
+  validation the server does (schema `pubrun-benchmark/5` + structural share-safety) plus a 256 KB size
+  cap, stores each accepted redacted result content-addressed under `benchmarks/data/accepted/<sha256>.redacted.json`
+  (with a metadata sidecar recording every contributing issue), aggregates the corpus into
+  `summary.csv`/`summary.md` via the existing aggregator, and re-tags issues (quiet on acceptance, a short
+  actionable comment on rejection). It is dry-run by default (`--apply` to write), calls `gh` via argv
+  lists (never a shell), parses untrusted JSON as data only, and never pushes. This is the "local pull"
+  design for collecting the corpus: GitHub Actions gains NO new write access; nothing is stored
+  automatically. Dev/reproducibility tooling, not shipped in the wheel.
 - **One-command benchmark contribution to GitHub (gist-and-link, inline fallback).** `pubrun bench` can
   now publish a share-checked redacted result to `fariello/pubrun` in one command, no browser required.
   It uses the GitHub CLI (`gh`): it creates an UNLISTED Gist of the redacted file and opens an issue

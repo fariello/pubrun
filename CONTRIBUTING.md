@@ -73,6 +73,17 @@ Benchmark results help verify pubrun's overhead claims across real hardware, fil
 
 A validate-only automated check posts a pass/fail receipt on the issue. It parses the submission only as data and cannot un-share a file, so only ever submit the redacted result (never the unredacted one). Note the published Gist is unlisted, not private: anyone with its URL can read it (the file is redacted, so this is expected).
 
+### Maintainer: collecting submissions
+
+The collected corpus is gathered by a maintainer-run tool, not by any GitHub Action (nothing is stored automatically). From a source checkout, authenticated with `gh`:
+
+```bash
+python3 benchmarks/pull_submissions.py            # dry run: show what would happen, write nothing
+python3 benchmarks/pull_submissions.py --apply     # store accepted results, re-tag issues, aggregate
+```
+
+It fetches benchmark-submission issues, runs the SAME fail-closed validation the server does (schema `pubrun-benchmark/5` + share-safety) plus a 256 KB size cap, stores each accepted redacted result content-addressed under `benchmarks/data/accepted/`, regenerates `summary.csv`/`summary.md`, and re-tags issues (quiet on acceptance, a short reason comment on rejection). It never pushes; you commit the corpus deliberately. See `benchmarks/data/README.md`.
+
 ## Pull requests
 
 Pull requests should be focused and reviewable. Before opening a pull request:
