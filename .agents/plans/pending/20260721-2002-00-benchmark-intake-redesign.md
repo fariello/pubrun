@@ -257,3 +257,14 @@ orchestrator: approving it is not approving all phases at once. Execution contra
   nodes), which the maintainer reversed. Commit `f6dfc32`; full CI matrix 21/21 green (run 29972628892).
   Slice A of research `20260722-1547-01`; Slice B (Gist discovery/reconciliation + --cleanup-submissions)
   is a separate future IPD. Orchestrator stays in pending/ (umbrella).
+- 2026-07-22 Phase 2 (Order 2) executed (opencode / its_direct/pt3-claude-opus-4.8-1m-us): child IPD
+  `20260722-2209-01` (Phase 2) is complete and moved to executed/. It DELIBERATELY SUPERSEDES this
+  orchestrator's original Phase 2 shape (a server-side archive job with `contents: write` on a
+  `benchmark-data` branch): after a maintainer model comparison, Phase 2 was built as the LOCAL PULL
+  model, `benchmarks/pull_submissions.py`, which stores/aggregates/re-tags locally and grants GitHub
+  Actions NO new write access. Because there is no server write path, this orchestrator's HARD
+  /assess security gate for Phase 2 did NOT apply; a lighter security pass on the local script's
+  untrusted-JSON handling (IPD S2-1..S2-7) was done instead. Commit `784289f`; full local suite 1034
+  passed / 7 skipped (dev tooling, not shipped in the wheel, so no CI-matrix gate). Orchestrator stays in
+  pending/ (umbrella). Remaining: Phase 3 (Order 3, retire satellite) and the client Slice B
+  (Gist reconciliation / --cleanup-submissions).
