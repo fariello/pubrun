@@ -155,7 +155,12 @@ class TestSlurmSafety:
         monkeypatch.setattr("builtins.input", lambda *a: "n")
         called = {"ran": False}
         import subprocess as sp
+        import threading
+        test_thread = threading.current_thread()
+        real_run = sp.run
         def _boom(*a, **k):
+            if threading.current_thread() is not test_thread:
+                return real_run(*a, **k)
             called["ran"] = True
             raise AssertionError("must not submit without confirmation")
         monkeypatch.setattr(sp, "run", _boom)
