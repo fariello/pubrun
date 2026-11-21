@@ -1,0 +1,15 @@
+{
+  "fetched_utc": "2026-11-21T18:42:26.988795+00:00",
+  "kind": "url",
+  "sha256": "3e812f3b05a031336fb627fb490c119a26d67782b320a7dc00ed243d9787b57e",
+  "share_safety_version": 1,
+  "source_host": "gist.githubusercontent.com",
+  "sources": [
+    {
+      "issue_number": 2,
+      "issue_url": "https://github.com/fariello/pubrun/issues/2",
+      "submitter_login": "fariello"
+    }
+  ],
+  "validator_version": "pubrun-benchmark/5"
+}
