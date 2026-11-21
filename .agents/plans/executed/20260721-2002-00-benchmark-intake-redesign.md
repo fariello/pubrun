@@ -7,7 +7,7 @@
   to a dedicated `benchmark-data` branch and aggregates rebuilt; consolidate intake into the MAIN pubrun
   repo and retire `pubrun-benchmarks` as the primary destination. Phased (see below). Touches
   `pubrun bench` client UX (`src/pubrun/__main__.py`), `.github/`, docs, and repo/branch settings.
-- Status: approved
+- Status: executed (Phases 1, 2, Order 4, and lean Phase 3 complete; Client Slice B deferred)
 - Approval: human-approved 2026-07-21 (maintainer "GO" on the APPROACH; each phase child IPD still
   separately reviewed + approved per this orchestrator's per-phase gate)
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
@@ -268,3 +268,20 @@ orchestrator: approving it is not approving all phases at once. Execution contra
   passed / 7 skipped (dev tooling, not shipped in the wheel, so no CI-matrix gate). Orchestrator stays in
   pending/ (umbrella). Remaining: Phase 3 (Order 3, retire satellite) and the client Slice B
   (Gist reconciliation / --cleanup-submissions).
+- 2026-11-21 lean Phase 3 executed + orchestrator closed:
+  - Synced live docs, Issue Form, CLI help, and validate-only workflow (`b36961a`): updated `docs/cli.md`,
+    `benchmarks/README.md`, `.github/ISSUE_TEMPLATE/benchmark-result.yml`,
+    `.github/workflows/benchmark-intake.yml` (actions bumped to `@v7`/`@v9`, local-pull wording),
+    `src/pubrun/__main__.py` help description, `CONTRIBUTING.md`, and `CHANGELOG.md`; 41/41 intake tests
+    passed.
+  - End-to-end live validation + migration: extracted `fariello/pubrun-benchmarks#1` (`pubrun-benchmark/5`,
+    38,262 bytes) and submitted it via `pubrun bench --submit-file ... --contribute` -> created
+    `fariello/pubrun#2`; `Benchmark intake (validate-only)` run `44936918070` succeeded in 12s (receipt
+    comment + `status:accepted` applied); `python3 benchmarks/pull_submissions.py --apply` collected it into
+    `benchmarks/data/accepted/3e812f3b...` and generated `summary.csv` / `summary.md` (23 aggregate rows).
+  - Retired `fariello/pubrun-benchmarks` (human-approved): replaced its README (`aad5796`) with a redirect
+    to `fariello/pubrun` (noting issue `#1` migrated to `fariello/pubrun#2`), updated its description, and
+    archived the repository (`archived: true`). Note: the PAT lacked `issues: write` on `pubrun-benchmarks`
+    (HTTP 403), so historical issue `#1` remains open on the read-only archived repo.
+  - Client Slice B (Gist discovery/reconciliation + `--cleanup-submissions`) explicitly deferred (YAGNI
+    until contributor volume warrants it). Moved this orchestrator IPD to `.agents/plans/executed/`.
