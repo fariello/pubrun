@@ -3,7 +3,7 @@
 - Date: 20260704
 - Concern: feature / reproducibility
 - Scope: `capture/packages.py`, `resources/default.toml`, manifest schema
-- Status: PENDING (awaiting human approval; not executed)
+- Status: executed
 - Author: OpenCode (its_direct/pt3-claude-opus-4.6-1m-us)
 
 ## Goal

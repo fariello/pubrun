@@ -8,7 +8,7 @@
   chart data path (`events.jsonl` `resource_sample` samples + the sparkline/chart logic in
   `report/diagnostics.py`). The TUI is an OPTIONAL extra (`pip install "pubrun[tui]"`,
   textual/rich); nothing here touches core/runtime or adds a core dependency. Docs, tests.
-- Status: PENDING (awaiting human approval; not executed)
+- Status: executed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Goal

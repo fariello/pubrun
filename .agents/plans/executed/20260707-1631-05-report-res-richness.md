@@ -10,7 +10,7 @@
 - Scope: `src/pubrun/report/diagnostics.py` (resources + report + timeline rendering),
   `src/pubrun/__main__.py` (`report`/`show` flag parity). Read-only over the manifest +
   `events.jsonl`; no capture/runtime change. Docs, tests.
-- Status: PENDING (awaiting human approval; not executed)
+- Status: executed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Goal

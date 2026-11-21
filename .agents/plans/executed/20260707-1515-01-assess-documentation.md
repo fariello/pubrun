@@ -6,7 +6,7 @@
   Triggered by the doc-sync discipline in `AGENTS.md` after this session's user-visible
   changes (command rename, `res` comprehensive, file-I/O levels, benchmark submission,
   schema/4, env-kind, fs-health).
-- Status: PENDING (awaiting human approval; not executed)
+- Status: executed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Goal

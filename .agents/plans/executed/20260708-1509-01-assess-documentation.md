@@ -7,7 +7,7 @@
   `--no-baseline` on `pubrun bench` so the CHANGELOG is truthful. Triggered by the doc-sync
   discipline in `AGENTS.md` after the 7-IPD CLI/UX batch (commits `f7ed43c`, `a262232`,
   `0da1ee5`, `e1eafe7`, `4cd956a`, `ac73c9a`, `fb86e84`).
-- Status: PENDING (awaiting human approval; not executed)
+- Status: executed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Goal

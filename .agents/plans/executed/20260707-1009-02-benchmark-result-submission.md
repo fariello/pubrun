@@ -11,7 +11,7 @@
   helper reused by the CLI) to confirm a file is redacted, docs, tests. **No change to
   `import pubrun` runtime behavior. No new runtime dependency. No server.** The benchmark
   tooling remains dev/source-checkout only (not shipped in the wheel).
-- Status: PENDING (proposal only; human approval required; NOT auto-executed).
+- Status: executed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Problem / motivation

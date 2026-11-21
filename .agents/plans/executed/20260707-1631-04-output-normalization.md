@@ -10,7 +10,7 @@
   `src/pubrun/_output.py`), migration of all call sites (`__main__.py`, `report/diagnostics.py`,
   `report/meta_snapshot.py`, `status.py`, `report/checks.py` finding markers), and the help
   ordering in `__main__.py`. Docs, tests.
-- Status: PENDING (awaiting human approval; not executed)
+- Status: executed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Goal

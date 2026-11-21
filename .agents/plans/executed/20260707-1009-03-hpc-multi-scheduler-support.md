@@ -11,7 +11,7 @@
   PBS/LSF/SGE batch scripts mirroring `submit_bench.sh`/`run_bench.sbatch`),
   `src/pubrun/report/checks.py` (login-node suggestion), docs, tests. **No change to
   `import pubrun` runtime behavior. No new runtime dependency. Never auto-submit.**
-- Status: PENDING (proposal only; human approval required; NOT auto-executed).
+- Status: executed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 - Depends on / relates to: IPD-C (`20260706-easy-benchmark-and-hpc-submit.md`, the Slurm
   seam this generalizes) and `20260707-benchmark-data-quality-and-fs-health.md` (the fs-health

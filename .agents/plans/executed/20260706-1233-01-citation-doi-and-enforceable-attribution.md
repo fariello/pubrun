@@ -11,9 +11,7 @@
   path and/or a CC-BY license for any distributed data/docs. Does NOT change the code
   license (stays Apache-2.0) and does NOT add a citation-as-license-condition clause
   unless the maintainer explicitly opts in (see "Open questions").
-- Status: PENDING — plan-reviewed 2026-07-06 (APPROVE WITH REVISIONS APPLIED); all six
-  open questions ANSWERED by the maintainer 2026-07-06 (see below). Execution of Phase 1
-  is unblocked pending the human "go". NOT auto-executed.
+- Status: executed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Problem / motivation

@@ -9,7 +9,7 @@
 - Scope: `src/pubrun/__main__.py` (`_run_self_check` `:779`, `_emit_findings` `:754`,
   `_run_meta` `:683`), `src/pubrun/report/checks.py` (`live_findings`/`summarize`),
   `src/pubrun/report/meta_snapshot.py`. Docs, tests. Read-only diagnostics; no runtime change.
-- Status: PENDING (awaiting human approval; not executed)
+- Status: executed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Goal

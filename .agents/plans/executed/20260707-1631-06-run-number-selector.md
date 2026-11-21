@@ -9,7 +9,7 @@
   `_get_manifest_path` (`src/pubrun/__main__.py:62`), plus every command that resolves a run
   (`report`/`show`, `res`/`cpu`/`mem`, `methods`, `inspect`, `rerun`, `diff`, `status`). Docs,
   tests. No runtime/capture change.
-- Status: PENDING (awaiting human approval; not executed)
+- Status: executed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Goal

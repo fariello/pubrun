@@ -3,7 +3,7 @@
 - Date: 20260704
 - Concern: documentation (accuracy, completeness, consistency)
 - Scope: all docs/ files, README.md, CHANGELOG.md
-- Status: PENDING (partially executed — doc fixes committed; remaining items below)
+- Status: executed
 - Author: OpenCode (its_direct/pt3-claude-opus-4.6-1m-us)
 
 ## Goal

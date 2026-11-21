@@ -21,7 +21,7 @@
   the always-on `import pubrun` path must NOT gain any blocking probe (the 5s threaded
   statvfs is bench/diagnostic-ONLY); never intrude on/slow/crash the host script; honest
   docs; degrade gracefully; redaction stays maximally aggressive on literal paths (PII).
-- Status: PENDING (proposal only; human approval required; NOT auto-executed).
+- Status: executed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Problem / motivation

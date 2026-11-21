@@ -8,7 +8,7 @@
 - Scope: `benchmarks/harness.py` (pass loop + iteration/pass defaults + a `--rigorous` mode),
   `src/pubrun/__main__.py` (`pubrun bench` flag passthrough), docs, tests. `benchmarks/` is
   dev/source-only (not shipped in the wheel).
-- Status: PENDING (awaiting human approval; not executed)
+- Status: executed
 - Author: opencode (its_direct/pt3-claude-opus-4.8-1m-us)
 
 ## Goal

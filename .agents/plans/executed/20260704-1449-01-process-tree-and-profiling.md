@@ -3,7 +3,7 @@
 - Date: 20260704
 - Concern: feature / observability
 - Scope: `capture/resources.py`, `core.py` (phase), config, manifest schema
-- Status: PENDING (awaiting human approval; not executed)
+- Status: executed
 - Author: OpenCode (its_direct/pt3-claude-opus-4.6-1m-us)
 
 ## Goal
