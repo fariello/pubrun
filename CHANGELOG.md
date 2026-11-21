@@ -85,6 +85,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and never imply consent to publish. The default contribution target is `fariello/pubrun`.
 
 ### Documentation
+- **Synced benchmark-intake documentation and Issue Form with the current `pubrun bench` behavior.**
+  Updated `docs/cli.md`, `benchmarks/README.md`, `.github/ISSUE_TEMPLATE/benchmark-result.yml`,
+  `.github/workflows/benchmark-intake.yml`, and `pubrun bench --help` to reflect the redacted-only
+  default, `--unredacted` / `--contribute` / `--prepare-submission` / `--wait-timeout` flags,
+  main-repo (`fariello/pubrun`) targeting, and the local-pull collection workflow
+  (`benchmarks/pull_submissions.py`). Fixed a stale `Code of Conduct` link in `CONTRIBUTING.md`.
 - **Adoption bridges, an examples ladder, and deep-page positioning (no behavior change).** The README
   now has an "Is pubrun for me?" section with two signpost links (a plain-script/data-job path and an
   HPC/large-scale/ML path) and an examples ladder pointing into `examples/` from a trivial script up to

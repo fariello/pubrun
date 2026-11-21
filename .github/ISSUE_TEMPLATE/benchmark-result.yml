@@ -10,15 +10,17 @@ body:
         claims across real hardware, filesystems, and schedulers.
 
         **How to submit (attach, do NOT paste):**
-        1. Run `pubrun bench` (or `pubrun bench --quick`). It writes two files and prints a
-           safe-file block telling you which is which.
+        1. Run `pubrun bench` (or `pubrun bench --quick`). By default it writes only a
+           redacted, share-safe file (`*.redacted.json`) and prints a safe-file block.
+           (Or use `pubrun bench --contribute` if you have `gh` installed.)
         2. `pubrun bench --prepare-submission` copies ONLY the redacted (safe) file into a
            clean `pubrun-share/` folder.
         3. Drag the `*.redacted.json` file from that folder into the attachment box below.
 
-        **Never attach the `*.unredacted.json` file** (it contains your hostname and paths).
-        An automated check will validate the attachment and comment a pass/fail receipt; it
-        cannot un-share a file, so please double-check before you attach.
+        **Never attach a `*.unredacted.json` file** (written only if you pass `--unredacted`;
+        it contains your hostname and paths). An automated check will validate the attachment
+        and comment a pass/fail receipt; it cannot un-share a file, so please double-check
+        before you attach.
   - type: textarea
     id: attachment
     attributes:

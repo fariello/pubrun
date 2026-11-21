@@ -1,12 +1,13 @@
 name: Benchmark intake (validate-only)
 
-# Benchmark-intake (IPD 20260721-2255-01 + 20260722-1930-01): a VALIDATE-ONLY intake for
-# community benchmark submissions. It parses an attacker-controlled submission from a public
-# issue as DATA ONLY (an attached/gist .json URL, or an inline JSON block from an automated
+# Benchmark-intake (IPD 20260721-2255-01 + 20260722-1930-01 + 20260722-2209-01): a VALIDATE-ONLY
+# intake for community benchmark submissions. It parses an attacker-controlled submission from a
+# public issue as DATA ONLY (an attached/gist .json URL, or an inline JSON block from an automated
 # `pubrun bench --contribute`), then comments a pass/fail receipt. It writes NOTHING to any
-# branch (contents permission is read-only); archival/aggregation is a later phase, gated
-# behind a hard security review. The issue body is never interpolated into a shell: it is read
-# from the checked event JSON by Python; only an enumerated source kind selects the command.
+# branch (contents permission is read-only); collection and aggregation happen locally via the
+# maintainer-run `benchmarks/pull_submissions.py` script (local-pull model). The issue body is
+# never interpolated into a shell: it is read from the checked event JSON by Python; only an
+# enumerated source kind selects the command.
 
 on:
   issues:
@@ -29,16 +30,16 @@ jobs:
       contains(join(github.event.issue.labels.*.name, ','), 'type:benchmark-submission')
       || contains(github.event.issue.body, '<!-- pubrun-benchmark-submission:v1 -->')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install validator dependencies (jsonschema only)
         run: pip install jsonschema
 
       - name: Self-apply routing labels (external callers cannot set labels)
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const issue_number = context.issue.number;
@@ -75,7 +76,7 @@ jobs:
             --file submission.json --out verdict.json || true
 
       - name: Comment a pass/fail receipt and set a status label (idempotent)
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           EXTRACT_KIND: ${{ steps.extract.outputs.kind }}
           EXTRACT_ERROR: ${{ steps.extract.outputs.error }}
@@ -117,7 +118,7 @@ jobs:
                 '- schema: pubrun-benchmark/5',
                 '- share-safety ruleset: v' + verdict.share_safety_version,
                 '',
-                'A maintainer will review and accept it. Nothing is stored automatically yet.',
+                'A maintainer will review and collect it locally into `benchmarks/data/` (nothing is stored automatically by CI).',
               ].join('\n');
               addLabel = 'status:accepted';
               removeLabel = 'status:needs-fix';

@@ -117,37 +117,36 @@ pip install -e .
 python -m pubrun bench            # runs locally; on an HPC login node, offers to submit to Slurm
 ```
 
-`pubrun bench` writes two files under `results/`:
+By default `pubrun bench` writes only a redacted, share-safe file under `results/`:
 
-- `<host>-<UTC-timestamp>.unredacted.json` — the **full** result, for your own analysis
-  (embeds the real hostname). Never a bare `*.json`.
-- `pubrun-bench-<hash>-<UTC-timestamp>.redacted.json` — a **redacted** copy safe to share
+- `pubrun-bench-<hash>-<UTC-timestamp>.redacted.json`: a **redacted** copy safe to share
   publicly. The filename embeds a stable, non-identifying hostname hash (never the hostname
   itself, matching the in-file hostname redaction). Inside, hostname, OS username, and every
   home-directory path are masked, while the analysis-relevant data (CPU/GPU model, core count,
-  raw timings, versions, filesystem type, Slurm partition) is preserved. The file is written
-  compact and, for a full default run, is comfortably under GitHub's ~65 KB issue-body cap; a
-  non-fatal warning is printed if it ever exceeds it (attach the file instead of pasting).
+  raw timings, versions, filesystem type, Slurm partition) is preserved.
+- Pass `--unredacted` if you also want `<host>-<UTC-timestamp>.unredacted.json` (the full,
+  identifying result for your own local analysis; do not share). Never a bare `*.json`.
 
-After a local run, `pubrun bench` **offers to contribute** the redacted result for
-you (`Contribute this redacted result…? [y/N]` — Enter never transmits). If you say
-yes, it tries the GitHub CLI (`gh`) → the GitHub Issues API → printing a
-ready-to-paste submission, in that order. Every automated path files a **GitHub
-issue**, so it needs a GitHub account (GitHub has no anonymous-issue mechanism);
-opening it from your own account lets us follow up without any personal data in the
-file. Fully anonymous submission (a throwaway account, or a manual paste) is fine too.
+After a run, `pubrun bench` runs the structural share-safety validator
+(`benchmarks/share_safety.py`) and, on an interactive terminal, **offers to contribute** the
+redacted result to `fariello/pubrun` (press Enter to accept, or pass `--contribute` /
+`--no-contribute` to pre-decide). It uses the GitHub CLI (`gh`): it creates an unlisted Gist of
+the redacted file and opens a GitHub issue linking it, falling back to embedding the JSON inline
+when under GitHub's ~65 KB body cap, and finally to the browser Issue Form when `gh` is
+unavailable.
 
-If you decline, submit later without re-running:
+If you decline, or if a Slurm wait is interrupted, submit later without re-running:
 
 ```bash
-pubrun bench --submit-file results/<host>-<timestamp>.redacted.json
+pubrun bench --submit-file results/pubrun-bench-<hash>-<timestamp>.redacted.json
 ```
 
-This is also the HPC path: run on a compute node, then submit the redacted file from
-a login node. pubrun **never auto-transmits an un-redacted result** — the submit path
-verifies the file looks redacted and refuses otherwise. You can always submit fully
-manually instead: attach the redacted file to a new issue at
-<https://github.com/fariello/pubrun-benchmarks/issues/new>.
+Prefer to attach manually in a browser? Run `pubrun bench --prepare-submission` to copy only
+the redacted file into a clean `pubrun-share/` folder, then attach it to the Issue Form at
+<https://github.com/fariello/pubrun/issues/new?template=benchmark-result.yml>. A validate-only
+GitHub Action checks the submission as data only and posts a pass/fail receipt; maintainers
+collect accepted results locally into `benchmarks/data/` via `benchmarks/pull_submissions.py`
+(see `benchmarks/data/README.md`).
 
 **Privacy caveat (honest):** even redacted, a distinctive CPU/GPU model plus a
 named Slurm partition can be re-identifying in a small group. Share only what you
@@ -156,8 +155,10 @@ are comfortable making public.
 Advanced / manual:
 
 - `python benchmarks/harness.py --redacted-out results/shareable.redacted.json` runs the
-  harness directly and also writes a compact redacted copy (with the ~65 KB size guard).
-- Re-run `aggregate.py` over all results and, if helpful, `plot.py`.
+  harness directly and writes a compact redacted copy.
+- `python benchmarks/pull_submissions.py` (dry-run; `--apply` to store/aggregate/re-tag)
+  collects validated community submissions locally into `benchmarks/data/`.
+- Re-run `aggregate.py` over results and, if helpful, `plot.py`.
 
 ## Interpreting the numbers
 

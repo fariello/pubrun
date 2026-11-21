@@ -114,7 +114,7 @@ Contributions that preserve this scope are more likely to be accepted.
 
 ## Code of conduct
 
-Contributors are expected to adhere to the [Code of Conduct](file://~/VC/pubrun/CODE_OF_CONDUCT.md). Please report any unacceptable behavior to gfariello@uri.edu.
+Contributors are expected to adhere to the [Code of Conduct](CODE_OF_CONDUCT.md). Please report any unacceptable behavior to gfariello@uri.edu.
 
 ## Maintainer review
 

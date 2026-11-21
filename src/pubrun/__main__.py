@@ -2537,12 +2537,12 @@ def main() -> None:
         help="Run the pubrun overhead benchmark suite (auto-detects Slurm on HPC).",
         description="Friendly front-end over the benchmark harness. Runs locally by "
                     "default; on an HPC login node with Slurm it OFFERS to submit the JOB "
-                    "to a compute node (never submits without confirmation). Writes a "
-                    "redacted, shareable copy by default and prints an unmistakable safe-file "
-                    "block: which file is PRIVATE, which is SAFE, the share-check verdict, "
-                    "and where to ATTACH the safe file (a GitHub Issue Form). This client "
-                    "never transmits the result itself. Requires a source checkout (the "
-                    "benchmark tooling is not shipped in the pip package).",
+                    "to a compute node (never submits without confirmation). Writes only a "
+                    "redacted, share-safe file by default (`--unredacted` also keeps the "
+                    "identifying copy), runs a share-safety check, and offers to contribute "
+                    "the redacted result to GitHub (via `gh` gist/inline, or browser Issue "
+                    "Form fallback). Requires a source checkout (the benchmark tooling is "
+                    "not shipped in the pip package).",
         epilog=f"Examples:\n  {prog_name} bench --quick\n  {prog_name} bench --local --passes 3\n"
                f"  {prog_name} bench --prepare-submission\n"
                f"  {prog_name} bench --submit-file runs.redacted.json",

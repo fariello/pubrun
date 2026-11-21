@@ -186,26 +186,29 @@ pubrun inspect -f train.py --json       # latest run matching "train.py", as JSO
 Friendly front-end over the benchmark harness (`benchmarks/harness.py`). Runs the suite
 locally by default; on an HPC login node it detects the batch scheduler (**Slurm, PBS/Torque,
 LSF, or SGE/Grid Engine**) and **offers** to submit to a compute node (and never submits
-without confirmation). Writes a **redacted, shareable** copy of the results by default and,
-after a local run, **offers to contribute it** to the public
-[`pubrun-benchmarks`](https://github.com/fariello/pubrun-benchmarks) repo.
+without confirmation; on Slurm it can wait for completion and then contribute from the login
+node). By default it writes **only a redacted, share-safe** result file (`*.redacted.json`)
+and, on an interactive terminal, offers to contribute it to `fariello/pubrun`.
 
-**Requires a source checkout** — the benchmark tooling is intentionally not shipped in the
-pip package (zero-footprint installs). Clone the repo and run from it.
+**Requires a source checkout** (the benchmark tooling is intentionally not shipped in the
+pip package to keep installs lightweight). Clone the repo and run from it.
 
 ```bash
-pubrun bench [--quick | --full | --rigorous] [--no-baseline] [--iterations N] [--passes N] [--local | --submit] [-y|--yes] [--no-redact] [--json]
-pubrun bench --submit-file PATH [--submit-method {gh,http,print}] [--gh-repo O/N] [--gh-token TOKEN] [--print-submission]
+pubrun bench [--quick | --full | --rigorous] [--no-baseline] [--iterations N] [--passes N]
+             [--local | --submit] [--scheduler {auto,slurm,pbs,lsf,sge,local}] [-y|--yes]
+             [--unredacted] [--json] [--contribute | --no-contribute]
+             [--prepare-submission] [--wait-timeout SECONDS] [--no-submit] [--gh-repo O/N]
+pubrun bench --submit-file FILE [--contribute | --no-contribute] [--prepare-submission] [--gh-repo O/N]
 ```
 
 Every run begins with one **uncaptured baseline pass** (pubrun absent) that warms caches and
 records the cost floor, followed by N measured passes of M iterations. Three tiers:
 
-| Tier | Passes × iterations | Use |
+| Tier | Passes x iterations | Use |
 |---|---|---|
-| `--quick` | baseline + 2 × 15 | fast smoke check |
-| `--full` (default) | baseline + 3 × 30 | the standard run |
-| `--rigorous` | baseline + 5 × 50 | tight confidence intervals; can take many minutes |
+| `--quick` | baseline + 2 x 15 | fast smoke check |
+| `--full` (default) | baseline + 3 x 30 | the standard run |
+| `--rigorous` | baseline + 5 x 50 | tight confidence intervals; can take many minutes |
 
 The result JSON records `mode`, `baseline_pass`, the baseline sweep (separately, so it never
 mixes into pubrun-overhead stats), and `total_wall_time_s` (whole-invocation wall time).
@@ -217,53 +220,54 @@ mixes into pubrun-overhead stats), and `total_wall_time_s` (whole-invocation wal
 | `--quick` / `--full` / `--rigorous` | Select a tier (see table above; `--full` is the default). |
 | `--no-baseline` | Skip the initial uncaptured baseline pass (the pubrun-absent reference sweep). |
 | `--iterations N` | Override iterations per scenario (takes precedence over the tier). |
-| `--passes N` | Override the number of measured sweeps (takes precedence over the tier). |
+| `--passes N` | Override the number of measured sweeps (default depends on tier: quick=2, full=3, rigorous=5). |
 | `--local` | Run here even if an HPC scheduler is detected. |
-| `--submit` | On HPC: submit to the detected scheduler without prompting. Off HPC: contribute the result without prompting. |
+| `--submit` | Submit the benchmark job to the detected HPC scheduler without prompting (no effect off HPC; never implies GitHub contribution). |
 | `--scheduler {auto,slurm,pbs,lsf,sge,local}` | Which HPC scheduler to submit to (default `auto`). `local` forces a local run. Use to resolve the PBS-vs-SGE `qsub` ambiguity. |
-| `-y`, `--yes` | Assume "yes" to the submit/contribute prompt. |
-| `--no-redact` | Do NOT write a redacted share copy (full detail only). Also disables auto-contribution (nothing safe to send). |
-| `--json` | Emit the result/redacted file paths as JSON. |
-| `--submit-file PATH` | Submit an existing **redacted** result file, without running a benchmark (recovery / HPC / batch). |
-| `--no-submit` | Do not offer to contribute the result. |
-| `--submit-method {gh,http,print}` | Force one submission method instead of probing (default: `gh` → `http` → printed floor). |
-| `--gh-repo OWNER/NAME` | Target repo for submission (default `fariello/pubrun-benchmarks`). |
-| `--gh-token TOKEN` | Token for the HTTP submission path (else `$GITHUB_TOKEN`/`$GH_TOKEN` or `gh auth token`). |
-| `--print-submission` | Print a ready-to-paste submission instead of transmitting (offline / power user). |
+| `-y`, `--yes` | Assume "yes" to the HPC scheduler submit prompt (never implies GitHub contribution). |
+| `--unredacted` | Also write the identifying, unredacted result (`*.unredacted.json`, embeds hostname/paths; for local debugging only, do not share). By default only the redacted file is written. |
+| `--json` | Emit the redacted/unredacted result paths as JSON. |
+| `--contribute` | Publish the share-checked redacted result to GitHub after the run without prompting (uses `gh`: unlisted Gist linked from an issue, or inline if small). |
+| `--no-contribute` | Never offer or attempt GitHub publication. |
+| `--prepare-submission` | Copy only the redacted (safe) file into a clean `pubrun-share/` folder for a manual browser attachment via the Issue Form. |
+| `--submit-file FILE` | Contribute an existing **redacted** result file (share-check + publish or prepare), without running a benchmark. |
+| `--wait-timeout SECONDS` | For Slurm submit-and-wait: how long the login-node process waits for the queued job before pointing you at `--submit-file` (default ~1800s; `0` = wait forever). |
+| `--no-submit` | Skip the end-of-run contribution offer entirely. |
+| `--gh-repo OWNER/NAME` | Target GitHub repo for the contribution (default `fariello/pubrun`). |
 
 **HPC scheduler submission.** On a login node, `pubrun bench` auto-detects the batch scheduler
-(Slurm, PBS/Torque, LSF, or SGE/Grid Engine — precedence Slurm > PBS > LSF > SGE) from
+(Slurm, PBS/Torque, LSF, or SGE/Grid Engine; precedence Slurm > PBS > LSF > SGE) from
 environment variables and submit tools on `PATH` (no scheduler is queried and no network call
 is made at detection). If one is found and you are not already inside an allocation, it prints
 the exact submit command and prompts before submitting (never submits without `--submit`/`--yes`
-or an interactive "y"). Because PBS and SGE both use `qsub`, an ambiguous environment is
-reported and you resolve it with `--scheduler pbs|sge`. The per-scheduler submit scripts under
-`benchmarks/` (`submit_bench.sh`, `submit_bench_pbs.sh`, `submit_bench_lsf.sh`,
-`submit_bench_sge.sh`) submit to the default queue and let the scheduler place the job; they
-are **starting points** — adapt account/queue/walltime to your site (only the Slurm path is
-exercised in CI).
+or an interactive "y"). On Slurm, after submission, the login-node process polls for completion
+(bounded by `--wait-timeout`), then runs the share-check and contribution offer from the login
+node; if interrupted or timed out, finish later with `--submit-file`. Because PBS and SGE both
+use `qsub`, an ambiguous environment is reported and you resolve it with `--scheduler pbs|sge`.
+The per-scheduler submit scripts under `benchmarks/` (`submit_bench.sh`, `submit_bench_pbs.sh`,
+`submit_bench_lsf.sh`, `submit_bench_sge.sh`) are starting points to adapt to your site.
 
-**Contributing a result (consent-gated).** After a local run, `pubrun bench` prints where
-the redacted copy was written and asks `Contribute this redacted result…? [y/N]` — pressing
-Enter (or any non-`y`) **never transmits**. If you say yes (or pass `--submit`/`--yes`), it
-tries, in order: the GitHub CLI (`gh`, using your existing auth) → a direct GitHub Issues
-API call (needs a token) → printing a ready-to-paste submission. Every automated path files
-a **GitHub issue**, so it requires a GitHub account (GitHub has no anonymous-issue
-mechanism); fully anonymous submission means a throwaway account or a manual paste.
+**Contributing a result (consent-gated).** After a run, `pubrun bench` runs a structural
+share-safety check (`benchmarks/share_safety.py`), prints a safe-file block, and on an
+interactive terminal offers to publish the redacted result to `fariello/pubrun` (Enter accepts;
+pass `--contribute` or `--no-contribute` to pre-decide). When publishing, it uses the GitHub
+CLI (`gh`): it creates an unlisted Gist of the redacted file and opens an issue linking the raw
+URL, falling back to embedding the JSON inline when under GitHub's ~65 KB body cap, and finally
+to the browser Issue Form (`https://github.com/fariello/pubrun/issues/new?template=benchmark-result.yml`)
+when `gh` is unavailable. A validate-only GitHub Actions workflow checks the submission as data
+only and posts a pass/fail receipt; maintainers collect accepted results locally via
+`benchmarks/pull_submissions.py` into `benchmarks/data/`.
 
-**"Oh, I meant yes."** The redacted file persists on disk, so if you decline you can submit
+**"Submit later" / HPC recovery.** Because the redacted file persists on disk, you can submit
 it later without re-running:
 
 ```bash
-pubrun bench --submit-file benchmarks/results/<host>-<ts>.redacted.json
+pubrun bench --submit-file benchmarks/results/pubrun-bench-<hash>-<ts>.redacted.json
 ```
 
-This is also the **HPC path**: run the benchmark on a compute node (often no network / no
-`gh`), then submit the redacted file later from a login node.
-
-**Safety.** pubrun **never auto-transmits an un-redacted result** to the public repo — the
-`--submit-file` path verifies the file looks redacted (no hostname/username/home-path leak)
-and refuses otherwise. The redacted copy masks hostname, OS username, and every
+**Safety.** pubrun never auto-transmits an unredacted result: by default only `*.redacted.json`
+is written, and the contribution path re-runs `share_safety` immediately before sending and
+refuses any file that fails. The redacted copy masks hostname, OS username, and every
 home-directory path while preserving analysis-relevant data (CPU/GPU model, timings,
 versions, filesystem type, Slurm partition). Even redacted, a distinctive CPU/GPU model plus
 a named Slurm partition can be re-identifying in a small group. See
@@ -271,10 +275,10 @@ a named Slurm partition can be re-identifying in a small group. See
 
 **Example:**
 ```bash
-pubrun bench --quick --local                          # quick local run, then offers to contribute
-pubrun bench --submit                                 # HPC: submit to Slurm; laptop: contribute (no prompt)
-pubrun bench --submit-file res.redacted.json          # submit a previously-produced redacted file
-pubrun bench --submit-file res.redacted.json --print-submission  # just print a copy-paste version
+pubrun bench --quick --local                           # quick local run, then offers to contribute
+pubrun bench --quick --contribute                      # run and publish via gh without prompting
+pubrun bench --prepare-submission                      # stage redacted file in pubrun-share/ for browser attach
+pubrun bench --submit-file res.redacted.json           # contribute a previously produced redacted file
 ```
 
 ---
