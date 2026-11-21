@@ -1,5 +1,7 @@
 # Implementation Plan: Minimal Research Workflow Example
 
+- Status: executed
+
 This plan details the addition of a complete, self-contained example workflow that models a real-world research analysis using `pubrun`, along with an automated pytest smoke test in the test suite to ensure the example continues to run and produce all expected artifacts.
 
 All changes will be implemented **locally** first. No commits will be pushed to the remote repository.

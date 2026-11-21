@@ -1,3 +1,9 @@
+---
+status: reference
+kind: research-report
+outcome: adopted
+---
+
 # pubrun benchmark intake: options and recommendation
 
 **Research date:** 2026-07-20

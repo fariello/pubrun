@@ -1,5 +1,7 @@
 # Depth-Aware List Diff Formatting
 
+- Status: executed
+
 This plan details the design and implementation changes to customize the formatting of simple array/list diffs (like `python.sys_path`) under different depth levels.
 
 ## User Review Required

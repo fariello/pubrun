@@ -1,5 +1,7 @@
 # Implementation Plan - Standardized CLI Error/Warning Prefixes, rerun Reconstruction, Not-Filters & Smarter Diffing
 
+- Status: executed
+
 This plan details the design and implementation changes to standardize error/warning prefixes in pubrun CLI, enable command reconstruction on rerun for active runs, add not-filtering capabilities to CLI filters, and enhance the semantic diff engine to natively compare lists, identify order changes, flatten complex list-of-dicts nested elements (like `pubrun_imports.requests`), and support wildcard key ignores.
 
 ## Proposed Changes

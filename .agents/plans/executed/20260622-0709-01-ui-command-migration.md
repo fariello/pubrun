@@ -1,5 +1,7 @@
 # Implementation Plan: UI Command Migration and Aliasing
 
+- Status: executed
+
 This plan details the changes to migrate the primary terminal user interface (TUI) command from `tui` to `ui`, while maintaining backward-compatible aliases for both `tui` and `gui` in `pubrun`.
 
 All changes will be implemented **locally** first. No commits will be pushed to the remote repository.

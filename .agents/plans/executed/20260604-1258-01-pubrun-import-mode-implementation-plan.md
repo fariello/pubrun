@@ -1,5 +1,7 @@
 # pubrun Import-Mode Configuration Implementation Plan
 
+- Status: executed
+
 ## Purpose
 
 This implementation plan describes how to make pubrun import-time behavior stupid simple for casual users, while giving advanced users precise control over auto-start, global hooks, conflict handling, and diagnostics.

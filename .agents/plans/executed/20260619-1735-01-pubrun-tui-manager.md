@@ -1,5 +1,7 @@
 # Implementation Plan: Comprehensive pubrun TUI Manager
 
+- Status: executed
+
 This document outlines the detailed implementation plan for building a terminal user interface (TUI) for `pubrun`, drawing structural and aesthetic inspiration from the `ocman_tui` controller.
 
 ---

@@ -1,5 +1,7 @@
 # Implementation Plan: Documentation Readiness and API/CLI Audit
 
+- Status: executed
+
 This plan details the updates to finalize and complete the `pubrun` documentation directory (`docs/`) for public adoption. It audits missing public APIs and CLI commands, adds the research usage page, and ensures consistent version/dependency statements across all project metadata files.
 
 All changes will be implemented **locally** first. No commits will be pushed to the remote repository.

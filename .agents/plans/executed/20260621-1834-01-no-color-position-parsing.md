@@ -1,5 +1,7 @@
 # Implementation Plan - Support --no-color Flag globally in Any Position & Subcommand-Aware Errors
 
+- Status: executed
+
 This plan details the design and implementation changes to fix the CLI parsing error when `--no-color` is passed after subcommands (e.g., `pubrun report <run_id> --no-color`), and to show subcommand-specific usage on parsing failures.
 
 ## Proposed Changes

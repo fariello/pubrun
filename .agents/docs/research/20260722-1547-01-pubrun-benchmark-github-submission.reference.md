@@ -1,3 +1,9 @@
+---
+status: reference
+kind: reference-research
+outcome: adopted
+---
+
 # Reference: Implementing GitHub Benchmark Submission in `pubrun bench`
 
 **Target repository:** [`fariello/pubrun`](https://github.com/fariello/pubrun/)

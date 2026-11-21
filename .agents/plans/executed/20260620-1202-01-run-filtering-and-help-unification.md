@@ -1,5 +1,7 @@
 # Implementation Plan - Run Filtering, Help Unification, and Active Run Usability
 
+- Status: executed
+
 This plan details the design and implementation changes to:
 1. Standardize runs filtering across all commands that operate on run listings or auto-select run files: `status`, `clean`, `report`, `combined`, `methods`, and `rerun`.
 2. Implement a reusable `filter_runs` function in `src/pubrun/status.py`.

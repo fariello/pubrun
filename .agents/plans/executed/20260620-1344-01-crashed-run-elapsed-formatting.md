@@ -1,5 +1,7 @@
 # Implementation Plan - Elapsed Timing Formatting and Crashed Run Timing Fallback
 
+- Status: executed
+
 This plan details the design and implementation changes to:
 1. **Timing fallback for crashed runs**: Update `close_out_crashed_run` in `src/pubrun/status.py` to set `ended_at_utc` and `elapsed_seconds` to `None` in fallback manifests (since the exact crash timing is unknown), and make the fallback manifest fully JSON schema compliant.
 2. **Elapsed time formatting**: Update `_format_elapsed` in `src/pubrun/status.py` to format elapsed times as `HH:MM:SS` (or `Xd HH:MM:SS` if $\ge$ 24h) and return `"unknown"` if the elapsed time is `None`.

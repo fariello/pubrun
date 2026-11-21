@@ -1,5 +1,7 @@
 # Task prompt for Google Antigravity Gemini 3.5 Flash
 
+- Status: executed
+
 ## Goal
 
 Add a minimal research workflow example to the `pubrun` repository.

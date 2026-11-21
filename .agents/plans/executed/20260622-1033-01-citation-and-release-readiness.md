@@ -1,5 +1,7 @@
 # Implementation Plan: Citation and Release Readiness
 
+- Status: executed
+
 This plan details the updates to establish citation metadata and prepare `pubrun` for the version `1.2.0` release and Zenodo archiving.
 
 All changes will be implemented **locally** first. No commits or tags will be pushed to the remote repository.

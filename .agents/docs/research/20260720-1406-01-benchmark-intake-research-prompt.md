@@ -1,3 +1,9 @@
+---
+status: reference
+kind: research-prompt
+outcome: adopted
+---
+
 # Research request: better ways to gather and receive community benchmark results for an open-source Python library
 
 You are GPT-5.6 acting as a research analyst with web search. Investigate the question below, then return your findings as a downloadable Markdown (`.md`) file so it can be handed back to the engineering team. Prefer current, citable sources (link them); flag anything that is your own reasoning versus a sourced fact. No em dashes or en dashes in your prose.

@@ -1,5 +1,7 @@
 # Implementation Plan: Colorize PBR Report & Add Resource Monitoring Chart
 
+- Status: executed
+
 This plan outlines the changes to colorize the diagnostic report, respect the `--no-color` option, add standalone `cpu` and `mem` subcommands to display CPU and memory graphs over the life of a run, and rename the `report` subcommand to `show` with optional section filtering (`show [run_dir] [section]`). The `report` subcommand is kept as a hidden, undocumented alias of `show` for full backward compatibility.
 
 ## Proposed Changes

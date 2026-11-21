@@ -1,5 +1,7 @@
 # Implementation Plan - Explicit Telemetry and Provenance API Evolution
 
+- Status: executed
+
 This document details the architectural design, engineering constraints, and implementation phases to transition `pubrun` from a purely passive execution monitoring tool to a robust developer-centric API for explicit tracking, scientific dataset provenance, and non-intrusive environment auditing.
 
 ---

@@ -1,5 +1,7 @@
 # Implementation Plan: Outstanding TODO.md Items
 
+- Status: executed
+
 This plan details the implementation of the outstanding issues and test coverage gaps remaining in `TODO.md`.
 
 ## 1. Proposed Changes
