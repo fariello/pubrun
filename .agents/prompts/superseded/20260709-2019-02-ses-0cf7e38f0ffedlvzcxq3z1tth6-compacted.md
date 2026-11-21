@@ -1,3 +1,5 @@
+RETIRED 2026-11-21: session recovery complete; queued show-config IPD was executed in .agents/plans/executed/20260709-2019-01-show-config-family.md and Zenodo concept DOI 10.5281/zenodo.20801582 was wired in commit 79ce0da.
+
 # Restart Context for opencode
 
 ## 1. Recovery Purpose
