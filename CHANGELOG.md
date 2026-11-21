@@ -92,6 +92,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **Citation metadata and repository hygiene correction.** Cleaned up residual placeholder DOI
+  tokens and venue-specific phrasing in historical plan records. Earlier releases had shipped
+  erroneous, unauthorized citation metadata introduced by an automated tooling error (the software
+  itself was unaffected); live citation surfaces (`pubrun cite`, `CITATION.cff`, `README.md`) emit
+  an honest software citation with no paper claim.
 - **Startup manifest no longer emits an empty `console` section.** The manifest written at startup
   previously left `console` as `{}` (no `capture_mode`), which a consumer reading a run before it
   finished could not distinguish from a real `"off"` result, and which caused an intermittent

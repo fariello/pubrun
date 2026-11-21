@@ -22,7 +22,7 @@ All changes will be implemented **locally** first. No commits will be pushed to 
 
 ### A. Remove Publication Placeholders in Codebase
 
-We will update the citation command output and report templates to reference the GitHub repository instead of the journal.
+We will update the citation command output and report templates to reference the GitHub repository instead of the journal. (Historical note: the `Example Journal` / `example.1234/example.08024` entries shown as *Current* below are neutralized representations of a fabricated placeholder citation introduced by an automated agent and never authorized; no such paper or DOI exists.)
 
 #### [MODIFY] [src/pubrun/__main__.py](file://~/VC/pubrun/src/pubrun/__main__.py)
 Update `_run_cite(style: str)`:

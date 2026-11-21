@@ -13,13 +13,13 @@ All changes will be implemented **locally** first. No commits or tags will be pu
 #### [MODIFY] [CITATION.cff](file://~/VC/pubrun/CITATION.cff)
 - Update `version` to `1.2.0`.
 - Update `date-released` to `2026-06-22`.
-- Add `identifiers` block to specify the Zenodo DOIs:
-  - Concept DOI: `10.5281/zenodo.1234567` (all versions)
-  - Version DOI: `10.5281/zenodo.1234568` (this version)
-- Add `preferred-citation` block specifying the accepted example paper metadata:
+- Add `identifiers` block to specify the Zenodo DOIs (historical note: the numeric placeholder DOIs below were fabricated by an automated agent, never authorized, and never real citations; replaced here with inert tokens):
+  - Concept DOI: `10.5281/zenodo.EXAMPLE_CONCEPT` (FABRICATED PLACEHOLDER; never a real citation)
+  - Version DOI: `10.5281/zenodo.EXAMPLE_VERSION` (FABRICATED PLACEHOLDER; never a real citation)
+- Add `preferred-citation` block specifying the accepted example paper metadata (historical note: never landed; no such paper or DOI exists):
   - Title: `pubrun: Low-friction execution provenance for Python research`
   - Journal: `Example Journal`
-  - DOI: `example.1234/example.08024`
+  - DOI: `example.1234/example.08024` (FABRICATED PLACEHOLDER; introduced by an automated agent, never authorized; never a real citation)
   - Volume: `11`, Issue: `121`, Pages: `8024`, Year: `2026`
 
 #### [MODIFY] [README.md](file://~/VC/pubrun/README.md)
