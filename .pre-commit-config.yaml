@@ -5,7 +5,9 @@ repos:
       - id: check-added-large-files
         args: ['--maxkb=500']
       - id: end-of-file-fixer
+        exclude: ^benchmarks/data/accepted/
       - id: trailing-whitespace
+        exclude: ^benchmarks/data/accepted/
       - id: check-yaml
       - id: check-toml
 
