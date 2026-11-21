@@ -847,12 +847,9 @@ def _run_cite(style: str) -> None:
     ver_bib = f",\n  version   = {{{_ver}}}" if _ver else ""
     url = "https://github.com/fariello/pubrun"
     title = "pubrun: Low-friction execution provenance for Python research"
-    # Zenodo concept DOI (all versions). PLACEHOLDER until the repo is enabled in
-    # Zenodo and the first GitHub release mints a real DOI. Keep this in sync with
-    # CITATION.cff / README (a consistency test guards drift). Replace
-    # "10.5281/zenodo.PENDING" with the real concept DOI in Phase 2; see
-    # .agents/plans/pending/20260706-citation-doi-and-enforceable-attribution.md.
-    doi = "10.5281/zenodo.PENDING"
+    # Zenodo concept DOI (all versions; always resolves to the latest archived release).
+    # Keep this in sync with CITATION.cff / README / docs (a consistency test guards drift).
+    doi = "10.5281/zenodo.20801582"
     doi_url = f"https://doi.org/{doi}"
     if style == "apa":
         print(f"Fariello, G. (2026). {title}{ver_apa} [Computer software]. {url}. {doi_url}")

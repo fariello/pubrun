@@ -15,15 +15,11 @@ url: "https://github.com/fariello/pubrun"
 license: Apache-2.0
 version: "1.3.1"
 date-released: "2026-07-05"
-# Zenodo concept DOI (all versions). PLACEHOLDER until the repo is enabled in
-# Zenodo and the first GitHub release mints a real DOI (see
-# .agents/plans/pending/20260706-citation-doi-and-enforceable-attribution.md,
-# Phase 2). Replace "10.5281/zenodo.PENDING" with the real concept DOI and drop
-# this comment. Do NOT ship "PENDING" in a tagged release.
+# Zenodo concept DOI (all versions; always resolves to the latest archived release).
 identifiers:
   - type: doi
-    value: "10.5281/zenodo.PENDING"
-    description: "Concept DOI (all versions) — placeholder pending Zenodo mint."
+    value: "10.5281/zenodo.20801582"
+    description: "Concept DOI (all versions, resolves to the latest archived release on Zenodo)."
 # NOTE: no `preferred-citation` block by design — pubrun has no peer-reviewed
 # paper yet, and we do not cite/insinuate one that does not exist. If a
 # peer-reviewed paper is accepted, add a `preferred-citation` block here with the real

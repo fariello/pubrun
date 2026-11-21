@@ -51,10 +51,7 @@ citation are the `pubrun cite` command (`pubrun cite --style apa|mla|chicago|bib
 GitHub's "Cite this repository" button (backed by `CITATION.cff`), or the archived DOI on
 Zenodo. A suggested citation:
 
-> Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research [Computer software]. https://github.com/fariello/pubrun. https://doi.org/10.5281/zenodo.PENDING
-
-<!-- DOI is a PLACEHOLDER until Zenodo mints the real concept DOI; see
-.agents/plans/pending/20260706-citation-doi-and-enforceable-attribution.md (Phase 2). -->
+> Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research [Computer software]. https://github.com/fariello/pubrun. https://doi.org/10.5281/zenodo.20801582
 
 **What is required vs. requested.** Under the Apache License 2.0 (§4(d)), any
 *redistribution or derivative work* of the `pubrun` **software** must retain the `NOTICE`

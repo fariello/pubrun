@@ -65,6 +65,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pass/fail receipt. Archival/aggregation is a later, separately gated phase.
 
 ### Changed
+- **Zenodo concept DOI live across citation surfaces.** Replaced the `10.5281/zenodo.PENDING`
+  placeholder with the archived Zenodo concept DOI (`10.5281/zenodo.20801582`) across
+  `CITATION.cff`, `pubrun cite` (all styles), `README.md` (with a Zenodo DOI badge),
+  `docs/research-use.md`, and `docs/cli.md`, and tightened the citation consistency test to
+  reject `PENDING` placeholders.
 - **`pubrun bench` writes only a redacted result by default (behavior change).** Previously every run
   wrote both a full `*.unredacted.json` (embedding hostname/paths) and a redacted `*.redacted.json`.
   Now only the redacted, share-safe file is written by default; pass `--unredacted` to also write the

@@ -494,20 +494,16 @@ Recently shipped (see the [Changelog](https://github.com/fariello/pubrun/blob/ma
 
 ## Citation
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20801582.svg)](https://doi.org/10.5281/zenodo.20801582)
+
 If you use `pubrun` in your research, please cite it. Because no peer-reviewed
 publication exists yet, cite the software itself (see `pubrun cite`, the `CITATION.cff`
 file, or GitHub's "Cite this repository" button):
 
-> Fariello, Gabriele. (2026). *pubrun* [Computer software]. https://github.com/fariello/pubrun. https://doi.org/10.5281/zenodo.PENDING
-
-<!-- The DOI above is a PLACEHOLDER ("zenodo.PENDING") until the repository is enabled in
-Zenodo and the first GitHub release mints a real concept DOI. See
-.agents/plans/pending/20260706-citation-doi-and-enforceable-attribution.md (Phase 2):
-replace "10.5281/zenodo.PENDING" here, in CITATION.cff, and in `pubrun cite` with the real
-concept DOI, then add a "Cite this DOI" Zenodo badge. -->
+> Fariello, Gabriele. (2026). *pubrun* [Computer software]. https://github.com/fariello/pubrun. https://doi.org/10.5281/zenodo.20801582
 
 The DOI is archived via [Zenodo](https://zenodo.org/); citing the **concept DOI**
-(`10.5281/zenodo.PENDING`, above) always resolves to the latest archived version. This
+(`10.5281/zenodo.20801582`, above) always resolves to the latest archived version. This
 citation will be updated to a peer-reviewed reference only *if and when* a journal article
 is actually accepted; pubrun does not yet have one, and this section will not
 imply otherwise. See the consolidated **License, Attribution & Citation** section below for

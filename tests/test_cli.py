@@ -251,9 +251,12 @@ class TestCitationConsistency:
         f = self._cff_fields()
         cff_doi = f["value"]  # the identifiers: - type: doi / value: line
         assert "zenodo" in cff_doi
-        # README carries the same DOI string.
+        assert "PENDING" not in cff_doi
+        # README and research-use docs carry the same DOI string.
         readme = (self._repo_root() / "README.md").read_text(encoding="utf-8")
         assert cff_doi in readme
+        research_use = (self._repo_root() / "docs" / "research-use.md").read_text(encoding="utf-8")
+        assert cff_doi in research_use
         # pubrun cite emits the same DOI in every style.
         for style in ("apa", "mla", "chicago", "bibtex"):
             out = run_pubrun("cite", "--style", style).stdout
