@@ -46,7 +46,7 @@ BUG-02 confirmed by manual trace:
   This computes `(user_delta_process) + (children_delta)` which is correct.
   Wait — re-reading: `user_delta = (current_times.user - self._last_times.user) + getattr(current_times, "children_user", 0) - getattr(self._last_times, "children_user", 0)`
   This IS `(cur.user - prev.user) + (cur.children_user - prev.children_user)` = correct delta.
-  
+
   **Correction**: On re-analysis, BUG-02 formula is actually correct — it computes
   `(cur.user - prev.user) + (cur.children_user - prev.children_user)` which is the
   right delta. Downgrading severity to Low and noting the formula is correct but
