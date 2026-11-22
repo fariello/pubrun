@@ -6,7 +6,9 @@
 - Scope: Define the run timing interval model; update `schemas/manifest.schema.json` additively; update `Run` (`src/pubrun/tracker.py`) and `ArtifactWriter` (`src/pubrun/writer.py`); add deterministic timing and schema conformance tests.
 - Scope-Paths: schemas/manifest.schema.json, src/pubrun/tracker.py, src/pubrun/writer.py, tests/test_timing_accuracy.py, tests/test_manifest_schema.py
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: complex
 - Short-Description: Add monotonic interval schema fields and separate startup, workload, and finalization timing in Run and ArtifactWriter
 - Work-Kind: bug
 - Priority: high
@@ -22,6 +24,7 @@
 
 ## Workflow history
 
+- 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-22 draft (agent): created.
 - 2026-11-22 to-review (agent): authored review-ready child plan from backlog item `6hp1zu`.
 
@@ -45,8 +48,8 @@ flowchart TD
     F -->|Yes| H["t2: _finalize_state entry under _run_lock (ended_at_utc, _workload_end_mono, workload_seconds)"]
     H --> I["Wait for _hardware_future_done (hardware_wait_seconds) and shut down engines"]
     I --> J["ArtifactWriter writes config.resolved.json"]
-    J --> K["t3: _mark_finalization_end (finalized_at_utc, finalization_overhead_seconds, session_seconds)"]
-    K --> L["Serialize and atomically write manifest.json, then write methods; record in-memory writer_overhead_seconds"]
+    J --> K["t3: Run._mark_finalization_end() (finalized_at_utc, finalization_overhead_seconds, session_seconds)"]
+    K --> L["Run.to_manifest_dict() freezes finalized timing; atomically write manifest.json, then methods; record in-memory writer_overhead_seconds"]
 ```
 
 ```mermaid
@@ -75,35 +78,36 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - [ ] E-03 Update `src/pubrun/writer.py` (`ArtifactWriter.write_artifacts`) to write `config.resolved.json` before `manifest.json`, stamp `t3` before `to_manifest_dict()`, and record post-manifest writer duration in memory.
   - Depends on: E-02
-  - Expected outcome: `ArtifactWriter.write_artifacts()` calls `self.run._finalize_state()`, writes `config.resolved.json` atomically, calls `self.run._mark_finalization_end()` right before `self.run.to_manifest_dict()`, writes `manifest.json` once atomically, writes `methods.{md,tex}`, and records total writer duration on `self.run.writer_overhead_seconds` in memory without performing a second `manifest.json` write.
+  - Expected outcome: `src/pubrun/writer.py` imports `time`, and `ArtifactWriter.write_artifacts()` guards against re-writing a finalized run (`_artifacts_written`), calls `self.run._finalize_state()`, writes `config.resolved.json` atomically, calls `self.run._mark_finalization_end()` when present (`hasattr` guard preserving duck-typed test doubles such as `tests/test_writer.py::DummyRun`) right before `self.run.to_manifest_dict()`, writes `manifest.json` once atomically, writes `methods.{md,tex}`, and records total writer duration on `self.run.writer_overhead_seconds` in memory without performing a second `manifest.json` write.
   - Execution state: pending
 
 ### Task group 2: Deterministic behavioral and schema verification
 
 - [ ] E-04 Create `tests/test_timing_accuracy.py` with deterministic behavioral tests using controlled fake wall and monotonic clocks.
   - Depends on: E-03
-  - Expected outcome: Tests exercise forward and backward wall-clock jumps, deterministic hardware-worker delay, deterministic writer delay, short runs, automatic `atexit` finalization, explicit `stop()`, nested reference-counted `start()`/`stop()`, `tracked_run` and `audit_run` normal and exception paths, `KeyboardInterrupt`/signal interruption, partial startup/ghost mode, and verification that no raw monotonic counter values appear in `manifest.json`, without depending on real-time sleeps.
+  - Expected outcome: Tests exercise forward and backward wall-clock jumps, deterministic hardware-worker delay, deterministic writer delay, short runs, automatic `atexit` finalization, explicit `stop()`, nested reference-counted `start()`/`stop()`, `tracked_run` and `audit_run` normal and exception paths, `KeyboardInterrupt`/signal interruption, partial startup/ghost mode, double-`stop()` idempotency, and verification that no raw monotonic counter values appear in `manifest.json`, without depending on real-time sleeps.
   - Execution state: pending
 
-- [ ] E-05 Extend `tests/test_manifest_schema.py` with conformance tests for new timing-rich manifests, legacy v1.0 manifests (without new timing fields), and startup/partial manifests, then run the targeted test suite.
+- [ ] E-05 Extend `tests/test_manifest_schema.py` with conformance tests for new timing-rich manifests, legacy v1.0 manifests (without new timing fields), startup manifests, and ghost-run `timing` subschema validation, then run the targeted test suite.
   - Depends on: E-04
-  - Expected outcome: `pytest tests/test_timing_accuracy.py tests/test_manifest_schema.py tests/test_tracker.py tests/test_writer.py -v` exits 0 with all tests passing.
+  - Expected outcome: `pytest tests/test_timing_accuracy.py tests/test_manifest_schema.py tests/test_tracker.py tests/test_writer.py -v`, `pytest tests/test_quality.py -k TestDoubleStop -v`, and `pytest tests/test_api.py -k test_timing_values_are_floats -v` exit 0 with all tests passing.
   - Execution state: pending
 
 ## Project conventions discovered (Step 0)
 
-- `src/pubrun/tracker.py` (`Run.__init__`, `Run._finalize_state`, `Run.to_manifest_dict`) uses `time.time()` for `started_at_utc` and `ended_at_utc`, sets `ended_at_utc` after `self._hardware_future_done.wait(timeout=2.0)`, and computes `elapsed = self.ended_at_utc - self.started_at_utc`.
-- `src/pubrun/tracker.py` protects `_finalized` latching and the background hardware thread startup re-write with `pubrun._run_lock` to prevent a Time-Of-Check to Time-Of-Use (TOCTOU) race where the background thread overwrites a finalized manifest.
-- `src/pubrun/writer.py` (`ArtifactWriter.write_artifacts`) currently writes `manifest.json`, then `config.resolved.json`, then `methods.{md,tex}`, using `_atomic_json_write` (temp file + `fsync` + `os.replace`) and catching all exceptions so `pubrun` never crashes the host script.
-- `schemas/manifest.schema.json` enforces `"additionalProperties": false` on `$defs.timing` and `$defs.subprocess_record`, and `tests/test_manifest_schema.py` (`test_full_manifest_conforms_to_schema`, `test_startup_manifest_conforms_to_schema`) acts as a hard schema gate.
+- `src/pubrun/tracker.py::Run.__init__`, `Run._finalize_state`, and `Run.to_manifest_dict` use `time.time()` for `started_at_utc` and `ended_at_utc`, set `ended_at_utc` after `self._hardware_future_done.wait(timeout=2.0)`, and compute `elapsed = self.ended_at_utc - self.started_at_utc`.
+- `src/pubrun/tracker.py::Run._bootstrap_engines` and `Run._finalize_state` protect `_finalized` latching and the background hardware thread startup re-write with `pubrun._run_lock` to prevent a Time-Of-Check to Time-Of-Use (TOCTOU) race where the background thread overwrites a finalized manifest.
+- `src/pubrun/writer.py::ArtifactWriter.write_artifacts` currently does not import `time`, writes `manifest.json`, then `config.resolved.json`, then `methods.{md,tex}` using `src/pubrun/writer.py::_atomic_json_write` (temp file + `fsync` + `os.replace`), and catches all exceptions so `pubrun` never crashes the host script; `tests/test_writer.py::DummyRun` provides only `run_dir`, `config`, `_finalized`, `_finalize_state()`, and `to_manifest_dict()`.
+- `schemas/manifest.schema.json` enforces `"additionalProperties": false` on `$defs.timing` and `$defs.subprocess_record` (and uses `"anyOf": [{"$ref": "#/$defs/utc_datetime"}, {"type": "null"}]` for nullable timestamps), and `tests/test_manifest_schema.py` (`test_full_manifest_conforms_to_schema`, `test_startup_manifest_conforms_to_schema`, `_config_subschema`) acts as a hard schema gate.
+- `src/pubrun/tracker.py::Run.__init__` ghost-mode early returns leave unrelated section dicts (`invocation_data`, `git_data`, `host_data`, etc.) as `{}` and `self.writer = None`, so ghost-run schema validation must check the `$defs.timing` subschema rather than whole-manifest validation.
 - `pyproject.toml` supports Python `>=3.8` through `3.14` with standard-library runtime only (except `tomli` on Python `<3.11`).
 - Tests must assert on observable behavior, outputs, exit codes, and side effects rather than inspecting production source code.
 
 ## Findings
 
-- **F-01 (Wall-clock distortion):** `Run.to_manifest_dict` derives `elapsed_seconds` by subtracting `self.started_at_utc` from `self.ended_at_utc`. A Network Time Protocol (NTP) adjustment or manual clock step shifts `elapsed_seconds` and can produce a negative number that violates `schemas/manifest.schema.json` (`minimum: 0`).
-- **F-02 (Teardown inflation):** `Run._finalize_state` waits up to `2.0` seconds on `self._hardware_future_done.wait(timeout=2.0)` before setting `self.ended_at_utc`. A short script therefore reports up to 2 seconds of hardware-detection wait inside its run duration.
-- **F-03 (Startup capture mixed into run duration):** `Run.__init__` sets `self.started_at_utc` before `mkdir()`, `_bootstrap_engines()`, and `write_startup_manifest()`, mixing synchronous startup capture cost with user workload time.
+- **F-01 (Wall-clock distortion):** `src/pubrun/tracker.py::Run.to_manifest_dict` derives `elapsed_seconds` by subtracting `self.started_at_utc` from `self.ended_at_utc`. A Network Time Protocol (NTP) adjustment or manual clock step shifts `elapsed_seconds` and can produce a negative number that violates `schemas/manifest.schema.json` (`minimum: 0`).
+- **F-02 (Teardown inflation):** `src/pubrun/tracker.py::Run._finalize_state` waits up to `2.0` seconds on `self._hardware_future_done.wait(timeout=2.0)` before setting `self.ended_at_utc`. A short script therefore reports up to 2 seconds of hardware-detection wait inside its run duration.
+- **F-03 (Startup capture mixed into run duration):** `src/pubrun/tracker.py::Run.__init__` sets `self.started_at_utc` before `mkdir()`, `_bootstrap_engines()`, and `write_startup_manifest()`, mixing synchronous startup capture cost with user workload time.
 - **F-04 (Unlabeled interval semantics):** `timing` does not state which clock produced `elapsed_seconds`, what interval `elapsed_seconds` spans, or that a late import observes only the tracked interval rather than full process lifetime.
 
 ## Proposed changes (ordered, validatable)
@@ -117,7 +121,7 @@ Every `Run` records four ordered monotonic anchor points in memory using `time.p
 | `t0` | Entry to `Run.__init__` before directory creation and engine bootstrap | `started_at_utc` | `_start_mono` |
 | `t1` | End of `Run.__init__` immediately after `write_startup_manifest()` returns | `workload_started_at_utc` | `_workload_start_mono` |
 | `t2` | Entry to `Run._finalize_state()` under `_run_lock` when `_finalized` transitions `False -> True`, before `_hardware_future_done.wait(timeout=2.0)` | `ended_at_utc` | `_workload_end_mono` |
-| `t3` | End of pre-manifest finalization (`Run._mark_finalization_end()`), after `_finalize_state()` teardown and `config.resolved.json` write, immediately before `to_manifest_dict()` | `finalized_at_utc` | `_finalize_end_mono` |
+| `t3` | End of pre-manifest finalization (`Run._mark_finalization_end()`), refreshed after `_finalize_state()` teardown and `config.resolved.json` write, immediately before `to_manifest_dict()` freezes finalized timing | `finalized_at_utc` | `_finalize_end_mono` |
 
 Intervals derived from these anchors (all clamped with `max(0.0, ...)` and `None` when an endpoint was not reached):
 
@@ -130,17 +134,17 @@ Intervals derived from these anchors (all clamped with `max(0.0, ...)` and `None
   - `background_hardware_seconds`: monotonic duration of the background `pubrun-hw` daemon thread from thread entry to `_hardware_future_done.set()` (or `None` if hardware capture did not finish before `t3` or did not run). Overlaps concurrently with `workload_seconds` and potentially with `finalization_overhead_seconds`.
   - `hardware_wait_seconds`: monotonic time `_finalize_state()` spent blocked in `_hardware_future_done.wait(timeout=2.0)`. This is a sub-interval of `finalization_overhead_seconds`.
 - **Compatibility and self-describing metadata:**
-  - `elapsed_seconds`: equals `workload_seconds` when `t1` and `t2` exist; `None` while still running or on ghost/partial startup where `t1` or `t2` was not reached.
-  - `duration_clock`: `"monotonic"` for tracker-measured runs (`"wall_clock_estimated"` reserved for crashed closeout in child `vrr1fv`).
-  - `elapsed_basis`: `"workload"` for tracker-measured runs (`"crashed_estimate"` reserved for crashed closeout; absence of `elapsed_basis` identifies legacy wall-clock manifests).
+  - `elapsed_seconds`: equals `workload_seconds` when `t1` and `t2` exist; `None` while still running (including startup and async hardware-thread startup snapshots) or on ghost/partial startup where `t1` or `t2` was not reached.
+  - `duration_clock`: `"monotonic"` for tracker-measured runs (both startup and finalized; `None` on ghost startup where no duration was measured; `"wall_clock_estimated"` reserved for crashed closeout in child `vrr1fv`).
+  - `elapsed_basis`: `"workload"` for tracker-measured runs (`None` on ghost startup where `t1` was not reached; `"crashed_estimate"` reserved for crashed closeout; absence of `elapsed_basis` identifies legacy wall-clock manifests).
   - `interval_scope`: `"tracked_interval"`.
-  - `capture_state`: `{"status": "complete"}` on finalized runs with valid `t0..t3`; `{"status": "partial"}` on startup snapshots (before finalization) and on ghost/partial startup where initialization aborted before `t1`.
+  - `capture_state`: `{"status": "complete"}` on finalized runs with valid `t0..t3`; `{"status": "partial"}` on startup snapshots (both initial write before `t1` and async hardware-thread re-write before `t2`); and `{"status": "partial", "detail": "ghost mode: startup did not complete"}` on ghost/partial startup where initialization aborted before `t1`.
 
 ### 2. Schema updates (`schemas/manifest.schema.json`)
 
 - Under `$defs.timing.properties`, add optional properties:
-  - `workload_started_at_utc` (`utc_datetime | null`)
-  - `finalized_at_utc` (`utc_datetime | null`)
+  - `workload_started_at_utc` (`{"anyOf": [{"$ref": "#/$defs/utc_datetime"}, {"type": "null"}]}`)
+  - `finalized_at_utc` (`{"anyOf": [{"$ref": "#/$defs/utc_datetime"}, {"type": "null"}]}`)
   - `workload_seconds` (`number | null`, `minimum: 0`)
   - `startup_overhead_seconds` (`number | null`, `minimum: 0`)
   - `finalization_overhead_seconds` (`number | null`, `minimum: 0`)
@@ -161,47 +165,53 @@ Intervals derived from these anchors (all clamped with `max(0.0, ...)` and `None
 
 - In `Run.__init__`:
   - Capture `self.started_at_utc = time.time()` and `self._start_mono = time.perf_counter()` at `t0`.
-  - Initialize `self.workload_started_at_utc = None`, `self._workload_start_mono = None`, `self.ended_at_utc = None`, `self._workload_end_mono = None`, `self.finalized_at_utc = None`, `self._finalize_end_mono = None`, `self._hardware_wait_seconds = None`, `self._background_hardware_seconds = None`, `self.writer_overhead_seconds = None`.
-  - In ghost-mode early returns (unwritable `run_dir` or `_bootstrap_engines()` exception), leave `_workload_start_mono = None` and `_workload_end_mono = None`, and emit `capture_state = {"status": "partial", "detail": "ghost mode: startup did not complete"}` in `timing`.
-  - After `self.writer.write_startup_manifest()`, record `t1`: `self._workload_start_mono = time.perf_counter()` and `self.workload_started_at_utc = time.time()`. Note: because the initial startup manifest is written before `t1`, the startup manifest cleanly reports `workload_started_at_utc: None`, `elapsed_seconds: None`, `capture_state: {"status": "partial"}` until finalization.
+  - Initialize `self.workload_started_at_utc = None`, `self._workload_start_mono = None`, `self.ended_at_utc = None`, `self._workload_end_mono = None`, `self.finalized_at_utc = None`, `self._finalize_end_mono = None`, `self._hardware_wait_seconds = None`, `self._background_hardware_seconds = None`, `self.writer_overhead_seconds = None`, `self._manifest_timing_frozen = False`, and `self._frozen_timing_dict = None` BEFORE the `self.run_dir.mkdir(...)` `try/except` block so ghost-mode early returns always have every timing attribute defined.
+  - In ghost-mode early returns (unwritable `run_dir` or `_bootstrap_engines()` exception), leave `_workload_start_mono = None` and `_workload_end_mono = None`, and emit `capture_state = {"status": "partial", "detail": "ghost mode: startup did not complete"}`, `elapsed_seconds = None`, `workload_seconds = None`, `duration_clock = None`, `elapsed_basis = None`, `interval_scope = "tracked_interval"` in `timing`.
+  - After `self.writer.write_startup_manifest()`, record `t1`: `self._workload_start_mono = time.perf_counter()` and `self.workload_started_at_utc = time.time()`. Because the initial startup manifest is written before `t1`, it cleanly reports `workload_started_at_utc: None`, `startup_overhead_seconds: None`, `elapsed_seconds: None`, and `capture_state: {"status": "partial"}`; if `_collect_hardware()` subsequently re-writes the startup manifest before `t2`, `startup_overhead_seconds` is populated while `elapsed_seconds` remains `None` and `capture_state` remains `{"status": "partial"}`.
 - In `Run._bootstrap_engines`:
   - Inside `_collect_hardware()`, record `hw_start = time.perf_counter()` at thread start and `self._background_hardware_seconds = max(0.0, time.perf_counter() - hw_start)` before `self._hardware_future_done.set()`.
 - In `Run._finalize_state`:
   - Under `_run_lock`, right after setting `self._finalized = True` and while `self.is_active` is true, record `t2` BEFORE releasing the lock and BEFORE waiting for hardware: `self._workload_end_mono = time.perf_counter()`, `self.ended_at_utc = time.time()`, and `self.is_active = False`.
   - Around `self._hardware_future_done.wait(timeout=2.0)`, measure `hw_wait_start = time.perf_counter()`, call `wait(timeout=2.0)`, and record `self._hardware_wait_seconds = max(0.0, time.perf_counter() - hw_wait_start)`.
-  - At the end of `_finalize_state()` (after shutting down all engines and removing `.pubrun.lock`), call `self._mark_finalization_end()` so direct callers of `_finalize_state()` always have a valid `t3`.
+  - At the end of `_finalize_state()` (after shutting down all engines and removing `.pubrun.lock`), call `self._mark_finalization_end()` so direct callers of `_finalize_state()` always have a valid `t3` while `_manifest_timing_frozen` remains `False` until `to_manifest_dict()` freezes finalized timing.
 - Add `Run._mark_finalization_end()`:
   - Updates `self._finalize_end_mono = time.perf_counter()` and `self.finalized_at_utc = time.time()` only if `self._workload_end_mono is not None` and `not getattr(self, "_manifest_timing_frozen", False)`.
-  - In `Run.to_manifest_dict()`: compute durations strictly from monotonic deltas (`max(0.0, ...)`); freeze manifest timing once serialized after finalization (or keep `to_manifest_dict()` idempotent on repeated calls after `stop()` so double-`stop()` never mutates `elapsed_seconds` or `finalization_overhead_seconds`).
+  - Because `_manifest_timing_frozen` stays `False` until finalized serialization, `ArtifactWriter.write_artifacts()` calling `_mark_finalization_end()` after writing `config.resolved.json` refreshes `t3` to include `config.resolved.json` write duration before `to_manifest_dict()` freezes it.
+- In `Run.to_manifest_dict()`:
+  - Compute durations strictly from monotonic deltas (`max(0.0, ...)`) without serializing any `_*_mono` attribute.
+  - When `self._finalized` is `False` (startup or async hardware-thread startup snapshot), build and return the current partial `timing` dict WITHOUT setting `_manifest_timing_frozen = True`.
+  - When `self._finalized` is `True`: if `self._frozen_timing_dict` is already cached, return a shallow copy of it so repeated `to_manifest_dict()` or double-`stop()` calls never mutate `elapsed_seconds` or `finalization_overhead_seconds`; otherwise compute the `timing` dict, cache it in `self._frozen_timing_dict`, and set `self._manifest_timing_frozen = True`.
 - In `Run.stop()`:
   - Preserve nested reference-count behavior: when `self.ref_count > 0` after decrement, return immediately without marking `t2` or finalizing.
   - When `self.ref_count` reaches `0`, call `self._finalize_state()` and `self.writer.write_artifacts()`.
 
 ### 4. Writer ordering and overhead accounting (`src/pubrun/writer.py`)
 
+- Add `import time` to `src/pubrun/writer.py` and initialize `self._artifacts_written = False` in `ArtifactWriter.__init__`.
 - In `ArtifactWriter.write_artifacts()`:
-  - Guard against re-writing a finalized run on a second `stop()` or redundant `atexit` invocation (track `self._artifacts_written = True` after writing once for a finalized run, preserving `test_double_stop_preserves_manifest`).
+  - Guard against re-writing a finalized run on a second `stop()` or redundant `atexit` invocation: if `self._artifacts_written and getattr(self.run, "_finalized", False)`, return immediately (preserving `tests/test_quality.py::TestDoubleStop.test_double_stop_preserves_manifest`).
   - Record `write_start_mono = time.perf_counter()`.
   - Call `self.run._finalize_state()`.
   - Ensure `out_dir` exists.
   - Write `config.resolved.json` atomically BEFORE serializing `manifest.json`.
-  - Call `self.run._mark_finalization_end()` so hardware wait, engine teardown, and `config.resolved.json` write duration are captured in `finalization_overhead_seconds`, then freeze manifest timing and build `manifest_data = self.run.to_manifest_dict()`.
+  - Call `if hasattr(self.run, "_mark_finalization_end"): self.run._mark_finalization_end()` (duck-type safe for `tests/test_writer.py::DummyRun`) so hardware wait, engine teardown, and `config.resolved.json` write duration are captured in `finalization_overhead_seconds`, then build `manifest_data = self.run.to_manifest_dict()` (which freezes finalized timing on `Run`).
   - Write `manifest.json` atomically (single write).
+  - Mark `self._artifacts_written = True` once `manifest.json` is written.
   - Write `methods.{md,tex}` (best-effort, non-fatal).
   - Record `self.run.writer_overhead_seconds = max(0.0, time.perf_counter() - write_start_mono)` in memory.
 
 ### 5. Deterministic behavioral tests (`tests/test_timing_accuracy.py`, `tests/test_manifest_schema.py`)
 
-- Implement a deterministic fake clock helper in `tests/test_timing_accuracy.py` that patches `time.time` and `time.perf_counter` independently so tests control wall-clock jumps (`+3600s`, `-3600s`) and exact monotonic advances with zero `time.sleep` flakiness.
+- Implement a deterministic fake clock helper in `tests/test_timing_accuracy.py` that patches `pubrun.tracker.time` and `pubrun.writer.time` (or uses scoped `monkeypatch.setattr` on `time.time` and `time.perf_counter` restored cleanly per test so `pytest` runner timing is not distorted) so tests control wall-clock jumps (`+7200s`, `-7200s`) and exact monotonic advances with zero `time.sleep` flakiness.
 - Test cases required:
   1. Forward wall-clock jump (`+7200s`) during workload: `workload_seconds` and `elapsed_seconds` match monotonic delta, remain unaffected by wall-clock jump, and `started_at_utc` / `ended_at_utc` retain UTC chronology.
   2. Backward wall-clock jump (`-7200s`) during workload: `workload_seconds`, `elapsed_seconds`, `startup_overhead_seconds`, `finalization_overhead_seconds`, and `session_seconds` are all nonnegative (`>= 0.0`) and match monotonic deltas.
   3. Deterministic hardware-worker delay (e.g., fake monotonic clock advances by `+1.5s` inside `_hardware_future_done.wait` or a blocked hardware thread released after a controlled event): `hardware_wait_seconds` and `finalization_overhead_seconds` reflect the `+1.5s` delay while `workload_seconds` and `elapsed_seconds` remain at the small workload delta (e.g., `0.05s`).
   4. Deterministic writer delay (advancing monotonic clock during `config.resolved.json` write and during `manifest.json` write): `config.resolved.json` delay appears in `finalization_overhead_seconds` and `writer_overhead_seconds`, `manifest.json` write delay appears in `writer_overhead_seconds`, and neither inflates `workload_seconds` or `elapsed_seconds`.
   5. Short run (`0.001s` workload with `0.2s` startup capture): `startup_overhead_seconds` captures startup cost, `workload_seconds` captures only `0.001s`, and `session_seconds == startup_overhead_seconds + workload_seconds + finalization_overhead_seconds` within floating-point tolerance (`1e-9`).
-  6. Lifecycle entry/exit modes: explicit `start()`/`stop()`, `atexit` finalization (`writer.write_artifacts()` directly without prior `stop()`), nested reference-counted `start()`/`stop()` (inner `stop()` does not freeze `t2`; outer `stop()` does), `tracked_run` normal and exception paths, `@audit_run` normal and exception paths, `KeyboardInterrupt` / termination signal interruption, double-`stop()` idempotency (second `stop()` does not alter recorded durations), and partial startup / ghost mode (read-only `run_dir` or engine init crash).
+  6. Lifecycle entry/exit modes: explicit `start()`/`stop()`, `atexit` finalization (`writer.write_artifacts()` directly without prior `stop()`), nested reference-counted `start()`/`stop()` (inner `stop()` does not freeze `t2`; outer `stop()` does), `tracked_run` normal and exception paths, `@audit_run` normal and exception paths, `KeyboardInterrupt` / termination signal interruption (exercised via active `KeyboardInterrupt` during `_finalize_state()`/`atexit` and/or recorded `SIGINT` in `SignalExitCapture`, confirming `outcome == "interrupted"` and accurate monotonic durations), double-`stop()` idempotency (second `stop()` does not alter recorded durations or rewrite `manifest.json`), and partial startup / ghost mode (read-only `run_dir` or engine init crash).
   7. No raw monotonic counter values leaked: set fake `perf_counter()` base to a distinctive large offset (e.g., `987654.321`) and assert no field in `manifest.json` contains that offset or any value derived directly from raw `perf_counter()`.
-- In `tests/test_manifest_schema.py`: validate new finalized manifests, startup manifests, ghost manifests, and a legacy v1.0 manifest fixture lacking the new timing fields against `schemas/manifest.schema.json`.
+- In `tests/test_manifest_schema.py`: validate new finalized manifests, startup manifests, and a legacy v1.0 manifest fixture lacking the new timing fields against the full `schemas/manifest.schema.json`, and validate a ghost-mode `Run`'s `timing` dict against the `$defs.timing` subschema (mirroring `_config_subschema`, because ghost runs never write manifests and leave unrelated section dicts empty).
 
 ## Deferred / out of scope (with reason)
 
@@ -221,6 +231,8 @@ Run inside the repository root and capture actual runner output and exit code:
 
 ```bash
 pytest tests/test_timing_accuracy.py tests/test_manifest_schema.py tests/test_tracker.py tests/test_writer.py -v
+pytest tests/test_quality.py -k TestDoubleStop -v
+pytest tests/test_api.py -k test_timing_values_are_floats -v
 ```
 
 ## Spec / documentation sync
@@ -233,32 +245,32 @@ Deferred to child plan `3tvesf`, which updates `docs/manifest.md`, `docs/archite
 
 - Blocking: no
 - Status: resolved
-- Owner: maintainer (confirmed upon plan approval)
-- Resolution or deferral rationale: Set `timing.elapsed_seconds` to `workload_seconds` (monotonic `[t1, t2]`) and emit `elapsed_basis: "workload"`, `duration_clock: "monotonic"`, and `interval_scope: "tracked_interval"`, alongside `session_seconds`, `startup_overhead_seconds`, and `finalization_overhead_seconds`. This directly resolves the backlog problem that short scripts appear slow due to capture overhead, while allowing consumers (`vrr1fv`) to distinguish old wall-clock manifests (missing `elapsed_basis`/`duration_clock`) from new manifests.
+- Owner: plan author
+- Resolution or deferral rationale: Set `timing.elapsed_seconds` to `workload_seconds` (monotonic `[t1, t2]`) and emit `elapsed_basis: "workload"`, `duration_clock: "monotonic"`, and `interval_scope: "tracked_interval"`, alongside `session_seconds`, `startup_overhead_seconds`, and `finalization_overhead_seconds`. This directly resolves the backlog problem (`6hp1zu`) that short scripts appear slow due to capture overhead, while allowing consumers (`vrr1fv`) to distinguish old wall-clock manifests (missing `elapsed_basis`/`duration_clock`) from new manifests. Human plan approval confirms these field names and semantics before execution.
 
 ### OQ-02: Accounting for `ArtifactWriter` delay without double-writing `manifest.json`
 
 - Blocking: no
 - Status: resolved
-- Owner: maintainer (confirmed upon plan approval)
-- Resolution or deferral rationale: Write `config.resolved.json` before `manifest.json`, stamp `t3` immediately before `to_manifest_dict()` so pre-manifest teardown and `config.resolved.json` write delays are persisted in `finalization_overhead_seconds`, and record total writer duration (including `manifest.json` and `methods` writes) in memory on `Run.writer_overhead_seconds`. This avoids a second `manifest.json` write (staying aligned with `t1xqpw`) while ensuring writer delays never inflate `workload_seconds`.
+- Owner: plan author
+- Resolution or deferral rationale: Write `config.resolved.json` before `manifest.json`, stamp `t3` immediately before `to_manifest_dict()` so pre-manifest teardown and `config.resolved.json` write delays are persisted in `finalization_overhead_seconds`, and record total writer duration (including `manifest.json` and `methods` writes) in memory on `Run.writer_overhead_seconds`. This avoids a second `manifest.json` write (staying aligned with `t1xqpw`) while ensuring writer delays never inflate `workload_seconds`. Human plan approval confirms this design before execution.
 
 ## Validation and cross-check (verify before reporting done)
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
 - [ ] V-01 validates E-01
-  - Required evidence: Diff of `schemas/manifest.schema.json` showing the additive `$defs.timing` and `$defs.subprocess_record` properties with `minimum: 0` constraints and unchanged `required` lists, plus pasted `pytest tests/test_manifest_schema.py -v` output showing schema draft check passes.
+  - Required evidence: Diff of `schemas/manifest.schema.json` showing the additive `$defs.timing` (using `anyOf` for nullable `utc_datetime` fields) and `$defs.subprocess_record` properties with `minimum: 0` constraints and unchanged `required` lists, plus pasted `pytest tests/test_manifest_schema.py -v` output showing schema draft check passes.
   - Observed evidence:
   - Result: pending
 
 - [ ] V-02 validates E-02
-  - Required evidence: Diff of `src/pubrun/tracker.py` showing monotonic anchors (`t0..t3`), `t2` captured under `_run_lock` before `_hardware_future_done.wait(timeout=2.0)`, separate overlapping `background_hardware_seconds` and `hardware_wait_seconds`, and no raw monotonic readings serialized in `to_manifest_dict()`.
+  - Required evidence: Diff of `src/pubrun/tracker.py` showing timing attributes initialized before `mkdir()`, monotonic anchors (`t0..t3`), `t2` captured under `_run_lock` before `_hardware_future_done.wait(timeout=2.0)`, separate overlapping `background_hardware_seconds` and `hardware_wait_seconds`, finalized-only timing freeze in `to_manifest_dict()`, and no raw monotonic readings serialized in `to_manifest_dict()`.
   - Observed evidence:
   - Result: pending
 
 - [ ] V-03 validates E-03
-  - Required evidence: Diff of `src/pubrun/writer.py` showing `config.resolved.json` written before `manifest.json`, `_mark_finalization_end()` called before `to_manifest_dict()`, single atomic `manifest.json` write, and `writer_overhead_seconds` recorded on `Run`.
+  - Required evidence: Diff of `src/pubrun/writer.py` showing `import time`, `_artifacts_written` guard, `config.resolved.json` written before `manifest.json`, `hasattr`-guarded `_mark_finalization_end()` called before `to_manifest_dict()`, single atomic `manifest.json` write, and `writer_overhead_seconds` recorded on `Run`, plus pasted `pytest tests/test_writer.py -v` output.
   - Observed evidence:
   - Result: pending
 
@@ -268,7 +280,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
   - Result: pending
 
 - [ ] V-05 validates E-05
-  - Required evidence: Pasted `pytest tests/test_timing_accuracy.py tests/test_manifest_schema.py tests/test_tracker.py tests/test_writer.py -v` output showing exit code 0 and zero failures across new, startup, ghost, and legacy v1.0 manifests.
+  - Required evidence: Pasted `pytest tests/test_timing_accuracy.py tests/test_manifest_schema.py tests/test_tracker.py tests/test_writer.py -v`, `pytest tests/test_quality.py -k TestDoubleStop -v`, and `pytest tests/test_api.py -k test_timing_values_are_floats -v` output showing exit code 0 and zero failures across new, startup, ghost-timing subschema, and legacy v1.0 manifests.
   - Observed evidence:
   - Result: pending
 
@@ -278,8 +290,8 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 - Cohesion rationale: not required
 
 Execution contract:
-1. All open questions (OQ-01, OQ-02) are resolved for review; do not execute until a human approves this plan (`- Status: approved`).
-2. Scope fence: edit only `schemas/manifest.schema.json`, `src/pubrun/tracker.py`, `src/pubrun/writer.py`, `tests/test_timing_accuracy.py`, and `tests/test_manifest_schema.py`. Do not expand scope; if additional files seem required, STOP and report.
-3. Honesty rule: paste the actual `pytest` runner output and exit code into each `V-*` `Observed evidence:` field; never claim tests passed without running them.
-4. Commit discipline: commit only the files listed in `- Scope-Paths:` using `aw commit e1fwy2 -- <paths>`; never use `git add -A`, `git add .`, or `git commit -a`; never push without explicit human instruction.
-5. Lifecycle move on completion: after `aw ipd lint --phase pre-transition` passes, move this plan from `.aw/records/plans/pending/` to `.aw/records/plans/executed/`, set `- Status: executed`, append a dated `## Workflow history` line, and commit the lifecycle move path-scoped.
+1. Open questions: all open questions (`OQ-01`, `OQ-02`) are resolved; execution requires explicit human approval (`- Status: approved`).
+2. Scope fence: restrict edits to `- Scope-Paths:` (`schemas/manifest.schema.json`, `src/pubrun/tracker.py`, `src/pubrun/writer.py`, `tests/test_timing_accuracy.py`, `tests/test_manifest_schema.py`). If an out-of-scope edit is genuinely required, justify it with `--scope-reason` at finalization; if a declared path needs no edit, acknowledge it with `--scope-ack`.
+3. Honesty rule (HARD MUST): paste actual `pytest` runner output and exit code into each `V-*` `Observed evidence:` field; never claim tests passed without running them.
+4. Commit and push discipline: commit only the files changed for this plan using `aw commit e1fwy2 -- <paths>`; never use `git add -A`, `git add .`, or `git commit -a`; never push without explicit human instruction.
+5. Lifecycle transition: this plan must reach `.aw/records/plans/executed/` with `- Status: executed` through `aw ipd finalize` once all `E-*` are `performed` and all `V-*` are `pass`. In a runner-managed lane with `self_finalize=True`, the runner performs `aw ipd finalize`; in standalone execution, the executor runs `aw ipd finalize` directly. Never hand-roll a raw `git mv` to `executed/`.
