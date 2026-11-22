@@ -134,3 +134,57 @@ class TestTableRenderer:
         table = self._render(report, table=True)
         for key in ("subprocesses.by_command.bash", "subprocesses.count"):
             assert key in inline and key in table
+
+    def test_note_renders_in_inline_and_table_modes(self):
+        report = {
+            "added": {},
+            "removed": {},
+            "modified": {
+                "timing.elapsed_seconds": {
+                    "type": "standard",
+                    "old": 45.5,
+                    "new": 12.0,
+                    "note": "timing definition changed (wall_clock_legacy/wall_clock -> workload/monotonic)",
+                }
+            },
+            "same": {},
+        }
+        inline = self._render(report)
+        table = self._render(report, table=True)
+        expected_note = "timing definition changed (wall_clock_legacy/wall_clock -> workload/monotonic)"
+        assert f"note: {expected_note}" in inline
+        assert f"[{expected_note}]" in table
+        assert "\033[" not in inline and "\033[" not in table
+
+
+class TestTimingSemanticsDiff:
+    def test_deep_diff_surfaces_legacy_vs_monotonic_note_and_metadata(self):
+        legacy = _mk(
+            ["python", "train.py"],
+            timing={"started_at_utc": 1780250000.0, "ended_at_utc": 1780250010.0, "elapsed_seconds": 10.0},
+        )
+        new_m = _mk(
+            ["python", "train.py"],
+            timing={
+                "started_at_utc": 1780250000.0,
+                "ended_at_utc": 1780250008.0,
+                "elapsed_seconds": 8.0,
+                "workload_seconds": 8.0,
+                "duration_clock": "monotonic",
+                "elapsed_basis": "workload",
+            },
+        )
+        # Default basic/standard still ignore timing
+        for depth in ("basic", "standard"):
+            r_def = compare_manifests(legacy, new_m, _ignores(depth), depth=depth)
+            assert not any(k.startswith("timing") for k in set(r_def["added"]) | set(r_def["removed"]) | set(r_def["modified"]))
+
+        # Deep diff includes timing and surfaces the definition change explicitly
+        r_deep = compare_manifests(legacy, new_m, _ignores("deep"), depth="deep")
+        assert r_deep["modified"]["timing.elapsed_seconds"]["note"] == (
+            "timing definition changed (wall_clock_legacy/wall_clock -> workload/monotonic)"
+        )
+        assert r_deep["modified"]["timing.duration_clock"]["old"] == "wall_clock"
+        assert r_deep["modified"]["timing.duration_clock"]["new"] == "monotonic"
+        assert r_deep["modified"]["timing.elapsed_basis"]["old"] == "wall_clock_legacy"
+        assert r_deep["modified"]["timing.elapsed_basis"]["new"] == "workload"

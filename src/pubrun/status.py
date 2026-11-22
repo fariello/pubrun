@@ -89,6 +89,79 @@ def _as_signal_list(value: Any) -> List[Dict[str, Any]]:
     return [s for s in value if isinstance(s, dict)]
 
 
+def classify_timing_semantics(
+    timing: Optional[Dict[str, Any]],
+    *,
+    status: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Classify manifest or live-run timing metadata into explicit display semantics.
+
+    Handles explicit monotonic fields, legacy v1.0 wall-clock manifests (without
+    ``duration_clock`` or ``elapsed_basis``), live running estimates, crashed
+    estimates, session totals, and incomplete or malformed timing dicts safely.
+    """
+    if not isinstance(timing, dict):
+        timing = {}
+
+    if status == STATUS_RUNNING:
+        return {
+            "duration_clock": "wall_clock_estimated",
+            "elapsed_basis": "running_estimate",
+            "interval_scope": "tracked_interval",
+            "label": "Elapsed (running, wall-clock estimate)",
+            "is_legacy": False,
+            "is_incomplete": False,
+        }
+
+    raw_clock = timing.get("duration_clock")
+    duration_clock: Optional[str] = (
+        raw_clock if isinstance(raw_clock, str) and raw_clock else None
+    )
+    raw_basis = timing.get("elapsed_basis")
+    elapsed_basis: Optional[str] = (
+        raw_basis if isinstance(raw_basis, str) and raw_basis else None
+    )
+
+    workload_val = _as_float(timing.get("workload_seconds"))
+    elapsed_val = _as_float(timing.get("elapsed_seconds"))
+
+    is_legacy = False
+    if duration_clock is None and elapsed_basis is None and elapsed_val is not None:
+        duration_clock = "wall_clock"
+        elapsed_basis = "wall_clock_legacy"
+        is_legacy = True
+
+    raw_scope = timing.get("interval_scope")
+    interval_scope = (
+        raw_scope if isinstance(raw_scope, str) and raw_scope else "tracked_interval"
+    )
+
+    has_duration = (workload_val is not None) or (elapsed_val is not None)
+    is_incomplete = not has_duration
+
+    if elapsed_basis == "workload" and duration_clock == "monotonic":
+        label = "Tracked workload (monotonic)"
+    elif elapsed_basis == "session" and duration_clock == "monotonic":
+        label = "Tracked session (monotonic)"
+    elif elapsed_basis == "session":
+        label = "Tracked session"
+    elif elapsed_basis == "crashed_estimate":
+        label = "Estimated elapsed (crashed, wall-clock)"
+    elif elapsed_basis == "wall_clock_legacy":
+        label = "Elapsed (legacy wall-clock, includes capture)"
+    else:
+        label = "Elapsed"
+
+    return {
+        "duration_clock": duration_clock,
+        "elapsed_basis": elapsed_basis,
+        "interval_scope": interval_scope,
+        "label": label,
+        "is_legacy": is_legacy,
+        "is_incomplete": is_incomplete,
+    }
+
+
 class RunInfo:
     """Lightweight descriptor for a single run directory."""
 
@@ -102,6 +175,13 @@ class RunInfo:
         self.started_at_utc: Optional[float] = None
         self.ended_at_utc: Optional[float] = None
         self.elapsed: Optional[float] = None
+        self.timing_semantics: Dict[str, Any] = classify_timing_semantics({})
+        self.workload_seconds: Optional[float] = None
+        self.startup_overhead_seconds: Optional[float] = None
+        self.finalization_overhead_seconds: Optional[float] = None
+        self.session_seconds: Optional[float] = None
+        self.hardware_wait_seconds: Optional[float] = None
+        self.background_hardware_seconds: Optional[float] = None
         self.pid: Optional[int] = None
         self.hostname: Optional[str] = None
         self.git_commit: Optional[str] = None
@@ -199,10 +279,29 @@ class RunInfo:
             self.run_id = data.get("run", {}).get("run_id")
             self.outcome = data.get("status", {}).get("outcome", "unknown")
 
-            timing = data.get("timing", {})
+            raw_timing = data.get("timing")
+            timing = raw_timing if isinstance(raw_timing, dict) else {}
             self.started_at_utc = _as_float(timing.get("started_at_utc"))
             self.ended_at_utc = _as_float(timing.get("ended_at_utc"))
-            self.elapsed = _as_float(timing.get("elapsed_seconds"))
+            self.workload_seconds = _as_float(timing.get("workload_seconds"))
+            self.startup_overhead_seconds = _as_float(timing.get("startup_overhead_seconds"))
+            self.finalization_overhead_seconds = _as_float(
+                timing.get("finalization_overhead_seconds")
+            )
+            self.session_seconds = _as_float(timing.get("session_seconds"))
+            self.hardware_wait_seconds = _as_float(timing.get("hardware_wait_seconds"))
+            self.background_hardware_seconds = _as_float(
+                timing.get("background_hardware_seconds")
+            )
+            elapsed_raw = _as_float(timing.get("elapsed_seconds"))
+            if timing.get("elapsed_basis") == "session" and elapsed_raw is not None:
+                self.elapsed = elapsed_raw
+            else:
+                self.elapsed = (
+                    self.workload_seconds
+                    if self.workload_seconds is not None
+                    else elapsed_raw
+                )
 
             # Git
             git = data.get("git", {})
@@ -257,9 +356,12 @@ class RunInfo:
             else:
                 self.status = STATUS_COMPLETED
 
+            self.timing_semantics = classify_timing_semantics(timing, status=self.status)
+
         except (json.JSONDecodeError, OSError):
             self._parse_dir_name()
             self.status = STATUS_CRASHED
+            self.timing_semantics = classify_timing_semantics({}, status=self.status)
 
     def _load_from_lock(self, lock_path: Path) -> None:
         """Load status from a lock file (in-progress or crashed)."""
@@ -286,18 +388,22 @@ class RunInfo:
             if self.hostname and self.hostname != current_host:
                 # Different host -- can't verify PID liveness
                 # If started more than 48 hours ago, assume crashed (stale lock from synced dir or dead node)
-                age = time.time() - self.started_at_utc if self.started_at_utc else 0
+                age = time.time() - self.started_at_utc if self.started_at_utc is not None else 0.0
                 if age > 172800:  # 48 hours
                     self.status = STATUS_CRASHED
                     self.elapsed = None
                 else:
                     # Assume running (could be on a cluster node)
                     self.status = STATUS_RUNNING
-                    self.elapsed = time.time() - self.started_at_utc if self.started_at_utc else None
-            elif self.pid and self.started_at_utc:
+                    self.elapsed = (
+                        max(0.0, time.time() - self.started_at_utc)
+                        if self.started_at_utc is not None
+                        else None
+                    )
+            elif self.pid and self.started_at_utc is not None:
                 if is_same_process(self.pid, self.started_at_utc, expected_script=self.script):
                     self.status = STATUS_RUNNING
-                    self.elapsed = time.time() - self.started_at_utc
+                    self.elapsed = max(0.0, time.time() - self.started_at_utc)
                     # Fetch live resource usage
                     self.rss_bytes = get_rss_bytes(self.pid)
                     self.cpu_percent = get_cpu_percent(self.pid)
@@ -306,6 +412,8 @@ class RunInfo:
                     self.elapsed = None  # Unknown when it died
             else:
                 self.status = STATUS_CRASHED
+
+            self.timing_semantics = classify_timing_semantics({}, status=self.status)
 
             # Count events if available.
             # PERF-10: estimate from file size instead of reading every line.
@@ -458,7 +566,9 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
     if manifest_path.exists():
         try:
             with open(manifest_path, "r", encoding="utf-8") as f:
-                manifest = json.load(f)
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                manifest = loaded
         except Exception:
             pass
 
@@ -479,6 +589,9 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
                 "started_at_utc": started_at,
                 "ended_at_utc": None,
                 "elapsed_seconds": None,
+                "duration_clock": None,
+                "elapsed_basis": None,
+                "interval_scope": "tracked_interval",
                 "capture_state": {"status": "partial"},
             },
             "capture": {
@@ -527,10 +640,19 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
             except OSError:
                 pass
 
-        timing = manifest.get("timing", {})
+        raw_timing = manifest.get("timing")
+        timing = raw_timing if isinstance(raw_timing, dict) else {}
         timing["ended_at_utc"] = ended_at
-        if timing.get("started_at_utc"):
-            timing["elapsed_seconds"] = ended_at - timing["started_at_utc"]
+        started_at_val = _as_float(timing.get("started_at_utc"))
+        if started_at_val is not None:
+            timing["elapsed_seconds"] = max(0.0, ended_at - started_at_val)
+            timing["duration_clock"] = "wall_clock_estimated"
+            timing["elapsed_basis"] = "crashed_estimate"
+        else:
+            timing["elapsed_seconds"] = None
+            timing["duration_clock"] = None
+            timing["elapsed_basis"] = None
+        timing["interval_scope"] = "tracked_interval"
         timing["capture_state"] = {"status": "partial"}
         manifest["timing"] = timing
 
@@ -682,6 +804,17 @@ def _format_elapsed(seconds: Optional[float]) -> str:
         formatted = f"{h:02d}:{m:02d}:{s:02d}"
 
     return f"-{formatted}" if is_negative else formatted
+
+
+def _format_duration_detail(seconds: Optional[float]) -> str:
+    """Format a duration with millisecond visibility for sub-minute intervals."""
+    val = _as_float(seconds)
+    if val is None:
+        return "unknown"
+    clamped = max(0.0, val)
+    if clamped < 60.0:
+        return f"{clamped:.3f}s"
+    return f"{_format_elapsed(clamped)} ({clamped:.1f}s)"
 
 
 # Display timezone preference for the CLI render. Timestamps are always STORED
@@ -972,9 +1105,47 @@ def render_inspect(run_info: RunInfo) -> str:
         lines.append(f"  Arguments:     {run_info.args}")
     lines.append(f"  Status:        {_status_marker(run_info.status)}")
     lines.append(f"  Started:       {_format_timestamp(run_info.started_at_utc)}")
-    if run_info.ended_at_utc:
+    if run_info.ended_at_utc is not None:
         lines.append(f"  Ended:         {_format_timestamp(run_info.ended_at_utc)}")
-    lines.append(f"  Elapsed:       {_format_elapsed(run_info.elapsed)}")
+    sem = getattr(run_info, "timing_semantics", None) or classify_timing_semantics(
+        run_info.manifest.get("timing") if isinstance(run_info.manifest, dict) else None,
+        status=run_info.status,
+    )
+    elapsed_label = sem.get("label", "Elapsed")
+    elapsed_str = (
+        "unknown"
+        if run_info.elapsed is None or sem.get("is_incomplete")
+        else _format_duration_detail(run_info.elapsed)
+    )
+    lines.append(f"  {elapsed_label}: {elapsed_str}")
+    lines.append(
+        "  Timing Scope:  tracked interval "
+        "(start() to stop(), not full process lifetime if imported late)"
+    )
+    if run_info.startup_overhead_seconds is not None:
+        lines.append(
+            f"  Startup overhead: {_format_duration_detail(run_info.startup_overhead_seconds)}"
+        )
+    if run_info.finalization_overhead_seconds is not None:
+        fin_str = _format_duration_detail(run_info.finalization_overhead_seconds)
+        if run_info.hardware_wait_seconds is not None:
+            fin_str += (
+                f" (includes Hardware wait: {_format_duration_detail(run_info.hardware_wait_seconds)})"
+            )
+        lines.append(f"  Finalization overhead: {fin_str}")
+    elif run_info.hardware_wait_seconds is not None:
+        lines.append(
+            f"  Hardware wait: {_format_duration_detail(run_info.hardware_wait_seconds)}"
+        )
+    if run_info.session_seconds is not None:
+        lines.append(
+            f"  Tracked session: {_format_duration_detail(run_info.session_seconds)}"
+        )
+    if run_info.background_hardware_seconds is not None:
+        lines.append(
+            f"  Background hardware (overlaps workload): "
+            f"{_format_duration_detail(run_info.background_hardware_seconds)}"
+        )
     lines.append(f"  Exit Code:     {run_info.exit_code if run_info.exit_code is not None else '-'}")
     lines.append("")
 

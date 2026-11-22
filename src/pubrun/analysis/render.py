@@ -127,6 +127,10 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int
             print(f"    {red}- {old_val}{rst}")
             print(f"    {grn}+ {new_val}{rst}")
 
+        note = mod.get("note")
+        if note:
+            print(f"    {yel}note: {note}{rst}")
+
     # SAME (if present)
     same = diff_report.get("same", {})
     if same:
@@ -138,6 +142,8 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int
 def _summarize_change(mod: Dict[str, Any], max_length: int) -> str:
     """One-cell 'A -> B' summary of a modified entry for the table view."""
     t = mod.get("type")
+    note = mod.get("note")
+    note_suffix = f" [{note}]" if note else ""
     if t == "path_split":
         added = mod.get("added", [])
         removed = mod.get("removed", [])
@@ -146,7 +152,10 @@ def _summarize_change(mod: Dict[str, Any], max_length: int) -> str:
             bits.append(f"+{len(added)}")
         if removed:
             bits.append(f"-{len(removed)}")
-        return f"PATH {' '.join(bits)}" if bits else "PATH changed"
+        cell = (f"PATH {' '.join(bits)}" if bits else "PATH changed") + note_suffix
+        if len(cell) > max_length:
+            cell = cell[:max_length] + " ..."
+        return cell
     if t == "list_diff":
         added = mod.get("added", [])
         removed = mod.get("removed", [])
@@ -157,10 +166,13 @@ def _summarize_change(mod: Dict[str, Any], max_length: int) -> str:
             parts.append(f"-{len(removed)}")
         if mod.get("order_changed"):
             parts.append("reordered")
-        return f"list [{', '.join(parts)}]" if parts else "list changed"
+        cell = (f"list [{', '.join(parts)}]" if parts else "list changed") + note_suffix
+        if len(cell) > max_length:
+            cell = cell[:max_length] + " ..."
+        return cell
     old = str(mod.get("old", ""))
     new = str(mod.get("new", ""))
-    cell = f"{old}  ->  {new}"
+    cell = f"{old}  ->  {new}{note_suffix}"
     if len(cell) > max_length:
         cell = cell[:max_length] + " ..."
     return cell

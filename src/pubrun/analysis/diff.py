@@ -139,6 +139,20 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str], depth: str
 
     _recruit(manifest)
 
+    # Synthesize explicit legacy timing semantics when comparing timing so legacy
+    # wall-clock manifests and new monotonic manifests surface definition changes
+    # even when numeric elapsed_seconds match.
+    raw_timing = manifest.get("timing")
+    if isinstance(raw_timing, dict) and not _should_ignore("timing"):
+        from pubrun.status import classify_timing_semantics
+
+        sem = classify_timing_semantics(raw_timing)
+        if sem["is_legacy"]:
+            if not _should_ignore("timing.duration_clock"):
+                flat["timing.duration_clock"] = "wall_clock"
+            if not _should_ignore("timing.elapsed_basis"):
+                flat["timing.elapsed_basis"] = "wall_clock_legacy"
+
     # Collapse derived invocation views: `command_line` and `rerun_command` are both derived
     # from `argv`, so a single argv change would otherwise be reported three times. Below
     # `--deep`, when argv is present, drop the two derived views so one argv change = one line.
@@ -266,6 +280,27 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Opt
         else:
             if show_same:
                 diff_report["same"][k] = val_a
+
+    if "timing.elapsed_seconds" in diff_report["modified"]:
+        from pubrun.status import classify_timing_semantics
+
+        sem_a = classify_timing_semantics(
+            raw_a.get("timing") if isinstance(raw_a, dict) else None
+        )
+        sem_b = classify_timing_semantics(
+            raw_b.get("timing") if isinstance(raw_b, dict) else None
+        )
+        if (sem_a["elapsed_basis"], sem_a["duration_clock"]) != (
+            sem_b["elapsed_basis"],
+            sem_b["duration_clock"],
+        ):
+            old_basis = sem_a["elapsed_basis"] or "unknown"
+            old_clock = sem_a["duration_clock"] or "unknown"
+            new_basis = sem_b["elapsed_basis"] or "unknown"
+            new_clock = sem_b["duration_clock"] or "unknown"
+            diff_report["modified"]["timing.elapsed_seconds"]["note"] = (
+                f"timing definition changed ({old_basis}/{old_clock} -> {new_basis}/{new_clock})"
+            )
 
     return diff_report
 

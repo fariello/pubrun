@@ -67,32 +67,32 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Status, diagnostics, diff, and TUI consumers
 
-- [ ] E-01 Update `src/pubrun/status.py` (`classify_timing_semantics`, `_format_duration_detail`, `RunInfo.__init__`, `RunInfo._load_from_manifest`, `RunInfo._load_from_lock`, `close_out_crashed_run`, `render_inspect`) for monotonic timing fields, legacy inference, nonnegative live and crashed durations, and tracked-interval labeling.
+- [x] E-01 Update `src/pubrun/status.py` (`classify_timing_semantics`, `_format_duration_detail`, `RunInfo.__init__`, `RunInfo._load_from_manifest`, `RunInfo._load_from_lock`, `close_out_crashed_run`, `render_inspect`) for monotonic timing fields, legacy inference, nonnegative live and crashed durations, and tracked-interval labeling.
   - Depends on: none
   - Expected outcome: `src/pubrun/status.py::classify_timing_semantics` normalizes explicit, legacy wall-clock, live-running, crashed-estimate, session, and incomplete timing dicts safely without crashing on non-dict or non-numeric inputs. `src/pubrun/status.py::_format_duration_detail` formats sub-minute breakdown intervals with millisecond precision while `src/pubrun/status.py::_format_elapsed` preserves existing formatting (including `_format_elapsed(-10) == "-00:00:10"`). `RunInfo` initializes and parses optional timing fields via `_as_float`, clamps both remote-host and local live lock elapsed calculations with `max(0.0, ...)`, and never mislabels a live lock run as finalized monotonic workload. `close_out_crashed_run` keeps `ended_at_utc: None` and `elapsed_seconds: None` on lock-only fallback manifests, clamps `elapsed_seconds >= 0.0` via `_as_float` on existing manifests with `duration_clock="wall_clock_estimated"` and `elapsed_basis="crashed_estimate"` (leaving `workload_seconds` untouched), and degrades to `None` when `started_at_utc` is missing or non-numeric. `render_inspect` renders the semantic elapsed label, tracked-interval note, and separate overhead lines without summing overlapping intervals.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update `src/pubrun/report/diagnostics.py` (`print_report`) to display labeled tracked-interval timing, separate capture overheads, legacy fallback labels, and monotonic subprocess durations.
+- [x] E-02 Update `src/pubrun/report/diagnostics.py` (`print_report`) to display labeled tracked-interval timing, separate capture overheads, legacy fallback labels, and monotonic subprocess durations.
   - Depends on: E-01
   - Expected outcome: `src/pubrun/report/diagnostics.py::print_report` guards non-dict `timing` and non-numeric `started_at_utc`/`elapsed_seconds` via `_as_float`, renders an explicit labeled elapsed line (including `"unknown"` when duration is missing or incomplete, and handling `0.0` via `is not None`), and clearly states tracked-interval scope rather than full application lifetime. When present, `print_report` prints startup overhead, finalization overhead (noting hardware wait as a sub-interval), tracked session, and overlapping background hardware using `_format_duration_detail` without summing overlaps. Deep-mode subprocess rendering guards non-list/non-dict entries, prefers `_as_float(sp.get("elapsed_seconds"))` with `is not None` (clamped `>= 0.0` and tagged with `duration_clock`), and falls back to `round(max(0.0, ended - started), 3)` labeled `wall-clock` for legacy subprocess records. Any partial-capture warning blocks from sibling plan `26euz0` (if already executed) are preserved intact.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Update `src/pubrun/analysis/diff.py` (`_normalize_manifest`, `compare_manifests`) and `src/pubrun/analysis/render.py` (`_render_inline`, `_summarize_change`, `_render_table`) so comparing legacy and new manifests surfaces timing semantic differences explicitly when `timing` is not ignored.
+- [x] E-03 Update `src/pubrun/analysis/diff.py` (`_normalize_manifest`, `compare_manifests`) and `src/pubrun/analysis/render.py` (`_render_inline`, `_summarize_change`, `_render_table`) so comparing legacy and new manifests surfaces timing semantic differences explicitly when `timing` is not ignored.
   - Depends on: E-01
   - Expected outcome: When `timing` is not ignored (`--deep` or custom `ignores`), `src/pubrun/analysis/diff.py::_normalize_manifest` reuses `classify_timing_semantics` to inject `timing.duration_clock = "wall_clock"` and `timing.elapsed_basis = "wall_clock_legacy"` only for legacy manifests that carry a valid numeric `elapsed_seconds` and lack both explicit fields (respecting `_should_ignore` per key). `src/pubrun/analysis/diff.py::compare_manifests` computes effective semantics for both manifests and attaches `"note": "timing definition changed (<old_basis>/<old_clock> -> <new_basis>/<new_clock>)"` to `diff_report["modified"]["timing.elapsed_seconds"]` whenever effective basis or clock differs (preserving `"type": "standard"`, `"old"`, and `"new"`). Even when legacy and new `elapsed_seconds` are numerically equal, `timing.duration_clock` and `timing.elapsed_basis` surface the definition change. `src/pubrun/analysis/render.py::_render_inline`, `_summarize_change`, and `_render_table` display `mod["note"]` when present (honoring `NO_COLOR`), while default `basic` and `standard` diffs continue to ignore `timing` unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Update `src/pubrun/tui/widgets/details.py` (`RunDetailsView.on_mount`, `RunDetailsView.update_general_pane`, `RunDetailsView.update_subprocesses_pane`) and `src/pubrun/tui/widgets/diff.py` (`DiffView.run_difference`, `DiffView.render_diff_report`) to label timing semantics, display capture overhead fields, prefer monotonic subprocess durations, and surface mixed-definition diff notes in the TUI.
+- [x] E-04 Update `src/pubrun/tui/widgets/details.py` (`RunDetailsView.on_mount`, `RunDetailsView.update_general_pane`, `RunDetailsView.update_subprocesses_pane`) and `src/pubrun/tui/widgets/diff.py` (`DiffView.run_difference`, `DiffView.render_diff_report`) to label timing semantics, display capture overhead fields, prefer monotonic subprocess durations, and surface mixed-definition diff notes in the TUI.
   - Depends on: E-01, E-03
   - Expected outcome: `RunDetailsView.update_general_pane` uses `r.timing_semantics` (safe when `r.manifest is None`), displays the semantic elapsed label with tracked-interval note, renders `"-"` when duration is incomplete, and displays startup overhead, finalization overhead (with hardware wait sub-interval), tracked session, and overlapping background hardware using `_format_duration_detail` when present without summing overlaps. `RunDetailsView.update_subprocesses_pane` guards non-list/non-dict entries and non-string `argv` items, prefers `_as_float(sub.get("elapsed_seconds"))` with `is not None` (clamped `>= 0.0`), falls back to `max(0.0, end_val - start_val)` for legacy records, and widens the `Elapsed` column in `on_mount()` if needed so clock tags are not truncated. `DiffView.run_difference` passes `depth=depth` to `compare_manifests`, and `DiffView.render_diff_report` renders `mod["note"]` when present.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Consumer compatibility tests and validation
 
-- [ ] E-05 Add behavioral tests in `tests/test_timing_consumers.py` and `tests/test_diff_usability.py`, including verification that `pubrun.report.methods.generate_report` and `generate_report_multi` handle legacy and new manifests without overstating timing precision, then run the targeted regression suite.
+- [x] E-05 Add behavioral tests in `tests/test_timing_consumers.py` and `tests/test_diff_usability.py`, including verification that `pubrun.report.methods.generate_report` and `generate_report_multi` handle legacy and new manifests without overstating timing precision, then run the targeted regression suite.
   - Depends on: E-02, E-03, E-04
   - Expected outcome: Behavioral tests cover legacy manifest readability, new monotonic manifests with sub-second overheads and non-summed overlapping intervals, live-running lock runs enriched with startup manifests, late-import tracked-interval wording, incomplete/corrupt timing data (`None`, missing keys, non-dict, non-numeric, `0.0`), crashed closeout with backward `mtime` and lock-only fallback, mixed legacy-vs-new diffs (differing and equal `elapsed_seconds`) across structured output, inline, table, and TUI `DiffView`, TUI `RunDetailsView` panes (guarded by `pytest.importorskip("textual")`), `_format_elapsed(-10)` compatibility, and `methods.py` precision check. Running `pytest tests/test_timing_consumers.py tests/test_diff_usability.py tests/test_reports.py tests/test_status.py tests/test_tui.py tests/test_edge_cases.py tests/test_tracker.py tests/test_quality.py tests/test_show_sections.py tests/test_methods_multi.py -v` exits 0 with zero failures.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -209,30 +209,30 @@ Deferred to downstream child plan `3tvesf` (timing docs, examples, benchmark, an
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Diff of `src/pubrun/status.py` showing `classify_timing_semantics` (including `STATUS_RUNNING`, `session`, legacy, crashed, and incomplete paths), `_format_duration_detail` (with `_format_elapsed` preserved), nonnegative live and crashed elapsed clamping across both lock branches and `close_out_crashed_run` branches, and separated overhead display in `render_inspect`, plus pasted `pytest tests/test_status.py tests/test_edge_cases.py tests/test_tracker.py -v` output.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff --stat src/pubrun/status.py` (`+195/-17`): added `classify_timing_semantics` covering `STATUS_RUNNING`, `workload`/`monotonic`, `session` (monotonic and non-monotonic), `crashed_estimate`, legacy wall-clock inference, and incomplete/malformed guards; added `_format_duration_detail` keeping `_format_elapsed` untouched; initialized and coerced timing fields in `RunInfo.__init__` and `RunInfo._load_from_manifest`; clamped remote-host and local live lock elapsed with `max(0.0, ...)` in `RunInfo._load_from_lock`; updated both lock-only and existing-manifest branches of `close_out_crashed_run`; updated `render_inspect` with semantic elapsed label, tracked-interval note, and separate overhead lines. Command `pytest tests/test_status.py tests/test_edge_cases.py tests/test_tracker.py -v --no-cov` exited 0: `100 passed in 5.10s`.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Diff of `src/pubrun/report/diagnostics.py` showing `_as_float`/non-dict guards, labeled tracked-interval timing with `"unknown"` incomplete fallback, separate millisecond-precision overhead lines, and monotonic subprocess duration preference with wall-clock fallback, plus pasted `pytest tests/test_reports.py tests/test_show_sections.py -v` output.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff --stat src/pubrun/report/diagnostics.py` (`+62/-16`): updated `_format_report_timestamp` to coerce via `_as_float` and preserve exception guards; updated `print_report` to classify timing via `classify_timing_semantics`, render labeled elapsed with `"unknown"` fallback and `0.0` support via `is not None`, print tracked-interval scope note and separate `_format_duration_detail` overhead lines without summing overlaps, preserve `26euz0` partial-capture warning blocks intact, and prefer `_as_float(sp.get("elapsed_seconds"))` with clock tags and clamped wall-clock fallback in deep-mode subprocess rendering. Command `pytest tests/test_reports.py tests/test_show_sections.py -v --no-cov` exited 0: `72 passed in 3.00s`.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Diff of `src/pubrun/analysis/diff.py` and `src/pubrun/analysis/render.py` showing `classify_timing_semantics`-backed legacy normalization, mixed-definition change notes on `timing.elapsed_seconds`, and note rendering in both inline and table renderers, plus pasted `pytest tests/test_diff_usability.py tests/test_quality.py -v` output.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff --stat src/pubrun/analysis/diff.py src/pubrun/analysis/render.py` (`+35/-0` and `+15/-3`): `_normalize_manifest` injects `timing.duration_clock="wall_clock"` and `timing.elapsed_basis="wall_clock_legacy"` when `classify_timing_semantics` reports `is_legacy` and keys are not ignored; `compare_manifests` attaches `"note": "timing definition changed (<old_basis>/<old_clock> -> <new_basis>/<new_clock>)"` to `diff_report["modified"]["timing.elapsed_seconds"]` while preserving `type`/`old`/`new`; `_render_inline` and `_summarize_change` (used by `_render_table`) render `mod["note"]` while honoring `NO_COLOR`. Command `pytest tests/test_diff_usability.py tests/test_quality.py -v --no-cov` exited 0: `53 passed in 0.45s`.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Diff of `src/pubrun/tui/widgets/details.py` and `src/pubrun/tui/widgets/diff.py` showing `r.timing_semantics`-backed general pane breakdown, widened subprocess elapsed column with monotonic duration preference, `depth=depth` forwarding, and `mod["note"]` rendering in `DiffView`, plus pasted `pytest tests/test_tui.py -v` output.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff --stat src/pubrun/tui/widgets/details.py src/pubrun/tui/widgets/diff.py` (`+98/-18` and `+6/-1`): widened `#subprocesses-table` `Elapsed` column from 12 to 18 in `RunDetailsView.on_mount`; updated `update_general_pane` to use `r.timing_semantics`, render `"-"` when incomplete, note tracked-interval scope, and display separated overhead lines via `_format_duration_detail`; added `_format_subprocess_rows` helper used by `update_subprocesses_pane` preferring monotonic `elapsed_seconds` with clamped wall-clock fallback and malformed-entry guards; forwarded `depth=depth` in `DiffView.run_difference` and rendered `mod["note"]` in `DiffView.render_diff_report`. Command `pytest tests/test_tui.py -v --no-cov` exited 0: `11 passed in 2.60s`.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted `pytest tests/test_timing_consumers.py tests/test_diff_usability.py tests/test_reports.py tests/test_status.py tests/test_tui.py tests/test_edge_cases.py tests/test_tracker.py tests/test_quality.py tests/test_show_sections.py tests/test_methods_multi.py -v` output showing exit code 0 and zero failures (confirming `textual`-dependent tests use `pytest.importorskip("textual")` and `methods.py` single/multi precision behavior is verified).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Added `tests/test_timing_consumers.py` (including `pytest.importorskip("textual")` guards for TUI Pilot tests and `methods.py` single/multi precision checks) and expanded `tests/test_diff_usability.py`. Command `pytest tests/test_timing_consumers.py tests/test_diff_usability.py tests/test_reports.py tests/test_status.py tests/test_tui.py tests/test_edge_cases.py tests/test_tracker.py tests/test_quality.py tests/test_show_sections.py tests/test_methods_multi.py -v --no-cov` exited 0: `272 passed in 12.98s` (zero failures, zero skips).
+  - Result: pass
 
 ## Approval and execution gate
 

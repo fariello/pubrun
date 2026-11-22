@@ -32,8 +32,8 @@ class DiffView(Vertical):
                 yield Select([], id="select-diff-b", prompt="Comparison Run B...")
             with Horizontal(id="diff-settings"):
                 yield Select(
-                    [("Basic (Ignore Jitter & Env)", "basic"), 
-                     ("Standard (Compare dependencies)", "standard"), 
+                    [("Basic (Ignore Jitter & Env)", "basic"),
+                     ("Standard (Compare dependencies)", "standard"),
                      ("Deep (Compare full environment)", "deep")],
                     id="select-diff-depth",
                     value="basic",
@@ -43,7 +43,7 @@ class DiffView(Vertical):
             with Horizontal(id="diff-actions-row"):
                 yield Button("Compare Runs", id="btn-execute-diff", variant="success")
                 yield Button("Clear View", id="btn-clear-diff", variant="primary")
-        
+
         yield Label("DIFFERENCE REPORT:", classes="info-label")
         yield RichLog(id="diff-output-area", max_lines=5000, classes="log-area")
 
@@ -54,7 +54,7 @@ class DiffView(Vertical):
 
         # Build options list
         options = [(f"{r.script or 'unknown'} ({(r.run_id or 'unknown')[:8]})", str(r.run_dir)) for r in runs]
-        
+
         # Save previous selections if any
         prev_a = select_a.value
         prev_b = select_b.value
@@ -133,7 +133,9 @@ class DiffView(Vertical):
             show_same = self.query_one("#check-show-same", Checkbox).value
 
             # Compare
-            diff_report = compare_manifests(manifest_a, manifest_b, ignores, show_same=show_same)
+            diff_report = compare_manifests(
+                manifest_a, manifest_b, ignores, show_same=show_same, depth=depth
+            )
 
             # Format and render
             self.render_diff_report(diff_report)
@@ -189,6 +191,9 @@ class DiffView(Vertical):
                     new_str = _fmt_val(mod.get("new", ""))
                     output.write(Text(f"      - Old: {old_str}", style="#f38ba8"))
                     output.write(Text(f"      + New: {new_str}", style="#a6e3a1"))
+                note = mod.get("note")
+                if note:
+                    output.write(Text(f"      ! Note: {note}", style="#f9e2af"))
             output.write("")
 
         # SAME (Dim/Unchanged)

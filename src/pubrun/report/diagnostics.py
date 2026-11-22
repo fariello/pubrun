@@ -329,10 +329,13 @@ def _unwrap_value(val: Any, default: str = "unknown") -> str:
 
 
 def _format_report_timestamp(ts: Any, utc: bool = False) -> str:
-    if not _is_finite_number(ts) or not ts:
+    from pubrun.status import _as_float
+
+    val = _as_float(ts)
+    if val is None:
         return "unknown"
     try:
-        sdt = datetime.fromtimestamp(float(ts), tz=timezone.utc)
+        sdt = datetime.fromtimestamp(val, tz=timezone.utc)
         if not utc:
             sdt = sdt.astimezone()
         return sdt.strftime("%Y-%m-%d %H:%M:%S")
@@ -747,7 +750,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         elif outcome == "interrupted":
             out_color = Colors.YELLOW
 
-    from pubrun.status import _format_elapsed
+    from pubrun.status import _as_float, _format_duration_detail, classify_timing_semantics
 
     exit_str = ""
     if exit_code is not None:
@@ -771,10 +774,47 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
 
     start_str = _format_report_timestamp(timing.get("started_at_utc"), utc=utc)
     print(f"{cyan}Started{rst}     : {start_str}")
-    elapsed_val = timing.get("elapsed_seconds")
-    if _is_finite_number(elapsed_val):
-        elapsed_str = _format_elapsed(float(elapsed_val))
-        print(f"{cyan}Elapsed{rst}     : {elapsed_str}")
+
+    timing_sem = classify_timing_semantics(timing)
+    workload_val = _as_float(timing.get("workload_seconds"))
+    elapsed_raw = _as_float(timing.get("elapsed_seconds"))
+    if timing_sem.get("elapsed_basis") == "session" and elapsed_raw is not None:
+        elapsed_val = elapsed_raw
+    else:
+        elapsed_val = workload_val if workload_val is not None else elapsed_raw
+    startup_overhead = _as_float(timing.get("startup_overhead_seconds"))
+    finalization_overhead = _as_float(timing.get("finalization_overhead_seconds"))
+    hardware_wait = _as_float(timing.get("hardware_wait_seconds"))
+    session_val = _as_float(timing.get("session_seconds"))
+    bg_hardware = _as_float(timing.get("background_hardware_seconds"))
+
+    elapsed_label = timing_sem.get("label", "Elapsed")
+    elapsed_str = (
+        "unknown"
+        if elapsed_val is None
+        else _format_duration_detail(elapsed_val)
+    )
+    print(f"{cyan}{elapsed_label}{rst} : {elapsed_str}")
+    print(
+        f"{cyan}Timing Scope{rst} : tracked interval "
+        "(start() to stop(), not full application lifetime when imported late)"
+    )
+    if startup_overhead is not None:
+        print(f"{cyan}Startup overhead{rst} : {_format_duration_detail(startup_overhead)}")
+    if finalization_overhead is not None:
+        fin_str = _format_duration_detail(finalization_overhead)
+        if hardware_wait is not None:
+            fin_str += f" (includes Hardware wait: {_format_duration_detail(hardware_wait)})"
+        print(f"{cyan}Finalization overhead{rst} : {fin_str}")
+    elif hardware_wait is not None:
+        print(f"{cyan}Hardware wait{rst} : {_format_duration_detail(hardware_wait)}")
+    if session_val is not None:
+        print(f"{cyan}Tracked session{rst} : {_format_duration_detail(session_val)}")
+    if bg_hardware is not None:
+        print(
+            f"{cyan}Background hardware{rst} : "
+            f"{_format_duration_detail(bg_hardware)} (overlaps workload)"
+        )
 
     # Read Events if available
     events_path = Path(manifest_path).parent / "events.jsonl"
@@ -985,13 +1025,25 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         else:
             cmd_str = str(cmd)
         rc = sp.get("exit_code")
-        started = sp.get("started_at_utc")
-        ended = sp.get("ended_at_utc")
-        if _is_finite_number(started) and _is_finite_number(ended):
-            elapsed = round(float(ended) - float(started), 3)
-            print(f"  [{green if rc == 0 else red}{rc}{rst}] {cmd_str} ({elapsed}s)")
+        sp_elapsed = _as_float(sp.get("elapsed_seconds"))
+        if sp_elapsed is not None:
+            elapsed = round(max(0.0, sp_elapsed), 3)
+            sp_clock = sp.get("duration_clock")
+            if sp_clock == "monotonic":
+                dur_str = f" ({elapsed}s, monotonic)"
+            elif sp_clock == "wall_clock":
+                dur_str = f" ({elapsed}s, wall-clock)"
+            else:
+                dur_str = f" ({elapsed}s)"
         else:
-            print(f"  [{green if rc == 0 else red}{rc}{rst}] {cmd_str}")
+            started = _as_float(sp.get("started_at_utc"))
+            ended = _as_float(sp.get("ended_at_utc"))
+            if started is not None and ended is not None:
+                elapsed = round(max(0.0, ended - started), 3)
+                dur_str = f" ({elapsed}s, wall-clock)"
+            else:
+                dur_str = ""
+        print(f"  [{green if rc == 0 else red}{rc}{rst}] {cmd_str}{dur_str}")
 
     print()
 

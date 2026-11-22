@@ -34,7 +34,16 @@ except ImportError:
     def rich_escape(markup: str) -> str:  # type: ignore[misc]
         return markup
 
-from pubrun.status import RunInfo, STATUS_RUNNING, _format_bytes, _format_elapsed, _format_timestamp
+from pubrun.status import (
+    RunInfo,
+    STATUS_RUNNING,
+    _as_float,
+    _format_bytes,
+    _format_duration_detail,
+    _format_elapsed,
+    _format_timestamp,
+    classify_timing_semantics,
+)
 
 
 def _escape_markup(text: str) -> str:
@@ -83,6 +92,50 @@ def _filter_package_rows(
         rows.append((name, version, loc_str))
     return rows
 
+
+def _format_subprocess_rows(subprocesses: Any) -> List[Tuple[str, str, str, str]]:
+    """Format manifest subprocess records into ``(cmd, start_time, elapsed, exit_code)`` rows.
+
+    Pure helper with no ``textual`` dependency so monotonic duration preference,
+    legacy wall-clock fallback, and malformed-entry guards are directly testable.
+    """
+    if not isinstance(subprocesses, list):
+        return []
+    rows: List[Tuple[str, str, str, str]] = []
+    for sub in subprocesses:
+        if not isinstance(sub, dict):
+            continue
+        raw_argv = sub.get("argv", [])
+        if isinstance(raw_argv, list):
+            cmd = " ".join(str(a) for a in raw_argv)
+        elif raw_argv is None:
+            cmd = ""
+        else:
+            cmd = str(raw_argv)
+        start_val = _as_float(sub.get("started_at_utc"))
+        end_val = _as_float(sub.get("ended_at_utc"))
+        start_time = _format_timestamp(start_val)
+
+        sp_elapsed = _as_float(sub.get("elapsed_seconds"))
+        if sp_elapsed is not None:
+            dur = _format_duration_detail(max(0.0, sp_elapsed))
+            clock = sub.get("duration_clock")
+            if clock == "monotonic":
+                elapsed = f"{dur} (mono)"
+            elif clock == "wall_clock":
+                elapsed = f"{dur} (wall)"
+            else:
+                elapsed = dur
+        elif start_val is not None and end_val is not None:
+            elapsed = f"{_format_duration_detail(max(0.0, end_val - start_val))} (wall)"
+        else:
+            elapsed = "-"
+
+        exit_code = str(sub.get("exit_code")) if sub.get("exit_code") is not None else "Running"
+        rows.append((cmd, start_time, elapsed, exit_code))
+    return rows
+
+
 class RunDetailsView(Vertical):
     """Component to display all metadata groups for a single selected run."""
 
@@ -114,7 +167,7 @@ class RunDetailsView(Vertical):
         sub_table = self.query_one("#subprocesses-table", DataTable)
         sub_table.add_column("Command", width=50)
         sub_table.add_column("Start Time", width=20)
-        sub_table.add_column("Elapsed", width=12)
+        sub_table.add_column("Elapsed", width=18)
         sub_table.add_column("Exit Code", width=10)
         sub_table.cursor_type = "row"
 
@@ -156,9 +209,47 @@ class RunDetailsView(Vertical):
 
         lines.append(f"[bold #cba6f7]=== TIMING & METRICS ===[/bold #cba6f7]")
         lines.append(f"  [bold]Started:[/]       {_format_timestamp(r.started_at_utc)}")
-        if r.ended_at_utc:
+        if r.ended_at_utc is not None:
             lines.append(f"  [bold]Ended:[/]         {_format_timestamp(r.ended_at_utc)}")
-        lines.append(f"  [bold]Elapsed:[/]       {_format_elapsed(r.elapsed)}")
+        sem = getattr(r, "timing_semantics", None) or classify_timing_semantics(
+            r.manifest.get("timing") if isinstance(r.manifest, dict) else None,
+            status=r.status,
+        )
+        elapsed_label = _escape_markup(str(sem.get("label", "Elapsed")))
+        elapsed_display = (
+            "-"
+            if r.elapsed is None or sem.get("is_incomplete")
+            else _format_duration_detail(r.elapsed)
+        )
+        lines.append(f"  [bold]{elapsed_label}:[/] {elapsed_display}")
+        lines.append(
+            "  [bold]Timing Scope:[/]  tracked interval "
+            "(start() to stop(), not full process lifetime if imported late)"
+        )
+        if r.startup_overhead_seconds is not None:
+            lines.append(
+                f"  [bold]Startup overhead:[/] {_format_duration_detail(r.startup_overhead_seconds)}"
+            )
+        if r.finalization_overhead_seconds is not None:
+            fin_str = _format_duration_detail(r.finalization_overhead_seconds)
+            if r.hardware_wait_seconds is not None:
+                fin_str += (
+                    f" (includes Hardware wait: {_format_duration_detail(r.hardware_wait_seconds)})"
+                )
+            lines.append(f"  [bold]Finalization overhead:[/] {fin_str}")
+        elif r.hardware_wait_seconds is not None:
+            lines.append(
+                f"  [bold]Hardware wait:[/] {_format_duration_detail(r.hardware_wait_seconds)}"
+            )
+        if r.session_seconds is not None:
+            lines.append(
+                f"  [bold]Tracked session:[/] {_format_duration_detail(r.session_seconds)}"
+            )
+        if r.background_hardware_seconds is not None:
+            lines.append(
+                f"  [bold]Background hardware (overlaps workload):[/] "
+                f"{_format_duration_detail(r.background_hardware_seconds)}"
+            )
         lines.append(f"  [bold]Exit Code:[/]     {r.exit_code if r.exit_code is not None else '-'}")
         lines.append("")
 
@@ -278,21 +369,10 @@ class RunDetailsView(Vertical):
             return
 
         subprocesses = self.run_info.manifest.get("subprocesses", [])
-        row_idx = 0
-        for sub in subprocesses:
-            argv = sub.get("argv", [])
-            cmd = " ".join(argv)
-            start_time = _format_timestamp(sub.get("started_at_utc"))
-
-            # Elapsed
-            start_val = sub.get("started_at_utc")
-            end_val = sub.get("ended_at_utc")
-            elapsed = _format_elapsed(end_val - start_val) if (start_val and end_val) else "-"
-
-            exit_code = str(sub.get("exit_code")) if sub.get("exit_code") is not None else "Running"
-
+        for row_idx, (cmd, start_time, elapsed, exit_code) in enumerate(
+            _format_subprocess_rows(subprocesses)
+        ):
             table.add_row(cmd, start_time, elapsed, exit_code, key=str(row_idx))
-            row_idx += 1
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "pkg-search":
