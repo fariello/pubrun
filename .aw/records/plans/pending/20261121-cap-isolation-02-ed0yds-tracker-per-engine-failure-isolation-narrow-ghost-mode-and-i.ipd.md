@@ -226,6 +226,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - Engine-level hook ownership primitives and `format_safe_error_detail()` are implemented by prerequisite child plan `p6pon8` (safe diagnostic redaction and hook ownership rollback).
   - Carrier: p6pon8
+  - Carrier-Evidence: .aw/records/plans/executed/20261121-cap-isolation-01-p6pon8-safe-diagnostic-redaction-and-hook-ownership-rollback-across.ipd.md
 - Consumer rendering of partial manifests and `errors.records` (`pubrun report`, `pubrun inspect`, `pubrun methods`) belongs to child plan `26euz0` (partial manifest diagnostics, inspect findings, and methods honesty).
   - Carrier: 26euz0
 - Overhead benchmarking and documentation reconciliation belong to child plan `zp2yyu` (isolation overhead measurement and documentation reconciliation).
