@@ -1,5 +1,5 @@
 - Id: x21s6w
-- Status: graduated
+- Status: done
 - Graduated-To: cap-isolation
 - Blocks-Release: next
 - Set: pubrun-improve
@@ -11,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-22 done (aw backlog): closed by aw agy run: IPD frzw20 executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261121-cap-isolation-00-frzw20-capture-failure-isolation-and-transactional-hook-rollback.ipd.md); evidence .aw/records/plans/executed/20261121-cap-isolation-00-frzw20-capture-failure-isolation-and-transactional-hook-rollback.ipd.md
 - 2026-11-22 graduated (aw backlog): graduated by run run-20261122T010822Z-2359880: 26euz0, ed0yds, frzw20, p6pon8, zp2yyu
 - 2026-11-22 same-status (aw set): Gate next release per check.live-bug-ungated
 - 2026-11-21 created (aw backlog): Maintainer requested detailed backlog capture; implementation remains future work.
