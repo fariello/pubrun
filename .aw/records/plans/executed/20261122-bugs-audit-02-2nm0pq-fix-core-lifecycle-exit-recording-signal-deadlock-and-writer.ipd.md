@@ -5,8 +5,9 @@
 - Concern: Bugs and correctness (run lifecycle state machine, exit/exception recording, signal safety, atomic artifact writing, and public Python APIs).
 - Scope: `src/pubrun/tracker.py`, `src/pubrun/capture/signals.py`, `src/pubrun/writer.py`, `src/pubrun/core.py`, `src/pubrun/events.py`, and regression tests in `tests/test_core_lifecycle_bugs.py`.
 - Scope-Paths: src/pubrun/tracker.py, src/pubrun/capture/signals.py, src/pubrun/writer.py, src/pubrun/core.py, src/pubrun/events.py, tests/test_core_lifecycle_bugs.py
+- Scope-Exceeded: tests/test_explicit_api.py (asserted exit_code None for CalledProcessError, which BUG-06 intentionally changes to the return code); tests/test_writer.py (asserted TypeError on plain-object config, which BUG-09 default=str intentionally fixes)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix exception/sys.exit status recording, signal re-entrancy deadlock, atomic JSON writer, python -m boot, and subprocess/phase API bugs
@@ -18,12 +19,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: 2nm0pq
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): aw oc run self-finalize: 2nm0pq verified (set bugs-audit, attempt 1). [Scope reconciliation - out-of-scope tests/test_explicit_api.py: asserted exit_code None for CalledProcessError, which BUG-06 intentionally changes to the return code; out-of-scope tests/test_writer.py: asserted TypeError on plain-object config, which BUG-09 default=str intentionally fixes]
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-22 to-review (Antigravity): authored fix steps, citations, and falsifiable validation criteria.
