@@ -6,7 +6,7 @@
 - Scope: Implement external file registration and pending-output finalization in `src/pubrun/capture/file_io.py`, expose `register_file`, `register_input`, and `register_output` in `src/pubrun/core.py` and `src/pubrun/__init__.py`, and add behavioral tests in `tests/test_file_registration.py`.
 - Scope-Paths: src/pubrun/capture/file_io.py, src/pubrun/core.py, src/pubrun/__init__.py, tests/test_file_registration.py
 - Item-Dependencies: executed:xxi3nc
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Add register_file, register_input, and register_output with labels, asserted/verified digests, and deduplication
@@ -18,12 +18,12 @@
 - Highest E allocated: 04
 - Author: agent
 - Id: 52dl55
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 52dl55 verified (set file-prov, attempt 1).
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-21 to-review (agent): authored child plan 02 of Set `file-prov` graduating backlog item `x6alw4`.
