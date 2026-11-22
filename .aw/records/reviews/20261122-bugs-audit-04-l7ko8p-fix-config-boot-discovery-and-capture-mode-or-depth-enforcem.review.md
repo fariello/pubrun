@@ -4,7 +4,7 @@
 - Subject-Type: ipd
 - Reviewed-At: 2026-11-22
 - Reviewer: Gemini 4 Neon (High)
-- Verdict: REVIEWED - OPEN QUESTIONS
+- Verdict: APPROVE WITH REVISIONS APPLIED
 
 ## Round 1
 
@@ -102,5 +102,48 @@ AW-TIER: complex
 ### Step S6
 
 - Checked: `steps/s6-rereview.md` trigger rules against all Round 1 edits. No `E-*` or `V-*` items were added or removed (still `E-01`..`E-04` and `V-01`..`V-04`), `- Scope-Paths:` and `- Item-Dependencies:` did not change, and a full cross-section sweep confirmed zero stale tokens (`get_process` without `_info`, `_user_config_path`, `load_boot_config`, false `pyproject.toml` claim) and consistent escalation of `PR-001` into `OQ-01` and `05-l7ko8p.json`.
+
+AW-REVIEW: DONE
+
+## Round 2
+
+### Step S5
+
+- Checked: Recorded the maintainer's resolution to `05-l7ko8p-a1-env-allowlist-contract` (`OQ-01`: `Option 1 (Recommended): allowlist = [] with exact + fnmatch globs, fail-closed empty`, adding `src/pubrun/resources/default.toml` and `docs/configuration.md` to `- Scope-Paths:`) in `.aw/records/plans/pending/20261122-bugs-audit-04-l7ko8p-fix-config-boot-discovery-and-capture-mode-or-depth-enforcem.ipd.md` (`- Status: resolved`, preserving `- Blocking: yes`, `- Finding: PR-001`, `- Carrier: 9mxiq1`, `- Owner: maintainer`, and appending the `RESOLVED 2026-11-22 by the user via /askme: ... No reason was given.` record). Removed the `**Unresolved (`OQ-01`):**` annotation from `E-02`, expanded `E-02`, `Proposed changes #3`, `Spec / documentation sync`, `V-02`, and `Approval and execution gate` with the approved `[capture.environment].allowlist = []` contract, and cleared `PR-001` below per `steps/s5-questions.md` escalation return path.
+
+### Findings
+
+| ID | Severity | Scope | Area | Evidence | Finding | Remediation Risk | Decision | Resolution |
+|---|---|---|---|---|---|---|---|---|
+| PR-001 | HIGH | UNDER-SCOPE | R1/R4.A/R4.Spec-doc-sync/S5 | `.aw/records/plans/pending/20261122-bugs-audit-04-l7ko8p-fix-config-boot-discovery-and-capture-mode-or-depth-enforcem.ipd.md:61-65,120-130`, `src/pubrun/resources/default.toml:191-198`, `docs/configuration.md:140-146` | Missing public TOML key name, matching semantics, and empty-list default for `[capture.environment].mode = "allowlist"` (escalated in Round 1 as `OQ-01`). | C:Low; U:Low; S:Low; F:Low; Overall:Low | FIXED | Resolved by maintainer answer to `OQ-01` on 2026-11-22 (`Option 1: allowlist = [] with exact + fnmatch globs, fail-closed empty`). Added `src/pubrun/resources/default.toml` and `docs/configuration.md` to `- Scope-Paths:` and specified exact `fnmatch.fnmatchcase` filtering, fail-closed empty/omitted/non-sequence handling, `redact_env_vars` retention, and doc sync in `E-02`/`V-02` (recommendation strength: very strong). |
+
+### Step S6
+
+- Checked: `steps/s6-rereview.md` trigger rules against Round 2 edits. Round 2 added `src/pubrun/resources/default.toml` and `docs/configuration.md` to `- Scope-Paths:`, so a Round 3 re-review verification pass is required before finalization.
+
+AW-REVIEW: AGAIN
+
+## Round 3
+
+### Step R1
+
+- Checked: Re-read the entire revised `.aw/records/plans/pending/20261122-bugs-audit-04-l7ko8p-fix-config-boot-discovery-and-capture-mode-or-depth-enforcem.ipd.md` after Round 2 edits. Verified every `path::Symbol` citation against `src/pubrun/_config_boot.py`, `src/pubrun/config.py`, `src/pubrun/capture/environment.py`, `src/pubrun/capture/git.py`, `src/pubrun/capture/host.py`, `src/pubrun/capture/process.py`, `src/pubrun/capture/python_runtime.py`, `src/pubrun/capture/redaction.py`, `src/pubrun/resources/default.toml`, and `docs/configuration.md`. Swept the plan for superseded tokens (`Unresolved (OQ-01)`, `pending maintainer decision`, `if confirmed by OQ-01`, `if added upon resolving OQ-01`, `Pending OQ-01`): zero stale occurrences remain.
+
+### Step R2
+
+- Checked: Re-verified 1:1 `E-01`..`E-04` to `V-01`..`V-04` bijection, 10-file `- Scope-Paths:` parity across `Scope`, `Scope-Paths`, `Scope check`, `Proposed changes`, and Execution contract items 2 and 4, `- Item-Dependencies: none`, `OQ-01` marked `- Status: resolved` with verbatim maintainer choice, zero remaining blocking open questions, compliant 5-item Execution contract, and `aw ipd lint --phase review-finalize --agent` clean disposition.
+
+### Step R7
+
+- Checked: Re-verified cross-plan alignment with Set `bugs-audit` orchestrator `jqqvkh` and sibling child plans (`njn1up`..`kqzd15`). Confirmed adding `src/pubrun/resources/default.toml` and `docs/configuration.md` to `l7ko8p`'s `- Scope-Paths:` keeps all 9 child plans in Set `bugs-audit` completely file-disjoint.
+
+### Findings
+
+| ID | Severity | Scope | Area | Evidence | Finding | Remediation Risk | Decision | Resolution |
+|---|---|---|---|---|---|---|---|---|
+
+### Step S6
+
+- Checked: Round 3 re-review pass confirmed zero new findings, zero changes to `E-*`/`V-*` counts, `- Scope-Paths:`, or `- Item-Dependencies:` in Round 3, and full cross-section consistency across front matter, workflow history, flowchart, checklist, findings, proposed changes, doc sync, resolved `OQ-01`, validation items, and execution gate.
 
 AW-REVIEW: DONE
