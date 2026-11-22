@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from typing import Any, Callable, Dict, Optional
 
 from pubrun.tracker import Run, get_current_run
@@ -344,6 +345,7 @@ class phase:
         self.name = name
         self.run_tracker = get_current_run()
         self._profiler = None
+        self._start_mono: Optional[float] = None
 
     def __enter__(self) -> "phase":
         if self.run_tracker and getattr(self.run_tracker, "event_stream", None):
@@ -382,9 +384,11 @@ class phase:
                     logging.getLogger("pubrun").warning(
                         f"pubrun: profiling backend '{backend}' unavailable: {prof_err}"
                     )
+        self._start_mono = time.perf_counter()
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        end_mono = time.perf_counter()
         # Stop profiler and dump stats
         if self._profiler and self.run_tracker and self.run_tracker.is_active:
             try:
@@ -418,11 +422,19 @@ class phase:
             self._profiler = None
 
         if self.run_tracker and getattr(self.run_tracker, "event_stream", None):
+            end_payload: Dict[str, Any] = {}
+            if self._start_mono is not None:
+                end_payload["elapsed_seconds"] = max(0.0, end_mono - self._start_mono)
+                end_payload["duration_clock"] = "monotonic"
             if exc_type is not None:
-                err_payload = {"error": exc_val.__class__.__name__}
-                self.run_tracker.event_stream.emit("phase_end", name=self.name, payload=err_payload)
-            else:
-                self.run_tracker.event_stream.emit("phase_end", name=self.name)
+                end_payload["error"] = (
+                    exc_val.__class__.__name__ if exc_val is not None else exc_type.__name__
+                )
+            self.run_tracker.event_stream.emit(
+                "phase_end",
+                name=self.name,
+                payload=end_payload if end_payload else None,
+            )
 
 
 # -- Boot sequence ------------------------------------------------------------
@@ -476,7 +488,6 @@ def _execute_boot_sequence(selected_by: str = "pubrun") -> None:
 
 # -- Explicit Tracking API (Phases 1-4) --------------------------------------
 
-import time
 import subprocess as _subprocess
 from pathlib import Path
 import builtins
@@ -868,12 +879,13 @@ class _PubrunSubprocessNamespace:
     @staticmethod
     def run(*args: Any, **kwargs: Any) -> _subprocess.CompletedProcess:
         cmd = args[0] if args else kwargs.get("args")
-        if isinstance(cmd, list):
+        if isinstance(cmd, (list, tuple)):
             cmd_args = [str(c) for c in cmd]
         else:
             cmd_args = [str(cmd)]
 
         started_at = time.time()
+        start_mono = time.perf_counter()
 
         from pubrun.capture.subprocesses import disable_spy
         try:
@@ -883,19 +895,26 @@ class _PubrunSubprocessNamespace:
             # Record the failed invocation for provenance (parity with the
             # SubprocessSpy, which logs failures), then re-raise unchanged so
             # host semantics are untouched. (IPD 20260705 EC-25.)
+            ended_at = time.time()
+            elapsed = max(0.0, time.perf_counter() - start_mono)
+            err_detail = f"{type(exc).__name__}: {exc}"
             current_run = get_current_run()
             if current_run and current_run.is_active:
                 _append_manual_subprocess_record(current_run, {
                     "argv": cmd_args,
                     "exit_code": None,
                     "started_at_utc": started_at,
-                    "ended_at_utc": time.time(),
+                    "ended_at_utc": ended_at,
+                    "elapsed_seconds": elapsed,
+                    "duration_clock": "monotonic",
                     "pid": None,
-                    "error": f"{type(exc).__name__}: {exc}",
+                    "error": err_detail,
+                    "capture_state": {"status": "failed", "detail": err_detail},
                 })
             raise
 
         ended_at = time.time()
+        elapsed = max(0.0, time.perf_counter() - start_mono)
 
         current_run = get_current_run()
         if current_run and current_run.is_active:
@@ -904,7 +923,12 @@ class _PubrunSubprocessNamespace:
                 "exit_code": res.returncode,
                 "started_at_utc": started_at,
                 "ended_at_utc": ended_at,
-                "pid": None
+                "elapsed_seconds": elapsed,
+                "duration_clock": "monotonic",
+                "pid": None,
+                "capture_state": {
+                    "status": "complete" if res.returncode == 0 else "failed"
+                },
             }
             _append_manual_subprocess_record(current_run, record)
 
@@ -914,11 +938,35 @@ class _PubrunSubprocessNamespace:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             self._pubrun_cmd = args[0] if args else kwargs.get("args")
             self._pubrun_started_at = time.time()
+            self._pubrun_start_mono = time.perf_counter()
             self._pubrun_log_lock = threading.Lock()
             self._pubrun_logged = False
             from pubrun.capture.subprocesses import disable_spy
-            with disable_spy():
-                super().__init__(*args, **kwargs)
+            try:
+                with disable_spy():
+                    super().__init__(*args, **kwargs)
+            except Exception as exc:
+                ended_at = time.time()
+                elapsed = max(0.0, time.perf_counter() - self._pubrun_start_mono)
+                err_detail = f"{type(exc).__name__}: {exc}"
+                current_run = get_current_run()
+                if current_run and current_run.is_active:
+                    if isinstance(self._pubrun_cmd, (list, tuple)):
+                        cmd_args = [str(c) for c in self._pubrun_cmd]
+                    else:
+                        cmd_args = [str(self._pubrun_cmd)]
+                    _append_manual_subprocess_record(current_run, {
+                        "argv": cmd_args,
+                        "exit_code": None,
+                        "started_at_utc": self._pubrun_started_at,
+                        "ended_at_utc": ended_at,
+                        "elapsed_seconds": elapsed,
+                        "duration_clock": "monotonic",
+                        "pid": None,
+                        "error": err_detail,
+                        "capture_state": {"status": "failed", "detail": err_detail},
+                    })
+                raise
 
         def _log_pubrun_record(self) -> None:
             # Atomically claim the single log slot so concurrent wait()/poll()
@@ -934,19 +982,27 @@ class _PubrunSubprocessNamespace:
                     return
                 self._pubrun_logged = True
             ended_at = time.time()
+            end_mono = time.perf_counter()
+            start_mono = getattr(self, "_pubrun_start_mono", None)
             current_run = get_current_run()
             if current_run and current_run.is_active:
-                if isinstance(self._pubrun_cmd, list):
+                if isinstance(self._pubrun_cmd, (list, tuple)):
                     cmd_args = [str(c) for c in self._pubrun_cmd]
                 else:
                     cmd_args = [str(self._pubrun_cmd)]
-                record = {
+                record: Dict[str, Any] = {
                     "argv": cmd_args,
                     "exit_code": self.returncode,
                     "started_at_utc": self._pubrun_started_at,
                     "ended_at_utc": ended_at,
-                    "pid": self.pid
+                    "pid": self.pid,
+                    "capture_state": {
+                        "status": "complete" if self.returncode == 0 else "failed"
+                    },
                 }
+                if start_mono is not None:
+                    record["elapsed_seconds"] = max(0.0, end_mono - start_mono)
+                    record["duration_clock"] = "monotonic"
                 _append_manual_subprocess_record(current_run, record)
 
         def wait(self, timeout: Optional[float] = None) -> int:
@@ -972,9 +1028,29 @@ subprocess = _PubrunSubprocessNamespace()
 def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
     """Wrapper around os.popen that tracks execution provenance."""
     started_at = time.time()
+    start_mono = time.perf_counter()
     from pubrun.capture.subprocesses import disable_spy
-    with disable_spy():
-        pipe = os.popen(cmd, mode, bufsize)
+    try:
+        with disable_spy():
+            pipe = os.popen(cmd, mode, bufsize)
+    except Exception as exc:
+        ended_at = time.time()
+        elapsed = max(0.0, time.perf_counter() - start_mono)
+        err_detail = f"{type(exc).__name__}: {exc}"
+        current_run = get_current_run()
+        if current_run and current_run.is_active:
+            _append_manual_subprocess_record(current_run, {
+                "argv": [cmd],
+                "exit_code": None,
+                "started_at_utc": started_at,
+                "ended_at_utc": ended_at,
+                "elapsed_seconds": elapsed,
+                "duration_clock": "monotonic",
+                "pid": None,
+                "error": err_detail,
+                "capture_state": {"status": "failed", "detail": err_detail},
+            })
+        raise
 
     class _PopenPipeProxy:
         def __init__(self, pipe_obj: Any) -> None:
@@ -986,6 +1062,8 @@ def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
                 return None
             self._closed = True
             exit_status = self._pipe_obj.close()
+            ended_at = time.time()
+            end_mono = time.perf_counter()
             rc = 0
             if exit_status is not None:
                 if sys.platform == "win32":
@@ -993,7 +1071,6 @@ def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
                 else:
                     rc = os.WEXITSTATUS(exit_status) if os.WIFEXITED(exit_status) else exit_status
 
-            ended_at = time.time()
             current_run = get_current_run()
             if current_run and current_run.is_active:
                 record = {
@@ -1001,7 +1078,12 @@ def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
                     "exit_code": rc,
                     "started_at_utc": started_at,
                     "ended_at_utc": ended_at,
-                    "pid": None
+                    "elapsed_seconds": max(0.0, end_mono - start_mono),
+                    "duration_clock": "monotonic",
+                    "pid": None,
+                    "capture_state": {
+                        "status": "complete" if rc == 0 else "failed"
+                    },
                 }
                 _append_manual_subprocess_record(current_run, record)
             return exit_status

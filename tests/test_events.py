@@ -203,7 +203,7 @@ class TestEventStreamMigration:
         config = {"events": {"enabled": True}}
         stream = EventStream(dir1, config=config)
         stream.emit("annotation", name="event1")
-        
+
         # Migrate
         stream.migrate_directory(dir2)
         stream.emit("annotation", name="event2")
@@ -225,11 +225,11 @@ class TestEventStreamMigration:
         from pubrun.tracker import Run
         dir1 = tmp_path / "dir1"
         dir2 = tmp_path / "dir2"
-        
+
         monkeypatch.setattr("pathlib.Path.cwd", lambda: dir1)
         run = Run(overrides={"events": {"enabled": True}})
         run.event_stream.emit("annotation", name="before_migration")
-        
+
         # Trigger directory migration via config overrides
         run._merge_and_migrate({"core": {"output_dir": str(dir2)}})
         run.event_stream.emit("annotation", name="after_migration")
@@ -279,3 +279,182 @@ class TestEventStreamCriticalCap:
         assert stream._max_critical_events == 10000
         stream.close()
 
+
+class _FakeClock:
+    """Thread-safe deterministic wall and monotonic clock for phase timing tests."""
+
+    def __init__(self, wall: float = 1_750_000_000.0, mono: float = 987654.321) -> None:
+        import threading
+        import time as _real_time
+
+        self._lock = threading.Lock()
+        self._real_time = _real_time
+        self._wall = float(wall)
+        self._mono = float(mono)
+
+    def time(self) -> float:
+        with self._lock:
+            return self._wall
+
+    def perf_counter(self) -> float:
+        with self._lock:
+            return self._mono
+
+    def advance(self, seconds: float) -> None:
+        with self._lock:
+            self._mono += seconds
+            self._wall += seconds
+
+    def jump_wall(self, delta: float) -> None:
+        with self._lock:
+            self._wall += delta
+
+    def __getattr__(self, name: str):
+        return getattr(self._real_time, name)
+
+
+class TestPhaseMonotonicTiming:
+    """Deterministic tests for monotonic phase durations and profiler boundary exclusion."""
+
+    def test_phase_monotonic_duration_survives_forward_and_backward_wall_jumps(
+        self, tmp_path, monkeypatch
+    ):
+        import pytest
+        import pubrun.core as core_mod
+        import pubrun.events as events_mod
+
+        clock = _FakeClock(wall=1_750_000_000.0, mono=987654.321)
+        monkeypatch.setattr(core_mod, "time", clock)
+        monkeypatch.setattr(events_mod, "time", clock)
+        monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+
+        t = start(events={"enabled": True}, capture={"resources": {"depth": "off"}})
+        try:
+            with phase("forward_jump"):
+                clock.advance(0.35)
+                clock.jump_wall(7200.0)
+
+            with phase("backward_jump"):
+                clock.advance(0.20)
+                clock.jump_wall(-7200.0)
+        finally:
+            t.stop()
+
+        raw_text = (t.run_dir / "events.jsonl").read_text("utf-8")
+        assert "987654" not in raw_text
+        events = [json.loads(line) for line in raw_text.strip().splitlines()]
+
+        fwd_start = next(
+            ev for ev in events if ev["type"] == "phase_start" and ev["name"] == "forward_jump"
+        )
+        fwd_end = next(
+            ev for ev in events if ev["type"] == "phase_end" and ev["name"] == "forward_jump"
+        )
+        assert fwd_end["timestamp_utc"] - fwd_start["timestamp_utc"] == pytest.approx(
+            7200.35, abs=1e-5
+        )
+        assert fwd_end["payload"]["elapsed_seconds"] == pytest.approx(0.35, abs=1e-9)
+        assert fwd_end["payload"]["duration_clock"] == "monotonic"
+
+        bwd_start = next(
+            ev for ev in events if ev["type"] == "phase_start" and ev["name"] == "backward_jump"
+        )
+        bwd_end = next(
+            ev for ev in events if ev["type"] == "phase_end" and ev["name"] == "backward_jump"
+        )
+        assert bwd_end["timestamp_utc"] < bwd_start["timestamp_utc"]
+        assert bwd_end["payload"]["elapsed_seconds"] == pytest.approx(0.20, abs=1e-9)
+        assert bwd_end["payload"]["duration_clock"] == "monotonic"
+
+        for ev in events:
+            for key in ev.get("payload", {}).keys():
+                assert not key.endswith("_mono")
+
+    def test_phase_exception_records_monotonic_duration_and_error(
+        self, tmp_path, monkeypatch
+    ):
+        import pytest
+        import pubrun.core as core_mod
+        import pubrun.events as events_mod
+
+        clock = _FakeClock(wall=1_750_000_000.0, mono=987654.321)
+        monkeypatch.setattr(core_mod, "time", clock)
+        monkeypatch.setattr(events_mod, "time", clock)
+        monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+
+        t = start(events={"enabled": True}, capture={"resources": {"depth": "off"}})
+        try:
+            with pytest.raises(RuntimeError, match="phase failure"):
+                with phase("failing_phase"):
+                    clock.advance(0.15)
+                    clock.jump_wall(-7200.0)
+                    raise RuntimeError("phase failure")
+        finally:
+            t.stop()
+
+        raw_text = (t.run_dir / "events.jsonl").read_text("utf-8")
+        assert "987654" not in raw_text
+        events = [json.loads(line) for line in raw_text.strip().splitlines()]
+
+        end_ev = next(
+            ev for ev in events if ev["type"] == "phase_end" and ev["name"] == "failing_phase"
+        )
+        assert end_ev["payload"]["error"] == "RuntimeError"
+        assert end_ev["payload"]["elapsed_seconds"] == pytest.approx(0.15, abs=1e-9)
+        assert end_ev["payload"]["duration_clock"] == "monotonic"
+
+    def test_phase_cprofile_excludes_profiler_startup_and_dump_stats(
+        self, tmp_path, monkeypatch
+    ):
+        import cProfile
+        import pytest
+        import pubrun.core as core_mod
+        import pubrun.events as events_mod
+
+        clock = _FakeClock(wall=1_750_000_000.0, mono=987654.321)
+        monkeypatch.setattr(core_mod, "time", clock)
+        monkeypatch.setattr(events_mod, "time", clock)
+        monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+
+        real_enable = cProfile.Profile.enable
+        real_dump_stats = cProfile.Profile.dump_stats
+
+        def slow_enable(self, *args, **kwargs):
+            clock.advance(2.0)
+            return real_enable(self, *args, **kwargs)
+
+        def slow_dump_stats(self, file):
+            clock.advance(5.0)
+            return real_dump_stats(self, file)
+
+        monkeypatch.setattr(cProfile.Profile, "enable", slow_enable)
+        monkeypatch.setattr(cProfile.Profile, "dump_stats", slow_dump_stats)
+
+        t = start(
+            events={"enabled": True},
+            capture={
+                "resources": {"depth": "off"},
+                "profiling": {"enabled": True, "backend": "cprofile"},
+            },
+        )
+        try:
+            with phase("profiled_phase"):
+                clock.advance(0.25)
+                clock.jump_wall(-7200.0)
+                _ = sum(range(100))
+        finally:
+            t.stop()
+
+        raw_text = (t.run_dir / "events.jsonl").read_text("utf-8")
+        assert "987654" not in raw_text
+        events = [json.loads(line) for line in raw_text.strip().splitlines()]
+
+        assert any(
+            ev["type"] == "profile_saved" and ev["name"] == "profiled_phase"
+            for ev in events
+        )
+        end_ev = next(
+            ev for ev in events if ev["type"] == "phase_end" and ev["name"] == "profiled_phase"
+        )
+        assert end_ev["payload"]["elapsed_seconds"] == pytest.approx(0.25, abs=1e-9)
+        assert end_ev["payload"]["duration_clock"] == "monotonic"

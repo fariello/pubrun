@@ -366,3 +366,301 @@ class TestTqdmSafeTeeBrokenPipe:
 
         # flush should NOT raise
         tee.flush()
+
+
+class _FakeClock:
+    """Thread-safe deterministic wall and monotonic clock for capture timing tests."""
+
+    def __init__(self, wall: float = 1_750_000_000.0, mono: float = 987654.321) -> None:
+        import threading
+        import time as _real_time
+
+        self._lock = threading.Lock()
+        self._real_time = _real_time
+        self._wall = float(wall)
+        self._mono = float(mono)
+
+    def time(self) -> float:
+        with self._lock:
+            return self._wall
+
+    def perf_counter(self) -> float:
+        with self._lock:
+            return self._mono
+
+    def advance(self, seconds: float) -> None:
+        with self._lock:
+            self._mono += seconds
+            self._wall += seconds
+
+    def jump_wall(self, delta: float) -> None:
+        with self._lock:
+            self._wall += delta
+
+    def __getattr__(self, name: str):
+        return getattr(self._real_time, name)
+
+
+class TestSubprocessSpyMonotonicTiming:
+    """Deterministic wall-clock-step tests for SubprocessSpy monotonic durations."""
+
+    def test_popen_forward_and_backward_wall_jumps(self, monkeypatch):
+        import pytest
+        import pubrun.capture.subprocesses as sub_mod
+
+        clock = _FakeClock(wall=1_750_000_000.0, mono=987654.321)
+        monkeypatch.setattr(sub_mod, "time", clock)
+
+        SubprocessSpy.install(max_records=100)
+        try:
+            p_fwd = subprocess.Popen([sys.executable, "-c", "pass"])
+            clock.advance(0.40)
+            clock.jump_wall(7200.0)
+            assert p_fwd.wait() == 0
+
+            p_bwd = subprocess.Popen([sys.executable, "-c", "pass"])
+            clock.advance(0.15)
+            clock.jump_wall(-7200.0)
+            assert p_bwd.wait() == 0
+
+            records = list(SubprocessSpy.get_records())
+        finally:
+            SubprocessSpy.uninstall()
+
+        assert SubprocessSpy._start_monos == {}
+        assert len(records) == 2
+
+        fwd, bwd = records
+        assert fwd["elapsed_seconds"] == pytest.approx(0.40, abs=1e-9)
+        assert fwd["duration_clock"] == "monotonic"
+        assert fwd["ended_at_utc"] - fwd["started_at_utc"] == pytest.approx(7200.40, abs=1e-5)
+        assert fwd["capture_state"]["status"] == "complete"
+
+        assert bwd["elapsed_seconds"] == pytest.approx(0.15, abs=1e-9)
+        assert bwd["duration_clock"] == "monotonic"
+        assert bwd["ended_at_utc"] < bwd["started_at_utc"]
+        assert bwd["capture_state"]["status"] == "complete"
+
+        assert "987654" not in json.dumps(records)
+
+    def test_os_system_backward_wall_jump_and_exception(self, monkeypatch):
+        import pytest
+        import pubrun.capture.subprocesses as sub_mod
+
+        clock = _FakeClock(wall=1_750_000_000.0, mono=987654.321)
+        monkeypatch.setattr(sub_mod, "time", clock)
+
+        def fake_system(cmd: str) -> int:
+            if cmd == "fail_cmd":
+                clock.advance(0.12)
+                clock.jump_wall(-7200.0)
+                raise OSError("system boom")
+            clock.advance(0.30)
+            clock.jump_wall(-7200.0)
+            return 0
+
+        monkeypatch.setattr(os, "system", fake_system)
+        SubprocessSpy.install(max_records=100)
+        try:
+            assert os.system("ok_cmd") == 0
+            with pytest.raises(OSError, match="system boom"):
+                os.system("fail_cmd")
+            records = list(SubprocessSpy.get_records())
+        finally:
+            SubprocessSpy.uninstall()
+
+        assert SubprocessSpy._start_monos == {}
+        assert len(records) == 2
+
+        ok_rec, err_rec = records
+        assert ok_rec["exit_code"] == 0
+        assert ok_rec["ended_at_utc"] < ok_rec["started_at_utc"]
+        assert ok_rec["elapsed_seconds"] == pytest.approx(0.30, abs=1e-9)
+        assert ok_rec["duration_clock"] == "monotonic"
+        assert ok_rec["capture_state"]["status"] == "complete"
+
+        assert err_rec["ended_at_utc"] < err_rec["started_at_utc"]
+        assert err_rec["elapsed_seconds"] == pytest.approx(0.12, abs=1e-9)
+        assert err_rec["duration_clock"] == "monotonic"
+        assert err_rec["capture_state"]["status"] == "failed"
+        assert "system boom" in err_rec["capture_state"]["detail"]
+
+        assert "987654" not in json.dumps(records)
+
+    def test_popen_launch_failure_records_monotonic_duration(self, monkeypatch):
+        import pytest
+        import pubrun.capture.subprocesses as sub_mod
+
+        clock = _FakeClock(wall=1_750_000_000.0, mono=987654.321)
+        monkeypatch.setattr(sub_mod, "time", clock)
+
+        def failing_popen_init(self, *args, **kwargs):
+            clock.advance(0.07)
+            clock.jump_wall(-7200.0)
+            raise FileNotFoundError("no such binary")
+
+        monkeypatch.setattr(subprocess.Popen, "__init__", failing_popen_init)
+        SubprocessSpy.install(max_records=100)
+        try:
+            with pytest.raises(FileNotFoundError, match="no such binary"):
+                subprocess.Popen(["__missing_binary__"])
+            records = list(SubprocessSpy.get_records())
+        finally:
+            SubprocessSpy.uninstall()
+
+        assert len(records) == 1
+        rec = records[0]
+        assert rec["ended_at_utc"] < rec["started_at_utc"]
+        assert rec["elapsed_seconds"] == pytest.approx(0.07, abs=1e-9)
+        assert rec["duration_clock"] == "monotonic"
+        assert rec["capture_state"]["status"] == "failed"
+        assert "987654" not in json.dumps(records)
+
+    def test_finalize_all_monotonic_non_collision_and_post_finalize_wait(self, monkeypatch):
+        import pytest
+        import pubrun.capture.subprocesses as sub_mod
+
+        clock = _FakeClock(wall=1_750_000_000.0, mono=987654.321)
+        monkeypatch.setattr(sub_mod, "time", clock)
+
+        SubprocessSpy.install(max_records=100)
+        try:
+            proc = subprocess.Popen([sys.executable, "-c", "pass"])
+            synthetic = {
+                "argv": ["synthetic_cmd"],
+                "exit_code": None,
+                "capture_state": {"status": "partial"},
+            }
+            SubprocessSpy._records.append(synthetic)
+
+            clock.advance(0.25)
+            clock.jump_wall(-7200.0)
+            SubprocessSpy.finalize_all()
+
+            real_rec = SubprocessSpy._records[0]
+            assert real_rec["ended_at_utc"] < real_rec["started_at_utc"]
+            assert real_rec["elapsed_seconds"] == pytest.approx(0.25, abs=1e-9)
+            assert real_rec["duration_clock"] == "monotonic"
+            assert real_rec["capture_state"]["status"] == "complete"
+
+            # Synthetic record has no monotonic entry and leaves elapsed_seconds unset.
+            assert synthetic["capture_state"]["status"] == "complete"
+            assert "ended_at_utc" in synthetic
+            assert "elapsed_seconds" not in synthetic
+            assert "duration_clock" not in synthetic
+
+            # Waiting after finalize_all preserves the already-finalized monotonic duration.
+            clock.advance(10.0)
+            assert proc.wait() == 0
+            assert real_rec["exit_code"] == 0
+            assert real_rec["elapsed_seconds"] == pytest.approx(0.25, abs=1e-9)
+            assert real_rec["duration_clock"] == "monotonic"
+
+            serialized = json.dumps(SubprocessSpy._records)
+        finally:
+            SubprocessSpy.uninstall()
+
+        assert SubprocessSpy._start_monos == {}
+        assert "987654" not in serialized
+
+    def test_subprocess_spy_manifest_validates_against_schema(self, tmp_path, monkeypatch):
+        import pytest
+        import pubrun.capture.subprocesses as sub_mod
+        import pubrun.tracker as tracker_mod
+        import pubrun.writer as writer_mod
+
+        jsonschema = pytest.importorskip("jsonschema")
+        schema_path = Path(__file__).resolve().parents[1] / "schemas" / "manifest.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+        clock = _FakeClock(wall=1_750_000_000.0, mono=987654.321)
+        monkeypatch.setattr(sub_mod, "time", clock)
+        monkeypatch.setattr(tracker_mod, "time", clock)
+        monkeypatch.setattr(writer_mod, "time", clock)
+        monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+
+        tracker = start(
+            capture={"subprocesses": {"enabled": True}, "resources": {"depth": "off"}}
+        )
+        p_unwaited = None
+        try:
+            p_waited = subprocess.Popen([sys.executable, "-c", "pass"])
+            clock.advance(0.18)
+            clock.jump_wall(-7200.0)
+            assert p_waited.wait() == 0
+
+            with pytest.raises(OSError):
+                subprocess.Popen(["__nonexistent_pubrun_spy_binary__"])
+
+            p_unwaited = subprocess.Popen([sys.executable, "-c", "pass"])
+            clock.advance(0.09)
+            clock.jump_wall(-7200.0)
+        finally:
+            tracker.stop()
+            if p_unwaited is not None:
+                p_unwaited.wait()
+
+        raw_text = (tracker.run_dir / "manifest.json").read_text(encoding="utf-8")
+        assert "987654" not in raw_text
+        manifest = json.loads(raw_text)
+        jsonschema.validate(manifest, schema)
+
+        subs = manifest["subprocesses"]
+        assert len(subs) == 3
+        for rec in subs:
+            assert rec["elapsed_seconds"] >= 0.0
+            assert rec["duration_clock"] == "monotonic"
+
+
+class TestResourceWatcherMonotonicSampling:
+    """Regression tests confirming ResourceWatcher CPU sampling stays monotonic."""
+
+    def test_poll_cpu_unaffected_by_backward_wall_clock_jump(self, monkeypatch):
+        from types import SimpleNamespace
+        import pubrun.capture.resources as res_mod
+        from pubrun.capture.resources import ResourceWatcher
+
+        clock = _FakeClock(wall=1_750_000_000.0, mono=987654.321)
+        monkeypatch.setattr(res_mod, "time", clock)
+
+        samples = iter([
+            SimpleNamespace(user=1.0, system=0.2),
+            SimpleNamespace(user=1.6, system=0.4),
+        ])
+        monkeypatch.setattr(res_mod.os, "times", lambda: next(samples))
+
+        watcher = ResourceWatcher(
+            run_tracker=None, interval_seconds=1.0, system_metrics=False
+        )
+        assert watcher._poll_cpu() == 0.0
+
+        clock.advance(2.0)
+        clock.jump_wall(-7200.0)
+        assert watcher._poll_cpu() == 40.0
+
+    def test_poll_tree_cpu_unaffected_by_backward_wall_clock_jump_linux(self, monkeypatch):
+        import pytest
+        import pubrun.capture.resources as res_mod
+        from pubrun.capture.resources import ResourceWatcher
+
+        if not sys.platform.startswith("linux"):
+            pytest.skip("_poll_tree_cpu is Linux-only")
+
+        clock = _FakeClock(wall=1_750_000_000.0, mono=987654.321)
+        monkeypatch.setattr(res_mod, "time", clock)
+
+        watcher = ResourceWatcher(
+            run_tracker=None, interval_seconds=1.0, scope="tree", system_metrics=False
+        )
+        assert watcher._clk_tck > 0
+
+        base_jiffies = 1000
+        delta_jiffies = int(round(1.5 * watcher._clk_tck))
+        jiffy_samples = iter([base_jiffies, base_jiffies + delta_jiffies])
+        monkeypatch.setattr(res_mod, "_get_tree_cpu_jiffies_linux", lambda: next(jiffy_samples))
+
+        assert watcher._poll_tree_cpu() == 0.0
+
+        clock.advance(2.0)
+        clock.jump_wall(-7200.0)
+        assert watcher._poll_tree_cpu() == 75.0

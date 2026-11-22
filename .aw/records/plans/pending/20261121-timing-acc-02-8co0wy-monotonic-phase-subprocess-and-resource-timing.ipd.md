@@ -56,32 +56,32 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Phase and subprocess monotonic durations
 
-- [ ] E-01 Update `src/pubrun/core.py::phase` (`__init__`, `__enter__`, and `__exit__`) and move `import time` to top-level imports in `src/pubrun/core.py` to record monotonic phase duration excluding profiler setup and teardown.
+- [x] E-01 Update `src/pubrun/core.py::phase` (`__init__`, `__enter__`, and `__exit__`) and move `import time` to top-level imports in `src/pubrun/core.py` to record monotonic phase duration excluding profiler setup and teardown.
   - Depends on: none
   - Expected outcome: `import time` sits with the top-level imports of `src/pubrun/core.py`. `phase.__init__` initializes `self._start_mono: Optional[float] = None`. `phase.__enter__` captures `self._start_mono = time.perf_counter()` as its final step before returning `self` (after `phase_start` emission and after any profiler startup). `phase.__exit__` captures `end_mono = time.perf_counter()` as its first line before stopping or dumping `cProfile` or `yappi` stats, then emits `phase_end` with `payload` containing `elapsed_seconds = max(0.0, end_mono - self._start_mono)` and `duration_clock = "monotonic"` whenever `self._start_mono is not None`. When an exception occurred, `payload` also retains `"error"` (`exc_val.__class__.__name__ if exc_val is not None else exc_type.__name__`), and `self._start_mono` is never persisted.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update explicit subprocess wrappers (`src/pubrun/core.py::_PubrunSubprocessNamespace.run`, `src/pubrun/core.py::_PubrunSubprocessNamespace.Popen`, and `src/pubrun/core.py::popen`) to emit monotonic durations and schema-conformant `capture_state`.
+- [x] E-02 Update explicit subprocess wrappers (`src/pubrun/core.py::_PubrunSubprocessNamespace.run`, `src/pubrun/core.py::_PubrunSubprocessNamespace.Popen`, and `src/pubrun/core.py::popen`) to emit monotonic durations and schema-conformant `capture_state`.
   - Depends on: E-01
   - Expected outcome: Each explicit wrapper captures `start_mono = time.perf_counter()` alongside `started_at_utc = time.time()`, computes `elapsed_seconds = max(0.0, time.perf_counter() - start_mono)`, sets `duration_clock = "monotonic"`, and includes schema-conformant `"capture_state"` (`{"status": "complete" | "failed"}` with `"detail"` on failure, matching `$defs.subprocess_record` from prerequisite child plan `e1fwy2`). Launch exceptions in `run()`, `Popen.__init__()`, and `popen()` consistently record failed invocations with `ended_at_utc`, `elapsed_seconds`, `duration_clock`, `"error"`, and `"capture_state"` before re-raising. `Popen.wait(timeout)` / `communicate(timeout)` raising `TimeoutExpired` do not log prematurely, and raw monotonic counter values are never stored in any record.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Update `src/pubrun/capture/subprocesses.py::SubprocessSpy` (`install`, `uninstall`, `_patched_popen_init`, `_patched_popen_wait`, `_patched_os_system`, `finalize_all`) to compute monotonic durations from an internal `id(rec)`-keyed monotonic-start table.
+- [x] E-03 Update `src/pubrun/capture/subprocesses.py::SubprocessSpy` (`install`, `uninstall`, `_patched_popen_init`, `_patched_popen_wait`, `_patched_os_system`, `finalize_all`) to compute monotonic durations from an internal `id(rec)`-keyed monotonic-start table.
   - Depends on: none
   - Expected outcome: `SubprocessSpy` maintains a lock-protected internal table `_start_monos: Dict[int, Tuple[Dict[str, Any], float]]` keyed by `id(rec)`, initialized and cleared under `cls._lock` in both `install()` and `uninstall()` and never serialized into `_records`. `_patched_popen_wait`, `_patched_os_system`, and `finalize_all` pop `id(rec)` under `cls._lock` and set `elapsed_seconds = max(0.0, end_mono - start_mono)` and `duration_clock = "monotonic"` whenever a monotonic start exists, preserving existing behavior for synthetic records lacking monotonic starts (such as `tests/test_capture.py::TestFinalizeAll`) and preserving already-finalized durations if `_patched_popen_wait` runs after `finalize_all`. `_patched_os_system` holds a local reference to `rec` (immune to concurrent `uninstall()`), and exception paths in both `_patched_popen_init` and `_patched_os_system` record `ended_at_utc`, `elapsed_seconds`, and `duration_clock`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Resource watcher audit and deterministic behavioral tests
 
-- [ ] E-04 Audit `src/pubrun/capture/resources.py::ResourceWatcher` (`_poll_cpu`, `_poll_tree_cpu`) to confirm monotonic CPU sampling is preserved intact, and add deterministic wall-clock-step tests to `tests/test_events.py`, `tests/test_capture.py`, and `tests/test_explicit_api.py`.
+- [x] E-04 Audit `src/pubrun/capture/resources.py::ResourceWatcher` (`_poll_cpu`, `_poll_tree_cpu`) to confirm monotonic CPU sampling is preserved intact, and add deterministic wall-clock-step tests to `tests/test_events.py`, `tests/test_capture.py`, and `tests/test_explicit_api.py`.
   - Depends on: E-01, E-02, E-03
   - Expected outcome: Audit confirms `src/pubrun/capture/resources.py` uses `time.perf_counter()` with zero wall-clock subtraction and remains unmodified unless a defect is discovered (acknowledged via `--scope-ack` at finalize if unchanged). Deterministic fake-clock tests verify forward and backward `time.time()` jumps during `phase()` (normal exit, exception exit, and `cProfile`-enabled exit with an injected clock advance inside `dump_stats`), `SubprocessSpy` (`Popen`, `os.system`, launch failure, and `finalize_all`), explicit `pubrun.subprocess.run` (success and exception), `pubrun.subprocess.Popen` (`wait`/`communicate`/`poll` and launch failure), `pubrun.popen`, and unstarted-instance `ResourceWatcher._poll_cpu()`/`_poll_tree_cpu()`. Tests confirm zero raw monotonic counter offsets are persisted and that emitted manifests validate against `schemas/manifest.schema.json`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Run targeted validation across events, capture, explicit API, public API, resources, and schema conformance tests.
+- [x] E-05 Run targeted validation across events, capture, explicit API, public API, resources, and schema conformance tests.
   - Depends on: E-04
   - Expected outcome: `pytest tests/test_events.py tests/test_capture.py tests/test_explicit_api.py tests/test_api.py tests/test_resources.py tests/test_manifest_schema.py -v` exits 0 with all tests passing.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -164,30 +164,30 @@ Deferred to child plan `3tvesf` (timing docs, examples, benchmark, and whole-Set
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Diff of `src/pubrun/core.py` (`import time` at top level, `phase.__init__`, `phase.__enter__`, `phase.__exit__`) showing monotonic `elapsed_seconds` captured symmetrically after profiler startup and before profiler teardown and emitted with `duration_clock: "monotonic"`, plus pasted `pytest tests/test_events.py -v` output.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Verified `git diff -- src/pubrun/core.py` (+108/-26 lines total): `import time` moved to top-level imports and removed from the mid-file explicit tracking block; `phase.__init__` initializes `self._start_mono: Optional[float] = None`; `phase.__enter__` captures `self._start_mono = time.perf_counter()` as the final step before `return self` (after `phase_start` emission and profiler startup); `phase.__exit__` captures `end_mono = time.perf_counter()` on its first line before stopping/dumping `cProfile`/`yappi` stats, then emits `phase_end` with `elapsed_seconds = max(0.0, end_mono - self._start_mono)`, `duration_clock = "monotonic"`, and `"error"` on exceptions without persisting `_start_mono`. Runner output (`python3 -m pytest tests/test_events.py -v --no-cov`, exit 0): `collected 19 items` -> all 19 passed including `TestPhaseMonotonicTiming::test_phase_monotonic_duration_survives_forward_and_backward_wall_jumps PASSED`, `TestPhaseMonotonicTiming::test_phase_exception_records_monotonic_duration_and_error PASSED`, `TestPhaseMonotonicTiming::test_phase_cprofile_excludes_profiler_startup_and_dump_stats PASSED`; `19 passed in 0.74s`.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Diff of `src/pubrun/core.py` (`_PubrunSubprocessNamespace.run`, `_PubrunSubprocessNamespace.Popen`, `popen`) showing monotonic `elapsed_seconds`, `duration_clock: "monotonic"`, schema-conformant `capture_state`, and consistent launch-failure recording, plus pasted `pytest tests/test_explicit_api.py -v` output.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Verified `git diff -- src/pubrun/core.py`: `_PubrunSubprocessNamespace.run`, `_PubrunSubprocessNamespace.Popen` (`__init__` and `_log_pubrun_record`), and `popen` (`_PopenPipeProxy.close` and launch error handler) each capture `time.perf_counter()` alongside `time.time()`, compute `elapsed_seconds = max(0.0, end_mono - start_mono)`, set `duration_clock = "monotonic"`, emit schema-conformant `capture_state` (`{"status": "complete" | "failed"}` with `"detail"` on exceptions), record failed launches with `ended_at_utc`, `elapsed_seconds`, `duration_clock`, `error`, and `capture_state` before re-raising, avoid premature logging on `TimeoutExpired`, and never store raw monotonic offsets. Runner output (`python3 -m pytest tests/test_explicit_api.py -v --no-cov`, exit 0): `collected 7 items` -> `test_report_and_artifact PASSED`, `test_pubrun_print PASSED`, `test_pubrun_open_provenance PASSED`, `test_explicit_subprocess_and_popen PASSED`, `test_explicit_subprocess_run_monotonic_and_schema PASSED`, `test_explicit_subprocess_popen_wait_communicate_poll_timeout_and_failure PASSED`, `test_explicit_popen_monotonic_and_launch_failure_schema PASSED`; `7 passed in 1.96s`.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Diff of `src/pubrun/capture/subprocesses.py` (`SubprocessSpy`) showing lock-protected internal `id(rec)`-keyed `_start_monos` cleared under lock in `install()` and `uninstall()`, local `rec` handling in `_patched_os_system`, and monotonic `elapsed_seconds` populated in `_patched_popen_init` (error path), `_patched_popen_wait`, `_patched_os_system`, and `finalize_all`, plus pasted `pytest tests/test_capture.py -v` output.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Verified `git diff -- src/pubrun/capture/subprocesses.py` (+47/-6 lines): `SubprocessSpy` defines `_start_monos: Dict[int, Tuple[Dict[str, Any], float]] = {}` protected by `cls._lock`, resets `cls._start_monos = {}` under `cls._lock` in both `install()` and `uninstall()`, preserves `p6pon8` per-install hook state chaining and safe redaction, keeps local `rec` handling in `_patched_os_system`, records `ended_at_utc`, `elapsed_seconds`, and `duration_clock: "monotonic"` on `_patched_popen_init` and `_patched_os_system` exception paths, and pops `id(rec)` with identity confirmation (`entry[0] is rec`) in `_patched_popen_wait`, `_patched_os_system`, and `finalize_all` (leaving synthetic records untouched and preserving already-finalized durations if `wait` runs after `finalize_all`). Runner output (`python3 -m pytest tests/test_capture.py -v --no-cov`, exit 0): `collected 33 items` -> all 33 passed including `TestFinalizeAll::*`, `TestSubprocessSpyMonotonicTiming::test_popen_forward_and_backward_wall_jumps PASSED`, `test_os_system_backward_wall_jump_and_exception PASSED`, `test_popen_launch_failure_records_monotonic_duration PASSED`, `test_finalize_all_monotonic_non_collision_and_post_finalize_wait PASSED`, `test_subprocess_spy_manifest_validates_against_schema PASSED`, and `TestResourceWatcherMonotonicSampling::*`; `33 passed in 1.82s`.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Audit note confirming `src/pubrun/capture/resources.py` preserves `time.perf_counter()` CPU sampling, plus pasted test output proving wall-clock jump resilience across `phase()` (including profiler dump exclusion), `SubprocessSpy`, explicit subprocess wrappers, and unstarted-instance `ResourceWatcher`, zero raw monotonic offsets persisted, and `schemas/manifest.schema.json` validation of emitted subprocess records.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Audited `src/pubrun/capture/resources.py` in full (`grep -n "time\." src/pubrun/capture/resources.py` returned only line 297 `current_clock = time.perf_counter()` in `_poll_cpu` and line 346 `clock = time.perf_counter()` in `_poll_tree_cpu`, zero `time.time()` references, file intentionally unmodified). Verified deterministic fake-clock tests with sentinel monotonic offset `987654.321` and `+7200s`/`-7200s` wall-clock jumps across `tests/test_events.py` (`19 passed in 0.74s`, including `cProfile.Profile.enable` +2.0s and `dump_stats` +5.0s exclusion), `tests/test_capture.py` (`33 passed in 1.82s`, covering `SubprocessSpy` Popen/`os.system`/launch failure/`finalize_all`/schema validation and unstarted-instance `ResourceWatcher._poll_cpu()`/`_poll_tree_cpu()`), and `tests/test_explicit_api.py` (`7 passed in 1.96s`, covering `pubrun.subprocess.run`, `Popen` wait/communicate/poll/TimeoutExpired/launch failure, `pubrun.popen`, zero leaked offsets, and full `schemas/manifest.schema.json` validation).
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted `pytest tests/test_events.py tests/test_capture.py tests/test_explicit_api.py tests/test_api.py tests/test_resources.py tests/test_manifest_schema.py -v` output showing exit code 0 and zero failures.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Runner output (`python3 -m pytest tests/test_events.py tests/test_capture.py tests/test_explicit_api.py tests/test_api.py tests/test_resources.py tests/test_manifest_schema.py -v --no-cov`, exit 0): `collected 141 items` -> `141 passed in 13.99s`. Full suite (`aw suite`, 6 xdist workers): `1260 passed, 1 failed in 131.85s` (`tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches`, pre-existing xdist-only defect already tracked in backlog `12rcu8`; `python3 -m pytest tests/test_liveness.py -v --no-cov` passed `27 passed in 0.23s`).
+  - Result: pass
 
 ## Approval and execution gate
 

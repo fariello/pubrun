@@ -5,7 +5,7 @@ import shlex
 import threading
 import time
 from contextlib import contextmanager
-from typing import Any, List, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 _spy_local = threading.local()
 
@@ -59,6 +59,7 @@ class SubprocessSpy:
     """Patches subprocess.Popen and os.system to record spawned processes transparently."""
     _installed = False
     _records: List[Dict[str, Any]] = []
+    _start_monos: Dict[int, Tuple[Dict[str, Any], float]] = {}
     _max_records = 5000
     _truncated = False
     _lock = threading.Lock()
@@ -124,6 +125,7 @@ class SubprocessSpy:
                     return prev_popen_init(self, args, *sys_args, **kwargs)
 
                 start_time = time.time()
+                start_mono = time.perf_counter()
                 argv_list = cls._safe_shlex_split(args)
 
                 from pubrun.capture.redaction import (
@@ -141,12 +143,17 @@ class SubprocessSpy:
                 try:
                     prev_popen_init(self, args, *sys_args, **kwargs)
                 except Exception as e:
+                    end_ts = time.time()
+                    end_mono = time.perf_counter()
                     detail = format_safe_error_detail(e, state["config"])
                     with cls._lock:
                         if state["active"]:
                             cls._records.append({
                                 "argv": argv_list,
                                 "started_at_utc": start_time,
+                                "ended_at_utc": end_ts,
+                                "elapsed_seconds": max(0.0, end_mono - start_mono),
+                                "duration_clock": "monotonic",
                                 "cwd": cwd_str,
                                 "capture_state": {"status": "failed", "detail": detail},
                             })
@@ -165,11 +172,14 @@ class SubprocessSpy:
                         self._pubrun_rec = rec
                         self._pubrun_idx = len(cls._records)
                         cls._records.append(rec)
+                        cls._start_monos[id(rec)] = (rec, start_mono)
 
             def _patched_popen_wait(self: Any, *args: Any, **kwargs: Any) -> int:
                 exit_code = prev_popen_wait(self, *args, **kwargs)
                 if not state["active"]:
                     return exit_code
+                end_ts = time.time()
+                end_mono = time.perf_counter()
                 try:
                     with cls._lock:
                         if (
@@ -179,10 +189,14 @@ class SubprocessSpy:
                             rec = getattr(self, "_pubrun_rec", None)
                             if rec is not None and rec.get("exit_code") is None:
                                 rec["exit_code"] = exit_code
-                                rec["ended_at_utc"] = time.time()
+                                rec["ended_at_utc"] = end_ts
                                 rec["capture_state"]["status"] = (
                                     "complete" if exit_code == 0 else "failed"
                                 )
+                                entry = cls._start_monos.pop(id(rec), None)
+                                if entry is not None and entry[0] is rec:
+                                    rec["elapsed_seconds"] = max(0.0, end_mono - entry[1])
+                                    rec["duration_clock"] = "monotonic"
                 except Exception as e:
                     logger.debug(
                         f"pubrun failed to finalize subprocess record wait hook: {e}"
@@ -206,6 +220,7 @@ class SubprocessSpy:
                     return prev_os_system(command)
 
                 start_time = time.time()
+                start_mono = time.perf_counter()
                 argv_list = cls._safe_shlex_split(command)
 
                 from pubrun.capture.redaction import (
@@ -227,23 +242,43 @@ class SubprocessSpy:
                 with cls._lock:
                     if state["active"]:
                         cls._records.append(rec)
+                        cls._start_monos[id(rec)] = (rec, start_mono)
 
                 try:
                     exit_code = prev_os_system(command)
                 except Exception as e:
+                    end_ts = time.time()
+                    end_mono = time.perf_counter()
                     detail = format_safe_error_detail(e, state["config"])
                     with cls._lock:
                         if state["active"]:
+                            rec["ended_at_utc"] = end_ts
+                            entry = cls._start_monos.pop(id(rec), None)
+                            if entry is not None and entry[0] is rec:
+                                rec["elapsed_seconds"] = max(0.0, end_mono - entry[1])
+                                rec["duration_clock"] = "monotonic"
+                            elif "elapsed_seconds" not in rec:
+                                rec["elapsed_seconds"] = max(0.0, end_mono - start_mono)
+                                rec["duration_clock"] = "monotonic"
                             rec["capture_state"] = {
                                 "status": "failed",
                                 "detail": detail,
                             }
                     raise
 
+                end_ts = time.time()
+                end_mono = time.perf_counter()
                 with cls._lock:
                     if state["active"]:
                         rec["exit_code"] = exit_code
-                        rec["ended_at_utc"] = time.time()
+                        rec["ended_at_utc"] = end_ts
+                        entry = cls._start_monos.pop(id(rec), None)
+                        if entry is not None and entry[0] is rec:
+                            rec["elapsed_seconds"] = max(0.0, end_mono - entry[1])
+                            rec["duration_clock"] = "monotonic"
+                        elif "elapsed_seconds" not in rec:
+                            rec["elapsed_seconds"] = max(0.0, end_mono - start_mono)
+                            rec["duration_clock"] = "monotonic"
                         rec["capture_state"]["status"] = (
                             "complete" if exit_code == 0 else "failed"
                         )
@@ -252,6 +287,7 @@ class SubprocessSpy:
 
             cls._max_records = max_records
             cls._records = []
+            cls._start_monos = {}
             cls._truncated = False
             cls._config = config
 
@@ -340,6 +376,7 @@ class SubprocessSpy:
             cls._installed_os_system = None
             # BUG-09: Clear records on uninstall to prevent cross-run leakage.
             cls._records = []
+            cls._start_monos = {}
             cls._truncated = False
 
     @classmethod
@@ -360,10 +397,15 @@ class SubprocessSpy:
     def finalize_all(cls) -> None:
         """Mark any un-waited subprocess records as complete."""
         now_ts = time.time()
+        now_mono = time.perf_counter()
         with cls._lock:
             for rec in cls._records:
                 if rec.get("exit_code") is None and "ended_at_utc" not in rec:
                     rec["ended_at_utc"] = now_ts
+                    entry = cls._start_monos.pop(id(rec), None)
+                    if entry is not None and entry[0] is rec:
+                        rec["elapsed_seconds"] = max(0.0, now_mono - entry[1])
+                        rec["duration_clock"] = "monotonic"
                     if rec.get("capture_state", {}).get("status") == "partial":
                         rec["capture_state"]["status"] = "complete"
 
