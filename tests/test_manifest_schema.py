@@ -182,4 +182,122 @@ def test_startup_manifest_conforms_to_schema(tmp_path):
 
     jsonschema.validate(manifest, _schema())
 
+
+@pytest.mark.parametrize("level", ["name", "stat", "realpath", "hash"])
+def test_populated_data_files_manifest_conforms_across_levels(tmp_path, level):
+    """Real manifests with populated data_files (inputs, outputs, mixed, hashing_summary)
+    must validate against schemas/manifest.schema.json across every tracking level."""
+    import os
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        import pubrun.noauto as pubrun
+
+        inp_path = tmp_path / f"in_{level}.bin"
+        inp_path.write_bytes(b"input-data-bytes")
+        out_path = tmp_path / f"out_{level}.bin"
+        mix_path = tmp_path / f"mix_{level}.bin"
+        mix_path.write_bytes(b"mix0")
+
+        t = pubrun.start(
+            console={"capture_mode": "off"},
+            capture={"file_io": {"level": level}},
+        )
+        try:
+            with pubrun.open(inp_path, "rb") as fh:
+                fh.read()
+            with pubrun.open(out_path, "wb") as fh:
+                fh.write(b"output-data-bytes")
+            with pubrun.open(mix_path, "r+b") as fh:
+                fh.read(2)
+                fh.write(b"99")
+        finally:
+            pubrun.stop()
+
+        manifest = json.loads((t.run_dir / "manifest.json").read_text(encoding="utf-8"))
+    finally:
+        os.chdir(cwd)
+
+    assert len(manifest["data_files"]["inputs"]) == 1
+    assert len(manifest["data_files"]["outputs"]) == 1
+    assert len(manifest["data_files"]["mixed"]) == 1
+    if level == "hash":
+        assert "hashing_summary" in manifest["data_files"]
+    jsonschema.validate(manifest, _schema())
+
+
+def test_populated_data_files_over_budget_and_file_changed_conform(tmp_path):
+    """Real manifests containing over_budget skips, file_changed records, and non-SHA-256
+    digests must validate against schemas/manifest.schema.json."""
+    import os
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        import pubrun.noauto as pubrun
+
+        big = tmp_path / "big.bin"
+        big.write_bytes(b"0123456789abcdef")
+        changed = tmp_path / "changed.bin"
+        changed.write_bytes(b"orig")
+        small = tmp_path / "small.bin"
+        small.write_bytes(b"ok")
+
+        t = pubrun.start(
+            console={"capture_mode": "off"},
+            capture={
+                "file_io": {
+                    "level": "hash",
+                    "max_hash_bytes": 8,
+                    "hash_algorithm": "sha512",
+                }
+            },
+        )
+        try:
+            with pubrun.open(big, "rb") as fh:
+                fh.read()
+            with pubrun.open(changed, "rb") as fh:
+                fh.read(2)
+                with open(changed, "ab") as writer:
+                    writer.write(b"-mut")
+            with pubrun.open(small, "rb") as fh:
+                fh.read()
+        finally:
+            pubrun.stop()
+
+        manifest = json.loads((t.run_dir / "manifest.json").read_text(encoding="utf-8"))
+    finally:
+        os.chdir(cwd)
+
+    statuses = [rec["hash_status"] for rec in manifest["data_files"]["inputs"]]
+    assert statuses == ["over_budget", "file_changed", "completed"]
+    jsonschema.validate(manifest, _schema())
+
+
+def test_legacy_data_files_manifest_without_mixed_or_hashing_summary_conforms():
+    """Legacy manifests carrying only inputs and outputs (without mixed or hashing_summary)
+    remain valid under schemas/manifest.schema.json."""
+    fixture = _SCHEMA_PATH.parent.parent / "tests" / "fixtures" / "sample_manifest.json"
+    manifest = json.loads(fixture.read_text(encoding="utf-8"))
+    manifest["data_files"] = {
+        "inputs": [
+            {
+                "path": "/tmp/legacy_in.csv",
+                "size_bytes": 128,
+                "mtime": 1715280000.0,
+                "ctime": 1715280000.0,
+                "sha256": None,
+                "accessed_at_utc": 1715280001.0,
+            }
+        ],
+        "outputs": [
+            {
+                "path": "/tmp/legacy_out.csv",
+                "size_bytes": 256,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "modified_at_utc": 1715280002.0,
+            }
+        ],
+    }
     jsonschema.validate(manifest, _schema())

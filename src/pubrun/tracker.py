@@ -2,6 +2,7 @@ import json
 import os
 import platform
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -134,6 +135,10 @@ class Run:
             self.packages_data = {}
             self.environment_data = {}
             self.host_data = {}
+            self.data_files = {"inputs": [], "outputs": [], "mixed": []}
+            self._data_files_lock = threading.Lock()
+            self._file_io_budget = None
+            self._pending_file_registrations = []
             self.console_interceptor = None
             self.signal_capture = None
             _active_run = self
@@ -154,7 +159,10 @@ class Run:
         self.hardware_data: Dict[str, Any] = {}
         self.host_data: Dict[str, Any] = {}
         self.console_data: Dict[str, Any] = {}
-        self.data_files: Dict[str, Any] = {"inputs": [], "outputs": []}
+        self.data_files: Dict[str, Any] = {"inputs": [], "outputs": [], "mixed": []}
+        self._data_files_lock = threading.Lock()
+        self._file_io_budget: Optional[Any] = None
+        self._pending_file_registrations: list = []
         self.manual_subprocess_records: list = []
         self._spying_subprocesses = False
         self.console_interceptor = None
@@ -576,6 +584,17 @@ class Run:
             self.console_data = self.console_interceptor.stop()
         if self.resource_watcher:
             self.resource_watcher.stop()
+        # Finalize any pending deferred external file registrations in an
+        # independent guard so a failure cannot disrupt shutdown of other engines.
+        if getattr(self, "_pending_file_registrations", None):
+            try:
+                from pubrun.capture.file_io import finalize_pending_registrations
+                finalize_pending_registrations(self)
+            except Exception as _file_io_err:
+                import logging as _logging
+                _logging.getLogger("pubrun").warning(
+                    f"pubrun: failed to finalize pending file registrations: {_file_io_err}"
+                )
         if self.event_stream:
             self.event_stream.close()
         # BUG2-04: Disable any orphaned profilers (phase entered without exit).
@@ -648,6 +667,29 @@ class Run:
             __version__ = "1.0.0"
             __commit__ = None
 
+        data_files_lock = getattr(self, "_data_files_lock", None)
+        if data_files_lock is not None:
+            with data_files_lock:
+                raw_data_files = getattr(self, "data_files", None) or {}
+                data_files_snapshot: Dict[str, Any] = {
+                    "inputs": list(raw_data_files.get("inputs", [])),
+                    "outputs": list(raw_data_files.get("outputs", [])),
+                    "mixed": list(raw_data_files.get("mixed", [])),
+                }
+        else:
+            raw_data_files = getattr(self, "data_files", None) or {}
+            data_files_snapshot = {
+                "inputs": list(raw_data_files.get("inputs", [])),
+                "outputs": list(raw_data_files.get("outputs", [])),
+                "mixed": list(raw_data_files.get("mixed", [])),
+            }
+        file_io_budget = getattr(self, "_file_io_budget", None)
+        if file_io_budget is not None:
+            try:
+                data_files_snapshot["hashing_summary"] = file_io_budget.to_summary_dict()
+            except Exception:
+                pass
+
         return {
             "schema_version": "1.0",
             "manifest_type": "pubrun-manifest",
@@ -705,7 +747,7 @@ class Run:
             "signals": self.signal_capture.get_records() if self.signal_capture else {"capture_state": {"status": "suppressed"}},
 
             "pubrun_imports": self._get_import_metadata(),
-            "data_files": getattr(self, "data_files", {"inputs": [], "outputs": []}),
+            "data_files": data_files_snapshot,
 
             "status": {
                 "outcome": self._outcome,

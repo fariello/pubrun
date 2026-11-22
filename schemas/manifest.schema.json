@@ -170,65 +170,87 @@
         },
         "data_files": {
             "type": "object",
-            "description": "Custom tracked input datasets and output files.",
+            "description": "Tracked input datasets, output files, mixed read/write files, and optional run-wide hashing summary.",
             "properties": {
                 "inputs": {
                     "type": "array",
                     "items": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string"
-                            },
-                            "size_bytes": {
-                                "type": "integer"
-                            },
-                            "sha256": {
-                                "type": "string"
-                            },
-                            "accessed_at_utc": {
-                                "type": "number"
-                            }
-                        },
-                        "required": [
-                            "path",
-                            "size_bytes",
-                            "sha256",
-                            "accessed_at_utc"
-                        ]
-                    }
+                        "$ref": "#/$defs/file_provenance_record"
+                    },
+                    "default": []
                 },
                 "outputs": {
                     "type": "array",
                     "items": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string"
-                            },
-                            "size_bytes": {
-                                "type": "integer"
-                            },
-                            "sha256": {
-                                "type": "string"
-                            },
-                            "modified_at_utc": {
-                                "type": "number"
+                        "$ref": "#/$defs/file_provenance_record"
+                    },
+                    "default": []
+                },
+                "mixed": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/file_provenance_record"
+                    },
+                    "default": []
+                },
+                "hashing_summary": {
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "max_hash_bytes": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                },
+                                "max_total_hash_bytes": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                },
+                                "max_total_hash_seconds": {
+                                    "type": "number",
+                                    "minimum": 0
+                                },
+                                "hash_algorithm": {
+                                    "type": "string"
+                                },
+                                "total_bytes_hashed": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                },
+                                "total_hash_seconds": {
+                                    "type": "number",
+                                    "minimum": 0
+                                },
+                                "files_hashed": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                },
+                                "files_skipped_over_budget": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                },
+                                "files_changed": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                },
+                                "files_failed": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                }
                             }
                         },
-                        "required": [
-                            "path",
-                            "size_bytes",
-                            "sha256",
-                            "modified_at_utc"
-                        ]
-                    }
+                        {
+                            "type": "null"
+                        }
+                    ]
                 }
             },
             "additionalProperties": false,
             "default": {
                 "inputs": [],
-                "outputs": []
+                "outputs": [],
+                "mixed": []
             }
         },
         "filesystem": {
@@ -1985,6 +2007,308 @@
                 },
                 "capture_state": {
                     "$ref": "#/$defs/capture_state"
+                }
+            }
+        },
+        "file_provenance_record": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "path"
+            ],
+            "properties": {
+                "path": {
+                    "type": "string"
+                },
+                "realpath": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "label": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "role": {
+                    "type": "string",
+                    "enum": [
+                        "input",
+                        "output",
+                        "input_output"
+                    ]
+                },
+                "mode": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "open_disposition": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "read",
+                        "write",
+                        "append",
+                        "exclusive_create",
+                        "read_write",
+                        null
+                    ]
+                },
+                "registration_source": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "pubrun.open",
+                        "register_file",
+                        "register_input",
+                        "register_output",
+                        null
+                    ]
+                },
+                "entry_type": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "file",
+                        "directory",
+                        "symlink",
+                        "special",
+                        "missing",
+                        "unsupported_remote_uri",
+                        null
+                    ]
+                },
+                "is_symlink": {
+                    "type": "boolean"
+                },
+                "symlink_target": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "size_bytes": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "mtime": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "ctime": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "mtime_ns": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "inode": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "device": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "sha256": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "digest": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/hash_record"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "caller_digest": {
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "algorithm",
+                                "value"
+                            ],
+                            "properties": {
+                                "algorithm": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "value": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "verified": {
+                                    "type": [
+                                        "boolean",
+                                        "null"
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "hash_status": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "completed",
+                        "disabled",
+                        "over_budget",
+                        "unavailable",
+                        "failed",
+                        "file_changed",
+                        "asserted",
+                        "pending",
+                        null
+                    ]
+                },
+                "hash_status_detail": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "hash_algorithm": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "observation_time": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "during_stream",
+                        "at_close",
+                        "at_registration",
+                        "at_finalization",
+                        "caller_supplied",
+                        "not_observed",
+                        null
+                    ]
+                },
+                "evidence_source": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "observed",
+                        "asserted",
+                        "none",
+                        null
+                    ]
+                },
+                "evidence_strength": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "verified_content",
+                        "asserted_content",
+                        "metadata_only",
+                        "path_only",
+                        "changed_unverified",
+                        "unavailable",
+                        null
+                    ]
+                },
+                "change_detected": {
+                    "type": "boolean"
+                },
+                "change_details": {
+                    "type": [
+                        "object",
+                        "null"
+                    ]
+                },
+                "access_observations": {
+                    "type": [
+                        "object",
+                        "null"
+                    ]
+                },
+                "hash_stats": {
+                    "type": [
+                        "object",
+                        "null"
+                    ]
+                },
+                "registration_count": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "registered_before_creation": {
+                    "type": "boolean"
+                },
+                "accessed_at_utc": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "modified_at_utc": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "registered_at_utc": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "last_observed_at_utc": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "metadata": {
+                    "type": [
+                        "object",
+                        "null"
+                    ]
                 }
             }
         }

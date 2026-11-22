@@ -462,7 +462,6 @@ def _execute_boot_sequence(selected_by: str = "pubrun") -> None:
 
 # -- Explicit Tracking API (Phases 1-4) --------------------------------------
 
-import hashlib
 import time
 import subprocess as _subprocess
 from pathlib import Path
@@ -595,124 +594,6 @@ def _file_io_level(run_instance: Any) -> str:
         return "stat"
 
 
-class ProvenanceFileProxy:
-    """Wraps a file stream opened via ``pubrun.open()`` to record file provenance at the
-    configured detail level (name/stat/realpath/hash). Records at close().
-
-    This is opt-in and per-file: it wraps ONLY files the user routes through
-    ``pubrun.open()``. pubrun never patches the builtin ``open``.
-    """
-    def __init__(self, file_obj: Any, path: Path, mode: str, run_instance: Any,
-                 level: str = "stat") -> None:
-        self._file_obj = file_obj
-        self._path = path
-        self._mode = mode
-        self._run = run_instance
-        self._level = level if level in _FILE_IO_LEVELS else "stat"
-        self._closed = False
-
-    def _is_read_mode(self) -> bool:
-        return "r" in self._mode and "w" not in self._mode and "a" not in self._mode
-
-    def close(self) -> None:
-        """Close the underlying file, then register provenance at the configured level.
-
-        Recording after close() means write/append buffers are flushed to disk, and read
-        hashes reflect the actual on-disk bytes (correct even for buffered/``readinto``
-        reads that never pass through this proxy's methods).
-        """
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            self._file_obj.close()
-        finally:
-            if self._level != "none":
-                self._register_provenance()
-
-    def _compute_hash_on_disk(self) -> Optional[str]:
-        """sha256 of the file's on-disk bytes. This is the honest 'hash of the file' —
-        independent of text/binary mode and of which read path the caller used."""
-        try:
-            if not self._path.exists():
-                return None
-            cap = 0
-            try:
-                cap = int(self._run.config.get("capture", {}).get("file_io", {}).get("max_hash_bytes", 0))
-            except Exception:
-                cap = 0
-            size = os.path.getsize(self._path)
-            if cap and size > cap:
-                return None  # too large to hash under the configured cap
-            h = hashlib.sha256()
-            with builtins.open(self._path, "rb") as f:
-                for chunk in iter(lambda: f.read(65536), b""):
-                    h.update(chunk)
-            return h.hexdigest()
-        except Exception:
-            return None
-
-    def _register_provenance(self) -> None:
-        try:
-            level = self._level
-            # L1 name: the path as given.
-            record: Dict[str, Any] = {"path": str(self._path)}
-
-            # L2 stat: fstat on the fd we hold (cheap even on NFS), + absolute path.
-            if level in ("stat", "realpath", "hash"):
-                record["path"] = os.path.abspath(str(self._path))
-                try:
-                    st = os.stat(self._path)  # file just closed; attrs cache-hot
-                    record["size_bytes"] = st.st_size
-                    record["mtime"] = st.st_mtime
-                    record["ctime"] = st.st_ctime
-                except OSError:
-                    pass
-
-            # L3 realpath: resolve symlinks (costlier on NFS — see docs).
-            if level in ("realpath", "hash"):
-                try:
-                    record["realpath"] = os.path.realpath(str(self._path))
-                except OSError:
-                    pass
-
-            # L4 hash: sha256 of on-disk bytes.
-            record["sha256"] = self._compute_hash_on_disk() if level == "hash" else None
-
-            if not hasattr(self._run, "data_files"):
-                self._run.data_files = {"inputs": [], "outputs": []}
-
-            if self._is_read_mode():
-                record["accessed_at_utc"] = time.time()
-                self._run.data_files["inputs"].append(record)
-                event = "input_dataset"
-            else:
-                record["modified_at_utc"] = time.time()
-                self._run.data_files["outputs"].append(record)
-                event = "output_artifact"
-
-            if getattr(self._run, "event_stream", None):
-                self._run.event_stream.emit(
-                    event, name=str(self._path.name),
-                    payload={"path": record["path"], "sha256": record.get("sha256")})
-        except Exception as e:
-            logging.getLogger("pubrun").warning(f"pubrun: failed to register provenance for '{self._path}': {e}")
-
-    def __enter__(self) -> "ProvenanceFileProxy":
-        return self
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        self.close()
-
-    def __iter__(self) -> Any:
-        return iter(self._file_obj)
-
-    def __getattr__(self, name: str) -> Any:
-        # Everything not overridden (read/write/readinto/seek/fileno/...) goes straight to
-        # the real file object, so behavior is identical to the builtin.
-        return getattr(self._file_obj, name)
-
-
 def open(file: Any, mode: str = "r", **kwargs: Any) -> Any:
     """Drop-in wrapper around the built-in ``open()`` that records file provenance for
     a run at the configured ``[capture.file_io].level`` (default ``stat``: path + size +
@@ -722,16 +603,33 @@ def open(file: Any, mode: str = "r", **kwargs: Any) -> Any:
     """
     f_obj = builtins.open(file, mode, **kwargs)
 
+    if isinstance(file, int):
+        return f_obj
+
     current_run = get_current_run()
     if current_run and current_run.is_active:
         try:
             level = _file_io_level(current_run)
             if level != "none":
-                return ProvenanceFileProxy(f_obj, Path(file), mode, current_run, level=level)
+                path_val = os.fspath(file)
+                if isinstance(path_val, bytes):
+                    path_val = os.fsdecode(path_val)
+                from pubrun.capture.file_io import ProvenanceFileProxy
+                return ProvenanceFileProxy(
+                    f_obj, Path(path_val), mode, current_run, level=level
+                )
         except Exception as e:
             logging.getLogger("pubrun").warning(f"pubrun: failed to wrap file for provenance: {e}")
 
     return f_obj
+
+
+def __getattr__(name: str) -> Any:
+    """PEP 562 lazy attribute lookup to avoid importing file_io on cold import."""
+    if name == "ProvenanceFileProxy":
+        from pubrun.capture.file_io import ProvenanceFileProxy
+        return ProvenanceFileProxy
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class _PubrunSubprocessNamespace:

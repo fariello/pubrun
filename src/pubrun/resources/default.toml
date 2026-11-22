@@ -303,26 +303,42 @@ system_metrics = true
 # -----------------------------------------------------------------------------
 # File-I/O provenance detail for files opened via `pubrun.open(...)` (the opt-in,
 # per-file API). This does NOT globally intercept open(); pubrun never patches the
-# builtin. It only governs how much is recorded for files you explicitly route
-# through pubrun.open().
+# builtin. It only governs how much is recorded for files you explicitly track.
 # -----------------------------------------------------------------------------
 # Progressive levels (each includes the ones before it):
 #   "none"     - record nothing (pubrun.open() behaves like the builtin open()).
-#   "name"     - record the path as given.
-#   "stat"     - + fstat on the open fd (size, mtime, ctime) and the absolute path.
-#                Cheap everywhere, including NFS (fstat on an already-open fd needs
-#                no extra round-trip). DEFAULT.
+#   "name"     - record the path as given without calling fstat or stat.
+#   "stat"     - + fstat on the open file descriptor (size, mtime, ctime,
+#                mtime_ns, inode, device) and the absolute path. Cheap
+#                everywhere, including NFS (fstat on an already-open fd needs
+#                no extra path lookup). DEFAULT.
 #   "realpath" - + resolve symlinks to the canonical path. NOTE: this walks every
-#                path component and can be noticeably COSTLIER on network
+#                path component and can be noticeably costlier on network
 #                filesystems (NFS/Lustre) than "stat"; enable only if you need it.
-#   "hash"     - + sha256 of the file contents. Reads every byte, so it is by far
-#                the most expensive level; use only when content-level provenance
-#                matters. Files larger than `max_hash_bytes` are recorded without a
-#                hash.
+#   "hash"     - + cryptographic digest of file contents (default sha256).
+#                Sequential binary pure reads and writes within budget are hashed
+#                in a single streaming pass; text, seeked, partial, append, and
+#                mixed-mode streams fall back to a checked post-close read with
+#                open/close fstat identity verification. Files or runs exceeding
+#                the configured budgets are recorded with hash_status="over_budget"
+#                and zero fallback content reads.
 level = "stat"
 
-# At level "hash", skip hashing files larger than this (bytes). 0 = no cap.
+# At level "hash", skip hashing any single file larger than this (bytes).
+# 0 = no per-file byte cap.
 max_hash_bytes = 0
+
+# At level "hash", cap total bytes hashed across all files in a run.
+# 0 = no run-wide byte cap.
+max_total_hash_bytes = 0
+
+# At level "hash", cap total wall-clock seconds spent hashing across a run.
+# 0.0 = no run-wide time cap.
+max_total_hash_seconds = 0.0
+
+# Digest algorithm used at level "hash".
+# Supported values: "sha256" (default), "sha512", "sha1", "md5".
+hash_algorithm = "sha256"
 
 
 [capture.profiling]

@@ -75,36 +75,36 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Configuration defaults and manifest schema contract
 
-- [ ] E-01 Add run-wide hashing budget and algorithm keys under `[capture.file_io]` in `src/pubrun/resources/default.toml` and update `schemas/manifest.schema.json` for `data_files`.
+- [x] E-01 Add run-wide hashing budget and algorithm keys under `[capture.file_io]` in `src/pubrun/resources/default.toml` and update `schemas/manifest.schema.json` for `data_files`.
   - Depends on: none
   - Expected outcome: `src/pubrun/resources/default.toml` defines `[capture.file_io].max_total_hash_bytes = 0`, `max_total_hash_seconds = 0.0`, and `hash_algorithm = "sha256"` alongside existing `level = "stat"` and `max_hash_bytes = 0`, and updates the comment to describe open-file-descriptor (`fstat`) capture and budget behavior accurately. `schemas/manifest.schema.json` fixes existing `data_files` drift (making `sha256` nullable, `size_bytes` optional at `name` level, and allowing `mtime`, `ctime`, `realpath`), keeps `mixed` and `hashing_summary` optional for legacy manifest compatibility, and defines `$defs.file_provenance_record` with `"additionalProperties": false` covering all fields used by this plan and child plan `52dl55` (external file registration API).
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Core file provenance module and proxy hardening
 
-- [ ] E-02 Create `src/pubrun/capture/file_io.py` with identity snapshots, budget tracking, checked hashing, mode classification, deduplication, pending-registration hook, and hardened `ProvenanceFileProxy`.
+- [x] E-02 Create `src/pubrun/capture/file_io.py` with identity snapshots, budget tracking, checked hashing, mode classification, deduplication, pending-registration hook, and hardened `ProvenanceFileProxy`.
   - Depends on: E-01
   - Expected outcome: `src/pubrun/capture/file_io.py` uses only the Python standard library (Python 3.8+) and implements `FileIoBudgetTracker` (thread-safe per-file byte cap, run-wide total byte cap, run-wide monotonic time cap, stream commit helper, and summary export), `FileIdentity` snapshots (comparing `st_ino`/`st_dev` only when non-zero), `classify_open_mode(mode)`, `hash_file_checked(...)` (regular-file `stat.S_ISREG` guard, pre-open budget checks, 64 kibibyte (KiB) chunked reads, before-and-after `fstat` verification), `append_or_deduplicate_record(...)`, a no-op `finalize_pending_registrations(run_instance)` hook extended by child plan `52dl55`, and `ProvenanceFileProxy`. `ProvenanceFileProxy` omits `fstat`/`size_bytes` at `level == "name"`, implements `__iter__` returning `self` with `__next__`, handles `readinto`/`readinto1`/`write` byte slices via `memoryview(...).cast("B")`, evaluates streaming hashing strictly for sequential binary pure reads and writes without double-counting budgets, uses `open_identity` for pure-read fallback and `close_identity` for write/append/mixed fallback, and never substitutes a partial or stream-of-reads hash for a whole-file digest.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Wire `pubrun.core` and `pubrun.tracker`
 
-- [ ] E-03 Integrate `pubrun.capture.file_io` into `src/pubrun/core.py` and `src/pubrun/tracker.py`.
+- [x] E-03 Integrate `pubrun.capture.file_io` into `src/pubrun/core.py` and `src/pubrun/tracker.py`.
   - Depends on: E-02
   - Expected outcome: `src/pubrun/core.py` removes top-level `import hashlib`, loads `pubrun.capture.file_io` lazily inside `pubrun.open()`, exposes `ProvenanceFileProxy` via Python Enhancement Proposal (PEP) 562 module `__getattr__` (adding zero import cost and keeping `pubrun.capture.file_io` absent from `sys.modules` on cold `import pubrun`), and preserves exact `builtins.open()` return values, integer-fd handling, and host exceptions. `src/pubrun/tracker.py` initializes `self.data_files = {"inputs": [], "outputs": [], "mixed": []}` (including in Ghost Mode), adds `_data_files_lock`, `_file_io_budget = None`, and `_pending_file_registrations = []`, calls `finalize_pending_registrations(self)` inside an independent `try/except` in `Run._finalize_state()` only when `_pending_file_registrations` is non-empty, and snapshots `data_files` (with optional `hashing_summary` when `_file_io_budget is not None`) safely in `Run.to_manifest_dict()`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Behavioral and schema conformance tests
 
-- [ ] E-04 Expand `tests/test_file_io_provenance.py` to test every hashing guarantee, budget cap, change-detection case, streaming-vs-fallback read pattern, and mixed mode.
+- [x] E-04 Expand `tests/test_file_io_provenance.py` to test every hashing guarantee, budget cap, change-detection case, streaming-vs-fallback read pattern, and mixed mode.
   - Depends on: E-03
   - Expected outcome: `tests/test_file_io_provenance.py` proves with targeted behavioral tests: (1) all five detail levels (`none`, `name` omitting `size_bytes`, `stat`, `realpath`, `hash`) produce distinct honest `hash_status` and `evidence_strength` values; (2) a large sparse file (or mocked `os.stat`/reader) exceeding `max_hash_bytes` or `max_total_hash_bytes` records `hash_status == "over_budget"` with zero content-read calls; (3) `max_total_hash_seconds` stops hashing cleanly with `hash_status == "over_budget"`; (4) permission error records `hash_status == "failed"` and non-regular files refuse hashing with `hash_status == "unavailable"`; (5) replacing or modifying a file between open, close, and hash records `hash_status == "file_changed"`, `change_detected == True`, and `sha256 is None`; (6) sequential binary `"rb"` (including `for line in f:` iteration and `readinto` on `bytearray`/`array.array`) and `"wb"` streams hash in one pass (`observation_time == "during_stream"`, `extra_read_bytes == 0`) with accurate budget accounting and zero double-counting on fallback, while partial read, `seek()`, reread, text mode (`"r"`, `"w"`), append (`"a"`), and mixed modes (`"r+"`, `"w+"`, `"a+"`, `"x+"`) preserve exact file semantics and whole-file digests; (7) `r+`/`w+`/`a+`/`x+` land in `data_files["mixed"]` with `role == "input_output"`; (8) `builtins.open` is never monkeypatched and host exceptions propagate unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Add populated `data_files` schema conformance tests in `tests/test_manifest_schema.py`.
+- [x] E-05 Add populated `data_files` schema conformance tests in `tests/test_manifest_schema.py`.
   - Depends on: E-04
   - Expected outcome: `tests/test_manifest_schema.py` validates real manifests containing populated `data_files` (`inputs`, `outputs`, `mixed`, `hashing_summary`) across `name`, `stat`, `realpath`, and `hash` levels, over-budget skips, and changed-file records (alongside legacy manifests lacking `mixed` and `hashing_summary`) against `schemas/manifest.schema.json` using `jsonschema.validate`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -219,30 +219,30 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste `pytest tests/test_manifest_schema.py tests/test_config.py -v` output showing exit code 0, plus command output confirming `[capture.file_io]` in `src/pubrun/resources/default.toml` resolves `max_total_hash_bytes`, `max_total_hash_seconds`, and `hash_algorithm` via `pubrun.config.load_default_config()` and `schemas/manifest.schema.json` passes `check_schema`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_manifest_schema.py tests/test_config.py -v --no-cov` exited 0 (`55 passed in 4.23s`, including `test_schema_is_valid_draft`, all `test_populated_data_files_*` cases, `test_legacy_data_files_manifest_without_mixed_or_hashing_summary_conforms`, and all 35 `tests/test_config.py` tests). `PYTHONPATH=src python3 -c "... load_default_config()['capture']['file_io'] ... check_schema(schema) ..."` exited 0 with stdout `CONFIG_AND_SCHEMA_OK {'level': 'stat', 'max_hash_bytes': 0, 'max_total_hash_bytes': 0, 'max_total_hash_seconds': 0.0, 'hash_algorithm': 'sha256'}`.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Paste `pytest tests/test_file_io_provenance.py -v` output showing exit code 0 and passing assertions covering `FileIoBudgetTracker` (including stream-commit without fallback double-counting), `FileIdentity`, `classify_open_mode`, `hash_file_checked` (`S_ISREG` guard, pre-open cap, `fstat` checks), `append_or_deduplicate_record`, and `ProvenanceFileProxy` (`name`-level omitted `size_bytes`, `__iter__`/`__next__`, `readinto` `memoryview` byte slicing, `open_identity` vs `close_identity` fallback baselines, and streaming-versus-fallback behavior).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_file_io_provenance.py -v --no-cov` exited 0 (`33 passed in 3.09s`), passing all assertions across `TestFileIoLevels` (7 passed), `TestProcIoCounters` (2 passed), `TestDetailLevelHonesty` (2 passed: all 5 levels and zero `fstat`/`stat` at `name` level), `TestHashingBudgets` (4 passed: 10 GiB sparse file cap, mocked 2 TiB stat cap, `max_total_hash_bytes`, `max_total_hash_seconds`), `TestErrorsAndSpecialFiles` (3 passed: permission error, directory/missing, POSIX FIFO without hang), `TestChangeDetection` (4 passed: open-to-close in-place mutation, replaced file on text read, mid-hash modification, zero-inode `FileIdentity`), `TestStreamingVsFallback` (6 passed: sequential binary `read`, `for line in f:` iteration, `readinto` on `bytearray`/`array.array`, `write`/`writelines`, partial/seek/raw fallback with zero double-counting, text/append fallback), `TestMixedModesAndAlgorithms` (3 passed: `classify_open_mode`, `r+`/`w+`/`a+`/`x+` mixed bucket, `sha512` and invalid algorithm fallback), and `TestDeduplicationAndHostPreservation` (2 passed: `append_or_deduplicate_record` + `finalize_pending_registrations` hook, unpatched `builtins.open`, integer fd, host exception preservation).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Paste output of `pytest tests/test_explicit_api.py tests/test_new_features.py tests/test_tracker.py -v` (exit code 0) and fresh subprocess output of `python -c "import builtins, sys; orig = builtins.open; import pubrun; assert builtins.open is orig; assert 'pubrun.capture.file_io' not in sys.modules; from pubrun.core import ProvenanceFileProxy; assert ProvenanceFileProxy is not None; pubrun.stop(); print('LAZY_AND_UNPATCHED')"` printing `LAZY_AND_UNPATCHED` with exit code 0.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_explicit_api.py tests/test_new_features.py tests/test_tracker.py -v --no-cov` exited 0 (`41 passed in 2.18s`: 4 passed in `tests/test_explicit_api.py`, 17 passed in `tests/test_new_features.py`, 20 passed in `tests/test_tracker.py`). Fresh subprocess `PYTHONPATH=src python3 -c "import builtins, sys; orig = builtins.open; import pubrun; assert builtins.open is orig; assert 'pubrun.capture.file_io' not in sys.modules; from pubrun.core import ProvenanceFileProxy; assert ProvenanceFileProxy is not None; pubrun.stop(); print('LAZY_AND_UNPATCHED')"` exited 0 with stdout `LAZY_AND_UNPATCHED`.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Paste full `pytest tests/test_file_io_provenance.py -v` output (exit code 0) listing passing tests for: all five detail levels, sparse-file/mocked-reader cap preventing content reads, total byte and time budgets without fallback double-counting, permission error and non-regular file handling, replaced/modified file detection, sequential binary streaming (including iteration and `readinto`) vs text/seek/reread/append/partial-read fallback, `r+`/`w+`/`a+`/`x+` mixed access, invalid `hash_algorithm` fallback, and host exception preservation.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_file_io_provenance.py -v --no-cov` exited 0 (`33 passed in 3.09s`): `TestFileIoLevels::{test_default_is_stat_metadata_no_hash, test_hash_level_matches_on_disk, test_name_level_no_stat_no_hash, test_realpath_level_includes_realpath_but_no_hash, test_none_level_records_nothing, test_pubrun_open_returns_usable_file, test_max_hash_bytes_skips_large_files}`, `TestProcIoCounters::{test_get_proc_io_shape, test_io_counters_in_manifest}`, `TestDetailLevelHonesty::{test_all_five_levels_record_honest_status_and_evidence, test_name_level_performs_zero_fstat_or_stat_calls}`, `TestHashingBudgets::{test_sparse_file_over_per_file_cap_zero_fallback_reads, test_mocked_terabyte_stat_cap_zero_content_reads, test_max_total_hash_bytes_caps_across_files_with_zero_fallback_reads, test_max_total_hash_seconds_aborts_cleanly}`, `TestErrorsAndSpecialFiles::{test_permission_error_records_failed, test_directory_and_missing_refuse_hashing_as_unavailable, test_fifo_refuses_hashing_without_hanging}`, `TestChangeDetection::{test_modified_in_place_between_open_and_close_sets_file_changed, test_replaced_file_between_open_and_close_on_text_read_sets_file_changed, test_file_modified_during_hash_file_checked_sets_file_changed, test_file_identity_zero_inode_comparison}`, `TestStreamingVsFallback::{test_sequential_binary_read_hashes_during_stream, test_sequential_binary_iteration_hashes_during_stream, test_sequential_binary_readinto_bytearray_and_array, test_sequential_binary_write_and_writelines_hash_during_stream, test_partial_read_seek_reread_and_raw_access_fallback_without_double_counting, test_text_and_append_modes_fallback_with_exact_whole_file_digests}`, `TestMixedModesAndAlgorithms::{test_classify_open_mode_covers_all_python_modes, test_mixed_modes_land_in_data_files_mixed_with_whole_file_digests, test_non_sha256_algorithm_and_invalid_algorithm_fallback}`, `TestDeduplicationAndHostPreservation::{test_append_or_deduplicate_record_behavior, test_builtins_open_unpatched_integer_fd_and_host_exceptions_preserved}` all PASSED.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Paste `pytest tests/test_manifest_schema.py -v` output (exit code 0) confirming real manifests with populated `data_files` (`inputs`, `outputs`, `mixed`, `hashing_summary`) across levels and hash outcomes, as well as legacy manifests without `mixed`/`hashing_summary`, validate against `schemas/manifest.schema.json`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_manifest_schema.py -v --no-cov` exited 0 (`20 passed in 4.03s`): `test_config_section_conforms_including_notices`, `test_config_section_conforms_without_notices`, `test_schema_is_valid_draft`, `test_full_manifest_conforms_to_schema`, `test_manifest_variants_conform_to_schema[default|profile-notice|console-on|tree-scope|packages-transitive]`, `test_packages_mode_written_to_manifest_is_in_schema_enum`, `test_committed_sample_fixture_conforms_to_schema`, `test_transient_capture_states_are_valid[pending|timeout]`, `test_startup_manifest_conforms_to_schema`, `test_populated_data_files_manifest_conforms_across_levels[name|stat|realpath|hash]`, `test_populated_data_files_over_budget_and_file_changed_conform`, and `test_legacy_data_files_manifest_without_mixed_or_hashing_summary_conforms` all PASSED.
+  - Result: pass
 
 ## Approval and execution gate
 
