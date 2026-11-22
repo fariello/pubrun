@@ -199,6 +199,19 @@ class TestPackages:
         names = [r["name"].lower() for r in result["records"]]
         assert "pubrun" in names
 
+    def test_default_mode_is_imported_only(self):
+        result = get_packages({})
+        assert result["mode"] == "imported-only"
+        assert "records" in result
+
+    def test_top_level_installed_is_subset_of_full_environment(self):
+        top = get_packages({"capture": {"packages": {"mode": "top-level-installed"}}})
+        full = get_packages({"capture": {"packages": {"mode": "full-environment"}}})
+        assert top["mode"] == "top-level-installed"
+        top_names = {r["name"].lower() for r in top["records"]}
+        full_names = {r["name"].lower() for r in full["records"]}
+        assert top_names.issubset(full_names)
+
 
 # ---------------------------------------------------------------------------
 # Git

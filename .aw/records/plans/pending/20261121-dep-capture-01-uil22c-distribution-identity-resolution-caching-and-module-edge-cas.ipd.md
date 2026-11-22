@@ -76,29 +76,29 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Distribution normalization, indexing, and caching
 
-- [ ] E-01 Add PEP 503 normalization (`normalize_package_name`), an environment-fingerprinted distribution index and cache (`_DistributionIndex`, `_get_distribution_index`, `invalidate_package_cache`) using a single-pass `importlib.metadata.distributions()` mapper compatible with Python 3.8 through 3.14, and shared `get_installed_distribution_versions()` in `src/pubrun/capture/packages.py`.
+- [x] E-01 Add PEP 503 normalization (`normalize_package_name`), an environment-fingerprinted distribution index and cache (`_DistributionIndex`, `_get_distribution_index`, `invalidate_package_cache`) using a single-pass `importlib.metadata.distributions()` mapper compatible with Python 3.8 through 3.14, and shared `get_installed_distribution_versions()` in `src/pubrun/capture/packages.py`.
   - Depends on: none
   - Expected outcome: `src/pubrun/capture/packages.py` provides `normalize_package_name(name)`, `invalidate_package_cache()`, `_get_distribution_index(use_cache=True)`, and `get_installed_distribution_versions(use_cache=True)` (matching the signature and return shape expected by sibling Set `repro-check` plan `tusvtd`, upgrading in place if `tusvtd` landed first), scans `importlib.metadata.distributions()` strictly once per unchanged environment fingerprint (`sys.path`, `sys.meta_path` types, `sys.path` directory mtimes, and `id(importlib.metadata.distributions)`), deduplicates identical distributions while keeping first-wins `sys.path` precedence, detects mid-run `sys.path`, directory-mtime, or provider changes, and never imports any user module.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Concurrent snapshotting and explicit edge-case resolution
 
-- [ ] E-02 Implement retry-safe `sys.modules` snapshotting, Python 3.8 through 3.14 standard-library classification, PEP 420 namespace package disambiguation via loaded submodule origins and `dist.files`, PEP 610 editable install detection without exposing `direct_url.json` URLs, local-only module classification, and missing or corrupt metadata degradation in `src/pubrun/capture/packages.py`.
+- [x] E-02 Implement retry-safe `sys.modules` snapshotting, Python 3.8 through 3.14 standard-library classification, PEP 420 namespace package disambiguation via loaded submodule origins and `dist.files`, PEP 610 editable install detection without exposing `direct_url.json` URLs, local-only module classification, and missing or corrupt metadata degradation in `src/pubrun/capture/packages.py`.
   - Depends on: E-01
   - Expected outcome: Snapshotting `sys.modules` tolerates concurrent mutation without raising `RuntimeError`; reading attributes from lazy or broken module proxies never raises; mismatched import names (`sklearn` -> `scikit-learn`, `PIL` -> `Pillow`, or synthetic equivalents) resolve to canonical distribution names with `import_names`; PEP 420 namespace packages resolve only the distribution(s) backing actually loaded submodules; truly ambiguous mappings, unmapped site-packages modules, and corrupt or missing metadata emit structured `unresolved` entries matching child `ijipnx`'s schema shape and set `capture_state.status = "partial"` with warnings; standard-library modules (including generated modules such as `_sysconfigdata__*` on Python 3.10+) and local-only modules are classified cleanly without marking capture `partial`; editable installs set `editable = True` from parsed `direct_url.json` without emitting raw `url` strings.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Update `get_packages()` in `src/pubrun/capture/packages.py` for `imported-only`, `top-level-installed`, and `full-environment` modes to use the cached resolver while keeping `mode = "imported-only"` as the default, keeping `get_packages()` output compliant with the current `schemas/manifest.schema.json` until child `ijipnx` extends the schema, and preserving `mode = "off"` suppression and `imported-transitive` functionality until child `fdqkrz` refactors transitive closure.
+- [x] E-03 Update `get_packages()` in `src/pubrun/capture/packages.py` for `imported-only`, `top-level-installed`, and `full-environment` modes to use the cached resolver while keeping `mode = "imported-only"` as the default, keeping `get_packages()` output compliant with the current `schemas/manifest.schema.json` until child `ijipnx` extends the schema, and preserving `mode = "off"` suppression and `imported-transitive` functionality until child `fdqkrz` refactors transitive closure.
   - Depends on: E-02
   - Expected outcome: `resolve_packages_snapshot(config)` returns the full structured snapshot (canonical `records` with `location`, `editable`, `source`, and `import_names`, plus `unresolved`, `local_modules`, and `capture_state`); `get_packages(config)` returns sorted canonical distribution records using only keys and non-null types accepted by the current `schemas/manifest.schema.json` (never emitting `name: None` or `capture_state.detail: None`) while surfacing `capture_state.status = "partial"` and `capture_state.warnings` for unresolved, ambiguous, or missing-metadata cases; `top-level-installed` computes installed distributions not required by any other installed distribution via `importlib.metadata` (ignoring self-requirements and extra-gated requirements); `src/pubrun/capture/packages.py::_parse_req_name`, `tests/test_edge_cases.py::TestPackagesNullName`, and `tests/test_new_features.py::TestImportedTransitiveMode` remain green; and metadata errors never crash the host.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Deterministic fixture-based behavioral tests
 
-- [ ] E-04 Create `tests/test_package_resolution.py` with deterministic local `.dist-info` and module fixtures and update `tests/test_capture_engines.py` if needed to verify all identity-resolution, `top-level-installed`, caching, concurrency, schema-key, and no-import behaviors.
+- [x] E-04 Create `tests/test_package_resolution.py` with deterministic local `.dist-info` and module fixtures and update `tests/test_capture_engines.py` if needed to verify all identity-resolution, `top-level-installed`, caching, concurrency, schema-key, and no-import behaviors.
   - Depends on: E-03
   - Expected outcome: `tests/test_package_resolution.py` builds synthetic distributions in `tmp_path` (requiring no `scikit-learn` or `Pillow` installation) and passes via `pytest` for mismatched import and distribution names, PEP 420 multi-distribution namespace packages, ambiguous mappings, standard-library modules, local-only modules, unmapped site-packages modules, editable installs (`direct_url.json` with `editable: true` vs `editable: false`, omitted `editable`, and non-dict JSON), missing or corrupt metadata, Python 3.8 and 3.9 compatibility (parity with `packages_distributions()` on Python 3.10+ and resilience when `packages_distributions` is absent), single-scan cache reuse and deterministic invalidation on `sys.path`, directory-mtime (`os.utime`), monkeypatched `distributions`, or `invalidate_package_cache()`, duplicate `sys.path` deduplication, `top-level-installed` root filtering (including self-requirements), concurrent `sys.modules` mutation thread stress, a guard proving `get_packages()` never imports any uninstalled or unloaded target module, and `get_installed_distribution_versions()`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -223,25 +223,101 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition, as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste `pytest tests/test_package_resolution.py -k "normalize or cache or fallback or dedup or installed_distribution_versions" -v` output showing exit code 0 (with non-zero collected tests), proving PEP 503 normalization, strictly single-scan caching with invalidation on `sys.path`/mtime/provider change, duplicate `sys.path` deduplication, Python 3.8/3.9 compatibility when `packages_distributions` is absent, and `get_installed_distribution_versions()` behavior.
   - Observed evidence:
-  - Result: pending
+    Command: `pytest tests/test_package_resolution.py -k "normalize or cache or fallback or dedup or installed_distribution_versions" -v` (exit code 0)
+    ```text
+    collected 17 items / 12 deselected / 5 selected
 
-- [ ] V-02 validates E-02
+    tests/test_package_resolution.py::test_normalize_package_name_pep503 PASSED [ 20%]
+    tests/test_package_resolution.py::test_cache_single_scan_and_invalidation PASSED [ 40%]
+    tests/test_package_resolution.py::test_dedup_duplicate_and_symlinked_sys_path PASSED [ 60%]
+    tests/test_package_resolution.py::test_fallback_python38_39_parity_and_record_filtering PASSED [ 80%]
+    tests/test_package_resolution.py::test_installed_distribution_versions_helper PASSED [100%]
+    ======================= 5 passed, 12 deselected in 5.36s =======================
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Paste `pytest tests/test_package_resolution.py -k "mismatch or namespace or ambiguous or stdlib or local or site_package or editable or missing_metadata or concurrent or lazy or no_import" -v` output showing exit code 0 (with non-zero collected tests), proving every module/distribution edge case, `direct_url.json` URL non-leakage, lazy-proxy and concurrent `sys.modules` safety, and the no-import invariant.
   - Observed evidence:
-  - Result: pending
+    Command: `pytest tests/test_package_resolution.py -k "mismatch or namespace or ambiguous or stdlib or local or site_package or editable or missing_metadata or concurrent or lazy or no_import" -v` (exit code 0)
+    ```text
+    collected 17 items / 7 deselected / 10 selected
 
-- [ ] V-03 validates E-03
+    tests/test_package_resolution.py::test_import_name_mismatch_resolves_canonical_distribution PASSED [ 10%]
+    tests/test_package_resolution.py::test_namespace_package_resolves_only_loaded_submodule_distribution PASSED [ 20%]
+    tests/test_package_resolution.py::test_ambiguous_mapping_and_bare_namespace_mark_partial PASSED [ 30%]
+    tests/test_package_resolution.py::test_stdlib_and_builtin_modules_excluded_cleanly PASSED [ 40%]
+    tests/test_package_resolution.py::test_local_only_module_classified_without_partial PASSED [ 50%]
+    tests/test_package_resolution.py::test_unmapped_site_package_module_marks_partial PASSED [ 60%]
+    tests/test_package_resolution.py::test_editable_direct_url_variants_and_no_url_leak PASSED [ 70%]
+    tests/test_package_resolution.py::test_missing_metadata_and_corrupt_dist_degrade_to_partial PASSED [ 80%]
+    tests/test_package_resolution.py::test_concurrent_sys_modules_mutation_and_lazy_proxy_safety PASSED [ 90%]
+    tests/test_package_resolution.py::test_no_import_invariant_never_executes_unloaded_module PASSED [100%]
+    ======================= 10 passed, 7 deselected in 5.07s =======================
+    ```
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: Paste `pytest tests/test_package_resolution.py -k "top_level or schema" -v` and `pytest tests/test_capture_engines.py tests/test_edge_cases.py tests/test_new_features.py tests/test_manifest_schema.py -v` output showing exit code 0, proving `get_packages()` works across `off`, `imported-only`, `imported-transitive`, `top-level-installed`, and `full-environment`, keeps `imported-only` default, preserves `TestPackagesNullName` and `TestImportedTransitiveMode`, and stays conformant with `schemas/manifest.schema.json`.
   - Observed evidence:
-  - Result: pending
+    Command 1: `pytest tests/test_package_resolution.py -k "top_level or schema" -v` (exit code 0)
+    ```text
+    collected 17 items / 15 deselected / 2 selected
 
-- [ ] V-04 validates E-04
+    tests/test_package_resolution.py::test_top_level_installed_filters_dependencies_and_ignores_self_and_extras PASSED [ 50%]
+    tests/test_package_resolution.py::test_get_packages_schema_conformance_and_default_mode PASSED [100%]
+    ======================= 2 passed, 15 deselected in 3.19s =======================
+    ```
+    Command 2: `pytest tests/test_capture_engines.py tests/test_edge_cases.py tests/test_new_features.py tests/test_manifest_schema.py -v` (exit code 0)
+    ```text
+    collected 81 items
+    ...
+    tests/test_capture_engines.py::TestPackages::test_default_mode_is_imported_only PASSED [ 30%]
+    tests/test_capture_engines.py::TestPackages::test_top_level_installed_is_subset_of_full_environment PASSED [ 32%]
+    tests/test_edge_cases.py::TestPackagesNullName::test_none_name_yields_partial_not_crash PASSED [ 48%]
+    tests/test_new_features.py::TestImportedTransitiveMode::test_transitive_deps_discovered PASSED [ 62%]
+    tests/test_new_features.py::TestImportedTransitiveMode::test_pep508_parser_edge_cases PASSED [ 64%]
+    tests/test_manifest_schema.py::test_full_manifest_conforms_to_schema PASSED [ 87%]
+    tests/test_manifest_schema.py::test_manifest_variants_conform_to_schema[packages-transitive] PASSED [ 93%]
+    tests/test_manifest_schema.py::test_startup_manifest_conforms_to_schema PASSED [100%]
+    ============================== 81 passed in 5.17s ==============================
+    ```
+  - Result: pass
+
+- [x] V-04 validates E-04
   - Required evidence: Paste complete `pytest tests/test_package_resolution.py tests/test_capture_engines.py tests/test_edge_cases.py tests/test_new_features.py tests/test_manifest_schema.py -v` runner output showing exit code 0 with zero skipped fixture tests and zero third-party test-only package installations required.
   - Observed evidence:
-  - Result: pending
+    Command: `pytest tests/test_package_resolution.py tests/test_capture_engines.py tests/test_edge_cases.py tests/test_new_features.py tests/test_manifest_schema.py -v` (exit code 0; 98 passed, 0 skipped, 0 failed)
+    ```text
+    collected 98 items
+
+    tests/test_package_resolution.py::test_normalize_package_name_pep503 PASSED [  1%]
+    tests/test_package_resolution.py::test_cache_single_scan_and_invalidation PASSED [  2%]
+    tests/test_package_resolution.py::test_dedup_duplicate_and_symlinked_sys_path PASSED [  3%]
+    tests/test_package_resolution.py::test_fallback_python38_39_parity_and_record_filtering PASSED [  4%]
+    tests/test_package_resolution.py::test_installed_distribution_versions_helper PASSED [  5%]
+    tests/test_package_resolution.py::test_import_name_mismatch_resolves_canonical_distribution PASSED [  6%]
+    tests/test_package_resolution.py::test_namespace_package_resolves_only_loaded_submodule_distribution PASSED [  7%]
+    tests/test_package_resolution.py::test_ambiguous_mapping_and_bare_namespace_mark_partial PASSED [  8%]
+    tests/test_package_resolution.py::test_stdlib_and_builtin_modules_excluded_cleanly PASSED [  9%]
+    tests/test_package_resolution.py::test_local_only_module_classified_without_partial PASSED [ 10%]
+    tests/test_package_resolution.py::test_unmapped_site_package_module_marks_partial PASSED [ 11%]
+    tests/test_package_resolution.py::test_editable_direct_url_variants_and_no_url_leak PASSED [ 12%]
+    tests/test_package_resolution.py::test_missing_metadata_and_corrupt_dist_degrade_to_partial PASSED [ 13%]
+    tests/test_package_resolution.py::test_concurrent_sys_modules_mutation_and_lazy_proxy_safety PASSED [ 14%]
+    tests/test_package_resolution.py::test_no_import_invariant_never_executes_unloaded_module PASSED [ 15%]
+    tests/test_package_resolution.py::test_top_level_installed_filters_dependencies_and_ignores_self_and_extras PASSED [ 16%]
+    tests/test_package_resolution.py::test_get_packages_schema_conformance_and_default_mode PASSED [ 17%]
+    tests/test_capture_engines.py (28 tests) PASSED [ 18%..51%]
+    tests/test_edge_cases.py (18 tests) PASSED [ 52%..68%]
+    tests/test_new_features.py (17 tests) PASSED [ 69%..85%]
+    tests/test_manifest_schema.py (14 tests) PASSED [ 86%..100%]
+    ============================= 98 passed in 13.94s ==============================
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 
