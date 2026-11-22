@@ -176,7 +176,7 @@ class TestParentHydrationReport:
         assert isinstance(report, HydrationReport)
         assert report.status == "none"
         assert report.inherited_sections == []
-        assert set(report.direct_sections) == {"hardware", "python", "packages", "environment", "git"}
+        assert set(report.direct_sections) == {"hardware", "python", "packages", "environment", "git", "host"}
         assert hydrated == snapshot_before
         assert hydrated is not manifest
         assert manifest == snapshot_before

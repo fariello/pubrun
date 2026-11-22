@@ -17,6 +17,7 @@ HYDRABLE_SECTIONS: Tuple[str, ...] = (
     "packages",
     "environment",
     "git",
+    "host",
 )
 
 _HYDRATION_INCOMPLETE_STATUSES = frozenset(
@@ -463,7 +464,7 @@ def hydrate_manifest(
 
     If the manifest references a ``meta_ref``, loads the parent snapshot
     and fills in any missing or suppressed sections (hardware, process,
-    python, packages, environment, git). Also checks for environmental
+    python, packages, environment, git, host). Also checks for environmental
     drift by comparing script mtime against the parent snapshot timestamp.
 
     Args:

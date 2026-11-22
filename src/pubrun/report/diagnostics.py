@@ -1459,7 +1459,13 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
 
     # Reuse the series already read for the summary above (single read of events.jsonl).
     timestamps = list(series["timestamps"])
-    rss_values = list(series["rss"])
+    # Plot the process-tree RSS only when the run was recorded in tree scope AND every
+    # sample carries a tree value (so it lines up with the timestamps); otherwise plot the
+    # main-process RSS. The chart title below follows whichever series is plotted.
+    _scope = manifest.get("resources", {}).get("scope", "process")
+    _tree_rss = list(series.get("tree_rss") or [])
+    plot_tree = _scope == "tree" and bool(_tree_rss) and len(_tree_rss) == len(timestamps)
+    rss_values = _tree_rss if plot_tree else list(series["rss"])
     cpu_values = list(series["cpu"])
     if not timestamps:
         print(f"\n{yellow}No resource samples found in events.jsonl.{rst}\n")
@@ -1514,11 +1520,9 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
             columns = 80
         chart_width = max(20, columns - 20)
 
-    # Scope label: the RSS/CPU samples are for the MAIN process unless the run
-    # was recorded in "tree" scope. Make the chart title explicit so a reader
-    # isn't misled into thinking a thin orchestrator's RSS is the whole tree.
-    _scope = manifest.get("resources", {}).get("scope", "process")
-    _scope_label = "process tree" if _scope == "tree" else "main process"
+    # Scope label names the series actually plotted, so a reader isn't misled into
+    # thinking a thin orchestrator's RSS is the whole tree (or vice versa).
+    _scope_label = "process tree" if plot_tree else "main process"
 
     # Plot CPU (Yellow theme). CPU% is always measured for the main process
     # (child CPU is excluded from the metric), regardless of RSS scope.

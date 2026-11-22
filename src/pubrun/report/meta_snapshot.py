@@ -10,21 +10,56 @@ from pubrun.capture.git import get_git
 from pubrun.capture.hardware import get_hardware
 from pubrun.capture.host import get_host
 
+_DEPTH_CAPTURE_OVERRIDES = {
+    "basic": {
+        "hardware": {"depth": "basic", "capture_gpu_clock_speed": False},
+        "git": {"enabled": True, "depth": "basic", "check_dirty": False},
+        "environment": {"mode": "off", "depth": "off"},
+        "packages": {"mode": "off", "depth": "off"},
+        "host": {"enabled": True, "depth": "basic"},
+        "python": {"depth": "basic"},
+    },
+    "standard": {
+        "hardware": {"depth": "standard", "capture_gpu_clock_speed": False},
+        "git": {"enabled": True, "depth": "standard", "check_dirty": True},
+        "environment": {"mode": "filtered", "depth": "standard"},
+        "packages": {"mode": "top-level-installed", "depth": "standard"},
+        "host": {"enabled": True, "depth": "standard"},
+        "python": {"depth": "standard"},
+    },
+    "deep": {
+        "hardware": {"depth": "deep", "capture_gpu_clock_speed": True},
+        "git": {"enabled": True, "depth": "deep", "check_dirty": True},
+        # "filtered", never "full": the snapshot is shared with child runs, so secrets
+        # must stay redacted even at the deepest level.
+        "environment": {"mode": "filtered", "depth": "deep"},
+        "packages": {"mode": "full-environment", "depth": "deep"},
+        "host": {"enabled": True, "depth": "deep"},
+        "python": {"depth": "deep"},
+    },
+}
+
+
 def generate_meta_snapshot(output_path: str, depth: str) -> None:
     """Generate a standalone environment snapshot for HPC parent-child hydration.
 
     Args:
         output_path: Target JSON file path.
         depth: Profiling depth (``"basic"``, ``"standard"``, ``"deep"``).
+
+    Raises:
+        ValueError: If ``depth`` is not one of the supported values.
     """
+    import copy
     import time
     from pubrun.report import output as _out
+    if depth not in _DEPTH_CAPTURE_OVERRIDES:
+        raise ValueError(
+            f"invalid meta snapshot depth {depth!r}; expected one of "
+            f"{', '.join(_DEPTH_CAPTURE_OVERRIDES)}"
+        )
     _out.info(f"Analyzing global environment context (depth: {depth})...", stream=sys.stdout)
-    # Resolve config with explicit overrides for global mode
-    cfg = resolve_config({
-        "core": {"profile": depth},
-        "capture": {"packages": {"mode": "full-environment"}}
-    })
+    cfg = resolve_config({"capture": copy.deepcopy(_DEPTH_CAPTURE_OVERRIDES[depth])})
 
     # 1. Capture each section, timed, itemizing what was gathered and its outcome.
     #    A section whose capture_state.status != "complete" is surfaced as [WARN ].
@@ -39,7 +74,10 @@ def generate_meta_snapshot(output_path: str, depth: str) -> None:
         state = (data.get("capture_state") or {}).get("status") if isinstance(data, dict) else None
         summary = summary_fn(data)
         line = f"{label}: {summary} ({dt*1000:.0f} ms)"
-        if state and state != "complete":
+        if state == "suppressed":
+            # Deliberately off at this depth: informational, not a problem.
+            _out.info(f"{line} — capture_state={state}", stream=sys.stdout)
+        elif state and state != "complete":
             _out.warn(f"{line} — capture_state={state}", stream=sys.stdout)
         else:
             _out.ok(line, stream=sys.stdout)
@@ -47,7 +85,7 @@ def generate_meta_snapshot(output_path: str, depth: str) -> None:
 
     t0 = time.perf_counter()
     hardware = _gather("hardware", get_hardware,
-                       lambda d: (d.get("cpu", {}) or {}).get("model", "unknown"))
+                       lambda d: (d.get("cpu", {}) or {}).get("model") or "unknown")
     python_env = _gather("python", get_python_runtime,
                          lambda d: f"v{(d.get('version','') or 'unknown').split()[0]} ({d.get('environment_kind','?')})")
     packages = _gather("packages", get_packages,

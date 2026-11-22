@@ -119,6 +119,36 @@ def _live_fs_health_findings(fs_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     return findings
 
 
+def _config_file_findings() -> List[Dict[str, Any]]:
+    """WARN for each config file ``resolve_config()`` would load that fails to parse."""
+    findings: List[Dict[str, Any]] = []
+    try:
+        from pathlib import Path
+        from pubrun.config import get_global_config_dir, tomllib
+        candidates = [
+            get_global_config_dir() / "config.toml",
+            Path.cwd() / ".config" / "pubrun" / "config.toml",
+            Path.cwd() / ".pubrun.toml",
+        ]
+    except Exception:
+        return findings
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+        except OSError:
+            continue
+        try:
+            tomllib.loads(path.read_text(encoding="utf-8"))
+        except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError) as e:
+            findings.append(_finding(
+                WARN, "config_invalid",
+                f"pubrun config file {path} could not be parsed and is being ignored: "
+                f"{type(e).__name__}: {e}",
+                f"Fix the TOML syntax in `{path}` (or remove the file)."))
+    return findings
+
+
 def _install_health_findings() -> List[Dict[str, Any]]:
     findings: List[Dict[str, Any]] = []
 
@@ -130,10 +160,13 @@ def _install_health_findings() -> List[Dict[str, Any]]:
             f"minimum supported {_MIN_PY[0]}.{_MIN_PY[1]}.",
             "Upgrade Python to a supported version."))
 
-    # Config file validity (if a .pubrun.toml is present in cwd or via resolve).
+    # Config file validity. resolve_config() deliberately tolerates malformed TOML (it logs
+    # and skips the file so a user's script never breaks), so parse each config file it
+    # would load explicitly here; otherwise a broken file passes self-check silently.
+    findings.extend(_config_file_findings())
     try:
         from pubrun.config import resolve_config
-        resolve_config()  # raises / logs on malformed config
+        resolve_config()
     except Exception as e:
         findings.append(_finding(
             WARN, "config_invalid",
@@ -143,12 +176,22 @@ def _install_health_findings() -> List[Dict[str, Any]]:
     # Output dir writability.
     try:
         base = _live_paths().get("output_dir", "")
-        parent = base if os.path.isdir(base) else os.path.dirname(base) or "."
+        if base:
+            base = os.path.abspath(base)
+            parent = base if os.path.isdir(base) else os.path.dirname(base)
+        else:
+            parent = os.getcwd()
         # Walk up to the nearest existing ancestor to test writability without creating dirs.
+        # dirname() is a fixed point at a filesystem root (including a nonexistent Windows
+        # drive), so stop there rather than looping forever.
         probe = parent
         while probe and not os.path.exists(probe):
-            probe = os.path.dirname(probe)
-        if probe and not os.access(probe, os.W_OK):
+            next_probe = os.path.dirname(probe)
+            if next_probe == probe:
+                probe = ""
+                break
+            probe = next_probe
+        if not probe or not os.access(probe, os.W_OK):
             findings.append(_finding(
                 WARN, "output_not_writable",
                 f"the run output location ({base}) is not writable.",
@@ -237,24 +280,22 @@ def live_checks():
     was checked and how each did (not only the problems). Never raises.
     """
     findings = live_findings()
-    by_prefix = {}
-    for f in findings:
-        by_prefix.setdefault(f.get("code", ""), f)
     checks = []
     for name, label, codes in _CHECK_CATALOG:
-        matched = None
-        for f in findings:
-            code = f.get("code", "")
-            if any(code == c or code.startswith(c) for c in codes):
-                matched = f
-                break
-        if matched is None:
+        matched = [
+            f for f in findings
+            if any(f.get("code", "") == c or f.get("code", "").startswith(c) for c in codes)
+        ]
+        if not matched:
             checks.append({"name": name, "label": label, "status": "ok", "detail": ""})
-        else:
+            continue
+        # One record per finding, so a check with several problems (e.g. two network
+        # mounts) shows and counts each one, and --show-suggestions can match each detail.
+        for f in matched:
             checks.append({
                 "name": name, "label": label,
-                "status": matched.get("severity", "info"),
-                "detail": matched.get("message", ""),
+                "status": f.get("severity", "info"),
+                "detail": f.get("message", ""),
             })
     return checks, findings
 
@@ -270,27 +311,34 @@ def _hpc_login_node_findings() -> List[Dict[str, Any]]:
     import shutil
     findings: List[Dict[str, Any]] = []
     try:
-        # (scheduler name, submit-tool on PATH, "inside an allocation" env marker)
-        schedulers = [
-            ("Slurm", "sbatch", "SLURM_JOB_ID"),
-            ("PBS/Torque", "qsub", "PBS_JOBID"),
-            ("LSF", "bsub", "LSB_JOBID"),
-            ("SGE/Grid Engine", "qsub", "JOB_ID"),
-        ]
-        seen = set()
-        for name, tool, alloc_env in schedulers:
-            if not shutil.which(tool) or tool in seen:
-                continue
-            seen.add(tool)
-            on_compute = bool(os.environ.get(alloc_env))
-            if not on_compute:
-                findings.append(_finding(
-                    INFO, "hpc_login_node",
-                    f"you appear to be on an HPC {name} login node "
-                    f"(`{tool}` present, not inside an allocation).",
-                    "Benchmark on a compute node for representative numbers: run "
-                    "`pubrun bench`, which offers to submit to the scheduler."))
-                break  # one nudge is enough
+        # Inside ANY scheduler allocation means a compute node, whichever submit tools are
+        # also on PATH. Checked first because PBS and SGE both ship `qsub`.
+        alloc_envs = ("SLURM_JOB_ID", "PBS_JOBID", "LSB_JOBID", "JOB_ID", "PE_HOSTFILE")
+        if any(os.environ.get(v) for v in alloc_envs):
+            return findings
+        detected = None
+        if shutil.which("sbatch"):
+            detected = ("Slurm", "sbatch")
+        elif shutil.which("bsub"):
+            detected = ("LSF", "bsub")
+        elif shutil.which("qsub"):
+            pbs = any(os.environ.get(v) for v in ("PBS_ENVIRONMENT", "PBS_O_HOST"))
+            sge = any(os.environ.get(v) for v in ("SGE_ROOT", "SGE_O_HOST"))
+            if pbs:
+                name = "PBS/Torque"
+            elif sge:
+                name = "SGE/Grid Engine"
+            else:
+                name = "PBS/Torque or SGE"
+            detected = (name, "qsub")
+        if detected is not None:
+            name, tool = detected
+            findings.append(_finding(
+                INFO, "hpc_login_node",
+                f"you appear to be on an HPC {name} login node "
+                f"(`{tool}` present, not inside an allocation).",
+                "Benchmark on a compute node for representative numbers: run "
+                "`pubrun bench`, which offers to submit to the scheduler."))
     except Exception:
         pass
     return findings
