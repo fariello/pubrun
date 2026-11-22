@@ -5,8 +5,9 @@
 - Concern: Measuring startup and finalization package-capture overhead separately in small and large environments, reconciling configuration comments and documentation, and validating the complete `dep-capture` Set.
 - Scope: Create a local, non-publishing benchmark script `benchmarks/package_capture_bench.py`, add an `imported-transitive` scenario in `benchmarks/scenarios.py`, add behavioral benchmark tests in `tests/test_package_benchmark.py`, update `src/pubrun/resources/default.toml`, `docs/manifest.md`, `docs/configuration.md`, `docs/architecture.md`, and `docs/performance.md` with actual measured results and remaining limits, and run whole-Set validation.
 - Scope-Paths: benchmarks/package_capture_bench.py, benchmarks/scenarios.py, tests/test_package_benchmark.py, src/pubrun/resources/default.toml, docs/manifest.md, docs/configuration.md, docs/architecture.md, docs/performance.md
+- Scope-Exceeded: .aw/records/backlog/open/20261122-ewgjmx-01-ewgjmx-benchmarks-readme-md-does-not-document-the-new-ben.backlog.md (driver contract requires each defect found during execution to be filed as a backlog item benchmarks/README.md is outside this plan's Scope-Paths so the gap was filed rather than fixed)
 - Item-Dependencies: executed:ijipnx
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Benchmark startup and finalization package capture in small and large environments, sync docs/config comments, and run full-Set validation
@@ -19,12 +20,12 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: iflqsl
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw agy run model=claude-opus-5-5-medium): aw agy run self-finalize: iflqsl verified (set dep-capture, attempt 2). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261122-ewgjmx-01-ewgjmx-benchmarks-readme-md-does-not-document-the-new-ben.backlog.md: driver contract requires each defect found during execution to be filed as a backlog item; benchmarks/README.md is outside this plan's Scope-Paths so the gap was filed rather than fixed]
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-21 to-review (agent): authored review-ready child plan 04 of Set `dep-capture` graduating backlog item `w4hxkh`.
