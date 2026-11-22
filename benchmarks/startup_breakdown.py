@@ -156,6 +156,12 @@ def _has_ancestor_git(path: Path) -> bool:
     return False
 
 
+def _ensure_pubrun_minimal() -> None:
+    """Import pubrun.minimal before any pubrun.* helper so the parent never auto-starts."""
+    if "pubrun" not in sys.modules:
+        import pubrun.minimal  # noqa: F401
+
+
 def _capture_filesystem_summary(workdir: Path) -> Dict[str, Any]:
     """Capture fstype and is_network for workdir, tmpdir, and pubrun install.
 
@@ -168,6 +174,7 @@ def _capture_filesystem_summary(workdir: Path) -> Dict[str, Any]:
     }
     summary: Dict[str, Any] = {}
     try:
+        _ensure_pubrun_minimal()
         from pubrun.capture.filesystem import get_filesystem
         fs_data = get_filesystem({}, raw_paths)
         for label in ("workdir", "tmpdir", "pubrun_install"):
@@ -197,6 +204,7 @@ def _capture_filesystem_summary(workdir: Path) -> Dict[str, Any]:
 def _capture_cpu_summary() -> Dict[str, Any]:
     model: Optional[str] = None
     try:
+        _ensure_pubrun_minimal()
         from pubrun.capture.hardware import _get_cpu_model
         model = _get_cpu_model(timeout=2.0)
     except Exception:
@@ -594,7 +602,7 @@ def _build_phased_argv(
         + "        _tm = _mdata.get('timing', {})\n"
         + "        if isinstance(_tm, dict):\n"
         + "            for _k, _v in _tm.items():\n"
-        + "                if isinstance(_v, (int, float)):\n"
+        + "                if isinstance(_v, (int, float)) and not isinstance(_v, bool):\n"
         + "                    _manifest_timing[_k] = _v\n"
         + "except Exception:\n"
         + "    pass\n"
@@ -898,7 +906,7 @@ def _aggregate_manifest_timing(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         for k, v in tm.items():
             if k in _TIMING_WALL_KEYS:
                 continue
-            if isinstance(v, (int, float)):
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
                 by_key.setdefault(k, []).append(float(v))
     if not by_key:
         return {}
@@ -948,7 +956,9 @@ def run_breakdown(
         parent_dir.mkdir(parents=True, exist_ok=True)
         if not os.access(str(parent_dir), os.W_OK):
             raise ValueError(f"--workdir is not writable: {workdir}")
-        extra_needles.append(str(parent_dir))
+        raw_wd = str(parent_dir)
+        if "/" in raw_wd or "\\" in raw_wd:
+            extra_needles.append(raw_wd)
         extra_needles.append(str(parent_dir.resolve()))
 
     wall_start = time.perf_counter()
@@ -1529,7 +1539,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    extra_needles = [args.workdir] if args.workdir else []
+    extra_needles: List[str] = []
+    if args.workdir:
+        if "/" in args.workdir or "\\" in args.workdir:
+            extra_needles.append(args.workdir)
+        extra_needles.append(str(Path(args.workdir).resolve()))
     md_text = scrub_text(format_markdown_report(result), extra_needles=extra_needles)
     ok, reasons = validate_redacted_output(
         result,

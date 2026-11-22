@@ -289,37 +289,38 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
   - Observed evidence:
     `pytest tests/test_startup_benchmark.py -v` (exit code 0):
     ```text
-    collected 14 items
-    tests/test_startup_benchmark.py::TestStartupAutoDefaultScenario::test_startup_auto_default_registered PASSED [  7%]
-    tests/test_startup_benchmark.py::TestBreakdownStatisticsAndRedaction::test_compute_stats_handles_empty_single_and_multi PASSED [ 14%]
-    tests/test_startup_benchmark.py::TestBreakdownStatisticsAndRedaction::test_redact_breakdown_scrubs_home_host_user_workdir_and_repo PASSED [ 21%]
-    tests/test_startup_benchmark.py::TestBreakdownStatisticsAndRedaction::test_validate_redacted_output_rejects_leaked_home_path PASSED [ 28%]
-    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args0] PASSED [ 35%]
-    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args1] PASSED [ 42%]
-    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args2] PASSED [ 50%]
-    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args3] PASSED [ 57%]
-    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args4] PASSED [ 64%]
-    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args5] PASSED [ 71%]
-    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args6] PASSED [ 78%]
-    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_workdir_regular_file_rejected PASSED [ 85%]
-    tests/test_startup_benchmark.py::TestBreakdownEndToEnd::test_cli_two_passes_two_iterations_and_workdir_cleanup PASSED [ 92%]
-    tests/test_startup_benchmark.py::TestBreakdownEndToEnd::test_cli_single_iteration_and_explicit_durability_policy PASSED [100%]
-    ============================= 14 passed in 31.82s ==============================
+    collected 15 items
+    tests/test_startup_benchmark.py::TestStartupAutoDefaultScenario::test_startup_auto_default_registered PASSED [  6%]
+    tests/test_startup_benchmark.py::TestBreakdownStatisticsAndRedaction::test_compute_stats_handles_empty_single_and_multi PASSED [ 13%]
+    tests/test_startup_benchmark.py::TestBreakdownStatisticsAndRedaction::test_redact_breakdown_scrubs_home_host_user_workdir_and_repo PASSED [ 20%]
+    tests/test_startup_benchmark.py::TestBreakdownStatisticsAndRedaction::test_validate_redacted_output_rejects_leaked_home_path PASSED [ 26%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args0] PASSED [ 33%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args1] PASSED [ 40%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args2] PASSED [ 46%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args3] PASSED [ 53%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args4] PASSED [ 60%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args5] PASSED [ 66%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args6] PASSED [ 73%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_workdir_regular_file_rejected PASSED [ 80%]
+    tests/test_startup_benchmark.py::TestBreakdownEndToEnd::test_cli_two_passes_two_iterations_and_workdir_cleanup PASSED [ 86%]
+    tests/test_startup_benchmark.py::TestBreakdownEndToEnd::test_cli_single_iteration_and_explicit_durability_policy PASSED [ 93%]
+    tests/test_startup_benchmark.py::TestBreakdownEndToEnd::test_cli_does_not_autostart_pubrun_in_caller_cwd_and_accepts_short_relative_workdir PASSED [100%]
+    ============================= 15 passed in 38.57s ==============================
     ```
   - Result: pass
 
 - [x] V-05 validates E-05
   - Required evidence: Pasted full redacted output of `python benchmarks/startup_breakdown.py --passes 3 --iterations 15 --warmup 1` (exit code 0) containing environment, git revision, filesystem type, cold/warm pass medians, mean, p95, stdev, IQR, subprocess/write/fsync/serialization counts, absolute ms and relative overhead % for short (`noop.py`) and long (`cpu_burn.py`) workloads, plus concrete baseline-derived numerical targets proposed for `4il383` and `tkmm5p` and `git status -s` confirming no stray or unredacted result artifacts remain.
   - Observed evidence:
-    `python benchmarks/startup_breakdown.py --passes 3 --iterations 15 --warmup 1` (exit code 0, unmodified `src/pubrun/` at `6fd82e24504e2601dc1a826950dc51dc3d3d04a4`):
+    `python3 benchmarks/startup_breakdown.py --passes 3 --iterations 15 --warmup 1` (exit code 0, unmodified `src/pubrun/`, parent process isolated via `pubrun.minimal`):
     ```markdown
     # pubrun Startup and Finalization Breakdown
 
     ## Environment
 
     - Schema: `pubrun-startup-breakdown/1`
-    - Generated (UTC): `2026-11-22T07:10:20.192702+00:00`
-    - Git revision: `6fd82e24504e2601dc1a826950dc51dc3d3d04a4`
+    - Generated (UTC): `2026-11-22T07:22:00.401613+00:00`
+    - Git revision: `d1ba84b55997d9d6cad99830570aadd9b8c41b00`
     - pubrun version: `1.3.1`
     - OS: `Linux 6.8.0-149-generic` (`linux`)
     - Python: `3.14.6`
@@ -335,53 +336,53 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 
     | Scenario | Pass | n | Fail | Median (ms) | Mean (ms) | p95 (ms) | Stdev (ms) | IQR (ms) |
     |---|---|---:|---:|---:|---:|---:|---:|---:|
-    | `bare-python-noop` | 1 (cold) | 15 | 0 | 19.77 | 19.49 | 21.76 | 1.66 | 2.29 |
-    | `bare-python-noop` | 2 (warm) | 15 | 0 | 17.39 | 17.09 | 19.96 | 1.76 | 2.27 |
-    | `bare-python-noop` | 3 (warm) | 15 | 0 | 19.09 | 19.34 | 23.27 | 2.01 | 1.73 |
-    | `bare-python-cpu-burn` | 1 (cold) | 15 | 0 | 224.50 | 228.07 | 238.99 | 8.71 | 6.23 |
-    | `bare-python-cpu-burn` | 2 (warm) | 15 | 0 | 222.79 | 226.01 | 236.35 | 6.44 | 9.80 |
-    | `bare-python-cpu-burn` | 3 (warm) | 15 | 0 | 229.26 | 229.21 | 238.83 | 5.47 | 5.98 |
-    | `import-minimal-checkout` | 1 (cold) | 15 | 0 | 114.85 | 113.98 | 117.95 | 3.07 | 5.16 |
-    | `import-minimal-checkout` | 2 (warm) | 15 | 0 | 113.79 | 115.96 | 127.55 | 5.70 | 4.85 |
-    | `import-minimal-checkout` | 3 (warm) | 15 | 0 | 114.13 | 116.28 | 125.81 | 5.40 | 5.42 |
-    | `import-minimal-installed` | 1 (cold) | 15 | 0 | 116.48 | 116.53 | 127.96 | 6.92 | 8.97 |
-    | `import-minimal-installed` | 2 (warm) | 15 | 0 | 111.77 | 112.26 | 116.42 | 2.26 | 1.71 |
-    | `import-minimal-installed` | 3 (warm) | 15 | 0 | 114.21 | 114.39 | 118.17 | 2.22 | 2.32 |
-    | `import-minimal-installed-nested` | 1 (cold) | 15 | 0 | 112.71 | 112.93 | 115.80 | 1.80 | 2.21 |
-    | `import-minimal-installed-nested` | 2 (warm) | 15 | 0 | 111.42 | 113.62 | 124.39 | 5.14 | 2.70 |
-    | `import-minimal-installed-nested` | 3 (warm) | 15 | 0 | 116.27 | 116.97 | 126.36 | 5.98 | 6.30 |
-    | `import-noauto-checkout` | 1 (cold) | 15 | 0 | 113.24 | 115.08 | 124.03 | 6.15 | 8.21 |
-    | `import-noauto-checkout` | 2 (warm) | 15 | 0 | 114.00 | 113.95 | 117.90 | 3.27 | 5.00 |
-    | `import-noauto-checkout` | 3 (warm) | 15 | 0 | 116.38 | 115.73 | 120.20 | 3.67 | 4.75 |
-    | `import-noauto-installed` | 1 (cold) | 15 | 0 | 112.86 | 113.02 | 117.13 | 2.82 | 3.08 |
-    | `import-noauto-installed` | 2 (warm) | 15 | 0 | 116.05 | 116.83 | 127.37 | 5.56 | 6.66 |
-    | `import-noauto-installed` | 3 (warm) | 15 | 0 | 114.82 | 116.51 | 126.47 | 5.43 | 5.80 |
-    | `import-noauto-installed-nested` | 1 (cold) | 15 | 0 | 114.71 | 116.61 | 124.08 | 5.75 | 8.94 |
-    | `import-noauto-installed-nested` | 2 (warm) | 15 | 0 | 112.83 | 115.47 | 121.43 | 4.68 | 7.76 |
-    | `import-noauto-installed-nested` | 3 (warm) | 15 | 0 | 113.15 | 113.42 | 117.37 | 2.66 | 3.30 |
-    | `auto-noop-default` | 1 (cold) | 15 | 0 | 498.24 | 500.15 | 516.60 | 8.99 | 9.46 |
-    | `auto-noop-default` | 2 (warm) | 15 | 0 | 502.38 | 499.12 | 511.83 | 10.62 | 13.50 |
-    | `auto-noop-default` | 3 (warm) | 15 | 0 | 488.67 | 492.01 | 508.65 | 11.54 | 6.60 |
-    | `phased-noop-default` | 1 (cold) | 15 | 0 | 507.39 | 510.24 | 528.61 | 9.39 | 9.27 |
-    | `phased-noop-default` | 2 (warm) | 15 | 0 | 508.24 | 510.46 | 533.82 | 12.36 | 12.11 |
-    | `phased-noop-default` | 3 (warm) | 15 | 0 | 503.96 | 505.02 | 516.66 | 6.43 | 7.51 |
-    | `auto-cpu-burn-default` | 1 (cold) | 15 | 0 | 712.56 | 713.23 | 744.83 | 18.64 | 25.65 |
-    | `auto-cpu-burn-default` | 2 (warm) | 15 | 0 | 700.65 | 703.01 | 721.24 | 13.27 | 20.94 |
-    | `auto-cpu-burn-default` | 3 (warm) | 15 | 0 | 703.98 | 707.44 | 736.62 | 18.69 | 30.08 |
-    | `phased-cpu-burn-default` | 1 (cold) | 15 | 0 | 718.59 | 721.45 | 742.12 | 12.87 | 14.29 |
-    | `phased-cpu-burn-default` | 2 (warm) | 15 | 0 | 724.00 | 722.84 | 736.73 | 11.24 | 18.00 |
-    | `phased-cpu-burn-default` | 3 (warm) | 15 | 0 | 726.38 | 726.48 | 750.08 | 15.75 | 15.01 |
+    | `bare-python-noop` | 1 (cold) | 15 | 0 | 15.58 | 16.02 | 18.31 | 1.49 | 2.65 |
+    | `bare-python-noop` | 2 (warm) | 15 | 0 | 17.29 | 17.70 | 20.89 | 1.70 | 1.87 |
+    | `bare-python-noop` | 3 (warm) | 15 | 0 | 17.34 | 18.22 | 22.75 | 2.48 | 3.40 |
+    | `bare-python-cpu-burn` | 1 (cold) | 15 | 0 | 227.57 | 228.73 | 242.22 | 8.37 | 5.30 |
+    | `bare-python-cpu-burn` | 2 (warm) | 15 | 0 | 223.63 | 225.90 | 235.46 | 6.92 | 7.16 |
+    | `bare-python-cpu-burn` | 3 (warm) | 15 | 0 | 227.82 | 229.07 | 240.08 | 7.06 | 6.08 |
+    | `import-minimal-checkout` | 1 (cold) | 15 | 0 | 112.36 | 114.29 | 126.28 | 6.64 | 9.12 |
+    | `import-minimal-checkout` | 2 (warm) | 15 | 0 | 112.41 | 113.33 | 120.36 | 5.12 | 9.72 |
+    | `import-minimal-checkout` | 3 (warm) | 15 | 0 | 111.19 | 111.65 | 119.32 | 4.32 | 5.72 |
+    | `import-minimal-installed` | 1 (cold) | 15 | 0 | 112.19 | 112.78 | 119.75 | 4.22 | 5.76 |
+    | `import-minimal-installed` | 2 (warm) | 15 | 0 | 112.47 | 113.00 | 118.92 | 4.05 | 6.74 |
+    | `import-minimal-installed` | 3 (warm) | 15 | 0 | 116.59 | 117.43 | 128.67 | 7.24 | 9.79 |
+    | `import-minimal-installed-nested` | 1 (cold) | 15 | 0 | 117.75 | 119.22 | 132.70 | 8.08 | 6.22 |
+    | `import-minimal-installed-nested` | 2 (warm) | 15 | 0 | 110.60 | 112.52 | 126.95 | 7.05 | 6.80 |
+    | `import-minimal-installed-nested` | 3 (warm) | 15 | 0 | 112.88 | 114.07 | 124.84 | 6.54 | 6.87 |
+    | `import-noauto-checkout` | 1 (cold) | 15 | 0 | 113.92 | 113.65 | 118.38 | 4.21 | 6.36 |
+    | `import-noauto-checkout` | 2 (warm) | 15 | 0 | 112.16 | 112.94 | 119.90 | 4.38 | 5.04 |
+    | `import-noauto-checkout` | 3 (warm) | 15 | 0 | 117.27 | 116.17 | 122.98 | 5.14 | 5.83 |
+    | `import-noauto-installed` | 1 (cold) | 15 | 0 | 112.14 | 115.26 | 129.84 | 7.05 | 6.39 |
+    | `import-noauto-installed` | 2 (warm) | 15 | 0 | 117.20 | 116.35 | 124.17 | 5.33 | 7.08 |
+    | `import-noauto-installed` | 3 (warm) | 15 | 0 | 111.54 | 112.94 | 121.70 | 5.30 | 7.06 |
+    | `import-noauto-installed-nested` | 1 (cold) | 15 | 0 | 114.97 | 114.60 | 121.42 | 4.39 | 4.40 |
+    | `import-noauto-installed-nested` | 2 (warm) | 15 | 0 | 110.77 | 111.66 | 117.68 | 4.18 | 6.64 |
+    | `import-noauto-installed-nested` | 3 (warm) | 15 | 0 | 115.41 | 115.51 | 125.63 | 6.67 | 8.80 |
+    | `auto-noop-default` | 1 (cold) | 15 | 0 | 495.17 | 496.21 | 515.40 | 9.96 | 8.91 |
+    | `auto-noop-default` | 2 (warm) | 15 | 0 | 491.24 | 492.19 | 506.01 | 10.58 | 9.72 |
+    | `auto-noop-default` | 3 (warm) | 15 | 0 | 490.10 | 491.30 | 504.07 | 8.64 | 10.42 |
+    | `phased-noop-default` | 1 (cold) | 15 | 0 | 509.63 | 514.57 | 554.72 | 17.40 | 9.97 |
+    | `phased-noop-default` | 2 (warm) | 15 | 0 | 511.52 | 513.88 | 536.89 | 12.27 | 9.22 |
+    | `phased-noop-default` | 3 (warm) | 15 | 0 | 512.10 | 511.91 | 537.99 | 14.26 | 14.27 |
+    | `auto-cpu-burn-default` | 1 (cold) | 15 | 0 | 707.40 | 707.15 | 725.54 | 14.69 | 24.95 |
+    | `auto-cpu-burn-default` | 2 (warm) | 15 | 0 | 702.11 | 709.38 | 750.75 | 20.19 | 24.66 |
+    | `auto-cpu-burn-default` | 3 (warm) | 15 | 0 | 705.09 | 706.37 | 736.98 | 15.92 | 12.42 |
+    | `phased-cpu-burn-default` | 1 (cold) | 15 | 0 | 716.79 | 720.22 | 751.33 | 18.80 | 20.56 |
+    | `phased-cpu-burn-default` | 2 (warm) | 15 | 0 | 722.11 | 725.21 | 747.93 | 15.48 | 20.67 |
+    | `phased-cpu-burn-default` | 3 (warm) | 15 | 0 | 717.41 | 720.06 | 747.49 | 13.71 | 9.93 |
 
     ## Phase Breakdown (median / IQR in ms)
 
     | Scenario | Pass | Import (ms) | Startup (ms) | Workload (ms) | Finalization (ms) | In-Process (ms) |
     |---|---|---:|---:|---:|---:|---:|
-    | `phased-noop-default` | 1 (cold) | 82.55 / 4.51 | 352.15 / 6.86 | 0.00 / 0.00 | 20.27 / 4.04 | 454.12 / 9.16 |
-    | `phased-noop-default` | 2 (warm) | 84.25 / 4.87 | 350.00 / 5.64 | 0.01 / 0.00 | 19.42 / 3.86 | 454.89 / 7.99 |
-    | `phased-noop-default` | 3 (warm) | 81.85 / 3.01 | 348.28 / 2.80 | 0.01 / 0.00 | 22.63 / 4.04 | 452.28 / 5.97 |
-    | `phased-cpu-burn-default` | 1 (cold) | 80.75 / 3.36 | 354.21 / 13.61 | 215.88 / 8.79 | 17.08 / 5.27 | 666.66 / 15.90 |
-    | `phased-cpu-burn-default` | 2 (warm) | 83.00 / 4.83 | 354.06 / 7.04 | 216.30 / 9.26 | 13.85 / 7.04 | 671.65 / 14.71 |
-    | `phased-cpu-burn-default` | 3 (warm) | 82.54 / 2.33 | 356.05 / 8.90 | 215.19 / 5.09 | 17.12 / 5.31 | 675.24 / 17.05 |
+    | `phased-noop-default` | 1 (cold) | 84.27 / 2.71 | 350.32 / 8.02 | 0.01 / 0.00 | 21.61 / 4.24 | 456.69 / 8.20 |
+    | `phased-noop-default` | 2 (warm) | 84.51 / 3.45 | 351.56 / 3.93 | 0.01 / 0.00 | 22.29 / 2.54 | 460.26 / 8.10 |
+    | `phased-noop-default` | 3 (warm) | 83.69 / 4.50 | 352.56 / 6.46 | 0.01 / 0.00 | 20.03 / 4.17 | 456.08 / 11.28 |
+    | `phased-cpu-burn-default` | 1 (cold) | 82.62 / 4.71 | 351.37 / 6.31 | 215.67 / 8.14 | 15.09 / 5.54 | 665.43 / 17.02 |
+    | `phased-cpu-burn-default` | 2 (warm) | 81.78 / 5.17 | 352.17 / 14.71 | 218.09 / 6.00 | 17.96 / 2.69 | 674.26 / 17.59 |
+    | `phased-cpu-burn-default` | 3 (warm) | 80.89 / 5.85 | 350.69 / 6.79 | 218.43 / 6.49 | 17.09 / 3.58 | 667.86 / 10.37 |
 
     ## Instrumented Subprocess, Write, Synchronization, and Serialization Counters
 
@@ -393,23 +394,23 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     | `import-noauto-checkout` | 1 | 1 | 0 (0/0) | 0 (0/0) | 0 (0/0) | 0.00 | 0 | 0.00 |
     | `import-noauto-installed` | 1 | 1 | 0 (0/0) | 0 (0/0) | 0 (0/0) | 0.00 | 0 | 0.00 |
     | `import-noauto-installed-nested` | 1 | 1 | 0 (0/0) | 0 (0/0) | 0 (0/0) | 0.00 | 0 | 0.00 |
-    | `auto-noop-default` | 6 | 7 | 2 (1/1) | 2 (1/1) | 4 (2/2) | 19.86 | 4 | 2.65 |
-    | `phased-noop-default` | 6 | 7 | 2 (1/1) | 2 (1/1) | 4 (2/2) | 18.72 | 4 | 2.78 |
-    | `auto-cpu-burn-default` | 6 | 7 | 3 (1/2) | 3 (1/2) | 6 (3/3) | 33.81 | 6 | 4.46 |
-    | `phased-cpu-burn-default` | 6 | 7 | 3 (2/1) | 3 (2/1) | 6 (4/2) | 45.20 | 6 | 5.48 |
+    | `auto-noop-default` | 6 | 7 | 2 (1/1) | 2 (1/1) | 4 (2/2) | 24.44 | 4 | 2.69 |
+    | `phased-noop-default` | 6 | 7 | 2 (1/1) | 2 (1/1) | 4 (2/2) | 19.52 | 4 | 3.03 |
+    | `auto-cpu-burn-default` | 6 | 7 | 3 (2/1) | 3 (1/2) | 6 (3/3) | 34.47 | 6 | 6.17 |
+    | `phased-cpu-burn-default` | 6 | 7 | 3 (2/1) | 3 (2/1) | 6 (4/2) | 40.57 | 6 | 3.64 |
 
     ## Short vs Long Workload Overhead Summary
 
     | Policy | Workload | Pass | Baseline (ms) | Auto (ms) | Abs Overhead (ms) | Rel Overhead (%) | Import (ms) | Startup (ms) | Finalize (ms) |
     |---|---|---|---:|---:|---:|---:|---:|---:|---:|
-    | `default` | `noop.py` (short) | 1 (cold) | 19.77 | 498.24 | 478.47 | 2420.5% | 82.55 | 352.15 | 20.27 |
-    | `default` | `noop.py` (short) | 2 (warm) | 17.39 | 502.38 | 484.99 | 2789.7% | 84.25 | 350.00 | 19.42 |
-    | `default` | `noop.py` (short) | 3 (warm) | 19.09 | 488.67 | 469.58 | 2460.4% | 81.85 | 348.28 | 22.63 |
-    | `default` | `cpu_burn.py` (long) | 1 (cold) | 224.50 | 712.56 | 488.06 | 217.4% | 80.75 | 354.21 | 17.08 |
-    | `default` | `cpu_burn.py` (long) | 2 (warm) | 222.79 | 700.65 | 477.86 | 214.5% | 83.00 | 354.06 | 13.85 |
-    | `default` | `cpu_burn.py` (long) | 3 (warm) | 229.26 | 703.98 | 474.72 | 207.1% | 82.54 | 356.05 | 17.12 |
+    | `default` | `noop.py` (short) | 1 (cold) | 15.58 | 495.17 | 479.59 | 3078.2% | 84.27 | 350.32 | 21.61 |
+    | `default` | `noop.py` (short) | 2 (warm) | 17.29 | 491.24 | 473.95 | 2741.8% | 84.51 | 351.56 | 22.29 |
+    | `default` | `noop.py` (short) | 3 (warm) | 17.34 | 490.10 | 472.77 | 2726.9% | 83.69 | 352.56 | 20.03 |
+    | `default` | `cpu_burn.py` (long) | 1 (cold) | 227.57 | 707.40 | 479.83 | 210.8% | 82.62 | 351.37 | 15.09 |
+    | `default` | `cpu_burn.py` (long) | 2 (warm) | 223.63 | 702.11 | 478.48 | 214.0% | 81.78 | 352.17 | 17.96 |
+    | `default` | `cpu_burn.py` (long) | 3 (warm) | 227.82 | 705.09 | 477.26 | 209.5% | 80.89 | 350.69 | 17.09 |
 
-    Total benchmark wall time: `165.9` s
+    Total benchmark wall time: `165.086` s
     ```
 
     Proposed baseline-derived numerical targets for maintainer agreement (anchored to Pass 3 warm medians on this Linux ext4 host):
@@ -417,15 +418,15 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     | Metric | Pre-change baseline (Pass 3 warm) | Proposed target | Owner plan |
     |---|---|---|---|
     | `git_spawns` on `import-{minimal,noauto}-{installed,installed-nested}` | `1` | `0` (exact structural invariant; also `0` on `checkout` before lazy `__commit__` access) | `4il383` |
-    | Warm wall median on `import-{minimal,noauto}-{installed,installed-nested}` | `113.15` to `116.27 ms` | `<= 112.0 ms` (reduce by `>= 2 ms` on local ext4 with zero regression; larger gains on Windows/NFS) | `4il383` |
+    | Warm wall median on `import-{minimal,noauto}-{installed,installed-nested}` | `111.54` to `116.59 ms` | `<= 110.0 ms` (reduce by `>= 2 ms` on local ext4 with zero regression; larger gains on Windows/NFS) | `4il383` |
     | `config_writes` for unchanged config (`auto-noop-default` / `auto-cpu-burn-default`) | `2` / `3` | `1` / `1` (exact structural invariant: zero rewrites at hardware refresh or finalization) | `tkmm5p` |
     | `fsync_total` under default `"fsync"` (`auto-noop-default` / `auto-cpu-burn-default`) | `4` / `6` | `3` (`-25%`) / `4` (`-33.3%`) | `tkmm5p` |
     | `writer_json_calls` under default `"fsync"` (`auto-noop-default` / `auto-cpu-burn-default`) | `4` / `6` | `3` / `4` | `tkmm5p` |
     | `git_spawns` on `auto-*` / `phased-*` (source checkout in Git repo) | `6` | `<= 4` (combined `rev-parse` in `get_git` plus lazy `__commit__`) | `4il383` + `tkmm5p` |
-    | Finalization median under default `"fsync"` (`phased-noop-default` / `phased-cpu-burn-default`) | `22.63 ms` / `17.12 ms` | `<= 18.0 ms` / `<= 13.7 ms` (`>= 20%` reduction from removing redundant config write + `fsync`) | `tkmm5p` |
-    | End-to-end absolute auto overhead under default `"fsync"` (`auto-noop-default` / `auto-cpu-burn-default`) | `469.58 ms` / `474.72 ms` | `<= 454 ms` / `<= 459 ms` (`>= 15 ms` / `>= 3%` reduction on local ext4 without relaxing default durability) | `4il383` + `tkmm5p` |
+    | Finalization median under default `"fsync"` (`phased-noop-default` / `phased-cpu-burn-default`) | `20.03 ms` / `17.09 ms` | `<= 16.0 ms` / `<= 13.7 ms` (`>= 20%` reduction from removing redundant config write + `fsync`) | `tkmm5p` |
+    | End-to-end absolute auto overhead under default `"fsync"` (`auto-noop-default` / `auto-cpu-burn-default`) | `472.77 ms` / `477.26 ms` | `<= 457 ms` / `<= 462 ms` (`>= 15 ms` / `>= 3%` reduction on local ext4 without relaxing default durability) | `4il383` + `tkmm5p` |
     | Opt-in `"finalize"` durability `fsync_total` (`fsync_startup` / `fsync_finalization`) | `4` (`2`/`2`) to `6` (`4`/`2`) | `2` (`0`/`2`; `-50%` to `-66.7%`, with in-place `fsync` upgrade of unchanged `config.resolved.json`) | `tkmm5p` |
-    | Opt-in `"atomic"` durability `fsync_total` / `fsync_ms` | `4` to `6` / `18.72` to `45.20 ms` | `0` / `0.00 ms` (atomic `os.replace` visibility preserved) | `tkmm5p` |
+    | Opt-in `"atomic"` durability `fsync_total` / `fsync_ms` | `4` to `6` / `19.52` to `40.57 ms` | `0` / `0.00 ms` (atomic `os.replace` visibility preserved) | `tkmm5p` |
     | Opt-in `"strict"` durability `fsync_total` | n/a (new) | `>= 4` (file + POSIX parent-directory `fsync`; measured and reported separately) | `tkmm5p` |
 
     `git status -s` shows only the four declared Scope-Paths (and this plan file) with zero stray or unredacted benchmark files (`benchmarks/README.md`, `benchmarks/scenarios.py`, `benchmarks/startup_breakdown.py`, `tests/test_startup_benchmark.py`), and `python3 scripts/sanitize_paths.py --check --all` exited 0.

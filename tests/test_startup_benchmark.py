@@ -384,3 +384,38 @@ class TestBreakdownEndToEnd:
         assert p0["stdev_ms"] == 0.0
         assert p0["iqr_ms"] == 0.0
         assert p0["p95_ms"] == p0["median_ms"]
+
+    def test_cli_does_not_autostart_pubrun_in_caller_cwd_and_accepts_short_relative_workdir(
+        self, tmp_path
+    ):
+        caller_cwd = tmp_path / "clean_caller_cwd"
+        caller_cwd.mkdir()
+        rel_workdir = caller_cwd / "tmp"
+        rel_workdir.mkdir()
+
+        # Strip any PUBRUN_* overrides so default auto-start would trigger if the parent
+        # benchmark script accidentally imported root `pubrun` instead of `pubrun.minimal`.
+        clean_env = {k: v for k, v in os.environ.items() if not k.startswith("PUBRUN_")}
+        proc = subprocess.run(
+            [
+                PYTHON,
+                str(_BREAKDOWN_SCRIPT),
+                "--iterations",
+                "1",
+                "--passes",
+                "1",
+                "--warmup",
+                "0",
+                "--workdir",
+                "tmp",
+            ],
+            cwd=str(caller_cwd),
+            env=clean_env,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        assert proc.returncode == 0, proc.stderr
+        # No `runs/` directory or stray artifacts created in caller_cwd, and `tmp/` is empty again.
+        assert [p.name for p in caller_cwd.iterdir()] == ["tmp"]
+        assert list(rel_workdir.iterdir()) == []
