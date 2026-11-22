@@ -1,0 +1,72 @@
+# Review findings: ipd nr63qr
+
+- Subject-Id: nr63qr
+- Subject-Type: ipd
+- Reviewed-At: 2026-11-22
+- Reviewer: Gemini 4 Neon (High)
+- Verdict: APPROVE WITH REVISIONS APPLIED
+
+## Round 1
+
+### Step P
+
+- Checked: Complete text, front matter, Mermaid flowchart and entity-relationship diagrams, `E-01`..`E-04`, `Child IPDs, sequence, and dependencies`, `Completion criteria`, `Cross-IPD validation`, `Deferred / out of scope`, `Scope check`, `Required tests / validation`, `Open questions`, `V-01`..`V-04`, and `Approval and execution gate` of `.aw/records/plans/pending/20261121-timing-acc-00-nr63qr-timing-accuracy-and-overhead-separation.ipd.md` against `.aw/system/workflows/technical-writing/technical-writing.md` (requirements 1 through 12) and `.aw/system/workflows/plan-review/steps/p-proofread.md`.
+
+### Proofreading
+
+#### Changes
+
+| Location | Old text summary | New text summary | Reason |
+|---|---|---|---|
+| `Goal` & `Completion criteria` | 56-68 word multi-clause sentences; `Textual User Interface (TUI)` mismatched sibling plans (`Terminal User Interface (TUI)`) | Split into short, complete sentences while preserving every requirement and `Owner: <id6>` attribution; standardized `Terminal User Interface (TUI)` and expanded `command-line interface (CLI)` and `Interquartile Range (IQR)` | Technical writing requirements 1, 2, and 4 |
+| `E-03`/`E-04`, `Child IPDs`, `Completion criteria`, `Cross-IPD validation`, `Required tests / validation` | `E-03`/`E-04` listed single-step dependencies instead of `E-01, E-02` / `E-01, E-02, E-03`; omitted `src/pubrun/tui/widgets/diff.py`, reviewed child test commands (`test_quality.py -k TestDoubleStop`, `test_api.py`, `test_tracker.py`, `test_quality.py`, `test_show_sections.py`, `test_methods_multi.py`, `python3 examples/verify_all.py`, exact benchmark flags), and reviewed guarantees | Aligned `E-03`/`E-04` dependencies with child table, child `- Item-Dependencies:`, and Mermaid flowchart; synchronized child summaries, `Completion criteria`, `Cross-IPD validation`, and `Required tests / validation` with reviewed children `e1fwy2`, `8co0wy`, `vrr1fv`, and `3tvesf` | Cross-plan consistency (Check R7) and reference accuracy (Check R1) |
+| `Deferred / out of scope`, `OQ-01` | Deferred items lacked `- Carrier:` / `- Carrier-Declined:` lines (`check.ipd-uncarried-obligation`), conflated runs-index optimization with four sibling backlog IDs, used `Multi-OS` unexpanded and non-canonical `_resolve_commit()` citation, and `OQ-01` claimed `- Owner: maintainer (confirmed upon plan approval)` | Added explicit `- Carrier:` (`9ppa0r`, `6s7k9e`, `frzw20`, `osjxbz`, `vtkkn1`) and `- Carrier-Declined:` lines; separated runs-index from accurately paired sibling backlog/orchestrator items; standardized `src/pubrun/__init__.py::_resolve_commit` and `Multi-operating-system (OS)`; set `OQ-01` `- Owner:` to `plan author (binding upon plan approval)` | `steps/s5-questions.md` rule 5, `check.ipd-uncarried-obligation`, and `steps/p-proofread.md` Section 11.1 |
+| `Validation and cross-check` boilerplate | Two em dashes triggering `IPD-C802` advisories | Replaced the two em dashes with parentheses | Zero `IPD-C802` advisories while preserving exact meaning |
+| `Approval and execution gate` | Gate item 5 instructed a hand-rolled move to `.aw/records/plans/executed/` and gate item 3 omitted the pasted-output honesty rule | Updated gate item 5 to unconditional `aw ipd finalize` with conditional runner-retirement vs standalone `aw ipd finalize nr63qr` ownership (forbidding raw `git mv`) and strengthened gate item 3 with the HARD MUST pasted-output requirement | `steps/r2-executability.md` and `steps/s7-finalize.md` execution-contract rules |
+
+#### Issues
+
+| ID | Location | Ambiguity | Information needed | Recommended answer | Recommendation strength |
+|---|---|---|---|---|---|
+| (none) | - | No unresolved ambiguities remain after in-place revisions. | None | None | very strong |
+
+### Step R1
+
+- Checked: Verified every artifact, backlog ID, child plan filename, test suite path, schema definition, CI workflow matrix, example path, and code symbol citation against `.aw/records/backlog/graduated/20261121-pubrun-improve-01-6hp1zu-timing-accuracy.backlog.md`, `.aw/records/backlog/graduated/` (`t1xqpw`, `w4hxkh`, `x21s6w`, `q3bll1`, `x6alw4`), sibling pending orchestrators (`9ppa0r`, `6s7k9e`, `frzw20`, `osjxbz`, `vtkkn1`), all four reviewed child plans (`e1fwy2`, `8co0wy`, `vrr1fv`, `3tvesf`), `.github/workflows/ci.yml`, `schemas/manifest.schema.json` (`$defs.timing`, `$defs.subprocess_record`), `src/pubrun/__init__.py::_resolve_commit`, `src/pubrun/core.py` (`phase`, `_PubrunSubprocessNamespace`, `popen`), `src/pubrun/status.py`, `src/pubrun/report/diagnostics.py`, `src/pubrun/report/methods.py`, `src/pubrun/analysis/diff.py`, `src/pubrun/analysis/render.py`, `src/pubrun/tui/widgets/details.py`, `src/pubrun/tui/widgets/diff.py`, and `examples/` (`05_execution_phases.py`, `minimal-research-workflow/manifest_excerpt.json`, `minimal-research-workflow/README.md`). Caught omitted `src/pubrun/tui/widgets/diff.py` and stale child test commands (PR-001).
+
+### Step R2
+
+- Checked: Executed `aw ipd lint --phase author --agent` (exit 0, 0 errors, 0 warnings, 2 `IPD-C802` advisories cleared by PR-004), `aw ipd coverage --no-commit nr63qr` (exit 0, ready for review), and verified typed child-tracking rows (`E-01`..`E-04` -> `CONFIRM <id6> REACHED executed`, `IPD-S407` clean), 1:1 `E-*`/`V-*` bijection (`V-01`..`V-04` each demanding executed file path, `- Status: executed`, all `E-*` `performed`, all `V-*` `pass`, and `aw ipd lint --phase post-transition` exit 0), `- Scope-Paths:` self-scope, `- Item-Dependencies: none`, and `## Approval and execution gate`. Caught and fixed hand-rolled lifecycle move instructions and missing pasted-output wording in the gate (PR-002), plus uncarried deferred items flagged by `check.ipd-uncarried-obligation` (PR-003). Check T skipped per `plan-review.md` step 3 (Order-00 orchestrators are not rated by T, per spec `k3yx72` Section 5.1).
+
+### Step R7
+
+- Checked: Cross-plan consistency across the entire Set `timing-acc` (`nr63qr`, `e1fwy2`, `8co0wy`, `vrr1fv`, `3tvesf`), backlog item `6hp1zu`, and sibling Sets (`startup-perf`/`9ppa0r`, `dep-capture`/`6s7k9e`, `cap-isolation`/`frzw20`, `repro-check`/`osjxbz`, `file-prov`/`vtkkn1`).
+  - Child table filenames, Order numbers (`01`..`04`), and dependencies (`none`, `01`, `01, 02`, `01, 02, 03`) match each child plan's `- Order:`, `- Item-Dependencies:` (`none`, `executed:e1fwy2`, `executed:e1fwy2, executed:8co0wy`, `executed:e1fwy2, executed:8co0wy, executed:vrr1fv`), and the Mermaid `flowchart TD` exactly; updated `E-03` and `E-04` `Depends on:` fields to match (`E-01, E-02` and `E-01, E-02, E-03`).
+  - All four child plans are already `- Status: reviewed` with `- Readiness: go-pending-approval` and zero blocking open questions.
+  - Synchronized `Child IPDs`, `Completion criteria`, `Cross-IPD validation`, and `Required tests / validation` with the four reviewed child plans so the orchestrator accurately rolls up every modified module, test command, and deliverable (PR-001).
+  - Verified full coverage of every implementation guidance point, acceptance criterion, and shared validation/documentation requirement in backlog `6hp1zu` across `e1fwy2`, `8co0wy`, `vrr1fv`, and `3tvesf`.
+
+### Step S5
+
+- Checked: Audited `OQ-01`, all deferred items, and all 4 review findings. Every finding had Low remediation risk and was fixed in place. Updated `OQ-01` `- Owner:` to `plan author (binding upon plan approval)` per `steps/s5-questions.md` rule 5, added explicit `- Carrier:` / `- Carrier-Declined:` lines to every deferred item (clearing `check.ipd-uncarried-obligation`), and recorded reversible decision `D-1` below. Zero blocking or uncarried questions remain.
+
+### Findings
+
+| ID | Severity | Scope | Area | Evidence | Finding | Remediation Risk | Decision | Resolution |
+|---|---|---|---|---|---|---|---|---|
+| PR-001 | HIGH | IN-SCOPE | R7/R1 | `.aw/records/plans/pending/20261121-timing-acc-00-nr63qr-timing-accuracy-and-overhead-separation.ipd.md:75-83,89-100,105-106,124-127`, `.aw/records/plans/pending/20261121-timing-acc-01-e1fwy2-manifest-timing-schema-and-tracker-monotonic-lifecycle.ipd.md:93,233-235`, `.aw/records/plans/pending/20261121-timing-acc-02-8co0wy-monotonic-phase-subprocess-and-resource-timing.ipd.md:81,144`, `.aw/records/plans/pending/20261121-timing-acc-03-vrr1fv-reports-status-diff-and-tui-timing-semantics.ipd.md:6-7,92,188`, `.aw/records/plans/pending/20261121-timing-acc-04-3tvesf-timing-docs-examples-benchmark-and-whole-set-verification.ipd.md:80,85,149-155` | `nr63qr` drifted behind the four reviewed child plans: `E-03`/`E-04` listed single-step dependencies instead of `E-01, E-02` / `E-01, E-02, E-03`; `vrr1fv` summary omitted `src/pubrun/tui/widgets/diff.py`; `Required tests / validation` omitted `tests/test_quality.py -k TestDoubleStop` and `tests/test_api.py -k test_timing_values_are_floats` (`e1fwy2`), `tests/test_api.py` (`8co0wy`), `tests/test_tracker.py`, `tests/test_quality.py`, `tests/test_show_sections.py`, and `tests/test_methods_multi.py` (`vrr1fv`), and used `python` instead of `python3` for `examples/verify_all.py` while omitting exact `benchmarks/harness.py` flags, `git status -s`, and the dash check (`3tvesf`); and summaries omitted reviewed guarantees (`$defs.subprocess_record`, `config.resolved.json`-before-`manifest.json`, profiler startup/dump exclusion, `id(rec)`-keyed `_start_monos`, `classify_timing_semantics`, `_format_duration_detail`, `pytest.importorskip("textual")`, and `#Representative results` preservation). | C:Low; U:Low; S:Low; F:Low; Overall:Low | FIXED | Aligned `E-03`/`E-04` dependencies and synchronized `Child IPDs`, `Completion criteria`, `Cross-IPD validation`, and `Required tests / validation` with the four reviewed child plans while preserving every `Owner: <id6>` attribution (recommendation strength: very strong). |
+| PR-002 | HIGH | IN-SCOPE | R2/S7 | `.aw/records/plans/pending/20261121-timing-acc-00-nr63qr-timing-accuracy-and-overhead-separation.ipd.md:169-174`, `.aw/system/workflows/plan-review/steps/r2-executability.md:58-60`, `.aw/system/workflows/plan-review/steps/s7-finalize.md:31-36` | Gate item 5 instructed a hand-rolled move to `.aw/records/plans/executed/` instead of unconditional `aw ipd finalize` with conditional runner-retirement vs standalone ownership, and gate item 3 omitted the HARD MUST requirement to paste actual `aw ipd lint --phase post-transition` output and exit codes into each `V-*` `Observed evidence:` field. | C:Low; U:Low; S:Low; F:Low; Overall:Low | FIXED | Rewrote gate item 5 with conditional runner-retirement vs standalone `aw ipd finalize nr63qr` ownership (forbidding raw `git mv`) and strengthened gate item 3 with the HARD MUST pasted-output honesty rule (recommendation strength: very strong). |
+| PR-003 | MEDIUM | IN-SCOPE | S5/R1/R2 | `.aw/records/plans/pending/20261121-timing-acc-00-nr63qr-timing-accuracy-and-overhead-separation.ipd.md:108-113,135`, `.aw/system/workflows/plan-review/steps/s5-questions.md:21,79-91` | All four deferred items lacked `- Carrier:` / `- Carrier-Declined:` lines (flagged by `check.ipd-uncarried-obligation`), line 111 conflated runs-index optimization with four graduated sibling backlog items (`q3bll1`, `w4hxkh`, `x21s6w`, `x6alw4`), and `OQ-01` claimed `- Owner: maintainer (confirmed upon plan approval)` on an author-resolved default. | C:Low; U:Low; S:Low; F:Low; Overall:Low | FIXED | Added `- Carrier:` (`9ppa0r`, `6s7k9e`, `frzw20`, `osjxbz`, `vtkkn1`) and `- Carrier-Declined:` lines to every deferred item, separated runs-index exclusion from accurately labeled sibling Sets, and set `OQ-01` `- Owner:` to `plan author (binding upon plan approval)` with `D-1` recorded below (recommendation strength: very strong). |
+| PR-004 | LOW | IN-SCOPE | Check P/R1 | `.aw/records/plans/pending/20261121-timing-acc-00-nr63qr-timing-accuracy-and-overhead-separation.ipd.md:34,96-100,110,113,140` | `Goal` and `Completion criteria` used 56-68 word run-on sentences, line 99 expanded `TUI` as `Textual User Interface` instead of `Terminal User Interface` (inconsistent with `8co0wy`/`vrr1fv`), `Multi-OS` was unexpanded, `_resolve_commit()` lacked `path::Symbol` format, and line 140 contained two em dashes triggering `IPD-C802` advisories. | C:Low; U:Low; S:Low; F:Low; Overall:Low | FIXED | Split run-on sentences while preserving every requirement and `Owner:` attribution, standardized `Terminal User Interface (TUI)`, expanded `Multi-operating-system (OS)`, `command-line interface (CLI)`, and `Interquartile Range (IQR)`, cited `src/pubrun/__init__.py::_resolve_commit`, and replaced the two em dashes on line 140 with parentheses (recommendation strength: strong). |
+
+### Decisions
+
+| ID | Question | Chosen | Alternatives considered | Basis | Reversible |
+|---|---|---|---|---|---|
+| D-1 | Additive timing field naming and `elapsed_seconds = workload_seconds` compatibility policy (`OQ-01`) and owner provenance | Keep additive `$defs.timing` fields (`workload_seconds`, `startup_overhead_seconds`, `finalization_overhead_seconds`, `session_seconds`, `hardware_wait_seconds`, `background_hardware_seconds`, `duration_clock`, `elapsed_basis`, `interval_scope`, `workload_started_at_utc`, `finalized_at_utc`) with `elapsed_seconds = workload_seconds` and explicit legacy wall-clock labeling (matching reviewed children `e1fwy2` and `vrr1fv`), attributed to `plan author (binding upon plan approval)` | Leave `- Owner: maintainer` (falsely claims maintainer already answered) or keep `elapsed_seconds` as session total including shutdown wait (leaves short-script inflation unresolved in existing callers) | `.aw/records/backlog/graduated/20261121-pubrun-improve-01-6hp1zu-timing-accuracy.backlog.md:22,44`, reviewed children `e1fwy2` (`OQ-01`) and `vrr1fv`, `.aw/system/workflows/plan-review/steps/s5-questions.md:21` | yes |
+
+### Step S6
+
+- Checked: `steps/s6-rereview.md` trigger rules against all Round 1 edits. No `E-*` or `V-*` items were added or removed, `- Scope-Paths:` and `- Item-Dependencies:` did not change, all sections were swept for cross-plan parity with reviewed children `e1fwy2`, `8co0wy`, `vrr1fv`, and `3tvesf`, and `aw ipd coverage --no-commit nr63qr` and `aw ipd lint --phase review-finalize --agent` were re-verified cleanly after edits.
+
+AW-REVIEW: DONE
