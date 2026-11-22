@@ -138,8 +138,8 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ## Deferred / out of scope (with reason)
 
-- Application code and test changes belong to prerequisite child plans `p6pon8` (hook ownership rollback), `ed0yds` (tracker isolation), and `26euz0` (consumer honesty); if `E-05` uncovers a code regression, stop and report with captured output rather than silently editing application code.
-  - Carrier: ed0yds
+- Application code and test changes belong to prerequisite child plans `p6pon8` (hook ownership rollback, executed), `ed0yds` (tracker isolation, executed), and `26euz0` (consumer honesty, pending); if `E-05` uncovers a code regression, stop and report with captured output rather than silently editing application code.
+  - Carrier: 26euz0
 - Multi-OS and multi-Python CI matrix execution runs in GitHub Actions after local commits are pushed by a human and cannot be simulated inside a single local Linux runner.
   - Carrier-Declined: local Linux worktree cannot execute Windows/macOS runners; enforced via `.github/workflows/ci.yml` on push/PR.
 - Benchmark submission, GitHub Gist publication, and HPC scheduler jobs are prohibited without explicit maintainer authorization per orchestrator `frzw20`.

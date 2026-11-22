@@ -146,6 +146,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Carrier-Evidence: .aw/records/plans/executed/20261121-cap-isolation-01-p6pon8-safe-diagnostic-redaction-and-hook-ownership-rollback-across.ipd.md
 - Tracker per-engine failure isolation, narrow ghost mode, and independent finalization belong to prerequisite plan `ed0yds` (tracker per-engine failure isolation, narrow ghost mode, and independent finalization).
   - Carrier: ed0yds
+  - Carrier-Evidence: .aw/records/plans/executed/20261121-cap-isolation-02-ed0yds-tracker-per-engine-failure-isolation-narrow-ghost-mode-and-i.ipd.md
 - Documentation updates and overhead benchmarking belong to child plan `zp2yyu` (isolation overhead measurement, documentation reconciliation, and whole-Set verification).
   - Carrier: zp2yyu
 - Reproducibility gap assessment (`repro-check`, orchestrator `osjxbz`) belongs to a separate Set and remains untouched here.
