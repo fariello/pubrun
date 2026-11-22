@@ -245,10 +245,14 @@ def _get_gpus(
                         parts = line.split(",")
                         if len(parts) >= 4:
                             mem = None
-                            if parts[1].isdigit():
-                                mem = int(parts[1])
-                                if mem < 0:
-                                    mem = mem & 0xFFFFFFFF
+                            try:
+                                mem = int(parts[1].strip())
+                            except ValueError:
+                                mem = None
+                            if mem is not None and mem < 0:
+                                # AdapterRAM is a signed 32-bit WMI value that
+                                # overflows negative for 2-4 GiB adapters.
+                                mem = mem & 0xFFFFFFFF
                             gpus.append({
                                 "vendor": "Generic",
                                 "model": parts[3],
@@ -268,6 +272,10 @@ def _get_gpus(
                     for line in out.splitlines():
                         stripped = line.strip()
                         if stripped.startswith("Chipset Model:"):
+                            # Each "Chipset Model:" starts a new GPU; keep the previous one.
+                            if "model" in gpu_rec:
+                                gpus.append(gpu_rec)
+                                gpu_rec = {"vendor": "Apple / Generic"}
                             gpu_rec["model"] = stripped.split(":", 1)[1].strip()
                         elif stripped.startswith("VRAM (Total):"):
                             gpu_rec["memory_total_bytes"] = None

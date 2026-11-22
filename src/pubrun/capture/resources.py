@@ -76,6 +76,28 @@ def _get_rss_darwin() -> int:
         return -1  # unreadable (distinct from a legitimate 0); see EC-12
 
 
+def _get_linux_child_pids(pid: int) -> list:
+    """Return the direct child PIDs of ``pid`` across ALL of its threads.
+
+    ``/proc/<pid>/task/<tid>/children`` lists only the children forked by that one
+    thread, so a child spawned from a worker thread is missing from the main
+    thread's file. Unreadable entries are skipped.
+    """
+    children: list = []
+    tids = [str(pid)]
+    try:
+        tids.extend(t for t in os.listdir(f'/proc/{pid}/task') if t != str(pid))
+    except OSError:
+        pass
+    for tid in tids:
+        try:
+            with open(f'/proc/{pid}/task/{tid}/children', 'r') as f:
+                children.extend(int(c) for c in f.read().split() if c)
+        except (OSError, ValueError):
+            continue
+    return children
+
+
 def _get_tree_rss_linux() -> int:
     """Sum RSS across the process tree on Linux via /proc."""
     try:
@@ -96,14 +118,8 @@ def _get_tree_rss_linux() -> int:
                     total_rss += pages * os.sysconf("SC_PAGE_SIZE")
             except (OSError, IndexError, ValueError):
                 continue
-            # Find children of this process
-            try:
-                children_path = f'/proc/{p}/task/{p}/children'
-                with open(children_path, 'r') as f:
-                    child_pids = [int(c) for c in f.read().split() if c]
-                    pids_to_check.extend(child_pids)
-            except (OSError, ValueError):
-                pass
+            # Find children of this process (forked from any of its threads)
+            pids_to_check.extend(_get_linux_child_pids(p))
         return total_rss
     except Exception as e:
         logger.debug(f"pubrun failed Linux tree RSS poll: {e}")
@@ -196,11 +212,7 @@ def _get_tree_cpu_jiffies_linux() -> int:
                     total += utime + stime
             except (OSError, IndexError, ValueError):
                 continue
-            try:
-                with open(f'/proc/{p}/task/{p}/children', 'r') as f:
-                    to_visit.extend(int(c) for c in f.read().split() if c)
-            except (OSError, ValueError):
-                pass
+            to_visit.extend(_get_linux_child_pids(p))
         return total
     except Exception as e:
         logger.debug(f"pubrun failed Linux tree CPU poll: {e}")

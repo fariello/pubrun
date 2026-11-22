@@ -54,36 +54,36 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Console tee and redaction safety
 
-- [ ] E-01 Fix `src/pubrun/capture/console.py::TqdmSafeTee.write` and `src/pubrun/capture/console.py::TqdmSafeTee.flush` to preserve Carriage Return Line Feed (CRLF) lines, synchronize concurrent log writes, and honor `pubrun.paused()`, and add `BUG-04` regression tests in `tests/test_capture_engine_bugs.py`.
+- [x] E-01 Fix `src/pubrun/capture/console.py::TqdmSafeTee.write` and `src/pubrun/capture/console.py::TqdmSafeTee.flush` to preserve Carriage Return Line Feed (CRLF) lines, synchronize concurrent log writes, and honor `pubrun.paused()`, and add `BUG-04` regression tests in `tests/test_capture_engine_bugs.py`.
   - Depends on: none
   - Expected outcome: `TqdmSafeTee` tracks `self._pending_cr` across chunk boundaries, normalizes `\r\n` to `\n` before splitting on bare `\r` progress overwrites so writing `"hello world\r\nsecond line\r\n"` (or split chunks `"hello\r"` then `"\n"`) logs `"hello world\nsecond line\n"` (while `"50%\r100%\n"` still squashes `"50%"`). Log state (`self._current_buffer`, `self._pending_cr`, `self.line_count`, and `log_file` I/O) is guarded by `self._lock = threading.Lock()` while `self.original_stream.write`/`flush` passthrough remains outside `self._lock`. `TqdmSafeTee.flush()` still flushes `self.original_stream` when paused, but skips flushing `self._current_buffer` or calling `log_file.flush()` whenever `src/pubrun/capture/console.py::_tee_paused()` is `True`. Tests in `tests/test_capture_engine_bugs.py` verify CRLF preservation, split chunks, concurrent writers, and paused `flush()`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Fix `src/pubrun/capture/redaction.py::redact_argv`, `src/pubrun/capture/redaction.py::_get_secret_pattern`, and `src/pubrun/capture/redaction.py::_redact_value_string_heuristics`, and add `BUG-05` and `BUG-37` regression tests in `tests/test_capture_engine_bugs.py`.
+- [x] E-02 Fix `src/pubrun/capture/redaction.py::redact_argv`, `src/pubrun/capture/redaction.py::_get_secret_pattern`, and `src/pubrun/capture/redaction.py::_redact_value_string_heuristics`, and add `BUG-05` and `BUG-37` regression tests in `tests/test_capture_engine_bugs.py`.
   - Depends on: none
   - Expected outcome: In `redact_argv`, when `redact_next` is `True` and the next token starts with `"-"` (an option flag such as `--password`), `redact_next` resets to `False` and the token is processed as a flag so `["train.py", "--use-auth", "--password", "SUPERSECRET"]` redacts `"SUPERSECRET"` instead of consuming `"--password"`. In `_get_secret_pattern`, invalid or non-string `sensitive_keys_regex` values are caught (`(re.error, TypeError)`), logged with a warning via `logging.getLogger("pubrun")`, and fall back to compiling `DEFAULT_SECRET_REGEX` without crashing host `Popen` or caching broken patterns. In `_redact_value_string_heuristics`, both user:pass and token-only URI credential patterns run sequentially (not `if/else`) using whitespace-bounded character classes (reusing `_DIAG_URI_USERPASS_RE` and `_DIAG_URI_TOKEN_RE`) so multi-URI strings redact every credential while `"see http://example.com email alice@corp.com"` is preserved intact. Tests in `tests/test_capture_engine_bugs.py` cover all cases.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Subprocess spy and filesystem mount/probe fixes
 
-- [ ] E-03 Fix `src/pubrun/capture/subprocesses.py::SubprocessSpy` (`_patched_os_system` and `Popen.poll` tracking) and `src/pubrun/capture/filesystem.py` (`_longest_prefix_fstype`, `_unescape_mount_field`, and `LiveProbe`), and add `BUG-28` and `BUG-38` regression tests in `tests/test_capture_engine_bugs.py`.
+- [x] E-03 Fix `src/pubrun/capture/subprocesses.py::SubprocessSpy` (`_patched_os_system` and `Popen.poll` tracking) and `src/pubrun/capture/filesystem.py` (`_longest_prefix_fstype`, `_unescape_mount_field`, and `LiveProbe`), and add `BUG-28` and `BUG-38` regression tests in `tests/test_capture_engine_bugs.py`.
   - Depends on: none
   - Expected outcome: `_patched_os_system` decodes Portable Operating System Interface (POSIX) wait status via a Python 3.8+ helper (`os.waitstatus_to_exitcode` with `ValueError` guard for `-1` and `WIFEXITED`/`WEXITSTATUS`/`WIFSIGNALED`/`WTERMSIG` fallback on Python 3.8) ONLY for `rec["exit_code"]` and `rec["capture_state"]["status"]`, while returning the raw wait status unchanged to the host caller so exit code 1 records `1` instead of `256`. `SubprocessSpy.install()` and `uninstall()` transactionally patch and identity-guardedly restore `subprocess.Popen.poll` (alongside `__init__`, `wait`, and `os.system`) so children reaped via `poll()` returning non-`None` record `exit_code`, `ended_at_utc`, `elapsed_seconds`, `duration_clock`, and `capture_state.status` idempotently. In `filesystem.py`, `_longest_prefix_fstype` uses `>=` so later mounts (`nfs4`/`ext4`) override shadowed `autofs`/`rootfs` entries on the same mountpoint; `_unescape_mount_field` checks `i + 3 < len(field)` with 3 octal digits (`0`-`7`) so `"foo\\04"` stays `"foo\\04"`; and `LiveProbe.__init__` wraps `self._thread.start()` in `try/except` to release `_live_probe_sem`, set `self._acquired = False`, record `{"status": "error", ...}` in `self._slot`, and set `self._done` without raising. Tests in `tests/test_capture_engine_bugs.py` cover every case.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Resource tree, liveness, and hardware capture fixes
 
-- [ ] E-04 Fix `src/pubrun/capture/resources.py` Linux child enumeration (`_get_tree_rss_linux` and `_get_tree_cpu_jiffies_linux`), `src/pubrun/capture/liveness.py` (`_match_script_in_tokens` and `_get_start_time_macos`), and `src/pubrun/capture/hardware.py::_get_gpus`, and add `BUG-35`, `BUG-36`, `BUG-61`, and `BUG-62` regression tests in `tests/test_capture_engine_bugs.py`.
+- [x] E-04 Fix `src/pubrun/capture/resources.py` Linux child enumeration (`_get_tree_rss_linux` and `_get_tree_cpu_jiffies_linux`), `src/pubrun/capture/liveness.py` (`_match_script_in_tokens` and `_get_start_time_macos`), and `src/pubrun/capture/hardware.py::_get_gpus`, and add `BUG-35`, `BUG-36`, `BUG-61`, and `BUG-62` regression tests in `tests/test_capture_engine_bugs.py`.
   - Depends on: none
   - Expected outcome: A shared helper `_get_linux_child_pids(pid)` in `resources.py` enumerates `/proc/{p}/task/*/children` across all threads and is called by both `_get_tree_rss_linux()` and `_get_tree_cpu_jiffies_linux()` so children spawned by worker threads are accounted for in tree Resident Set Size (RSS) and tree Central Processing Unit (CPU) metrics. In `liveness.py`, `_match_script_in_tokens` handles sanitized script stems (such as `"my_train"` matching `["python3", "/x/my train.py"]` and `"train"` matching `["python3", "/x/train.py"]`) and exact `.py` basenames without breaking `tests/test_liveness.py::TestIsSameProcess::test_substring_only_match_is_inconclusive` (`"train.py"` vs `"/x/train.py.bak"` must still return `None`). `_get_start_time_macos` passes `LC_ALL=C` and `LC_TIME=C` in `subprocess.run(..., env=...)` and parses the `C`-locale date string without relying on the host Python process's `locale.LC_TIME`. In `hardware.py::_get_gpus`, Windows `AdapterRAM` parses signed integers (`try: mem = int(parts[1].strip())`) before applying `mem & 0xFFFFFFFF` for negative values (replacing the dead `.isdigit()` guard), and macOS `system_profiler` flushes the previous GPU record whenever a new `Chipset Model:` line appears so multi-GPU systems retain all GPUs. Tests in `tests/test_capture_engine_bugs.py` cover all four bug groups.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Full-suite regression verification
 
-- [ ] E-05 Run `tests/test_capture_engine_bugs.py` and the full `pytest` suite to confirm zero regressions across all capture, redaction, hook-ownership, liveness, filesystem, resource, and hardware test suites.
+- [x] E-05 Run `tests/test_capture_engine_bugs.py` and the full `pytest` suite to confirm zero regressions across all capture, redaction, hook-ownership, liveness, filesystem, resource, and hardware test suites.
   - Depends on: E-01, E-02, E-03, E-04
   - Expected outcome: `pytest tests/test_capture_engine_bugs.py -v` passes every regression test for all 9 bug groups, and full `pytest -q` passes with zero failures across the repository.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -142,30 +142,110 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest tests/test_capture_engine_bugs.py -v` output confirming `TqdmSafeTee` preserves CRLF lines (including split `\r` / `\n` writes while still squashing bare `\r` progress redraws), remains thread-safe under concurrent writers, and skips log writes on `flush()` while `pubrun.paused()` is active (while still flushing the original stream).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Observed: `python3 -m pytest tests/test_capture_engine_bugs.py -v -p no:cacheprovider --no-cov` (worktree, 2026-11-22) after all edits; the same tests run against the pre-fix modules from HEAD `af36c85` FAILED (`test_crlf_lines_preserved`, `test_crlf_split_across_writes`, `test_paused_flush_leaves_earlier_buffer_for_later`), so they detect BUG-04. Deviation: `self._lock` is a `threading.RLock`, not a `threading.Lock`, so a logging handler bound to the tee that re-enters `write()` on the same thread cannot deadlock (decision D-01).
 
-- [ ] V-02 validates E-02
+    ```text
+    TestTeeCrlf::test_crlf_lines_preserved PASSED
+    TestTeeCrlf::test_crlf_split_across_writes PASSED
+    TestTeeCrlf::test_bare_cr_at_chunk_end_still_overwrites PASSED
+    TestTeeCrlf::test_bare_cr_progress_squashed PASSED
+    TestTeeCrlf::test_passthrough_unchanged PASSED
+    TestTeeCrlf::test_concurrent_writers_keep_lines_whole PASSED
+    TestTeeCrlf::test_paused_flush_does_not_record_buffer PASSED
+    TestTeeCrlf::test_paused_flush_still_flushes_original PASSED
+    TestTeeCrlf::test_paused_flush_leaves_earlier_buffer_for_later PASSED
+    ============================== 48 passed in 0.36s ==============================
+    attempt 2 re-run (lane m780uj_attempt2, rebased on 8489b10): ============================== 48 passed in 0.81s ==============================
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest tests/test_capture_engine_bugs.py -v` output confirming `redact_argv(["train.py", "--use-auth", "--password", "SUPERSECRET"], {})` redacts `SUPERSECRET` and keeps `--password`, invalid or non-string `sensitive_keys_regex` warns and falls back to `DEFAULT_SECRET_REGEX` without raising, multi-URI strings redact all credentials, and `"see http://example.com email alice@corp.com"` is preserved intact.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Observed: `python3 -m pytest tests/test_capture_engine_bugs.py -v -p no:cacheprovider --no-cov` (worktree, 2026-11-22). Against the pre-fix HEAD modules, `test_invalid_regex_falls_back_without_raising`, `test_non_string_regex_falls_back_without_raising`, and the argv/URI cases FAILED. `test_boolean_sensitive_flag_before_password` asserts `redact_argv(["train.py", "--use-auth", "--password", "SUPERSECRET"], {}) == ["train.py", "--use-auth", "--password", "[REDACTED]"]`; `test_url_followed_by_email_preserved` asserts the URL+email string is returned unchanged.
 
-- [ ] V-03 validates E-03
+    ```text
+    TestArgvRedaction::test_boolean_sensitive_flag_before_password PASSED
+    TestArgvRedaction::test_value_after_sensitive_flag_still_redacted PASSED
+    TestArgvRedaction::test_boolean_flag_followed_by_eq_flag PASSED
+    TestSecretPattern::test_invalid_regex_falls_back_without_raising PASSED
+    TestSecretPattern::test_non_string_regex_falls_back_without_raising PASSED
+    TestSecretPattern::test_invalid_regex_does_not_break_popen PASSED
+    TestUriHeuristics::test_multiple_uri_credentials_all_redacted PASSED
+    TestUriHeuristics::test_userpass_and_token_uri_mixed PASSED
+    TestUriHeuristics::test_url_followed_by_email_preserved PASSED
+    ============================== 48 passed in 0.36s ==============================
+    attempt 2 re-run (lane m780uj_attempt2, rebased on 8489b10): ============================== 48 passed in 0.81s ==============================
+    ```
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: Pasted `pytest tests/test_capture_engine_bugs.py -v` output confirming `os.system` exit 1 records `exit_code == 1` while returning raw status unchanged to caller, `Popen.poll()` reaping records exit code and uninstall restores `Popen.poll`, `_longest_prefix_fstype` picks `nfs4` over shadowed `autofs`, `_unescape_mount_field("foo\\04")` stays `"foo\\04"`, and `LiveProbe` releases `_live_probe_sem` and returns `status == "error"` without raising when `Thread.start()` fails.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Observed: `python3 -m pytest tests/test_capture_engine_bugs.py -v -p no:cacheprovider --no-cov` (worktree, 2026-11-22). `test_os_system_records_exit_code_returns_raw_status` asserts `os.system("exit 1") == 256` and the record's `exit_code == 1`; `test_poll_reaping_records_exit` asserts exit_code 3, `ended_at_utc`, `elapsed_seconds`, `duration_clock == "monotonic"`, idempotence across later wait()/poll(), and that uninstall restores `Popen.poll`. Against the pre-fix HEAD modules the mount-table, live-probe, os.system, and poll tests FAILED.
 
-- [ ] V-04 validates E-04
+    ```text
+    TestSubprocessSpy::test_os_system_records_exit_code_returns_raw_status PASSED
+    TestSubprocessSpy::test_os_system_success PASSED
+    TestSubprocessSpy::test_decode_wait_status_fallbacks PASSED
+    TestSubprocessSpy::test_poll_reaping_records_exit PASSED
+    TestSubprocessSpy::test_uninstall_keeps_third_party_poll_wrapper PASSED
+    TestSubprocessSpy::test_install_rollback_restores_poll PASSED
+    TestMountTable::test_later_mount_on_same_point_wins PASSED
+    TestMountTable::test_rootfs_shadowed_by_later_root PASSED
+    TestMountTable::test_longer_prefix_still_beats_later_shorter PASSED
+    TestMountTable::test_truncated_octal_escape_preserved PASSED
+    TestMountTable::test_non_octal_digits_preserved PASSED
+    TestMountTable::test_valid_escapes_decoded PASSED
+    TestLiveProbe::test_thread_start_failure_releases_semaphore PASSED
+    TestLiveProbe::test_repeated_failures_do_not_exhaust_cap PASSED
+    ============================== 48 passed in 0.36s ==============================
+    attempt 2 re-run (lane m780uj_attempt2, rebased on 8489b10): ============================== 48 passed in 0.81s ==============================
+    ```
+  - Result: pass
+
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest tests/test_capture_engine_bugs.py -v` output confirming both `_get_tree_rss_linux` and `_get_tree_cpu_jiffies_linux` traverse `/proc/{p}/task/*/children`, `_match_script_in_tokens("my_train", ["python3", "/x/my train.py"]) is True` and `_match_script_in_tokens("train.py", ["/usr/bin/python", "/x/train.py.bak"]) is None`, macOS `_get_start_time_macos` passes `LC_ALL=C`/`LC_TIME=C` and parses dates independent of host locale, and Windows negative `AdapterRAM` plus macOS multi-GPU outputs parse accurately.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Observed: `python3 -m pytest tests/test_capture_engine_bugs.py -v -p no:cacheprovider --no-cov` (worktree, 2026-11-22), plus `python3 -m pytest tests/test_liveness.py -q -p no:cacheprovider --no-cov` -> `27 passed in 0.21s` (includes `test_substring_only_match_is_inconclusive`). Against the pre-fix HEAD modules the GPU, mac start-time, thread-children, and script-match tests FAILED.
 
-- [ ] V-05 validates E-05
+    ```text
+    TestThreadChildren::test_child_pids_cover_all_threads PASSED
+    TestThreadChildren::test_tree_rss_includes_worker_thread_children PASSED
+    TestThreadChildren::test_tree_cpu_includes_worker_thread_children PASSED
+    TestScriptMatch::test_sanitized_stem_matches_path_with_space_split PASSED
+    TestScriptMatch::test_sanitized_stem_matches_path_with_space_token PASSED
+    TestScriptMatch::test_stem_matches_py_basename PASSED
+    TestScriptMatch::test_exact_basename PASSED
+    TestScriptMatch::test_suffix_lookalike_is_inconclusive PASSED
+    TestScriptMatch::test_absent_is_false PASSED
+    TestScriptMatch::test_special_chars_sanitized PASSED
+    TestMacStartTime::test_passes_c_locale_and_parses PASSED
+    TestMacStartTime::test_parse_independent_of_strptime_locale PASSED
+    TestMacStartTime::test_garbage_returns_none PASSED
+    TestGpuFallback::test_windows_negative_adapter_ram PASSED
+    TestGpuFallback::test_windows_blank_adapter_ram PASSED
+    TestGpuFallback::test_macos_multi_gpu PASSED
+    ============================== 48 passed in 0.36s ==============================
+    attempt 2 re-run (lane m780uj_attempt2, rebased on 8489b10): ============================== 48 passed in 0.81s ==============================
+    ```
+  - Result: pass
+
+- [x] V-05 validates E-05
   - Required evidence: Pasted full `pytest -q` summary confirming `tests/test_capture_engine_bugs.py` and the entire test suite pass with zero failures.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Observed: `aw suite --no-cache` (full pytest, xdist workers, worktree, 2026-11-22) after all edits: 48 new tests pass and no regression. The single failure, `tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches`, also fails in a baseline `aw suite --no-cache` on an unmodified detached checkout of HEAD `af36c85` (`1 failed, 1493 passed in 152.96s`); it is the pre-existing xdist-only defect tracked by open backlog item `12rcu8` (under an xdist worker the process command line has no `pytest` token), and it passes standalone (`27 passed`). Related suites `tests/test_capture.py tests/test_redaction.py tests/test_hook_ownership_rollback.py tests/test_env_capture.py tests/test_liveness.py tests/test_pause_resume.py tests/test_new_features.py tests/test_hardware.py tests/test_resources.py tests/test_capture_isolation.py tests/test_edge_cases.py tests/test_status.py` -> `326 passed, 2 skipped in 38.94s`. CI matrix (3 OS x Python 3.8-3.14) not run in this local lane.
+
+    ```text
+    FAILED tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches
+    ================== 1 failed, 1541 passed in 139.11s (0:02:19) ==================
+    ```
+
+    Attempt 2 (lane `m780uj_attempt2`, the attempt-1 changes carried forward onto main `8489b10`): `aw suite --no-cache` again shows the same single pre-existing failure. `python3 -m pytest tests/test_liveness.py -n 2` fails that test identically with the UNMODIFIED `8489b10` `liveness.py` (`1 failed, 26 passed in 1.31s`) and with this plan's `liveness.py` (`1 failed, 26 passed in 1.62s`), so this plan did not cause it (tracked by backlog `12rcu8`).
+
+    ```text
+    FAILED tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches
+    ================== 1 failed, 1570 passed in 144.10s (0:02:24) ==================
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 

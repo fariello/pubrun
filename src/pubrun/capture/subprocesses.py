@@ -53,7 +53,34 @@ logger = logging.getLogger("pubrun")
 
 _original_popen_init = subprocess.Popen.__init__
 _original_popen_wait = subprocess.Popen.wait
+_original_popen_poll = subprocess.Popen.poll
 _original_os_system = os.system
+
+
+def _decode_wait_status(status: Any) -> Any:
+    """Convert an ``os.system`` return value to a process exit code for recording.
+
+    On POSIX ``os.system`` returns a wait status (exit 1 -> 256); on Windows it
+    already returns the exit code. A signal-terminated child decodes to
+    ``-signum`` (matching ``subprocess``). Undecodable values are returned as-is.
+    """
+    if os.name != "posix" or not isinstance(status, int) or isinstance(status, bool):
+        return status
+    converter = getattr(os, "waitstatus_to_exitcode", None)
+    if converter is not None:
+        try:
+            return converter(status)
+        except ValueError:
+            return status
+    # Python 3.8 fallback.
+    try:
+        if os.WIFEXITED(status):
+            return os.WEXITSTATUS(status)
+        if os.WIFSIGNALED(status):
+            return -os.WTERMSIG(status)
+    except (ValueError, OverflowError):
+        pass
+    return status
 
 class SubprocessSpy:
     """Patches subprocess.Popen and os.system to record spawned processes transparently."""
@@ -68,6 +95,7 @@ class SubprocessSpy:
     _active_state: Optional[Dict[str, Any]] = None
     _installed_popen_init: Optional[Any] = None
     _installed_popen_wait: Optional[Any] = None
+    _installed_popen_poll: Optional[Any] = None
     _installed_os_system: Optional[Any] = None
 
     @classmethod
@@ -96,6 +124,7 @@ class SubprocessSpy:
 
             prev_popen_init = subprocess.Popen.__init__
             prev_popen_wait = subprocess.Popen.wait
+            prev_popen_poll = subprocess.Popen.poll
             prev_os_system = os.system
 
             state: Dict[str, Any] = {
@@ -103,6 +132,7 @@ class SubprocessSpy:
                 "config": config,
                 "prev_popen_init": prev_popen_init,
                 "prev_popen_wait": prev_popen_wait,
+                "prev_popen_poll": prev_popen_poll,
                 "prev_os_system": prev_os_system,
             }
 
@@ -174,10 +204,16 @@ class SubprocessSpy:
                         cls._records.append(rec)
                         cls._start_monos[id(rec)] = (rec, start_mono)
 
-            def _patched_popen_wait(self: Any, *args: Any, **kwargs: Any) -> int:
-                exit_code = prev_popen_wait(self, *args, **kwargs)
-                if not state["active"]:
-                    return exit_code
+            def _complete_popen_record(self: Any, exit_code: Any) -> None:
+                """Record a reaped child's exit once (idempotent across wait/poll)."""
+                if exit_code is None or not state["active"]:
+                    return
+                if getattr(self, "_pubrun_state", None) is not state:
+                    return
+                rec0 = getattr(self, "_pubrun_rec", None)
+                if rec0 is None or rec0.get("exit_code") is not None:
+                    # Already recorded: repeated poll() calls stay cheap.
+                    return
                 end_ts = time.time()
                 end_mono = time.perf_counter()
                 try:
@@ -201,6 +237,15 @@ class SubprocessSpy:
                     logger.debug(
                         f"pubrun failed to finalize subprocess record wait hook: {e}"
                     )
+
+            def _patched_popen_wait(self: Any, *args: Any, **kwargs: Any) -> int:
+                exit_code = prev_popen_wait(self, *args, **kwargs)
+                _complete_popen_record(self, exit_code)
+                return exit_code
+
+            def _patched_popen_poll(self: Any, *args: Any, **kwargs: Any) -> Any:
+                exit_code = prev_popen_poll(self, *args, **kwargs)
+                _complete_popen_record(self, exit_code)
                 return exit_code
 
             def _patched_os_system(command: str) -> int:
@@ -268,9 +313,12 @@ class SubprocessSpy:
 
                 end_ts = time.time()
                 end_mono = time.perf_counter()
+                # The host receives the raw wait status unchanged; only the
+                # recorded value is decoded to a real exit code.
+                recorded_code = _decode_wait_status(exit_code)
                 with cls._lock:
                     if state["active"]:
-                        rec["exit_code"] = exit_code
+                        rec["exit_code"] = recorded_code
                         rec["ended_at_utc"] = end_ts
                         entry = cls._start_monos.pop(id(rec), None)
                         if entry is not None and entry[0] is rec:
@@ -280,7 +328,7 @@ class SubprocessSpy:
                             rec["elapsed_seconds"] = max(0.0, end_mono - start_mono)
                             rec["duration_clock"] = "monotonic"
                         rec["capture_state"]["status"] = (
-                            "complete" if exit_code == 0 else "failed"
+                            "complete" if recorded_code == 0 else "failed"
                         )
 
                 return exit_code
@@ -295,6 +343,7 @@ class SubprocessSpy:
             targets = [
                 (subprocess.Popen, "__init__", _patched_popen_init, prev_popen_init),
                 (subprocess.Popen, "wait", _patched_popen_wait, prev_popen_wait),
+                (subprocess.Popen, "poll", _patched_popen_poll, prev_popen_poll),
                 (os, "system", _patched_os_system, prev_os_system),
             ]
             try:
@@ -314,12 +363,14 @@ class SubprocessSpy:
                 cls._active_state = None
                 cls._installed_popen_init = None
                 cls._installed_popen_wait = None
+                cls._installed_popen_poll = None
                 cls._installed_os_system = None
                 raise
 
             cls._active_state = state
             cls._installed_popen_init = _patched_popen_init
             cls._installed_popen_wait = _patched_popen_wait
+            cls._installed_popen_poll = _patched_popen_poll
             cls._installed_os_system = _patched_os_system
             cls._owner = owner
             cls._installed = True
@@ -351,6 +402,12 @@ class SubprocessSpy:
                         state["prev_popen_wait"],
                     ),
                     (
+                        subprocess.Popen,
+                        "poll",
+                        cls._installed_popen_poll,
+                        state["prev_popen_poll"],
+                    ),
+                    (
                         os,
                         "system",
                         cls._installed_os_system,
@@ -373,6 +430,7 @@ class SubprocessSpy:
             cls._active_state = None
             cls._installed_popen_init = None
             cls._installed_popen_wait = None
+            cls._installed_popen_poll = None
             cls._installed_os_system = None
             # BUG-09: Clear records on uninstall to prevent cross-run leakage.
             cls._records = []

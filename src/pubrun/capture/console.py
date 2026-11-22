@@ -97,6 +97,12 @@ class TqdmSafeTee:
         self.timestamped = timestamped
         self.line_count = 0
         self._current_buffer = ""
+        # A write ending in "\r" may be the first half of a "\r\n" split across
+        # two write() calls, so the overwrite decision is deferred to the next chunk.
+        self._pending_cr = False
+        # Reentrant so a log write that re-enters the tee on the same thread
+        # (for example a logging handler bound to this stream) cannot deadlock.
+        self._lock = threading.RLock()
         self._log_write_failed = False
         self._in_error_log = False
 
@@ -155,35 +161,52 @@ class TqdmSafeTee:
         if getattr(_tee_local, "depth", 0):
             return ret
 
-        try:
-            # 2. Process strings for log file safely (handling carriage returns aka TQDM interception)
-            # Split on \r first to squash progress bar redraws, then process \n for line breaks.
-            # PERF-05: compute timestamp once per write() call, not per line.
-            if self.timestamped:
-                from datetime import datetime, timezone
-                ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
-            else:
-                ts = ""
-            segments = data.split('\r')
-            for i, segment in enumerate(segments):
-                if i > 0:
-                    # A \r was encountered — discard the current buffer (progress bar redraw)
-                    self._current_buffer = ""
-                lines = segment.split('\n')
-                # All but the last piece end with \n
-                for j, line in enumerate(lines):
-                    if j < len(lines) - 1:
-                        full_line = self._current_buffer + line
-                        if ts:
-                            log_file.write(ts + full_line + '\n')
-                        else:
-                            log_file.write(full_line + '\n')
-                        self.line_count += 1
+        if not data:
+            return ret
+
+        with self._lock:
+            log_file = self.log_file
+            if not log_file or getattr(log_file, "closed", False):
+                return ret
+            try:
+                # 2. Process strings for log file safely (handling carriage returns aka TQDM interception)
+                # CRLF is a line ending, not a redraw: normalize it to \n first, then
+                # split on the remaining bare \r to squash progress bar redraws.
+                # PERF-05: compute timestamp once per write() call, not per line.
+                if self.timestamped:
+                    from datetime import datetime, timezone
+                    ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
+                else:
+                    ts = ""
+                if self._pending_cr:
+                    self._pending_cr = False
+                    if not data.startswith('\n'):
+                        # The deferred \r was a bare redraw, not half of a CRLF.
                         self._current_buffer = ""
-                    else:
-                        self._current_buffer += line
-        except Exception as e:
-            self._handle_log_error(e)
+                text = data.replace('\r\n', '\n')
+                if text.endswith('\r'):
+                    self._pending_cr = True
+                    text = text[:-1]
+                segments = text.split('\r')
+                for i, segment in enumerate(segments):
+                    if i > 0:
+                        # A bare \r was encountered: discard the current buffer (progress bar redraw)
+                        self._current_buffer = ""
+                    lines = segment.split('\n')
+                    # All but the last piece end with \n
+                    for j, line in enumerate(lines):
+                        if j < len(lines) - 1:
+                            full_line = self._current_buffer + line
+                            if ts:
+                                log_file.write(ts + full_line + '\n')
+                            else:
+                                log_file.write(full_line + '\n')
+                            self.line_count += 1
+                            self._current_buffer = ""
+                        else:
+                            self._current_buffer += line
+            except Exception as e:
+                self._handle_log_error(e)
 
         return ret
 
@@ -195,22 +218,29 @@ class TqdmSafeTee:
             self.original_stream.flush()
         except (BrokenPipeError, OSError, ValueError):
             pass  # Downstream reader closed or original stream closed/broken
-        log_file = self.log_file
-        if log_file and not getattr(log_file, "closed", False):
-            try:
-                # Dump whatever is left in the buffer on a flush
-                if self._current_buffer:
-                    if self.timestamped:
-                        from datetime import datetime, timezone
-                        ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
-                        log_file.write(ts + self._current_buffer + '\n')
-                    else:
-                        log_file.write(self._current_buffer + '\n')
-                    self.line_count += 1
-                    self._current_buffer = ""
-                log_file.flush()
-            except Exception as e:
-                self._handle_log_error(e)
+        # While paused on this thread, recording is suspended: do not move the
+        # pending buffer into the log (the passthrough flush above still ran).
+        if _tee_paused():
+            return
+        with self._lock:
+            log_file = self.log_file
+            if log_file and not getattr(log_file, "closed", False):
+                try:
+                    # Dump whatever is left in the buffer on a flush. A buffer that
+                    # ends in a deferred \r is a progress redraw awaiting overwrite
+                    # (or half a CRLF): leave it for the next write to resolve.
+                    if self._current_buffer and not self._pending_cr:
+                        if self.timestamped:
+                            from datetime import datetime, timezone
+                            ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
+                            log_file.write(ts + self._current_buffer + '\n')
+                        else:
+                            log_file.write(self._current_buffer + '\n')
+                        self.line_count += 1
+                        self._current_buffer = ""
+                    log_file.flush()
+                except Exception as e:
+                    self._handle_log_error(e)
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the original stream (e.g. isatty, encoding)."""

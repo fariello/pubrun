@@ -1,7 +1,10 @@
 import re
 import hashlib
 import json
+import logging
 from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger("pubrun")
 
 
 # Default regex for detecting sensitive variable/flag names.
@@ -28,10 +31,23 @@ def _get_secret_pattern(config: Optional[Dict[str, Any]] = None) -> re.Pattern:
         )
     else:
         pattern_str = DEFAULT_SECRET_REGEX
-    cached = _PATTERN_CACHE.get(pattern_str)
+    try:
+        cached = _PATTERN_CACHE.get(pattern_str)
+    except TypeError:
+        # Unhashable value (e.g. a list from a malformed config).
+        cached = None
     if cached is not None:
         return cached
-    compiled = re.compile(pattern_str)
+    try:
+        compiled = re.compile(pattern_str)
+    except (re.error, TypeError) as e:
+        # A bad user regex must never crash the host (this runs inside the
+        # patched Popen); fall back to the default pattern and do not cache it.
+        logger.warning(
+            "pubrun: invalid [redaction].sensitive_keys_regex (%s); using the default pattern",
+            type(e).__name__,
+        )
+        return _get_secret_pattern(None)
     _PATTERN_CACHE[pattern_str] = compiled
     return compiled
 
@@ -131,15 +147,12 @@ def _redact_value_string_heuristics(val: str, config: Optional[Dict[str, Any]] =
         except Exception:
             pass
 
-    # 2. Database/URI credentials heuristic
-    uri_pattern = re.compile(r"([a-zA-Z0-9+.-]+)://([^/:]+):([^/@]+)@([^/]+)")
-    if uri_pattern.search(val):
-        val = uri_pattern.sub(r"\1://\2:[REDACTED]@\4", val)
-    else:
-        # scheme://token@host (e.g. git tokens)
-        token_uri_pattern = re.compile(r"([a-zA-Z0-9+.-]+)://([^/:]+)@([^/]+)")
-        if token_uri_pattern.search(val):
-            val = token_uri_pattern.sub(r"\1://[REDACTED]@\3", val)
+    # 2. Database/URI credentials heuristic. Both forms run so a string holding
+    # a user:pass URI and a token URI redacts each; the whitespace-bounded
+    # classes keep a match inside one URI (no spanning into adjacent text).
+    val = _DIAG_URI_USERPASS_RE.sub(r"\1://\2:[REDACTED]@\4", val)
+    # scheme://token@host (e.g. git tokens)
+    val = _DIAG_URI_TOKEN_RE.sub(r"\1://[REDACTED]@\3", val)
 
     # 3. Known API keys / Tokens
     openai_pattern = re.compile(r"sk-[a-zA-Z0-9]{20,}")
@@ -199,9 +212,13 @@ def redact_argv(argv: list, config: Optional[Dict[str, Any]] = None) -> list:
         arg_str = str(arg)
 
         if redact_next:
-            result.append("[REDACTED]")
             redact_next = False
-            continue
+            if not arg_str.startswith("-"):
+                result.append("[REDACTED]")
+                continue
+            # The previous sensitive flag was boolean (e.g. --use-auth): this
+            # token is another option, so process it as a flag instead of
+            # consuming it, or the value of a following --password would leak.
 
         # Heuristic 1: --flag=value or -flag=value
         if "=" in arg_str and arg_str.startswith("-"):

@@ -83,6 +83,47 @@ def _script_is_generic(expected_script: str) -> bool:
     return len(base) < 3 or base in _GENERIC_SCRIPT_TOKENS
 
 
+_SCRIPT_SUFFIXES = (".py", ".pyw")
+# Bound on how many whitespace-split tokens are re-joined when looking for a
+# script path that contains spaces (ps/wmic command lines are split on spaces).
+_MAX_JOINED_TOKENS = 8
+
+
+def _sanitize_script_name(name: str) -> str:
+    """Apply the same sanitization the tracker uses for the recorded script name."""
+    import re
+    return re.sub(r"[^a-zA-Z0-9_\-\.]", "_", name)
+
+
+def _script_name_forms(tok: str) -> set:
+    """Names under which a command-line token may have been recorded.
+
+    The lock file records a sanitized stem (``my train.py`` -> ``my_train``) and
+    a manifest records the basename (``train.py``), so both, raw and sanitized,
+    count as exact. Only a ``.py``/``.pyw`` suffix is stripped, so
+    ``train.py.bak`` never yields ``train.py``.
+    """
+    from pathlib import PurePath
+    name = PurePath(tok).name
+    forms = {name, _sanitize_script_name(name)}
+    for suffix in _SCRIPT_SUFFIXES:
+        if name.endswith(suffix) and len(name) > len(suffix):
+            stem = name[: -len(suffix)]
+            forms.add(stem)
+            forms.add(_sanitize_script_name(stem))
+    return forms
+
+
+def _candidate_tokens(tokens):
+    """Yield each token, then runs of adjacent tokens re-joined with a space."""
+    for tok in tokens:
+        yield tok
+    n = len(tokens)
+    for i in range(n):
+        for j in range(i + 2, min(n, i + _MAX_JOINED_TOKENS) + 1):
+            yield " ".join(tokens[i:j])
+
+
 def _match_script_in_tokens(expected_script: str, tokens) -> Optional[bool]:
     """Given the command-line tokens of a process, decide whether it is running
     ``expected_script``.
@@ -92,17 +133,16 @@ def _match_script_in_tokens(expected_script: str, tokens) -> Optional[bool]:
     and None when the only evidence is a substring (ambiguous) so the caller
     falls through to start-time timing. (IPD 20260705 EC-06.)
     """
-    from pathlib import Path
     tokens = [t for t in tokens if t]
     if not tokens:
         return None
     exact = False
     substring = False
-    for tok in tokens:
-        if Path(tok).name == expected_script or tok == expected_script:
+    for tok in _candidate_tokens(tokens):
+        if tok == expected_script or expected_script in _script_name_forms(tok):
             exact = True
             break
-        if expected_script in tok:
+        if expected_script in tok or expected_script in _sanitize_script_name(tok):
             substring = True
     if exact:
         return True
@@ -340,17 +380,45 @@ def _get_cpu_linux(pid: int) -> Optional[float]:
 def _get_start_time_macos(pid: int) -> Optional[float]:
     """Get process start time via ps -o lstart=."""
     try:
+        env = dict(os.environ)
+        env["LC_ALL"] = "C"
+        env["LC_TIME"] = "C"
         result = subprocess.run(
             ["ps", "-o", "lstart=", "-p", str(pid)],
-            capture_output=True, text=True, timeout=5
+            capture_output=True, text=True, timeout=5, env=env
         )
         if result.returncode != 0 or not result.stdout.strip():
             return None
-        # Output format: "Thu May 31 14:02:17 2026" (locale-independent format)
-        from datetime import datetime
-        dt = datetime.strptime(result.stdout.strip(), "%a %b %d %H:%M:%S %Y")
-        return dt.timestamp()
+        # With LC_ALL=C the output is "Thu May 31 14:02:17 2026".
+        return _parse_c_locale_lstart(result.stdout.strip())
     except (subprocess.TimeoutExpired, ValueError, OSError):
+        return None
+
+
+_C_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+
+def _parse_c_locale_lstart(text: str) -> Optional[float]:
+    """Parse a C-locale ``ps -o lstart=`` string as local time, without strptime.
+
+    ``datetime.strptime`` matches ``%a``/``%b`` against the host Python process's
+    LC_TIME, so it rejects English names when Python runs under another locale.
+    """
+    parts = text.split()
+    if len(parts) != 5:
+        return None
+    _weekday, mon, day, hms, year = parts
+    month = _C_MONTHS.get(mon.lower())
+    if month is None:
+        return None
+    try:
+        hour, minute, second = (int(x) for x in hms.split(":"))
+        from datetime import datetime
+        return datetime(int(year), month, int(day), hour, minute, second).timestamp()
+    except (ValueError, OverflowError):
         return None
 
 

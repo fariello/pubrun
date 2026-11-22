@@ -93,9 +93,15 @@ def _unescape_mount_field(field: str) -> str:
     out = []
     i = 0
     while i < len(field):
-        if field[i] == "\\" and i + 3 < len(field) + 1 and field[i + 1:i + 4].isdigit():
+        octal = field[i + 1:i + 4]
+        if (
+            field[i] == "\\"
+            and i + 3 < len(field)
+            and len(octal) == 3
+            and all(c in "01234567" for c in octal)
+        ):
             try:
-                out.append(chr(int(field[i + 1:i + 4], 8)))
+                out.append(chr(int(octal, 8)))
                 i += 4
                 continue
             except ValueError:
@@ -106,14 +112,18 @@ def _unescape_mount_field(field: str) -> str:
 
 
 def _longest_prefix_fstype(resolved_path: str, entries: List[Tuple[str, str]]) -> Optional[Tuple[str, str]]:
-    """Return (mount_point, fstype) of the longest mount point that prefixes the path."""
+    """Return (mount_point, fstype) of the longest mount point that prefixes the path.
+
+    On a tie the LATER entry wins: the mount table lists mounts in mount order, so a
+    later mount on the same point (e.g. nfs4 over an autofs trigger) shadows it.
+    """
     best: Optional[Tuple[str, str]] = None
     best_len = -1
     for mount_point, fstype in entries:
         mp = mount_point.rstrip("/") or "/"
         # A mount matches if the path equals it or sits under it.
         if resolved_path == mp or resolved_path.startswith(mp + "/") or mp == "/":
-            if len(mp) > best_len:
+            if len(mp) >= best_len:
                 best_len = len(mp)
                 best = (mount_point, fstype)
     return best
@@ -317,8 +327,21 @@ class LiveProbe:
             self._slot = {"status": "skipped", "detail": "probe cap reached"}
             self._done.set()
             return
-        self._thread = threading.Thread(target=self._run, name="pubrun-fsprobe", daemon=True)
-        self._thread.start()
+        try:
+            self._thread = threading.Thread(target=self._run, name="pubrun-fsprobe", daemon=True)
+            self._thread.start()
+        except Exception as e:
+            # Thread creation can fail (e.g. "can't start new thread"); never raise and
+            # never leak the semaphore slot, since _run() will not release it.
+            try:
+                _live_probe_sem.release()
+            except (ValueError, RuntimeError):
+                pass
+            self._acquired = False
+            self._slot = {"status": "error", "detail": str(e),
+                          "elapsed_s": round(time.monotonic() - self._t0, 3)}
+            self._done.set()
+            return
         # Wait only the responsiveness budget; the daemon keeps running past it.
         self._done.wait(timeout=wait_budget_s)
 
