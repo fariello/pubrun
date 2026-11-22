@@ -3,10 +3,12 @@
 - Date: 2026-11-22
 - Kind: child
 - Concern: Bugs and correctness (diagnostic self-checks, meta snapshot depth handling, resource report labeling, null-safe CPU formatting, and manifest hydration).
-- Scope: `src/pubrun/report/checks.py`, `src/pubrun/report/meta_snapshot.py`, `src/pubrun/report/diagnostics.py`, `src/pubrun/report/methods.py`, `src/pubrun/report/utils.py`, and regression tests in `tests/test_report_checks_bugs.py`.
-- Scope-Paths: src/pubrun/report/checks.py, src/pubrun/report/meta_snapshot.py, src/pubrun/report/diagnostics.py, src/pubrun/report/methods.py, src/pubrun/report/utils.py, tests/test_report_checks_bugs.py
+- Scope: `src/pubrun/report/checks.py`, `src/pubrun/report/meta_snapshot.py`, `src/pubrun/report/diagnostics.py`, `src/pubrun/report/utils.py`, `tests/test_reproducibility_assessment.py`, and regression tests in `tests/test_report_checks_bugs.py`.
+- Scope-Paths: src/pubrun/report/checks.py, src/pubrun/report/meta_snapshot.py, src/pubrun/report/diagnostics.py, src/pubrun/report/utils.py, tests/test_reproducibility_assessment.py, tests/test_report_checks_bugs.py
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: complex
 - Short-Description: Fix malformed TOML detection in self-check, meta depth flags, SGE/PBS check precedence, multi-mount reporting, and manifest hydration bugs
 - Work-Kind: bug
 - Priority: high
@@ -21,72 +23,108 @@
 
 ## Workflow history
 
-- 2026-11-22 draft (Antigravity): created from `/assess-bugs` audit.
+- 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-22 to-review (Antigravity): authored fix steps, citations, and falsifiable validation criteria.
+- 2026-11-22 draft (Antigravity): created from `/assess-bugs` audit.
 
 ## Goal
 
-Fix 8 confirmed diagnostic and reporting bugs so `pubrun self-check` detects malformed TOML configs, preserves all filesystem findings, distinguishes SGE compute nodes from PBS login nodes, and never infinite-loops on non-existent drives; `pubrun meta --basic/--standard/--deep` actually controls capture depth; and resource/methods/hydration reports format data accurately.
+Fix 8 confirmed diagnostic and reporting bugs across `pubrun self-check`, `pubrun meta`, resource charts, null Central Processing Unit (CPU) formatting, and manifest hydration. Make `pubrun self-check` detect malformed Tom's Obvious Minimal Language (TOML) configuration files, preserve every filesystem finding, distinguish Sun Grid Engine (SGE) and Portable Batch System (PBS) compute nodes from login nodes, and terminate cleanly on nonexistent roots or relative paths. Make `pubrun meta --basic/--standard/--deep` control active collector configuration, keep Resident Set Size (RSS) chart titles aligned with the plotted series, prevent literal `"None"` output on 64-bit Advanced RISC Machine (ARM64) hosts, and hydrate `"host"` from parent meta snapshots.
+
+### Self-check scheduler disambiguation and meta snapshot depth mapping (target behavior)
+
+```mermaid
+flowchart TD
+    SC["checks._hpc_login_node_findings()"] --> ALLOC{"Any compute allocation env var set?\n(SLURM_JOB_ID, PBS_JOBID, LSB_JOBID, JOB_ID, PE_HOSTFILE)"}
+    ALLOC -- "yes" --> NONE["Return [] (on compute node)"]
+    ALLOC -- "no" --> TOOLS{"Submit tool on PATH?"}
+    TOOLS -- "sbatch" --> SLURM["Emit INFO hpc_login_node (Slurm)"]
+    TOOLS -- "bsub" --> LSF["Emit INFO hpc_login_node (LSF)"]
+    TOOLS -- "qsub" --> QSUB{"Scheduler env markers?"}
+    QSUB -- "SGE_ROOT or SGE_O_HOST (no PBS markers)" --> SGE["Emit INFO hpc_login_node (SGE/Grid Engine)"]
+    QSUB -- "PBS_ENVIRONMENT or PBS_O_HOST" --> PBS["Emit INFO hpc_login_node (PBS/Torque)"]
+    QSUB -- "neither" --> AMB["Emit INFO hpc_login_node (PBS/Torque or SGE)"]
+
+    META["meta_snapshot.generate_meta_snapshot(output_path, depth)"] --> DCHK{"depth value?"}
+    DCHK -- "basic" --> DB["hardware=basic (no GPU clocks), git check_dirty=False,\nenvironment=off, packages=off"]
+    DCHK -- "standard" --> DS["hardware=standard (no GPU clocks), git check_dirty=True,\nenvironment=filtered, packages=top-level-installed"]
+    DCHK -- "deep" --> DD["hardware=deep (GPU clocks=True), git check_dirty=True,\nenvironment=filtered (redacted), packages=full-environment"]
+    DCHK -- "other" --> DERR["Raise ValueError"]
+```
 
 ## Detailed Implementation Checklist (TODO)
 
 Execution-state rule: mark an `E-*` item complete only after performing the action. That mark is not validation. Right-sizing rule: each E-item is one focused pass with its own V-item check (`IPD-Z603`). Accepted execution states: blocked, failed, pending, performed; terminal gate demands 'performed'.
 
-### Task group 1: `report/checks.py` diagnostic accuracy and termination
+### Task group 1: `src/pubrun/report/checks.py` diagnostic accuracy and termination
 
-- [ ] E-01 Fix `report.checks._install_health_findings` and `report.checks.live_checks` to report malformed `.pubrun.toml` / config files as failing checks and preserve all filesystem findings.
+- [ ] E-01 Fix `src/pubrun/report/checks.py::_install_health_findings` and `src/pubrun/report/checks.py::live_checks` to report malformed TOML config files as `WARN` findings and preserve every matched finding in itemized checks, and add `BUG-16` and `BUG-47` regression tests in `tests/test_report_checks_bugs.py`.
   - Depends on: none
-  - Expected outcome: `_install_health_findings` explicitly parses discovered config TOML files (or inspects `config` parse errors) and emits an error/warn finding when `.pubrun.toml` or `pyproject.toml` has invalid TOML so `self-check --strict` exits non-zero; `live_checks` returns every filesystem finding rather than dropping all entries after the first.
+  - Expected outcome: `_install_health_findings` explicitly parses each existing file among the three canonical config paths loaded by `src/pubrun/config.py` (`get_global_config_dir() / "config.toml"`, `Path.cwd() / ".config" / "pubrun" / "config.toml"`, and `Path.cwd() / ".pubrun.toml"`) via `pubrun.config.tomllib.loads` and emits a `WARN` (`"warn"`) `"config_invalid"` finding naming the offending path on `TOMLDecodeError` or `OSError` (while keeping the `try/except` around `resolve_config()`), so `pubrun self-check --strict` exits non-zero on malformed config files. `live_checks` removes the unused `by_prefix` dict and emits one `{"name", "label", "status", "detail"}` check record per matched finding for each `_CHECK_CATALOG` entry (preserving the exact `f.get("message", "")` in `detail` so `src/pubrun/__main__.py::_run_self_check` `--show-suggestions` matching and warning counts remain accurate), and emits one `"ok"` entry when no finding matches. Tests in `tests/test_report_checks_bugs.py` cover malformed config files and multiple simultaneous filesystem findings.
   - Execution state: pending
 
-- [ ] E-02 Fix `report.checks._hpc_login_node_findings` and output-directory writability traversal in `src/pubrun/report/checks.py`.
+- [ ] E-02 Fix `src/pubrun/report/checks.py::_hpc_login_node_findings` and output-directory writability traversal in `src/pubrun/report/checks.py::_install_health_findings`, and add `BUG-46` and `BUG-48` regression tests in `tests/test_report_checks_bugs.py`.
   - Depends on: none
-  - Expected outcome: `_hpc_login_node_findings` checks SGE compute-node variables (`JOB_ID`/`SGE_ROOT`) before PBS login-node heuristics so SGE compute jobs are not misidentified as PBS login nodes; output-dir writability resolves relative paths against CWD and terminates cleanly when `parent == current` (preventing infinite loops on nonexistent Windows drive letters).
+  - Expected outcome: `_hpc_login_node_findings` checks all compute-node allocation variables first (`SLURM_JOB_ID`, `PBS_JOBID`, `LSB_JOBID`, `JOB_ID`, `PE_HOSTFILE`) and returns `[]` when any is set, so neither SGE compute jobs nor PBS compute jobs are misclassified as login nodes. When no compute allocation variable is set and `qsub` is on `PATH`, `_hpc_login_node_findings` disambiguates the login-node label using environment markers (`"SGE/Grid Engine"` when `SGE_ROOT` or `SGE_O_HOST` is set without PBS markers `PBS_ENVIRONMENT`/`PBS_O_HOST`; `"PBS/Torque"` when PBS markers are set; `"PBS/Torque or SGE"` when neither is set) while preserving Slurm (`sbatch`) and Load Sharing Facility (LSF, `bsub`) detection and `INFO` severity. Output-directory writability anchors non-empty `base` with `os.path.abspath(base)` so relative paths resolve against the current working directory (CWD), stops the ancestor walk whenever `os.path.dirname(probe) == probe` (preventing infinite loops on nonexistent roots or Windows drive letters), and emits `WARN` `"output_not_writable"` when no existing ancestor exists or `not os.access(probe, os.W_OK)`. Tests in `tests/test_report_checks_bugs.py` cover SGE compute, PBS compute, SGE login, PBS login, relative paths under a read-only CWD, and nonexistent roots.
   - Execution state: pending
 
 ### Task group 2: Meta snapshot depth and report rendering fixes
 
-- [ ] E-03 Fix `report.meta_snapshot.generate_meta_snapshot` to translate `depth` (`basic`/`standard`/`deep`) into active capture configuration keys instead of deprecated `core.profile`.
+- [ ] E-03 Fix `src/pubrun/report/meta_snapshot.py::generate_meta_snapshot` to map `depth` (`"basic"`, `"standard"`, `"deep"`) onto active `capture.*` configuration keys instead of deprecated `core.profile`, and fix null `cpu.model` formatting in its hardware summary, adding `BUG-17` and `BUG-64a` (`meta_snapshot`) regression tests in `tests/test_report_checks_bugs.py`.
   - Depends on: none
-  - Expected outcome: Passing `--basic`, `--standard`, or `--deep` to `generate_meta_snapshot` produces visibly distinct capture depth configuration for hardware/git/environment/packages collectors instead of acting as a no-op.
+  - Expected outcome: `generate_meta_snapshot` validates `depth` against `("basic", "standard", "deep")` (raising `ValueError` for invalid values), removes `"core": {"profile": depth}`, and resolves distinct active `capture.*` overrides for each depth: `"basic"` sets `hardware: {"depth": "basic", "capture_gpu_clock_speed": False}`, `git: {"enabled": True, "depth": "basic", "check_dirty": False}`, `environment: {"mode": "off", "depth": "off"}`, `packages: {"mode": "off", "depth": "off"}`, `host: {"enabled": True, "depth": "basic"}`, `python: {"depth": "basic"}`; `"standard"` sets `hardware: {"depth": "standard", "capture_gpu_clock_speed": False}`, `git: {"enabled": True, "depth": "standard", "check_dirty": True}`, `environment: {"mode": "filtered", "depth": "standard"}`, `packages: {"mode": "top-level-installed", "depth": "standard"}`, `host: {"enabled": True, "depth": "standard"}`, `python: {"depth": "standard"}`; `"deep"` sets `hardware: {"depth": "deep", "capture_gpu_clock_speed": True}`, `git: {"enabled": True, "depth": "deep", "check_dirty": True}`, `environment: {"mode": "filtered", "depth": "deep"}` (never `"full"`, preserving secret redaction), `packages: {"mode": "full-environment", "depth": "deep"}`, `host: {"enabled": True, "depth": "deep"}`, `python: {"depth": "deep"}`. Intentionally `"suppressed"` sections log with `_out.info` rather than `_out.warn` (while `"failed"`, `"timeout"`, `"partial"`, and `"unavailable"` remain `_out.warn`). The hardware summary lambda uses `(d.get("cpu", {}) or {}).get("model") or "unknown"` so ARM64 `cpu.model = None` renders `"unknown"` instead of `"None"`. Tests in `tests/test_report_checks_bugs.py` verify all three depths, invalid depth rejection, secret-redaction preservation at `"deep"`, and `cpu.model = None` formatting.
   - Execution state: pending
 
-- [ ] E-04 Fix `report.diagnostics.print_resources_report`, `report.methods` / `report.diagnostics` null CPU formatting, and `report.utils.hydrate_manifest`.
+- [ ] E-04 Fix `src/pubrun/report/diagnostics.py::print_resources_report`, add `"host"` to `src/pubrun/report/utils.py::HYDRABLE_SECTIONS`, update `tests/test_reproducibility_assessment.py` for the expanded `direct_sections` set, and add `BUG-49`, `BUG-64a` (`methods`/`diagnostics` regression pins), and `BUG-65` regression tests in `tests/test_report_checks_bugs.py`.
   - Depends on: none
-  - Expected outcome: `print_resources_report` labels main-process `rss` data accurately (and only prints `(process tree)` when displaying tree-scoped RSS data); `methods.py` and `diagnostics.py` omit or replace `None` gracefully when ARM64 `cpu.model` is `null` instead of rendering literal `"None"`; `hydrate_manifest` hydrates `"host"` from meta snapshots alongside other environment sections.
+  - Expected outcome: `print_resources_report` selects `series["tree_rss"]` (filtered in lockstep with `timestamps` under `--last` and used in both chart and single-sample output) and titles the chart `"Memory (RSS) History (process tree)"` only when `manifest.get("resources", {}).get("scope") == "tree"` and `series["tree_rss"]` is non-empty with length equal to `series["timestamps"]`; otherwise it plots `series["rss"]` with title `"Memory (RSS) History (main process)"`. `src/pubrun/report/utils.py::HYDRABLE_SECTIONS` includes `"host"` (and the `hydrate_manifest` docstring lists `host`), so missing or suppressed `"host"` sections hydrate from parent `meta.json` with `is_hydrated = True` while directly observed child `"host"` sections remain untouched and keep `_compare_parent_child_identity` mismatch detection working. `tests/test_reproducibility_assessment.py::TestParentHydrationReport.test_hydration_no_meta_ref_does_not_mutate_input` is updated to include `"host"` in the expected `direct_sections` set. Tests in `tests/test_report_checks_bugs.py` verify `print_resources_report` tree vs main-process labeling, confirm `src/pubrun/report/methods.py::generate_report`, `src/pubrun/report/methods.py::generate_report_multi`, and `src/pubrun/report/diagnostics.py::print_report` never render literal `"None"` when `cpu.model = None`, and verify `"host"` hydration and direct-host preservation.
   - Execution state: pending
 
-### Task group 3: Regression test suite
+### Task group 3: Full-suite regression verification
 
-- [ ] E-05 Add regression tests in `tests/test_report_checks_bugs.py` and verify the full `pytest` suite passes.
+- [ ] E-05 Run targeted report/checks/hydration tests and the full `pytest` suite to confirm all 8 bug fixes pass with zero regressions.
   - Depends on: E-01, E-02, E-03, E-04
-  - Expected outcome: `tests/test_report_checks_bugs.py` verifies all 8 defects above, and `pytest -q` passes with zero regressions.
+  - Expected outcome: `pytest tests/test_report_checks_bugs.py tests/test_reproducibility_assessment.py tests/test_checks_commands.py tests/test_reports.py tests/test_hpc_hydration_e2e.py -v` passes every test, and full `pytest -q` passes with zero failures across the repository.
   - Execution state: pending
 
 ## Project conventions discovered (Step 0)
 
-- `config.resolve_config` intentionally warns and continues on malformed TOML during normal user scripts so instrumentation never breaks a user's workload; therefore `report.checks._install_health_findings` must explicitly validate config TOML syntax itself (or consume recorded config parse notices).
-- Pending IPD Set `timing-acc` touches `report/diagnostics.py`; keep edits strictly scoped to `print_resources_report` and null CPU formatting.
+- `src/pubrun/config.py::resolve_config` intentionally logs a warning and continues on malformed TOML (`_safe_load_toml`) during normal user scripts so instrumentation never breaks a host workload. It loads exactly three TOML paths: `get_global_config_dir() / "config.toml"`, `Path.cwd() / ".config" / "pubrun" / "config.toml"`, and `Path.cwd() / ".pubrun.toml"` (never `pyproject.toml`). Use `pubrun.config.tomllib` for Python 3.8 through 3.14 compatibility.
+- `src/pubrun/report/checks.py` defines only `INFO = "info"` and `WARN = "warn"`, and `src/pubrun/__main__.py::_run_self_check` exits non-zero under `--strict` only when `severity == "warn"`. `import pubrun` must never import `pubrun.report.checks` (pinned by `tests/test_checks_commands.py::test_import_pubrun_does_not_import_checks`).
+- `src/pubrun/__main__.py::_run_self_check` matches `--show-suggestions` lines by exact string equality (`f.get("message") == detail`) and computes the concern count as `sum(1 for c in checks if c.get("status") == "warn")`, so `live_checks()` must emit one check dict per matched finding rather than concatenating finding messages into one string.
+- `src/pubrun/report/methods.py::generate_report`, `src/pubrun/report/methods.py::_cpu_of`, and `src/pubrun/report/diagnostics.py::print_report` already guard `cpu.model = None` (fixed in executed plan `26euz0`, commit `d5f7af0`). The remaining live `report/` null `cpu.model` defect is `src/pubrun/report/meta_snapshot.py::generate_meta_snapshot`; `src/pubrun/tui/widgets/details.py` is outside this plan's scope and owned by sibling plan `8ebjeg` in Set `bugs-audit`.
+- Executed plan `vrr1fv` (Set `timing-acc`) has already completed its `src/pubrun/report/diagnostics.py` changes; no pending plan in Set `bugs-audit` overlaps `ihh27o`'s `Scope-Paths`.
+- Tests must assert observable behavior and outputs, never inspect source code strings.
 
 ## Findings
 
 | Bug ID | Severity | Remediation Risk | Location (symbol) | Defect |
 |---|---|---|---|---|
-| `BUG-16` | High | Low | `report.checks._install_health_findings` | Relies on `resolve_config()`, which swallows `TOMLDecodeError`, so malformed `.pubrun.toml` prints `[ OK  ]` and exits 0 even under `--strict`. |
-| `BUG-17` | High | Low | `report.meta_snapshot.generate_meta_snapshot` | Passes deprecated inert `{"core": {"profile": depth}}`, making `pubrun meta --basic/--standard/--deep` a no-op. |
-| `BUG-46` | Medium | Low | `report.checks._hpc_login_node_findings` | SGE compute nodes match PBS login-node check first, making the SGE branch unreachable. |
-| `BUG-47` | Medium | Low | `report.checks.live_checks` | Drops all filesystem findings after the first in default `pubrun self-check`. |
-| `BUG-48` | Medium | Low | `report.checks._install_health_findings` (writability loop) | Loops infinitely on nonexistent Windows drive root and skips CWD check on relative output paths. |
-| `BUG-49` | Medium | Low | `report.diagnostics.print_resources_report` | Titles main-process `rss` data as `"Memory (RSS) History (process tree)"`. |
-| `BUG-64a` | Low | Low | `report.methods`, `report.diagnostics` | Renders literal `"None"` when ARM64 `cpu.model` is `null`. |
-| `BUG-65` | Low | Low | `report.utils.hydrate_manifest` | Omits `"host"` when hydrating manifests from meta snapshots. |
+| `BUG-16` | High | Low | `src/pubrun/report/checks.py::_install_health_findings` | Relies on `resolve_config()`, which swallows `TOMLDecodeError` in `_safe_load_toml`, so malformed `.pubrun.toml` or `config.toml` prints `[ OK  ]` and exits 0 even under `--strict`. |
+| `BUG-17` | High | Low | `src/pubrun/report/meta_snapshot.py::generate_meta_snapshot` | Passes deprecated inert `{"core": {"profile": depth}}` and hardcodes `packages.mode = "full-environment"`, making `pubrun meta --basic/--standard/--deep` a no-op. |
+| `BUG-46` | Medium | Low | `src/pubrun/report/checks.py::_hpc_login_node_findings` | Checks PBS `qsub` (`PBS_JOBID`) and records `"qsub"` in `seen` before SGE (`JOB_ID`), making the SGE branch unreachable and misclassifying SGE compute nodes as PBS login nodes. |
+| `BUG-47` | Medium | Low | `src/pubrun/report/checks.py::live_checks` | Breaks after the first matching finding per `_CHECK_CATALOG` entry, dropping all filesystem findings after the first in itemized `pubrun self-check` output and undercounting warnings. |
+| `BUG-48` | Medium | Low | `src/pubrun/report/checks.py::_install_health_findings` | Ancestor writability loop spins infinitely when `os.path.dirname(probe) == probe` on nonexistent roots (such as nonexistent Windows drive letters) and skips checking CWD for unanchored nested relative paths. |
+| `BUG-49` | Medium | Low | `src/pubrun/report/diagnostics.py::print_resources_report` | Always plots main-process `series["rss"]`, yet titles the chart `"Memory (RSS) History (process tree)"` whenever `manifest["resources"]["scope"] == "tree"`. |
+| `BUG-64a` | Low | Low | `src/pubrun/report/meta_snapshot.py::generate_meta_snapshot` (verified clean in `methods.py` and `diagnostics.py`) | `meta_snapshot.py` hardware summary uses `.get("model", "unknown")`, which returns `None` and prints literal `"None"` when ARM64 `cpu.model` is `null`; `methods.py` and `diagnostics.py` are already guarded and need regression pins. |
+| `BUG-65` | Low | Low | `src/pubrun/report/utils.py::HYDRABLE_SECTIONS`, `src/pubrun/report/utils.py::hydrate_manifest_with_report` | Omits `"host"` from `HYDRABLE_SECTIONS`, so manifests referencing a parent `meta.json` never hydrate suppressed or missing `"host"` sections. |
 
 ## Proposed changes (ordered, validatable)
 
-1. In `src/pubrun/report/checks.py`: validate discovered TOML files directly in `_install_health_findings` and emit a non-OK finding on `TOMLDecodeError`; return all filesystem findings from `live_checks`; reorder SGE detection ahead of PBS login-node fallback in `_hpc_login_node_findings`; resolve relative `output_dir` via `.resolve()` and guard `parent == current` in the writability walk.
-2. In `src/pubrun/report/meta_snapshot.py`: map `depth` (`basic`/`standard`/`deep`) onto concrete `capture.*` depth/mode overrides recognized by `resolve_config`.
-3. In `src/pubrun/report/diagnostics.py`, `src/pubrun/report/methods.py`, and `src/pubrun/report/utils.py`: fix the RSS header label based on whether tree RSS or main-process RSS is plotted, guard `cpu.model` against `None`, and include `"host"` in `hydrate_manifest`.
-4. Add `tests/test_report_checks_bugs.py`.
+1. In `src/pubrun/report/checks.py`:
+   - In `_install_health_findings`: iterate over existing files in `[get_global_config_dir() / "config.toml", Path.cwd() / ".config" / "pubrun" / "config.toml", Path.cwd() / ".pubrun.toml"]`, parse each via `pubrun.config.tomllib.loads(path.read_text(encoding="utf-8"))`, and emit `_finding(WARN, "config_invalid", ...)` naming the path on `TOMLDecodeError` or `OSError` (keeping the `resolve_config()` `try/except` guard).
+   - In `live_checks`: remove dead `by_prefix`; for each `(name, label, codes)` in `_CHECK_CATALOG`, collect all matching findings and emit one `{"name", "label", "status", "detail"}` record per matched finding (or one `"ok"` record when none match) so every finding and `--show-suggestions` entry renders accurately.
+   - In `_hpc_login_node_findings`: return `[]` immediately if any compute allocation env var (`SLURM_JOB_ID`, `PBS_JOBID`, `LSB_JOBID`, `JOB_ID`, `PE_HOSTFILE`) is set; otherwise check `sbatch` (`"Slurm"`), `bsub` (`"LSF"`), and `qsub` (labeled `"SGE/Grid Engine"` if `SGE_ROOT` or `SGE_O_HOST` without `PBS_ENVIRONMENT`/`PBS_O_HOST`, `"PBS/Torque"` if PBS markers exist, else `"PBS/Torque or SGE"`).
+   - In `_install_health_findings` writability check: anchor non-empty `base` with `os.path.abspath(base)`, stop walking when `next_probe == probe` (setting `probe = ""`), and emit `_finding(WARN, "output_not_writable", ...)` if `not probe or not os.access(probe, os.W_OK)`.
+2. In `src/pubrun/report/meta_snapshot.py`:
+   - Validate `depth in ("basic", "standard", "deep")` (else raise `ValueError`), remove `"core": {"profile": depth}`, and pass the explicit `capture` dict for `"basic"`, `"standard"`, or `"deep"` (keeping `capture.environment.mode = "filtered"` at `"standard"` and `"deep"` so secrets stay redacted).
+   - In `_gather`: log `state == "suppressed"` with `_out.info` instead of `_out.warn` (keep `_out.warn` for other non-complete states).
+   - Fix the hardware summary lambda to `(d.get("cpu", {}) or {}).get("model") or "unknown"`.
+3. In `src/pubrun/report/diagnostics.py`, `src/pubrun/report/utils.py`, and `tests/test_reproducibility_assessment.py`:
+   - In `diagnostics.py::print_resources_report`: select `tree_rss` only when `_scope == "tree"` and `len(series["tree_rss"]) == len(series["timestamps"])` (non-empty), filter it in lockstep with `timestamps` under `--last`, use it consistently in single-sample and chart rendering, and set the title to `"Memory (RSS) History (process tree)"` iff `tree_rss` is plotted (otherwise `"Memory (RSS) History (main process)"`).
+   - In `utils.py`: add `"host"` to `HYDRABLE_SECTIONS` and update the `hydrate_manifest` docstring.
+   - In `tests/test_reproducibility_assessment.py`: add `"host"` to the expected `direct_sections` set in `TestParentHydrationReport.test_hydration_no_meta_ref_does_not_mutate_input`.
+4. Add `tests/test_report_checks_bugs.py` co-located with `E-01` through `E-04`, and run the targeted tests plus full `pytest -q` in `E-05`.
 
 ## Deferred / out of scope (with reason)
 
@@ -94,17 +132,17 @@ None.
 
 ## Scope check
 
-- Over-scope: none.
-- Under-scope: none.
+- Over-scope: none. Removed already-fixed `src/pubrun/report/methods.py` from production edits; only the 4 affected report modules and 2 test files in `Scope-Paths` are modified, remaining completely disjoint from all other child plans in Set `bugs-audit`.
+- Under-scope: none. Every bug across all 8 findings has a concrete fix, existing-test alignment (`tests/test_reproducibility_assessment.py`), and observable regression tests.
 
 ## Required tests / validation
 
-- Run `pytest tests/test_report_checks_bugs.py -v` and paste actual output.
-- Run full `pytest -q` and paste actual output confirming zero regressions.
+- Run `pytest tests/test_report_checks_bugs.py tests/test_reproducibility_assessment.py tests/test_checks_commands.py tests/test_reports.py tests/test_hpc_hydration_e2e.py -v` and paste actual output.
+- Run full `pytest -q` and paste actual output confirming zero regressions across the repository.
 
 ## Spec / documentation sync
 
-N/A: fixes diagnostic accuracy and documented `--basic`/`--standard`/`--deep` flags without altering CLI interfaces.
+- No external documentation changes under `docs/` or `README.md` are required: `docs/cli.md`, `docs/functional_spec.md`, `docs/hpc.md`, and `README.md` already document `pubrun self-check --strict` and `pubrun meta [--out PATH] [--basic|--standard|--deep]`, and `docs/manifest.md` already documents `host` as a meta snapshot section. This plan brings runtime behavior into conformance with those documented contracts without changing command-line interface (CLI) flags or manifest schemas.
 
 ## Open questions
 
@@ -115,27 +153,27 @@ None.
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'.
 
 - [ ] V-01 validates E-01
-  - Required evidence: Pasted `pytest tests/test_report_checks_bugs.py -v` output confirming malformed `.pubrun.toml` produces a non-OK finding in `_install_health_findings` and `live_checks` preserves multiple filesystem findings.
+  - Required evidence: Pasted `pytest tests/test_report_checks_bugs.py -v` output confirming malformed `.pubrun.toml` and user/local `config.toml` each produce a `WARN` `"config_invalid"` finding in `_install_health_findings` (making `self-check --strict` exit non-zero) and `live_checks` preserves all simultaneous filesystem findings with exact per-finding `detail` matching `findings`.
   - Observed evidence:
   - Result: pending
 
 - [ ] V-02 validates E-02
-  - Required evidence: Pasted `pytest tests/test_report_checks_bugs.py -v` output confirming SGE compute-node env vars are not misclassified as PBS login node and writability check handles relative paths and non-existent roots without looping.
+  - Required evidence: Pasted `pytest tests/test_report_checks_bugs.py -v` output confirming SGE compute nodes (`qsub` + `JOB_ID` or `PE_HOSTFILE`) and PBS compute nodes (`qsub` + `PBS_JOBID`) emit no login-node nudge, SGE login nodes (`qsub` + `SGE_ROOT`) label `"SGE/Grid Engine"`, and writability check resolves relative paths against CWD and terminates cleanly with `"output_not_writable"` on nonexistent roots without looping.
   - Observed evidence:
   - Result: pending
 
 - [ ] V-03 validates E-03
-  - Required evidence: Pasted `pytest tests/test_report_checks_bugs.py -v` output confirming `generate_meta_snapshot` with `basic`, `standard`, and `deep` configures distinct collector depths.
+  - Required evidence: Pasted `pytest tests/test_report_checks_bugs.py -v` output confirming `generate_meta_snapshot` with `"basic"`, `"standard"`, and `"deep"` passes distinct active `capture.*` overrides (no `core.profile`, `environment.mode == "filtered"` at `"standard"` and `"deep"`), rejects invalid depth with `ValueError`, and prints `"unknown"` (never `"None"`) when `cpu.model` is `None`.
   - Observed evidence:
   - Result: pending
 
 - [ ] V-04 validates E-04
-  - Required evidence: Pasted `pytest tests/test_report_checks_bugs.py -v` output confirming `print_resources_report` RSS title matches scope, `cpu.model = None` does not print `"None"`, and `hydrate_manifest` populates `"host"`.
+  - Required evidence: Pasted `pytest tests/test_report_checks_bugs.py tests/test_reproducibility_assessment.py -v` output confirming `print_resources_report` prints `(process tree)` only when plotting `tree_rss` and `(main process)` when plotting `rss`, `methods.py` and `diagnostics.py` do not print literal `"None"` when `cpu.model` is `None`, `hydrate_manifest` / `hydrate_manifest_with_report` hydrates suppressed/missing `"host"` while preserving direct `"host"`, and `tests/test_reproducibility_assessment.py` passes.
   - Observed evidence:
   - Result: pending
 
 - [ ] V-05 validates E-05
-  - Required evidence: Pasted full `pytest -q` summary confirming `tests/test_report_checks_bugs.py` and the full test suite pass with zero failures.
+  - Required evidence: Pasted output of `pytest tests/test_report_checks_bugs.py tests/test_reproducibility_assessment.py tests/test_checks_commands.py tests/test_reports.py tests/test_hpc_hydration_e2e.py -v` and full `pytest -q` confirming zero failures across the entire test suite.
   - Observed evidence:
   - Result: pending
 
@@ -144,4 +182,11 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 - Size assessment: standard
 - Cohesion rationale: not required
 
-Wait for human approval (`- Status: approved`) before executing. Commit only files listed in `Scope-Paths` via `aw commit ihh27o -- src/pubrun/report/checks.py src/pubrun/report/meta_snapshot.py src/pubrun/report/diagnostics.py src/pubrun/report/methods.py src/pubrun/report/utils.py tests/test_report_checks_bugs.py`, then move this plan to `.aw/records/plans/executed/` through the post-gate lifecycle transition.
+Execution does not begin until a human approves this plan (`- Status: approved`).
+
+### Execution contract
+1. **Resolved open questions:** Do not begin execution while any `- Blocking: yes` open question remains open (`None` currently).
+2. **Scope declaration:** This plan declares edits to `src/pubrun/report/checks.py`, `src/pubrun/report/meta_snapshot.py`, `src/pubrun/report/diagnostics.py`, `src/pubrun/report/utils.py`, `tests/test_reproducibility_assessment.py`, and `tests/test_report_checks_bugs.py`. If execution requires editing an additional file, make the edit and justify it with `--scope-reason` at finalize; if a declared file needs no edit, acknowledge it with `--scope-ack`. Stop and report only on a genuinely unsafe condition (such as an unresolvable concurrent-edit conflict or an unexpected missing symbol).
+3. **Honesty rule (HARD MUST):** Every claim that tests or checks pass MUST include the actual pasted runner output in the corresponding `V-*` `Observed evidence:` field and execution report. Never claim passing results from memory or partial runs.
+4. **Path-scoped commit and never-push:** Commit only files you modified for this plan through `aw commit ihh27o -- src/pubrun/report/checks.py src/pubrun/report/meta_snapshot.py src/pubrun/report/diagnostics.py src/pubrun/report/utils.py tests/test_reproducibility_assessment.py tests/test_report_checks_bugs.py` (plus any justified out-of-scope file, if applicable). Never run `git add -A`, `git commit -a`, or `git push`.
+5. **Lifecycle transition (post-gate):** Once all `E-*` items are `performed` and all `V-*` items are `pass` with pasted evidence, this plan must reach `.aw/records/plans/executed/` through `aw ipd finalize ihh27o` (never a hand-rolled `git mv`). When executed inside a managed runner lane (`aw oc run` / `aw agy run`), the runner owns `aw ipd finalize ihh27o` after lane integration; when executed standalone outside a runner, the executor runs `aw ipd finalize ihh27o` directly.
