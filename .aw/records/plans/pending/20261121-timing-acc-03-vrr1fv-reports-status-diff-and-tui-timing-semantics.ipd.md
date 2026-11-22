@@ -173,6 +173,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Carrier-Evidence: .aw/records/plans/executed/20261121-timing-acc-01-e1fwy2-manifest-timing-schema-and-tracker-monotonic-lifecycle.ipd.md
 - Phase, `SubprocessSpy`, explicit subprocess wrapper, and `ResourceWatcher` timing mechanics in `src/pubrun/core.py`, `src/pubrun/capture/subprocesses.py`, and `src/pubrun/capture/resources.py` are implemented in prerequisite child plan `8co0wy` (monotonic phase, subprocess, and resource timing).
   - Carrier: 8co0wy
+  - Carrier-Evidence: .aw/records/plans/executed/20261121-timing-acc-02-8co0wy-monotonic-phase-subprocess-and-resource-timing.ipd.md
 - Documentation, examples, benchmarking, and whole-Set verification are implemented in downstream child plan `3tvesf` (timing docs, examples, benchmark, and whole-Set verification).
   - Carrier: 3tvesf
 - `src/pubrun/report/methods.py` and `src/pubrun/report/templates.py` are not modified because they do not emit run duration claims; `E-05` of this plan (`vrr1fv`) verifies via behavioral tests that both functions read legacy and new manifests cleanly and do not overstate timing precision.
