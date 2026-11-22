@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/status.py`, dedicated regression tests in `tests/test_status_bugs.py`, and additive age-filter documentation sync in `docs/cli.md` and `docs/functional_spec.md`.
 - Scope-Paths: src/pubrun/status.py, tests/test_status_bugs.py, docs/cli.md, docs/functional_spec.md
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix Blocker data-loss bugs in clean_runs and filter_runs plus crashed-run closeout and display defects
@@ -18,12 +18,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: njn1up
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): aw oc run self-finalize: njn1up verified (set bugs-audit, attempt 1).
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-22 to-review (Antigravity): authored fix steps, citations, and falsifiable validation criteria.
