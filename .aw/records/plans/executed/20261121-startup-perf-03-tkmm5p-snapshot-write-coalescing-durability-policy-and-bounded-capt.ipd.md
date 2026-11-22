@@ -5,8 +5,9 @@
 - Concern: Eliminating redundant `config.resolved.json` rewrites, coalescing startup and hardware-refresh snapshots safely, separating explicit durability policy from atomic visibility, and bounding total Git and hardware capture work.
 - Scope: Add explicit durability policy and total capture budget settings in `src/pubrun/resources/default.toml`, implement config-change tracking, snapshot coalescing, and durability modes in `src/pubrun/writer.py` and `src/pubrun/tracker.py`, bound total capture time and combine `rev-parse` calls in `src/pubrun/capture/git.py` and `src/pubrun/capture/hardware.py`, and add comprehensive behavioral tests.
 - Scope-Paths: src/pubrun/resources/default.toml, src/pubrun/writer.py, src/pubrun/tracker.py, src/pubrun/capture/git.py, src/pubrun/capture/hardware.py, tests/test_writer.py, tests/test_capture_engines.py, tests/test_startup_overhead_writes.py
+- Scope-Exceeded: tests/test_timing_accuracy.py (Update three pre-tkmm5p tests from sibling e1fwy2 that assumed unconditional config.resolved.json rewrites at finalization or 1-arg write_startup_manifest spy, preserving every timing assertion)
 - Item-Dependencies: executed:fthyv5
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Eliminate redundant config snapshot writes, coalesce hardware refresh writes, add explicit durability policy, and bound total git and hardware capture work
@@ -18,12 +19,12 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: tkmm5p
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: tkmm5p verified (set startup-perf, attempt 1). [Scope reconciliation - out-of-scope tests/test_timing_accuracy.py: Update three pre-tkmm5p tests from sibling e1fwy2 that assumed unconditional config.resolved.json rewrites at finalization or 1-arg write_startup_manifest spy, preserving every timing assertion]
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007, PR-008
 - 2026-11-22 draft (agent): created.
