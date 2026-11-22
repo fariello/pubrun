@@ -52,6 +52,24 @@ def _config_subschema(schema):
     return sub
 
 
+def _timing_subschema(schema):
+    """Extract a standalone schema for the `timing` section from $defs."""
+    defs = schema.get("$defs", schema.get("definitions", {}))
+    assert "timing" in defs, "timing missing from schema $defs"
+    sub = dict(defs["timing"])
+    sub["$defs"] = defs  # keep $ref targets (utc_datetime, capture_state) resolvable
+    return sub
+
+
+def _subprocess_record_subschema(schema):
+    """Extract a standalone schema for `$defs.subprocess_record`."""
+    defs = schema.get("$defs", schema.get("definitions", {}))
+    assert "subprocess_record" in defs, "subprocess_record missing from schema $defs"
+    sub = dict(defs["subprocess_record"])
+    sub["$defs"] = defs
+    return sub
+
+
 def test_config_section_conforms_including_notices(tmp_path):
     """The `config` manifest section (incl. the new `notices` field) must validate.
 
@@ -301,3 +319,144 @@ def test_legacy_data_files_manifest_without_mixed_or_hashing_summary_conforms():
         ],
     }
     jsonschema.validate(manifest, _schema())
+
+
+def test_finalized_manifest_timing_fields_conform_to_schema(tmp_path):
+    """A finalized run emits monotonic timing interval fields and validates end-to-end."""
+    manifest = _make_manifest(tmp_path)
+    jsonschema.validate(manifest, _schema())
+
+    timing = manifest["timing"]
+    assert timing["duration_clock"] == "monotonic"
+    assert timing["elapsed_basis"] == "workload"
+    assert timing["interval_scope"] == "tracked_interval"
+    assert timing["capture_state"] == {"status": "complete"}
+    assert isinstance(timing["workload_started_at_utc"], float)
+    assert isinstance(timing["finalized_at_utc"], float)
+    assert timing["elapsed_seconds"] == timing["workload_seconds"]
+    for key in (
+        "elapsed_seconds",
+        "workload_seconds",
+        "startup_overhead_seconds",
+        "finalization_overhead_seconds",
+        "session_seconds",
+    ):
+        assert isinstance(timing[key], float)
+        assert timing[key] >= 0.0
+
+
+def test_legacy_v1_timing_manifest_without_new_fields_conforms():
+    """Legacy v1.0 manifests carrying only started_at_utc, ended_at_utc,
+    elapsed_seconds, and capture_state remain valid under schemas/manifest.schema.json."""
+    fixture = _SCHEMA_PATH.parent.parent / "tests" / "fixtures" / "sample_manifest.json"
+    manifest = json.loads(fixture.read_text(encoding="utf-8"))
+    manifest["timing"] = {
+        "started_at_utc": 1715280000.0,
+        "ended_at_utc": 1715280045.5,
+        "elapsed_seconds": 45.5,
+        "capture_state": {"status": "complete"},
+    }
+    jsonschema.validate(manifest, _schema())
+
+
+def test_ghost_run_timing_subschema_conforms(tmp_path, monkeypatch):
+    """Ghost-mode runs (unwritable run_dir or engine init crash) emit a timing
+    section that conforms to `$defs.timing`."""
+    import pubrun.tracker as tracker_mod
+    from pubrun.tracker import Run
+
+    schema = _schema()
+    timing_schema = _timing_subschema(schema)
+
+    # Engine init failure ghost run
+    monkeypatch.setattr(
+        tracker_mod,
+        "get_invocation",
+        lambda cfg: (_ for _ in ()).throw(RuntimeError("simulated init failure")),
+    )
+    ghost_engine = Run()
+    timing_engine = ghost_engine.to_manifest_dict()["timing"]
+    assert timing_engine["capture_state"] == {
+        "status": "partial",
+        "detail": "ghost mode: startup did not complete",
+    }
+    assert timing_engine["elapsed_seconds"] is None
+    assert timing_engine["workload_seconds"] is None
+    assert timing_engine["duration_clock"] is None
+    assert timing_engine["elapsed_basis"] is None
+    jsonschema.validate(timing_engine, timing_schema)
+    ghost_engine.stop()
+
+    # Unwritable run_dir ghost run
+    monkeypatch.undo()
+    monkeypatch.setattr(
+        Path,
+        "mkdir",
+        lambda self, *a, **kw: (_ for _ in ()).throw(PermissionError("read-only")),
+    )
+    ghost_fs = Run()
+    timing_fs = ghost_fs.to_manifest_dict()["timing"]
+    jsonschema.validate(timing_fs, timing_schema)
+    ghost_fs.stop()
+
+
+def test_timing_and_subprocess_schema_constraints():
+    """Additive timing and subprocess_record fields validate valid values and reject
+    negative durations or unknown enum strings."""
+    schema = _schema()
+    timing_schema = _timing_subschema(schema)
+    subproc_schema = _subprocess_record_subschema(schema)
+
+    # Valid enriched subprocess_record (used by child 8co0wy)
+    jsonschema.validate(
+        {
+            "argv": ["python3", "-c", "print(1)"],
+            "started_at_utc": 1715280000.0,
+            "ended_at_utc": 1715280001.25,
+            "exit_code": 0,
+            "elapsed_seconds": 1.25,
+            "duration_clock": "monotonic",
+            "pid": 12345,
+            "error": None,
+            "capture_state": {"status": "complete"},
+        },
+        subproc_schema,
+    )
+    # Valid legacy subprocess_record without new fields
+    jsonschema.validate(
+        {
+            "argv": ["echo", "ok"],
+            "capture_state": {"status": "complete"},
+        },
+        subproc_schema,
+    )
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(
+            {
+                "started_at_utc": 1715280000.0,
+                "workload_seconds": -0.1,
+                "capture_state": {"status": "complete"},
+            },
+            timing_schema,
+        )
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(
+            {
+                "started_at_utc": 1715280000.0,
+                "duration_clock": "bogus_clock",
+                "capture_state": {"status": "complete"},
+            },
+            timing_schema,
+        )
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(
+            {
+                "argv": ["echo", "bad"],
+                "elapsed_seconds": -1.0,
+                "capture_state": {"status": "complete"},
+            },
+            subproc_schema,
+        )

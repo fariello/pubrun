@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 import uuid
 import atexit
 from pathlib import Path
@@ -42,6 +43,7 @@ class ArtifactWriter:
         """Bind this writer to the given Run instance."""
         self.run = run_instance
         self._registered = False
+        self._artifacts_written = False
 
     def register_atexit(self) -> None:
         """Register ``write_artifacts`` as a Python atexit handler (once only)."""
@@ -50,12 +52,17 @@ class ArtifactWriter:
             self._registered = True
 
     def write_artifacts(self) -> None:
-        """Write manifest.json, config.resolved.json, and methods report to disk.
+        """Write config.resolved.json, manifest.json, and methods report to disk.
 
         Uses atomic writes (temp file + os.replace) to prevent partial files.
         Catches all exceptions — pubrun must never crash the host script.
         """
         try:
+            if self._artifacts_written and getattr(self.run, "_finalized", False):
+                return
+
+            write_start_mono = time.perf_counter()
+
             # Finalize has already been called by stop() — the _finalized guard
             # makes this safe even if atexit triggers write_artifacts directly.
             self.run._finalize_state()
@@ -63,21 +70,25 @@ class ArtifactWriter:
             out_dir: Path = self.run.run_dir
             out_dir.mkdir(parents=True, exist_ok=True)
 
-            # Build manifest once, reuse for both manifest.json and methods report.
-            manifest_data = self.run.to_manifest_dict()
-
-            # 2. Write manifest.json (atomically)
-            manifest_path = out_dir / "manifest.json"
-            _atomic_json_write(manifest_path, manifest_data)
-
-            # 3. Write config.resolved.json (atomically)
+            # 1. Write config.resolved.json atomically before manifest.json so
+            #    its write latency is captured in pre-manifest finalization overhead.
             config_path = out_dir / "config.resolved.json"
             _atomic_json_write(config_path, self.run.config)
+
+            # 2. Refresh t3 right before freezing finalized timing in manifest.json.
+            if hasattr(self.run, "_mark_finalization_end"):
+                self.run._mark_finalization_end()
+
+            # 3. Build manifest once (freezes finalized timing) and write atomically.
+            manifest_data = self.run.to_manifest_dict()
+            manifest_path = out_dir / "manifest.json"
+            _atomic_json_write(manifest_path, manifest_data)
+            self._artifacts_written = True
 
             # 4. Write methods.md or methods.tex (Automated publication generation)
             try:
                 from pubrun.report.methods import generate_report
-                
+
                 methods_format = self.run.config.get("methods", {}).get("format", "markdown")
                 ext = "tex" if methods_format == "latex" else "md"
                 methods_path = out_dir / f"methods.{ext}"
@@ -85,6 +96,8 @@ class ArtifactWriter:
                     f.write(generate_report(manifest_data, methods_format))
             except Exception as report_err:
                 logger.debug(f"Methods generation failed: {report_err}")
+
+            self.run.writer_overhead_seconds = max(0.0, time.perf_counter() - write_start_mono)
 
         except Exception as e:
             # The golden rule: pubrun never crashes the host script.

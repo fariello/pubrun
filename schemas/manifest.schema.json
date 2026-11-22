@@ -407,7 +407,27 @@
                 "started_at_utc": {
                     "$ref": "#/$defs/utc_datetime"
                 },
+                "workload_started_at_utc": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/utc_datetime"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
                 "ended_at_utc": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/utc_datetime"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "finalized_at_utc": {
                     "anyOf": [
                         {
                             "$ref": "#/$defs/utc_datetime"
@@ -423,6 +443,83 @@
                         "null"
                     ],
                     "minimum": 0
+                },
+                "workload_seconds": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "startup_overhead_seconds": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "finalization_overhead_seconds": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "session_seconds": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "hardware_wait_seconds": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "background_hardware_seconds": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "duration_clock": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "monotonic",
+                        "wall_clock",
+                        "wall_clock_estimated",
+                        null
+                    ]
+                },
+                "elapsed_basis": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "workload",
+                        "session",
+                        "wall_clock_legacy",
+                        "crashed_estimate",
+                        null
+                    ]
+                },
+                "interval_scope": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "tracked_interval",
+                        null
+                    ]
                 },
                 "cpu_time_seconds": {
                     "type": [
@@ -1645,6 +1742,37 @@
                 "exit_code": {
                     "type": [
                         "integer",
+                        "null"
+                    ]
+                },
+                "elapsed_seconds": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "duration_clock": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "monotonic",
+                        "wall_clock",
+                        null
+                    ]
+                },
+                "pid": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "error": {
+                    "type": [
+                        "string",
                         "null"
                     ]
                 },

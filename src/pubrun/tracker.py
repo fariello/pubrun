@@ -51,6 +51,25 @@ class Run:
         """
         global _active_run
 
+        # Timing anchors and interval state.
+        # UTC epoch floats (time.time()) establish absolute chronology, while
+        # private monotonic counter readings (time.perf_counter()) measure
+        # nonnegative intervals immune to wall-clock jumps. Monotonic anchors
+        # remain in memory only and are never serialized to manifest.json.
+        self.started_at_utc: float = time.time()
+        self._start_mono: float = time.perf_counter()
+        self.workload_started_at_utc: Optional[float] = None
+        self._workload_start_mono: Optional[float] = None
+        self.ended_at_utc: Optional[float] = None
+        self._workload_end_mono: Optional[float] = None
+        self.finalized_at_utc: Optional[float] = None
+        self._finalize_end_mono: Optional[float] = None
+        self._hardware_wait_seconds: Optional[float] = None
+        self._background_hardware_seconds: Optional[float] = None
+        self.writer_overhead_seconds: Optional[float] = None
+        self._manifest_timing_frozen: bool = False
+        self._frozen_timing_dict: Optional[Dict[str, Any]] = None
+
         try:
             self.config = resolve_config(overrides)
         except Exception as config_err:
@@ -80,16 +99,6 @@ class Run:
         import re
         self.script_name = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", raw_script)
 
-
-        # Timing state -- stored as POSIX epoch floats (time.time()), not ISO 8601
-        # strings. This is a deliberate design choice:
-        #   - Sub-second / microsecond precision via IEEE 754.
-        #   - Timezone-agnostic: no locale-dependent formatting or parsing.
-        #   - Trivial arithmetic: elapsed = ended_at - started_at.
-        #   - Natively produced by time.time(), os.stat().st_mtime, etc.
-        #   - Compact and deterministic (no string formatting jitter).
-        self.started_at_utc = time.time()
-        self.ended_at_utc: Optional[float] = None
         self.is_active = True
 
         # Establish the unique run directory name
@@ -209,6 +218,10 @@ class Run:
         if self.writer:
             self.writer.write_startup_manifest()
 
+        # Anchor t1: synchronous startup complete; observed tracked workload begins.
+        self._workload_start_mono = time.perf_counter()
+        self.workload_started_at_utc = time.time()
+
         # Update global reference
         _active_run = self
 
@@ -308,28 +321,32 @@ class Run:
         self._hardware_future_done = _threading.Event()
 
         def _collect_hardware():
+            hw_start = time.perf_counter()
             try:
-                self.hardware_data = get_hardware(self.config)
-                self.host_data = get_host(self.config)
-            except Exception:
-                self.hardware_data = {"capture_state": {"status": "failed"}}
-                self.host_data = {"capture_state": {"status": "failed"}}
-            # Filesystem classification of run-relevant paths. Wrapped separately so a
-            # failure here cannot mask hardware/host capture. NON-BLOCKING by design
-            # (parses /proc/mounts; never statvfs/df/stat on the target) so it cannot
-            # hang on a sick NFS/Lustre mount — the very thing it detects.
-            try:
-                from pubrun.capture.filesystem import get_filesystem
-                import tempfile as _tf
-                paths = {
-                    "output_dir": str(getattr(self, "output_base_dir", "") or ""),
-                    "run_dir": str(getattr(self, "run_dir", "") or ""),
-                    "tmpdir": _tf.gettempdir(),
-                }
-                self.filesystem_data = get_filesystem(self.config, {k: v for k, v in paths.items() if v})
-            except Exception as e:
-                self.filesystem_data = {"capture_state": {"status": "failed", "detail": str(e)}}
-            self._hardware_future_done.set()
+                try:
+                    self.hardware_data = get_hardware(self.config)
+                    self.host_data = get_host(self.config)
+                except Exception:
+                    self.hardware_data = {"capture_state": {"status": "failed"}}
+                    self.host_data = {"capture_state": {"status": "failed"}}
+                # Filesystem classification of run-relevant paths. Wrapped separately so a
+                # failure here cannot mask hardware/host capture. NON-BLOCKING by design
+                # (parses /proc/mounts; never statvfs/df/stat on the target) so it cannot
+                # hang on a sick NFS/Lustre mount — the very thing it detects.
+                try:
+                    from pubrun.capture.filesystem import get_filesystem
+                    import tempfile as _tf
+                    paths = {
+                        "output_dir": str(getattr(self, "output_base_dir", "") or ""),
+                        "run_dir": str(getattr(self, "run_dir", "") or ""),
+                        "tmpdir": _tf.gettempdir(),
+                    }
+                    self.filesystem_data = get_filesystem(self.config, {k: v for k, v in paths.items() if v})
+                except Exception as e:
+                    self.filesystem_data = {"capture_state": {"status": "failed", "detail": str(e)}}
+            finally:
+                self._background_hardware_seconds = max(0.0, time.perf_counter() - hw_start)
+                self._hardware_future_done.set()
             # BUG-06: Re-write startup manifest so on-disk state includes
             # hardware data even if the process is killed before stop().
             #
@@ -514,24 +531,26 @@ class Run:
         If ``sys.exc_info()`` indicates an active exception, outcome is set
         to ``"failed"``.
         """
-        # Set the finalized latch under the run lock so it is mutually exclusive with
-        # the async hardware-thread startup re-write (which also takes _run_lock and
-        # skips when _finalized). This closes the TOCTOU window where that thread could
-        # overwrite the final manifest with a non-finalized one (IPD 20260721-1425-01).
+        # Set the finalized latch and capture workload-end anchor t2 under _run_lock
+        # before waiting on deferred hardware collection so teardown latency never
+        # inflates workload_seconds and the async hardware thread cannot overwrite
+        # a finalized manifest (IPD 20260721-1425-01).
         from pubrun import _run_lock
         with _run_lock:
             if self._finalized:
                 return
             self._finalized = True
+            if self.is_active:
+                self._workload_end_mono = time.perf_counter()
+                self.ended_at_utc = time.time()
+                self.is_active = False
 
         # Wait for deferred hardware collection to complete (PERF-02).
         # Cap at 2s to avoid blocking exit on a stuck nvidia-smi.
         if hasattr(self, "_hardware_future_done"):
+            hw_wait_start = time.perf_counter()
             self._hardware_future_done.wait(timeout=2.0)
-
-        if self.is_active:
-            self.ended_at_utc = time.time()
-            self.is_active = False
+            self._hardware_wait_seconds = max(0.0, time.perf_counter() - hw_wait_start)
 
         if self._outcome in ("unknown", "running"):
             # If sys.exc_info() denotes an active crash at exit time, we log failed.
@@ -612,6 +631,90 @@ class Run:
         # Remove the lock file -- this run is no longer active.
         self._remove_lock_file()
 
+        # Stamp initial pre-manifest finalization end anchor t3 so direct callers
+        # of _finalize_state() have complete finalization timing before freezing.
+        self._mark_finalization_end()
+
+    def _mark_finalization_end(self) -> None:
+        """Record or refresh pre-manifest finalization anchor t3 until timing is frozen."""
+        if (
+            self._workload_end_mono is not None
+            and not getattr(self, "_manifest_timing_frozen", False)
+        ):
+            self._finalize_end_mono = time.perf_counter()
+            self.finalized_at_utc = time.time()
+
+    def _build_timing_dict(self) -> Dict[str, Any]:
+        """Compute the manifest timing section from monotonic deltas and UTC anchors."""
+        start_mono = getattr(self, "_start_mono", None)
+        workload_start_mono = getattr(self, "_workload_start_mono", None)
+        workload_end_mono = getattr(self, "_workload_end_mono", None)
+        finalize_end_mono = getattr(self, "_finalize_end_mono", None)
+
+        startup_overhead: Optional[float] = None
+        if start_mono is not None and workload_start_mono is not None:
+            startup_overhead = max(0.0, workload_start_mono - start_mono)
+
+        workload_seconds: Optional[float] = None
+        if workload_start_mono is not None and workload_end_mono is not None:
+            workload_seconds = max(0.0, workload_end_mono - workload_start_mono)
+
+        finalization_overhead: Optional[float] = None
+        if workload_end_mono is not None and finalize_end_mono is not None:
+            finalization_overhead = max(0.0, finalize_end_mono - workload_end_mono)
+
+        session_seconds: Optional[float] = None
+        if start_mono is not None and finalize_end_mono is not None:
+            session_seconds = max(0.0, finalize_end_mono - start_mono)
+
+        is_ghost = (
+            getattr(self, "_outcome", None) == "ghost"
+            or (getattr(self, "_finalized", False) and workload_start_mono is None)
+        )
+
+        if is_ghost:
+            capture_state: Dict[str, Any] = {
+                "status": "partial",
+                "detail": "ghost mode: startup did not complete",
+            }
+            duration_clock: Optional[str] = None
+            elapsed_basis: Optional[str] = None
+            elapsed_seconds: Optional[float] = None
+        elif (
+            getattr(self, "_finalized", False)
+            and start_mono is not None
+            and workload_start_mono is not None
+            and workload_end_mono is not None
+            and finalize_end_mono is not None
+        ):
+            capture_state = {"status": "complete"}
+            duration_clock = "monotonic"
+            elapsed_basis = "workload"
+            elapsed_seconds = workload_seconds
+        else:
+            capture_state = {"status": "partial"}
+            duration_clock = "monotonic"
+            elapsed_basis = "workload"
+            elapsed_seconds = None
+
+        return {
+            "started_at_utc": self.started_at_utc,
+            "workload_started_at_utc": getattr(self, "workload_started_at_utc", None),
+            "ended_at_utc": self.ended_at_utc,
+            "finalized_at_utc": getattr(self, "finalized_at_utc", None),
+            "elapsed_seconds": elapsed_seconds,
+            "workload_seconds": workload_seconds,
+            "startup_overhead_seconds": startup_overhead,
+            "finalization_overhead_seconds": finalization_overhead,
+            "session_seconds": session_seconds,
+            "hardware_wait_seconds": getattr(self, "_hardware_wait_seconds", None),
+            "background_hardware_seconds": getattr(self, "_background_hardware_seconds", None),
+            "duration_clock": duration_clock,
+            "elapsed_basis": elapsed_basis,
+            "interval_scope": "tracked_interval",
+            "capture_state": capture_state,
+        }
+
     def stop(self, outcome: str = "completed") -> None:
         """Stop tracking, finalize engines, and write artifacts.
 
@@ -622,7 +725,7 @@ class Run:
         Decrements the reference count. Artifacts are written only when the
         count reaches zero.
         """
-        if self._outcome not in ("failed", "ghost"):
+        if not getattr(self, "_finalized", False) and self._outcome not in ("failed", "ghost"):
             self._outcome = outcome
 
         from pubrun import _run_lock
@@ -649,11 +752,16 @@ class Run:
 
     def to_manifest_dict(self) -> Dict[str, Any]:
         """Build and return the complete ``manifest.json`` dictionary."""
-        elapsed = None
-        if self.ended_at_utc:
-            elapsed = self.ended_at_utc - self.started_at_utc
+        if getattr(self, "_finalized", False):
+            if self._frozen_timing_dict is None:
+                self._frozen_timing_dict = self._build_timing_dict()
+                self._manifest_timing_frozen = True
+            timing_dict = dict(self._frozen_timing_dict)
+            if isinstance(timing_dict.get("capture_state"), dict):
+                timing_dict["capture_state"] = dict(timing_dict["capture_state"])
+        else:
+            timing_dict = self._build_timing_dict()
 
-            pass # removed local string formatter hook
         # Use saved records (captured before uninstall) if available; fall back to live.
         spy_records = getattr(self, "_saved_subprocess_records", None)
         if spy_records is None:
@@ -700,12 +808,7 @@ class Run:
                 "library_commit": __commit__,
                 "capture_state": {"status": "complete"}
             },
-            "timing": {
-                "started_at_utc": self.started_at_utc,
-                "ended_at_utc": self.ended_at_utc,
-                "elapsed_seconds": elapsed,
-                "capture_state": {"status": "complete"}
-            },
+            "timing": timing_dict,
 
             # Integrated Phase 3 sections
             "invocation": self.invocation_data,
