@@ -5,8 +5,9 @@
 - Concern: Narrowing ghost mode to unusable output, isolating every capture engine into honest partial manifests with bounded redacted error records, rolling back owned hooks transactionally on ghost transition, and executing finalization cleanup steps independently.
 - Scope: Extend `$defs.error_record` additively in `schemas/manifest.schema.json`; refactor `Run` in `src/pubrun/tracker.py`, `ArtifactWriter` in `src/pubrun/writer.py`, `EventStream` in `src/pubrun/events.py`, and ghost/nested guards in `src/pubrun/core.py`; update `tests/test_tracker.py` and `tests/test_manifest_schema.py`; add comprehensive fault-injection and lifecycle tests in `tests/test_capture_isolation.py`.
 - Scope-Paths: schemas/manifest.schema.json, src/pubrun/tracker.py, src/pubrun/writer.py, src/pubrun/events.py, src/pubrun/core.py, tests/test_tracker.py, tests/test_capture_isolation.py, tests/test_manifest_schema.py
+- Scope-Exceeded: tests/conftest.py (Updated autouse fixture clean_active_run to stop leaked unstopped runs and uninstall leaked SubprocessSpy between tests so ownership-guarded SubprocessSpy.install does not fail under parallel xdist wo...); tests/test_timing_accuracy.py (Updated Case 2 of test_partial_startup_ghost_mode_unwritable_dir_and_engine_crash added by sibling plan e1fwy2 after ed0yds was authored to trigger post-bootstrap ghost mode via write_startup_manifest...)
 - Item-Dependencies: executed:p6pon8
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Isolate per-engine capture calls, narrow ghost mode to unusable output, roll back owned hooks on ghost transition, and run finalization steps independently
@@ -19,12 +20,12 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: ed0yds
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: ed0yds verified (set cap-isolation, attempt 1). [Scope reconciliation - out-of-scope tests/conftest.py: Updated autouse fixture clean_active_run to stop leaked unstopped runs and uninstall leaked SubprocessSpy between tests so ownership-guarded SubprocessSpy.install() does not fail under parallel xdist workers (D-04).; out-of-scope tests/test_timing_accuracy.py: Updated Case 2 of test_partial_startup_ghost_mode_unwritable_dir_and_engine_crash (added by sibling plan e1fwy2 after ed0yds was authored) to trigger post-bootstrap ghost mode via write_startup_manifest failure instead of get_invocation crash under narrowed ghost-mode semantics (D-01).]
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007
 - 2026-11-22 draft (agent): created.
