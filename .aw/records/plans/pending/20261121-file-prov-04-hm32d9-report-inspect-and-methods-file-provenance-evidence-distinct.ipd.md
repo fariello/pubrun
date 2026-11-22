@@ -150,8 +150,8 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ## Deferred / out of scope (with reason)
 
-- Reproducibility preflight assessment (`src/pubrun/report/reproducibility.py`): owned by sibling backlog item `q3bll1` (reproducibility gap assessment and rerun preflight, Set `repro-check`, reviewed child plan `0b8i7x`). Our manifest field names (`hash_status`, `evidence_source`, `evidence_strength`) align with `0b8i7x` without modifying files outside this plan's scope.
-  - Carrier: 0b8i7x
+- Reproducibility preflight assessment (`src/pubrun/report/reproducibility.py`): owned by sibling backlog item `q3bll1` (reproducibility gap assessment and rerun preflight, Set `repro-check`, reviewed child plan `0b8i7x` for recorded gap analysis and child plan `tusvtd` for offline preflight comparison). Our manifest field names (`hash_status`, `evidence_source`, `evidence_strength`) align with `0b8i7x` and `tusvtd` without modifying files outside this plan's scope.
+  - Carrier: tusvtd
 - Terminal user interface (TUI) tab redesign for `data_files`: not required by backlog item `x6alw4` (explicit external file registration and hashing guarantees); CLI `inspect`, `show`, and `methods` cover all reporting requirements without adding `textual` coupling.
   - Carrier-Declined: TUI data_files tab redesign is outside backlog item x6alw4 scope; CLI inspect, show, and methods satisfy acceptance criterion 5 without adding textual coupling.
 

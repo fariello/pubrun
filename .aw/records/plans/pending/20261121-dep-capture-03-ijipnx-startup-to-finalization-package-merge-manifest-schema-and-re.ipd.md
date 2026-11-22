@@ -233,6 +233,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Carrier: iflqsl
 - Reproducibility gap analysis and preflight consumption of `unresolved` and `snapshot_stage`: owned by sibling Set `repro-check` (`0b8i7x`, recorded reproducibility gap analysis, and `tusvtd`, offline preflight comparison), which already anticipates optional `unresolved` and startup-only markers defensively.
   - Carrier: 0b8i7x
+  - Carrier-Evidence: .aw/records/plans/executed/20261121-repro-check-01-0b8i7x-shared-reproducibility-evidence-model-and-recorded-gap-analy.ipd.md
 
 ## Scope check
 
