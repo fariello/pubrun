@@ -140,6 +140,55 @@ python3 benchmarks/startup_breakdown.py --workdir /path/to/shared/tmp --durabili
 
 See [Configuration](configuration.md#artifact-durability-policy) for full platform durability limits (Linux `fsync(2)`, macOS `fsync(2)` versus `F_FULLFSYNC`, Windows `FlushFileBuffers`, and shared-filesystem directory sync fallback).
 
+## Capture-isolation startup and hot-path overhead (single-machine local measurements)
+
+The measurements below come from one local machine and are scoped strictly to that environment; they are not cross-machine representative numbers (`## Representative results` above remains a multi-machine placeholder):
+
+- **Machine and runtime:** Operating System (OS) `Linux 6.8.0-149-generic` (`x86_64`), Central Processing Unit (CPU) `Intel(R) Core(TM) i7-6800K CPU @ 3.40GHz` (12 logical cores), Python `3.14.6`.
+- **Storage:** Local `ext4` detected via `pubrun.capture.filesystem.get_filesystem()` (`is_network = false` for both `workdir` and `tmpdir`).
+- **Git revisions:** Pre-`p6pon8` baseline `9703da77e41fb27fd19e8f0b081ac0fccdc0547f` versus post-`26euz0` HEAD `114d243d1e82739172d45a4d842303f7281882c5`.
+- **Workloads and repetitions:**
+  1. Ephemeral Python micro-benchmark run against both revisions (baseline checked out in a temporary detached Git worktree that was removed after measurement), with 1 explicit cold pass plus 25 warm iterations per workload. `SubprocessSpy` micro-benchmarks monkeypatch `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` to no-op stubs before importing `pubrun.capture.subprocesses` so both import-time (pre-`p6pon8`) and install-time (post-`p6pon8`) hooks measure pure Python wrapper overhead without OS fork jitter.
+  2. Local non-publishing harness sweep (`python3 benchmarks/harness.py --passes 2 --iterations 20 --redacted-out <temp_path>`) on `114d243d` (1 uncaptured baseline pass, Pass 1 cold, Pass 2 warm, 20 measured iterations plus 1 discarded warmup per scenario; total wall time `303.579` s; temporary output deleted after reading).
+
+### Micro-benchmark comparison (pre-`p6pon8` `9703da77` vs. post-`26euz0` `114d243d`)
+
+| Workload | Pre-`p6pon8` (`9703da77`) Cold / Warm Median (ms) | Pre-`p6pon8` IQR / Stdev (ms) | Post-`26euz0` (`114d243d`) Cold / Warm Median (ms) | Post-`26euz0` IQR / Stdev (ms) | Warm Median Delta |
+|---|---:|---:|---:|---:|---:|
+| `Run` start/stop (all-off, 1 run) | 46.427 / 47.739 | 8.278 / 6.055 | 31.479 / 34.871 | 3.962 / 4.199 | -12.868 ms (-26.95%) |
+| `Run` start/stop (default, 1 run) | 200.246 / 93.500 | 16.926 / 15.714 | 427.441 / 62.941 | 10.906 / 6.390 | -30.559 ms (-32.68%) |
+| `TqdmSafeTee.write` (plain, 10,000 lines) | 17.712 / 16.839 | 0.791 / 0.779 | 43.011 / 16.313 | 3.636 / 6.095 | -0.526 ms (-3.12%) |
+| `TqdmSafeTee.write` (timestamped, 10,000 lines) | 77.323 / 61.099 | 4.265 / 4.005 | 94.460 / 60.504 | 0.398 / 3.050 | -0.595 ms (-0.97%) |
+| `SubprocessSpy` bypassed (`disable_spy`, 10,000 stub triplets) | 15.654 / 13.944 | 0.310 / 0.849 | 50.934 / 19.150 | 2.940 / 7.896 | +5.206 ms (+37.34%) |
+| `SubprocessSpy` active (recording, 2,000 stub triplets) | 79.770 / 48.003 | 0.666 / 2.193 | 68.957 / 55.973 | 2.105 / 2.403 | +7.969 ms (+16.60%) |
+| `EventStream.emit` (buffered, 10,000 events) | 53.301 / 45.642 | 0.460 / 2.029 | 110.423 / 46.871 | 0.677 / 4.961 | +1.229 ms (+2.69%) |
+
+### Local `benchmarks/harness.py` startup and hot-path summary (`114d243d`, 2 passes x 20 iterations)
+
+| Scenario | Group | Pass 1 Cold Median (ms) | Pass 1 IQR / Stdev (ms) | Pass 2 Warm Median (ms) | Pass 2 IQR / Stdev (ms) |
+|---|---|---:|---:|---:|---:|
+| `baseline-noop` | `startup` | 20.58 | 2.23 / 1.42 | 19.70 | 2.19 / 1.79 |
+| `import-auto` (all-off) | `startup` | 154.76 | 18.16 / 9.89 | 154.71 | 13.11 / 8.85 |
+| `import-noauto` | `startup` | 116.53 | 3.74 / 4.19 | 119.01 | 5.04 / 2.95 |
+| `import-nopatch` | `startup` | 121.71 | 4.43 / 4.92 | 120.60 | 7.90 / 9.73 |
+| `import-noconsole` | `startup` | 121.44 | 13.12 / 8.70 | 124.44 | 5.73 / 4.29 |
+| `import-minimal` | `startup` | 115.90 | 8.59 / 7.14 | 114.16 | 4.08 / 3.85 |
+| `startup-auto-default` | `startup` | 505.22 | 14.41 / 12.26 | 503.69 | 11.79 / 9.86 |
+| `feature-baseline` | `feature` | 227.00 | 8.53 / 6.98 | 223.44 | 6.59 / 7.74 |
+| `feature-none` | `feature` | 358.57 | 19.55 / 12.26 | 347.53 | 11.89 / 8.52 |
+| `feature-subprocesses` | `feature` | 357.64 | 7.36 / 8.90 | 353.44 | 10.10 / 6.05 |
+| `hotpath-open-baseline` | `hotpath` | 49.60 | 4.65 / 2.73 | 46.56 | 6.31 / 3.29 |
+| `hotpath-open-pubrun` | `hotpath` | 158.26 | 8.01 / 7.08 | 163.71 | 8.91 / 6.72 |
+| `hotpath-print-baseline` | `hotpath` | 21.61 | 3.15 / 1.51 | 20.46 | 3.08 / 2.14 |
+| `hotpath-print-tee` | `hotpath` | 218.32 | 11.90 / 8.33 | 212.01 | 10.06 / 10.58 |
+
+Key takeaways from these local measurements:
+
+- **Startup and finalization (`Run` start/stop):** Warm `Run` start/stop latency decreased between `9703da77` and `114d243d` (`-12.87 ms` all-off, `-30.56 ms` default) because sibling optimizations merged in the same window (config-write coalescing, synchronous `hardware.depth = "off"`, and cached package identity resolution) outweighed the per-engine `try/except` isolation guards. The higher cold `Run` default pass (`427.44 ms` versus `200.25 ms`) reflects one-time package-distribution index caching on the first run.
+- **Console tee (`TqdmSafeTee.write`):** Warm medians over 10,000 lines stayed within host jitter (`-0.53 ms` plain, `-0.60 ms` timestamped, about `-0.05` to `-0.06` microseconds per line).
+- **Subprocess spy (`SubprocessSpy`):** Generation-scoped closure checks (`state["active"]`), direct record tagging, and monotonic `time.perf_counter()` duration tracking added `+5.21 ms` across 10,000 bypassed stub triplets (`+0.52` microseconds per triplet, or `+0.17` microseconds per wrapper call) and `+7.97 ms` across 2,000 active stub triplets (`+3.98` microseconds per recorded triplet). Compared with real OS process spawn latency (milliseconds per process), this wrapper delta is negligible; in the full subprocess harness, `feature-subprocesses` measured `+5.91 ms` over `feature-none` on Pass 2 (`353.44 ms` versus `347.53 ms`).
+- **Event stream (`EventStream.emit`):** Re-checking `self._file is None` inside `self._lock` and tracking failure state added `+1.23 ms` across 10,000 buffered events (`+0.12` microseconds per event).
+
 ---
 
 [README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Performance](performance.md) | [Research Use](research-use.md) | [HPC](hpc.md) | [Changelog](../CHANGELOG.md)

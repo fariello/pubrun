@@ -220,12 +220,27 @@ Git repository state.
 
 ## `errors`
 
-Captured errors during the run.
+Captured errors during the run, including isolated capture and cleanup failures.
 
 | Field | Type | Description |
 |---|---|---|
-| `records` | list[object] | Error records. Empty if no errors occurred. |
-| `capture_state` | object | See [Capture State](#capture-state). |
+| `records` | list[object] | Structured error records (see `errors.records[]` below). Empty if no errors occurred. Capped at `MAX_CAPTURE_ERRORS = 50` entries per run. |
+| `capture_state` | object | See [Capture State](#capture-state). Reports `{"status": "complete"}` when all errors fit within the cap, or `{"status": "partial", "detail": "<N> additional capture error(s) omitted"}` when more than 50 capture errors occurred. |
+
+### `errors.records[]`
+
+Each entry conforms to `$defs.error_record` in `schemas/manifest.schema.json`:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | string | Yes | One of `"exception"`, `"warning"`, `"capture-error"`, `"signal"`, or `"other"`. Isolated engine and cleanup failures record `"capture-error"`. |
+| `type` | string \| null | No | Exception class name (for example `"RuntimeError"`), or `null`. |
+| `message` | string \| null | No | Single-line, redacted, length-bounded detail string (at most 240 characters, formatted by `format_safe_error_detail()`). Sensitive values (Uniform Resource Identifier (URI) credentials, `Bearer` tokens, `sk-...` keys, `key=value`, `key: value`, `--flag=value`, and `--flag value` pairs matching the configured secret pattern) are replaced with `[REDACTED]`. Falls back to default secret patterns and then to the exception type name if redaction fails. |
+| `traceback` | string \| null | No | Always `null` for `"capture-error"` records (no traceback dumps are written into manifests). |
+| `section` | string \| null | No | Optional manifest section or subsystem name where the failure occurred (for example `"git"`, `"packages"`, `"console"`, `"subprocesses"`, `"resources"`, `"signals"`, `"events"`, `"hardware"`, `"host"`, `"filesystem"`, or `"writer"`). |
+| `stage` | string \| null | No | Optional lifecycle stage where the failure occurred (`"bootstrap"`, `"runtime"`, `"finalization"`, `"rollback"`, or `"writer"`). |
+
+When an individual capture engine fails, its own manifest section records `capture_state: {"status": "failed", "detail": "<bounded redacted detail>"}` (distinct from `"suppressed"`, which indicates the section was disabled by configuration).
 
 ---
 
@@ -413,7 +428,7 @@ Run-level capture metadata.
 | `console_capture_mode` | string | The effective console mode for this run. |
 | `subprocesses_enabled` | bool | Whether the subprocess spy was installed for this run. Lets tooling distinguish "subprocess tracking was OFF" from "on but no subprocesses ran" (an empty `subprocesses` list is otherwise ambiguous). |
 | `file_provenance_available` | bool | Whether file-open provenance was available (a run was active and `pubrun.open` was importable). Note: file I/O is only *recorded* if the user calls `pubrun.open()` — an empty `data_files` means "not used", not "unavailable". |
-| `capture_state` | object | See [Capture State](#capture-state). |
+| `capture_state` | object | See [Capture State](#capture-state). Reports `{"status": "complete"}` when every enabled section succeeded, or `{"status": "partial", "detail": "capture degraded in: <sorted failed sections>"}` whenever any section failed (covering both escaping exceptions recorded in `errors.records` and self-caught engine returns whose own `capture_state.status` is `"failed"`). |
 
 ---
 
@@ -470,7 +485,9 @@ Every manifest section includes a `capture_state` object indicating the status o
 
 | Field | Type | Description |
 |---|---|---|
-| `status` | string | `"complete"`, `"partial"`, `"unavailable"`, `"suppressed"`, `"failed"`, or `"timeout"`. |
+| `status` | string | `"complete"`, `"partial"`, `"unavailable"`, `"suppressed"`, `"failed"`, `"pending"`, or `"timeout"`. |
+| `detail` | string | Optional single-line diagnostic context. For `"failed"` sections and capture errors, `detail` is bounded to at most 240 characters and redacted via `format_safe_error_detail()`. |
+| `warnings` | list[string] | Optional list of non-fatal warning strings associated with the section. |
 
 - `complete` — Data captured successfully.
 - `partial` — Some data captured, but errors occurred.

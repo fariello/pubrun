@@ -92,15 +92,22 @@ Flat shortcuts: `profile`, `output_dir`, `auto_start`, `meta_ref`. All other ove
 > [!NOTE]
 > If both flat and nested forms are passed for the same key, the flat shortcut wins: `start(core={"profile": "minimal"}, profile="deep")` results in `profile = "deep"`.
 
+**Partial capture versus narrow ghost mode:**
+- If an individual capture engine fails during `start()`, `pubrun` isolates that failure to the affected section (`capture_state.status = "failed"` with a bounded redacted `detail`), appends a `"capture-error"` entry to `errors.records` (up to `MAX_CAPTURE_ERRORS = 50`), sets `capture.capture_state.status = "partial"`, and keeps all other capture active without affecting host execution.
+- Ghost mode (`outcome = "ghost"`, `is_active = False`, `writer = None`) activates only when run output itself is unusable at startup (`run_dir` creation or initial startup manifest write fails, such as on read-only storage). If output fails after hooks were installed, `start()` rolls back every hook, thread, open handle, and lock file owned by that run before returning the ghost `Run` instance.
+- Calling `start(**overrides)` while a ghost run is active increments `ref_count` and returns the ghost run without running `_merge_and_migrate()`. Calling `start(**overrides)` while a healthy run is active merges overrides and respects the active import mode's `patch_subprocesses` permission before installing `SubprocessSpy` mid-run.
+
 ### `pubrun.stop()`
 
 Finalizes the active run: writes the manifest, closes log files, and resets internal state. Safe to call even if no run is active.
+
+`stop()` decrements `ref_count` and finalizes only when `ref_count` reaches zero. Repeated `stop()` calls (and the `atexit` safety net) are idempotent and never rewrite already-finalized artifacts. Every teardown step runs independently so a failure in one cleanup step never skips restoring other hooks, unregistering `atexit`, writing artifacts, or clearing `get_current_run()`. Calling `stop()` on a ghost run preserves `outcome = "ghost"` and clears the active run reference when `ref_count` reaches zero.
 
 The run outcome is determined automatically:
 - `"completed"` — Normal exit, no termination signals received.
 - `"failed"` — An unhandled exception occurred (set by `tracked_run` / `audit_run`).
 - `"interrupted"` — The process received SIGINT, SIGTERM, or SIGHUP during execution (even if user code caught `KeyboardInterrupt`).
-- `"ghost"` — The run entered ghost mode due to filesystem failure at initialization.
+- `"ghost"`: The run entered ghost mode because run output was unusable at startup.
 
 ```python
 pubrun.stop()
@@ -338,6 +345,18 @@ result = pubrun.subprocess.run(["python", "preprocess.py", "--input", "data.csv"
 ### `pubrun.popen(cmd, mode="r", bufsize=-1)`
 
 Drop-in replacement for `os.popen()` with provenance tracking.
+
+### Third-Party Hook Ownership Rules
+
+When global hooks are permitted by the active import mode and enabled in configuration, `pubrun` enforces strict ownership rules so third-party wrappers installed before or after `pubrun.start()` are preserved:
+
+| Global Hook | Install Behavior | Teardown / Rollback Behavior |
+|---|---|---|
+| `sys.stdout` and `sys.stderr` (`ConsoleInterceptor`) | Snapshots live streams at `start()` and wraps them in `TqdmSafeTee`. Rolls back streams and opened log files if setup fails. | Restores each stream only when `sys.stdout` or `sys.stderr` is still `pubrun`'s tee. If a third-party wrapper sits outside `pubrun`, leaves that wrapper intact and detaches `log_file = None` so `pubrun`'s tee becomes a passive passthrough. |
+| `faulthandler` (`ConsoleInterceptor`) | Checks `faulthandler.is_enabled()` before touching it; enables `faulthandler` on `stderr.log` only when previously disabled. | Calls `faulthandler.disable()` (before closing `stderr.log`) only when `pubrun` enabled it. A pre-existing user or test-runner `faulthandler` remains enabled. |
+| OS signal handlers (`SignalExitCapture`) | Records each installed shim and chains to the prior handler. Rolls back registered shims on unexpected install errors. | Restores each signal only when `signal.getsignal(signum)` is still `pubrun`'s shim. Deactivated shims left under a later third-party handler pass signals through passively without recording or calling `_finalize_active_run()`. |
+| `sys.excepthook` (`SignalExitCapture`) | Captures the prior `sys.excepthook` in a local closure and redacts sensitive values in captured exception messages. | Restores `sys.excepthook` only when it is still `pubrun`'s wrapper. If a third-party hook wraps `pubrun`, `pubrun`'s deactivated wrapper forwards passively to the closure-captured prior hook. |
+| `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` (`SubprocessSpy`) | Snapshots live targets at `install()`, chains to pre-existing wrappers, tags spawned processes with install-generation state, and rolls back already-patched targets if a later patch fails. | Verifies caller ownership token when set, marks the generation inactive first, and restores each target independently only when it still matches `pubrun`'s installed wrapper. Any wrapper left beneath a later third-party wrapper passes calls through passively without recording. |
 
 ---
 

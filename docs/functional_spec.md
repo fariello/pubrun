@@ -707,12 +707,15 @@ Each profiled phase produces a pstats-compatible `.prof` file. A `profile_saved`
 
 ## 17. Ghost Mode
 
-If the run directory cannot be created (e.g., read-only filesystem on strict HPC nodes):
+Ghost mode activates strictly when run output is unusable at startup: either `run_dir.mkdir()` fails or the initial `ArtifactWriter.write_startup_manifest()` fails (for example, on a read-only filesystem or unavailable storage). A failure inside an individual capture engine MUST NOT trigger ghost mode; it degrades only that section into a partial manifest.
 
-1. A warning is printed to stderr.
-2. All capture is suppressed — the tracker becomes a silent no-op.
-3. The run outcome is set to `"ghost"`.
-4. The host script continues execution unaffected.
+When startup output fails:
+
+1. If any hooks, background workers, file handles, or `.pubrun.lock` were already created by the failing run, `Run` latches `_finalized = True`, `_hardware_write_closed = True`, and `is_active = False` under `_run_lock`, then calls `_rollback_owned_hooks(stage="rollback")` to tear down only resources owned by this run while leaving pre-existing and later third-party wrappers intact.
+2. `atexit` registration is skipped (or unregistered).
+3. `writer` is cleared to `None`, `is_active` is set to `False`, `status.outcome` is set to `"ghost"`, and `_active_run` is published so nested `start()` calls increment `ref_count` without running `_merge_and_migrate()`.
+4. One bounded, redacted warning is printed to `sys.stderr` (never raw exception tracebacks or sensitive values).
+5. The host script continues execution unaffected. Calling `stop()` on a ghost run preserves `outcome = "ghost"` and clears `_active_run` when `ref_count` reaches zero.
 
 Ghost mode MUST never crash the host script.
 
@@ -751,23 +754,26 @@ The `meta_ref` path MUST end with `.json`. If it resolves outside the manifest's
 
 ### 19.1 Artifact Writer
 
-The `ArtifactWriter` is responsible for serializing the run state to disk.
+The `ArtifactWriter` serializes run state to disk and reports write outcomes without raising into the host script.
 
 Artifacts written:
-1. `manifest.json`: Written atomically via `Run.to_manifest_dict()` at startup, optionally refreshed once when background hardware finishes (if initial startup did not already include completed hardware and the run is still active and unfinalized), and written once at finalization.
-2. `config.resolved.json`: Written atomically at startup with the resolved configuration dictionary. `ArtifactWriter` tracks `(target_path, sha256_digest, durability_rank)` over canonical sorted JSON so unchanged configuration skips redundant rewrites during hardware refreshes and finalization. Mid-run configuration changes or `run_dir` migrations via `Run._merge_and_migrate()` persist updated `config.resolved.json` immediately through `sync_config_if_changed()`.
-3. `methods.md` or `methods.tex`: Auto-generated methodology paragraph written at finalization (failure is non-fatal).
+1. `manifest.json`: Written atomically via `Run.to_manifest_dict()` at startup (`write_startup_manifest()`, returning `True` on success or `False` on failure while recording a bounded redacted `last_error`), optionally refreshed once when background hardware finishes (if initial startup did not already include completed hardware and the run is still active and unfinalized), and written once at finalization (`write_artifacts()`, returning `True` when `manifest.json` wrote atomically or was already written for a finalized run, and `False` on failure).
+2. `config.resolved.json`: Written atomically at startup with the resolved configuration dictionary. `ArtifactWriter` tracks `(target_path, sha256_digest, durability_rank)` over canonical sorted JSON so unchanged configuration skips redundant rewrites during hardware refreshes and finalization. Mid-run configuration changes or `run_dir` migrations via `Run._merge_and_migrate()` persist updated `config.resolved.json` immediately through `sync_config_if_changed()`. At finalization, `config.resolved.json` writes are guarded separately so a config write failure logs at most one bounded redacted warning and never prevents writing `manifest.json`.
+3. `methods.md` or `methods.tex`: Auto-generated methodology paragraph written at finalization. A failure in methods generation is non-fatal and MUST NOT cause `write_artifacts()` to return `False`.
+
+When `write_artifacts()` fails to write `manifest.json`, it records a bounded redacted `last_error` and emits at most one bounded redacted warning (`_write_failure_warned`) without dumping tracebacks or configuration dictionaries. `ArtifactWriter.unregister_atexit()` removes the registered `atexit` callback cleanly during normal `stop()` or ghost rollback.
 
 ### 19.2 Finalization Lifecycle
 
-1. `stop()` sets the outcome, decrements `ref_count`, and calls `_finalize_state()` and `write_artifacts()` when `ref_count` reaches zero.
+1. `stop()` preserves sticky `"failed"` and `"ghost"` outcomes, decrements `ref_count`, and when `ref_count` reaches zero calls `_finalize_state()` and `write_artifacts()` inside `try ... finally:`. The `finally` block always unregisters `atexit` (when a writer exists) and clears `_active_run` if it still points to this run.
 2. `_finalize_state()` is **idempotent** (guarded by `_finalized` under `_run_lock`). It:
-   - Latches `_finalized = True` and records `ended_at_utc`.
-   - Waits up to `2.0`s for background hardware completion before closing hardware writes.
-   - Determines outcome (`completed`, `failed`, or `interrupted`).
-   - Uninstalls the subprocess spy, stops the console interceptor, stops the resource watcher, closes the event stream, refreshes packages, and removes `.pubrun.lock`.
-3. `write_artifacts()` calls `_finalize_state()` before acquiring reentrant `_write_lock` (preserving `_run_lock` before `_write_lock` lock ordering to prevent deadlock with `pubrun-hw`), checks `_artifacts_written` for idempotency, persists or durability-upgrades `config.resolved.json` if needed, writes final `manifest.json` once atomically, sets `_artifacts_written = True`, and writes `methods.{md,tex}`.
-4. The `atexit` handler calls `write_artifacts()` as a safety net (unregistered after normal `stop()`; if invoked after finalization, `_artifacts_written` returns immediately without rewriting finalized artifacts).
+   - Latches `_finalized = True` and records `ended_at_utc` under `_run_lock`.
+   - Runs every pre-teardown step independently in its own `try/except` guard: waiting up to `2.0`s for background hardware completion (then closing `_hardware_write_closed = True` under `_run_lock`), checking `signal_capture.get_records()` for interruption signals (`SIGINT`, `SIGTERM`, `SIGHUP`), and recording the process exit code.
+   - Runs every teardown step independently via `_rollback_owned_hooks(stage="finalization")` so a first or second cleanup failure never blocks remaining steps: (a) `SubprocessSpy.finalize_all()`, record snapshot, and `SubprocessSpy.uninstall(owner=...)` in separate guards; (b) `ConsoleInterceptor.stop()` (marking `console` `"failed"` instead of `"pending"` if teardown raises); (c) `ResourceWatcher.stop()` and `to_manifest_dict()` in separate guards; (d) pending deferred file registrations; (e) `EventStream.close()`; (f) disabling active profilers individually; (g) `SignalExitCapture.get_records()` and `uninstall()` in separate guards; (h) removing `.pubrun.lock`.
+   - Refreshes and merges finalization package snapshots safely without losing startup package data if refresh fails.
+3. `write_artifacts()` calls `_finalize_state()` before acquiring reentrant `_write_lock` (preserving `_run_lock` before `_write_lock` lock ordering to prevent deadlock with `pubrun-hw`), checks `_artifacts_written` for idempotency, persists or durability-upgrades `config.resolved.json` if needed, writes final `manifest.json` once atomically, sets `_artifacts_written = True`, and writes `methods.{md,tex}` non-fatally.
+4. The `atexit` handler calls `write_artifacts()` as a safety net (unregistered after normal `stop()`; if invoked after finalization, `_artifacts_written` returns `True` immediately without rewriting finalized artifacts).
+5. During active execution, if `EventStream.emit()` encounters a disk write or flush error, it closes and detaches `self._file = None` and clears its buffer under `self._lock` (preventing repeated failing writes) and emits at most one bounded redacted warning outside `self._lock` per failure episode.
 
 ### 19.3 Atomic Visibility, Explicit Durability Policy, and Platform Limits
 
@@ -793,10 +799,17 @@ The writer MUST catch all exceptions. pubrun MUST NEVER crash the host script du
 
 The system MUST:
 
-- Never crash the host script due solely to capture failure.
-- Emit a partial manifest if needed.
-- Record capture errors in the `errors` section.
-- Degrade gracefully when optional features are unavailable.
+- Never crash the host script due solely to capture, cleanup, or serialization failure.
+- Isolate every capture engine (`invocation`, `git`, `process`, `python`, `packages`, `environment`, `hardware`, `host`, `filesystem`, `subprocesses`, `console`, `events`, `resources`, and `signals`) inside its own failure guard (`hardware`, `host`, and `filesystem` each isolated separately) so an error in one engine preserves unrelated healthy sections and the host script's normal return value and exit code.
+- Mark each failed section with `capture_state.status = "failed"` and a single-line, redacted, length-bounded `detail` string (`<= 240` characters via `format_safe_error_detail()`, with no tracebacks or leaked secrets).
+- Set `capture.capture_state.status = "partial"` (naming the degraded sections in `detail`) whenever any section failed, covering both escaping exceptions and self-caught failed returns, while keeping `status.outcome` accurate to the host script's execution outcome.
+- Record structured `capture-error` entries (`kind = "capture-error"`, `type`, bounded redacted `message`, `traceback = null`, optional `section`, optional `stage`) in `errors.records` under `_errors_lock`, capped at `MAX_CAPTURE_ERRORS = 50`. When additional errors exceed the cap, set `errors.capture_state.status = "partial"` with the omitted count.
+- Emit bounded runtime warnings without traceback spam: at most one warning per `(section, stage)` in `Run`, at most one per write-failure episode in `EventStream` (outside its lock), and at most one on finalization write failure in `ArtifactWriter`.
+- Enforce transactional installation, prior `faulthandler.is_enabled()` preservation, identity-guarded restoration, and passive passthrough across all process-global hooks (`sys.stdout`/`sys.stderr`, `faulthandler`, signal handlers, `sys.excepthook`, `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `os.system`) so later third-party wrappers are never overwritten.
+- Surface partial manifests honestly in downstream consumers without crashing on `null` or malformed fields:
+  - `pubrun report` (across `basic`, `standard`, `deep`, and `section="env"`/`"packages"` extracts, respecting `NO_COLOR`) renders a bounded `[WARN ]` summary of failed sections and up to 10 `capture-error` records (with overflow and truncation detail) and displays `capture failed` instead of misleading empty counts.
+  - `pubrun inspect` emits `WARN` findings (`{section}_capture_failed`, deduplicated `capture_error_{section}`, and `errors_capture_partial` truncation notices) distinct from `"suppressed"` (`*_off`).
+  - `pubrun methods` (both single-run and multi-run across all manifests in scope) states explicitly when package capture failed or was disabled rather than claiming standard-library-only dependencies, and appends a partial-provenance disclosure (escaping underscores in LaTeX) while leaving healthy complete manifests unchanged.
 
 ---
 

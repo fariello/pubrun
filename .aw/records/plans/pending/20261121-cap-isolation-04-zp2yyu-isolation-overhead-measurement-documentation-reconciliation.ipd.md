@@ -63,32 +63,32 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Local overhead measurement and documentation reconciliation
 
-- [ ] E-01 Measure startup and hot-path (`TqdmSafeTee.write`, `SubprocessSpy` active/bypassed wrapper, `EventStream.emit`, and `Run` start/stop) overhead locally across cold and warm passes and compare against a clean pre-`p6pon8` baseline revision.
+- [x] E-01 Measure startup and hot-path (`TqdmSafeTee.write`, `SubprocessSpy` active/bypassed wrapper, `EventStream.emit`, and `Run` start/stop) overhead locally across cold and warm passes and compare against a clean pre-`p6pon8` baseline revision.
   - Depends on: none
   - Expected outcome: Local benchmark execution (`python3 benchmarks/harness.py --passes 2 --iterations 20 --redacted-out <temp_path>` plus an ephemeral Python micro-benchmark comparing post-`26euz0` HEAD against the pre-`p6pon8` baseline commit in a cleaned-up temporary Git worktree) captures host Operating System (OS), Central Processing Unit (CPU), Python version, detected filesystem type via `pubrun.capture.filesystem.get_filesystem({}, {"workdir": ...})`, baseline and post-change Git commit SHAs, exact workloads, repetition counts (`>= 20` warm iterations plus explicit cold pass), median, Interquartile Range (IQR), and standard deviation. Zero network calls, zero benchmark submission, zero leaked hostnames/home paths, and zero leftover temp files or worktrees remain.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Reconcile `docs/architecture.md` and `docs/functional_spec.md` against the implemented narrow ghost-mode boundary, per-engine capture isolation, transactional hook rollback, independent cleanup, consumer honesty, and bounded warning discipline.
+- [x] E-02 Reconcile `docs/architecture.md` and `docs/functional_spec.md` against the implemented narrow ghost-mode boundary, per-engine capture isolation, transactional hook rollback, independent cleanup, consumer honesty, and bounded warning discipline.
   - Depends on: E-01
   - Expected outcome: `docs/architecture.md` (`## 3. Run Lifecycle`, `## 12. Console Capture Model`, `## 15. Subprocess Model`, `## 18. Failure Model`) and `docs/functional_spec.md` (`## 17. Ghost Mode`, `## 19. Writer and Finalization`, `## 20. Failure Behavior`) accurately describe partial capture versus narrow ghost mode, third-party hook ownership rules (including `faulthandler.is_enabled()` preservation and passive passthrough), independent cleanup, `MAX_CAPTURE_ERRORS = 50` truncation, and honest partial-manifest reporting. Edits preserve any additive sibling-Set documentation already on disk and introduce zero em dashes (`U+2014`) or en dashes (`U+2013`) in added or modified lines.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Reconcile `docs/manifest.md` and `docs/api.md` against the implemented `errors.records` schema, `capture.capture_state` partial status, bounded redacted `detail` rules, and third-party hook ownership guarantees.
+- [x] E-03 Reconcile `docs/manifest.md` and `docs/api.md` against the implemented `errors.records` schema, `capture.capture_state` partial status, bounded redacted `detail` rules, and third-party hook ownership guarantees.
   - Depends on: E-01
   - Expected outcome: `docs/manifest.md` (`## errors`, `## capture`) documents `errors.records` (`kind = "capture-error"`, `type`, bounded redacted `message`, `traceback = null`, optional `section`, optional `stage`), `MAX_CAPTURE_ERRORS = 50` truncation (`errors.capture_state.status = "partial"`), per-section `failed` status, and `capture.capture_state = "partial"` (for both escaping exceptions and self-caught failed returns). `docs/api.md` (`### pubrun.start`, `### pubrun.stop`, `## 8. Provenance-Tracked I/O`) documents narrow ghost mode, `stop()` idempotence, and ownership rules for `sys.stdout`/`sys.stderr`, `faulthandler`, signal handlers, `sys.excepthook`, and `subprocess.Popen`/`os.system`. Edits preserve any additive sibling-Set documentation already on disk and introduce zero em dashes (`U+2014`) or en dashes (`U+2013`) in added or modified lines.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Update `docs/performance.md` with the measured capture-isolation overhead summary from `E-01` (recording environment, Git revisions, workloads, baseline, repetitions, cold/warm distinction, and dispersion, labeled honestly as single-machine measurements).
+- [x] E-04 Update `docs/performance.md` with the measured capture-isolation overhead summary from `E-01` (recording environment, Git revisions, workloads, baseline, repetitions, cold/warm distinction, and dispersion, labeled honestly as single-machine measurements).
   - Depends on: E-01
   - Expected outcome: `docs/performance.md` leaves `## Representative results` untouched as a multi-machine placeholder, preserves any sibling-Set subsections, and adds a dedicated, clearly labeled single-machine subsection recording the measured startup and hot-path isolation delta with complete experimental metadata, zero raw hostnames or local home paths, zero unmeasured performance claims, and zero newly introduced em dashes (`U+2014`) or en dashes (`U+2013`).
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Whole-Set regression, example, and hygiene verification
 
-- [ ] E-05 Run the full repository test suite, example verification script, and local-path sanitizer across the whole `cap-isolation` Set, and record the required multi-OS/Python Continuous Integration (CI) matrix gate.
+- [x] E-05 Run the full repository test suite, example verification script, and local-path sanitizer across the whole `cap-isolation` Set, and record the required multi-OS/Python Continuous Integration (CI) matrix gate.
   - Depends on: E-02, E-03, E-04
   - Expected outcome: `pytest tests/ -v` (confirming `test_hook_ownership_rollback.py`, `test_capture_isolation.py`, `test_tracker.py`, `test_reports.py`, `test_checks_commands.py`, `test_edge_cases.py`, and `test_manifest_schema.py` pass), `python3 examples/verify_all.py`, and `python3 scripts/sanitize_paths.py --check --all` all exit 0 with actual runner output captured, `git status --short` shows only the five scoped doc files (zero stray benchmark artifacts or temporary worktrees), and the post-merge GitHub Actions CI matrix requirement (`.github/workflows/ci.yml`: `ubuntu-latest`, `ubuntu-24.04`, `windows-latest`, `macos-latest`, Python 3.8 through 3.14) is recorded explicitly.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -181,30 +181,35 @@ This plan directly reconciles `docs/architecture.md`, `docs/functional_spec.md`,
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted local benchmark runner output (`python3 benchmarks/harness.py --passes 2 --iterations 20 --redacted-out <temp_path>` plus ephemeral micro-benchmark) showing environment (without local hostnames/paths), baseline and post-change Git commit SHAs, workloads (startup + `TqdmSafeTee` + `SubprocessSpy` + `EventStream`), repetition counts (`>= 20` warm + cold pass), medians, IQRs, and standard deviations, plus confirmation that temporary worktree and `--redacted-out` files were removed.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Ran local harness (`python3 benchmarks/harness.py --passes 2 --iterations 20 --redacted-out /tmp/pubrun-cap-isolation-harness.redacted.json`, exit 0, `total_wall_time_s: 303.579`, zero failures) and ephemeral pre-`p6pon8` vs post-`26euz0` micro-benchmark (1 cold pass + 25 warm iterations per workload, exit 0). Environment: `Linux 6.8.0-149-generic (x86_64)`, Python `3.14.6`, `Intel(R) Core(TM) i7-6800K CPU @ 3.40GHz` (12 logical cores), `get_filesystem`: `workdir=ext4 (is_network=False), tmpdir=ext4 (is_network=False)`. Revisions: baseline pre-`p6pon8` `9703da77e41fb27fd19e8f0b081ac0fccdc0547f` vs post-`26euz0` `114d243d1e82739172d45a4d842303f7281882c5`. Micro-benchmark (ms, `pre` -> `post`): `run_all_off` cold `46.427`/`31.479`, warm med `47.739` (iqr `8.278`, sd `6.055`) -> `34.871` (iqr `3.962`, sd `4.199`, delta `-12.868 ms` / `-26.95%`); `run_default` cold `200.246`/`427.441`, warm med `93.500` (iqr `16.926`, sd `15.714`) -> `62.941` (iqr `10.906`, sd `6.390`, delta `-30.559 ms` / `-32.68%`); `tee_plain_10k` cold `17.712`/`43.011`, warm med `16.839` (iqr `0.791`, sd `0.779`) -> `16.313` (iqr `3.636`, sd `6.095`, delta `-0.526 ms` / `-3.12%`); `tee_ts_10k` cold `77.323`/`94.460`, warm med `61.099` (iqr `4.265`, sd `4.005`) -> `60.504` (iqr `0.398`, sd `3.050`, delta `-0.595 ms` / `-0.97%`); `spy_bypassed_10k` cold `15.654`/`50.934`, warm med `13.944` (iqr `0.310`, sd `0.849`) -> `19.150` (iqr `2.940`, sd `7.896`, delta `+5.206 ms` / `+37.34%`); `spy_active_2k` cold `79.770`/`68.957`, warm med `48.003` (iqr `0.666`, sd `2.193`) -> `55.973` (iqr `2.105`, sd `2.403`, delta `+7.969 ms` / `+16.60%`); `event_stream_10k` cold `53.301`/`110.423`, warm med `45.642` (iqr `0.460`, sd `2.029`) -> `46.871` (iqr `0.677`, sd `4.961`, delta `+1.229 ms` / `+2.69%`). Harness summary (`114d243`, P1 cold / P2 warm med, iqr, sd ms, n=20): `baseline-noop` `20.58 (2.23/1.42)` / `19.70 (2.19/1.79)`; `import-auto` `154.76 (18.16/9.89)` / `154.71 (13.11/8.85)`; `startup-auto-default` `505.22 (14.41/12.26)` / `503.69 (11.79/9.86)`; `feature-none` `358.57 (19.55/12.26)` / `347.53 (11.89/8.52)`; `feature-subprocesses` `357.64 (7.36/8.90)` / `353.44 (10.10/6.05)`; `hotpath-print-baseline` `21.61 (3.15/1.51)` / `20.46 (3.08/2.14)`; `hotpath-print-tee` `218.32 (11.90/8.33)` / `212.01 (10.06/10.58)`. Cleanup confirmed: `ls: cannot access '/tmp/pubrun-cap-isolation-harness.redacted.json': No such file or directory`, `ls: cannot access '/tmp/pubrun-pre-p6pon8-wt': No such file or directory`, `git worktree list | grep -c pubrun-pre-p6pon8-wt` -> `0`.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Paste `git diff --stat -- docs/architecture.md docs/functional_spec.md` and key diff excerpts showing reconciled narrow ghost-mode boundary, per-engine isolation, transactional rollback, `faulthandler` and third-party ownership rules, independent cleanup, `MAX_CAPTURE_ERRORS = 50` truncation, and consumer honesty, plus a Python check over added (`+`) lines of `git diff -U0 -- docs/architecture.md docs/functional_spec.md` reporting zero `U+2014` or `U+2013` characters.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff --stat -- docs/architecture.md docs/functional_spec.md`: `docs/architecture.md | 49 +++++++++++++++++++++++++++++++++------------`, `docs/functional_spec.md | 53 ++++++++++++++++++++++++++++++-------------------`, `2 files changed, 69 insertions(+), 33 deletions(-)`. Reconciled `docs/architecture.md` sections `## 3. Run Lifecycle` (per-engine guards, `_rollback_owned_hooks(stage="rollback")`, `_merge_and_migrate()` ghost/permission guards, independent `_finalize_state()` steps), `## 12. Console Capture Model` (`faulthandler.is_enabled()` ownership preservation, `TqdmSafeTee` non-recursive `_in_error_log` isolation and `log_file = None` detach, idempotent 7-step `stop()`), `## 15. Subprocess Model` (live target chaining, generation-scoped `_pubrun_state`/`_pubrun_rec`, ownership-guarded `uninstall(owner=...)` and passive passthrough), and `## 18. Failure Model` (narrow ghost boundary, `MAX_CAPTURE_ERRORS = 50`, bounded warnings, honest consumers), plus `docs/functional_spec.md` sections `## 17. Ghost Mode`, `## 19. Writer and Finalization` (`write_startup_manifest()`/`write_artifacts()` booleans, independent cleanup, `EventStream` single warning outside lock, non-fatal `methods`), and `## 20. Failure Behavior`. Preserved all sibling `startup-perf` durability/commit-identity prose. Diff-scoped dash check: `E-02 (arch+spec): 0 em/en dash hit(s)` (exit 0).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Paste `git diff --stat -- docs/manifest.md docs/api.md` and key diff excerpts showing `errors.records` (`capture-error`, `section`, `stage`, `MAX_CAPTURE_ERRORS = 50` truncation), partial `capture.capture_state`, `stop()` idempotence, and third-party hook ownership rules, plus a Python check over added (`+`) lines of `git diff -U0 -- docs/manifest.md docs/api.md` reporting zero `U+2014` or `U+2013` characters.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff --stat -- docs/manifest.md docs/api.md`: `docs/api.md | 21 ++++++++++++++++++++-`, `docs/manifest.md | 27 ++++++++++++++++++++++-----`, `2 files changed, 42 insertions(+), 6 deletions(-)`. Reconciled `docs/manifest.md` `## errors` (added `### errors.records[]` table documenting `kind`, `type`, bounded redacted `message <= 240` chars via `format_safe_error_detail()`, `traceback = null`, optional `section`, optional `stage`, `MAX_CAPTURE_ERRORS = 50` cap and `errors.capture_state.status = "partial"` truncation, per-section `"failed"` status), `## capture` (`capture.capture_state = "partial"` covering both escaping exceptions and self-caught failed returns), and `### Capture State` (`detail` and `warnings` fields). Reconciled `docs/api.md` `### pubrun.start` (partial capture vs narrow ghost mode, ghost nested `start()`, import-mode `patch_subprocesses` check), `### pubrun.stop` (idempotence, independent cleanup, ghost outcome preservation), and added `### Third-Party Hook Ownership Rules` under `## 8. Provenance-Tracked I/O` covering `sys.stdout`/`sys.stderr`, `faulthandler`, signal handlers, `sys.excepthook`, and `subprocess.Popen.__init__`/`Popen.wait`/`os.system`. Diff-scoped dash check: `E-03 (manifest+api): 0 em/en dash hit(s)` (exit 0).
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Paste `git diff -- docs/performance.md` showing the dedicated single-machine capture-isolation overhead subsection matching `V-01` with complete experimental metadata, intact `## Representative results` placeholder, zero raw hostnames/paths, and zero unmeasured claims, plus a Python check over added (`+`) lines of `git diff -U0 -- docs/performance.md` reporting zero `U+2014` or `U+2013` characters.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff --stat -- docs/performance.md`: `docs/performance.md | 49 +++++++++++++++++++++++++++++++++++++++++++++` (+49/-0 lines). Added `## Capture-isolation startup and hot-path overhead (single-machine local measurements)` matching `V-01` numbers verbatim (environment: `Linux 6.8.0-149-generic (x86_64)`, `Intel(R) Core(TM) i7-6800K CPU @ 3.40GHz` 12 logical cores, Python `3.14.6`, local `ext4` via `get_filesystem()`, revisions `9703da77e41fb27fd19e8f0b081ac0fccdc0547f` vs `114d243d1e82739172d45a4d842303f7281882c5`, micro-benchmark cold/warm/IQR/stdev/delta table + harness P1/P2 table + honest explanation of sibling startup optimizations and microsecond wrapper deltas). `## Representative results` multi-machine placeholder and sibling `### Startup, finalization, and artifact durability overhead` subsection remain completely intact. Diff-scoped dash check: `E-04 (performance): 0 em/en dash hit(s)` (exit 0).
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted runner output and exit codes (all 0) for `pytest tests/ -v` (confirming `test_hook_ownership_rollback.py`, `test_capture_isolation.py`, `test_tracker.py`, `test_reports.py`, `test_checks_commands.py`, `test_edge_cases.py`, and `test_manifest_schema.py` pass), `python3 examples/verify_all.py`, `python3 scripts/sanitize_paths.py --check --all`, and `git status --short` (no stray untracked benchmark files or temporary worktrees), plus an explicit note of the required post-merge GitHub Actions OS/Python CI matrix gate (`.github/workflows/ci.yml`).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: All verification commands exited 0:
+    1. `python3 -m pytest tests/ -v` (exit 0): `================= 1350 passed, 2 skipped in 373.30s (0:06:13) ==================` including `tests/test_capture_isolation.py` (35 passed), `tests/test_checks_commands.py` (47 passed), `tests/test_edge_cases.py` (18 passed), `tests/test_hook_ownership_rollback.py` (39 passed), `tests/test_manifest_schema.py` (39 passed), `tests/test_reports.py` (57 passed), and `tests/test_tracker.py` (20 passed).
+    2. `python3 examples/verify_all.py` (exit 0): all 12 numbered examples (`00_auto_start.py` through `11_cli_report.py`) plus `minimal-research-workflow/analysis.py` passed (`[SUCCESS] All examples passed.`); cleaned up generated `runs/` and untracked `outputs/` (known backlog item `wghq9s`).
+    3. `python3 scripts/sanitize_paths.py --check --all` (exit 0, zero violations).
+    4. `git status --short` (after docs edits and before IPD update): `M docs/api.md`, `M docs/architecture.md`, `M docs/functional_spec.md`, `M docs/manifest.md`, `M docs/performance.md` (zero stray benchmark artifacts or temporary worktrees).
+    5. Post-merge CI matrix gate required before closing backlog item `x21s6w` for release: `.github/workflows/ci.yml` runs `pytest tests/ -v` across `ubuntu-latest` (Python 3.10 through 3.14), `ubuntu-24.04` (Python 3.8 and 3.9), `windows-latest` (Python 3.8 through 3.14), and `macos-latest` (Python 3.8 through 3.14); this full OS/Python matrix must pass in GitHub Actions after human push/merge.
+  - Result: pass
 
 ## Approval and execution gate
 

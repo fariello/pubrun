@@ -31,15 +31,17 @@ Structured events may be emitted during execution to `events.jsonl`, providing a
 ### Initialization
 Resolve the import mode without importing the full configuration engine: `_config_boot.py` reads and parses `./.pubrun.toml` at most once when checking `[imports].mode` and `[core].auto_start`. Library commit identity (`pubrun.__commit__`) resolves lazily through Python Enhancement Proposal 562 (PEP 562) module `__getattr__` only when requested, so installed imports and `minimal` or `noauto` imports spawn zero `git` processes.
 
-When a run starts, `pubrun` assigns a run ID, creates the run directory, and captures early metadata (invocation, script metadata, environment, packages, and Git state). Git and script source-state capture stay synchronous before user code runs so user edits cannot race with provenance capture; `get_git()` combines `--show-toplevel`, `HEAD`, and `--abbrev-ref HEAD` into one `git rev-parse` subprocess call and enforces a shared monotonic budget (`[capture.git].total_timeout`, default `5`s).
+When a run starts, `pubrun` assigns a run ID, creates the run directory, and runs every capture engine (`invocation`, `git`, `process`, `python`, `packages`, `environment`, `hardware`, `host`, `filesystem`, `subprocesses`, `console`, `events`, `resources`, and `signals`) inside its own isolated failure guard. A failure in one engine marks only that section `"failed"`, records a bounded redacted entry in `errors.records`, and never promotes healthy tracking into ghost mode. Git and script source-state capture stay synchronous before user code runs so user edits cannot race with provenance capture; `get_git()` combines `--show-toplevel`, `HEAD`, and `--abbrev-ref HEAD` into one `git rev-parse` subprocess call and enforces a shared monotonic budget (`[capture.git].total_timeout`, default `5`s).
 
-When `[capture.hardware].depth == "off"`, hardware (suppressed), host, and filesystem metadata are collected synchronously in three separate failure-isolated guards without spawning a background thread or triggering a second startup manifest write. When hardware capture is enabled, the background `pubrun-hw` daemon thread runs within `[capture.hardware].total_timeout` (default `10`s) and refreshes `manifest.json` only if the initial startup write did not already include completed hardware data and the run is still active and unfinalized. At startup, `ArtifactWriter` writes `manifest.json` and `config.resolved.json` atomically and records the config target path, canonical SHA-256 digest, and applied durability rank.
+When `[capture.hardware].depth == "off"`, hardware (suppressed), host, and filesystem metadata are collected synchronously in three separate failure-isolated guards without spawning a background thread or triggering a second startup manifest write. When hardware capture is enabled, the background `pubrun-hw` daemon thread runs `get_hardware()`, `get_host()`, and `get_filesystem()` in three independent failure guards within `[capture.hardware].total_timeout` (default `10`s) and refreshes `manifest.json` only if the initial startup write did not already include completed hardware data and the run is still active and unfinalized.
+
+At startup, `ArtifactWriter.write_startup_manifest()` writes `manifest.json` and `config.resolved.json` atomically, records the config target path, canonical SHA-256 digest, and applied durability rank, and returns a boolean indicating whether startup output succeeded. If `run_dir` creation or initial startup manifest writing fails, `Run` latches `_finalized = True`, `_hardware_write_closed = True`, and `is_active = False` under `_run_lock`, rolls back only hooks, workers, file handles, and `.pubrun.lock` owned by that run via `_rollback_owned_hooks(stage="rollback")`, skips `atexit` registration, and enters ghost mode.
 
 ### Active Capture
-Collect events, subprocess records, and console output. Update summary fields. If a re-entrant `start(**overrides)` call merges new configuration or migrates `run_dir` through `Run._merge_and_migrate()`, `ArtifactWriter.sync_config_if_changed()` writes the updated `config.resolved.json` immediately while the run is active and unfinalized.
+Collect events, subprocess records, and console output. Update summary fields. If a re-entrant `start(**overrides)` call merges new configuration or migrates `run_dir` through `Run._merge_and_migrate()`, `ArtifactWriter.sync_config_if_changed()` writes the updated `config.resolved.json` immediately while the run is active and unfinalized. `Run._merge_and_migrate()` is a no-op on ghost, inactive, or finalized runs, guards `resolve_config()` failures safely, and checks import-mode `patch_subprocesses` permission before activating `SubprocessSpy` mid-run.
 
 ### Finalization
-Call `_finalize_state()` before acquiring `ArtifactWriter._write_lock` so lock order stays strictly `_run_lock` before `_write_lock`. Persist `config.resolved.json` only when the target path, canonical SHA-256 digest, or file presence changed (or synchronize an unchanged startup snapshot in place via `os.fsync()` under `[core].artifact_durability = "finalize"`). Write final `manifest.json` once atomically, mark `_artifacts_written = True`, close console tees and event streams, and mark the run complete.
+Call `_finalize_state()` before acquiring `ArtifactWriter._write_lock` so lock order stays strictly `_run_lock` before `_write_lock`. Inside `_finalize_state()`, every pre-teardown step (`_hardware_future_done.wait(timeout=2.0)`, signal interruption check, and exit-code recording) and every teardown step (`SubprocessSpy.finalize_all()`, record snapshot, `SubprocessSpy.uninstall(owner=...)`, `ConsoleInterceptor.stop()`, `ResourceWatcher.stop()` and snapshot, deferred file registrations, `EventStream.close()`, profiler disable, `SignalExitCapture` snapshot and `uninstall()`, `.pubrun.lock` removal, and finalization package refresh) runs inside an independent `try/except` guard so one or more cleanup errors never skip remaining cleanup. `ArtifactWriter.write_artifacts()` persists `config.resolved.json` only when the target path, canonical SHA-256 digest, or file presence changed (or synchronizes an unchanged startup snapshot in place via `os.fsync()` under `[core].artifact_durability = "finalize"`), guards `config.resolved.json` separately from `manifest.json`, writes final `manifest.json` once atomically, marks `_artifacts_written = True`, and treats `methods.{md,tex}` generation failures as non-fatal. `Run.stop()` unregisters `atexit` and clears `_active_run` in a `finally` block when `ref_count` reaches zero.
 
 ### Abnormal Termination
 Best-effort partial capture. Both `_finalize_state()` (guarded by `_finalized`) and `write_artifacts()` (guarded by `_artifacts_written`) are idempotent, so calling them from `stop()`, signal handlers, and `atexit` never rewrites finalized artifacts.
@@ -152,9 +154,17 @@ Each capture category is a modular sub-engine responsible for one section of the
 
 ## 12. Console Capture Model
 
-Console capture uses a tee-style wrapper around `sys.stdout` and `sys.stderr`. Output is preserved for the user while being simultaneously written to log files.
+Console capture uses a tee-style wrapper (`TqdmSafeTee`) around `sys.stdout` and `sys.stderr`. Output is preserved for the user while being written to `stdout.log` and `stderr.log`.
 
-The `TqdmSafeTee` implementation squashes carriage-return redraws (common with progress bars) to prevent log bloat, keeping only the final state of each redrawn line.
+The `TqdmSafeTee` implementation squashes carriage-return redraws (common with progress bars) to prevent log bloat, keeping only the final state of each redrawn line. Runtime log-file write or flush errors never break user output or recurse through a wrapped `sys.stderr`: `TqdmSafeTee` guards `original_stream.flush()` against `(BrokenPipeError, OSError, ValueError)`, detaches `log_file = None` on the first log error to stop repeated failing system calls, guards its single debug log with an `_in_error_log` re-entry flag, and causes `ConsoleInterceptor.stop()` to report `capture_state.status = "partial"`.
+
+`ConsoleInterceptor.start()` installs transactionally and preserves prior `faulthandler` ownership:
+
+- It snapshots live `sys.stdout`, `sys.stderr`, and `faulthandler.is_enabled()` at start time.
+- It calls `faulthandler.enable(file=self.stderr_log)` only when `faulthandler.is_enabled()` is `False`, so a user or test-runner `faulthandler` is never hijacked or disabled later.
+- If any setup step fails, it rolls back opened files, replaced streams, and owned `faulthandler` state, records a bounded redacted detail, and returns `False` so the manifest reports `capture_state.status = "failed"` with `captured = false`.
+
+`ConsoleInterceptor.stop()` is idempotent (returning a copy of its cached result on repeat calls) and runs seven independent cleanup steps: identity-guarded `sys.stdout` restore, identity-guarded `sys.stderr` restore, `stdout_tee` flush and `log_file = None` detach, `stderr_tee` flush and `log_file = None` detach, `faulthandler.disable()` (only if owned, before closing `stderr.log`), `stdout.log` close, and `stderr.log` close. If a third-party library wrapped `sys.stdout` or `sys.stderr` after `start()`, `stop()` leaves that wrapper intact while `pubrun`'s detached tee passes output through passively.
 
 ## 13. Run Directory Model
 
@@ -193,9 +203,13 @@ Contents:
 
 ## 15. Subprocess Model
 
-The `SubprocessSpy` transparently monkey-patches `subprocess.Popen` and `os.system` to capture spawned process metadata (argv, timing, exit codes). Access is thread-safe via `threading.Lock`.
+`SubprocessSpy` transparently monkey-patches `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` to capture spawned process metadata (argv, timing, exit codes). Record mutations and lifecycle transitions are thread-safe under `SubprocessSpy._lock`.
 
-Internal library subprocess calls (e.g., `git` queries) use the `disable_spy()` context manager to prevent circular logging.
+- **Live target chaining and transactional install:** `SubprocessSpy.install(max_records, config, owner)` snapshots the live `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` attributes at install time, builds generation-scoped wrapper closures that chain to those pre-existing targets, and rolls back any already-patched target if a later patch fails.
+- **Generation-scoped records:** Each spawned `Popen` instance carries its install generation's `state` dict and direct record reference (`_pubrun_state`, `_pubrun_rec`), and `os.system` holds a direct local reference to its record. Post-uninstall `wait()` calls or concurrent `uninstall()` calls cannot corrupt a newer run's records or raise `IndexError`. Failed spawn details pass through `format_safe_error_detail()`.
+- **Ownership-guarded uninstall and passive passthrough:** `SubprocessSpy.uninstall(owner=...)` verifies the caller's ownership token when set, flips `state["active"] = False` first, and restores each target independently only when the current attribute is still `pubrun`'s installed wrapper. If a third-party wrapper sits outside `pubrun`, that wrapper remains intact while `pubrun`'s deactivated closure passes calls through passively without recording.
+
+Internal library subprocess calls (for example, `git` queries) use the `disable_spy()` context manager to prevent circular logging.
 
 ## 16. Public API
 
@@ -220,12 +234,21 @@ The manifest schema is versioned (`schema_version: "1.0"`). New sections can be 
 
 The system must:
 
-- Never crash the host script due to capture failure.
-- Emit a partial manifest if needed.
-- Record capture errors in the `errors` section.
-- Degrade gracefully when optional features are unavailable.
+- Never crash the host script due to capture, cleanup, or serialization failure.
+- Isolate each capture engine so one failing engine produces a schema-valid partial manifest rather than suppressing healthy sections.
+- Reserve ghost mode strictly for unusable run output at startup, with transactional rollback of owned hooks.
+- Record bounded, redacted capture errors in `errors.records` and surface partial capture honestly across downstream consumers.
 
-"Ghost mode" activates automatically when filesystem operations fail (e.g., read-only filesystem). In ghost mode, all capture methods become silent no-ops.
+### Partial Capture vs. Narrow Ghost Mode
+
+- **Per-engine failure isolation:** Every capture engine (`invocation`, `git`, `process`, `python`, `packages`, `environment`, `hardware`, `host`, `filesystem`, `subprocesses`, `console`, `events`, `resources`, and `signals`) executes in its own isolated guard (`hardware`, `host`, and `filesystem` each have separate guards). If an engine raises or returns `capture_state.status = "failed"`, only that section is marked `"failed"` with a bounded redacted `detail`. Unrelated healthy sections remain complete, the host script's return value and exit code are unaffected, `status.outcome` keeps the host script's outcome, and `capture.capture_state` reports `"partial"`.
+- **Narrow ghost-mode boundary:** Ghost mode (`status.outcome = "ghost"`, `is_active = False`, `writer = None`) activates only when run output itself is unusable at startup: either `run_dir.mkdir()` fails or the initial `ArtifactWriter.write_startup_manifest()` fails (for example, on read-only or unavailable storage). If output fails after hooks were installed, `Run` latches `_finalized = True` and `_hardware_write_closed = True` under `_run_lock`, rolls back every hook, background thread, open handle, and `.pubrun.lock` owned by that run via `_rollback_owned_hooks(stage="rollback")`, skips `atexit` registration, publishes `_active_run` safely for nested `start()` calls, and emits one bounded redacted warning to `sys.stderr`.
+
+### Bounded Redacted Diagnostics, Independent Cleanup, and Consumer Honesty
+
+- **Bounded redacted error records:** Capture and cleanup exceptions pass through `format_safe_error_detail()` (single-line, sensitive values redacted, 240-character cap, `traceback = null`, falling back to default patterns and then `type(exc).__name__`). `Run` retains up to `MAX_CAPTURE_ERRORS = 50` entries in `errors.records` under `_errors_lock`; additional errors increment the omitted counter and set `errors.capture_state.status = "partial"`. Runtime warnings in `Run`, `EventStream`, and `ArtifactWriter` are emitted at most once per `(section, stage)` or failure episode, outside internal locks.
+- **Independent cleanup and hook ownership:** `_finalize_state()` and `_rollback_owned_hooks()` isolate every pre-teardown and teardown step independently, separating `SubprocessSpy.finalize_all()` and record snapshotting from `SubprocessSpy.uninstall(owner=...)`. Process-global hooks (`sys.stdout`, `sys.stderr`, `faulthandler`, signal handlers, `sys.excepthook`, `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `os.system`) use identity-guarded restoration and passive passthrough so later third-party wrappers are never clobbered.
+- **Honest consumers:** `pubrun report`, `pubrun inspect`, `pubrun methods`, and `pubrun status` tolerate failed, `null`, or malformed section fields without crashing. They surface failed sections and deduplicated `capture-error` findings explicitly (distinct from `"suppressed"`) and disclose partial provenance instead of claiming complete capture or standard-library-only dependencies.
 
 ## 19. Redaction Model
 
