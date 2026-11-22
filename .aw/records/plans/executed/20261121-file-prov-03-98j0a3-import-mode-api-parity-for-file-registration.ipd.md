@@ -5,8 +5,9 @@
 - Concern: Re-exporting external file registration application programming interface (API) functions across all six `pubrun` import modes and verifying parity
 - Scope: Re-export `register_file`, `register_input`, and `register_output` in `src/pubrun/auto.py`, `src/pubrun/full.py`, `src/pubrun/noauto.py`, `src/pubrun/nopatch.py`, `src/pubrun/noconsole.py`, and `src/pubrun/minimal.py`, and expand `tests/test_import_modes.py`.
 - Scope-Paths: src/pubrun/auto.py, src/pubrun/full.py, src/pubrun/noauto.py, src/pubrun/nopatch.py, src/pubrun/noconsole.py, src/pubrun/minimal.py, tests/test_import_modes.py
+- Scope-Exceeded: .aw/records/backlog/open/20261122-zdkdyg-01-zdkdyg-prepend-repository-src-directory-to-pythonpath-for.backlog.md (Required defect-report backlog carrier filed via aw backlog new for subprocess PYTHONPATH worktree isolation defect discovered during validation)
 - Item-Dependencies: executed:52dl55
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Re-export external file registration APIs across all six pubrun import modes with parity tests
@@ -18,12 +19,12 @@
 - Highest E allocated: 03
 - Author: agent
 - Id: 98j0a3
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 98j0a3 verified (set file-prov, attempt 1). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261122-zdkdyg-01-zdkdyg-prepend-repository-src-directory-to-pythonpath-for.backlog.md: Required defect-report backlog carrier filed via aw backlog new for subprocess PYTHONPATH worktree isolation defect discovered during validation]
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-21 to-review (agent): authored child plan 03 of Set `file-prov` graduating backlog item `x6alw4`.
