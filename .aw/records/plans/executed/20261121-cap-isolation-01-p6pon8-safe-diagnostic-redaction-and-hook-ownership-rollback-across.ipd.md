@@ -6,7 +6,7 @@
 - Scope: Add `format_safe_error_detail()` in `src/pubrun/capture/redaction.py`; enforce transactional install, pre-existing wrapper chaining, and ownership-guarded rollback/uninstall in `src/pubrun/capture/subprocesses.py`, `src/pubrun/capture/console.py`, `src/pubrun/capture/signals.py`, and `src/pubrun/capture/resources.py`; sanitize fallback failure data in `src/pubrun/capture/invocation.py`; add behavioral ownership and rollback tests in `tests/test_hook_ownership_rollback.py`.
 - Scope-Paths: src/pubrun/capture/redaction.py, src/pubrun/capture/subprocesses.py, src/pubrun/capture/console.py, src/pubrun/capture/signals.py, src/pubrun/capture/resources.py, src/pubrun/capture/invocation.py, tests/test_hook_ownership_rollback.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Add bounded redacted error formatting and transactional ownership-guarded install/uninstall for subprocess, console, signal, and resource engines
@@ -19,12 +19,12 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: p6pon8
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: p6pon8 verified (set cap-isolation, attempt 1).
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007, PR-008
 - 2026-11-22 draft (agent): created.
