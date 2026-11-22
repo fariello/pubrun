@@ -198,12 +198,24 @@ mode = "filtered"
 depth = "standard"
 
 [capture.packages]
-# How Python dependency versions are tracked.
+# How Python dependency versions are tracked. All modes read installed
+# distribution metadata through importlib.metadata (offline, no subprocesses).
+# Import-based modes take a startup snapshot (kept if the run crashes) and
+# refresh and merge it at finalization so late imports are recorded; no global
+# import hook is installed, so a module imported after startup and removed
+# from sys.modules before finalization is not observed.
 # Values:
-#   "imported-only"        - Scan sys.modules for libraries used by the script.
-#   "imported-transitive"  - Imported packages plus their declared dependencies.
-#   "top-level-installed"  - List packages from pip/conda.
-#   "full-environment"     - Every dependency in the virtual environment.
+#   "off"                  - Disable package capture (section is "suppressed").
+#   "imported-only"        - Resolve modules loaded in sys.modules to their
+#                            installed distributions (default).
+#   "imported-transitive"  - Imported distributions plus the recursive,
+#                            cycle-safe closure of their declared dependencies
+#                            whose PEP 508 markers apply. Optional extras of
+#                            imported distributions are not guessed; extras a
+#                            parent requests (pkg[extra]) are followed.
+#   "top-level-installed"  - Installed distributions that no other installed
+#                            distribution requires.
+#   "full-environment"     - Every installed distribution in the environment.
 mode = "imported-only"
 depth = "standard"
 

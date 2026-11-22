@@ -162,24 +162,44 @@ Python runtime environment.
 
 ## `packages`
 
-Tracked Python dependencies.
+Tracked Python dependencies. Import-based modes (`imported-only`, `imported-transitive`) take a startup snapshot and, at finalization, refresh it and merge the two, so the final manifest contains distributions imported at startup, during the run, or both. When `[capture.packages].mode = "off"`, the section is exactly `{"capture_state": {"status": "suppressed"}}` and `mode` is omitted.
 
 | Field | Type | Description |
 |---|---|---|
-| `mode` | string | `"imported-only"`, `"imported-transitive"`, `"top-level-installed"`, or `"full-environment"`. |
+| `mode` | string \| null | `"imported-only"`, `"imported-transitive"`, `"top-level-installed"`, or `"full-environment"`. Omitted when capture is off. |
+| `snapshot_stage` | string \| null | `"startup"` for the startup snapshot (what a crashed run keeps), `"final"` for the merged startup-plus-finalization snapshot, or `"single"` for a standalone capture outside a run lifecycle. |
 | `records` | list[object] | Package records (see below). |
+| `unresolved` | list[object] | Modules or dependencies that could not be mapped to exactly one installed distribution (see below). Default `[]`. |
+| `local_modules` | list[string] | Sorted top-level names of loaded modules that live outside `site-packages` (for example the project's own modules). Default `[]`. |
+| `coverage_notes` | list[string] | Factual notes on what this snapshot could not observe. For import-based modes at finalization this states the no-import-hook limitation described below. Default `[]`. |
 | `capture_state` | object | See [Capture State](#capture-state). |
+
+`capture_state.status` is `"partial"` when `unresolved` is non-empty, when a distribution's version changed between the startup and finalization snapshots (a warning names it), or when the startup snapshot, the finalization refresh, or the transitive closure reported an error; the error text is kept in `capture_state.detail`. If the finalization refresh itself raises, the startup snapshot's records are kept and the status is `"partial"`, or `"failed"` when the startup snapshot had also failed.
+
+Limitation: `pubrun` does not install a global import hook. A module imported after startup and removed from `sys.modules` before finalization is not observed, so its distribution is absent from `records`.
 
 ### `packages.records[]`
 
 | Field | Type | Description |
 |---|---|---|
 | `name` | string | Package name. |
-| `version` | string | Installed version. |
+| `version` | string \| null | Installed version, or `null` when the distribution metadata has no version. |
 | `location` | string \| null | Install location path, if available. |
 | `editable` | bool \| null | Whether the package is installed in editable (development) mode. |
 | `source` | string \| null | How the record was discovered (e.g. `"imported"`, `"transitive"`). |
 | `required_by` | list[string] \| null | In `imported-transitive` mode, the imported packages that require this (transitive) dependency. Absent/`null` for non-transitive records. |
+| `import_names` | list[string] \| null | Sorted import names observed in `sys.modules` that map to this distribution (for example `yaml` for `PyYAML`). `null` for records that were not discovered through imports. |
+| `observed_at` | string \| null | For imported records, when the import was seen: `"startup"`, `"final"`, or `"startup_and_final"`. `null` for records not discovered through imports. |
+
+### `packages.unresolved[]`
+
+| Field | Type | Description |
+|---|---|---|
+| `module` | string | Import name, dependency name, or distribution hint that could not be resolved. |
+| `reason` | string | One of `"ambiguous"` (several installed distributions provide the module), `"unmapped_site_package"` (a module under `site-packages` matches no distribution), `"missing_metadata"` (distribution metadata lacks a valid `Name`), `"metadata_error"` (reading the metadata raised an error), `"missing_transitive_dependency"` (a declared dependency is not installed), or `"unparseable_marker"` (a dependency's PEP 508 marker could not be evaluated). |
+| `candidates` | list[string] | Candidate distribution names, when known (for `"ambiguous"`). Default `[]`. |
+| `observed_at` | string \| null | `"startup"`, `"final"`, `"startup_and_final"`, or `null`. |
+| `detail` | string \| null | Short human-readable explanation. |
 
 ---
 

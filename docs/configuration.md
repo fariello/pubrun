@@ -148,8 +148,10 @@ Security policies for preventing secret leakage into manifest files.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `mode` | string | `"imported-only"` | `"imported-only"` — scan `sys.modules`; `"imported-transitive"` — imported packages plus their declared dependencies (one level); `"top-level-installed"` — pip/conda list; `"full-environment"` — every dependency in the virtualenv. |
+| `mode` | string | `"imported-only"` | `"off"`: disable package capture (the `packages` section records `capture_state.status = "suppressed"` and omits `mode`). `"imported-only"`: resolve modules loaded in `sys.modules` to their installed distributions. `"imported-transitive"`: imported distributions plus the recursive, cycle-safe closure of their declared dependencies whose Python Enhancement Proposal (PEP) 508 markers apply; optional extras of imported distributions are not guessed, and extras a parent requests (`pkg[extra]`) are followed. `"top-level-installed"`: installed distributions that no other installed distribution requires. `"full-environment"`: every installed distribution in the environment. All modes read metadata through `importlib.metadata` (offline, no subprocesses). |
 | `depth` | string | `"standard"` | Capture depth for this category. |
+
+When `mode` is not `"off"`, `pubrun` captures packages twice: a startup snapshot while the run initializes (so a crashed run still records what was loaded), and a refresh at finalization that is merged with the startup snapshot so imports made during the run are recorded too. No global import hook is installed, so a module imported after startup and removed from `sys.modules` before finalization is not observed; the manifest states this in `packages.coverage_notes`. See [Manifest: `packages`](manifest.md#packages) for the recorded fields and [Performance](performance.md#package-capture-startup-and-finalization-overhead-single-machine-local-measurements) for measured cost.
 
 ### `[capture.subprocesses]`
 

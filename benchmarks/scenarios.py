@@ -102,6 +102,8 @@ def all_scenarios() -> List[Scenario]:
                        config=_off_plus({"capture": {"hardware": {"depth": "basic"}}})))
     S.append(Scenario("feature-packages-imported", "feature", "auto", "cpu_burn.py",
                        config=_off_plus({"capture": {"packages": {"mode": "imported-only"}}})))
+    S.append(Scenario("feature-packages-transitive", "feature", "auto", "cpu_burn.py",
+                       config=_off_plus({"capture": {"packages": {"mode": "imported-transitive"}}})))
     S.append(Scenario("feature-packages-full", "feature", "auto", "cpu_burn.py",
                        config=_off_plus({"capture": {"packages": {"mode": "full-environment"}}})))
 

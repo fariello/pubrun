@@ -189,6 +189,70 @@ Key takeaways from these local measurements:
 - **Subprocess spy (`SubprocessSpy`):** Generation-scoped closure checks (`state["active"]`), direct record tagging, and monotonic `time.perf_counter()` duration tracking added `+5.21 ms` across 10,000 bypassed stub triplets (`+0.52` microseconds per triplet, or `+0.17` microseconds per wrapper call) and `+7.97 ms` across 2,000 active stub triplets (`+3.98` microseconds per recorded triplet). Compared with real OS process spawn latency (milliseconds per process), this wrapper delta is negligible; in the full subprocess harness, `feature-subprocesses` measured `+5.91 ms` over `feature-none` on Pass 2 (`353.44 ms` versus `347.53 ms`).
 - **Event stream (`EventStream.emit`):** Re-checking `self._file is None` inside `self._lock` and tracking failure state added `+1.23 ms` across 10,000 buffered events (`+0.12` microseconds per event).
 
+## Package capture startup and finalization overhead (single-machine local measurements)
+
+These numbers come from one local machine, measured on 2026-11-22. They are not cross-machine representative numbers; `## Representative results` above remains a multi-machine placeholder.
+
+A tracked run pays for package capture twice when `[capture.packages].mode` is not `"off"`: once for the startup snapshot, and once at finalization for the refresh that records late imports and merges them with the startup snapshot. [`benchmarks/package_capture_bench.py`](../benchmarks/package_capture_bench.py) times the two separately by calling the same functions `Run` calls (`get_packages(cfg, stage="startup")`, then `get_packages(cfg, stage="final", include_transitive=...)` plus `merge_package_snapshots()`), so the figures below are package-capture time only, not whole-run wall time.
+
+- **Machine and runtime:** Operating System (OS) `Linux 6.8.0-149-generic` (`x86_64`), Central Processing Unit (CPU) `Intel(R) Core(TM) i7-6800K CPU @ 3.40GHz` (12 logical cores), CPython `3.14.6`.
+- **Storage:** local storage only. The benchmark's temporary work directory was on `ext4` (`is_network = false`), detected through `pubrun.capture.filesystem.get_filesystem()`. No network or parallel filesystem was measured.
+- **Git revision:** `ff2516476876`.
+- **Command:** `python3 benchmarks/package_capture_bench.py --small-count 10 --large-count 300 --repetitions 10 --cold-runs 3` (total wall time about 16 s).
+- **Workloads:**
+  - `small`: 10 synthetic distributions run under `python -S`, so only they are installed; 1 module imported before the startup snapshot and 1 imported afterwards (a late import).
+  - `large`: 300 synthetic distributions under `python -S`; 30 startup imports and 15 late imports. The synthetic metadata has `Requires-Dist` chains, PEP 508 markers, an optional extra, a parent-requested `pkg[extra]`, and import names that differ from distribution names.
+  - `ambient`: the interpreter's real environment (215 installed distributions); no extra startup imports and 3 late standard-library imports.
+- **Repetitions:** each cold sample is a fresh child process (empty distribution cache), 3 per mode. Warm samples are 10 passes in one child process after 1 discarded warmup pass, so the cached distribution index is reused. `mode = "off"` is the baseline; for `off`, finalization does no package work, matching `Run`.
+
+Times are milliseconds, shown as median (interquartile range (IQR) / standard deviation). "Indexed distributions" is the size of the installed-distribution index the capture built; "Records" is the number of records in the merged snapshot.
+
+`small` (10 synthetic distributions):
+
+| Mode | Indexed distributions | Records | Startup cold | Startup warm | Finalization cold | Finalization warm | Finalization warm p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `off` | n/a | 0 | 0.00 (0.00 / 0.00) | 0.00 (0.00 / 0.00) | 0.00 (0.00 / 0.00) | 0.00 (0.00 / 0.00) | 0.00 |
+| `imported-only` | 10 | 2 | 15.00 (0.07 / 0.08) | 2.32 (0.07 / 0.11) | 2.20 (0.02 / 0.02) | 2.34 (0.13 / 0.10) | 2.43 |
+| `imported-transitive` | 10 | 10 | 15.75 (0.95 / 1.03) | 2.54 (0.07 / 0.14) | 2.54 (0.06 / 0.06) | 2.66 (0.18 / 0.12) | 2.70 |
+| `top-level-installed` | 10 | 1 | 11.96 (0.04 / 0.04) | 0.09 (0.00 / 0.00) | 0.13 (0.00 / 0.00) | 0.11 (0.01 / 0.00) | 0.12 |
+| `full-environment` | 10 | 10 | 13.87 (1.10 / 1.10) | 0.05 (0.00 / 0.00) | 0.10 (0.01 / 0.01) | 0.08 (0.00 / 0.00) | 0.09 |
+
+`large` (300 synthetic distributions):
+
+| Mode | Indexed distributions | Records | Startup cold | Startup warm | Finalization cold | Finalization warm | Finalization warm p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `off` | n/a | 0 | 0.00 (0.00 / 0.00) | 0.00 (0.00 / 0.00) | 0.00 (0.00 / 0.00) | 0.00 (0.00 / 0.00) | 0.00 |
+| `imported-only` | 300 | 45 | 127.46 (4.70 / 4.79) | 2.51 (0.21 / 0.13) | 3.08 (0.68 / 0.73) | 2.98 (0.15 / 0.26) | 3.45 |
+| `imported-transitive` | 300 | 150 | 124.31 (1.36 / 1.42) | 4.74 (0.41 / 0.20) | 5.03 (0.08 / 0.08) | 5.15 (0.35 / 0.36) | 5.73 |
+| `top-level-installed` | 300 | 45 | 122.43 (1.79 / 1.83) | 1.58 (0.18 / 0.11) | 1.51 (0.14 / 0.16) | 1.68 (0.16 / 0.20) | 2.01 |
+| `full-environment` | 300 | 300 | 119.74 (0.51 / 0.51) | 0.49 (0.01 / 0.00) | 0.93 (0.11 / 0.13) | 0.86 (0.01 / 0.04) | 0.93 |
+
+`ambient` (215 installed distributions):
+
+| Mode | Indexed distributions | Records | Startup cold | Startup warm | Finalization cold | Finalization warm | Finalization warm p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `off` | n/a | 0 | 0.00 (0.00 / 0.00) | 0.00 (0.00 / 0.00) | 0.00 (0.00 / 0.00) | 0.00 (0.00 / 0.00) | 0.00 |
+| `imported-only` | 215 | 2 | 317.54 (1.48 / 1.55) | 0.99 (0.03 / 0.04) | 1.09 (0.03 / 0.04) | 1.04 (0.04 / 0.08) | 1.16 |
+| `imported-transitive` | 215 | 2 | 321.36 (10.12 / 11.29) | 2.41 (0.22 / 0.15) | 2.79 (0.04 / 0.05) | 2.54 (0.09 / 0.13) | 2.80 |
+| `top-level-installed` | 215 | 58 | 320.76 (1.50 / 1.54) | 2.92 (0.16 / 0.18) | 3.21 (0.09 / 0.09) | 3.09 (0.13 / 0.09) | 3.20 |
+| `full-environment` | 215 | 215 | 323.64 (16.32 / 17.11) | 0.40 (0.02 / 0.02) | 0.71 (0.01 / 0.01) | 0.71 (0.32 / 0.44) | 1.77 |
+
+What these measurements show on this machine:
+
+- **The first startup snapshot in a process carries almost all of the cost.** It builds the installed-distribution index: about 12 to 16 ms for 10 synthetic distributions, about 120 to 127 ms for 300, and about 318 to 324 ms for the 215 real distributions in the ambient environment. The cost is similar across modes because every mode builds the same index. Why the real environment costs more per distribution than the synthetic one was not isolated.
+- **The finalization refresh is cheap when the environment has not changed.** It reuses the index cached at startup, so cold finalization stayed at or below 5.03 ms median in every profile and mode, and warm finalization at or below 5.15 ms. `imported-transitive` on the 300-distribution profile was the most expensive refresh (5.15 ms warm median, 5.73 ms p95) because it recomputes the recursive closure over the merged imports.
+- **`off` costs nothing measurable** at either stage, so each mode's delta over the baseline equals its own median.
+
+Remaining overhead and limits:
+
+- One machine, local `ext4` storage, and one Python version only. Behavior on other OSes, Python 3.8 through 3.13, and network filesystems was not measured.
+- The index cache is keyed on a fingerprint of `sys.path` and the modification times of its directories. If either changes during a run (for example a package is installed mid-run), the finalization refresh rebuilds the index and should then cost about as much as the cold startup column; that case was not benchmarked.
+- Synthetic distributions carry minimal metadata, so the `small` and `large` rows understate the per-distribution cost of real packages, as the `ambient` rows show.
+- The ambient workload imports only standard-library modules late, so it does not exercise late third-party imports.
+- These are package-capture function timings, not whole-run wall time. The standard harness (`benchmarks/harness.py`) measures whole runs through the `feature-packages-imported`, `feature-packages-transitive`, and `feature-packages-full` scenarios.
+
+To measure a shared filesystem such as Network File System (NFS) or Lustre, pass a directory on it as `--workdir`, for example `python3 benchmarks/package_capture_bench.py --workdir /path/to/shared/scratch --json-out results.json`. The synthetic `site-packages` trees are then created and read on that filesystem (the `ambient` profile still reads the interpreter's own installation), the detected filesystem type is reported, and only a dedicated temporary subdirectory is created inside `--workdir` and removed on exit. The JSON output is written locally, has hostnames, usernames, and machine-local paths redacted, and is never uploaded; the script submits no scheduler jobs.
+
 ---
 
 [README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Performance](performance.md) | [Research Use](research-use.md) | [HPC](hpc.md) | [Changelog](../CHANGELOG.md)
