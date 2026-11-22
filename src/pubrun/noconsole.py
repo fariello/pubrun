@@ -28,6 +28,9 @@ from pubrun.core import (  # noqa: F401, E402
     artifact,
     print,
     open,
+    register_file,
+    register_input,
+    register_output,
     subprocess,
     popen,
     _run_lock,
@@ -59,6 +62,9 @@ import pubrun.report  # noqa: E402,F401
 _pkg.artifact = artifact
 _pkg.print = print
 _pkg.open = open
+_pkg.register_file = register_file
+_pkg.register_input = register_input
+_pkg.register_output = register_output
 _pkg.subprocess = subprocess
 _pkg.popen = popen
 _pkg._run_lock = _run_lock

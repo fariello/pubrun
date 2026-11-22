@@ -1,6 +1,7 @@
 """Tests for import mode resolution, bootstrap state, and conflict detection."""
 import os
 import json
+import pathlib
 import subprocess
 import sys
 import warnings
@@ -815,18 +816,43 @@ class TestModeAliasApiParity:
     _PUBLIC = [
         "start", "stop", "annotate", "phase", "diff", "audit_run",
         "tracked_run", "get_current_run", "report", "artifact",
-        "print", "open", "subprocess", "popen",
+        "print", "open", "register_file", "register_input", "register_output",
+        "subprocess", "popen",
     ]
 
+    @staticmethod
+    def _clean_env():
+        env = {**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""}
+        src_dir = pathlib.Path(__file__).resolve().parents[1] / "src"
+        if src_dir.is_dir():
+            existing = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing}" if existing else str(src_dir)
+        return env
+
     @pytest.mark.parametrize("mode", ["auto", "noauto", "nopatch", "noconsole", "minimal", "full"])
-    def test_mode_alias_exposes_full_api(self, mode):
+    def test_mode_alias_exposes_full_api(self, mode, tmp_path):
         names = json.dumps(self._PUBLIC)
         script = f"""
-import json
+import json, sys
 import pubrun.{mode} as pubrun
+import pubrun as base
 names = {names}
-missing = [n for n in names if not hasattr(pubrun, n)]
-print(json.dumps({{"missing": missing}}))
+missing_alias = [n for n in names if not hasattr(pubrun, n)]
+missing_base = [n for n in names if not hasattr(base, n)]
+mismatched = [
+    n for n in names
+    if n != "report"
+    and hasattr(pubrun, n)
+    and hasattr(base, n)
+    and getattr(base, n) is not getattr(pubrun, n)
+]
+file_io_loaded = "pubrun.capture.file_io" in sys.modules
+print(json.dumps({{
+    "missing_alias": missing_alias,
+    "missing_base": missing_base,
+    "mismatched": mismatched,
+    "file_io_loaded": file_io_loaded,
+}}))
 try:
     if pubrun.get_current_run():
         pubrun.stop()
@@ -835,12 +861,15 @@ except Exception:
 """
         result = subprocess.run(
             [PYTHON, "-c", script],
-            capture_output=True, text=True, timeout=20,
-            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+            capture_output=True, text=True, timeout=20, cwd=str(tmp_path),
+            env=self._clean_env(),
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         data = json.loads(result.stdout.strip().splitlines()[-1])
-        assert data["missing"] == [], f"{mode} alias missing: {data['missing']}"
+        assert data["missing_alias"] == [], f"{mode} alias missing: {data['missing_alias']}"
+        assert data["missing_base"] == [], f"{mode} parent pubrun missing: {data['missing_base']}"
+        assert data["mismatched"] == [], f"{mode} parent/alias mismatch: {data['mismatched']}"
+        assert data["file_io_loaded"] is False, f"{mode} eagerly imported pubrun.capture.file_io"
 
     def test_noconsole_alias_print_captures_to_stdout_log(self, tmp_path):
         """pubrun.print via the noconsole alias records to stdout.log even
@@ -857,7 +886,133 @@ print("CAPTURE_OK" if ok else "CAPTURE_FAIL")
         result = subprocess.run(
             [PYTHON, "-c", script],
             capture_output=True, text=True, timeout=20, cwd=str(tmp_path),
-            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+            env=self._clean_env(),
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "CAPTURE_OK" in result.stdout, f"stdout: {result.stdout}"
+
+    def test_nopatch_file_registration_lazy_unpatched_and_recorded(self, tmp_path):
+        """pubrun.nopatch supports external input/output registration without
+        eagerly importing pubrun.capture.file_io or patching builtins.open."""
+        in_path = tmp_path / "external_in.csv"
+        out_path = tmp_path / "external_out.csv"
+        in_path.write_text("col\n1\n", encoding="utf-8")
+        script = f"""
+import builtins, glob, json, sys
+from pathlib import Path
+
+orig_open = builtins.open
+import pubrun.nopatch as pubrun
+
+file_io_loaded_after_import = "pubrun.capture.file_io" in sys.modules
+open_unpatched_after_import = builtins.open is orig_open
+
+in_path = Path({str(in_path)!r})
+out_path = Path({str(out_path)!r})
+
+pubrun.register_input(in_path, label="raw_input")
+with builtins.open(out_path, "w", encoding="utf-8") as fh:
+    fh.write("result\\n42\\n")
+pubrun.register_output(out_path, label="derived_output")
+pubrun.stop()
+
+open_unpatched_after_stop = builtins.open is orig_open
+manifests = glob.glob("runs/pubrun-*/manifest.json")
+assert len(manifests) == 1, f"expected 1 manifest, got {{manifests}}"
+manifest = json.loads(Path(manifests[0]).read_text(encoding="utf-8"))
+data_files = manifest.get("data_files", {{}})
+print(json.dumps({{
+    "file_io_loaded_after_import": file_io_loaded_after_import,
+    "open_unpatched_after_import": open_unpatched_after_import,
+    "open_unpatched_after_stop": open_unpatched_after_stop,
+    "inputs": data_files.get("inputs", []),
+    "outputs": data_files.get("outputs", []),
+}}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=20, cwd=str(tmp_path),
+            env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["file_io_loaded_after_import"] is False
+        assert data["open_unpatched_after_import"] is True
+        assert data["open_unpatched_after_stop"] is True
+        assert len(data["inputs"]) == 1
+        assert data["inputs"][0]["label"] == "raw_input"
+        assert data["inputs"][0]["registration_source"] == "register_input"
+        assert data["inputs"][0]["path"] == os.path.abspath(str(in_path))
+        assert len(data["outputs"]) == 1
+        assert data["outputs"][0]["label"] == "derived_output"
+        assert data["outputs"][0]["registration_source"] == "register_output"
+        assert data["outputs"][0]["path"] == os.path.abspath(str(out_path))
+
+    def test_minimal_file_registration_lazy_unpatched_and_recorded(self, tmp_path):
+        """pubrun.minimal supports explicit start/stop external file registration
+        without eagerly importing pubrun.capture.file_io or patching builtins.open."""
+        in_path = tmp_path / "minimal_in.txt"
+        out_path = tmp_path / "minimal_out.txt"
+        in_path.write_text("alpha\n", encoding="utf-8")
+        script = f"""
+import builtins, glob, json, sys
+from pathlib import Path
+
+orig_open = builtins.open
+import pubrun.minimal as pubrun
+
+file_io_loaded_after_import = "pubrun.capture.file_io" in sys.modules
+open_unpatched_after_import = builtins.open is orig_open
+active_after_import = pubrun.get_current_run() is not None
+
+pubrun.start()
+file_io_loaded_after_start = "pubrun.capture.file_io" in sys.modules
+open_unpatched_after_start = builtins.open is orig_open
+
+in_path = Path({str(in_path)!r})
+out_path = Path({str(out_path)!r})
+
+pubrun.register_input(in_path, label="minimal_input")
+pubrun.register_output(out_path, label="minimal_output", defer=True)
+with builtins.open(out_path, "w", encoding="utf-8") as fh:
+    fh.write("beta\\n")
+pubrun.stop()
+
+open_unpatched_after_stop = builtins.open is orig_open
+manifests = glob.glob("runs/pubrun-*/manifest.json")
+assert len(manifests) == 1, f"expected 1 manifest, got {{manifests}}"
+manifest = json.loads(Path(manifests[0]).read_text(encoding="utf-8"))
+data_files = manifest.get("data_files", {{}})
+print(json.dumps({{
+    "file_io_loaded_after_import": file_io_loaded_after_import,
+    "open_unpatched_after_import": open_unpatched_after_import,
+    "active_after_import": active_after_import,
+    "file_io_loaded_after_start": file_io_loaded_after_start,
+    "open_unpatched_after_start": open_unpatched_after_start,
+    "open_unpatched_after_stop": open_unpatched_after_stop,
+    "inputs": data_files.get("inputs", []),
+    "outputs": data_files.get("outputs", []),
+}}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=20, cwd=str(tmp_path),
+            env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["file_io_loaded_after_import"] is False
+        assert data["open_unpatched_after_import"] is True
+        assert data["active_after_import"] is False
+        assert data["file_io_loaded_after_start"] is False
+        assert data["open_unpatched_after_start"] is True
+        assert data["open_unpatched_after_stop"] is True
+        assert len(data["inputs"]) == 1
+        assert data["inputs"][0]["label"] == "minimal_input"
+        assert data["inputs"][0]["registration_source"] == "register_input"
+        assert data["inputs"][0]["path"] == os.path.abspath(str(in_path))
+        assert len(data["outputs"]) == 1
+        assert data["outputs"][0]["label"] == "minimal_output"
+        assert data["outputs"][0]["registration_source"] == "register_output"
+        assert data["outputs"][0]["registered_before_creation"] is True
+        assert data["outputs"][0]["path"] == os.path.abspath(str(out_path))
