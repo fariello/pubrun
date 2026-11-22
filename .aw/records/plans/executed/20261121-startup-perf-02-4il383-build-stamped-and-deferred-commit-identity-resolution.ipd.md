@@ -6,7 +6,7 @@
 - Scope: Defer `pubrun.__commit__` via Python Enhancement Proposal 562 (PEP 562) module `__getattr__` in `src/pubrun/__init__.py`, enforce verified checkout ownership and bounded Git lookup, prefer version-checked build-stamped metadata for installed artifacts via `hatch_build.py`, `pyproject.toml`, and `scripts/update_commit_file.py`, eliminate duplicate `.pubrun.toml` parsing in `src/pubrun/_config_boot.py`, and add behavioral tests in `tests/test_commit_identity.py`.
 - Scope-Paths: src/pubrun/__init__.py, src/pubrun/_config_boot.py, hatch_build.py, pyproject.toml, scripts/update_commit_file.py, tests/test_commit_identity.py
 - Item-Dependencies: executed:fthyv5
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Defer pubrun.__commit__ resolution, prefer build-stamped identity for wheels, validate checkout ownership, and avoid duplicate boot TOML parsing
@@ -18,12 +18,12 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: 4il383
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 4il383 verified (set startup-perf, attempt 1).
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007, PR-008
 - 2026-11-22 draft (agent): created.
