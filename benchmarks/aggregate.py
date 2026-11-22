@@ -89,7 +89,14 @@ _GROUP_BASELINE = {
 }
 # hotpath scenarios pair explicitly (scenario -> baseline)
 _HOTPATH_BASELINE = {
+    # Legacy pairing, kept so older committed results still aggregate.
     "hotpath-open-pubrun": "hotpath-open-baseline",
+    # File provenance: stat-only versus full hashing.
+    "hotpath-open-stat": "hotpath-open-baseline",
+    "hotpath-open-hash-stream": "hotpath-open-baseline",
+    "hotpath-open-hash-fallback": "hotpath-open-baseline",
+    "hotpath-register-stat": "hotpath-open-baseline",
+    "hotpath-register-hash": "hotpath-open-baseline",
     "hotpath-print-tee": "hotpath-print-baseline",
 }
 

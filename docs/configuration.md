@@ -252,18 +252,25 @@ above.
 
 ### `[capture.file_io]`
 
-Controls how much detail `pubrun.open(...)` records for files it wraps. This does **not**
-globally intercept `open()` — pubrun never patches the builtin; it only governs files you
-explicitly route through `pubrun.open()`.
+Controls how much detail `pubrun.open(...)` records for files it wraps, and the default
+level for `pubrun.register_file()`/`register_input()`/`register_output()` (each accepts a
+per-call `level=` override). This does **not** globally intercept `open()`: pubrun never
+patches the builtin; it only governs files you explicitly route through `pubrun.open()` or
+register.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `level` | string | `"stat"` | Progressive detail level: `none` \| `name` \| `stat` \| `realpath` \| `hash`. `stat` records size/mtime/ctime via `fstat` on the open fd (~free, incl. on NFS) + the absolute path. `realpath` adds symlink resolution (**costlier on NFS/Lustre** — walks every path component). `hash` adds a SHA-256 of the file contents (reads every byte). `none` disables recording. |
-| `max_hash_bytes` | int | `0` | At `level = "hash"`, skip hashing files larger than this many bytes (`0` = no cap). |
+| `level` | string | `"stat"` | Progressive detail level: `none` \| `name` \| `stat` \| `realpath` \| `hash`. `stat` records size, mtime, ctime, inode and device via `fstat` on the already-open file descriptor (for `pubrun.open()`; a path `stat` for registration), plus the absolute path; it reads no file content. `realpath` adds symlink resolution (**costlier on NFS/Lustre**: walks every path component). `hash` adds a content digest (see `hash_algorithm`); `pubrun.open()` computes it from the bytes you read when it can, otherwise it re-reads the file. `none` disables recording. |
+| `max_hash_bytes` | int | `0` | At `level = "hash"`, do not hash a single file larger than this many bytes; the record gets `hash_status = "over_budget"` (`0` = no cap). |
+| `max_total_hash_bytes` | int | `0` | Run-wide cap on bytes hashed across all files. Once reached, later files get `hash_status = "over_budget"` (`0` = no cap). |
+| `max_total_hash_seconds` | float | `0.0` | Run-wide cap on time spent hashing. Once reached, later files get `hash_status = "over_budget"` (`0.0` = no cap). |
+| `hash_algorithm` | string | `"sha256"` | Digest algorithm: `sha256`, `sha512`, `sha1`, or `md5`. An unsupported value logs a warning and falls back to `sha256`. The `sha256` record field is filled only when the algorithm is `sha256`; `digest` always names the algorithm. |
+
+Budget use is reported per run in the manifest's `data_files.hashing_summary`.
 
 > **Changed in 1.4.0:** the default level is `stat` (metadata only). Previously
-> `pubrun.open()` always hashed; set `level = "hash"` to restore that. The recorded hash is
-> computed from the on-disk bytes at close, so it is correct regardless of read path.
+> `pubrun.open()` always hashed; set `level = "hash"` to restore that. A recorded hash
+> always describes the on-disk bytes, whether it came from the read stream or a re-read.
 
 ### `[capture.profiling]`
 

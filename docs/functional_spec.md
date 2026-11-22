@@ -610,6 +610,15 @@ Replay is **advisory, not guaranteed**. Environment differences between the orig
 | `tracked_run(**overrides)` | Context manager | Wraps `start()`/`stop()`. Sets outcome to `"failed"` on exception. |
 | `audit_run(**overrides)` | Decorator | Wraps a function in `start()`/`stop()`. Preserves return value. Sets outcome to `"failed"` on exception, then re-raises. |
 | `diff(a, b, ignores)` | Returns `dict` | Compares two run directories. Returns `{"added": ..., "removed": ..., "modified": ..., "same": ...}`. |
+| `report(name, data)` | Returns `None` | Writes a JSON (`dict`/`list`) or text report into the run directory and emits an annotation. |
+| `artifact(filename, content)` | Returns `None` | Writes a text or bytes file into the run directory (run-internal output) and emits an annotation. |
+| `print(*args, **kwargs)` | Returns `None` | Calls the builtin `print()` and appends the text to `stdout.log`, independently of console wrapping. |
+| `open(file, mode="r", **kwargs)` | Returns a file object | Wraps `builtins.open()` for that one file and records a `data_files` entry at `[capture.file_io].level`. Never patches the global `open()`. At `hash`, a sequential binary read or write is hashed as it streams; otherwise the file is re-read at close. |
+| `subprocess.run(...)` / `subprocess.Popen(...)` | As `subprocess` | Explicit subprocess wrappers that record argv, timing, and exit code without the global spy. |
+| `popen(cmd, mode="r", bufsize=-1)` | As `os.popen` | Tracked `os.popen()` replacement. |
+| `register_file(path, role="input", *, label, digest, digest_algorithm, level, verify_digest, defer, metadata)` | Returns `dict \| None` | Records an external file read or written by other code (for example a library) into `data_files.inputs`, `outputs`, or `mixed`, without wrapping its I/O. A caller digest is recorded as asserted unless `verify_digest=True`. Outputs may be registered before they exist and are completed at finalization. Returns `None` with no active run or at level `none`. |
+| `register_input(path, ...)` | Returns `dict \| None` | `register_file(path, role="input", ...)`. |
+| `register_output(path, ..., defer=False)` | Returns `dict \| None` | `register_file(path, role="output", ...)`. |
 
 ### 14.2 Re-Entrant Start Behavior
 
@@ -622,9 +631,13 @@ If `start()` is called while a run is already active:
 
 The following APIs are planned but not implemented:
 
-- `register_artifact()` — Track user-produced output files.
 - `register_metadata()` — Inject structured metadata into the manifest.
 - `register_seed()` — Record pseudorandom seeds for determinism tracking.
+
+The previously planned `register_artifact()` is retired and will not be added: use
+`pubrun.artifact()` to write a file into the run directory, and
+`pubrun.register_output()` or `pubrun.register_file()` to record an external file
+produced elsewhere (see 14.1).
 
 ---
 

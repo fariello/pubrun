@@ -20,7 +20,10 @@ median of a scenario minus its group baseline:
 - **feature** — vs `feature-baseline`; `feature-none` (pubrun active, everything
   off) isolates pubrun's fixed startup cost, so a single feature's *marginal*
   cost is its delta above `feature-none`.
-- **hotpath** — the patched `open()`/`print()` path vs the unpatched builtin.
+- **hotpath**: explicit per-call paths vs their unwrapped builtin: file
+  provenance through `pubrun.open()` and `pubrun.register_input()` at
+  `[capture.file_io].level = "stat"` and `"hash"` vs `builtins.open()` (pubrun
+  never patches `open()`), and the console tee vs plain `print()`.
 
 See [`benchmarks/README.md`](../benchmarks/README.md) to run it:
 
@@ -68,7 +71,10 @@ both `/4` (stored stats) and `/5` (recomputed) files, producing identical output
 | + hardware capture | CPU/RAM/GPU inspection | _TBD_ |
 | packages `imported-only` | Scan `sys.modules` | _TBD_ |
 | packages `full-environment` | Enumerate all distributions | _TBD_ |
-| patched `open()` read (8 MiB) | Per-byte hashing tax vs `builtins.open` | _TBD_ |
+| `pubrun.open()` read, `level = "stat"` (8 MiB) | Open-fd `fstat` provenance vs `builtins.open` | _TBD_ |
+| `pubrun.open()` read, `level = "hash"`, streamed (8 MiB) | Hashing the bytes as they are read | _TBD_ |
+| `pubrun.open()` read, `level = "hash"`, fallback (8 MiB) | Re-reading the file at close to hash it | _TBD_ |
+| `register_input()`, `level = "stat"` / `"hash"` (8 MiB) | Registering a file a library read | _TBD_ |
 | console tee (`capture_mode="standard"`) | Per-write tee/log tax | _TBD_ |
 
 ## Notes
@@ -252,6 +258,68 @@ Remaining overhead and limits:
 - These are package-capture function timings, not whole-run wall time. The standard harness (`benchmarks/harness.py`) measures whole runs through the `feature-packages-imported`, `feature-packages-transitive`, and `feature-packages-full` scenarios.
 
 To measure a shared filesystem such as Network File System (NFS) or Lustre, pass a directory on it as `--workdir`, for example `python3 benchmarks/package_capture_bench.py --workdir /path/to/shared/scratch --json-out results.json`. The synthetic `site-packages` trees are then created and read on that filesystem (the `ambient` profile still reads the interpreter's own installation), the detected filesystem type is reported, and only a dedicated temporary subdirectory is created inside `--workdir` and removed on exit. The JSON output is written locally, has hostnames, usernames, and machine-local paths redacted, and is never uploaded; the script submits no scheduler jobs.
+
+## File provenance: stat-only versus full hashing (single-machine local measurements)
+
+These numbers come from one machine and are **not** representative results; the
+multi-machine table above stays a placeholder. They show what each
+`[capture.file_io].level` costs when reading one file, and how many extra bytes pubrun
+reads to produce a digest.
+
+How they were collected: `benchmarks/workloads/file_read.py --measure-detail` was run
+once per fresh Python process for each mode, selected with `PUBRUN_BENCH_FILE_MODE`.
+Each process writes an 8 MiB temporary file (8,388,608 bytes), reads it in 64 KiB
+chunks inside a temporary `pubrun.tracked_run()`, reads the finalized manifest record,
+and removes every temporary file and run directory. Sequence: one cold pass (the first
+process for each mode), then 3 warm passes of 10 processes per mode (30 samples per
+mode). The baseline reads with `builtins.open()` and never imports pubrun. Nothing was
+uploaded or written under `benchmarks/results/`.
+
+Environment: Linux 6.8 (x86_64), Intel Core i7-6800K (12 logical CPUs), CPython 3.14.6,
+temporary directory on local `ext4` (file contents in the page cache), Git revision
+`7164b15` plus the uncommitted changes of plan `4gpguy` (workload and documentation
+only; no `src/pubrun/` changes).
+
+Columns: **Read total** is the time from the first read to the end of close (or of the
+registration call), which also includes the one-time lazy import of
+`pubrun.capture.file_io` in that process. **Close/register** is the time spent in
+`close()` for `pubrun.open()` modes, or in the `register_input()` call. Values are
+milliseconds: warm median (interquartile range) and warm p95; cold is the single first
+process. `extra_read_bytes` is the manifest's `hash_stats.extra_read_bytes`, confirmed
+by the Linux `/proc/self/io` `rchar` delta (about 8.4 MB for one read, about 17.0 MB
+when pubrun re-reads the file).
+
+| Mode | Level | Read total, warm median (IQR) | Read total, warm p95 | Read total, cold | Close/register, warm median (IQR) | Close/register, warm p95 | `extra_read_bytes` | `hash_status` / `observation_time` |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| `baseline` (`builtins.open`) | n/a | 1.51 (0.43) | 2.07 | 1.46 | n/a | n/a | 0 | n/a |
+| `open-stat` | `stat` | 3.36 (2.29) | 7.43 | 27.07 | 0.11 (0.04) | 0.22 | 0 | `disabled` / `at_close` |
+| `open-hash-stream` | `hash` | 24.86 (1.37) | 31.65 | 24.11 | 0.15 (0.02) | 0.20 | 0 | `completed` / `during_stream` |
+| `open-hash-fallback` | `hash` | 26.78 (2.76) | 33.66 | 27.64 | 22.59 (2.89) | 29.85 | 8,388,608 | `completed` / `at_close` |
+| `register-stat` | `stat` | 3.61 (2.78) | 8.56 | 2.71 | 1.08 (0.36) | 4.22 | 0 | `disabled` / `at_registration` |
+| `register-hash` | `hash` | 26.37 (2.86) | 42.84 | 26.39 | 23.98 (2.58) | 40.45 | 8,388,608 | `completed` / `at_registration` |
+
+What these measurements show on this machine:
+
+- **`stat` reads no file content.** Its close cost was about 0.1 ms and its
+  `register_input()` cost about 1 ms (which includes the first-call module import),
+  with zero extra bytes read.
+- **Hashing costs about 23 ms per 8 MiB here, whichever path computes it.** SHA-256
+  throughput, not I/O, dominates while the file is in the page cache.
+- **A streamed digest moves the cost into the reads and adds no I/O.** `open-hash-stream`
+  closed in about 0.15 ms and read zero extra bytes. The fallback and `register_input()`
+  at `hash` re-read the whole file (8,388,608 extra bytes), which roughly doubles the
+  bytes read.
+- The `open-stat` cold value (27 ms) includes first-time costs in that process that
+  were not isolated; the warm passes did not repeat it.
+
+Limits: one machine, one Python version, a page-cached local `ext4` file, and one file
+size. On a cold cache or a network filesystem such as NFS or Lustre the extra re-read
+of the fallback and of `register_input()` at `hash` costs real I/O, which these numbers
+do not show. To reproduce, run
+`PUBRUN_BENCH_FILE_MODE=<mode> python3 benchmarks/workloads/file_read.py --measure-detail`
+for each mode, or the `hotpath-open-*` and `hotpath-register-*` scenarios of
+`benchmarks/harness.py`, which report whole-process overhead against
+`hotpath-open-baseline`.
 
 ---
 

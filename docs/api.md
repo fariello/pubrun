@@ -318,8 +318,94 @@ with pubrun.open("results/output.json", "w") as f:
 > `[capture.file_io].level = "hash"` (or `capture={"file_io": {"level": "hash"}}` at
 > `pubrun.start(...)`). The `data_files` record shape is unchanged; `sha256` is `null`
 > unless the level is `hash`. Hashing is also skipped for files larger than
-> `[capture.file_io].max_hash_bytes` (0 = no cap). The recorded hash is always computed
-> from the on-disk bytes at close, so it is correct regardless of how the file was read.
+> `[capture.file_io].max_hash_bytes` (0 = no cap).
+
+#### How `pubrun.open()` hashes: streaming versus fallback
+
+At `level = "hash"`, `pubrun.open()` tries to compute the digest from the bytes your code
+already reads, so hashing costs no extra I/O:
+
+- **Streaming (single pass).** A binary read (`"rb"`) of a regular file that reads
+  sequentially from the start to the end, or a binary write/exclusive create (`"wb"`,
+  `"xb"`), is hashed as the bytes pass through. The record has
+  `observation_time = "during_stream"` and `hash_stats.extra_read_bytes = 0`.
+- **Fallback (re-read at close).** Text mode, a partial read, any `seek()` or
+  `truncate()`, access to the underlying `.raw`/`.buffer`, or append and `+` modes make
+  the streamed bytes unusable as a whole-file digest. pubrun then re-reads the file from
+  disk after close and records `observation_time = "at_close"`, with
+  `hash_stats.extra_read_bytes` equal to the bytes it re-read.
+
+Either way the digest describes the on-disk bytes, never a guess from a partial stream.
+
+#### File-change detection and race limits
+
+pubrun compares the open-fd `fstat` identity (device, inode, size, mtime) taken at open
+with the one taken just before close. If a file read through `pubrun.open()` changed in
+between, the record has `change_detected = true`, `change_details`, and, at `hash`,
+`hash_status = "file_changed"` with `evidence_strength = "changed_unverified"` and no
+digest. A fallback hash also re-checks identity around the re-read. These checks narrow
+but cannot close every race: a writer that restores size and mtime exactly, a change on a
+filesystem with coarse timestamps, or a change after pubrun's last observation is not
+detectable. Treat `verified_content` as "these were the bytes at observation time".
+
+### `pubrun.register_file(path, role="input", *, label=None, digest=None, digest_algorithm="sha256", level=None, verify_digest=False, defer=False, metadata=None)`
+
+Records provenance for a file that your code, or a library you cannot modify (pandas,
+PyArrow, NumPy, a C extension), reads or writes itself. It does **not** wrap or patch any
+reader or writer and does not patch `builtins.open`. The record goes into
+`data_files.inputs`, `data_files.outputs`, or `data_files.mixed` by `role`.
+
+*   **Arguments**:
+    *   `path`: local path (`str` or `os.PathLike`). Remote object-store URIs (for
+        example `s3://...`) are recorded as `entry_type = "unsupported_remote_uri"`
+        without network access.
+    *   `role`: `"input"`, `"output"`, or `"input_output"`.
+    *   `label`: optional logical name (for example `"training_data"`).
+    *   `digest` / `digest_algorithm`: a digest you already know. Without
+        `verify_digest`, it is recorded as **asserted** evidence
+        (`hash_status = "asserted"`, `evidence_source = "asserted"`, `sha256 = null`):
+        pubrun did not read the bytes.
+    *   `verify_digest`: if `True`, pubrun hashes the file and compares.
+        A match gives `verified_content` and `caller_digest.verified = true`; a mismatch
+        gives `hash_status = "failed"`, `hash_status_detail = "caller_digest_mismatch"`.
+    *   `level`: per-call override of `[capture.file_io].level`.
+    *   `defer`: for outputs, record a `pending` entry now and inspect the file later
+        (on a post-creation registration or at run finalization).
+    *   `metadata`: optional JSON-serializable dict stored on the record.
+*   **Return value**: the recorded provenance dict, or `None` when no run is active or
+    the effective level is `"none"`. Invalid arguments raise `ValueError`/`TypeError`
+    even without an active run.
+
+Registering an output that does not exist yet is allowed and records
+`registered_before_creation = true` with `hash_status = "pending"`; the entry is completed
+automatically when the run finalizes (`observation_time = "at_finalization"`).
+
+### `pubrun.register_input(path, *, label=None, digest=None, ...)` / `pubrun.register_output(path, *, label=None, digest=None, ..., defer=False)`
+
+Convenience wrappers for `register_file(path, role="input")` and
+`register_file(path, role="output")` with the same keyword arguments
+(`register_input` has no `defer`).
+
+```python
+import pubrun
+import pandas as pd
+
+pubrun.register_input("data/raw.parquet", label="raw", level="hash")    # verified
+pubrun.register_input("data/ref.csv", digest=known_sha256)              # asserted
+pubrun.register_output("results/summary.csv", label="summary", level="hash")  # before creation
+df = pd.read_parquet("data/raw.parquet")
+df.describe().to_csv("results/summary.csv")   # hashed when the run finalizes
+```
+
+A runnable, dependency-free version is `examples/12_external_file_provenance.py`.
+
+#### Which file API to use
+
+| You want to | Use |
+|---|---|
+| Write a file **into the run directory** (it becomes part of the run record) | `pubrun.artifact()` |
+| Read or write an external file **through your own code**, with provenance | `pubrun.open()` |
+| Record an external file that **a library reads or writes** | `pubrun.register_input()` / `register_output()` / `register_file()` |
 
 ### `pubrun.print(*args, **kwargs)`
 
@@ -370,9 +456,12 @@ When global hooks are permitted by the active import mode and enabled in configu
 | `annotate(msg, **kw)` | Inject custom events | Yes (configurable) |
 | `phase(name)` | Time a named code region | Yes (silent no-op) |
 | `report(name, data)` | Save structured custom report | Yes (configurable) |
-| `artifact(filename, content)` | Save raw artifact file | Yes (configurable) |
+| `artifact(filename, content)` | Save a file inside the run directory | Yes (configurable) |
 | `print(*args, **kw)` | Print + log to stdout.log | Yes (falls back to print) |
 | `open(file, mode, **kw)` | File I/O with provenance | Yes (falls back to open) |
+| `register_file(path, role, ...)` | Record an external file read or written elsewhere | Yes (returns `None`) |
+| `register_input(path, ...)` | `register_file` with `role="input"` | Yes (returns `None`) |
+| `register_output(path, ...)` | `register_file` with `role="output"` | Yes (returns `None`) |
 | `subprocess.run(...)` | Tracked subprocess execution | Yes (falls back to subprocess) |
 | `popen(cmd)` | Tracked os.popen replacement | Yes (falls back to popen) |
 | `tracked_run(**kw)` | Context manager lifecycle | N/A (creates run) |

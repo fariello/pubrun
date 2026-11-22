@@ -108,8 +108,21 @@ def all_scenarios() -> List[Scenario]:
                        config=_off_plus({"capture": {"packages": {"mode": "full-environment"}}})))
 
     # --- Group 3: hot-path taxes --------------------------------------------
-    S.append(Scenario("hotpath-open-baseline", "hotpath", "baseline", "file_read.py"))
-    S.append(Scenario("hotpath-open-pubrun", "hotpath", "auto", "file_read.py", config=_ALL_OFF))
+    # File provenance: stat-only versus full hashing (see workloads/file_read.py).
+    # The baseline never imports pubrun; each pubrun scenario sets
+    # [capture.file_io].level to what its PUBRUN_BENCH_FILE_MODE needs.
+    S.append(Scenario("hotpath-open-baseline", "hotpath", "baseline", "file_read.py",
+                      env={"PUBRUN_BENCH_FILE_MODE": "baseline"}))
+    for _name, _level, _mode in (
+        ("hotpath-open-stat", "stat", "open-stat"),
+        ("hotpath-open-hash-stream", "hash", "open-hash-stream"),
+        ("hotpath-open-hash-fallback", "hash", "open-hash-fallback"),
+        ("hotpath-register-stat", "stat", "register-stat"),
+        ("hotpath-register-hash", "hash", "register-hash"),
+    ):
+        S.append(Scenario(_name, "hotpath", "auto", "file_read.py",
+                          config=_off_plus({"capture": {"file_io": {"level": _level}}}),
+                          env={"PUBRUN_BENCH_FILE_MODE": _mode}))
     S.append(Scenario("hotpath-print-baseline", "hotpath", "baseline", "print_loop.py"))
     S.append(Scenario("hotpath-print-tee", "hotpath", "auto", "print_loop.py",
                        config=_off_plus({"console": {"capture_mode": "standard"}})))

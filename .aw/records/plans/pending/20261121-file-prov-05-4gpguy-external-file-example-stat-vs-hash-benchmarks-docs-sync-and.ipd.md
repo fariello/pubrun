@@ -24,6 +24,7 @@
 
 ## Workflow history
 
+- 2026-11-22 executed in lane run-20261122T143534Z-3922406 (agent): E-01..E-05 performed, V-01..V-05 pass; finalization left to runner.
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-21 to-review (agent): authored child plan 05 of Set `file-prov` graduating backlog item `x6alw4`.
@@ -53,36 +54,36 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Dependency-free external file registration example
 
-- [ ] E-01 Create `examples/12_external_file_provenance.py` demonstrating external input and output registration around an unmodified library-style component.
+- [x] E-01 Create `examples/12_external_file_provenance.py` demonstrating external input and output registration around an unmodified library-style component.
   - Depends on: none
   - Expected outcome: `examples/12_external_file_provenance.py` uses only the Python standard library (zero pandas or PyArrow dependency) and defines a library-style Comma-Separated Values (CSV) processor reading and writing files with unmodified `builtins.open()`. It registers an external input (verified hash), an external reference file (caller-supplied asserted digest), and an external output (registered before creation) using `pubrun.register_input()` and `pubrun.register_output()`. It asserts that `manifest.json` distinguishes verified content from caller-asserted evidence, cleans up its temporary dataset files, and exits 0 both standalone and via `python3 examples/verify_all.py`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Stat-versus-hash benchmarks and empirical measurements
 
-- [ ] E-02 Update `benchmarks/workloads/file_read.py`, `benchmarks/scenarios.py`, and `benchmarks/aggregate.py` to benchmark stat-only versus full hashing and capture close-time latency and extra bytes read.
+- [x] E-02 Update `benchmarks/workloads/file_read.py`, `benchmarks/scenarios.py`, and `benchmarks/aggregate.py` to benchmark stat-only versus full hashing and capture close-time latency and extra bytes read.
   - Depends on: E-01
   - Expected outcome: `benchmarks/workloads/file_read.py` removes the stale "patched `open()`" assumption, imports `pubrun` lazily only when `PUBRUN_BENCH_FILE_MODE != "baseline"` (keeping `hotpath-open-baseline` completely free of `pubrun` imports), supports modes `baseline`, `open-stat`, `open-hash-stream`, `open-hash-fallback`, `register-stat`, and `register-hash`, and provides a standalone `--measure-detail` command-line interface (CLI) mode printing JavaScript Object Notation (JSON) metrics (`total_s`, `close_or_register_s`, `extra_read_bytes`, `hash_status`, `observation_time`, and Linux `/proc/self/io` deltas when available) while cleaning up its temporary run and dataset files. `benchmarks/scenarios.py` replaces `hotpath-open-pubrun` with the explicit `_off_plus({"capture": {"file_io": {"level": ...}}})` scenarios, and `benchmarks/aggregate.py::_HOTPATH_BASELINE` pairs all five new scenarios to `hotpath-open-baseline` while keeping legacy `"hotpath-open-pubrun"` for older committed results. `pytest benchmarks/test_benchmarks.py benchmarks/test_share_safety.py -o addopts="" -v` exits 0. Local non-publishing measurements (at least 1 cold warmup pass plus >= 2 warm passes with >= 10 repetitions per mode; zero `--contribute`, GitHub Gist, or High-Performance Computing (HPC) scheduler runs, and zero leftover files in `benchmarks/results/`) capture environment (Operating System (OS), Central Processing Unit (CPU), Python version, filesystem type without local hostnames or home paths), Git revision, workload byte size, baseline, repetitions, cold versus warm separation, median, interquartile range (IQR) or standard deviation, 95th percentile (p95), close/registration latency, and `extra_read_bytes`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Documentation and specification reconciliation
 
-- [ ] E-03 Update `docs/api.md`, `docs/configuration.md`, and `docs/manifest.md` to match the implemented file-provenance contract.
+- [x] E-03 Update `docs/api.md`, `docs/configuration.md`, and `docs/manifest.md` to match the implemented file-provenance contract.
   - Depends on: E-02
   - Expected outcome: `docs/api.md` documents `pubrun.register_file()`, `pubrun.register_input()`, and `pubrun.register_output()`, clearly separates them from `pubrun.artifact()` (run-internal file writer) and `pubrun.open()` (per-file stream wrapper), updates the API Summary table, documents streaming-versus-fallback semantics for `pubrun.open()`, and documents file-change detection and race limits. `docs/configuration.md` documents `[capture.file_io]` keys `level`, `max_hash_bytes`, `max_total_hash_bytes`, `max_total_hash_seconds`, and `hash_algorithm`, and corrects the open-file-descriptor `fstat` and budget description. `docs/manifest.md` documents `data_files.inputs`, `data_files.outputs`, `data_files.mixed`, `data_files.hashing_summary`, and every `$defs.file_provenance_record` field (`role`, `label`, `open_disposition`, `registration_source`, `entry_type`, `hash_status`, `hash_status_detail`, `hash_algorithm`, `evidence_source`, `evidence_strength`, `observation_time`, `digest`, `caller_digest`, `change_detected`, `change_details`, `access_observations`, `hash_stats`, `registration_count`, `registered_before_creation`, `metadata`) plus documented race limits. All edits preserve concurrent sibling-Set additions already on disk and introduce zero em dashes (`U+2014`) or en dashes (`U+2013`) in added or modified lines.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Reconcile `docs/functional_spec.md` and `docs/performance.md` against the current code and measured benchmark results.
+- [x] E-04 Reconcile `docs/functional_spec.md` and `docs/performance.md` against the current code and measured benchmark results.
   - Depends on: E-03
   - Expected outcome: `docs/functional_spec.md` section 14.1 adds `open`, `artifact`, `report`, `print`, `subprocess`, `popen`, `register_file`, `register_input`, and `register_output`, and section 14.3 retires the stale `register_artifact()` placeholder (noting it is superseded by `pubrun.artifact()` for run-internal files and `pubrun.register_output()`/`register_file()` for external files). `docs/performance.md` replaces the stale "patched `open()`" descriptions in `## How overhead is measured` and `## Representative results`, preserves `## Representative results` intact as a multi-machine `_TBD_` placeholder, preserves any sibling-Set measurement subsections already on disk, and adds a clearly labeled single-machine subsection recording the measured stat-only versus full-hashing results (additional bytes read, close-time/registration latency, environment without personal paths or hostnames, Git revision, workload size, baseline, repetitions, cold versus warm passes, and dispersion) with zero unmeasured speedup claims. Added or modified lines in both files introduce zero em dashes (`U+2014`) or en dashes (`U+2013`).
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Whole-Set validation
 
-- [ ] E-05 Execute full repository validation (`pytest tests/ -v`, `python3 examples/verify_all.py`, `pytest benchmarks/test_benchmarks.py benchmarks/test_share_safety.py -o addopts="" -v`, `python3 scripts/sanitize_paths.py --check --all`, `git status --short`, and import-isolation checks) and record the pre-release Continuous Integration (CI) matrix scope.
+- [x] E-05 Execute full repository validation (`pytest tests/ -v`, `python3 examples/verify_all.py`, `pytest benchmarks/test_benchmarks.py benchmarks/test_share_safety.py -o addopts="" -v`, `python3 scripts/sanitize_paths.py --check --all`, `git status --short`, and import-isolation checks) and record the pre-release Continuous Integration (CI) matrix scope.
   - Depends on: E-04
   - Expected outcome: Full `pytest tests/ -v`, `python3 examples/verify_all.py`, `pytest benchmarks/test_benchmarks.py benchmarks/test_share_safety.py -o addopts="" -v`, `python3 scripts/sanitize_paths.py --check --all`, and fresh-subprocess import-isolation verification (`import pubrun` neither patches `builtins.open` nor imports `pubrun.report.checks` or `pubrun.capture.file_io`) all exit 0 with actual output captured in `Observed evidence`. `git status --short` shows only declared Scope-Paths (zero stray benchmark results or temporary files), and the pre-release requirement to pass the repository's supported OS/Python CI matrix (`.github/workflows/ci.yml`: Linux, macOS, Windows across Python 3.8 through 3.14) is recorded honestly.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -170,30 +171,30 @@ None. (Public API names, `[capture.file_io]` config keys, and manifest field nam
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste actual command output of `python3 examples/12_external_file_provenance.py` (printing `[PASS] PASS: 12_external_file_provenance.py`, exit code 0) and `python3 examples/verify_all.py` (printing `[SUCCESS] All examples passed.`, exit code 0).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 examples/12_external_file_provenance.py` -> `Testing 12_external_file_provenance...` / `raw_observations:   completed / verified_content` / `reference_lookup:   asserted / asserted_content` / `aggregated_summary: completed / verified_content` / `[PASS] PASS: 12_external_file_provenance.py`, `EXIT=0`. `python3 examples/verify_all.py` -> `[PASS] PASS: 00_auto_start.py` ... `[PASS] PASS: 11_cli_report.py`, `[PASS] PASS: 12_external_file_provenance.py`, `[SUCCESS] All examples passed.`, `VERIFY_EXIT=0`. Example uses only the standard library (csv, hashlib, json, shutil, tempfile) and removes its temporary directory (asserted in-script).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Paste `git diff --stat -- benchmarks/workloads/file_read.py benchmarks/scenarios.py benchmarks/aggregate.py` (confirming lazy `pubrun` import in `file_read.py`, updated hotpath scenarios, and `_HOTPATH_BASELINE` pairings preserving legacy `hotpath-open-pubrun`), `pytest benchmarks/test_benchmarks.py benchmarks/test_share_safety.py -o addopts="" -v` output (exit code 0), plus actual output of the controlled stat-versus-hash benchmark run showing environment (without personal paths or hostnames), Git revision, workload size, baseline, repetitions, cold versus warm passes, median, dispersion (IQR/stdev and p95), close/registration latency, and additional bytes read (`extra_read_bytes`), and confirmation that zero temporary files remain in `benchmarks/results/`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff --stat` -> `benchmarks/aggregate.py | 7 ++`, `benchmarks/scenarios.py | 17 ++-`, `benchmarks/workloads/file_read.py | 213 +++---`, `3 files changed, 219 insertions(+), 18 deletions(-)`. `file_read.py` imports `pubrun` only inside non-baseline branches (`PUBRUN_BENCH_FILE_MODE=baseline python3 -X importtime benchmarks/workloads/file_read.py 2>&1 | grep -c pubrun` -> `0`). Pairing check: `hotpath-open-pubrun hotpath-open-baseline False True` (legacy key kept, scenario retired), `hotpath-open-stat/-hash-stream/-hash-fallback`, `hotpath-register-stat/-hash` -> `hotpath-open-baseline True True`. All six hotpath-open/register scenarios ran via `harness._build_child_command` with exit 0. `pytest benchmarks/test_benchmarks.py benchmarks/test_share_safety.py -o addopts="" -q` -> `23 passed, 3 skipped in 355.98s`, `BENCH_EXIT=0`. Measurement (1 cold pass + 3 warm passes x 10 reps, fresh process per sample, 8388608-byte file; env Linux 6.8, Intel Core i7-6800K 12 CPUs, CPython 3.14.6, tmp on ext4, git `7164b15`): warm median total ms (IQR, p95) / close-or-register ms / extra_read_bytes: baseline 1.508 (0.429, 2.074) / n/a / 0; open-stat 3.358 (2.288, 7.434) / 0.111 / 0 (`disabled`,`at_close`); open-hash-stream 24.855 (1.368, 31.646) / 0.149 / 0 (`completed`,`during_stream`); open-hash-fallback 26.777 (2.764, 33.663) / 22.59 / 8388608 (`completed`,`at_close`); register-stat 3.607 (2.775, 8.563) / 1.077 / 0; register-hash 26.369 (2.859, 42.836) / 23.983 / 8388608. `/proc/self/io` rchar median: 8388721 baseline, 16962503 for fallback and register-hash. `ls benchmarks/results` -> only the pre-existing committed `pubrun-bench-50687292-20260720T174137Z.redacted.json`; no new files.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Paste `git diff --stat -- docs/api.md docs/configuration.md docs/manifest.md` and key diff excerpts confirming updated sections cover `register_file`/`register_input`/`register_output`, `pubrun.artifact()` boundary, `[capture.file_io]` budgets, `data_files.mixed`/`hashing_summary` and `$defs.file_provenance_record` fields, and race limits, plus output of a Python check over added (`+`) lines of `git diff -U0 -- docs/api.md docs/configuration.md docs/manifest.md` reporting zero `U+2014` or `U+2013` characters.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff --stat` -> `docs/api.md | 95 +++`, `docs/configuration.md | 21 ++--`, `docs/manifest.md | 60 +++--`, `3 files changed, 159 insertions(+), 17 deletions(-)`. api.md adds `register_file`/`register_input`/`register_output` sections, a 'Which file API to use' table separating `pubrun.artifact()` / `pubrun.open()` / registration, streaming-versus-fallback and file-change/race-limit subsections, and three API Summary rows. configuration.md documents `level`, `max_hash_bytes`, `max_total_hash_bytes`, `max_total_hash_seconds`, `hash_algorithm` and corrects the fd `fstat`/re-read description. manifest.md documents `inputs`/`outputs`/`mixed`/`hashing_summary` and every `$defs.file_provenance_record` field plus race limits. Dash check over added lines of `git diff -U0 -- docs/` -> `dash lines: 0`.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Paste `git diff --stat -- docs/functional_spec.md docs/performance.md` and key diff excerpts confirming `docs/functional_spec.md` section 14.1/14.3 reconciliation, intact `## Representative results` `_TBD_` placeholder and single-machine stat-versus-hash measurement subsection (with environment, Git revision, dispersion, latency, and `extra_read_bytes`, zero local hostnames/paths) in `docs/performance.md`, plus output of a Python check over added (`+`) lines of `git diff -U0 -- docs/functional_spec.md docs/performance.md` reporting zero `U+2014` or `U+2013` characters.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff --stat` -> `docs/functional_spec.md | 15 ++++++++++-`, `docs/performance.md | 72 +++`, `2 files changed, 84 insertions(+), 3 deletions(-)`. functional_spec 14.1 adds `report`, `artifact`, `print`, `open`, `subprocess.run/Popen`, `popen`, `register_file`, `register_input`, `register_output`; 14.3 retires `register_artifact()` pointing to `artifact()` and `register_output()`/`register_file()`. performance.md: stale 'patched `open()`' text replaced in `## How overhead is measured` and the `## Representative results` table (still all `_TBD_`, `grep -c _TBD_` -> 14); new section `## File provenance: stat-only versus full hashing (single-machine local measurements)` with environment (no hostnames/paths), git `7164b15`, 8 MiB size, baseline, 1 cold + 3x10 warm, median/IQR/p95, close/register latency, `extra_read_bytes`. Sibling sections (durability, capture-isolation, package capture) untouched. Dash check over added lines -> `dash lines: 0`.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Paste full `pytest tests/ -v` summary and exit code (0), `python3 examples/verify_all.py` exit code (0), `pytest benchmarks/test_benchmarks.py benchmarks/test_share_safety.py -o addopts="" -v` exit code (0), `python3 scripts/sanitize_paths.py --check --all` exit code (0), `git status --short` (only declared Scope-Paths, zero stray files), and subprocess output of `python3 -c "import builtins, sys; orig = builtins.open; import pubrun; assert builtins.open is orig; assert 'pubrun.report.checks' not in sys.modules and 'pubrun.capture.file_io' not in sys.modules; pubrun.stop(); print('WHOLE_SET_ISOLATED')"` printing `WHOLE_SET_ISOLATED` with exit code 0, plus explicit note of the pre-release `.github/workflows/ci.yml` OS/Python matrix gate.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/ -v` -> `1362 passed, 2 skipped in 417.43s (0:06:57)`, `PYTEST_EXIT=0`. `aw suite` (xdist) -> `1 failed, 1363 passed`: `tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches` (`assert is_same_process(os.getpid(), ..., expected_script="pytest")` false under an xdist worker command line); passes serially (`27 passed` x3 for tests/test_liveness.py), pre-existing and tracked as backlog `12rcu8`; this plan changes no `src/` or `tests/` file. `python3 examples/verify_all.py` -> `VERIFY_EXIT=0`. Benchmark tests -> `BENCH_EXIT=0`. `python3 scripts/sanitize_paths.py --check --all` -> `SANITIZE_EXIT=0`. Import isolation -> `WHOLE_SET_ISOLATED`, `ISO_EXIT=0`. `git status --short` -> only the 8 modified Scope-Paths, the new example, and the new backlog item `cp1jvn` (filed for the untracked `outputs/` directory that `examples/minimal-research-workflow/analysis.py` leaves in the repo root during verify_all; removed after the run). CI matrix: `.github/workflows/ci.yml` (Linux, macOS, Windows x Python 3.8-3.14) was NOT run in this single Linux worktree; it remains a pre-release gate on push/PR.
+  - Result: pass
 
 ## Approval and execution gate
 

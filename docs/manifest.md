@@ -393,16 +393,62 @@ misleading nulls.
 
 ## `data_files`
 
-Provenance-tracked file I/O (populated by `pubrun.open()`).
+Provenance-tracked files: files opened through `pubrun.open()` and files recorded with
+`pubrun.register_file()`, `pubrun.register_input()`, or `pubrun.register_output()`. Files
+written into the run directory with `pubrun.artifact()` are part of the run itself and are
+not listed here.
 
 | Field | Type | Description |
 |---|---|---|
-| `inputs` | list[object] | Files read via `pubrun.open()`. Fields depend on `[capture.file_io].level`: always `path` + (`accessed_at_utc`); at `stat`+ also `size_bytes`, `mtime`, `ctime`; at `realpath`+ also `realpath`; `sha256` is present at every level but is **`null` unless the level is `hash`**. |
-| `outputs` | list[object] | Files written via `pubrun.open()`. Same fields as `inputs`, with `modified_at_utc` instead of `accessed_at_utc`. |
+| `inputs` | list[object] | Files read (`role = "input"`). Each entry is a file provenance record (below). |
+| `outputs` | list[object] | Files written (`role = "output"`). |
+| `mixed` | list[object] | Files both read and written (`role = "input_output"`, for example a `"r+"` open or `register_file(..., role="input_output")`). |
+| `hashing_summary` | object \| null | Run-wide hashing budget and outcome counters: `max_hash_bytes`, `max_total_hash_bytes`, `max_total_hash_seconds`, `hash_algorithm`, `total_bytes_hashed`, `total_hash_seconds`, `files_hashed`, `files_skipped_over_budget`, `files_changed`, `files_failed`. Present once the run has used its hashing budget (for example a file handled at `hash` level); otherwise absent. |
+
+### File provenance record (`$defs.file_provenance_record`)
+
+Which fields appear depends on the effective `[capture.file_io].level`: `name` records the
+path as given; `stat` and above add the absolute path and `fstat`/`stat` metadata
+(`size_bytes`, `mtime`, `ctime`, `mtime_ns`, `inode`, `device`); `realpath` and above add
+`realpath`, `is_symlink`, and `symlink_target`; `hash` adds a content digest. `sha256` is
+present at every level but is `null` unless a SHA-256 digest was observed.
+
+| Field | Type | Description |
+|---|---|---|
+| `path` | string | Absolute path (the path as given at `name` level). Required. |
+| `role` | string | `input` \| `output` \| `input_output`. |
+| `label` | string \| null | Caller-supplied logical name. |
+| `mode` | string \| null | The `open()` mode string (`pubrun.open()` records only). |
+| `open_disposition` | string \| null | `read` \| `write` \| `append` \| `exclusive_create` \| `read_write`, derived from the open mode. |
+| `registration_source` | string \| null | `pubrun.open` \| `register_file` \| `register_input` \| `register_output`. |
+| `entry_type` | string \| null | `file` \| `directory` \| `symlink` \| `special` \| `missing` \| `unsupported_remote_uri`. |
+| `hash_status` | string \| null | `completed` (digest observed by pubrun) \| `disabled` (level below `hash`) \| `over_budget` \| `unavailable` (missing file, directory, remote URI) \| `failed` (read error or `caller_digest_mismatch`) \| `file_changed` (changed while observed) \| `asserted` (caller-supplied digest, not read) \| `pending` (output registered before creation). |
+| `hash_status_detail` | string \| null | Human-readable reason for a non-`completed` status. |
+| `hash_algorithm` | string \| null | Algorithm of `digest`, or `null` when there is none. |
+| `digest` | object \| null | `{algorithm, value}` of the digest pubrun observed, or of an asserted digest when `hash_status = "asserted"`. |
+| `caller_digest` | object \| null | `{algorithm, value, verified}` as supplied by the caller. `verified` is `true`/`false` after `verify_digest=True`, else `null`. |
+| `evidence_source` | string \| null | `observed` (pubrun looked at the file) \| `asserted` (taken from the caller) \| `none`. |
+| `evidence_strength` | string \| null | `verified_content` \| `asserted_content` \| `metadata_only` \| `path_only` \| `changed_unverified` \| `unavailable`. Read this before trusting a digest. |
+| `observation_time` | string \| null | When the evidence was gathered: `during_stream` \| `at_close` \| `at_registration` \| `at_finalization` \| `caller_supplied` \| `not_observed`. |
+| `change_detected` | bool | `true` when the file's identity (size, mtime, and inode/device where reported) changed while pubrun observed it. |
+| `change_details` | object \| null | Before/after identity fields that differed. |
+| `access_observations` | object \| null | `pubrun.open()` only: `bytes_read`, `bytes_written`, `read_calls`, `write_calls`, `seek_used`, `truncate_used`, `eof_reached`, `raw_or_buffer_accessed`. |
+| `hash_stats` | object \| null | `bytes_hashed`, `extra_read_bytes` (bytes pubrun read beyond what the caller read; `0` for a streamed digest), `hash_duration_seconds`. |
+| `registration_count` | int | Number of registrations merged into this record (>= 1). |
+| `registered_before_creation` | bool | `true` when an output was registered before it existed. |
+| `metadata` | object \| null | Caller-supplied JSON metadata from `register_file(..., metadata=...)`. |
+| `accessed_at_utc` / `modified_at_utc` | number \| null | POSIX time of the read or write observation. |
+| `registered_at_utc` / `last_observed_at_utc` | number \| null | POSIX time of first registration and of the latest observation. |
+
+**Race limits.** Identity checks compare `fstat`/`stat` snapshots, so they narrow but
+cannot close every race: a writer that restores size and mtime exactly, coarse filesystem
+timestamps, or a change after pubrun's last observation goes undetected.
+`verified_content` means "these were the bytes when pubrun observed them", as stated by
+`observation_time`; it is not a guarantee about the file at any later time.
 
 > The default `[capture.file_io].level` is `stat` (metadata, no hashing). See
 > [Configuration](configuration.md) → `[capture.file_io]` and the API docs for
-> `pubrun.open()`.
+> `pubrun.open()` and `pubrun.register_file()`.
 
 ---
 
