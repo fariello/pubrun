@@ -56,32 +56,32 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Measurement harness and scenario coverage
 
-- [ ] E-01 Create `benchmarks/startup_breakdown.py` to measure import-only, auto-start, startup capture, workload, finalization, subprocess spawns, serialization, and synchronization costs in fresh child processes.
+- [x] E-01 Create `benchmarks/startup_breakdown.py` to measure import-only, auto-start, startup capture, workload, finalization, subprocess spawns, serialization, and synchronization costs in fresh child processes.
   - Depends on: none
   - Expected outcome: `benchmarks/startup_breakdown.py` uses Python standard library modules only (compatible with Python 3.8 through 3.14) and supports `--iterations`, `--passes`, `--warmup`, `--workdir`, `--durability-policies`, and `--out` with explicit CLI input validation. It creates and cleans up only a dedicated ephemeral subdirectory inside `--workdir`, isolates child `PUBRUN_*` and user-config environment variables, and never invokes GitHub, Gist, or scheduler commands. It runs clean uninstrumented timing probes alongside dedicated instrumented counter/serialization probes so `subprocess`/`json` wrappers do not distort wall-clock timings, separates import, startup capture, workload, and finalization costs, counts spawned `git` processes, `manifest.json`/`config.resolved.json` atomic writes, and `os.fsync` calls, compares source-checkout layout against isolated installed-package and nested-user-repo layouts (verifying `pubrun.__file__`), and reports Pass 1 (cold) through Pass N (warm) median, mean, 95th percentile (p95), standard deviation (stdev), and Interquartile Range (IQR) in milliseconds alongside absolute overhead (ms) and relative overhead (%) for short (`noop.py`) and long (`cpu_burn.py`) workloads. All emitted JSON and Markdown output omits raw paths, scrubs hostname, username, home directory, `--workdir`, and repository root substrings, and passes `benchmarks/share_safety.py::check_share_safe` before emission.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update `benchmarks/scenarios.py` to add a realistic default-config startup scenario (`startup-auto-default`, measuring `auto` with default config rather than `_ALL_OFF` only) while preserving full `pubrun-benchmark/5` schema conformance and existing scenario names.
+- [x] E-02 Update `benchmarks/scenarios.py` to add a realistic default-config startup scenario (`startup-auto-default`, measuring `auto` with default config rather than `_ALL_OFF` only) while preserving full `pubrun-benchmark/5` schema conformance and existing scenario names.
   - Depends on: E-01
   - Expected outcome: `benchmarks/scenarios.py::all_scenarios` retains all existing scenarios unchanged and adds `startup-auto-default` in group `"startup"` so `benchmarks/harness.py` tracks default auto-start overhead alongside `_ALL_OFF` `import-auto`. `benchmarks/test_benchmarks.py`, `benchmarks/test_share_safety.py`, and `tests/test_bench_command.py` pass without error.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Update `benchmarks/README.md` to document `benchmarks/startup_breakdown.py`, how to run it locally or on a shared filesystem via `--workdir`, how cold versus warm passes and dispersion metrics are reported, and that no submission or scheduler job is executed automatically.
+- [x] E-03 Update `benchmarks/README.md` to document `benchmarks/startup_breakdown.py`, how to run it locally or on a shared filesystem via `--workdir`, how cold versus warm passes and dispersion metrics are reported, and that no submission or scheduler job is executed automatically.
   - Depends on: E-02
   - Expected outcome: `benchmarks/README.md` documents the breakdown script flags, output schema, and local-versus-shared filesystem testing instructions without em or en dashes in newly added prose.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Behavioral tests and pre-change baseline capture
 
-- [ ] E-04 Create `tests/test_startup_benchmark.py` with behavioral tests exercising `benchmarks/startup_breakdown.py` end-to-end on small iteration counts.
+- [x] E-04 Create `tests/test_startup_benchmark.py` with behavioral tests exercising `benchmarks/startup_breakdown.py` end-to-end on small iteration counts.
   - Depends on: E-03
   - Expected outcome: Tests execute `benchmarks/startup_breakdown.py` via Python function calls and subprocess CLI (`--iterations 2 --passes 2 --warmup 0`, plus `--iterations 1` edge case and invalid CLI argument rejection). They verify phase breakdown keys (import, startup, workload, finalization), `git`/write/`fsync`/serialization counters, installed-layout and nested-repo scenarios, cold-versus-warm pass arrays, dispersion statistics (median, mean, p95, stdev, IQR), absolute ms and relative overhead %, environment/filesystem metadata, redaction of home paths, hostnames, and custom `--workdir` paths (validated via `check_share_safe`), and preservation of pre-existing sibling files inside `--workdir` after cleanup.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Run `tests/test_startup_benchmark.py`, `tests/test_bench_command.py`, `benchmarks/test_benchmarks.py`, `benchmarks/test_share_safety.py`, and the pre-change baseline measurement (`python benchmarks/startup_breakdown.py --passes 3 --iterations 15 --warmup 1`) against unmodified `src/pubrun/`, record the full baseline summary and proposed baseline-derived targets in `V-05`, and leave no stray unredacted files in the working tree.
+- [x] E-05 Run `tests/test_startup_benchmark.py`, `tests/test_bench_command.py`, `benchmarks/test_benchmarks.py`, `benchmarks/test_share_safety.py`, and the pre-change baseline measurement (`python benchmarks/startup_breakdown.py --passes 3 --iterations 15 --warmup 1`) against unmodified `src/pubrun/`, record the full baseline summary and proposed baseline-derived targets in `V-05`, and leave no stray unredacted files in the working tree.
   - Depends on: E-04
   - Expected outcome: All targeted test suites exit 0. The redacted pre-change baseline output is pasted in `V-05` with environment, git revision, filesystem type, repetitions, cold/warm pass medians, mean, p95, stdev, IQR, subprocess/write/fsync/serialization counters, absolute milliseconds, and relative overhead percentages for short and long workloads. `V-05` records concrete baseline-derived improvement targets for `4il383` (commit identity) and `tkmm5p` (write coalescing, durability, and capture budgets) proposed for maintainer agreement, and `git status -s` is clean of stray or unredacted result files.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -189,30 +189,247 @@ Updates `benchmarks/README.md` for the new measurement script. User-facing perfo
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Diff or file inspection confirming `benchmarks/startup_breakdown.py` is stdlib-only (Python 3.8+ safe), non-publishing, separates clean wall-clock timing probes from instrumented counter/serialization probes, separates import, startup capture, workload, and finalization phases, covers checkout, installed, and installed-nested layouts with `pubrun.__file__` verification and temp Git-repo cwd for auto scenarios, isolates child `PUBRUN_*` and config env vars, cleans up only an ephemeral subdirectory under `--workdir`, runs `benchmarks/share_safety.py::check_share_safe`, and validates CLI flags, plus pasted `python benchmarks/startup_breakdown.py --help` output (exit code 0).
   - Observed evidence:
-  - Result: pending
+    Inspected `benchmarks/startup_breakdown.py`: uses stdlib modules only (`from __future__ import annotations`, `typing` generics, Python 3.8+ compatible), performs zero GitHub/Gist/push/scheduler calls, separates uninstrumented wall-clock and phased timing probes from dedicated instrumented counter probes (`subprocess.Popen.__init__`, `os.replace`, `os.fsync`, `json.dump`/`json.dumps` attributed to `pubrun.writer`), verifies `pubrun.__file__` under expected layout roots (`checkout`, `installed`, `installed-nested`), initializes a deterministic temporary Git repo (`sample_repo`) for auto/phased scenarios, strips `PUBRUN_*` and `GIT_*` env vars and isolates `XDG_CONFIG_HOME`/`APPDATA`, creates and removes only `tempfile.TemporaryDirectory(prefix="pubrun-startup-bench-", dir=workdir)`, redacts keys and substrings, validates via `benchmarks/share_safety.py::check_share_safe` failing closed on violations, and validates all CLI flags.
+    `python benchmarks/startup_breakdown.py --help` (exit code 0):
+    ```text
+    usage: startup_breakdown.py [-h] [--iterations ITERATIONS] [--passes PASSES]
+                                [--warmup WARMUP] [--workdir WORKDIR]
+                                [--durability-policies DURABILITY_POLICIES]
+                                [--out OUT]
 
-- [ ] V-02 validates E-02
+    Local, non-publishing startup and finalization overhead breakdown benchmark
+    for pubrun.
+
+    options:
+      -h, --help            show this help message and exit
+      --iterations ITERATIONS
+                            Measured iterations per scenario per pass (integer >=
+                            1, default: 15).
+      --passes PASSES       Number of measured passes from Pass 1 (cold) to Pass N
+                            (warm) (integer >= 1, default: 3).
+      --warmup WARMUP       Discarded warmup iterations before each pass (integer
+                            >= 0, default: 1).
+      --workdir WORKDIR     Optional parent directory for ephemeral benchmark
+                            files (useful for testing local storage vs a shared
+                            filesystem mount). Only a dedicated ephemeral
+                            subdirectory inside --workdir is created and removed.
+      --durability-policies DURABILITY_POLICIES
+                            Comma-separated subset of
+                            default,fsync,finalize,atomic,strict (default:
+                            default).
+      --out OUT             Optional path to write the redacted JSON breakdown
+                            report.
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Diff of `benchmarks/scenarios.py` showing `startup-auto-default` added without modifying existing scenarios, plus pasted `pytest benchmarks/test_benchmarks.py benchmarks/test_share_safety.py -o addopts="" -v` and `pytest tests/test_bench_command.py -v` output (exit code 0).
   - Observed evidence:
-  - Result: pending
+    `git diff -- benchmarks/scenarios.py`:
+    ```diff
+    --- a/benchmarks/scenarios.py
+    +++ b/benchmarks/scenarios.py
+    @@ -82,6 +82,7 @@ def all_scenarios() -> List[Scenario]:
+         for mode in ("auto", "noauto", "nopatch", "noconsole", "minimal"):
+             S.append(Scenario(f"import-{mode}", "startup", mode, "noop.py",
+                               config=_ALL_OFF if mode in ("auto", "nopatch", "noconsole") else {}))
+    +    S.append(Scenario("startup-auto-default", "startup", "auto", "noop.py", config={}))
+    ```
+    `pytest benchmarks/test_benchmarks.py benchmarks/test_share_safety.py -o addopts="" -v` (exit code 0):
+    ```text
+    collected 26 items
+    benchmarks/test_share_safety.py::test_windows_userprofile_path_rejected PASSED [  3%]
+    benchmarks/test_share_safety.py::test_unredacted_python_executable_rejected PASSED [  7%]
+    benchmarks/test_share_safety.py::test_version_is_exposed PASSED          [ 11%]
+    benchmarks/test_share_safety.py::test_text_wrapper_parse_failure PASSED  [ 15%]
+    benchmarks/test_share_safety.py::test_redacted_result_is_safe PASSED     [ 19%]
+    benchmarks/test_share_safety.py::test_missing_field_is_not_unsafe PASSED [ 23%]
+    benchmarks/test_share_safety.py::test_home_path_anywhere_rejected PASSED [ 26%]
+    benchmarks/test_share_safety.py::test_text_wrapper_non_object PASSED     [ 30%]
+    benchmarks/test_share_safety.py::test_unredacted_hostname_rejected PASSED [ 34%]
+    benchmarks/test_benchmarks.py::TestSchema5AggregateParity::test_aggregate_reads_both_versions PASSED [ 38%]
+    benchmarks/test_benchmarks.py::TestSchema5AggregateParity::test_parity_from_same_timings PASSED [ 42%]
+    benchmarks/test_benchmarks.py::test_bench_pubrun_print SKIPPED (requ...) [ 46%]
+    benchmarks/test_benchmarks.py::test_bench_import_pubrun_cost SKIPPED     [ 50%]
+    benchmarks/test_benchmarks.py::test_bench_builtin_open_read SKIPPED      [ 53%]
+    benchmarks/test_benchmarks.py::TestSchema5Shape::test_both_timestamps_present PASSED [ 57%]
+    benchmarks/test_benchmarks.py::TestSchema5Shape::test_baseline_same_compact_shape PASSED [ 61%]
+    benchmarks/test_benchmarks.py::TestSchema5Shape::test_schema_is_v5 PASSED [ 65%]
+    benchmarks/test_benchmarks.py::TestSchema5Shape::test_no_stored_stats PASSED [ 69%]
+    benchmarks/test_benchmarks.py::TestSchema5Shape::test_round_trips PASSED [ 73%]
+    benchmarks/test_benchmarks.py::TestSchema5Shape::test_timings_rounded_6dp_and_grouped_by_pass PASSED [ 76%]
+    benchmarks/test_benchmarks.py::TestSchema5Shape::test_scenario_defs_present_and_no_top_scenarios PASSED [ 80%]
+    benchmarks/test_benchmarks.py::TestSchema5Shape::test_compact_no_indent PASSED [ 84%]
+    benchmarks/test_benchmarks.py::TestSchema5Conformance::test_committed_redacted_sample_conforms PASSED [ 88%]
+    benchmarks/test_benchmarks.py::TestSchema5Conformance::test_broken_result_is_rejected PASSED [ 92%]
+    benchmarks/test_benchmarks.py::TestSchema5Conformance::test_fresh_result_and_redaction_conform PASSED [ 96%]
+    benchmarks/test_benchmarks.py::TestSchema5Conformance::test_schema_is_well_formed PASSED [100%]
+    ================== 23 passed, 3 skipped in 240.73s (0:04:00) ===================
+    ```
+    `pytest tests/test_bench_command.py -v` (exit code 0):
+    ```text
+    collected 63 items
+    tests/test_bench_command.py (63/63 PASSED, including TestRedaction, TestHarnessResolution, TestSlurmSafety, TestSchedulerDetection, TestSchedulerSubmitSafety, TestBenchCLI, TestIoBaselineScenarios, TestSubmissionVerifier, TestAttachFlowSubmitFile, TestAttachFlowClient, TestHarnessRedactedOnlyDefault, TestGistInlineContribution, TestSchema5RawTimings, TestBenchTiers)
+    ======================== 63 passed in 125.38s (0:02:05) ========================
+    ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Diff of `benchmarks/README.md` showing usage documentation for `benchmarks/startup_breakdown.py`, `--workdir` shared-filesystem instructions, cold/warm and dispersion explanation, non-publishing notice, and zero em or en dashes in added lines.
   - Observed evidence:
-  - Result: pending
+    `git diff -- benchmarks/README.md` adds the `startup_breakdown.py` bullet under `## Design` and the `### Startup and finalization breakdown` subsection under `## Running` covering CLI flags (`--iterations`, `--passes`, `--warmup`, `--workdir`, `--durability-policies`, `--out`), shared-filesystem `--workdir` usage and ephemeral cleanup, cold/warm passes and dispersion statistics (`median_ms`, `mean_ms`, `p95_ms`, `stdev_ms`, `iqr_ms`), output schema (`pubrun-startup-breakdown/1`), `share_safety.py::check_share_safe` validation, and the explicit local/non-publishing notice.
+    Em/en dash check over added lines of `git diff -- benchmarks/README.md` exited 0 with `em/en dashes in README diff: 0`.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest tests/test_startup_benchmark.py -v` output showing exit code 0 and all behavioral tests passing (phase breakdown, counters, checkout/installed/nested layouts, cold/warm passes, dispersion stats including `--iterations 1`, redaction and `check_share_safe`, `--workdir` ephemeral cleanup preserving sibling files, and invalid CLI argument rejection).
   - Observed evidence:
-  - Result: pending
+    `pytest tests/test_startup_benchmark.py -v` (exit code 0):
+    ```text
+    collected 14 items
+    tests/test_startup_benchmark.py::TestStartupAutoDefaultScenario::test_startup_auto_default_registered PASSED [  7%]
+    tests/test_startup_benchmark.py::TestBreakdownStatisticsAndRedaction::test_compute_stats_handles_empty_single_and_multi PASSED [ 14%]
+    tests/test_startup_benchmark.py::TestBreakdownStatisticsAndRedaction::test_redact_breakdown_scrubs_home_host_user_workdir_and_repo PASSED [ 21%]
+    tests/test_startup_benchmark.py::TestBreakdownStatisticsAndRedaction::test_validate_redacted_output_rejects_leaked_home_path PASSED [ 28%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args0] PASSED [ 35%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args1] PASSED [ 42%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args2] PASSED [ 50%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args3] PASSED [ 57%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args4] PASSED [ 64%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args5] PASSED [ 71%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args6] PASSED [ 78%]
+    tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_workdir_regular_file_rejected PASSED [ 85%]
+    tests/test_startup_benchmark.py::TestBreakdownEndToEnd::test_cli_two_passes_two_iterations_and_workdir_cleanup PASSED [ 92%]
+    tests/test_startup_benchmark.py::TestBreakdownEndToEnd::test_cli_single_iteration_and_explicit_durability_policy PASSED [100%]
+    ============================= 14 passed in 31.82s ==============================
+    ```
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted full redacted output of `python benchmarks/startup_breakdown.py --passes 3 --iterations 15 --warmup 1` (exit code 0) containing environment, git revision, filesystem type, cold/warm pass medians, mean, p95, stdev, IQR, subprocess/write/fsync/serialization counts, absolute ms and relative overhead % for short (`noop.py`) and long (`cpu_burn.py`) workloads, plus concrete baseline-derived numerical targets proposed for `4il383` and `tkmm5p` and `git status -s` confirming no stray or unredacted result artifacts remain.
   - Observed evidence:
-  - Result: pending
+    `python benchmarks/startup_breakdown.py --passes 3 --iterations 15 --warmup 1` (exit code 0, unmodified `src/pubrun/` at `6fd82e24504e2601dc1a826950dc51dc3d3d04a4`):
+    ```markdown
+    # pubrun Startup and Finalization Breakdown
+
+    ## Environment
+
+    - Schema: `pubrun-startup-breakdown/1`
+    - Generated (UTC): `2026-11-22T07:10:20.192702+00:00`
+    - Git revision: `6fd82e24504e2601dc1a826950dc51dc3d3d04a4`
+    - pubrun version: `1.3.1`
+    - OS: `Linux 6.8.0-149-generic` (`linux`)
+    - Python: `3.14.6`
+    - CPU: `Intel(R) Core(TM) i7-6800K CPU @ 3.40GHz` (12 logical cores, `x86_64`)
+    - Repetitions: `3` pass(es) x `15` iterations (+`1` warmup per pass)
+    - Durability policies: `default`
+    - Installed layout ancestor `.git` present: `False`
+    - Filesystem (workdir): `ext4` (network=`False`)
+    - Filesystem (tmpdir): `ext4` (network=`False`)
+    - Filesystem (pubrun_install): `ext4` (network=`False`)
+
+    ## Scenario Wall-Clock Timings (ms)
+
+    | Scenario | Pass | n | Fail | Median (ms) | Mean (ms) | p95 (ms) | Stdev (ms) | IQR (ms) |
+    |---|---|---:|---:|---:|---:|---:|---:|---:|
+    | `bare-python-noop` | 1 (cold) | 15 | 0 | 19.77 | 19.49 | 21.76 | 1.66 | 2.29 |
+    | `bare-python-noop` | 2 (warm) | 15 | 0 | 17.39 | 17.09 | 19.96 | 1.76 | 2.27 |
+    | `bare-python-noop` | 3 (warm) | 15 | 0 | 19.09 | 19.34 | 23.27 | 2.01 | 1.73 |
+    | `bare-python-cpu-burn` | 1 (cold) | 15 | 0 | 224.50 | 228.07 | 238.99 | 8.71 | 6.23 |
+    | `bare-python-cpu-burn` | 2 (warm) | 15 | 0 | 222.79 | 226.01 | 236.35 | 6.44 | 9.80 |
+    | `bare-python-cpu-burn` | 3 (warm) | 15 | 0 | 229.26 | 229.21 | 238.83 | 5.47 | 5.98 |
+    | `import-minimal-checkout` | 1 (cold) | 15 | 0 | 114.85 | 113.98 | 117.95 | 3.07 | 5.16 |
+    | `import-minimal-checkout` | 2 (warm) | 15 | 0 | 113.79 | 115.96 | 127.55 | 5.70 | 4.85 |
+    | `import-minimal-checkout` | 3 (warm) | 15 | 0 | 114.13 | 116.28 | 125.81 | 5.40 | 5.42 |
+    | `import-minimal-installed` | 1 (cold) | 15 | 0 | 116.48 | 116.53 | 127.96 | 6.92 | 8.97 |
+    | `import-minimal-installed` | 2 (warm) | 15 | 0 | 111.77 | 112.26 | 116.42 | 2.26 | 1.71 |
+    | `import-minimal-installed` | 3 (warm) | 15 | 0 | 114.21 | 114.39 | 118.17 | 2.22 | 2.32 |
+    | `import-minimal-installed-nested` | 1 (cold) | 15 | 0 | 112.71 | 112.93 | 115.80 | 1.80 | 2.21 |
+    | `import-minimal-installed-nested` | 2 (warm) | 15 | 0 | 111.42 | 113.62 | 124.39 | 5.14 | 2.70 |
+    | `import-minimal-installed-nested` | 3 (warm) | 15 | 0 | 116.27 | 116.97 | 126.36 | 5.98 | 6.30 |
+    | `import-noauto-checkout` | 1 (cold) | 15 | 0 | 113.24 | 115.08 | 124.03 | 6.15 | 8.21 |
+    | `import-noauto-checkout` | 2 (warm) | 15 | 0 | 114.00 | 113.95 | 117.90 | 3.27 | 5.00 |
+    | `import-noauto-checkout` | 3 (warm) | 15 | 0 | 116.38 | 115.73 | 120.20 | 3.67 | 4.75 |
+    | `import-noauto-installed` | 1 (cold) | 15 | 0 | 112.86 | 113.02 | 117.13 | 2.82 | 3.08 |
+    | `import-noauto-installed` | 2 (warm) | 15 | 0 | 116.05 | 116.83 | 127.37 | 5.56 | 6.66 |
+    | `import-noauto-installed` | 3 (warm) | 15 | 0 | 114.82 | 116.51 | 126.47 | 5.43 | 5.80 |
+    | `import-noauto-installed-nested` | 1 (cold) | 15 | 0 | 114.71 | 116.61 | 124.08 | 5.75 | 8.94 |
+    | `import-noauto-installed-nested` | 2 (warm) | 15 | 0 | 112.83 | 115.47 | 121.43 | 4.68 | 7.76 |
+    | `import-noauto-installed-nested` | 3 (warm) | 15 | 0 | 113.15 | 113.42 | 117.37 | 2.66 | 3.30 |
+    | `auto-noop-default` | 1 (cold) | 15 | 0 | 498.24 | 500.15 | 516.60 | 8.99 | 9.46 |
+    | `auto-noop-default` | 2 (warm) | 15 | 0 | 502.38 | 499.12 | 511.83 | 10.62 | 13.50 |
+    | `auto-noop-default` | 3 (warm) | 15 | 0 | 488.67 | 492.01 | 508.65 | 11.54 | 6.60 |
+    | `phased-noop-default` | 1 (cold) | 15 | 0 | 507.39 | 510.24 | 528.61 | 9.39 | 9.27 |
+    | `phased-noop-default` | 2 (warm) | 15 | 0 | 508.24 | 510.46 | 533.82 | 12.36 | 12.11 |
+    | `phased-noop-default` | 3 (warm) | 15 | 0 | 503.96 | 505.02 | 516.66 | 6.43 | 7.51 |
+    | `auto-cpu-burn-default` | 1 (cold) | 15 | 0 | 712.56 | 713.23 | 744.83 | 18.64 | 25.65 |
+    | `auto-cpu-burn-default` | 2 (warm) | 15 | 0 | 700.65 | 703.01 | 721.24 | 13.27 | 20.94 |
+    | `auto-cpu-burn-default` | 3 (warm) | 15 | 0 | 703.98 | 707.44 | 736.62 | 18.69 | 30.08 |
+    | `phased-cpu-burn-default` | 1 (cold) | 15 | 0 | 718.59 | 721.45 | 742.12 | 12.87 | 14.29 |
+    | `phased-cpu-burn-default` | 2 (warm) | 15 | 0 | 724.00 | 722.84 | 736.73 | 11.24 | 18.00 |
+    | `phased-cpu-burn-default` | 3 (warm) | 15 | 0 | 726.38 | 726.48 | 750.08 | 15.75 | 15.01 |
+
+    ## Phase Breakdown (median / IQR in ms)
+
+    | Scenario | Pass | Import (ms) | Startup (ms) | Workload (ms) | Finalization (ms) | In-Process (ms) |
+    |---|---|---:|---:|---:|---:|---:|
+    | `phased-noop-default` | 1 (cold) | 82.55 / 4.51 | 352.15 / 6.86 | 0.00 / 0.00 | 20.27 / 4.04 | 454.12 / 9.16 |
+    | `phased-noop-default` | 2 (warm) | 84.25 / 4.87 | 350.00 / 5.64 | 0.01 / 0.00 | 19.42 / 3.86 | 454.89 / 7.99 |
+    | `phased-noop-default` | 3 (warm) | 81.85 / 3.01 | 348.28 / 2.80 | 0.01 / 0.00 | 22.63 / 4.04 | 452.28 / 5.97 |
+    | `phased-cpu-burn-default` | 1 (cold) | 80.75 / 3.36 | 354.21 / 13.61 | 215.88 / 8.79 | 17.08 / 5.27 | 666.66 / 15.90 |
+    | `phased-cpu-burn-default` | 2 (warm) | 83.00 / 4.83 | 354.06 / 7.04 | 216.30 / 9.26 | 13.85 / 7.04 | 671.65 / 14.71 |
+    | `phased-cpu-burn-default` | 3 (warm) | 82.54 / 2.33 | 356.05 / 8.90 | 215.19 / 5.09 | 17.12 / 5.31 | 675.24 / 17.05 |
+
+    ## Instrumented Subprocess, Write, Synchronization, and Serialization Counters
+
+    | Scenario | git spawns | total procs | manifest writes (S/F) | config writes (S/F) | fsync total (S/F) | fsync (ms) | writer JSON calls | writer JSON (ms) |
+    |---|---:|---:|---|---|---|---:|---:|---:|
+    | `import-minimal-checkout` | 1 | 1 | 0 (0/0) | 0 (0/0) | 0 (0/0) | 0.00 | 0 | 0.00 |
+    | `import-minimal-installed` | 1 | 1 | 0 (0/0) | 0 (0/0) | 0 (0/0) | 0.00 | 0 | 0.00 |
+    | `import-minimal-installed-nested` | 1 | 1 | 0 (0/0) | 0 (0/0) | 0 (0/0) | 0.00 | 0 | 0.00 |
+    | `import-noauto-checkout` | 1 | 1 | 0 (0/0) | 0 (0/0) | 0 (0/0) | 0.00 | 0 | 0.00 |
+    | `import-noauto-installed` | 1 | 1 | 0 (0/0) | 0 (0/0) | 0 (0/0) | 0.00 | 0 | 0.00 |
+    | `import-noauto-installed-nested` | 1 | 1 | 0 (0/0) | 0 (0/0) | 0 (0/0) | 0.00 | 0 | 0.00 |
+    | `auto-noop-default` | 6 | 7 | 2 (1/1) | 2 (1/1) | 4 (2/2) | 19.86 | 4 | 2.65 |
+    | `phased-noop-default` | 6 | 7 | 2 (1/1) | 2 (1/1) | 4 (2/2) | 18.72 | 4 | 2.78 |
+    | `auto-cpu-burn-default` | 6 | 7 | 3 (1/2) | 3 (1/2) | 6 (3/3) | 33.81 | 6 | 4.46 |
+    | `phased-cpu-burn-default` | 6 | 7 | 3 (2/1) | 3 (2/1) | 6 (4/2) | 45.20 | 6 | 5.48 |
+
+    ## Short vs Long Workload Overhead Summary
+
+    | Policy | Workload | Pass | Baseline (ms) | Auto (ms) | Abs Overhead (ms) | Rel Overhead (%) | Import (ms) | Startup (ms) | Finalize (ms) |
+    |---|---|---|---:|---:|---:|---:|---:|---:|---:|
+    | `default` | `noop.py` (short) | 1 (cold) | 19.77 | 498.24 | 478.47 | 2420.5% | 82.55 | 352.15 | 20.27 |
+    | `default` | `noop.py` (short) | 2 (warm) | 17.39 | 502.38 | 484.99 | 2789.7% | 84.25 | 350.00 | 19.42 |
+    | `default` | `noop.py` (short) | 3 (warm) | 19.09 | 488.67 | 469.58 | 2460.4% | 81.85 | 348.28 | 22.63 |
+    | `default` | `cpu_burn.py` (long) | 1 (cold) | 224.50 | 712.56 | 488.06 | 217.4% | 80.75 | 354.21 | 17.08 |
+    | `default` | `cpu_burn.py` (long) | 2 (warm) | 222.79 | 700.65 | 477.86 | 214.5% | 83.00 | 354.06 | 13.85 |
+    | `default` | `cpu_burn.py` (long) | 3 (warm) | 229.26 | 703.98 | 474.72 | 207.1% | 82.54 | 356.05 | 17.12 |
+
+    Total benchmark wall time: `165.9` s
+    ```
+
+    Proposed baseline-derived numerical targets for maintainer agreement (anchored to Pass 3 warm medians on this Linux ext4 host):
+
+    | Metric | Pre-change baseline (Pass 3 warm) | Proposed target | Owner plan |
+    |---|---|---|---|
+    | `git_spawns` on `import-{minimal,noauto}-{installed,installed-nested}` | `1` | `0` (exact structural invariant; also `0` on `checkout` before lazy `__commit__` access) | `4il383` |
+    | Warm wall median on `import-{minimal,noauto}-{installed,installed-nested}` | `113.15` to `116.27 ms` | `<= 112.0 ms` (reduce by `>= 2 ms` on local ext4 with zero regression; larger gains on Windows/NFS) | `4il383` |
+    | `config_writes` for unchanged config (`auto-noop-default` / `auto-cpu-burn-default`) | `2` / `3` | `1` / `1` (exact structural invariant: zero rewrites at hardware refresh or finalization) | `tkmm5p` |
+    | `fsync_total` under default `"fsync"` (`auto-noop-default` / `auto-cpu-burn-default`) | `4` / `6` | `3` (`-25%`) / `4` (`-33.3%`) | `tkmm5p` |
+    | `writer_json_calls` under default `"fsync"` (`auto-noop-default` / `auto-cpu-burn-default`) | `4` / `6` | `3` / `4` | `tkmm5p` |
+    | `git_spawns` on `auto-*` / `phased-*` (source checkout in Git repo) | `6` | `<= 4` (combined `rev-parse` in `get_git` plus lazy `__commit__`) | `4il383` + `tkmm5p` |
+    | Finalization median under default `"fsync"` (`phased-noop-default` / `phased-cpu-burn-default`) | `22.63 ms` / `17.12 ms` | `<= 18.0 ms` / `<= 13.7 ms` (`>= 20%` reduction from removing redundant config write + `fsync`) | `tkmm5p` |
+    | End-to-end absolute auto overhead under default `"fsync"` (`auto-noop-default` / `auto-cpu-burn-default`) | `469.58 ms` / `474.72 ms` | `<= 454 ms` / `<= 459 ms` (`>= 15 ms` / `>= 3%` reduction on local ext4 without relaxing default durability) | `4il383` + `tkmm5p` |
+    | Opt-in `"finalize"` durability `fsync_total` (`fsync_startup` / `fsync_finalization`) | `4` (`2`/`2`) to `6` (`4`/`2`) | `2` (`0`/`2`; `-50%` to `-66.7%`, with in-place `fsync` upgrade of unchanged `config.resolved.json`) | `tkmm5p` |
+    | Opt-in `"atomic"` durability `fsync_total` / `fsync_ms` | `4` to `6` / `18.72` to `45.20 ms` | `0` / `0.00 ms` (atomic `os.replace` visibility preserved) | `tkmm5p` |
+    | Opt-in `"strict"` durability `fsync_total` | n/a (new) | `>= 4` (file + POSIX parent-directory `fsync`; measured and reported separately) | `tkmm5p` |
+
+    `git status -s` shows only the four declared Scope-Paths (and this plan file) with zero stray or unredacted benchmark files (`benchmarks/README.md`, `benchmarks/scenarios.py`, `benchmarks/startup_breakdown.py`, `tests/test_startup_benchmark.py`), and `python3 scripts/sanitize_paths.py --check --all` exited 0.
+  - Result: pass
 
 ## Approval and execution gate
 

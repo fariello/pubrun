@@ -82,6 +82,7 @@ def all_scenarios() -> List[Scenario]:
     for mode in ("auto", "noauto", "nopatch", "noconsole", "minimal"):
         S.append(Scenario(f"import-{mode}", "startup", mode, "noop.py",
                           config=_ALL_OFF if mode in ("auto", "nopatch", "noconsole") else {}))
+    S.append(Scenario("startup-auto-default", "startup", "auto", "noop.py", config={}))
 
     # --- Group 2: per-feature run-time deltas (cpu_burn, one feature on) ----
     S.append(Scenario("feature-baseline", "feature", "baseline", "cpu_burn.py"))

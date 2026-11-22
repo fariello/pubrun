@@ -10,6 +10,11 @@ machines.
   subprocess N times and writes one JSON result (timings + machine metadata).
   Runs anywhere `pubrun` runs, including locked-down HPC nodes. No third-party
   imports.
+- **`startup_breakdown.py`** - stdlib-only, local, non-publishing startup and
+  finalization breakdown benchmark. Separates import, startup capture, workload,
+  and finalization timings, compares source-checkout against isolated installed
+  and nested-repository layouts, and counts Git subprocess spawns, manifest and
+  config atomic writes, `os.fsync` calls, and writer JSON serialization time.
 - **`scenarios.py`** — declarative scenario list (import mode, config overrides,
   workload) grouped into `startup`, `feature`, and `hotpath`.
 - **`workloads/`** — tiny scripts the scenarios execute (`noop`, `cpu_burn`,
@@ -64,6 +69,56 @@ pytest benchmarks/ -o addopts="" --benchmark-only
 
 `-o addopts=""` clears the repo's global `--cov` options, which would otherwise
 distort pytest-benchmark timings.
+
+### Startup and finalization breakdown
+
+Use `benchmarks/startup_breakdown.py` to measure fixed startup and finalization
+overhead in detail before and after performance changes. The script uses Python
+standard library modules only (compatible with Python 3.8 through 3.14). It is
+strictly local and non-publishing: it never invokes GitHub CLI (`gh`), Gist
+APIs, `git push`, or batch schedulers (`sbatch`, `qsub`, `bsub`).
+
+```bash
+python benchmarks/startup_breakdown.py
+python benchmarks/startup_breakdown.py --passes 3 --iterations 15 --warmup 1
+python benchmarks/startup_breakdown.py --workdir /path/to/shared/tmp --out /tmp/breakdown.redacted.json
+python benchmarks/startup_breakdown.py --durability-policies fsync,finalize,atomic,strict
+```
+
+CLI flags:
+
+- `--iterations`: measured iterations per scenario per pass (integer >= 1, default `15`).
+- `--passes`: measured passes from Pass 1 (cold) through Pass N (warm) (integer >= 1, default `3`).
+- `--warmup`: discarded warmup iterations before each pass (integer >= 0, default `1`).
+- `--workdir`: optional parent directory for ephemeral benchmark files. Pass a path on a
+  shared filesystem (such as Network File System (NFS) or Lustre) to compare shared storage
+  against local storage. The script creates and deletes only a dedicated ephemeral
+  subdirectory inside `--workdir`, leaving `--workdir` and pre-existing sibling files intact.
+- `--durability-policies`: comma-separated subset of `default,fsync,finalize,atomic,strict`
+  (default `default`). `default` measures built-in defaults without writing `.pubrun.toml`;
+  explicit policies write `[core].artifact_durability` into each temporary scenario directory.
+- `--out`: optional path for the redacted JSON report (`pubrun-startup-breakdown/1`). Standard
+  output always prints a concise redacted Markdown summary.
+
+What it measures and reports:
+
+- **Isolated layouts:** compares `pubrun.minimal` and `pubrun.noauto` across a source checkout
+  (`checkout`), an isolated installed package outside any Git tree (`installed`), and an
+  installed package inside a nested user Git repository (`installed-nested`).
+- **Phase separation and clean timing:** runs uninstrumented child processes for wall-clock
+  timings (`bare-python-noop`, `bare-python-cpu-burn`, `auto-noop-*`, `auto-cpu-burn-*`, and
+  phased `import` / `startup` / `workload` / `finalization` probes) so instrumentation never
+  distorts wall-clock measurements.
+- **Counters and serialization:** runs dedicated instrumented probes outside timed samples to
+  count `git` subprocess spawns, `manifest.json` and `config.resolved.json` atomic writes,
+  startup and finalization `os.fsync` calls, and `pubrun.writer` JSON serialization time.
+- **Cold versus warm passes and dispersion:** records Pass 1 (cold) through Pass N (warm) with
+  sample count (`n`), `failures`, `median_ms`, `mean_ms`, 95th percentile (`p95_ms`), standard
+  deviation (`stdev_ms`), and Interquartile Range (`iqr_ms`), alongside absolute overhead (ms)
+  and relative overhead (%) for short (`noop.py`) and long (`cpu_burn.py`) workloads.
+- **Redaction and share-safety:** omits raw paths and mount points, scrubs hostname, username,
+  home directory, `--workdir`, and repository root substrings, and validates output with
+  `benchmarks/share_safety.py::check_share_safe` before writing or printing.
 
 ## Running on an HPC cluster
 
