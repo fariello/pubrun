@@ -57,7 +57,11 @@ def _emit(kind: str, *, url: str = "", file: str = "", error: str = "") -> None:
         with open(out_path, "a", encoding="utf-8") as fh:
             fh.write(line)
     if kind == "url":
-        print(f"selected attachment URL on host: {urlparse(url).hostname}", file=sys.stderr)
+        try:
+            host = urlparse(url).hostname
+        except ValueError:
+            host = "?"
+        print(f"selected attachment URL on host: {host}", file=sys.stderr)
     elif kind == "inline":
         print(f"extracted an inline JSON submission to {file}", file=sys.stderr)
     else:
@@ -65,7 +69,8 @@ def _emit(kind: str, *, url: str = "", file: str = "", error: str = "") -> None:
 
 
 def find_attachment_url(body: str) -> tuple:
-    """Return (url, error). url is the first allowlisted-host `.json` URL, else ('', reason)."""
+    """Return (url, error). url is the first https, allowlisted-host `.json` URL, else
+    ('', reason). A malformed URL (bad IPv6 literal or port) is skipped, never raised."""
     if not body:
         return ("", "the issue body is empty")
     candidates = _URL_RE.findall(body)
@@ -73,18 +78,28 @@ def find_attachment_url(body: str) -> tuple:
         return ("", "no URL found in the issue body")
     saw_json_off_allowlist = False
     saw_allowlisted_non_json = False
+    saw_non_https_json = False
     for raw in candidates:
         url = raw.rstrip(".,")
-        parsed = urlparse(url)
-        host = (parsed.hostname or "").lower()
+        try:
+            parsed = urlparse(url)
+            host = (parsed.hostname or "").lower()
+            parsed.port  # raises ValueError on an out-of-range or non-numeric port
+        except ValueError:
+            continue
+        is_https = (parsed.scheme or "").lower() == "https"
         is_json = (parsed.path or "").lower().endswith(".json")
         on_allowlist = host in ALLOWED_ATTACHMENT_HOSTS
-        if on_allowlist and is_json:
+        if on_allowlist and is_json and is_https:
             return (url, "")
+        if on_allowlist and is_json and not is_https:
+            saw_non_https_json = True
         if is_json and not on_allowlist:
             saw_json_off_allowlist = True
         if on_allowlist and not is_json:
             saw_allowlisted_non_json = True
+    if saw_non_https_json:
+        return ("", "a .json attachment link was found but it does not use HTTPS")
     if saw_json_off_allowlist:
         return ("", "a .json link was found but not on an allowlisted GitHub attachment host")
     if saw_allowlisted_non_json:

@@ -62,25 +62,41 @@ def _scenarios_view(run: dict) -> dict:
     - schema/4 (or older with a top-level ``scenarios``): use the stored last-pass alias with
       its stored stats verbatim.
     """
-    schema = run.get("schema") or ""
-    if schema.endswith("/5"):
-        defs = run.get("scenario_defs", {}) or {}
-        passes = run.get("pass_results", []) or []
-        last = passes[-1] if passes else {}
-        timings = last.get("timings", {}) or {}
-        skipped = last.get("skipped", {}) or {}
+    schema = run.get("schema")
+    if isinstance(schema, str) and schema.endswith("/5"):
+        defs = _as_dict(run.get("scenario_defs"))
+        passes = run.get("pass_results")
+        passes = passes if isinstance(passes, list) else []
+        last = _as_dict(passes[-1]) if passes else {}
+        timings = _as_dict(last.get("timings"))
+        skipped = _as_dict(last.get("skipped"))
         view: dict = {}
         for name, d in defs.items():
-            entry = {"group": d.get("group"), "mode": d.get("mode"),
+            if not isinstance(d, dict):
+                continue
+            entry = {"group": _group_label(d.get("group")), "mode": d.get("mode"),
                      "workload": d.get("workload")}
             if name in skipped:
                 entry["skipped"] = skipped[name]
-            elif name in timings:
-                entry.update(_stats(timings[name]))
+            elif isinstance(timings.get(name), list):
+                samples = [t for t in timings[name]
+                           if isinstance(t, (int, float)) and not isinstance(t, bool)]
+                entry.update(_stats(samples))
             view[name] = entry
         return view
     # schema/4 (and older schema/1 top-level alias): the stored last-pass scenarios map.
-    return run.get("scenarios", {}) or {}
+    scns = _as_dict(run.get("scenarios"))
+    return {name: s for name, s in scns.items() if isinstance(s, dict)}
+
+
+def _as_dict(value) -> dict:
+    """Return value when it is a dict, else an empty dict (corpus entries are untrusted)."""
+    return value if isinstance(value, dict) else {}
+
+
+def _group_label(value) -> str:
+    """Normalize a scenario group to a string; a missing/null/non-string group becomes "?"."""
+    return value if isinstance(value, str) and value else "?"
 
 # Which baseline scenario each scenario is compared against.
 _GROUP_BASELINE = {
@@ -105,17 +121,25 @@ def _load(paths: list[str]) -> list[dict]:
     runs = []
     for p in paths:
         try:
-            runs.append(json.loads(Path(p).read_text(encoding="utf-8")))
+            doc = json.loads(Path(p).read_text(encoding="utf-8"))
         except Exception as e:
             print(f"warning: skipping {p}: {e}", file=sys.stderr)
+            continue
+        if not isinstance(doc, dict):
+            print(f"warning: skipping {p}: top-level JSON is not an object", file=sys.stderr)
+            continue
+        runs.append(doc)
     return runs
 
 
 def _machine_label(run: dict) -> str:
-    m = run.get("machine", {})
-    cpu = (m.get("hardware", {}) or {}).get("cpu", {}) or {}
-    os_name = (m.get("host", {}) or {}).get("os_name", "?")
-    return f"{os_name}/{cpu.get('model', '?')}/{cpu.get('logical_cores', '?')}c"
+    m = _as_dict(run.get("machine"))
+    cpu = _as_dict(_as_dict(m.get("hardware")).get("cpu"))
+    os_name = _as_dict(m.get("host")).get("os_name")
+    model = cpu.get("model")
+    cores = cpu.get("logical_cores")
+    return (f"{'?' if os_name is None else os_name}/{'?' if model is None else model}/"
+            f"{'?' if cores is None else cores}c")
 
 
 def _baseline_for(name: str, group: str) -> str | None:
@@ -128,16 +152,16 @@ def build_rows(runs: list[dict]) -> list[dict]:
     rows: list[dict] = []
     for run in runs:
         label = _machine_label(run)
-        pubrun_version = (run.get("machine", {}) or {}).get("pubrun_version")
+        pubrun_version = _as_dict(run.get("machine")).get("pubrun_version")
         scns = _scenarios_view(run)
         for name, s in scns.items():
             if s.get("skipped"):
                 continue
-            group = s.get("group", "?")
+            group = _group_label(s.get("group"))
             base_name = _baseline_for(name, group)
-            base = scns.get(base_name, {}) if base_name else {}
-            med = s.get("median_s")
-            base_med = base.get("median_s")
+            base = _as_dict(scns.get(base_name)) if base_name else {}
+            med = _num(s.get("median_s"))
+            base_med = _num(base.get("median_s"))
             overhead_ms = None
             overhead_pct = None
             if med is not None and base_med is not None and base_name != name:
@@ -152,8 +176,9 @@ def build_rows(runs: list[dict]) -> list[dict]:
                 "mode": s.get("mode"),
                 "workload": s.get("workload"),
                 "median_ms": None if med is None else round(med * 1000, 2),
-                "p95_ms": None if s.get("p95_s") is None else round(s["p95_s"] * 1000, 2),
-                "stdev_ms": None if s.get("stdev_s") is None else round(s["stdev_s"] * 1000, 2),
+                "p95_ms": None if _num(s.get("p95_s")) is None else round(s["p95_s"] * 1000, 2),
+                "stdev_ms": (None if _num(s.get("stdev_s")) is None
+                             else round(s["stdev_s"] * 1000, 2)),
                 "n": s.get("n"),
                 "vs_baseline": base_name if base_name != name else "",
                 "overhead_ms": None if overhead_ms is None else round(overhead_ms, 2),
@@ -162,10 +187,18 @@ def build_rows(runs: list[dict]) -> list[dict]:
     return rows
 
 
+def _num(value):
+    """Return value when it is a real number (not bool), else None."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    return None
+
+
 def write_csv(rows: list[dict], path: Path) -> None:
     if not rows:
         return
     fields = list(rows[0].keys())
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
@@ -174,7 +207,7 @@ def write_csv(rows: list[dict], path: Path) -> None:
 
 def write_markdown(rows: list[dict], path: Path) -> None:
     lines = ["# pubrun overhead summary", ""]
-    machines = sorted({r["machine"] for r in rows})
+    machines = sorted({str(r["machine"]) for r in rows})
     lines.append(f"Machines aggregated: {len(machines)}")
     for mlabel in machines:
         lines.append(f"- `{mlabel}`")
@@ -184,7 +217,7 @@ def write_markdown(rows: list[dict], path: Path) -> None:
     lines.append("")
     lines.append("| Machine | Group | Scenario | Median (ms) | p95 (ms) | vs baseline | Overhead (ms) | Overhead (%) |")
     lines.append("|---|---|---|---:|---:|---|---:|---:|")
-    for r in sorted(rows, key=lambda x: (x["machine"], x["group"], x["scenario"])):
+    for r in sorted(rows, key=lambda x: (str(x["machine"]), str(x["group"]), str(x["scenario"]))):
         lines.append(
             f"| {r['machine']} | {r['group']} | {r['scenario']} | "
             f"{r['median_ms']} | {r['p95_ms']} | {r['vs_baseline'] or '-'} | "
@@ -192,6 +225,7 @@ def write_markdown(rows: list[dict], path: Path) -> None:
             f"{'-' if r['overhead_pct'] is None else r['overhead_pct']} |"
         )
     lines.append("")
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
 
 

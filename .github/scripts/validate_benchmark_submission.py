@@ -88,13 +88,25 @@ def check_shape(path: Path) -> None:
         raise Reject("shape", f"attachment is {size} bytes, over the {MAX_BYTES}-byte cap")
 
 
+class _NonStandardConstant(ValueError):
+    """Raised by json.loads for NaN / Infinity / -Infinity (not valid standard JSON)."""
+
+
+def _reject_constant(name: str):
+    raise _NonStandardConstant(f"non-standard JSON constant {name}")
+
+
 def parse_json(path: Path):
     try:
         text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raise Reject("parse", "attachment is not valid UTF-8 text")
     except OSError as e:
-        raise Reject("parse", f"could not read attachment: {e}")
+        raise Reject("parse", f"could not read attachment: {type(e).__name__}")
     try:
-        data = json.loads(text)
+        data = json.loads(text, parse_constant=_reject_constant)
+    except _NonStandardConstant as e:
+        raise Reject("parse", f"not valid JSON: {e}")
     except (ValueError, TypeError) as e:
         raise Reject("parse", f"not valid JSON: {e}")
     if not isinstance(data, dict):
@@ -113,12 +125,17 @@ def check_schema(data: dict) -> None:
     schema = _load_schema()
     validator_cls = jsonschema.validators.validator_for(schema)
     validator_cls.check_schema(schema)
-    errors = sorted(validator_cls(schema).iter_errors(data), key=lambda e: list(e.path))
+    errors = sorted(validator_cls(schema).iter_errors(data),
+                    key=lambda e: [str(p) for p in e.schema_path])
     if errors:
         first = errors[0]
-        loc = "/".join(str(p) for p in first.path) or "(root)"
-        # message is schema-derived, not raw payload
-        raise Reject("schema", f"schema validation failed at `{loc}`: {first.message}")
+        # The reason is posted in a public issue comment, so it is built ONLY from the
+        # schema side (schema path + validator keyword). jsonschema's message, the offending
+        # instance, and the instance path (which can contain submitter-chosen keys) may all
+        # echo raw payload, so none of them is interpolated.
+        loc = "/".join(str(p) for p in first.schema_path) or "(root)"
+        raise Reject("schema", f"schema validation failed at schema path `{loc}` "
+                               f"(validator `{first.validator}`)")
 
 
 def check_share_safe(data: dict) -> None:
@@ -171,31 +188,47 @@ def validate_file(path: Path) -> dict:
             "share_safety_version": share_safety.SHARE_SAFETY_VERSION}
 
 
-def _download(url: str, dest: Path) -> None:
-    """Fetch an attachment with strict host + redirect + byte-cap limits. Fail closed."""
-    import urllib.request
-    import urllib.error
+def _check_url(url: str, what: str) -> None:
+    """Require an https URL on an allowlisted host. Fail closed (never raise ValueError)."""
     from urllib.parse import urlparse
 
-    host = urlparse(url).hostname or ""
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        parsed.port  # raises ValueError on an out-of-range or non-numeric port
+    except ValueError:
+        raise Reject("shape", f"{what} URL is malformed")
+    if (parsed.scheme or "").lower() != "https":
+        raise Reject("shape", f"{what} URL must use https")
     if host not in ALLOWED_ATTACHMENT_HOSTS:
-        raise Reject("shape", f"attachment host `{host}` is not on the allowlist")
+        raise Reject("shape", f"{what} host `{host}` is not on the allowlist")
+
+
+def _download(url: str, dest: Path) -> None:
+    """Fetch an attachment with strict scheme + host + redirect + byte-cap limits. Fail closed."""
+    import http.client
+    import urllib.request
+    import urllib.error
+
+    _check_url(url, "attachment")
 
     class _NoFollow(urllib.request.HTTPRedirectHandler):
         max_repeats = 3
+        max_redirections = 3
 
         def redirect_request(self, req, fp, code, msg, headers, newurl):
-            new_host = urlparse(newurl).hostname or ""
-            if new_host not in ALLOWED_ATTACHMENT_HOSTS:
-                raise Reject("shape", f"redirect host `{new_host}` is not on the allowlist")
+            _check_url(newurl, "redirect")
             return super().redirect_request(req, fp, code, msg, headers, newurl)
 
     opener = urllib.request.build_opener(_NoFollow)
     try:
         with opener.open(url, timeout=20) as resp:
             data = resp.read(MAX_BYTES + 1)
-    except urllib.error.URLError as e:
-        raise Reject("shape", f"download failed: {e}")
+    except Reject:
+        raise
+    except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError,
+            ValueError) as e:
+        raise Reject("shape", f"download failed: {type(e).__name__}")
     if len(data) > MAX_BYTES:
         raise Reject("shape", f"download exceeds the {MAX_BYTES}-byte cap")
     dest.write_bytes(data)

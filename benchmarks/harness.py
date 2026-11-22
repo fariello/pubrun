@@ -574,20 +574,66 @@ def _redact_secrets(obj):
     return obj
 
 
+# Keys whose string values are fixed, non-PII metadata or schema markers. The substring scrub
+# skips them so a short username (e.g. `pub` or `benchmark`) can never corrupt a contract
+# value such as `schema: "pubrun-benchmark/5"`.
+_SCRUB_SKIP_KEYS = frozenset({
+    "schema", "mode", "group", "workload", "fstype", "environment_kind", "os_name",
+    "platform", "architecture", "implementation", "pubrun_version", "pubrun_commit",
+    "git_commit",
+})
+
+# Slurm fields that identify the machine/allocation (the compute-node hostname and the job id).
+# The remaining Slurm context (partition, cpus_per_task, mem_per_node, num_nodes) is kept.
+_SLURM_REDACT_KEYS = ("node", "job_id")
+
+
+def _is_path_needle(needle: str) -> bool:
+    return "/" in needle or "\\" in needle
+
+
+def _scrub_segment(text: str, needles) -> str:
+    """Scrub one segment that contains no `<redacted>` marker. Each needle's matches become
+    `<redacted>`; the text between matches is scrubbed with the remaining needles only, so a
+    marker produced here is never rescanned (a username like `ed` cannot corrupt it)."""
+    if not needles or not text:
+        return text
+    needle, rest = needles[0], needles[1:]
+    if _is_path_needle(needle):
+        pieces = text.split(needle)
+    else:
+        import re
+        pieces = re.split(r"(?<![A-Za-z0-9_])" + re.escape(needle) + r"(?![A-Za-z0-9_])", text)
+    return _REDACTED.join(_scrub_segment(p, rest) for p in pieces)
+
+
+def _scrub_string(s: str, needles) -> str:
+    if s == _REDACTED:
+        return s
+    return _REDACTED.join(_scrub_segment(seg, needles) for seg in s.split(_REDACTED))
+
+
 def _scrub_pii_substrings(obj, needles):
     """Belt-and-suspenders: replace any home-dir prefix / username substring that leaked
-    into an un-enumerated string value, anywhere in the structure."""
-    if isinstance(obj, dict):
-        return {k: _scrub_pii_substrings(v, needles) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_scrub_pii_substrings(x, needles) for x in obj]
-    if isinstance(obj, str):
-        s = obj
-        for n in needles:
-            if n:
-                s = s.replace(n, _REDACTED)
-        return s
-    return obj
+    into an un-enumerated string value, anywhere in the structure.
+
+    Path-like needles (containing a separator) are replaced literally, longest first; a bare
+    username is replaced only at identifier boundaries so it never matches inside a larger
+    word. Existing `<redacted>` markers and fixed metadata keys (`_SCRUB_SKIP_KEYS`) are left
+    untouched."""
+    ordered = sorted({n for n in needles if n}, key=len, reverse=True)
+
+    def _walk(o):
+        if isinstance(o, dict):
+            return {k: (v if k in _SCRUB_SKIP_KEYS and isinstance(v, str) else _walk(v))
+                    for k, v in o.items()}
+        if isinstance(o, list):
+            return [_walk(x) for x in o]
+        if isinstance(o, str):
+            return _scrub_string(o, ordered)
+        return o
+
+    return _walk(obj)
 
 
 def redact_result(result: dict):
@@ -595,12 +641,19 @@ def redact_result(result: dict):
 
     Masks hostname, OS username, and every path field that can embed the home directory,
     then does a deep substring scrub of the home-dir prefix and username as a safety net.
-    Preserves the analysis-relevant, non-identifying data (CPU model, timings, versions,
-    fstype classification, Slurm partition).
+    Also masks the Slurm compute-node hostname and job id. Preserves the analysis-relevant,
+    non-identifying data (CPU model, timings, versions, fstype classification, Slurm
+    partition/cpus/memory/node count).
     """
     import copy
     import getpass
     redacted = _redact_secrets(copy.deepcopy(result))
+    machine = redacted.get("machine")
+    slurm = machine.get("slurm") if isinstance(machine, dict) else None
+    if isinstance(slurm, dict):
+        for key in _SLURM_REDACT_KEYS:
+            if slurm.get(key) is not None:
+                slurm[key] = _REDACTED
     needles = []
     try:
         home = os.path.expanduser("~")
@@ -672,16 +725,22 @@ def main() -> None:
     red_path.parent.mkdir(parents=True, exist_ok=True)
     redacted = redact_result(result)
     # Redaction self-check (defense in depth): confirm the redacted result is structurally
-    # share-safe before writing it. A failure means a redaction bug; warn loudly (never write a
-    # file that claims to be safe but is not). Best-effort import (dev/CI tooling, not the wheel).
+    # share-safe before writing it. A failure means a redaction bug, so refuse to write a file
+    # that claims to be safe but is not, and exit non-zero. Only a missing share_safety module
+    # (dev/CI tooling, not the wheel) skips the check.
     try:
         import share_safety as _ss  # same directory
-        ok, reasons = _ss.check_share_safe(redacted)
+    except ImportError:
+        _ss = None
+    if _ss is not None:
+        try:
+            ok, reasons = _ss.check_share_safe(redacted)
+        except Exception as e:
+            ok, reasons = False, [f"self-check raised {type(e).__name__}"]
         if not ok:
-            print("WARNING: redaction self-check FAILED; the redacted output may not be "
-                  "share-safe. Do NOT share it. Reasons: " + "; ".join(reasons), file=sys.stderr)
-    except Exception:
-        pass  # self-check is best-effort; absence must not block a run
+            print("ERROR: redaction self-check FAILED; refusing to write the redacted output "
+                  f"{red_path}. Reasons: " + "; ".join(reasons), file=sys.stderr)
+            sys.exit(1)
     # Compact (no indent): the redacted copy must fit GitHub's issue-body cap.
     red_path.write_text(json.dumps(redacted, separators=(",", ":")), encoding="utf-8")
     print(f"Wrote redacted result {red_path}", file=sys.stderr)

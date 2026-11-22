@@ -40,8 +40,10 @@ _HOME_PATH_RE = re.compile(
     r"|[A-Za-z]:\\+[Uu]sers\\+[^\\\"]+"           # Windows: C:\Users\<x> (escaped or not)
 )
 
-# Dotted paths (into the result dict) whose leaf value MUST equal the redaction marker.
-# These are the fields the harness redacts; if any is not the marker, the file is not safe.
+# Dotted paths (into the result dict) whose leaf value MUST equal the redaction marker when
+# present and non-null. These are the fields the harness redacts; if any carries a real value
+# that is not the marker, the file is not safe. `None` is allowed (e.g. `virtual_env` on a
+# non-venv run, or an optional field that was never captured): a null carries no identity.
 _MUST_BE_REDACTED = (
     "machine.host.hostname",
     "machine.python.executable",
@@ -49,6 +51,8 @@ _MUST_BE_REDACTED = (
     "machine.python.base_prefix",
     "machine.python.virtual_env",
     "machine.python_executable",
+    "machine.slurm.node",
+    "machine.slurm.job_id",
 )
 
 
@@ -68,7 +72,8 @@ def check_share_safe(result: Dict[str, Any]) -> Tuple[bool, List[str]]:
     """Return (is_safe, reasons). reasons is empty when safe.
 
     Rules (structural):
-      1. Each field in _MUST_BE_REDACTED, when PRESENT, must equal "<redacted>".
+      1. Each field in _MUST_BE_REDACTED, when PRESENT and not null, must equal "<redacted>"
+         (a non-string value such as an integer job id is also unsafe).
       2. No absolute home/user-profile path may appear anywhere in the serialized document.
     A missing field is not by itself unsafe (a partial/older result may omit it); an
     unredacted PRESENT value is unsafe.
@@ -77,9 +82,9 @@ def check_share_safe(result: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
     for dotted in _MUST_BE_REDACTED:
         val = _get(result, dotted)
-        if val is _MISSING:
+        if val is _MISSING or val is None:
             continue
-        if val != REDACTED:
+        if not isinstance(val, str) or val != REDACTED:
             # Report the field, never the raw value (do not echo a potential leak).
             reasons.append(f"field `{dotted}` is not redacted (must equal \"{REDACTED}\")")
 

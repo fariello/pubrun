@@ -61,6 +61,10 @@ _LABEL_ACCEPTED = "status:accepted"
 _LABEL_NEEDS_FIX = "status:needs-fix"
 _LABEL_PENDING = "status:pending"
 
+# Hidden marker embedded in every rejection comment so a repeated --apply run can recognize
+# its own earlier comment and not post the same reason again.
+_REJECT_MARKER = "<!-- pubrun-benchmark-pull-reject:v1 -->"
+
 # A safe OWNER/NAME repo slug (blocks shell metacharacters even though we never use a shell).
 import re  # noqa: E402
 _GH_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -217,36 +221,98 @@ def aggregate_corpus(data_dir: Path, *, apply: bool) -> int:
     return len(rows)
 
 
+def _existing_comment_bodies(repo: str, issue_number: int) -> list:
+    """Return the bodies of the issue's existing comments, or [] when they cannot be read
+    (gh failure, empty or non-JSON output). Never raises."""
+    try:
+        out = _run_gh(["issue", "view", str(int(issue_number)), "--repo", repo,
+                       "--json", "comments"], timeout=30)
+    except PullError:
+        return []
+    if not isinstance(out, str) or not out.strip():
+        return []
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return []
+    comments = data.get("comments") if isinstance(data, dict) else None
+    if not isinstance(comments, list):
+        return []
+    return [c.get("body") for c in comments
+            if isinstance(c, dict) and isinstance(c.get("body"), str)]
+
+
+def _already_commented(repo: str, issue_number: int, reason: str) -> bool:
+    reason_line = f"- reason: {reason}"
+    for body in _existing_comment_bodies(repo, issue_number):
+        if _REJECT_MARKER in body and reason_line in body.splitlines():
+            return True
+    return False
+
+
 def _retag(repo: str, issue_number: int, accepted: bool, reason: str, *, apply: bool) -> None:
     """Set the decision label, always dropping status:pending (PR-003). Comment ONLY on
-    rejection. All writes are the maintainer's own gh actions; no-op unless apply."""
+    rejection, and only once per distinct reason. All writes are the maintainer's own gh
+    actions; no-op unless apply."""
     add = _LABEL_ACCEPTED if accepted else _LABEL_NEEDS_FIX
     remove = _LABEL_NEEDS_FIX if accepted else _LABEL_ACCEPTED
     if not apply:
         return
     # issue_number is an int; labels are fixed constants; never a shell.
-    try:
-        _run_gh(["issue", "edit", str(int(issue_number)), "--repo", repo,
-                 "--add-label", add, "--remove-label", remove,
-                 "--remove-label", _LABEL_PENDING], timeout=30)
-    except PullError:
-        # A missing label to remove is not fatal; try just adding the decision label.
+    num = str(int(issue_number))
+    attempts = (
+        ["--add-label", add, "--remove-label", remove, "--remove-label", _LABEL_PENDING],
+        # The opposite decision label may not exist on the issue (gh refuses to remove an
+        # absent label); still drop status:pending.
+        ["--add-label", add, "--remove-label", _LABEL_PENDING],
+        ["--add-label", add],
+    )
+    for extra in attempts:
         try:
-            _run_gh(["issue", "edit", str(int(issue_number)), "--repo", repo,
-                     "--add-label", add], timeout=30)
+            _run_gh(["issue", "edit", num, "--repo", repo, *extra], timeout=30)
+            break
         except PullError:
-            pass
+            continue
     if not accepted:
-        body = ("Automated (maintainer-run) benchmark check: needs fix.\n\n"
+        if _already_commented(repo, issue_number, reason):
+            return
+        body = (f"{_REJECT_MARKER}\n"
+                "Automated (maintainer-run) benchmark check: needs fix.\n\n"
                 f"- reason: {reason}\n\n"
                 "Re-run `pubrun bench` (which writes a redacted file and share-checks it), then "
                 "re-run `pubrun bench --contribute` or attach the redacted file, and edit the "
                 "issue to resubmit.")
         try:
-            _run_gh(["issue", "comment", str(int(issue_number)), "--repo", repo,
+            _run_gh(["issue", "comment", num, "--repo", repo,
                      "--body", body], timeout=30)
         except PullError:
             pass
+
+
+def _process_issue(repo: str, issue: dict, data_dir: Path, apply: bool, report: dict) -> None:
+    num = issue["number"]
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        src = None
+        kind = host = ""
+        try:
+            src, kind, host = _materialize_source(issue["body"], workdir)
+            verdict = _v.validate_file(src)
+        except _v.Reject as r:
+            verdict = {"accepted": False, "stage": r.stage, "reason": r.reason}
+        if verdict.get("accepted") and src is not None:
+            sha, stored, deduped = store_accepted(
+                src, data_dir, issue_number=num, issue_url=issue["url"],
+                submitter=issue["author"], kind=kind, host=host, apply=apply)
+            _retag(repo, num, True, "", apply=apply)
+            entry = {"issue": num, "sha": sha, "stored": stored, "deduped": deduped}
+            report["accepted"].append(entry)
+            if deduped:
+                report["deduped"].append(entry)
+        else:
+            reason = f"{verdict.get('stage', '?')}: {verdict.get('reason', 'invalid')}"
+            _retag(repo, num, False, reason, apply=apply)
+            report["rejected"].append({"issue": num, "reason": reason})
 
 
 def process(repo: str, label: str, state: str, limit: int, data_dir: Path, apply: bool):
@@ -254,32 +320,17 @@ def process(repo: str, label: str, state: str, limit: int, data_dir: Path, apply
     _require_gh_ready()
     issues = list_issues(repo, label, state, limit)
     report = {"repo": repo, "apply": apply, "processed": 0,
-              "accepted": [], "rejected": [], "deduped": []}
+              "accepted": [], "rejected": [], "deduped": [], "errors": []}
     for issue in issues:
         report["processed"] += 1
         num = issue["number"]
-        with tempfile.TemporaryDirectory() as td:
-            workdir = Path(td)
-            src = None
-            kind = host = ""
-            try:
-                src, kind, host = _materialize_source(issue["body"], workdir)
-                verdict = _v.validate_file(src)
-            except _v.Reject as r:
-                verdict = {"accepted": False, "stage": r.stage, "reason": r.reason}
-            if verdict.get("accepted") and src is not None:
-                sha, stored, deduped = store_accepted(
-                    src, data_dir, issue_number=num, issue_url=issue["url"],
-                    submitter=issue["author"], kind=kind, host=host, apply=apply)
-                _retag(repo, num, True, "", apply=apply)
-                entry = {"issue": num, "sha": sha, "stored": stored, "deduped": deduped}
-                report["accepted"].append(entry)
-                if deduped:
-                    report["deduped"].append(entry)
-            else:
-                reason = f"{verdict.get('stage', '?')}: {verdict.get('reason', 'invalid')}"
-                _retag(repo, num, False, reason, apply=apply)
-                report["rejected"].append({"issue": num, "reason": reason})
+        try:
+            _process_issue(repo, issue, data_dir, apply, report)
+        except Exception as exc:
+            # An unexpected failure on one issue (transport error, malformed data, a bug) is
+            # recorded without the payload and without relabeling the issue, and the batch
+            # continues with the next issue.
+            report["errors"].append({"issue": num, "reason": type(exc).__name__})
     if apply or True:
         report["aggregate_rows"] = aggregate_corpus(data_dir, apply=apply)
     return report
@@ -297,6 +348,10 @@ def _print_report(report: dict, as_json: bool) -> None:
     print(f"  rejected:  {len(report['rejected'])}", file=sys.stderr)
     for r in report["rejected"]:
         print(f"    - issue #{r['issue']}: {r['reason']}", file=sys.stderr)
+    errors = report.get("errors", [])
+    print(f"  errors:    {len(errors)}", file=sys.stderr)
+    for e in errors:
+        print(f"    - issue #{e['issue']}: {e['reason']}", file=sys.stderr)
     print(f"  aggregate rows: {report.get('aggregate_rows', 0)}", file=sys.stderr)
 
 
