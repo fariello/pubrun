@@ -1986,6 +1986,18 @@
                         "string",
                         "null"
                     ]
+                },
+                "section": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "stage": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
                 }
             }
         },

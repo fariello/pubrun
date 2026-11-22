@@ -25,10 +25,27 @@ def isolated_cwd(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def clean_active_run():
-    """Ensure _active_run is reset before and after each test to prevent cross-test pollution."""
-    pubrun.tracker._active_run = None
+    """Ensure any unstopped active run and leaked process-global hooks are cleaned up around each test."""
+    def _cleanup():
+        active = pubrun.tracker._active_run
+        if active is not None:
+            try:
+                if hasattr(active, "stop"):
+                    active.ref_count = 1
+                    active.stop()
+            except Exception:
+                pass
+            pubrun.tracker._active_run = None
+        try:
+            from pubrun.capture.subprocesses import SubprocessSpy
+            if SubprocessSpy._installed:
+                SubprocessSpy.uninstall()
+        except Exception:
+            pass
+
+    _cleanup()
     yield
-    pubrun.tracker._active_run = None
+    _cleanup()
 
 
 @pytest.fixture(autouse=True)

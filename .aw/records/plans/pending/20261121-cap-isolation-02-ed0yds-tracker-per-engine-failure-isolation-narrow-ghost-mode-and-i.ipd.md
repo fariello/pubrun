@@ -74,32 +74,32 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Schema, writer, event stream, and tracker isolation
 
-- [ ] E-01 Extend `$defs.error_record` additively in `schemas/manifest.schema.json` with optional `section` and `stage` string-or-null fields while keeping existing `required` fields unchanged.
+- [x] E-01 Extend `$defs.error_record` additively in `schemas/manifest.schema.json` with optional `section` and `stage` string-or-null fields while keeping existing `required` fields unchanged.
   - Depends on: none
   - Expected outcome: `schemas/manifest.schema.json` validates both existing manifests and manifests containing `errors.records` entries with `kind = "capture-error"`, `type`, bounded redacted `message`, `traceback = null`, `section`, and `stage`, as well as partial manifests where any section carries `capture_state.status == "failed"`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update `src/pubrun/writer.py::ArtifactWriter` and `src/pubrun/events.py::EventStream` to report output-write success or failure explicitly, bound failure warnings without retrying broken handles indefinitely, support `unregister_atexit()`, and prevent redundant finalized rewrites.
+- [x] E-02 Update `src/pubrun/writer.py::ArtifactWriter` and `src/pubrun/events.py::EventStream` to report output-write success or failure explicitly, bound failure warnings without retrying broken handles indefinitely, support `unregister_atexit()`, and prevent redundant finalized rewrites.
   - Depends on: E-01
   - Expected outcome: `ArtifactWriter.write_startup_manifest()` returns `bool` (`True` when startup artifacts wrote, `False` on failure) and stores a bounded redacted `last_error`. `ArtifactWriter.write_artifacts()` returns `bool`, guards against rewriting an already-written finalized run on redundant `stop()` or `atexit`, treats `methods.{md,tex}` failures as non-fatal, logs at most one bounded redacted warning on finalization write failure, stays duck-type compatible with `tests/test_writer.py::DummyRun`, and supports `unregister_atexit()`. `EventStream` stores `self._config`, closes and clears a broken `self._file` cleanly under `self._lock` instead of retrying failing writes indefinitely, emits at most one bounded redacted warning outside `self._lock` per write-failure episode, and keeps `emit()`, `close()`, and `migrate_directory()` thread-safe.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Refactor `src/pubrun/tracker.py::Run` and lifecycle guards in `src/pubrun/core.py` for per-engine capture isolation, independent background `hardware`/`host`/`filesystem` isolation, narrow ghost mode with transactional `_rollback_owned_hooks()`, independent pre-teardown and cleanup steps in `_finalize_state()`, and lock-safe `to_manifest_dict()`.
+- [x] E-03 Refactor `src/pubrun/tracker.py::Run` and lifecycle guards in `src/pubrun/core.py` for per-engine capture isolation, independent background `hardware`/`host`/`filesystem` isolation, narrow ghost mode with transactional `_rollback_owned_hooks()`, independent pre-teardown and cleanup steps in `_finalize_state()`, and lock-safe `to_manifest_dict()`.
   - Depends on: E-02
   - Expected outcome: Every capture engine in `Run._bootstrap_engines()` (including `resolve_console_mode()`, `set_poll_timeout()`, and `_hardware_thread.start()`) runs in its own isolated guard so an escaping exception marks only that section `"failed"` (with bounded redacted `detail` and an in-memory `errors.records` entry) while preserving all unrelated sections. `get_hardware()`, `get_host()`, and `get_filesystem()` run in three separate `try/except` blocks inside `_collect_hardware()`. If `run_dir.mkdir()` or initial `write_startup_manifest()` fails, `Run` latches `_finalized = True` and `is_active = False` under `_run_lock`, rolls back all owned hooks, threads, handles, lock file, and `atexit`, enters ghost mode cleanly (publishing `_active_run = self` with `writer = None` and one bounded redacted stderr warning), and returns. `_finalize_state()` executes every pre-teardown step (`_hardware_future_done.wait()`, `signal_capture.get_records()`, `signal_capture.record_exit_code()`) and every teardown step (separating `SubprocessSpy.finalize_all()`, `get_records()`, and `uninstall(owner=...)`) independently even if earlier steps raise. `Run.stop()` unregisters `atexit` and clears `_active_run` in `finally` when `ref_count <= 0`. `_merge_and_migrate()` is a no-op on ghost or inactive runs, guards `resolve_config()`, respects import-mode `patch_subprocesses` permission, and isolates mid-run `SubprocessSpy` activation. `to_manifest_dict()` reads error state under `_errors_lock`, isolates dynamic providers, populates `errors.records`, and sets `capture.capture_state` to `"partial"` whenever any section failed (whether via exception or self-caught failed return).
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Fault-injection, rollback, lifecycle, and schema verification
 
-- [ ] E-04 Update outdated engine-crash ghost tests in `tests/test_tracker.py` and add partial-manifest schema conformance tests in `tests/test_manifest_schema.py`.
+- [x] E-04 Update outdated engine-crash ghost tests in `tests/test_tracker.py` and add partial-manifest schema conformance tests in `tests/test_manifest_schema.py`.
   - Depends on: E-03
   - Expected outcome: `tests/test_tracker.py` verifies that failing `get_invocation`, `get_git`, `get_environment`, or `get_hardware` produces an active partial run (not ghost mode) while genuine output-directory failure enters ghost mode and preserves `outcome == "ghost"` across `stop()`. `tests/test_manifest_schema.py` validates real partial manifests produced under per-engine fault injection against `schemas/manifest.schema.json`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Create `tests/test_capture_isolation.py` verifying per-engine fault injection, output-loss rollback, second cleanup failures, lifecycle edge cases, and import modes across the targeted test suite.
+- [x] E-05 Create `tests/test_capture_isolation.py` verifying per-engine fault injection, output-loss rollback, second cleanup failures, lifecycle edge cases, and import modes across the targeted test suite.
   - Depends on: E-04
   - Expected outcome: `pytest tests/test_capture_isolation.py tests/test_tracker.py tests/test_writer.py tests/test_events.py tests/test_import_modes.py tests/test_manifest_schema.py tests/test_quality.py -v` exits 0 with all tests passing.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -269,30 +269,30 @@ Deferred to child plan `zp2yyu` (isolation overhead measurement and documentatio
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Diff of `schemas/manifest.schema.json` showing optional `section` and `stage` properties under `$defs.error_record` with unchanged `required` arrays, plus pasted `pytest tests/test_manifest_schema.py -v` output (exit code 0).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff schemas/manifest.schema.json` (+12 lines under `$defs.error_record.properties` adding `"section": {"type": ["string", "null"]}` and `"stage": {"type": ["string", "null"]}` with `$defs.error_record.required` unchanged as `["kind"]`). Runner output for `python3 -m pytest tests/test_manifest_schema.py -v` (exit code 0): `collected 32 items ... tests/test_manifest_schema.py::test_partial_manifest_under_engine_fault_conforms_to_schema[invocation..signals] PASSED ... tests/test_manifest_schema.py::test_error_record_schema_accepts_legacy_and_extended_shapes PASSED ... ============================== 32 passed in 10.30s ==============================`.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Diff of `src/pubrun/writer.py` and `src/pubrun/events.py` showing `bool` return values on `write_startup_manifest()`/`write_artifacts()`, `unregister_atexit()`, duplicate finalized write guard, non-fatal `methods` handling, `DummyRun` compatibility, and bounded one-time error warnings emitted outside `EventStream._lock` without infinite retry loops.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff src/pubrun/writer.py src/pubrun/events.py` (`src/pubrun/writer.py`: +80/-30 lines; `src/pubrun/events.py`: +67/-30 lines). `ArtifactWriter` tracks `last_error`, `_artifacts_written`, and `_write_failure_warned`; adds `unregister_atexit()`; returns `bool` from `write_startup_manifest(*args, **kwargs)` and `write_artifacts()`; guards duplicate finalized rewrites; preserves `_mark_finalization_end()` timing order; guards `config.resolved.json` separately and keeps `methods.{md,tex}` non-fatal; emits at most one bounded redacted warning on failure; stays compatible with `DummyRun`. `EventStream` stores `self._config`, `self._write_failed`, and `self._last_error`; re-checks `self._file is None` inside `self._lock`; closes and detaches broken `self._file` and clears `_buffer` under `self._lock` while emitting the single bounded redacted warning outside `self._lock`; resets `_write_failed = False` in `migrate_directory()` only when reopening succeeds.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Diff of `src/pubrun/tracker.py` and `src/pubrun/core.py` showing per-engine isolation guards (including `resolve_console_mode`, `set_poll_timeout`, and `_hardware_thread.start`), three independent `hardware`/`host`/`filesystem` blocks in `_collect_hardware()`, narrow ghost-mode rollback via `_rollback_owned_hooks()` after latching `_finalized` under `_run_lock`, independent pre-teardown and teardown steps in `_finalize_state()` (with `SubprocessSpy.uninstall()` separated from `finalize_all()`), `_errors_lock`-protected `to_manifest_dict()` populating `errors.records` and honest `capture.capture_state` (including self-caught failed returns), and import-mode-respecting `_merge_and_migrate()`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff src/pubrun/tracker.py src/pubrun/core.py` (`src/pubrun/tracker.py`: +809/-262 lines; `src/pubrun/core.py`: +28/-14 lines). `src/pubrun/tracker.py` defines `MAX_CAPTURE_ERRORS = 50`; initializes error locks, ownership token `_spy_owner_token`, `_hardware_write_closed`, and fallback section fields before `mkdir()`; narrows ghost mode to `mkdir()` or `write_startup_manifest()` failure with `_run_lock`-latched `_finalized = True`/`_hardware_write_closed = True`/`is_active = False` followed by `_rollback_owned_hooks(stage="rollback")` and `_enter_ghost_mode()`; isolates every static and hook engine in `_bootstrap_engines()` (including `resolve_console_mode()`, `ConsoleInterceptor.start()`, `EventStream`, `set_poll_timeout()`, `ResourceWatcher`, `SignalExitCapture`, and `_hardware_thread.start()`) plus three separate `hardware`/`host`/`filesystem` blocks in `_collect_hardware()` guarded by `_hardware_write_closed` under `_run_lock` (allowing collection to complete during `_finalize_state()`'s 2s wait while blocking late post-wait mutations); runs all pre-teardown and teardown steps independently in `_finalize_state()`/`_rollback_owned_hooks()` (separating `SubprocessSpy.finalize_all()`, `get_records()`, and `uninstall(owner=...)`); unregisters `atexit` and clears `_active_run` in `Run.stop()` `finally`; guards `_merge_and_migrate()` on ghost/inactive/finalized runs, `resolve_config()`, and import-mode `patch_subprocesses`; and snapshots error state under `_errors_lock` in `to_manifest_dict()` with honest `capture.capture_state` across both exceptions and self-caught failed returns while preserving `e1fwy2` monotonic timing anchors. `src/pubrun/core.py` switches `_run_lock` to `threading.RLock()`, separates `_start_lock` for `Run()` construction serialization, and skips `_merge_and_migrate()` when the active run is ghost or inactive.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest tests/test_tracker.py tests/test_manifest_schema.py -v` output (exit code 0) showing updated partial-capture and ghost-mode tracker tests and schema validation of partial manifests.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Runner output for `python3 -m pytest tests/test_tracker.py tests/test_manifest_schema.py -v` (exit code 0): `collected 52 items ... tests/test_tracker.py::test_engine_crash_isolated_to_partial_manifest PASSED ... tests/test_tracker.py::TestBootstrapEnginesFailures::test_git_failure_isolated_partial_run PASSED ... test_hardware_failure_graceful PASSED ... test_environment_failure_isolated_partial_run PASSED ... test_ghost_run_stop_is_safe PASSED ... test_ghost_outcome_preserved_after_stop PASSED ... tests/test_manifest_schema.py::test_ghost_run_timing_subschema_conforms PASSED ... test_partial_manifest_under_engine_fault_conforms_to_schema[invocation..signals] PASSED ... ============================== 52 passed in 11.26s ==============================`.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted `pytest tests/test_capture_isolation.py tests/test_tracker.py tests/test_writer.py tests/test_events.py tests/test_import_modes.py tests/test_manifest_schema.py tests/test_quality.py -v` output showing exit code 0 and zero failures across all engine fault injections (and self-caught failed returns), output-loss rollback, second cleanup failure (including `finalize_all()` failure), nested runs, multi-stop, auto-exit, slow worker, and six import modes.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Runner output for `python3 -m pytest tests/test_capture_isolation.py tests/test_tracker.py tests/test_writer.py tests/test_events.py tests/test_import_modes.py tests/test_manifest_schema.py tests/test_quality.py -v` (exit code 0): `collected 212 items ... tests/test_capture_isolation.py (35 passed across all 14 engines, bootstrap edges, self-caught failed return, error cap truncation, startup output-loss rollback, EventStream lock-free warning & detach, mid-run output loss, non-fatal methods/config write, multi-failure cleanup & finalize_all/uninstall isolation, nested/tracked_run/audit_run/multi-stop, atexit subprocess finalization, slow hw worker race, all 6 import modes, and restricted-mode rollback third-party hook preservation) ... ============================== 212 passed in 38.65s ==============================`. Additionally ran `python3 -m pytest tests/test_hardware.py tests/test_timing_accuracy.py -v` (exit code 0, `17 passed in 3.53s`) and full `aw suite` (`1132 passed, 1 failed`; sole failure is pre-existing xdist issue `12rcu8` in `tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches`, which passes 27/27 standalone in `python3 -m pytest tests/test_liveness.py -v`).
+  - Result: pass
 
 ## Approval and execution gate
 

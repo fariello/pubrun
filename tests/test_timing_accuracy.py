@@ -629,14 +629,15 @@ def test_partial_startup_ghost_mode_unwritable_dir_and_engine_crash(monkeypatch)
     assert timing_fs["interval_scope"] == "tracked_interval"
     ghost_fs.stop()
 
-    # Case 2: Engine init crash during _bootstrap_engines.
+    # Case 2: Post-bootstrap startup manifest write failure (unusable output -> ghost rollback).
     monkeypatch.undo()
     _install_fake_clock(monkeypatch, wall=1_750_000_000.0, mono=1400.0)
-    monkeypatch.setattr(
-        tracker_mod,
-        "get_invocation",
-        lambda cfg: (_ for _ in ()).throw(RuntimeError("invocation crash")),
-    )
+
+    def _fail_startup(self, *args, **kwargs):
+        self.last_error = "PermissionError: read-only output"
+        return False
+
+    monkeypatch.setattr(writer_mod.ArtifactWriter, "write_startup_manifest", _fail_startup)
     ghost_eng = Run()
     assert ghost_eng._outcome == "ghost"
     assert ghost_eng._finalized is True

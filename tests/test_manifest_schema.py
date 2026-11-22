@@ -360,34 +360,35 @@ def test_legacy_v1_timing_manifest_without_new_fields_conforms():
 
 
 def test_ghost_run_timing_subschema_conforms(tmp_path, monkeypatch):
-    """Ghost-mode runs (unwritable run_dir or engine init crash) emit a timing
-    section that conforms to `$defs.timing`."""
-    import pubrun.tracker as tracker_mod
+    """Ghost-mode runs (unwritable run_dir or startup manifest write failure)
+    emit a timing section that conforms to `$defs.timing`."""
+    import pubrun.writer as writer_mod
     from pubrun.tracker import Run
 
     schema = _schema()
     timing_schema = _timing_subschema(schema)
 
-    # Engine init failure ghost run
-    monkeypatch.setattr(
-        tracker_mod,
-        "get_invocation",
-        lambda cfg: (_ for _ in ()).throw(RuntimeError("simulated init failure")),
-    )
-    ghost_engine = Run()
-    timing_engine = ghost_engine.to_manifest_dict()["timing"]
-    assert timing_engine["capture_state"] == {
+    # Startup output write failure ghost run (post-bootstrap rollback)
+    def failing_startup(self, *args, **kwargs):
+        self.last_error = "PermissionError: read-only output"
+        return False
+
+    monkeypatch.setattr(writer_mod.ArtifactWriter, "write_startup_manifest", failing_startup)
+    ghost_output = Run()
+    assert ghost_output._outcome == "ghost"
+    timing_output = ghost_output.to_manifest_dict()["timing"]
+    assert timing_output["capture_state"] == {
         "status": "partial",
         "detail": "ghost mode: startup did not complete",
     }
-    assert timing_engine["elapsed_seconds"] is None
-    assert timing_engine["workload_seconds"] is None
-    assert timing_engine["duration_clock"] is None
-    assert timing_engine["elapsed_basis"] is None
-    jsonschema.validate(timing_engine, timing_schema)
-    ghost_engine.stop()
+    assert timing_output["elapsed_seconds"] is None
+    assert timing_output["workload_seconds"] is None
+    assert timing_output["duration_clock"] is None
+    assert timing_output["elapsed_basis"] is None
+    jsonschema.validate(timing_output, timing_schema)
+    ghost_output.stop()
 
-    # Unwritable run_dir ghost run
+    # Unwritable run_dir ghost run (mkdir failure)
     monkeypatch.undo()
     monkeypatch.setattr(
         Path,
@@ -395,9 +396,102 @@ def test_ghost_run_timing_subschema_conforms(tmp_path, monkeypatch):
         lambda self, *a, **kw: (_ for _ in ()).throw(PermissionError("read-only")),
     )
     ghost_fs = Run()
+    assert ghost_fs._outcome == "ghost"
     timing_fs = ghost_fs.to_manifest_dict()["timing"]
     jsonschema.validate(timing_fs, timing_schema)
     ghost_fs.stop()
+
+
+@pytest.mark.parametrize(
+    "fault_section",
+    ["invocation", "git", "packages", "hardware", "console", "resources", "signals"],
+)
+def test_partial_manifest_under_engine_fault_conforms_to_schema(
+    tmp_path, monkeypatch, fault_section
+):
+    """Real partial manifests produced when any capture engine fails must validate
+    end-to-end against schemas/manifest.schema.json with structured capture-error records."""
+    import pubrun.tracker as tracker_mod
+    from pubrun.tracker import Run
+
+    monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError(f"fault in {fault_section} api_key=secret_token_value")
+
+    overrides = {}
+    if fault_section == "invocation":
+        monkeypatch.setattr(tracker_mod, "get_invocation", _boom)
+    elif fault_section == "git":
+        monkeypatch.setattr(tracker_mod, "get_git", _boom)
+    elif fault_section == "packages":
+        monkeypatch.setattr(tracker_mod, "get_packages", _boom)
+    elif fault_section == "hardware":
+        monkeypatch.setattr(tracker_mod, "get_hardware", _boom)
+    elif fault_section == "console":
+        overrides = {"console": {"capture_mode": "standard"}}
+        monkeypatch.setattr(tracker_mod.ConsoleInterceptor, "start", _boom)
+    elif fault_section == "resources":
+        overrides = {"capture": {"resources": {"depth": "basic"}}}
+        monkeypatch.setattr(tracker_mod.ResourceWatcher, "start", _boom)
+    elif fault_section == "signals":
+        overrides = {"capture": {"signals": {"enabled": True}}}
+        monkeypatch.setattr(tracker_mod.SignalExitCapture, "install", _boom)
+
+    run = Run(overrides=overrides)
+    if run._hardware_future_done is not None:
+        run._hardware_future_done.wait(timeout=2.0)
+    run.stop()
+
+    manifest = json.loads((run.run_dir / "manifest.json").read_text(encoding="utf-8"))
+    jsonschema.validate(manifest, _schema())
+
+    assert manifest["status"]["outcome"] == "completed"
+    assert manifest[fault_section]["capture_state"]["status"] == "failed"
+    assert "secret_token_value" not in manifest[fault_section]["capture_state"].get("detail", "")
+    assert manifest["capture"]["capture_state"]["status"] == "partial"
+
+    matching = [
+        rec
+        for rec in manifest["errors"]["records"]
+        if rec.get("kind") == "capture-error" and rec.get("section") == fault_section
+    ]
+    assert matching, f"Expected capture-error record for {fault_section}"
+    assert matching[0]["stage"] == "bootstrap"
+    assert matching[0]["traceback"] is None
+    assert "secret_token_value" not in (matching[0].get("message") or "")
+
+
+def test_error_record_schema_accepts_legacy_and_extended_shapes():
+    """$defs.error_record keeps required=['kind'] and accepts optional section/stage."""
+    schema = _schema()
+    defs = schema["$defs"]
+    err_sub = dict(defs["error_record"])
+    err_sub["$defs"] = defs
+
+    # Legacy minimal record (only required field 'kind')
+    jsonschema.validate({"kind": "exception"}, err_sub)
+    # Extended capture-error record with section and stage
+    jsonschema.validate(
+        {
+            "kind": "capture-error",
+            "type": "RuntimeError",
+            "message": "RuntimeError: git unavailable",
+            "traceback": None,
+            "section": "git",
+            "stage": "bootstrap",
+        },
+        err_sub,
+    )
+    # Nullable section/stage
+    jsonschema.validate(
+        {
+            "kind": "capture-error",
+            "section": None,
+            "stage": None,
+        },
+        err_sub,
+    )
 
 
 def test_timing_and_subprocess_schema_constraints():

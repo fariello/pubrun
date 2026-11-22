@@ -21,8 +21,9 @@ from typing import Any, Callable, Dict, Optional
 from pubrun.tracker import Run, get_current_run
 
 
-# -- Thread lock for ref_count safety ----------------------------------------
-_run_lock = threading.Lock()
+# -- Thread locks for ref_count and Run construction safety ------------------
+_run_lock = threading.RLock()
+_start_lock = threading.Lock()
 
 
 def _append_manual_subprocess_record(current_run: Any, record: dict) -> None:
@@ -124,21 +125,34 @@ def start(**kwargs: Any) -> Run:
         >>> tracker = pubrun.start(profile="deep")
         >>> tracker.stop()
     """
+    is_ghost_or_inactive = False
     with _run_lock:
         active = get_current_run()
         if active:
             active.ref_count = getattr(active, "ref_count", 0) + 1
+            is_ghost_or_inactive = (
+                getattr(active, "_outcome", None) == "ghost"
+                or not getattr(active, "is_active", False)
+            )
     if active:
-        if hasattr(active, "_merge_and_migrate"):
+        if not is_ghost_or_inactive and hasattr(active, "_merge_and_migrate"):
             active._merge_and_migrate(kwargs)
         return active
-    # BUG-04: Hold the lock across Run() construction to prevent two
-    # concurrent threads from both seeing active=None and creating two Runs.
-    with _run_lock:
-        # Double-check: another thread may have created one while we waited.
-        active = get_current_run()
+    # BUG-04: Serialize Run() construction with _start_lock so two concurrent
+    # threads never create two Runs, while keeping _run_lock free for rollback
+    # and background hardware thread coordination inside Run.__init__().
+    with _start_lock:
+        with _run_lock:
+            active = get_current_run()
+            if active:
+                active.ref_count = getattr(active, "ref_count", 0) + 1
+                is_ghost_or_inactive = (
+                    getattr(active, "_outcome", None) == "ghost"
+                    or not getattr(active, "is_active", False)
+                )
         if active:
-            active.ref_count = getattr(active, "ref_count", 0) + 1
+            if not is_ghost_or_inactive and hasattr(active, "_merge_and_migrate"):
+                active._merge_and_migrate(kwargs)
             return active
         return Run(overrides=kwargs)
 

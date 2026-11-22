@@ -28,6 +28,9 @@ class EventStream:
         if config is None:
             from pubrun.config import resolve_config
             config = resolve_config()
+        self._config: Optional[Dict[str, Any]] = config
+        self._write_failed: bool = False
+        self._last_error: Optional[str] = None
         self._max_events = config.get("events", {}).get("max_tracked_events", 1_000_000)
         # Secondary cap for critical events (annotations, phases) to prevent
         # unbounded disk writes from scripts calling annotate() in tight loops.
@@ -46,7 +49,10 @@ class EventStream:
             # typical in machine learning epochs.
             self._file = open(self.stream_path, "a", encoding="utf-8")
         except Exception as e:
-            logger.debug(f"pubrun failed to open event stream: {e}")
+            from pubrun.capture.redaction import format_safe_error_detail
+            detail = format_safe_error_detail(e, self._config)
+            self._last_error = detail
+            logger.debug("pubrun failed to open event stream: %s", detail)
             self._file = None
 
     def emit(self, event_type: str, name: Optional[str] = None, payload: Optional[Dict[str, Any]] = None) -> None:
@@ -61,7 +67,7 @@ class EventStream:
             name: Optional semantic label.
             payload: Optional key-value data attached to the event.
         """
-        if not self._file:
+        if self._file is None:
             return
 
         # Critical lifecycle events bypass the throttle threshold so they are
@@ -81,14 +87,18 @@ class EventStream:
         try:
             line = json.dumps(record) + "\n"
         except (TypeError, ValueError, OverflowError) as ser_err:
-            # BUG-05: Non-serializable payload — log at warning so user knows.
+            # BUG-05: Non-serializable payload -- log at warning so user knows.
             logger.warning(
                 f"pubrun: event '{event_type}' dropped (payload not JSON-serializable): {ser_err}"
             )
             return
 
-        try:
-            with self._lock:
+        should_warn = False
+        warn_detail = ""
+        with self._lock:
+            if self._file is None:
+                return
+            try:
                 if is_critical:
                     if self._critical_event_count >= self._max_critical_events:
                         return
@@ -108,41 +118,68 @@ class EventStream:
                         self._file.writelines(self._buffer)
                         self._buffer.clear()
                         self._file.flush()
-        except Exception as e:
-            logger.debug(f"pubrun event write failed: {e}")
+            except Exception as e:
+                f, self._file = self._file, None
+                self._buffer.clear()
+                try:
+                    if f is not None:
+                        f.close()
+                except Exception:
+                    pass
+                from pubrun.capture.redaction import format_safe_error_detail
+                detail = format_safe_error_detail(e, self._config)
+                self._last_error = detail
+                should_warn = not self._write_failed
+                self._write_failed = True
+                warn_detail = detail
+
+        if should_warn:
+            logger.warning("pubrun: event stream write failed: %s", warn_detail)
 
     def close(self) -> None:
         """Flush and close the event stream file. Safe to call multiple times."""
         with self._lock:
-            if self._file:
+            f, self._file = self._file, None
+            buf = self._buffer
+            self._buffer = []
+            if f is not None:
                 try:
-                    # Flush remaining buffer before closing.
-                    if self._buffer:
-                        self._file.writelines(self._buffer)
-                        self._buffer.clear()
-                    self._file.flush()
-                    self._file.close()
+                    if buf:
+                        f.writelines(buf)
+                    f.flush()
                 except Exception:
                     pass
-                self._file = None
+                try:
+                    f.close()
+                except Exception:
+                    pass
 
     def migrate_directory(self, new_dir: Path) -> None:
         """Close the current stream file, update the path to the new directory,
         and reopen the file in append mode. Safe to call concurrently."""
         with self._lock:
-            if self._file:
+            f, self._file = self._file, None
+            buf = self._buffer
+            self._buffer = []
+            if f is not None:
                 try:
-                    if self._buffer:
-                        self._file.writelines(self._buffer)
-                        self._buffer.clear()
-                    self._file.flush()
-                    self._file.close()
+                    if buf:
+                        f.writelines(buf)
+                    f.flush()
                 except Exception:
                     pass
-                self._file = None
+                try:
+                    f.close()
+                except Exception:
+                    pass
             self.stream_path = new_dir / "events.jsonl"
             try:
                 self._file = open(self.stream_path, "a", encoding="utf-8")
+                self._write_failed = False
+                self._last_error = None
             except Exception as e:
-                logger.debug(f"pubrun failed to open migrated event stream: {e}")
+                from pubrun.capture.redaction import format_safe_error_detail
+                detail = format_safe_error_detail(e, self._config)
+                self._last_error = detail
+                logger.debug("pubrun failed to open migrated event stream: %s", detail)
                 self._file = None

@@ -5,7 +5,7 @@ import time
 import uuid
 import atexit
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger("pubrun")
 
@@ -44,6 +44,8 @@ class ArtifactWriter:
         self.run = run_instance
         self._registered = False
         self._artifacts_written = False
+        self.last_error: Optional[str] = None
+        self._write_failure_warned = False
 
     def register_atexit(self) -> None:
         """Register ``write_artifacts`` as a Python atexit handler (once only)."""
@@ -51,19 +53,29 @@ class ArtifactWriter:
             atexit.register(self.write_artifacts)
             self._registered = True
 
-    def write_artifacts(self) -> None:
+    def unregister_atexit(self) -> None:
+        """Unregister ``write_artifacts`` from Python atexit hooks if registered."""
+        if self._registered:
+            try:
+                atexit.unregister(self.write_artifacts)
+            except Exception:
+                pass
+            self._registered = False
+
+    def write_artifacts(self) -> bool:
         """Write config.resolved.json, manifest.json, and methods report to disk.
 
         Uses atomic writes (temp file + os.replace) to prevent partial files.
-        Catches all exceptions — pubrun must never crash the host script.
+        Catches all exceptions and returns True when manifest.json was written
+        successfully (or was already written for a finalized run), False otherwise.
         """
-        try:
-            if self._artifacts_written and getattr(self.run, "_finalized", False):
-                return
+        if self._artifacts_written and getattr(self.run, "_finalized", False):
+            return True
 
+        try:
             write_start_mono = time.perf_counter()
 
-            # Finalize has already been called by stop() — the _finalized guard
+            # Finalize has already been called by stop() -- the _finalized guard
             # makes this safe even if atexit triggers write_artifacts directly.
             self.run._finalize_state()
 
@@ -72,8 +84,24 @@ class ArtifactWriter:
 
             # 1. Write config.resolved.json atomically before manifest.json so
             #    its write latency is captured in pre-manifest finalization overhead.
+            #    Guarded separately so a config write failure does not prevent
+            #    writing manifest.json or falsely claim manifest.json failed.
+            config_err_detail: Optional[str] = None
             config_path = out_dir / "config.resolved.json"
-            _atomic_json_write(config_path, self.run.config)
+            try:
+                _atomic_json_write(config_path, self.run.config)
+            except Exception as cfg_err:
+                from pubrun.capture.redaction import format_safe_error_detail
+                config_err_detail = format_safe_error_detail(
+                    cfg_err, getattr(self.run, "config", None)
+                )
+                self.last_error = config_err_detail
+                if not self._write_failure_warned:
+                    self._write_failure_warned = True
+                    logger.warning(
+                        "pubrun: failed to write config.resolved.json: %s",
+                        config_err_detail,
+                    )
 
             # 2. Refresh t3 right before freezing finalized timing in manifest.json.
             if hasattr(self.run, "_mark_finalization_end"):
@@ -84,28 +112,44 @@ class ArtifactWriter:
             manifest_path = out_dir / "manifest.json"
             _atomic_json_write(manifest_path, manifest_data)
             self._artifacts_written = True
+            if config_err_detail is None:
+                self.last_error = None
 
-            # 4. Write methods.md or methods.tex (Automated publication generation)
+            # 4. Write methods.md or methods.tex (non-fatal).
             try:
                 from pubrun.report.methods import generate_report
 
-                methods_format = self.run.config.get("methods", {}).get("format", "markdown")
+                cfg = getattr(self.run, "config", None) or {}
+                methods_format = cfg.get("methods", {}).get("format", "markdown")
                 ext = "tex" if methods_format == "latex" else "md"
                 methods_path = out_dir / f"methods.{ext}"
                 with open(methods_path, "w", encoding="utf-8") as f:
                     f.write(generate_report(manifest_data, methods_format))
             except Exception as report_err:
-                logger.debug(f"Methods generation failed: {report_err}")
+                from pubrun.capture.redaction import format_safe_error_detail
+                logger.debug(
+                    "Methods generation failed: %s",
+                    format_safe_error_detail(report_err, getattr(self.run, "config", None)),
+                )
 
             self.run.writer_overhead_seconds = max(0.0, time.perf_counter() - write_start_mono)
+            return True
 
         except Exception as e:
             # The golden rule: pubrun never crashes the host script.
-            logger.debug(f"pubrun failed to write execution artifacts: {e}")
+            from pubrun.capture.redaction import format_safe_error_detail
+            detail = format_safe_error_detail(e, getattr(self.run, "config", None))
+            self.last_error = detail
+            if not self._write_failure_warned:
+                self._write_failure_warned = True
+                logger.warning("pubrun: failed to write execution artifacts: %s", detail)
+            return False
 
-    def write_startup_manifest(self) -> None:
+    def write_startup_manifest(self, *args: Any, **kwargs: Any) -> bool:
         """Write the initial manifest.json and config.resolved.json at startup.
         Does not finalize state.
+
+        Returns True when startup artifacts wrote atomically, False on failure.
         """
         try:
             out_dir: Path = self.run.run_dir
@@ -117,5 +161,11 @@ class ArtifactWriter:
 
             config_path = out_dir / "config.resolved.json"
             _atomic_json_write(config_path, self.run.config)
+            self.last_error = None
+            return True
         except Exception as e:
-            logger.debug(f"pubrun failed to write startup artifacts: {e}")
+            from pubrun.capture.redaction import format_safe_error_detail
+            detail = format_safe_error_detail(e, getattr(self.run, "config", None))
+            self.last_error = detail
+            logger.debug("pubrun failed to write startup artifacts: %s", detail)
+            return False

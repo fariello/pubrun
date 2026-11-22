@@ -8,36 +8,36 @@ def test_tracker_lifecycle_and_writer(tmp_path, monkeypatch):
     """Verifies that start() creates a directory and stop() dumps the manifest properly."""
     # Override the cwd to our tmp_path so runs/ generates there
     monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
-    
+
     tracker = start()
     assert tracker.is_active is True
     assert tracker.run_dir.exists()
     assert tracker.run_dir.parent.name == "runs"
-    
+
     assert get_current_run() is tracker
-    
+
     # Manually halt
     tracker.stop(outcome="completed")
-    
+
     assert tracker.is_active is False
     assert tracker._outcome == "completed"
     assert get_current_run() is None
-    
+
     # Check artifacts
     manifest_path = tracker.run_dir / "manifest.json"
     assert manifest_path.exists()
-    
+
     with open(manifest_path, "r", encoding="utf-8") as f:
         manifest_data = json.load(f)
-        
+
     assert manifest_data["schema_version"] == "1.0"
     assert isinstance(manifest_data["timing"]["started_at_utc"], float)
     assert manifest_data["status"]["outcome"] == "completed"
-    
+
     from pubrun import __version__, __commit__
     assert manifest_data["run"]["library_version"] == __version__
     assert manifest_data["run"]["library_commit"] == __commit__
-    
+
     # Check config
     config_path = tracker.run_dir / "config.resolved.json"
     assert config_path.exists()
@@ -45,20 +45,21 @@ def test_tracker_lifecycle_and_writer(tmp_path, monkeypatch):
 def test_audit_run_decorator(tmp_path, monkeypatch):
     from pubrun import audit_run
     monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
-    
+
     @audit_run(profile="deep")
     def my_logic():
         # verify active inside
         assert get_current_run() is not None
         return 42
-        
+
     res = my_logic()
     assert res == 42
     assert get_current_run() is None # cleaned up automatically after run
 
 
-def test_engine_crash_promotes_to_ghost(tmp_path, monkeypatch):
-    """If a capture engine raises during init, the run enters ghost mode."""
+def test_engine_crash_isolated_to_partial_manifest(tmp_path, monkeypatch):
+    """If a single capture engine raises during init, the run stays active and
+    degrades only that section into a partial manifest instead of ghost mode."""
     from pubrun.tracker import Run
     monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
 
@@ -69,9 +70,22 @@ def test_engine_crash_promotes_to_ghost(tmp_path, monkeypatch):
     monkeypatch.setattr("pubrun.tracker.get_invocation", broken_invocation)
 
     run = Run()
-    assert run._outcome == "ghost"
-    assert run.is_active is False
-    assert run._finalized is True
+    assert run._outcome == "running"
+    assert run.is_active is True
+    assert run._finalized is False
+    assert run.invocation_data["capture_state"]["status"] == "failed"
+    assert "RuntimeError" in run.invocation_data["capture_state"]["detail"]
+    run.stop()
+
+    manifest = json.loads((run.run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"]["outcome"] == "completed"
+    assert manifest["invocation"]["capture_state"]["status"] == "failed"
+    assert manifest["process"]["capture_state"]["status"] == "complete"
+    assert manifest["capture"]["capture_state"]["status"] == "partial"
+    assert any(
+        r.get("kind") == "capture-error" and r.get("section") == "invocation"
+        for r in manifest["errors"]["records"]
+    )
 
 
 def test_atomic_manifest_write(tmp_path, monkeypatch):
@@ -227,57 +241,88 @@ class TestMergeAndMigrate:
 # ==========================================================================
 
 class TestBootstrapEnginesFailures:
-    """Test that each engine failure individually promotes to ghost mode."""
+    """Test that individual engine failures isolate into partial manifests while
+    genuine output-directory failures enter ghost mode."""
 
-    def test_git_failure_ghost_mode(self, tmp_path, monkeypatch):
-        """get_git raising promotes to ghost mode."""
+    def test_git_failure_isolated_partial_run(self, tmp_path, monkeypatch):
+        """get_git raising degrades only the git section without entering ghost mode."""
         from pubrun.tracker import Run
         monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
         monkeypatch.setattr("pubrun.tracker.get_git", lambda c: (_ for _ in ()).throw(RuntimeError("git broken")))
         run = Run()
-        assert run._outcome == "ghost"
+        assert run._outcome == "running"
+        assert run.is_active is True
+        assert run.git_data["capture_state"]["status"] == "failed"
+        run.stop()
+
+        manifest = json.loads((run.run_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["status"]["outcome"] == "completed"
+        assert manifest["git"]["capture_state"]["status"] == "failed"
+        assert manifest["capture"]["capture_state"]["status"] == "partial"
+        assert any(r.get("section") == "git" for r in manifest["errors"]["records"])
 
     def test_hardware_failure_graceful(self, tmp_path, monkeypatch):
-        """get_hardware raising in background thread is handled gracefully (not ghost)."""
+        """get_hardware raising in background thread is isolated from host and filesystem."""
         from pubrun.tracker import Run
         monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
         monkeypatch.setattr("pubrun.tracker.get_hardware", lambda c: (_ for _ in ()).throw(RuntimeError("hw broken")))
         run = Run()
-        # Hardware now runs in a background thread; failure does not promote to ghost.
+        # Hardware runs in a background thread; failure does not promote to ghost.
         assert run._outcome == "running"
         assert run.is_active is True
-        # Wait for background thread and verify hardware shows failed state.
+        # Wait for background thread and verify hardware failed while host survived.
         run._hardware_future_done.wait(timeout=2)
         assert run.hardware_data.get("capture_state", {}).get("status") == "failed"
+        assert run.host_data.get("capture_state", {}).get("status") == "complete"
         run.stop()
 
-    def test_environment_failure_ghost_mode(self, tmp_path, monkeypatch):
-        """get_environment raising promotes to ghost mode."""
+    def test_environment_failure_isolated_partial_run(self, tmp_path, monkeypatch):
+        """get_environment raising degrades only the environment section."""
         from pubrun.tracker import Run
         monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
         monkeypatch.setattr("pubrun.tracker.get_environment", lambda c: (_ for _ in ()).throw(RuntimeError("env broken")))
         run = Run()
-        assert run._outcome == "ghost"
+        assert run._outcome == "running"
+        assert run.is_active is True
+        assert run.environment_data["capture_state"]["status"] == "failed"
+        run.stop()
+
+        manifest = json.loads((run.run_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["status"]["outcome"] == "completed"
+        assert manifest["environment"]["capture_state"]["status"] == "failed"
+        assert manifest["capture"]["capture_state"]["status"] == "partial"
 
     def test_ghost_run_stop_is_safe(self, tmp_path, monkeypatch):
-        """A ghost-mode run can be stopped without error."""
+        """A ghost-mode run (unwritable output directory) can be stopped without error."""
         from pubrun.tracker import Run
         monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
-        monkeypatch.setattr("pubrun.tracker.get_invocation", lambda c: (_ for _ in ()).throw(RuntimeError("fail")))
+        monkeypatch.setattr(
+            Path,
+            "mkdir",
+            lambda self, *a, **kw: (_ for _ in ()).throw(PermissionError("read-only")),
+        )
         run = Run()
         assert run._outcome == "ghost"
+        assert run.is_active is False
+        assert run.writer is None
         # stop() should not raise
         run.stop()
+        assert get_current_run() is None
 
     def test_ghost_outcome_preserved_after_stop(self, tmp_path, monkeypatch):
         """P3-R5: Ghost outcome must not be overwritten to 'completed' by stop()."""
         from pubrun.tracker import Run
         monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
-        monkeypatch.setattr("pubrun.tracker.get_invocation", lambda c: (_ for _ in ()).throw(RuntimeError("fail")))
+        monkeypatch.setattr(
+            Path,
+            "mkdir",
+            lambda self, *a, **kw: (_ for _ in ()).throw(PermissionError("read-only")),
+        )
         run = Run()
         assert run._outcome == "ghost"
         run.stop()
         assert run._outcome == "ghost"  # Must remain ghost, not overwritten
+        assert get_current_run() is None
 
 
 # ==========================================================================
@@ -336,10 +381,10 @@ class TestStartupManifestAndCrashedFallback:
         assert data["status"]["outcome"] == "running"
         assert "git" in data
         assert "host" in data
-        
+
         # Stop tracking cleanly
         run.stop()
-        
+
         with open(manifest_path, "r", encoding="utf-8") as f:
             data_final = json.load(f)
         assert data_final["status"]["outcome"] == "completed"
@@ -352,7 +397,7 @@ class TestStartupManifestAndCrashedFallback:
         # Create a mock run directory structure
         run_dir = tmp_path / "mock_run"
         run_dir.mkdir()
-        
+
         # Write a mock manifest representing startup state
         manifest_data = {
             "schema_version": "1.0",
@@ -363,11 +408,11 @@ class TestStartupManifestAndCrashedFallback:
             "git": {"commit": "mockcommit123"},
             "environment": {"captured_vars": {"FOO": "BAR"}}
         }
-        
+
         manifest_path = run_dir / "manifest.json"
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest_data, f)
-            
+
         # Write a mock lock file
         from pubrun.tracker import Run
         lock_path = run_dir / Run.LOCK_FILENAME
@@ -392,12 +437,12 @@ class TestStartupManifestAndCrashedFallback:
 
         # The outcome must be updated to crashed
         assert updated_data["status"]["outcome"] == "crashed"
-        
+
         # Timing must be filled
         assert updated_data["timing"]["started_at_utc"] == 1000.0
         assert updated_data["timing"]["ended_at_utc"] is not None
         assert updated_data["timing"]["elapsed_seconds"] is not None
-        
+
         # The other pre-captured static metadata must be fully preserved
         assert updated_data["host"]["hostname"]["value"] == "my-mock-host"
         assert updated_data["git"]["commit"] == "mockcommit123"
