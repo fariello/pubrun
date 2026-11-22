@@ -62,30 +62,30 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: `scripts/sanitize_paths.py` binary, `--repo-root`, and staged `--fix` safety
 
-- [ ] E-01 Fix binary staged-file reading, `--repo-root` forwarding to Git helpers and file writes, and staged `--fix` data-loss protection in `scripts/sanitize_paths.py`, and add regression tests for `BUG-25` and `BUG-26` in `tests/test_repo_scripts_bugs.py`.
+- [x] E-01 Fix binary staged-file reading, `--repo-root` forwarding to Git helpers and file writes, and staged `--fix` data-loss protection in `scripts/sanitize_paths.py`, and add regression tests for `BUG-25` and `BUG-26` in `tests/test_repo_scripts_bugs.py`.
   - Depends on: none
   - Expected outcome:
     - `scripts/sanitize_paths.py::_read_staged(path, repo_root=None)` runs `git show :<path>` with `text=False` and `cwd=repo_root`, returning `None` if `returncode != 0`, if `b"\x00" in out.stdout`, or if `.decode("utf-8")` raises `UnicodeDecodeError` (no uncaught exception on staged binary or non-Unicode Transformation Format 8 (UTF-8) blobs).
     - `scripts/sanitize_paths.py::_staged_files(repo_root=None)`, `scripts/sanitize_paths.py::_tracked_files(repo_root=None)`, a new helper `scripts/sanitize_paths.py::_unstaged_files(repo_root=None)` (`git diff --name-only`), `scripts/sanitize_paths.py::_read_staged(path, repo_root=None)`, and the staged `git add -- <fixed_paths>` call in `scripts/sanitize_paths.py::main` all accept/pass `cwd=repo_root` (defaulting `repo_root=None` on helpers for backwards compatibility), and `main` resolves write targets as `fp = Path(path) if args.files else (repo_root / path)` so `--repo-root` works from any current working directory (CWD) in both `--all` and staged modes.
     - Under `--fix` (non-`--dry-run`) in staged mode (`not args.files and not args.all`), `main` queries `unstaged = set(_unstaged_files(repo_root))`; if a matched file is in `unstaged`, it refuses to overwrite the working tree or run `git add` on that file, prints a clear warning to `stderr` (never leaking raw matched values), records it as unfixed, and exits `1` (fail closed) whenever any finding remains unfixed or `git add` returns non-zero; it exits `0` when all findings are fixed and re-staged cleanly (preserving `tests/test_sanitize_paths.py::test_fix_rewrites_and_exits_zero`).
     - `tests/test_repo_scripts_bugs.py` covers staged binary/non-UTF-8 files (`BUG-25`), `--repo-root` execution from a different CWD in `--all` and staged modes (`BUG-26`), and refusing `--fix` on a partially staged file with unstaged edits without modifying the working tree (`BUG-26`).
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Fix `glob` blacklist translation, `home-user` boundary and subpath-tail matching, and `_IPV6_RE` compressed address matching in `scripts/sanitize_paths.py`, and add regression tests for `BUG-27` and `BUG-58` in `tests/test_repo_scripts_bugs.py`.
+- [x] E-02 Fix `glob` blacklist translation, `home-user` boundary and subpath-tail matching, and `_IPV6_RE` compressed address matching in `scripts/sanitize_paths.py`, and add regression tests for `BUG-27` and `BUG-58` in `tests/test_repo_scripts_bugs.py`.
   - Depends on: none
   - Expected outcome:
     - `scripts/sanitize_paths.py::build_rules` compiles `glob` blacklist entries through a dedicated inline glob-to-regex helper (instead of `fnmatch.translate`, which injects `(?s:...)` and `\Z`) that translates `*` to `[^\s"'`()\[\]{}<>,;]*`, `?` to `[^\s]`, and `[seq]` / `[!seq]` character classes while escaping regex metacharacters, so inline `glob` blacklists match mid-line without crossing whitespace, delimiters, or newlines.
     - `scripts/sanitize_paths.py::build_rules` constructs `home-user` prefixes from `[home.rstrip("/"), f"/home/{user}"]`, skips empty/`"~"`/`"/"` values (preserving `tests/test_sanitize_paths.py` tests where `HOME="~"`), deduplicates longest-first, and compiles `re.compile(re.escape(base) + r"((?:/[A-Za-z0-9_.+-]+)*)(?![A-Za-z0-9_.-])")` with replacement `r"~\1"`. As a result, a short prefix such as a `HOME` path ending in `al` never corrupts `/home/alice/work` into `~ice/work`, and `<home>/*` whitelists match full paths identically under `home-user` and `home-any` while preserving `tests/test_sanitize_paths.py::test_author_name_and_email_are_never_matched`.
     - `scripts/sanitize_paths.py::_IPV6_RE` uses an RFC-4291 full-and-compressed IPv6 regular expression bounded by `(?<![A-Za-z0-9_:])` and `(?![A-Za-z0-9_:])` so it matches compressed addresses (`::1`, `fe80::1`, `2001:db8::1`, `2001:db8::`) and full 8-group addresses (`2001:0db8:85a3:0000:0000:8a2e:0370:7334`) while rejecting bare `::`, `module::Symbol` tokens (`foo::1`, `os::a`), timestamps (`12:34:56`), and invalid double-`::` strings (`a::b::c`).
     - `tests/test_repo_scripts_bugs.py` verifies inline `glob` blacklists (including multi-line text), prefix-sharing `HOME` boundary safety and `<home>/*` whitelisting under `home-user`, and `_IPV6_RE` compressed/full matches and false-positive rejections.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Full regression and repository sanitizer verification
 
-- [ ] E-03 Run `tests/test_repo_scripts_bugs.py`, `tests/test_sanitize_paths.py`, `tests/test_commit_identity.py`, `python3 scripts/sanitize_paths.py --check --all`, and the full `pytest -q` suite to confirm zero regressions.
+- [x] E-03 Run `tests/test_repo_scripts_bugs.py`, `tests/test_sanitize_paths.py`, `tests/test_commit_identity.py`, `python3 scripts/sanitize_paths.py --check --all`, and the full `pytest -q` suite to confirm zero regressions.
   - Depends on: E-01, E-02
   - Expected outcome: All targeted regression suites (`tests/test_repo_scripts_bugs.py`, `tests/test_sanitize_paths.py`, `tests/test_commit_identity.py`), `python3 scripts/sanitize_paths.py --check --all` (exit 0 with no false positives on tracked files), and full `pytest -q` pass with zero failures.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -149,20 +149,81 @@ Checked `.pre-commit-config.yaml` (`sanitize-paths` hook invoking `python3 scrip
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest tests/test_repo_scripts_bugs.py -v` output confirming (1) staged binary files containing NUL bytes or invalid UTF-8 are skipped cleanly without `UnicodeDecodeError`, (2) `--repo-root` works from a different CWD in both `--all` and staged modes (including writing fixed files under `repo_root`), and (3) staged `--fix` refuses to overwrite a partially staged file that has unstaged working-tree edits, prints a warning to `stderr`, leaves the working-tree edits intact, and exits `1` (while exiting `0` when all staged findings are safely fixed and re-staged).
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest -o addopts="" tests/test_repo_scripts_bugs.py -v   (2026-11-22, lane kqzd15, commit 38d708a; 29 passed in 1.08s)
+    test_staged_binary_or_non_utf8_file_is_skipped[caf\xe9 \xff\xfe\n] PASSED
+    test_staged_dry_run_with_unstaged_edits_writes_nothing PASSED
+    test_repo_root_all_mode_from_other_cwd PASSED
+    test_staged_binary_only_is_clean PASSED
+    test_staged_fix_fixes_safe_files_and_still_fails_closed PASSED
+    test_staged_binary_or_non_utf8_file_is_skipped[\x00\x01PNG /home/alice/x\x00] PASSED
+    test_staged_fix_refuses_file_with_unstaged_edits PASSED
+    test_repo_root_staged_mode_from_other_cwd_fixes_and_restages PASSED
+    ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest tests/test_repo_scripts_bugs.py -v` output confirming (1) inline `glob` blacklists match mid-line without eating trailing newlines or delimiters, (2) a short prefix `HOME` ending in `al` does not corrupt `/home/alice/work` into `~ice/work` while still sanitizing `<home>/work` to `~/work` and honoring `<home>/*` whitelists under `home-user`, and (3) `_IPV6_RE` matches `::1`, `fe80::1`, `2001:db8::1`, `2001:db8::`, and full 8-group IPv6 addresses while rejecting bare `::`, `foo::1`, `12:34:56`, and `a::b::c`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest -o addopts="" tests/test_repo_scripts_bugs.py -v   (2026-11-22, lane kqzd15, commit 38d708a; 29 passed in 1.08s)
+    test_ipv6_rejects_false_positives[::] PASSED
+    test_ipv6_rejects_false_positives[12:34:56] PASSED
+    test_ipv6_rejects_false_positives[os::a] PASSED
+    test_ipv6_rejects_false_positives[a::b::c] PASSED
+    test_ipv6_rejects_false_positives[foo::1] PASSED
+    test_ipv6_matches_compressed_and_full[2001:db8:0:0:1::1] PASSED
+    test_ipv6_matches_compressed_and_full[2001:0db8:85a3:0000:0000:8a2e:0370:7334] PASSED
+    test_ipv6_rejects_false_positives[1:2:3:4:5:6:7] PASSED
+    test_glob_blacklist_escapes_regex_metacharacters PASSED
+    test_glob_blacklist_matches_mid_line_without_eating_newline PASSED
+    test_home_user_whitelist_glob_sees_full_path PASSED
+    test_home_user_ignores_degenerate_home PASSED
+    test_ipv6_rejects_false_positives[at 12:34:56.789 ok] PASSED
+    test_ipv6_matches_compressed_and_full[::1] PASSED
+    test_ipv6_matches_compressed_and_full[2001:db8::1] PASSED
+    test_ipv6_matches_compressed_and_full[2001:db8::] PASSED
+    test_glob_blacklist_question_mark_and_class PASSED
+    test_ipv6_rejects_false_positives[std::vector<int>] PASSED
+    test_ipv6_scrubbed_through_ip_ruleset PASSED
+    test_home_user_prefix_does_not_corrupt_longer_username PASSED
+    test_ipv6_matches_compressed_and_full[fe80::1] PASSED
+    ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted output from `pytest tests/test_repo_scripts_bugs.py tests/test_sanitize_paths.py tests/test_commit_identity.py -v`, `python3 scripts/sanitize_paths.py --check --all` (exit 0), and full `pytest -q` showing all tests pass with zero failures.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest -o addopts="" tests/test_repo_scripts_bugs.py tests/test_sanitize_paths.py tests/test_commit_identity.py -q   (lane kqzd15, commit 38d708a)
+    88 passed in 8.75s
+
+    $ python3 scripts/sanitize_paths.py --check --all; echo "exit=$?"
+    exit=0
+
+    $ aw suite   (lane kqzd15 working tree with this change)
+    FAILED tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches
+    FAILED tests/test_tui.py::TestTuiReproducibilityAndActions::test_details_reproducibility_markup_safety_running_and_no_live_preflight
+    FAILED tests/test_tui.py::TestTuiReproducibilityAndActions::test_actions_panel_redacted_advisory_clearing_and_clean_clipboard
+    ================== 3 failed, 1462 passed in 168.84s (0:02:48) ==================
+
+    $ aw suite   (baseline: temporary detached worktree at unchanged HEAD 92b965e, before this change)
+    FAILED tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches
+    FAILED tests/test_tui.py::TestTuiReproducibilityAndActions::test_details_reproducibility_markup_safety_running_and_no_live_preflight
+    FAILED tests/test_tui.py::TestTuiReproducibilityAndActions::test_actions_panel_redacted_advisory_clearing_and_clean_clipboard
+    ================== 3 failed, 1433 passed in 205.62s (0:03:25) ==================
+
+    $ python3 -m pytest tests/test_liveness.py tests/test_tui.py -q --no-cov   (lane kqzd15)
+    38 passed in 4.16s
+
+    $ python3 -m pytest -q --no-cov   (full suite, serial, as this V-item requires; lane kqzd15, commit 38d708a)
+    1463 passed, 2 skipped in 455.04s (0:07:35)
+    ```
+    The 3 suite failures are pre-existing on unchanged HEAD (identical node ids), pass when their files run alone, touch no sanitizer code, and are already tracked by backlog items `12rcu8` (xdist `is_same_process` script name) and `pgcmea` (order-dependent `sys.modules['pubrun.tui.app']`). The serial full `pytest -q` run, which is what this V-item names, passes with zero failures. This change adds 29 passing tests and introduces zero new failures.
+  - Result: pass
 
 ## Approval and execution gate
 
