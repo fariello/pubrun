@@ -353,6 +353,264 @@ def _normalize_error_section(raw: Any) -> str:
     return normalized or "general"
 
 
+_DATA_FILE_SECTIONS: Tuple[Tuple[str, str], ...] = (
+    ("inputs", "input"),
+    ("outputs", "output"),
+    ("mixed", "input_output"),
+)
+
+
+def _iter_data_file_records(manifest: Any):
+    """Safely yield ``(section_role, record)`` pairs across ``inputs``, ``outputs``, and ``mixed``."""
+    if not isinstance(manifest, dict):
+        return
+    data_files = manifest.get("data_files")
+    if not isinstance(data_files, dict):
+        return
+    for bucket_name, section_role in _DATA_FILE_SECTIONS:
+        bucket = data_files.get(bucket_name)
+        if not isinstance(bucket, list):
+            continue
+        for rec in bucket:
+            if isinstance(rec, dict):
+                yield section_role, rec
+
+
+def _is_caller_digest_mismatch(rec: Dict[str, Any]) -> bool:
+    """Return True when a record indicates a verified caller digest mismatched content."""
+    if rec.get("hash_status_detail") == "caller_digest_mismatch":
+        return True
+    caller_digest = rec.get("caller_digest")
+    if isinstance(caller_digest, dict) and caller_digest.get("verified") is False:
+        return True
+    return False
+
+
+def _has_nonempty_digest_value(rec: Dict[str, Any]) -> bool:
+    digest = rec.get("digest")
+    if isinstance(digest, dict):
+        val = digest.get("value")
+        if isinstance(val, str) and val.strip():
+            return True
+    sha256 = rec.get("sha256")
+    if isinstance(sha256, str) and sha256.strip():
+        return True
+    return False
+
+
+def _classify_file_record(rec: Dict[str, Any]) -> str:
+    """Classify a single ``data_files`` record by evidence strength and hashing outcome."""
+    hash_status = rec.get("hash_status")
+    evidence_strength = rec.get("evidence_strength")
+    evidence_source = rec.get("evidence_source")
+
+    if hash_status == "file_changed" or rec.get("change_detected") is True:
+        return "changed"
+    if hash_status == "failed" or _is_caller_digest_mismatch(rec):
+        return "failed"
+    if hash_status == "unavailable":
+        return "unavailable"
+    if hash_status == "over_budget":
+        return "over_budget"
+    if hash_status == "completed" or evidence_strength == "verified_content":
+        return "verified"
+    if (
+        hash_status == "asserted"
+        or evidence_strength == "asserted_content"
+        or evidence_source == "asserted"
+    ):
+        return "asserted"
+    if hash_status == "pending":
+        return "pending"
+    if hash_status == "disabled" or evidence_strength in ("metadata_only", "path_only"):
+        return "identified_only"
+    if hash_status is None and evidence_strength is None and evidence_source is None:
+        return "verified" if _has_nonempty_digest_value(rec) else "identified_only"
+    if evidence_strength == "unavailable":
+        return "unavailable"
+    if evidence_strength == "changed_unverified":
+        return "changed"
+    return "identified_only"
+
+
+def _upsert_finding(
+    findings: List[Dict[str, Any]],
+    target_code: str,
+    legacy_codes: Set[str],
+    severity: str,
+    message: str,
+    suggestion: Optional[str],
+) -> List[Dict[str, Any]]:
+    """Update an existing finding (by target or legacy code) in place, or append it."""
+    match_codes = set(legacy_codes) | {target_code}
+    updated_list: List[Dict[str, Any]] = []
+    replaced = False
+    for item in findings:
+        code = item.get("code")
+        if code in match_codes:
+            if not replaced:
+                merged = dict(item)
+                merged["severity"] = severity
+                merged["code"] = target_code
+                merged["message"] = message
+                merged["suggestion"] = suggestion
+                updated_list.append(merged)
+                replaced = True
+            continue
+        updated_list.append(item)
+    if not replaced:
+        updated_list.append(_finding(severity, target_code, message, suggestion))
+    return updated_list
+
+
+def _apply_file_provenance_findings(
+    manifest: Dict[str, Any],
+    findings: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Reconcile file-provenance findings for ``data_files`` without duplicate codes."""
+    records = [rec for _, rec in _iter_data_file_records(manifest)]
+
+    if not records:
+        no_fp_msg = (
+            "no file-I/O provenance was recorded - pubrun does NOT patch open() "
+            "globally, so files are recorded only via `pubrun.open()`, "
+            "`pubrun.register_input()`, `pubrun.register_output()`, or `pubrun.register_file()`."
+        )
+        no_fp_sugg = (
+            "Use `pubrun.open(...)` or register external files with "
+            "`pubrun.register_input(...)` / `pubrun.register_output(...)` to record input/output provenance."
+        )
+        existing_codes = {f.get("code") for f in findings}
+        if "no_file_provenance" in existing_codes:
+            findings = _upsert_finding(
+                findings, "no_file_provenance", set(), INFO, no_fp_msg, no_fp_sugg
+            )
+        elif "inputs_argv_inferred_only" not in existing_codes:
+            findings.append(_finding(INFO, "no_file_provenance", no_fp_msg, no_fp_sugg))
+        return findings
+
+    changed_count = 0
+    failed_count = 0
+    unavailable_count = 0
+    mismatch_count = 0
+    over_budget_count = 0
+    asserted_count = 0
+    identified_only_count = 0
+    pending_unverified_count = 0
+
+    for rec in records:
+        cls = _classify_file_record(rec)
+        is_unverified_asserted = (
+            cls == "asserted"
+            or (rec.get("evidence_source") == "asserted" and rec.get("hash_status") != "completed")
+        )
+        if cls == "changed":
+            changed_count += 1
+        elif cls == "failed":
+            failed_count += 1
+            if _is_caller_digest_mismatch(rec):
+                mismatch_count += 1
+        elif cls == "unavailable":
+            unavailable_count += 1
+        elif cls == "over_budget":
+            over_budget_count += 1
+        elif cls == "pending":
+            if not is_unverified_asserted:
+                pending_unverified_count += 1
+        elif cls == "identified_only":
+            if not is_unverified_asserted:
+                identified_only_count += 1
+
+        if is_unverified_asserted:
+            asserted_count += 1
+
+    # Remove stale file-provenance codes that have zero affected records under canonical classification.
+    stale_codes: Set[str] = {"no_file_provenance"}
+    if changed_count == 0:
+        stale_codes.update({"file_hash_changed", "file_provenance_changed"})
+    if failed_count + unavailable_count == 0:
+        stale_codes.update({"file_hash_unavailable", "file_provenance_hash_failed"})
+    if over_budget_count == 0:
+        stale_codes.update({"file_hash_over_budget", "file_provenance_over_budget"})
+    if asserted_count == 0:
+        stale_codes.add("file_provenance_asserted_only")
+    if identified_only_count + pending_unverified_count == 0:
+        stale_codes.update({"file_provenance_unhashed", "file_provenance_unverified_paths"})
+    findings = [f for f in findings if f.get("code") not in stale_codes]
+
+    if changed_count > 0:
+        findings = _upsert_finding(
+            findings,
+            "file_provenance_changed",
+            {"file_hash_changed"},
+            WARN,
+            f"{changed_count} tracked file(s) changed between access and hashing; recorded content evidence is unverified.",
+            "Avoid mutating tracked input or output files while a run is reading or hashing them.",
+        )
+
+    failed_or_unavail = failed_count + unavailable_count
+    if failed_or_unavail > 0:
+        mismatch_note = (
+            f" (including {mismatch_count} caller-digest mismatch(es))"
+            if mismatch_count > 0
+            else ""
+        )
+        findings = _upsert_finding(
+            findings,
+            "file_provenance_hash_failed",
+            {"file_hash_unavailable"},
+            WARN,
+            f"Content hashing failed or target was unavailable for {failed_or_unavail} tracked file(s){mismatch_note}.",
+            "Inspect `data_files` `hash_status_detail` in manifest.json and verify target readability or caller-supplied digests.",
+        )
+
+    if over_budget_count > 0:
+        findings = _upsert_finding(
+            findings,
+            "file_provenance_over_budget",
+            {"file_hash_over_budget"},
+            INFO,
+            f"{over_budget_count} tracked file(s) exceeded the hashing size or time budget and were not content-hashed.",
+            "Increase `[capture.file_io]` budget limits or supply verified external digests if content verification is required.",
+        )
+
+    if asserted_count > 0:
+        findings = _upsert_finding(
+            findings,
+            "file_provenance_asserted_only",
+            set(),
+            INFO,
+            f"{asserted_count} tracked file(s) carry caller-asserted digests that were not independently verified by pubrun.",
+            "Pass `verify_digest=True` to `pubrun.register_input()` / `pubrun.register_output()` or hash with `pubrun.open()` for verified content evidence.",
+        )
+
+    unverified_total = identified_only_count + pending_unverified_count
+    if unverified_total > 0:
+        if identified_only_count > 0 and pending_unverified_count > 0:
+            unverified_msg = (
+                f"{unverified_total} tracked file(s) lack verified content hashes "
+                f"({identified_only_count} path/metadata-only, {pending_unverified_count} pending output(s))."
+            )
+        elif pending_unverified_count > 0:
+            unverified_msg = (
+                f"{pending_unverified_count} tracked output file(s) remain pending without verified content hashes."
+            )
+        else:
+            unverified_msg = (
+                f"{identified_only_count} tracked file(s) recorded path or stat metadata only without verified content hashes."
+            )
+        findings = _upsert_finding(
+            findings,
+            "file_provenance_unverified_paths",
+            {"file_provenance_unhashed"},
+            INFO,
+            unverified_msg,
+            'Set `[capture.file_io].level = "hash"` or pass `level="hash"` to `pubrun.register_input()` / `pubrun.register_output()` to record content hashes.',
+        )
+
+    return findings
+
+
 def manifest_findings(manifest: Dict[str, Any],
                       current_hostname: Optional[str] = None) -> List[Dict[str, Any]]:
     """Capture-completeness + recorded-signal findings for a completed run's manifest.
@@ -472,6 +730,7 @@ def manifest_findings(manifest: Dict[str, Any],
                             _finding(WARN, "errors_capture_partial", trunc_msg, trunc_sugg)
                         )
 
+        findings = _apply_file_provenance_findings(manifest, findings)
         return findings
     except Exception:
         # Completeness assessment must never crash inspect.

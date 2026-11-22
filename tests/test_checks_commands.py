@@ -23,6 +23,10 @@ from pubrun.report import checks
 def run_pubrun(*args, cwd=None, env=None):
     cmd = [PYTHON, "-m", "pubrun"] + list(args)
     e = dict(os.environ)
+    src_dir = Path(__file__).resolve().parents[1] / "src"
+    if src_dir.is_dir():
+        existing = e.get("PYTHONPATH", "")
+        e["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing}" if existing else str(src_dir)
     if env:
         e.update(env)
     return subprocess.run(cmd, capture_output=True, text=True, cwd=cwd or os.getcwd(),
@@ -428,3 +432,298 @@ class TestInspectCLI:
     def test_inspect_no_runs_errors(self, tmp_path):
         res = run_pubrun("inspect", cwd=str(tmp_path))
         assert res.returncode != 0
+
+
+class TestFileProvenanceManifestFindings:
+    """Behavioral tests for file-provenance evidence distinction in checks.manifest_findings (IPD hm32d9)."""
+
+    def test_empty_data_files_recommends_open_and_register_apis(self):
+        m = _fake_manifest(data_files={"inputs": [], "outputs": [], "mixed": []})
+        findings = checks.manifest_findings(m, current_hostname="compute-042")
+        nf = [f for f in findings if f["code"] == "no_file_provenance"]
+        assert len(nf) == 1
+        assert nf[0]["severity"] == checks.INFO
+        combined = f"{nf[0]['message']} {nf[0].get('suggestion') or ''}"
+        assert "pubrun.open" in combined
+        assert "pubrun.register_input" in combined
+        assert "pubrun.register_output" in combined
+
+    def test_verified_sha256_and_non_sha256_records_emit_no_file_provenance_findings(self):
+        m = _fake_manifest(
+            data_files={
+                "inputs": [
+                    {
+                        "path": "data/a.csv",
+                        "hash_status": "completed",
+                        "hash_algorithm": "sha256",
+                        "sha256": "a" * 64,
+                        "digest": {"algorithm": "sha256", "value": "a" * 64},
+                        "evidence_source": "observed",
+                        "evidence_strength": "verified_content",
+                    }
+                ],
+                "outputs": [
+                    {
+                        "path": "out/b.parquet",
+                        "hash_status": "completed",
+                        "hash_algorithm": "sha512",
+                        "sha256": None,
+                        "digest": {"algorithm": "sha512", "value": "b" * 128},
+                        "evidence_source": "observed",
+                        "evidence_strength": "verified_content",
+                    }
+                ],
+                "mixed": [],
+            }
+        )
+        findings = checks.manifest_findings(m, current_hostname="compute-042")
+        fp_codes = [
+            f["code"]
+            for f in findings
+            if f["code"].startswith(("file_provenance_", "file_hash_", "no_file_provenance"))
+        ]
+        assert fp_codes == []
+
+    def test_unverified_paths_stat_only_path_only_and_pending_outputs(self):
+        m = _fake_manifest(
+            data_files={
+                "inputs": [
+                    {
+                        "path": "data/stat.csv",
+                        "hash_status": "disabled",
+                        "evidence_source": "observed",
+                        "evidence_strength": "metadata_only",
+                        "sha256": None,
+                    },
+                    {
+                        "path": "data/name_only.csv",
+                        "hash_status": "disabled",
+                        "evidence_source": "observed",
+                        "evidence_strength": "path_only",
+                        "sha256": None,
+                    },
+                ],
+                "outputs": [
+                    {
+                        "path": "out/deferred.bin",
+                        "hash_status": "pending",
+                        "evidence_source": "none",
+                        "evidence_strength": "path_only",
+                        "sha256": None,
+                    }
+                ],
+                "mixed": [],
+            }
+        )
+        findings = checks.manifest_findings(m, current_hostname="compute-042")
+        codes = [f["code"] for f in findings]
+        assert codes.count("file_provenance_unverified_paths") == 1
+        assert "file_provenance_unhashed" not in codes
+        unv = next(f for f in findings if f["code"] == "file_provenance_unverified_paths")
+        assert unv["severity"] == checks.INFO
+        assert "3" in unv["message"]
+        assert "pending" in unv["message"].lower()
+
+    def test_asserted_only_and_compound_verify_digest_unavailable(self):
+        m = _fake_manifest(
+            data_files={
+                "inputs": [
+                    {
+                        "path": "ext/features.parquet",
+                        "hash_status": "asserted",
+                        "evidence_source": "asserted",
+                        "evidence_strength": "asserted_content",
+                        "caller_digest": {"algorithm": "sha256", "value": "c" * 64, "verified": None},
+                        "digest": {"algorithm": "sha256", "value": "c" * 64},
+                        "sha256": None,
+                    },
+                    {
+                        "path": "ext/missing_verified.parquet",
+                        "hash_status": "unavailable",
+                        "hash_status_detail": "cannot verify caller digest: target is missing",
+                        "evidence_source": "asserted",
+                        "evidence_strength": "asserted_content",
+                        "caller_digest": {"algorithm": "sha256", "value": "d" * 64, "verified": None},
+                        "digest": {"algorithm": "sha256", "value": "d" * 64},
+                        "sha256": None,
+                    },
+                ],
+                "outputs": [
+                    {
+                        "path": "out/pending_asserted.bin",
+                        "hash_status": "pending",
+                        "evidence_source": "asserted",
+                        "evidence_strength": "asserted_content",
+                        "caller_digest": {"algorithm": "sha256", "value": "e" * 64, "verified": None},
+                    }
+                ],
+                "mixed": [],
+            }
+        )
+        findings = checks.manifest_findings(m, current_hostname="compute-042")
+        by_code = {f["code"]: f for f in findings}
+        assert "file_provenance_asserted_only" in by_code
+        assert by_code["file_provenance_asserted_only"]["severity"] == checks.INFO
+        assert "3" in by_code["file_provenance_asserted_only"]["message"]
+        assert "file_provenance_hash_failed" in by_code
+        assert by_code["file_provenance_hash_failed"]["severity"] == checks.WARN
+        assert "file_hash_unavailable" not in by_code
+        assert "file_provenance_unverified_paths" not in by_code
+
+    def test_over_budget_changed_failed_caller_mismatch_and_mixed_entries(self):
+        m = _fake_manifest(
+            data_files={
+                "inputs": [
+                    {
+                        "path": "data/huge.bin",
+                        "hash_status": "over_budget",
+                        "hash_status_detail": "file size exceeded max_hash_bytes",
+                        "evidence_source": "observed",
+                        "evidence_strength": "metadata_only",
+                    },
+                    {
+                        "path": "data/mismatch.csv",
+                        "hash_status": "failed",
+                        "hash_status_detail": "caller_digest_mismatch",
+                        "caller_digest": {"algorithm": "sha256", "value": "1" * 64, "verified": False},
+                        "evidence_source": "observed",
+                        "evidence_strength": "changed_unverified",
+                    },
+                ],
+                "outputs": [],
+                "mixed": [
+                    {
+                        "path": "work/state.db",
+                        "hash_status": "file_changed",
+                        "change_detected": True,
+                        "hash_status_detail": "file changed during hashing",
+                        "evidence_source": "observed",
+                        "evidence_strength": "changed_unverified",
+                    }
+                ],
+            }
+        )
+        findings = checks.manifest_findings(m, current_hostname="compute-042")
+        codes = [f["code"] for f in findings]
+        by_code = {f["code"]: f for f in findings}
+
+        assert codes.count("file_provenance_changed") == 1
+        assert codes.count("file_provenance_hash_failed") == 1
+        assert codes.count("file_provenance_over_budget") == 1
+        assert "file_hash_changed" not in codes
+        assert "file_hash_unavailable" not in codes
+        assert "file_hash_over_budget" not in codes
+
+        assert by_code["file_provenance_changed"]["severity"] == checks.WARN
+        assert by_code["file_provenance_hash_failed"]["severity"] == checks.WARN
+        assert "caller-digest mismatch" in by_code["file_provenance_hash_failed"]["message"].lower()
+        assert by_code["file_provenance_over_budget"]["severity"] == checks.INFO
+
+    def test_legacy_and_malformed_data_files_degrade_safely(self):
+        # Legacy verified record (no hash_status/evidence_strength/evidence_source, sha256 present).
+        legacy_verified = _fake_manifest(
+            data_files={"inputs": [{"path": "old.csv", "sha256": "f" * 64}], "outputs": []}
+        )
+        f_leg_v = checks.manifest_findings(legacy_verified, current_hostname="compute-042")
+        assert not any(
+            f["code"].startswith(("file_provenance_", "file_hash_", "no_file_provenance"))
+            for f in f_leg_v
+        )
+
+        # Legacy unhashed record (no hash_status, no sha256).
+        legacy_unhashed = _fake_manifest(
+            data_files={"inputs": [{"path": "old.csv", "size_bytes": 42}], "outputs": []}
+        )
+        f_leg_u = checks.manifest_findings(legacy_unhashed, current_hostname="compute-042")
+        assert any(f["code"] == "file_provenance_unverified_paths" for f in f_leg_u)
+
+        # Malformed data_files structures never raise and fall back to no_file_provenance.
+        for bad_df in (None, "not-a-dict", {"inputs": "bad", "outputs": [123, None], "mixed": 7}):
+            f_bad = checks.manifest_findings(_fake_manifest(data_files=bad_df), current_hostname="compute-042")
+            assert any(f["code"] == "no_file_provenance" for f in f_bad)
+
+    def test_inspect_strict_exits_nonzero_on_warn_and_zero_on_info_only(self, tmp_path):
+        import socket
+
+        cur_host = socket.gethostname()
+
+        def _write_run(name: str, data_files: dict) -> Path:
+            run_dir = tmp_path / "runs" / name
+            run_dir.mkdir(parents=True, exist_ok=True)
+            manifest = {
+                "run": {"run_id": name, "capture_state": {"status": "complete"}},
+                "status": {"outcome": "completed", "exit_code": 0, "capture_state": {"status": "complete"}},
+                "host": {"hostname": cur_host, "os_name": "Linux", "capture_state": {"status": "complete"}},
+                "python": {"version": "3.11.0", "capture_state": {"status": "complete"}},
+                "hardware": {"capture_state": {"status": "complete"}},
+                "packages": {"mode": "full-environment", "records": [{"name": "numpy", "version": "1.0"}], "capture_state": {"status": "complete"}},
+                "git": {"commit": "a" * 40, "dirty": False, "capture_state": {"status": "complete"}},
+                "invocation": {"entrypoint_type": "script", "script": {"path": "x.py", "sha256": "b" * 64}},
+                "resources": {"scope": "tree", "capture_state": {"status": "complete"}},
+                "console": {"capture_mode": "standard", "capture_state": {"status": "complete"}},
+                "subprocesses": [],
+                "capture": {"subprocesses_enabled": True, "file_provenance_available": True},
+                "pubrun_imports": {"selected_mode": "auto", "selected_behavior": {"patch_subprocesses": True}},
+                "determinism": {"registered_seeds": [{"name": "numpy", "value": 1}]},
+                "config": {"notices": []},
+                "errors": {"records": [], "capture_state": {"status": "complete"}},
+                "data_files": data_files,
+            }
+            (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            return run_dir
+
+        info_dir = _write_run(
+            "run-info-only",
+            {
+                "inputs": [
+                    {
+                        "path": "data/stat.csv",
+                        "hash_status": "disabled",
+                        "evidence_source": "observed",
+                        "evidence_strength": "metadata_only",
+                    },
+                    {
+                        "path": "data/asserted.csv",
+                        "hash_status": "asserted",
+                        "evidence_source": "asserted",
+                        "evidence_strength": "asserted_content",
+                        "caller_digest": {"algorithm": "sha256", "value": "c" * 64, "verified": None},
+                    },
+                    {
+                        "path": "data/big.bin",
+                        "hash_status": "over_budget",
+                        "evidence_source": "observed",
+                        "evidence_strength": "metadata_only",
+                    },
+                ],
+                "outputs": [],
+                "mixed": [],
+            },
+        )
+        res_info = run_pubrun("inspect", str(info_dir), "--strict", "--json", env={"NO_COLOR": "1"})
+        assert res_info.returncode == 0, res_info.stdout + res_info.stderr
+        info_codes = {f["code"] for f in json.loads(res_info.stdout)["findings"]}
+        assert "file_provenance_unverified_paths" in info_codes
+        assert "file_provenance_asserted_only" in info_codes
+        assert "file_provenance_over_budget" in info_codes
+
+        warn_dir = _write_run(
+            "run-warn",
+            {
+                "inputs": [
+                    {
+                        "path": "data/changed.csv",
+                        "hash_status": "file_changed",
+                        "change_detected": True,
+                        "evidence_source": "observed",
+                        "evidence_strength": "changed_unverified",
+                    }
+                ],
+                "outputs": [],
+                "mixed": [],
+            },
+        )
+        res_warn = run_pubrun("inspect", str(warn_dir), "--strict", "--json", env={"NO_COLOR": "1"})
+        assert res_warn.returncode != 0
+        warn_codes = {f["code"] for f in json.loads(res_warn.stdout)["findings"]}
+        assert "file_provenance_changed" in warn_codes

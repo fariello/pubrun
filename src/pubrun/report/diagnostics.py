@@ -1,7 +1,8 @@
 from __future__ import annotations
 import json
 import math
-from typing import Optional, Dict, Any, List
+import re
+from typing import Optional, Dict, Any, List, Tuple
 import os
 import sys
 from pathlib import Path
@@ -71,6 +72,242 @@ def _bound_text(text: Any, max_len: int = _MAX_DIAGNOSTIC_DETAIL_LEN) -> str:
     if len(cleaned) <= max_len:
         return cleaned
     return cleaned[: max(0, max_len - 3)].rstrip() + "..."
+
+
+_ANSI_ESCAPE_RE = re.compile(
+    r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])"
+)
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _sanitize_inline(val: Any, max_len: int = 200) -> str:
+    """Return a single-line, control-character-free, length-bounded display string."""
+    if val is None:
+        return ""
+    text = val if isinstance(val, str) else str(val)
+    text = _ANSI_ESCAPE_RE.sub("", text)
+    text = text.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    text = _CONTROL_CHAR_RE.sub("", text)
+    cleaned = " ".join(text.split())
+    if not cleaned:
+        return ""
+    if max_len > 0 and len(cleaned) > max_len:
+        if max_len <= 3:
+            return cleaned[:max_len]
+        return cleaned[: max_len - 3].rstrip() + "..."
+    return cleaned
+
+
+_DATA_FILE_BUCKETS: Tuple[Tuple[str, str], ...] = (
+    ("inputs", "input"),
+    ("outputs", "output"),
+    ("mixed", "mixed"),
+)
+
+
+def _iter_data_file_entries(data_files: Any) -> List[Tuple[str, Dict[str, Any]]]:
+    if not isinstance(data_files, dict):
+        return []
+    out: List[Tuple[str, Dict[str, Any]]] = []
+    for bucket_name, default_role in _DATA_FILE_BUCKETS:
+        bucket = data_files.get(bucket_name)
+        if not isinstance(bucket, list):
+            continue
+        for rec in bucket:
+            if isinstance(rec, dict):
+                out.append((default_role, rec))
+    return out
+
+
+def _classify_file_record_display(rec: Dict[str, Any]) -> str:
+    """Classify a ``data_files`` record into its authoritative textual badge name."""
+    hash_status = rec.get("hash_status")
+    evidence_strength = rec.get("evidence_strength")
+    evidence_source = rec.get("evidence_source")
+    caller_digest = rec.get("caller_digest")
+
+    if hash_status == "file_changed" or rec.get("change_detected") is True:
+        return "changed"
+    if (
+        hash_status == "failed"
+        or rec.get("hash_status_detail") == "caller_digest_mismatch"
+        or (isinstance(caller_digest, dict) and caller_digest.get("verified") is False)
+    ):
+        return "failed"
+    if hash_status == "unavailable":
+        return "unavailable"
+    if hash_status == "over_budget":
+        return "over-budget"
+    if hash_status == "completed" or evidence_strength == "verified_content":
+        return "verified"
+    if (
+        hash_status == "asserted"
+        or evidence_strength == "asserted_content"
+        or evidence_source == "asserted"
+    ):
+        return "asserted"
+    if hash_status == "pending":
+        return "pending"
+    if hash_status == "disabled" or evidence_strength in ("metadata_only", "path_only"):
+        return "path-only" if evidence_strength == "path_only" else "metadata-only"
+    if hash_status is None and evidence_strength is None and evidence_source is None:
+        digest = rec.get("digest")
+        has_digest = (
+            isinstance(digest, dict)
+            and isinstance(digest.get("value"), str)
+            and bool(digest["value"].strip())
+        ) or (isinstance(rec.get("sha256"), str) and bool(rec["sha256"].strip()))
+        return "verified" if has_digest else "metadata-only"
+    if evidence_strength == "unavailable":
+        return "unavailable"
+    if evidence_strength == "changed_unverified":
+        return "changed"
+    return "metadata-only"
+
+
+def _extract_display_digest(rec: Dict[str, Any], badge: str) -> Optional[str]:
+    """Return ``<alg>:<prefix12>`` for verified/asserted records only; ``None`` otherwise."""
+    if badge == "verified":
+        digest = rec.get("digest")
+        if isinstance(digest, dict):
+            raw_val = digest.get("value")
+            if isinstance(raw_val, str) and raw_val.strip():
+                raw_alg = digest.get("algorithm") or rec.get("hash_algorithm") or "sha256"
+                alg = _sanitize_inline(raw_alg, max_len=32) or "sha256"
+                val = _sanitize_inline(raw_val, max_len=128)
+                if val:
+                    return f"{alg}:{val[:12]}"
+        raw_sha = rec.get("sha256")
+        if isinstance(raw_sha, str) and raw_sha.strip():
+            val = _sanitize_inline(raw_sha, max_len=128)
+            if val:
+                return f"sha256:{val[:12]}"
+        return None
+
+    if badge == "asserted":
+        for key in ("caller_digest", "digest"):
+            obj = rec.get(key)
+            if isinstance(obj, dict):
+                raw_val = obj.get("value")
+                if isinstance(raw_val, str) and raw_val.strip():
+                    raw_alg = obj.get("algorithm") or rec.get("hash_algorithm") or "sha256"
+                    alg = _sanitize_inline(raw_alg, max_len=32) or "sha256"
+                    val = _sanitize_inline(raw_val, max_len=128)
+                    if val:
+                        return f"{alg}:{val[:12]}"
+        return None
+
+    return None
+
+
+def _summarize_data_files(data_files: Any) -> Dict[str, int]:
+    """Summarize ``data_files`` counts across evidence categories (sum equals ``total``)."""
+    counts: Dict[str, int] = {
+        "total": 0,
+        "verified": 0,
+        "asserted": 0,
+        "identified_only": 0,
+        "over_budget": 0,
+        "changed": 0,
+        "failed_or_unavailable": 0,
+        "pending": 0,
+    }
+    for _, rec in _iter_data_file_entries(data_files):
+        badge = _classify_file_record_display(rec)
+        counts["total"] += 1
+        if badge == "verified":
+            counts["verified"] += 1
+        elif badge == "asserted":
+            counts["asserted"] += 1
+        elif badge in ("metadata-only", "path-only"):
+            counts["identified_only"] += 1
+        elif badge == "over-budget":
+            counts["over_budget"] += 1
+        elif badge == "changed":
+            counts["changed"] += 1
+        elif badge in ("failed", "unavailable"):
+            counts["failed_or_unavailable"] += 1
+        elif badge == "pending":
+            counts["pending"] += 1
+        else:
+            counts["identified_only"] += 1
+    return counts
+
+
+def _format_data_files_summary_line(counts: Dict[str, int]) -> str:
+    """Format the concise Standard-depth ``Data Files`` summary text."""
+    parts: List[str] = []
+    if counts["verified"] > 0:
+        parts.append(f"{counts['verified']} verified")
+    if counts["asserted"] > 0:
+        parts.append(f"{counts['asserted']} asserted")
+    if counts["identified_only"] > 0:
+        parts.append(f"{counts['identified_only']} identified-only")
+    if counts["over_budget"] > 0:
+        parts.append(f"{counts['over_budget']} over-budget")
+    if counts["pending"] > 0:
+        parts.append(f"{counts['pending']} pending")
+    if counts["changed"] > 0:
+        parts.append(f"{counts['changed']} changed")
+    if counts["failed_or_unavailable"] > 0:
+        parts.append(f"{counts['failed_or_unavailable']} failed/unavailable")
+    return f"{counts['total']} tracked ({', '.join(parts)})"
+
+
+def _print_data_files_block(manifest: Dict[str, Any], use_color: bool) -> None:
+    """Render the Deep-depth ``[ Data Files ]`` subsection without ``Colors.DIM``."""
+    blue = Colors.BLUE if use_color else ""
+    green = Colors.GREEN if use_color else ""
+    yellow = Colors.YELLOW if use_color else ""
+    red = Colors.RED if use_color else ""
+    cyan = Colors.CYAN if use_color else ""
+    rst = Colors.RESET if use_color else ""
+
+    entries = _iter_data_file_entries(manifest.get("data_files"))
+    print(f"\n{blue}[ Data Files ]{rst}")
+    if not entries:
+        print("  (None captured)")
+        return
+
+    badge_colors = {
+        "verified": green,
+        "asserted": yellow,
+        "metadata-only": cyan,
+        "path-only": cyan,
+        "over-budget": yellow,
+        "pending": yellow,
+        "changed": red,
+        "unavailable": red,
+        "failed": red,
+    }
+    anomaly_badges = frozenset(("failed", "changed", "unavailable", "over-budget"))
+
+    for default_role, rec in entries:
+        badge = _classify_file_record_display(rec)
+        b_color = badge_colors.get(badge, "") if use_color else ""
+        badge_txt = f"{b_color}[{badge}]{rst}" if b_color else f"[{badge}]"
+
+        path_txt = _sanitize_inline(rec.get("path"), max_len=200) or "<unknown>"
+        role_txt = _sanitize_inline(rec.get("role") or default_role, max_len=32) or default_role
+        mode_txt = _sanitize_inline(rec.get("mode"), max_len=16)
+        role_meta = f"({role_txt}, mode={mode_txt})" if mode_txt else f"({role_txt})"
+
+        pieces: List[str] = [f"  {badge_txt}", path_txt, role_meta]
+
+        label_txt = _sanitize_inline(rec.get("label"), max_len=80)
+        if label_txt:
+            pieces.append(f"[label={label_txt}]")
+
+        digest_txt = _extract_display_digest(rec, badge)
+        if digest_txt:
+            pieces.append(digest_txt)
+
+        if badge in anomaly_badges:
+            detail_txt = _sanitize_inline(rec.get("hash_status_detail"), max_len=120)
+            if detail_txt:
+                pieces.append(f"({detail_txt})")
+
+        print(" ".join(pieces))
 
 
 def _unwrap_value(val: Any, default: str = "unknown") -> str:
@@ -637,6 +874,10 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     else:
         print(f"{cyan}Env Vars{rst}    : {len(envs)} captured")
 
+    df_counts = _summarize_data_files(manifest.get("data_files"))
+    if df_counts["total"] > 0:
+        print(f"{cyan}Data Files{rst}  : {_format_data_files_summary_line(df_counts)}")
+
     if depth == "standard":
         print()
         return
@@ -681,6 +922,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
             print(f"  {green}{name}{rst}={val_obj}")
 
     _print_packages_block(manifest, use_color, leading_newline=True)
+    _print_data_files_block(manifest, use_color)
 
     subprocs = _as_dict_list(manifest.get("subprocesses"))
     print(f"\n{blue}[ Subprocesses ]{rst} ({len(subprocs)} executed)")

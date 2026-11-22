@@ -168,9 +168,15 @@ pubrun inspect [RUN_DIR] [--show-suggestions|-v] [--json] [--strict] [-f QUERY] 
 | `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code` | Standard run selectors (which single run to inspect). |
 
 > **Honesty note:** pubrun does not patch `open()` or subprocess globally, so file-I/O and
-> subprocess provenance are recorded only when the script uses `pubrun.open()` /
-> `pubrun.subprocess`. `inspect` will not claim a feature was "off" when the manifest merely
-> shows no records unless it can determine this definitively.
+> subprocess provenance are recorded only when the script uses `pubrun.open()`, explicit
+> external file registration (`pubrun.register_input()`, `pubrun.register_output()`, or
+> `pubrun.register_file()`), or `pubrun.subprocess`. `inspect` does not claim a feature was
+> "off" when the manifest merely shows no records unless it can determine this definitively.
+
+**File-provenance findings:** `inspect` evaluates recorded `data_files` (`inputs`, `outputs`, and `mixed`) by evidence strength and hashing outcome:
+
+- **`WARN` findings (fail `--strict`):** `file_provenance_changed` (a tracked file changed between access and hashing) and `file_provenance_hash_failed` (content hashing failed, a target was unavailable, or a verified caller-supplied digest did not match).
+- **`INFO` findings (do not fail `--strict`):** `no_file_provenance` (no files were recorded), `file_provenance_unverified_paths` (files recorded by path/stat metadata only or pending outputs without content hashes), `file_provenance_asserted_only` (caller-asserted digests not independently verified by pubrun), and `file_provenance_over_budget` (files skipped because hashing size or time budgets were exceeded).
 
 **Example:**
 ```bash
@@ -426,6 +432,7 @@ pubrun methods [RUN_DIR] [--format markdown|latex] [--all] [-n N] [-f/-F/-s/-S .
 
 - If `RUN_DIR` is omitted, automatically uses the **most recent** run in `./runs/` (the default, single-run behavior). Run filters (`-f`, `-F`, `-s`, `-S`, `--older-than`, `--exit-code`) still select the most-recent *matching* run.
 - If the manifest references a `meta_ref`, the parent context is hydrated before generating the output.
+- When a run (or aggregated `--all` set) records tracked `data_files`, `methods` adds a concise file-provenance evidence breakdown that distinguishes independently verified content digests from caller-asserted digests, path or stat-only identifications, over-budget skips, pending outputs, and changed or failed hashes. When no `data_files` are recorded, the output is unchanged.
 
 **Aggregating many runs (`--all`):** for a study run many times (sweeps, seeds, folds), `pubrun methods --all` aggregates the whole matching set into **one** representative paragraph plus a variance note listing only the fields that differ across runs (OS, CPU, RAM, Python, git commit, pubrun version, packages). If the runs are environment-homogeneous, the output reads like the single-run paragraph with "across N runs" added.
 
@@ -464,8 +471,8 @@ pubrun show [RUN_DIR ...] [--basic|--standard|--deep] [--utc]
 | Flag | Scope |
 |---|---|
 | `--basic` | Timing and outcome only |
-| `--standard` | Hardware, Git, Python, and dependency summary (default) |
-| `--deep` | Full environment variables and complete package list |
+| `--standard` | Hardware, Git, Python, dependency summary, and `Data Files` evidence-category counts when tracked files exist (default) |
+| `--deep` | Full environment variables, complete package list, subprocesses, and `[ Data Files ]` per-file listing with evidence badges (`[verified]`, `[asserted]`, `[metadata-only]`, `[path-only]`, `[over-budget]`, `[pending]`, `[changed]`, `[unavailable]`, `[failed]`), abbreviated digests, and anomaly details |
 
 #### `show config` — inspect resolved configuration
 

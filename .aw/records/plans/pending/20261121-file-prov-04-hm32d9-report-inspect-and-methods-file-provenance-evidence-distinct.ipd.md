@@ -52,31 +52,31 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Inspect findings and legacy-manifest compatibility
 
-- [ ] E-01 Update `src/pubrun/report/checks.py::manifest_findings` to classify `data_files` (`inputs`, `outputs`, `mixed`) by evidence strength and hashing outcome.
+- [x] E-01 Update `src/pubrun/report/checks.py::manifest_findings` to classify `data_files` (`inputs`, `outputs`, `mixed`) by evidence strength and hashing outcome.
   - Depends on: none
   - Expected outcome: `src/pubrun/report/checks.py::manifest_findings` inspects `data_files.inputs`, `data_files.outputs`, and `data_files.mixed` defensively (tolerating missing, `None`, or non-dict `data_files`, non-list sections, non-dict entries, and legacy manifests omitting `mixed` or `hash_status`). When all three lists are empty, `no_file_provenance` (`info`) recommends both `pubrun.open()` and `pubrun.register_input()` / `pubrun.register_output()`. When records exist, `manifest_findings()` emits distinct findings: `file_provenance_changed` (`warn`, when `hash_status == "file_changed"` or `change_detected is True`), `file_provenance_hash_failed` (`warn`, when `hash_status in ("failed", "unavailable")`, including `caller_digest_mismatch`), `file_provenance_over_budget` (`info`, when `hash_status == "over_budget"`), `file_provenance_asserted_only` (`info`, when unverified caller-supplied digests are present via `hash_status == "asserted"` or `evidence_source == "asserted"` with `hash_status != "completed"`), and `file_provenance_unverified_paths` (`info`, when entries are `metadata_only`, `path_only`, `hash_status in ("disabled", "pending")` without caller digest, or legacy records lacking `hash_status`/`evidence_strength`/`evidence_source` and lacking a digest). Verified non-SHA-256 records (`hash_status == "completed"` with `digest` set and `sha256: None`) are classified as verified and do not trigger `file_provenance_unverified_paths`. Existing finding codes, never-raise behavior, CLI-only import isolation, and coexistence with sibling plan `0b8i7x` (shared reproducibility evidence model) and `26euz0` (partial-manifest diagnostics) are preserved without duplicate findings.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Diagnostic report rendering
 
-- [ ] E-02 Update `src/pubrun/report/diagnostics.py::print_report` to display a File Provenance breakdown separating verified content from identified paths, asserted digests, pending outputs, and anomalies.
+- [x] E-02 Update `src/pubrun/report/diagnostics.py::print_report` to display a File Provenance breakdown separating verified content from identified paths, asserted digests, pending outputs, and anomalies.
   - Depends on: E-01
   - Expected outcome: In `src/pubrun/report/diagnostics.py::print_report`, the Standard section prints a concise `Data Files` summary line showing counts by evidence category (`verified`, `asserted`, `identified-only`, `over-budget`, `changed`, `failed/unavailable`, `pending`) whenever `data_files` has records. The Deep section prints a `[ Data Files ]` subsection listing individual `inputs`, `outputs`, and `mixed` entries with sanitized path, optional label, role/mode, authoritative textual evidence badge (`[verified]`, `[asserted]`, `[metadata-only]`, `[path-only]`, `[over-budget]`, `[changed]`, `[unavailable]`, `[failed]`, `[pending]`), bounded `hash_status_detail` on anomaly states, and abbreviated `<alg>:<prefix12>` digest (from `digest` or `sha256`, and `caller_digest` only on `[asserted]`, never presented as verified on `failed`/`changed`/`over_budget`/`unavailable`/`disabled`/`pending`). New output never uses `Colors.DIM`, emits zero ANSI escapes under `NO_COLOR`, handles legacy or malformed `data_files` cleanly without raising, and preserves any sibling `26euz0` or `vrr1fv` report sections.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Methods generation and CLI documentation
 
-- [ ] E-03 Update `src/pubrun/report/methods.py` and `docs/cli.md` to reflect honest file-provenance evidence levels.
+- [x] E-03 Update `src/pubrun/report/methods.py` and `docs/cli.md` to reflect honest file-provenance evidence levels.
   - Depends on: E-02
   - Expected outcome: `src/pubrun/report/methods.py::generate_report` and `src/pubrun/report/methods.py::generate_report_multi` produce byte-identical output when `data_files` has no entries across all manifests in scope (preserving `tests/test_reports.py`, `tests/test_methods_multi.py`, and `tests/test_templates.py`). When `data_files` has entries, `generate_report()` inserts one factual, restrained sentence into the methods body (before `**References:**` in Markdown and before `%% Ensure you add` in LaTeX, escaping LaTeX special characters) distinguishing independently verified content digests from caller-asserted digests, path/metadata-only identifications, over-budget skips, pending outputs, and changed/failed entries without ever claiming unverified or asserted files were content-verified. `generate_report_multi()` aggregates file-provenance evidence across all manifests in `manifests` (including when `manifests[0]` has empty `data_files` and `manifests[1:]` has tracked files, or when runs vary), preserving any sibling `26euz0` partial-provenance disclosures. `docs/cli.md` updates the `pubrun inspect`, `pubrun show`, and `pubrun methods` sections to document `pubrun.register_input()` / `register_output()` / `register_file()`, file-provenance findings, evidence badges, and methods provenance notes without introducing em or en dashes.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Behavioral tests and import-isolation verification
 
-- [ ] E-04 Add behavioral tests in `tests/test_checks_commands.py`, `tests/test_reports.py`, and `tests/test_show_sections.py`.
+- [x] E-04 Add behavioral tests in `tests/test_checks_commands.py`, `tests/test_reports.py`, and `tests/test_show_sections.py`.
   - Depends on: E-03
   - Expected outcome: Targeted behavioral tests pass via `pytest` confirming: (1) `manifest_findings()` emits distinct codes for empty `data_files`, verified SHA-256 and non-SHA-256 (`sha512`) content (no unverified-path finding), stat-only/path-only records, caller-asserted digests (including `verify_digest=True` on unavailable targets), over-budget skips, pending outputs, failed/unavailable records (including `caller_digest_mismatch`), changed/replaced files, mixed-role entries, legacy manifests, and malformed `data_files`, and `pubrun inspect --strict` exits non-zero on `WARN` file-provenance findings while exiting 0 when only `INFO` file-provenance findings occur; (2) `pubrun show` (standard) and `pubrun show --deep` (plus `print_report(..., depth="deep")`) render the File Provenance breakdown with authoritative textual badges, sanitized labels/paths, zero ANSI escapes under `NO_COLOR=1`, and intact `SHOW_SECTIONS` filtering; (3) `generate_report()` and `generate_report_multi()` (Markdown and LaTeX) stay byte-identical for empty `data_files` and distinguish verified, asserted, unverified, and anomaly file records when populated; (4) `test_import_pubrun_does_not_import_checks` continues to pass.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -179,25 +179,316 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste `pytest tests/test_checks_commands.py -v` output (exit code 0) confirming all existing checks tests pass alongside new tests for `no_file_provenance` (mentioning `open()` and `register_input()`/`register_output()`), `file_provenance_unverified_paths`, `file_provenance_asserted_only`, `file_provenance_over_budget`, `file_provenance_changed`, `file_provenance_hash_failed` (including `caller_digest_mismatch`), verified SHA-256 and non-SHA-256 (`sha512`) records, `pending` outputs, `mixed` entries, legacy and malformed manifests, `pubrun inspect --strict` (`WARN` vs `INFO`), and `test_import_pubrun_does_not_import_checks`.
   - Observed evidence:
-  - Result: pending
+    Command: `PYTHONPATH="$PWD/src" python3 -m pytest tests/test_checks_commands.py -o addopts="" -v` (exit code 0)
+    ```text
+    collected 41 items
 
-- [ ] V-02 validates E-02
+    tests/test_checks_commands.py::TestManifestFindings::test_subprocess_definitively_off_with_flag PASSED [  2%]
+    tests/test_checks_commands.py::TestManifestFindings::test_failed_sections_emit_warn_distinct_from_suppressed PASSED [  4%]
+    tests/test_checks_commands.py::TestManifestFindings::test_capture_error_records_deduplicated_and_truncation_surfaced PASSED [  7%]
+    tests/test_checks_commands.py::TestManifestFindings::test_process_scope_flagged PASSED [  9%]
+    tests/test_checks_commands.py::TestManifestFindings::test_resources_off_suppressed PASSED [ 12%]
+    tests/test_checks_commands.py::TestManifestFindings::test_different_host_banner_fires_on_mismatch PASSED [ 14%]
+    tests/test_checks_commands.py::TestManifestFindings::test_subprocess_ambiguous_without_flag_is_honest PASSED [ 17%]
+    tests/test_checks_commands.py::TestManifestFindings::test_never_raises_on_garbage PASSED [ 19%]
+    tests/test_checks_commands.py::TestManifestFindings::test_no_file_provenance_finding_mentions_open PASSED [ 21%]
+    tests/test_checks_commands.py::TestManifestFindings::test_no_banner_on_same_host PASSED [ 24%]
+    tests/test_checks_commands.py::TestManifestFindings::test_tree_scope_not_flagged PASSED [ 26%]
+    tests/test_checks_commands.py::TestManifestFindings::test_real_fault_injected_manifest_propagates_redacted_detail PASSED [ 29%]
+    tests/test_checks_commands.py::TestSelfCheckCLI::test_itemized_default_shows_per_check_and_timing PASSED [ 31%]
+    tests/test_checks_commands.py::TestSelfCheckCLI::test_self_check_runs_exit_zero_by_default PASSED [ 34%]
+    tests/test_checks_commands.py::TestSelfCheckCLI::test_help_no_color_marker PASSED [ 36%]
+    tests/test_checks_commands.py::TestSelfCheckCLI::test_json_includes_checks_and_elapsed PASSED [ 39%]
+    tests/test_checks_commands.py::TestSelfCheckCLI::test_quiet_is_one_liner PASSED [ 41%]
+    tests/test_checks_commands.py::TestLiveChecksModel::test_returns_checks_and_findings PASSED [ 43%]
+    tests/test_checks_commands.py::TestLiveChecksModel::test_findings_unchanged_by_live_checks PASSED [ 46%]
+    tests/test_checks_commands.py::TestHpcLoginNodeNudge::test_no_scheduler_no_nudge PASSED [ 48%]
+    tests/test_checks_commands.py::TestHpcLoginNodeNudge::test_login_node_emits_info_not_warn PASSED [ 51%]
+    tests/test_checks_commands.py::TestHpcLoginNodeNudge::test_on_compute_node_no_nudge PASSED [ 53%]
+    tests/test_checks_commands.py::TestInspectCLI::test_inspect_show_suggestions_expands PASSED [ 56%]
+    tests/test_checks_commands.py::TestInspectCLI::test_inspect_terse_default PASSED [ 58%]
+    tests/test_checks_commands.py::TestInspectCLI::test_inspect_json_full PASSED [ 60%]
+    tests/test_checks_commands.py::TestInspectCLI::test_inspect_no_runs_errors PASSED [ 63%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_asserted_only_and_compound_verify_digest_unavailable PASSED [ 65%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_empty_data_files_recommends_open_and_register_apis PASSED [ 68%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_unverified_paths_stat_only_path_only_and_pending_outputs PASSED [ 70%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_over_budget_changed_failed_caller_mismatch_and_mixed_entries PASSED [ 73%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_verified_sha256_and_non_sha256_records_emit_no_file_provenance_findings PASSED [ 75%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_legacy_and_malformed_data_files_degrade_safely PASSED [ 78%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_inspect_strict_exits_nonzero_on_warn_and_zero_on_info_only PASSED [ 80%]
+    tests/test_checks_commands.py::TestLiveFsHealthFindings::test_hung_probe_emits_systemwide_warning PASSED [ 82%]
+    tests/test_checks_commands.py::TestLiveFsHealthFindings::test_slow_probe_states_measured_elapsed PASSED [ 85%]
+    tests/test_checks_commands.py::TestLiveFsHealthFindings::test_healthy_probe_emits_nothing PASSED [ 87%]
+    tests/test_checks_commands.py::test_import_and_run_makes_no_statvfs_call PASSED [ 90%]
+    tests/test_checks_commands.py::test_import_pubrun_does_not_import_checks PASSED [ 92%]
+    tests/test_checks_commands.py::TestMetaVerbose::test_meta_itemizes_and_writes_json PASSED [ 95%]
+    tests/test_checks_commands.py::TestLiveFindings::test_live_findings_returns_list PASSED [ 97%]
+    tests/test_checks_commands.py::TestLiveFindings::test_summarize_no_warns PASSED [100%]
+
+    ============================== 41 passed in 3.77s ==============================
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Paste `pytest tests/test_show_sections.py -v` output (exit code 0) confirming `pubrun show` (standard) and `pubrun show --deep` (plus `print_report(..., depth="deep")`) render the File Provenance breakdown separating verified content hashes (including non-SHA-256), caller-asserted digests, identified paths/metadata only, over-budget skips, pending outputs, changed files, and failed/unavailable records with authoritative textual badges, sanitized strings, zero ANSI escapes under `NO_COLOR=1`, no `Colors.DIM` usage, and intact `SHOW_SECTIONS` filters.
   - Observed evidence:
-  - Result: pending
+    Command: `PYTHONPATH="$PWD/src" python3 -m pytest tests/test_show_sections.py -o addopts="" -v` (exit code 0)
+    ```text
+    collected 15 items
 
-- [ ] V-03 validates E-03
+    tests/test_show_sections.py::test_cpu_command PASSED                     [  6%]
+    tests/test_show_sections.py::test_show_packages PASSED                   [ 13%]
+    tests/test_show_sections.py::test_show_option_shifting_env PASSED        [ 20%]
+    tests/test_show_sections.py::test_show_option_shifting_packages PASSED   [ 26%]
+    tests/test_show_sections.py::test_show_logs PASSED                       [ 33%]
+    tests/test_show_sections.py::test_mem_command PASSED                     [ 40%]
+    tests/test_show_sections.py::test_width_option PASSED                    [ 46%]
+    tests/test_show_sections.py::test_hidden_report_command PASSED           [ 53%]
+    tests/test_show_sections.py::test_swapped_command_args PASSED            [ 60%]
+    tests/test_show_sections.py::test_show_option_shifting_logs PASSED       [ 66%]
+    tests/test_show_sections.py::test_show_full_report PASSED                [ 73%]
+    tests/test_show_sections.py::test_res_command PASSED                     [ 80%]
+    tests/test_show_sections.py::test_show_env PASSED                        [ 86%]
+    tests/test_show_sections.py::TestShowDataFilesProvenance::test_cli_show_standard_and_deep_with_no_color_and_all_badges PASSED [ 93%]
+    tests/test_show_sections.py::TestShowDataFilesProvenance::test_print_report_color_uses_no_dim_and_handles_legacy_malformed_and_sections PASSED [100%]
+
+    ============================== 15 passed in 2.32s ==============================
+    ```
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: Paste `pytest tests/test_reports.py tests/test_methods_multi.py tests/test_templates.py tests/test_example_minimal_research_workflow.py -v` output (exit code 0) confirming `generate_report()` and `generate_report_multi()` (Markdown and LaTeX) remain byte-identical when `data_files` is empty and distinguish verified, asserted, unverified, and anomaly file records when populated (including `manifests[1:]` in multi-run aggregation and LaTeX escaping), plus `git diff -- docs/cli.md` confirming updated `inspect`, `show`, and `methods` CLI documentation with zero newly introduced em or en dashes.
   - Observed evidence:
-  - Result: pending
+    Command: `PYTHONPATH="$PWD/src" python3 -m pytest tests/test_reports.py tests/test_methods_multi.py tests/test_templates.py tests/test_example_minimal_research_workflow.py -o addopts="" -v` (exit code 0)
+    ```text
+    collected 73 items
 
-- [ ] V-04 validates E-04
+    tests/test_templates.py::test_generate_report_latex_escaping PASSED      [  1%]
+    tests/test_templates.py::test_bytes_to_gb PASSED                         [  2%]
+    tests/test_templates.py::test_generate_report_pubrun_version_fallback PASSED [  4%]
+    tests/test_templates.py::test_generate_report_markdown PASSED            [  5%]
+    tests/test_templates.py::test_extract_highlighted_packages PASSED        [  6%]
+    tests/test_example_minimal_research_workflow.py::test_minimal_research_workflow_runs PASSED [  8%]
+    tests/test_methods_multi.py::TestMethodsAllCli::test_note_is_marked_and_outside_methods_under_no_color PASSED [  9%]
+    tests/test_methods_multi.py::TestMethodsAllCli::test_all_aggregates_and_notes_variance PASSED [ 10%]
+    tests/test_methods_multi.py::TestSingleRunParity::test_aggregate_of_one_equals_single PASSED [ 12%]
+    tests/test_methods_multi.py::TestSingleRunParity::test_single_run_markdown_unchanged PASSED [ 13%]
+    tests/test_methods_multi.py::TestAggregateGenerator::test_latex_variance_is_commented_out PASSED [ 15%]
+    tests/test_methods_multi.py::TestAggregateGenerator::test_deterministic PASSED [ 16%]
+    tests/test_methods_multi.py::TestAggregateGenerator::test_homogeneous_reads_like_single_plus_count PASSED [ 17%]
+    tests/test_methods_multi.py::TestAggregateGenerator::test_empty_raises PASSED [ 19%]
+    tests/test_methods_multi.py::TestAggregateGenerator::test_differing_git_commit_is_noted_not_refused PASSED [ 20%]
+    tests/test_methods_multi.py::TestAggregateGenerator::test_heterogeneous_notes_variance PASSED [ 21%]
+    tests/test_reports.py::TestHydrateManifest::test_warns_on_missing_meta_ref PASSED [ 23%]
+    tests/test_reports.py::TestHydrateManifest::test_no_meta_ref PASSED      [ 24%]
+    tests/test_reports.py::TestHydrateManifest::test_hydrates_from_valid_parent PASSED [ 26%]
+    tests/test_reports.py::TestHydrateManifest::test_warns_on_non_json_meta_ref PASSED [ 27%]
+    tests/test_reports.py::TestGenerateReportLatex::test_contains_pubrun_citation PASSED [ 28%]
+    tests/test_reports.py::TestGenerateReportLatex::test_contains_subsection PASSED [ 30%]
+    tests/test_reports.py::TestGenerateReportLatex::test_escapes_underscores PASSED [ 31%]
+    tests/test_reports.py::TestBytesToGb::test_zero PASSED                   [ 32%]
+    tests/test_reports.py::TestBytesToGb::test_one_gb PASSED                 [ 34%]
+    tests/test_reports.py::TestBytesToGb::test_fractional PASSED             [ 35%]
+    tests/test_reports.py::TestBytesToGb::test_32_gb PASSED                  [ 36%]
+    tests/test_reports.py::TestBytesToGb::test_none PASSED                   [ 38%]
+    tests/test_reports.py::TestResourceMonitoring::test_draw_ascii_chart_ascii_fallback PASSED [ 39%]
+    tests/test_reports.py::TestResourceMonitoring::test_draw_ascii_chart_average PASSED [ 41%]
+    tests/test_reports.py::TestResourceMonitoring::test_print_resources_report_no_samples PASSED [ 42%]
+    tests/test_reports.py::TestResourceMonitoring::test_draw_ascii_chart_unicode PASSED [ 43%]
+    tests/test_reports.py::TestResourceMonitoring::test_print_resources_report_with_samples PASSED [ 45%]
+    tests/test_reports.py::TestResourceMonitoring::test_print_resources_report_average PASSED [ 46%]
+    tests/test_reports.py::TestExtractHighlightedPackages::test_case_insensitive PASSED [ 47%]
+    tests/test_reports.py::TestExtractHighlightedPackages::test_no_packages_section PASSED [ 49%]
+    tests/test_reports.py::TestExtractHighlightedPackages::test_includes_version PASSED [ 50%]
+    tests/test_reports.py::TestExtractHighlightedPackages::test_empty_packages PASSED [ 52%]
+    tests/test_reports.py::TestExtractHighlightedPackages::test_detects_torch PASSED [ 53%]
+    tests/test_reports.py::TestExtractHighlightedPackages::test_detects_numpy PASSED [ 54%]
+    tests/test_reports.py::TestGenerateMetaSnapshotUnit::test_required_keys_present PASSED [ 56%]
+    tests/test_reports.py::TestGenerateMetaSnapshotUnit::test_timing_has_started_at PASSED [ 57%]
+    tests/test_reports.py::TestGenerateMetaSnapshotUnit::test_default_output_path PASSED [ 58%]
+    tests/test_reports.py::TestGenerateMetaSnapshotUnit::test_produces_valid_json_file PASSED [ 60%]
+    tests/test_reports.py::TestGenerateMetaSnapshotUnit::test_manifest_type_is_meta_snapshot PASSED [ 61%]
+    tests/test_reports.py::TestPartialManifestDiagnosticsAndMethods::test_methods_single_and_multi_honest_on_real_failed_engines PASSED [ 63%]
+    tests/test_reports.py::TestPartialManifestDiagnosticsAndMethods::test_print_report_real_partial_manifest_all_depths_sections_and_no_color PASSED [ 64%]
+    tests/test_reports.py::TestPartialManifestDiagnosticsAndMethods::test_print_report_caps_errors_records_and_surfaces_truncation PASSED [ 65%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_pubrun_reference PASSED [ 67%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_computational_methods PASSED [ 68%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_ram PASSED [ 69%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_git_commit PASSED [ 71%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_python_version PASSED [ 72%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_cpu PASSED [ 73%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_os_name PASSED [ 75%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_packages PASSED [ 76%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_empty_python_version PASSED [ 78%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_latex_format_with_underscores_in_remote_url PASSED [ 79%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_missing_git_section PASSED [ 80%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_empty_packages_records PASSED [ 82%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_missing_host_section PASSED [ 83%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_git_commit_empty_string PASSED [ 84%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_missing_packages_section PASSED [ 86%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_missing_hardware_section PASSED [ 87%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_git_commit_none PASSED [ 89%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_unverified_and_asserted_files_never_claimed_verified PASSED [ 90%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_empty_or_malformed_data_files_is_byte_identical PASSED [ 91%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_single_run_markdown_and_latex_placement_and_honest_evidence_breakdown PASSED [ 93%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_escape_latex_helper_escapes_underscores_and_percent PASSED [ 94%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_multi_run_aggregates_when_first_manifest_empty_and_preserves_partial_notes PASSED [ 95%]
+    tests/test_reports.py::TestPrintReportUnit::test_standard_depth_shows_git PASSED [ 97%]
+    tests/test_reports.py::TestPrintReportUnit::test_basic_depth_shows_timing PASSED [ 98%]
+    tests/test_reports.py::TestPrintReportUnit::test_deep_depth_shows_packages PASSED [100%]
+
+    ============================== 73 passed in 1.39s ==============================
+    ```
+    Docs diff check (`git diff -- docs/cli.md`, exit code 0, `ADDED_EM_EN_DASHES: 0`):
+    - `### inspect` Honesty note updated to include `pubrun.register_input()`, `pubrun.register_output()`, and `pubrun.register_file()` alongside `pubrun.open()` and `pubrun.subprocess`, plus a `File-provenance findings:` breakdown documenting `WARN` (`file_provenance_changed`, `file_provenance_hash_failed`) vs `INFO` (`no_file_provenance`, `file_provenance_unverified_paths`, `file_provenance_asserted_only`, `file_provenance_over_budget`) and `--strict` behavior.
+    - `### methods` updated to document that populated `data_files` appends a concise file-provenance evidence breakdown (single-run and `--all`), while empty `data_files` leaves output unchanged.
+    - `### show` Depth Controls table updated: `--standard` documents `Data Files` evidence-category counts; `--deep` documents `[ Data Files ]` per-file listing with `[verified]`, `[asserted]`, `[metadata-only]`, `[path-only]`, `[over-budget]`, `[pending]`, `[changed]`, `[unavailable]`, `[failed]` badges, abbreviated digests, and anomaly details.
+    - Automated dash check on all added lines in `git diff -- docs/cli.md`: `ADDED_EM_EN_DASHES: 0` (exit code 0).
+  - Result: pass
+
+- [x] V-04 validates E-04
   - Required evidence: Paste full output of `pytest tests/test_checks_commands.py tests/test_reports.py tests/test_show_sections.py tests/test_methods_multi.py tests/test_templates.py tests/test_example_minimal_research_workflow.py -v` (exit code 0, zero failures).
   - Observed evidence:
-  - Result: pending
+    Command: `PYTHONPATH="$PWD/src" python3 -m pytest tests/test_checks_commands.py tests/test_reports.py tests/test_show_sections.py tests/test_methods_multi.py tests/test_templates.py tests/test_example_minimal_research_workflow.py -o addopts="" -v` (exit code 0)
+    ```text
+    collected 129 items
+
+    tests/test_checks_commands.py::TestLiveChecksModel::test_returns_checks_and_findings PASSED [  0%]
+    tests/test_checks_commands.py::TestLiveChecksModel::test_findings_unchanged_by_live_checks PASSED [  1%]
+    tests/test_checks_commands.py::TestManifestFindings::test_tree_scope_not_flagged PASSED [  2%]
+    tests/test_checks_commands.py::TestManifestFindings::test_no_banner_on_same_host PASSED [  3%]
+    tests/test_checks_commands.py::TestManifestFindings::test_real_fault_injected_manifest_propagates_redacted_detail PASSED [  3%]
+    tests/test_checks_commands.py::TestManifestFindings::test_capture_error_records_deduplicated_and_truncation_surfaced PASSED [  4%]
+    tests/test_checks_commands.py::TestManifestFindings::test_failed_sections_emit_warn_distinct_from_suppressed PASSED [  5%]
+    tests/test_checks_commands.py::TestManifestFindings::test_resources_off_suppressed PASSED [  6%]
+    tests/test_checks_commands.py::TestManifestFindings::test_never_raises_on_garbage PASSED [  6%]
+    tests/test_checks_commands.py::TestManifestFindings::test_subprocess_ambiguous_without_flag_is_honest PASSED [  7%]
+    tests/test_checks_commands.py::TestManifestFindings::test_no_file_provenance_finding_mentions_open PASSED [  8%]
+    tests/test_checks_commands.py::TestManifestFindings::test_process_scope_flagged PASSED [  9%]
+    tests/test_checks_commands.py::TestManifestFindings::test_subprocess_definitively_off_with_flag PASSED [ 10%]
+    tests/test_checks_commands.py::TestManifestFindings::test_different_host_banner_fires_on_mismatch PASSED [ 10%]
+    tests/test_checks_commands.py::TestLiveFsHealthFindings::test_healthy_probe_emits_nothing PASSED [ 11%]
+    tests/test_checks_commands.py::TestLiveFsHealthFindings::test_slow_probe_states_measured_elapsed PASSED [ 12%]
+    tests/test_checks_commands.py::TestLiveFsHealthFindings::test_hung_probe_emits_systemwide_warning PASSED [ 13%]
+    tests/test_checks_commands.py::TestMetaVerbose::test_meta_itemizes_and_writes_json PASSED [ 13%]
+    tests/test_checks_commands.py::TestHpcLoginNodeNudge::test_on_compute_node_no_nudge PASSED [ 14%]
+    tests/test_checks_commands.py::TestHpcLoginNodeNudge::test_login_node_emits_info_not_warn PASSED [ 15%]
+    tests/test_checks_commands.py::TestHpcLoginNodeNudge::test_no_scheduler_no_nudge PASSED [ 16%]
+    tests/test_checks_commands.py::TestLiveFindings::test_summarize_no_warns PASSED [ 17%]
+    tests/test_checks_commands.py::TestLiveFindings::test_live_findings_returns_list PASSED [ 17%]
+    tests/test_checks_commands.py::test_import_pubrun_does_not_import_checks PASSED [ 18%]
+    tests/test_checks_commands.py::test_import_and_run_makes_no_statvfs_call PASSED [ 19%]
+    tests/test_checks_commands.py::TestInspectCLI::test_inspect_json_full PASSED [ 20%]
+    tests/test_checks_commands.py::TestInspectCLI::test_inspect_terse_default PASSED [ 20%]
+    tests/test_checks_commands.py::TestInspectCLI::test_inspect_show_suggestions_expands PASSED [ 21%]
+    tests/test_checks_commands.py::TestInspectCLI::test_inspect_no_runs_errors PASSED [ 22%]
+    tests/test_checks_commands.py::TestSelfCheckCLI::test_quiet_is_one_liner PASSED [ 23%]
+    tests/test_checks_commands.py::TestSelfCheckCLI::test_self_check_runs_exit_zero_by_default PASSED [ 24%]
+    tests/test_checks_commands.py::TestSelfCheckCLI::test_help_no_color_marker PASSED [ 24%]
+    tests/test_checks_commands.py::TestSelfCheckCLI::test_itemized_default_shows_per_check_and_timing PASSED [ 25%]
+    tests/test_checks_commands.py::TestSelfCheckCLI::test_json_includes_checks_and_elapsed PASSED [ 26%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_unverified_paths_stat_only_path_only_and_pending_outputs PASSED [ 27%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_over_budget_changed_failed_caller_mismatch_and_mixed_entries PASSED [ 27%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_inspect_strict_exits_nonzero_on_warn_and_zero_on_info_only PASSED [ 28%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_empty_data_files_recommends_open_and_register_apis PASSED [ 29%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_asserted_only_and_compound_verify_digest_unavailable PASSED [ 30%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_verified_sha256_and_non_sha256_records_emit_no_file_provenance_findings PASSED [ 31%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_legacy_and_malformed_data_files_degrade_safely PASSED [ 31%]
+    tests/test_methods_multi.py::TestMethodsAllCli::test_note_is_marked_and_outside_methods_under_no_color PASSED [ 32%]
+    tests/test_methods_multi.py::TestMethodsAllCli::test_all_aggregates_and_notes_variance PASSED [ 33%]
+    tests/test_methods_multi.py::TestAggregateGenerator::test_differing_git_commit_is_noted_not_refused PASSED [ 34%]
+    tests/test_methods_multi.py::TestAggregateGenerator::test_empty_raises PASSED [ 34%]
+    tests/test_methods_multi.py::TestAggregateGenerator::test_deterministic PASSED [ 35%]
+    tests/test_methods_multi.py::TestAggregateGenerator::test_heterogeneous_notes_variance PASSED [ 36%]
+    tests/test_methods_multi.py::TestAggregateGenerator::test_homogeneous_reads_like_single_plus_count PASSED [ 37%]
+    tests/test_methods_multi.py::TestAggregateGenerator::test_latex_variance_is_commented_out PASSED [ 37%]
+    tests/test_methods_multi.py::TestSingleRunParity::test_aggregate_of_one_equals_single PASSED [ 38%]
+    tests/test_methods_multi.py::TestSingleRunParity::test_single_run_markdown_unchanged PASSED [ 39%]
+    tests/test_example_minimal_research_workflow.py::test_minimal_research_workflow_runs PASSED [ 40%]
+    tests/test_templates.py::test_extract_highlighted_packages PASSED        [ 41%]
+    tests/test_templates.py::test_bytes_to_gb PASSED                         [ 41%]
+    tests/test_templates.py::test_generate_report_markdown PASSED            [ 42%]
+    tests/test_templates.py::test_generate_report_latex_escaping PASSED      [ 43%]
+    tests/test_templates.py::test_generate_report_pubrun_version_fallback PASSED [ 44%]
+    tests/test_show_sections.py::TestShowDataFilesProvenance::test_print_report_color_uses_no_dim_and_handles_legacy_malformed_and_sections PASSED [ 44%]
+    tests/test_show_sections.py::TestShowDataFilesProvenance::test_cli_show_standard_and_deep_with_no_color_and_all_badges PASSED [ 45%]
+    tests/test_show_sections.py::test_show_option_shifting_logs PASSED       [ 46%]
+    tests/test_show_sections.py::test_show_full_report PASSED                [ 47%]
+    tests/test_show_sections.py::test_show_option_shifting_env PASSED        [ 48%]
+    tests/test_show_sections.py::test_mem_command PASSED                     [ 48%]
+    tests/test_show_sections.py::test_show_packages PASSED                   [ 49%]
+    tests/test_show_sections.py::test_width_option PASSED                    [ 50%]
+    tests/test_show_sections.py::test_res_command PASSED                     [ 51%]
+    tests/test_show_sections.py::test_show_env PASSED                        [ 51%]
+    tests/test_show_sections.py::test_cpu_command PASSED                     [ 52%]
+    tests/test_show_sections.py::test_hidden_report_command PASSED           [ 53%]
+    tests/test_show_sections.py::test_swapped_command_args PASSED            [ 54%]
+    tests/test_show_sections.py::test_show_option_shifting_packages PASSED   [ 55%]
+    tests/test_show_sections.py::test_show_logs PASSED                       [ 55%]
+    tests/test_reports.py::TestPartialManifestDiagnosticsAndMethods::test_print_report_real_partial_manifest_all_depths_sections_and_no_color PASSED [ 56%]
+    tests/test_reports.py::TestPartialManifestDiagnosticsAndMethods::test_methods_single_and_multi_honest_on_real_failed_engines PASSED [ 57%]
+    tests/test_reports.py::TestPartialManifestDiagnosticsAndMethods::test_print_report_caps_errors_records_and_surfaces_truncation PASSED [ 58%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_multi_run_aggregates_when_first_manifest_empty_and_preserves_partial_notes PASSED [ 58%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_unverified_and_asserted_files_never_claimed_verified PASSED [ 59%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_empty_or_malformed_data_files_is_byte_identical PASSED [ 60%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_single_run_markdown_and_latex_placement_and_honest_evidence_breakdown PASSED [ 61%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_escape_latex_helper_escapes_underscores_and_percent PASSED [ 62%]
+    tests/test_reports.py::TestGenerateReportLatex::test_contains_pubrun_citation PASSED [ 62%]
+    tests/test_reports.py::TestGenerateReportLatex::test_escapes_underscores PASSED [ 63%]
+    tests/test_reports.py::TestGenerateReportLatex::test_contains_subsection PASSED [ 64%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_empty_python_version PASSED [ 65%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_missing_hardware_section PASSED [ 65%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_latex_format_with_underscores_in_remote_url PASSED [ 66%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_missing_packages_section PASSED [ 67%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_git_commit_empty_string PASSED [ 68%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_missing_host_section PASSED [ 68%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_git_commit_none PASSED [ 69%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_empty_packages_records PASSED [ 70%]
+    tests/test_reports.py::TestGenerateReportDegradedManifests::test_missing_git_section PASSED [ 71%]
+    tests/test_reports.py::TestHydrateManifest::test_no_meta_ref PASSED      [ 72%]
+    tests/test_reports.py::TestHydrateManifest::test_hydrates_from_valid_parent PASSED [ 72%]
+    tests/test_reports.py::TestHydrateManifest::test_warns_on_non_json_meta_ref PASSED [ 73%]
+    tests/test_reports.py::TestHydrateManifest::test_warns_on_missing_meta_ref PASSED [ 74%]
+    tests/test_reports.py::TestGenerateMetaSnapshotUnit::test_default_output_path PASSED [ 75%]
+    tests/test_reports.py::TestGenerateMetaSnapshotUnit::test_produces_valid_json_file PASSED [ 75%]
+    tests/test_reports.py::TestGenerateMetaSnapshotUnit::test_manifest_type_is_meta_snapshot PASSED [ 76%]
+    tests/test_reports.py::TestGenerateMetaSnapshotUnit::test_required_keys_present PASSED [ 77%]
+    tests/test_reports.py::TestGenerateMetaSnapshotUnit::test_timing_has_started_at PASSED [ 78%]
+    tests/test_reports.py::TestBytesToGb::test_none PASSED                   [ 79%]
+    tests/test_reports.py::TestBytesToGb::test_32_gb PASSED                  [ 79%]
+    tests/test_reports.py::TestBytesToGb::test_fractional PASSED             [ 80%]
+    tests/test_reports.py::TestBytesToGb::test_zero PASSED                   [ 81%]
+    tests/test_reports.py::TestBytesToGb::test_one_gb PASSED                 [ 82%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_cpu PASSED [ 82%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_pubrun_reference PASSED [ 83%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_ram PASSED [ 84%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_os_name PASSED [ 85%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_computational_methods PASSED [ 86%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_packages PASSED [ 86%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_python_version PASSED [ 87%]
+    tests/test_reports.py::TestGenerateReportMarkdown::test_contains_git_commit PASSED [ 88%]
+    tests/test_reports.py::TestExtractHighlightedPackages::test_detects_torch PASSED [ 89%]
+    tests/test_reports.py::TestExtractHighlightedPackages::test_detects_numpy PASSED [ 89%]
+    tests/test_reports.py::TestExtractHighlightedPackages::test_includes_version PASSED [ 90%]
+    tests/test_reports.py::TestExtractHighlightedPackages::test_empty_packages PASSED [ 91%]
+    tests/test_reports.py::TestExtractHighlightedPackages::test_no_packages_section PASSED [ 92%]
+    tests/test_reports.py::TestExtractHighlightedPackages::test_case_insensitive PASSED [ 93%]
+    tests/test_reports.py::TestPrintReportUnit::test_deep_depth_shows_packages PASSED [ 93%]
+    tests/test_reports.py::TestPrintReportUnit::test_basic_depth_shows_timing PASSED [ 94%]
+    tests/test_reports.py::TestPrintReportUnit::test_standard_depth_shows_git PASSED [ 95%]
+    tests/test_reports.py::TestResourceMonitoring::test_draw_ascii_chart_average PASSED [ 96%]
+    tests/test_reports.py::TestResourceMonitoring::test_draw_ascii_chart_unicode PASSED [ 96%]
+    tests/test_reports.py::TestResourceMonitoring::test_print_resources_report_with_samples PASSED [ 97%]
+    tests/test_reports.py::TestResourceMonitoring::test_print_resources_report_no_samples PASSED [ 98%]
+    tests/test_reports.py::TestResourceMonitoring::test_print_resources_report_average PASSED [ 99%]
+    tests/test_reports.py::TestResourceMonitoring::test_draw_ascii_chart_ascii_fallback PASSED [100%]
+
+    ============================= 129 passed in 7.02s ==============================
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 

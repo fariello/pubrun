@@ -34,6 +34,156 @@ def _failed_sections(manifest: Any) -> List[str]:
     return sorted(failed)
 
 
+def _escape_latex(text: str) -> str:
+    """Escape LaTeX special characters used in generated methods notes."""
+    return text.replace("_", "\\_").replace("%", "\\%")
+
+
+def _classify_file_record(rec: Dict[str, Any]) -> str:
+    """Classify a single ``data_files`` record using canonical evidence precedence."""
+    hash_status = rec.get("hash_status")
+    evidence_strength = rec.get("evidence_strength")
+    evidence_source = rec.get("evidence_source")
+    caller_digest = rec.get("caller_digest")
+
+    if hash_status == "file_changed" or rec.get("change_detected") is True:
+        return "changed"
+    if (
+        hash_status == "failed"
+        or rec.get("hash_status_detail") == "caller_digest_mismatch"
+        or (isinstance(caller_digest, dict) and caller_digest.get("verified") is False)
+    ):
+        return "failed"
+    if hash_status == "unavailable":
+        return "unavailable"
+    if hash_status == "over_budget":
+        return "over_budget"
+    if hash_status == "completed" or evidence_strength == "verified_content":
+        return "verified"
+    if (
+        hash_status == "asserted"
+        or evidence_strength == "asserted_content"
+        or evidence_source == "asserted"
+    ):
+        return "asserted"
+    if hash_status == "pending":
+        return "pending"
+    if hash_status == "disabled" or evidence_strength in ("metadata_only", "path_only"):
+        return "identified_only"
+    if hash_status is None and evidence_strength is None and evidence_source is None:
+        digest = rec.get("digest")
+        has_digest = (
+            isinstance(digest, dict)
+            and isinstance(digest.get("value"), str)
+            and bool(digest["value"].strip())
+        ) or (isinstance(rec.get("sha256"), str) and bool(rec["sha256"].strip()))
+        return "verified" if has_digest else "identified_only"
+    if evidence_strength == "unavailable":
+        return "unavailable"
+    if evidence_strength == "changed_unverified":
+        return "changed"
+    return "identified_only"
+
+
+def _summarize_manifest_data_files(manifest: Any) -> Dict[str, int]:
+    """Summarize ``data_files`` evidence counts for a single manifest."""
+    counts: Dict[str, int] = {
+        "total": 0,
+        "verified": 0,
+        "asserted": 0,
+        "identified_only": 0,
+        "over_budget": 0,
+        "pending": 0,
+        "changed": 0,
+        "failed_or_unavailable": 0,
+    }
+    if not isinstance(manifest, dict):
+        return counts
+    data_files = manifest.get("data_files")
+    if not isinstance(data_files, dict):
+        return counts
+    for bucket_name in ("inputs", "outputs", "mixed"):
+        bucket = data_files.get(bucket_name)
+        if not isinstance(bucket, list):
+            continue
+        for rec in bucket:
+            if not isinstance(rec, dict):
+                continue
+            cls = _classify_file_record(rec)
+            counts["total"] += 1
+            if cls == "verified":
+                counts["verified"] += 1
+            elif cls == "asserted":
+                counts["asserted"] += 1
+            elif cls == "identified_only":
+                counts["identified_only"] += 1
+            elif cls == "over_budget":
+                counts["over_budget"] += 1
+            elif cls == "pending":
+                counts["pending"] += 1
+            elif cls == "changed":
+                counts["changed"] += 1
+            elif cls in ("failed", "unavailable"):
+                counts["failed_or_unavailable"] += 1
+            else:
+                counts["identified_only"] += 1
+    return counts
+
+
+def _format_file_provenance_note(
+    counts: Dict[str, int],
+    format_type: str,
+    *,
+    multi_run_count: Optional[int] = None,
+    runs_with_files: Optional[int] = None,
+) -> str:
+    """Format an honest file-provenance evidence breakdown sentence, or ``""`` when empty."""
+    total = counts.get("total", 0)
+    if total <= 0:
+        return ""
+
+    parts: List[str] = []
+    if counts.get("verified", 0) > 0:
+        n = counts["verified"]
+        parts.append(f"{n} with independently verified content digest{'s' if n != 1 else ''}")
+    if counts.get("asserted", 0) > 0:
+        n = counts["asserted"]
+        parts.append(f"{n} with caller-asserted digest{'s' if n != 1 else ''} (unverified)")
+    if counts.get("identified_only", 0) > 0:
+        n = counts["identified_only"]
+        parts.append(f"{n} recorded by path or stat metadata only")
+    if counts.get("over_budget", 0) > 0:
+        n = counts["over_budget"]
+        parts.append(f"{n} skipped as over hashing budget")
+    if counts.get("pending", 0) > 0:
+        n = counts["pending"]
+        parts.append(f"{n} pending output record{'s' if n != 1 else ''} (unhashed)")
+    if counts.get("changed", 0) > 0:
+        n = counts["changed"]
+        parts.append(f"{n} changed during capture (unverified)")
+    if counts.get("failed_or_unavailable", 0) > 0:
+        n = counts["failed_or_unavailable"]
+        parts.append(f"{n} with failed or unavailable hashing")
+
+    breakdown = ", ".join(parts)
+    record_word = "file record" if total == 1 else "file records"
+
+    if multi_run_count is not None:
+        recorded_runs = runs_with_files if runs_with_files is not None else multi_run_count
+        sentence = (
+            f"Note: data file provenance across {recorded_runs} of {multi_run_count} runs "
+            f"tracked {total} {record_word} ({breakdown})."
+        )
+        if format_type == "latex":
+            return f"% {_escape_latex(sentence)}"
+        return f"*{sentence}*"
+
+    sentence = f"Data file provenance tracked {total} {record_word} ({breakdown})."
+    if format_type == "latex":
+        return _escape_latex(sentence)
+    return sentence
+
+
 def bytes_to_gb(bytes_val: Any) -> float:
     if isinstance(bytes_val, bool) or not isinstance(bytes_val, (int, float)):
         return 0.0
@@ -159,6 +309,15 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
         pubrun_version_text=pubrun_version_text
     ).strip()
 
+    fp_counts = _summarize_manifest_data_files(m)
+    fp_note = _format_file_provenance_note(fp_counts, format_type)
+    if fp_note:
+        anchor = "\n\n%% Ensure you add" if format_type == "latex" else "\n\n**References:**"
+        if anchor in rendered:
+            rendered = rendered.replace(anchor, f" {fp_note}{anchor}", 1)
+        else:
+            rendered = f"{rendered}\n\n{fp_note}"
+
     failed = _failed_sections(m)
     if failed:
         if format_type == "latex":
@@ -268,6 +427,32 @@ def generate_report_multi(manifests: List[Dict[str, Any]], format_type: str = "m
     all_failed_sections = sorted({sec for secs in per_run_failed for sec in secs})
     affected_runs = sum(1 for secs in per_run_failed if secs)
 
+    per_run_fp = [_summarize_manifest_data_files(m) for m in manifests]
+    agg_fp: Dict[str, int] = {
+        key: sum(c[key] for c in per_run_fp)
+        for key in (
+            "total",
+            "verified",
+            "asserted",
+            "identified_only",
+            "over_budget",
+            "pending",
+            "changed",
+            "failed_or_unavailable",
+        )
+    }
+    runs_with_files = sum(1 for c in per_run_fp if c["total"] > 0)
+    multi_fp_note = (
+        _format_file_provenance_note(
+            agg_fp,
+            format_type,
+            multi_run_count=n,
+            runs_with_files=runs_with_files,
+        )
+        if agg_fp["total"] > 0
+        else ""
+    )
+
     if format_type == "latex":
         parts = [base, "", f"% {count_note}"]
         if varying:
@@ -275,6 +460,8 @@ def generate_report_multi(manifests: List[Dict[str, Any]], format_type: str = "m
             for label, values in varying:
                 joined = "; ".join(v.replace("_", "\\_") for v in values)
                 parts.append(f"%   {label}: {joined}")
+        if multi_fp_note:
+            parts.append(multi_fp_note)
         if rest_has_failures and all_failed_sections:
             escaped = ", ".join(sec.replace("_", "\\_") for sec in all_failed_sections)
             parts.append(
@@ -290,6 +477,9 @@ def generate_report_multi(manifests: List[Dict[str, Any]], format_type: str = "m
         parts.append("**Environment variation across the aggregated runs:**")
         for label, values in varying:
             parts.append(f"- {label}: {', '.join(values)}")
+    if multi_fp_note:
+        parts.append("")
+        parts.append(multi_fp_note)
     if rest_has_failures and all_failed_sections:
         parts.append("")
         parts.append(

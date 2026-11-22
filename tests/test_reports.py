@@ -714,3 +714,179 @@ class TestPartialManifestDiagnosticsAndMethods:
         assert "partial provenance" not in healthy_single
         healthy_multi = generate_report_multi([healthy, healthy], "markdown")
         assert "partial provenance" not in healthy_multi
+
+
+class TestMethodsFileProvenanceDistinction:
+    """Behavioral tests for honest file-provenance evidence in methods reports (IPD hm32d9)."""
+
+    def _base_manifest(self, **over):
+        m = {
+            "run": {"library_version": "1.5.0", "library_commit": "0123456789abcdef"},
+            "host": {"os_name": "Linux"},
+            "hardware": {"cpu": {"model": "Intel Core i7"}, "memory_total_bytes": 16 * 1024**3},
+            "python": {"version": "3.11.5 final", "implementation": "cpython"},
+            "git": {"commit": "abcdef1234567890"},
+            "packages": {"records": [{"name": "numpy", "version": "1.26.0"}]},
+        }
+        m.update(over)
+        return m
+
+    def test_empty_or_malformed_data_files_is_byte_identical(self):
+        from pubrun.report.methods import generate_report_multi
+
+        baseline = self._base_manifest()
+        empty_variants = [
+            self._base_manifest(data_files={"inputs": [], "outputs": []}),
+            self._base_manifest(data_files={"inputs": [], "outputs": [], "mixed": []}),
+            self._base_manifest(data_files=None),
+            self._base_manifest(data_files={"inputs": "not-a-list", "outputs": [None, 1]}),
+        ]
+        for fmt in ("markdown", "latex"):
+            expected_single = generate_report(baseline, fmt)
+            expected_multi = generate_report_multi([baseline, baseline], fmt)
+            for variant in empty_variants:
+                assert generate_report(variant, fmt) == expected_single
+                assert generate_report_multi([variant, baseline], fmt) == expected_multi
+
+    def test_single_run_markdown_and_latex_placement_and_honest_evidence_breakdown(self):
+        m = self._base_manifest(
+            data_files={
+                "inputs": [
+                    {
+                        "path": "data/verified.csv",
+                        "hash_status": "completed",
+                        "hash_algorithm": "sha512",
+                        "sha256": None,
+                        "digest": {"algorithm": "sha512", "value": "a" * 128},
+                        "evidence_source": "observed",
+                        "evidence_strength": "verified_content",
+                    },
+                    {
+                        "path": "data/asserted.parquet",
+                        "hash_status": "asserted",
+                        "evidence_source": "asserted",
+                        "evidence_strength": "asserted_content",
+                        "caller_digest": {"algorithm": "sha256", "value": "b" * 64, "verified": None},
+                    },
+                    {
+                        "path": "data/stat.csv",
+                        "hash_status": "disabled",
+                        "evidence_source": "observed",
+                        "evidence_strength": "metadata_only",
+                    },
+                    {
+                        "path": "data/huge.bin",
+                        "hash_status": "over_budget",
+                        "evidence_source": "observed",
+                        "evidence_strength": "metadata_only",
+                    },
+                ],
+                "outputs": [
+                    {
+                        "path": "out/pending.pt",
+                        "hash_status": "pending",
+                        "evidence_source": "none",
+                        "evidence_strength": "path_only",
+                    },
+                    {
+                        "path": "out/failed.csv",
+                        "hash_status": "failed",
+                        "hash_status_detail": "caller_digest_mismatch",
+                        "evidence_source": "observed",
+                        "evidence_strength": "changed_unverified",
+                    },
+                ],
+                "mixed": [
+                    {
+                        "path": "work/state.db",
+                        "hash_status": "file_changed",
+                        "change_detected": True,
+                        "evidence_source": "observed",
+                        "evidence_strength": "changed_unverified",
+                    }
+                ],
+            }
+        )
+
+        md = generate_report(m, "markdown")
+        assert "Data file provenance tracked 7 file records" in md
+        assert "1 with independently verified content digest" in md
+        assert "1 with caller-asserted digest (unverified)" in md
+        assert "1 recorded by path or stat metadata only" in md
+        assert "1 skipped as over hashing budget" in md
+        assert "1 pending output record (unhashed)" in md
+        assert "1 changed during capture (unverified)" in md
+        assert "1 with failed or unavailable hashing" in md
+        assert md.index("Data file provenance tracked") < md.index("**References:**")
+
+        tex = generate_report(m, "latex")
+        assert "Data file provenance tracked 7 file records" in tex
+        assert tex.index("Data file provenance tracked") < tex.index("%% Ensure you add")
+
+    def test_unverified_and_asserted_files_never_claimed_verified(self):
+        m = self._base_manifest(
+            data_files={
+                "inputs": [
+                    {
+                        "path": "ext/a.parquet",
+                        "hash_status": "asserted",
+                        "evidence_source": "asserted",
+                        "evidence_strength": "asserted_content",
+                    },
+                    {
+                        "path": "ext/b.csv",
+                        "hash_status": "disabled",
+                        "evidence_source": "observed",
+                        "evidence_strength": "path_only",
+                    },
+                ],
+                "outputs": [],
+                "mixed": [],
+            }
+        )
+        md = generate_report(m, "markdown")
+        assert "independently verified" not in md
+        assert "caller-asserted" in md
+        assert "path or stat metadata only" in md
+
+    def test_escape_latex_helper_escapes_underscores_and_percent(self):
+        from pubrun.report.methods import _escape_latex
+
+        assert _escape_latex("data_files 100% checked") == "data\\_files 100\\% checked"
+
+    def test_multi_run_aggregates_when_first_manifest_empty_and_preserves_partial_notes(self):
+        from pubrun.report.methods import generate_report_multi
+
+        m_empty = self._base_manifest(data_files={"inputs": [], "outputs": [], "mixed": []})
+        m_tracked = self._base_manifest(
+            data_files={
+                "inputs": [
+                    {
+                        "path": "data/in.csv",
+                        "hash_status": "completed",
+                        "sha256": "a" * 64,
+                        "evidence_source": "observed",
+                        "evidence_strength": "verified_content",
+                    },
+                    {
+                        "path": "ext/asserted.parquet",
+                        "hash_status": "asserted",
+                        "evidence_source": "asserted",
+                        "evidence_strength": "asserted_content",
+                    },
+                ],
+                "outputs": [],
+                "mixed": [],
+            },
+            git={"capture_state": {"status": "failed", "detail": "git crashed"}},
+        )
+
+        md = generate_report_multi([m_empty, m_tracked], "markdown")
+        assert "across 1 of 2 runs tracked 2 file records" in md
+        assert "1 with independently verified content digest" in md
+        assert "1 with caller-asserted digest (unverified)" in md
+        assert "partial provenance across 1 of 2 runs" in md
+
+        tex = generate_report_multi([m_empty, m_tracked], "latex")
+        assert "% Note: data file provenance across 1 of 2 runs tracked 2 file records" in tex
+        assert "% Note: partial provenance across 1 of 2 runs;" in tex
