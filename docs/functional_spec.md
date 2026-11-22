@@ -68,6 +68,12 @@ Importing `pubrun` MUST NOT:
 
 The boot sequence is wrapped in `try/except`. If configuration resolution fails (e.g., corrupt TOML), the import succeeds silently with auto-start disabled.
 
+To keep import and startup overhead bounded:
+
+- **Lazy commit identity:** `pubrun.__commit__` resolves lazily via Python Enhancement Proposal 562 (PEP 562) module `__getattr__` and caches under a lock. Importing `pubrun.minimal` or `pubrun.noauto`, or importing an installed wheel, spawns zero `git` processes. Installed packages read version-checked `_build_meta.json` (falling back to legacy `COMMIT` only when `_build_meta.json` is absent) and never launch `git`. Verified `pubrun` source checkouts run one bounded (`1.0`s timeout) `git -C <repo_root> rev-parse --show-toplevel HEAD` call with `GIT_*` override variables stripped and `SubprocessSpy` disabled when loaded, returning `None` on missing Git, timeout, error, or ownership mismatch without falling back to an on-disk `COMMIT` file.
+- **Single-read boot configuration:** `src/pubrun/_config_boot.py::resolve_import_mode` opens and parses `./.pubrun.toml` at most once when checking `[imports].mode` and `[core].auto_start`.
+- **Bounded capture budgets:** Git and script source-state capture stay synchronous before user code runs so user modifications cannot invalidate captured state. `get_git()` combines `--show-toplevel`, `HEAD`, and `--abbrev-ref HEAD` into one `git rev-parse` subprocess call on normal repositories and enforces `[capture.git].total_timeout` (default `5`s), reporting `capture_state.status` `"timeout"` or `"partial"` when the budget expires. Hardware inspection runs in the background `pubrun-hw` thread within `[capture.hardware].total_timeout` (default `10`s), reporting `"timeout"` when zero probed fields succeed or `"partial"` when at least one succeeds; when `[capture.hardware].depth == "off"`, hardware, host, and filesystem run synchronously in separate failure-isolated guards with no background thread spawn.
+
 ### 3.3 Auto-Start Behavior
 
 When `auto_start = true` (the default), `import pubrun` automatically calls `start()`. This is suppressed when:
@@ -748,24 +754,36 @@ The `meta_ref` path MUST end with `.json`. If it resolves outside the manifest's
 The `ArtifactWriter` is responsible for serializing the run state to disk.
 
 Artifacts written:
-1. `manifest.json` — via `Run.to_manifest_dict()`.
-2. `config.resolved.json` — the resolved configuration dictionary.
-3. `methods.md` or `methods.tex` — auto-generated methodology paragraph (failure is non-fatal).
+1. `manifest.json`: Written atomically via `Run.to_manifest_dict()` at startup, optionally refreshed once when background hardware finishes (if initial startup did not already include completed hardware and the run is still active and unfinalized), and written once at finalization.
+2. `config.resolved.json`: Written atomically at startup with the resolved configuration dictionary. `ArtifactWriter` tracks `(target_path, sha256_digest, durability_rank)` over canonical sorted JSON so unchanged configuration skips redundant rewrites during hardware refreshes and finalization. Mid-run configuration changes or `run_dir` migrations via `Run._merge_and_migrate()` persist updated `config.resolved.json` immediately through `sync_config_if_changed()`.
+3. `methods.md` or `methods.tex`: Auto-generated methodology paragraph written at finalization (failure is non-fatal).
 
 ### 19.2 Finalization Lifecycle
 
-1. `stop()` sets the outcome, decrements `ref_count`, and calls `_finalize_state()`.
-2. `_finalize_state()` is **idempotent** (guarded by `_finalized` flag). It:
-   - Records `ended_at_utc`.
-   - Determines outcome (`completed` or `failed` based on `sys.exc_info()`).
-   - Uninstalls the subprocess spy.
-   - Stops the console interceptor.
-   - Stops the resource watcher.
-   - Closes the event stream.
-3. `write_artifacts()` serializes to disk.
-4. The `atexit` handler calls `write_artifacts()` as a safety net.
+1. `stop()` sets the outcome, decrements `ref_count`, and calls `_finalize_state()` and `write_artifacts()` when `ref_count` reaches zero.
+2. `_finalize_state()` is **idempotent** (guarded by `_finalized` under `_run_lock`). It:
+   - Latches `_finalized = True` and records `ended_at_utc`.
+   - Waits up to `2.0`s for background hardware completion before closing hardware writes.
+   - Determines outcome (`completed`, `failed`, or `interrupted`).
+   - Uninstalls the subprocess spy, stops the console interceptor, stops the resource watcher, closes the event stream, refreshes packages, and removes `.pubrun.lock`.
+3. `write_artifacts()` calls `_finalize_state()` before acquiring reentrant `_write_lock` (preserving `_run_lock` before `_write_lock` lock ordering to prevent deadlock with `pubrun-hw`), checks `_artifacts_written` for idempotency, persists or durability-upgrades `config.resolved.json` if needed, writes final `manifest.json` once atomically, sets `_artifacts_written = True`, and writes `methods.{md,tex}`.
+4. The `atexit` handler calls `write_artifacts()` as a safety net (unregistered after normal `stop()`; if invoked after finalization, `_artifacts_written` returns immediately without rewriting finalized artifacts).
 
-### 19.3 Golden Rule
+### 19.3 Atomic Visibility, Explicit Durability Policy, and Platform Limits
+
+Atomic visibility is always enforced regardless of durability policy: every write to `manifest.json` and `config.resolved.json` uses a unique temporary file, `flush()`, and `os.replace()`, ensuring concurrent readers never observe partial JSON and cleaning up temporary files on error.
+
+Explicit disk synchronization is configured separately via `[core].artifact_durability` (default `"fsync"`):
+
+- `"fsync"` (default): Calls file `os.fsync()` before `os.replace()` on startup, refresh, and finalized writes (no parent-directory sync).
+- `"finalize"`: Omits `os.fsync()` on intermediate startup and refresh snapshots while preserving atomic visibility; applies file `os.fsync()` on finalization in `write_artifacts()`, upgrading an unchanged startup `config.resolved.json` in place (`open(..., "r+b")` + `os.fsync()`) without rewriting it (falling back to atomic rewrite on `OSError`).
+- `"atomic"`: Atomic temporary file and `os.replace()` with zero `os.fsync()` calls.
+- `"strict"`: File `os.fsync()` before `os.replace()` plus best-effort Portable Operating System Interface (POSIX) parent-directory `os.fsync()` (`O_DIRECTORY | O_CLOEXEC`) after `os.replace()`.
+- Invalid values log one bounded warning per distinct invalid value and fall back safely to `"fsync"`.
+
+Platform limits: Linux uses POSIX `fsync(2)`; macOS uses POSIX `fsync(2)` rather than `F_FULLFSYNC`; Windows uses `FlushFileBuffers` on files only (parent-directory sync is unsupported and skipped cleanly in `"strict"` mode); Network File System (NFS) and Lustre incur synchronous remote procedure call (RPC) and writeback overhead on `fsync` and skip unsupported directory sync cleanly on `OSError`.
+
+### 19.4 Golden Rule
 
 The writer MUST catch all exceptions. pubrun MUST NEVER crash the host script due to serialization failure.
 

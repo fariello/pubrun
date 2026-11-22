@@ -29,16 +29,20 @@ Structured events may be emitted during execution to `events.jsonl`, providing a
 ## 3. Run Lifecycle
 
 ### Initialization
-Capture early metadata (invocation, environment, packages) and assign a run ID. Create the run directory.
+Resolve the import mode without importing the full configuration engine: `_config_boot.py` reads and parses `./.pubrun.toml` at most once when checking `[imports].mode` and `[core].auto_start`. Library commit identity (`pubrun.__commit__`) resolves lazily through Python Enhancement Proposal 562 (PEP 562) module `__getattr__` only when requested, so installed imports and `minimal` or `noauto` imports spawn zero `git` processes.
+
+When a run starts, `pubrun` assigns a run ID, creates the run directory, and captures early metadata (invocation, script metadata, environment, packages, and Git state). Git and script source-state capture stay synchronous before user code runs so user edits cannot race with provenance capture; `get_git()` combines `--show-toplevel`, `HEAD`, and `--abbrev-ref HEAD` into one `git rev-parse` subprocess call and enforces a shared monotonic budget (`[capture.git].total_timeout`, default `5`s).
+
+When `[capture.hardware].depth == "off"`, hardware (suppressed), host, and filesystem metadata are collected synchronously in three separate failure-isolated guards without spawning a background thread or triggering a second startup manifest write. When hardware capture is enabled, the background `pubrun-hw` daemon thread runs within `[capture.hardware].total_timeout` (default `10`s) and refreshes `manifest.json` only if the initial startup write did not already include completed hardware data and the run is still active and unfinalized. At startup, `ArtifactWriter` writes `manifest.json` and `config.resolved.json` atomically and records the config target path, canonical SHA-256 digest, and applied durability rank.
 
 ### Active Capture
-Collect events, subprocess records, and console output. Update summary fields.
+Collect events, subprocess records, and console output. Update summary fields. If a re-entrant `start(**overrides)` call merges new configuration or migrates `run_dir` through `Run._merge_and_migrate()`, `ArtifactWriter.sync_config_if_changed()` writes the updated `config.resolved.json` immediately while the run is active and unfinalized.
 
 ### Finalization
-Write `manifest.json` and `config.resolved.json`. Close console tees and event streams. Mark the run as complete.
+Call `_finalize_state()` before acquiring `ArtifactWriter._write_lock` so lock order stays strictly `_run_lock` before `_write_lock`. Persist `config.resolved.json` only when the target path, canonical SHA-256 digest, or file presence changed (or synchronize an unchanged startup snapshot in place via `os.fsync()` under `[core].artifact_durability = "finalize"`). Write final `manifest.json` once atomically, mark `_artifacts_written = True`, close console tees and event streams, and mark the run complete.
 
 ### Abnormal Termination
-Best-effort partial capture. The `_finalize_state()` method is idempotent, so it can safely be called from both `stop()` and `atexit` handlers without double-writing.
+Best-effort partial capture. Both `_finalize_state()` (guarded by `_finalized`) and `write_artifacts()` (guarded by `_artifacts_written`) are idempotent, so calling them from `stop()`, signal handlers, and `atexit` never rewrites finalized artifacts.
 
 ## 4. Data Model Principles
 
@@ -177,7 +181,15 @@ Contents:
 
 - Directory names include timestamp, PID, and random hex ID to prevent collisions.
 - Directory creation uses `mkdir()` rather than exists-check + create.
-- The finalization method is idempotent to handle both explicit `stop()` and `atexit` cleanup.
+- Both `_finalize_state()` and `ArtifactWriter.write_artifacts()` (`_artifacts_written`) are idempotent so explicit `stop()`, signal handlers, and `atexit` never overwrite finalized artifacts.
+- **Lock ordering:** `_run_lock` is always acquired before reentrant `ArtifactWriter._write_lock`. `write_artifacts()` calls `self.run._finalize_state()` outside `_write_lock` to prevent AB-BA deadlocks with the background `pubrun-hw` thread and to avoid holding `_write_lock` while waiting for hardware completion.
+- **Config snapshot coalescing:** `ArtifactWriter` tracks `(target_path, sha256_digest, durability_rank)` over canonical sorted JSON for `config.resolved.json`. Unchanged configuration skips redundant rewrites during background hardware refreshes and finalization while preserving immediate persistence on startup and mid-run `_merge_and_migrate()` updates.
+- **Atomic visibility versus explicit durability:** Every write of `manifest.json` and `config.resolved.json` uses a unique temporary file (`*.tmp`), `flush()`, and `os.replace()` so concurrent readers never see truncated JSON. Disk synchronization is controlled separately by `[core].artifact_durability`:
+  - `"fsync"` (default): File `os.fsync()` before `os.replace()` on startup, refresh, and finalized writes (no parent-directory sync).
+  - `"finalize"`: Skips `os.fsync()` on startup and refresh snapshots while keeping atomic visibility; applies file `os.fsync()` on finalization, including in-place `r+b` `os.fsync()` upgrade of an unchanged startup `config.resolved.json` (falling back to atomic rewrite on `OSError`).
+  - `"atomic"`: Atomic temporary file and `os.replace()` without `os.fsync()`.
+  - `"strict"`: File `os.fsync()` plus best-effort Portable Operating System Interface (POSIX) parent-directory `os.fsync()` (opened with `O_DIRECTORY | O_CLOEXEC`) after `os.replace()`.
+- **Platform durability limits:** Linux uses POSIX `fsync(2)`; macOS uses POSIX `fsync(2)` rather than `F_FULLFSYNC` (disk write caches are not flushed to physical media); Windows uses `FlushFileBuffers` on files only (parent-directory sync is unsupported and skipped cleanly in `"strict"` mode); Network File System (NFS) and Lustre incur synchronous remote procedure call (RPC) and writeback latency on every `fsync` and may skip unsupported directory sync on `OSError`.
 
 ## 15. Subprocess Model
 
@@ -236,18 +248,18 @@ pubrun is not:
 
 The execution engine is divided into these key systems:
 
-- **Import Mode Router** (`__init__.py`) — Target-aware package initializer that detects mode submodule imports and defers core loading when appropriate.
+- **Import Mode Router** (`__init__.py`): Target-aware package initializer that detects mode submodule imports, defers core loading when appropriate, and resolves `pubrun.__commit__` lazily via PEP 562 `__getattr__` (version-checked build metadata for installed wheels with zero `git` spawns; bounded ownership-verified live `HEAD` lookup for verified source checkouts).
 - **Bootstrap State** (`_bootstrap.py`) — Singleton tracking selected import mode, conflict detection, and provenance metadata.
-- **Boot Config Resolver** (`_config_boot.py`) — Lightweight import-mode resolver that reads env vars and `.pubrun.toml` without importing the full config system.
+- **Boot Config Resolver** (`_config_boot.py`): Lightweight import-mode resolver that reads environment variables and parses `./.pubrun.toml` at most once without importing the full config system.
 - **Mode Definitions** (`_modes.py`) — Six import presets (auto, full, noauto, nopatch, noconsole, minimal) with behavior flags.
 - **Core API** (`core.py`) — Public API implementation (start, stop, annotate, phase, diff, audit_run, tracked_run) and boot sequence logic.
 - **Configuration Resolver** (`config.py`) — Merges and applies settings from API > env vars > local config > user config > defaults.
-- **Capture Engine** (`tracker.py`) — Orchestrates individual data collection routines, operating gracefully under partial failures. Respects granular behavior flags (patch_subprocesses, patch_console, signal_hooks).
+- **Capture Engine** (`tracker.py`): Orchestrates failure-isolated data collection routines, keeps Git and script source-state capture synchronous before user code runs under `[capture.git].total_timeout`, runs hardware/host/filesystem synchronously without a background thread when `capture.hardware.depth == "off"` (or in a bounded `pubrun-hw` thread under `[capture.hardware].total_timeout` with coalesced refresh), and syncs `config.resolved.json` on mid-run `_merge_and_migrate()` changes.
 - **Event Streamer** (`events.py`) — Writes structured execution events to `events.jsonl` with throttling.
 - **Console Manager** (`capture/console.py`) — Tee-style wrapper around standard streams with tqdm-safe carriage return squashing. Includes `resolve_console_mode()` for context-aware mode selection (Jupyter detection, non-TTY override).
 - **Resource Tree Walker** (`capture/resources.py`) — Background resource sampling with optional process-tree scope (`_get_tree_rss_linux`, `_get_tree_rss_darwin`).
 - **Phase Profiler** (`core.py` phase hooks) — Optional cProfile/yappi integration that profiles `pubrun.phase()` blocks and saves per-phase `.prof` files.
-- **Artifact Writer** (`writer.py`) — Creates the run directory and serializes all outputs.
+- **Artifact Writer** (`writer.py`): Creates the run directory, enforces atomic visibility via unique temporary files and `os.replace()`, applies `[core].artifact_durability`, coalesces unchanged `config.resolved.json` writes by SHA-256 digest and durability rank, and guards finalized artifacts with `_artifacts_written`.
 - **Diagnostics Analyzer** (`pubrun report`) — Evaluates and renders execution metrics from manifests.
 - **Methods Generator** (`pubrun methods`) — Compiles manifest data into prose methodology paragraphs.
 - **Global Context Snapshotter** (`pubrun meta`) — Generates standalone environment snapshots for HPC hydration.

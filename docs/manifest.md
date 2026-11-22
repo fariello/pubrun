@@ -25,7 +25,15 @@ Run identity.
 | Field | Type | Description |
 |---|---|---|
 | `run_id` | string | 8-character hex identifier (e.g., `"a1b2c3d4"`). |
+| `library_version` | string \| null | Installed or active `pubrun` package version string (resolved from package metadata via `importlib.metadata`, or fallback `"1.0.0"` when metadata is unavailable). |
+| `library_commit` | string \| null | 40- or 64-character hex commit Secure Hash Algorithm (SHA) identifying the `pubrun` library itself, or `null` when unknown, timed out, nested, or stale. |
 | `capture_state` | object | See [Capture State](#capture-state). |
+
+**`library_commit` resolution semantics:** `pubrun.__commit__` resolves lazily through Python Enhancement Proposal 562 (PEP 562) module `__getattr__` and caches the result under a lock on first access, so importing `pubrun.minimal` or `pubrun.noauto` spawns zero `git` processes. Resolution follows two strict paths:
+
+- **Installed package (wheel or `site-packages`):** Never spawns `git`. Reads packaged `_build_meta.json` and accepts its commit only when the file parses as a JSON object with a valid 40- or 64-character hex SHA and a non-empty `version` matching `pubrun.__version__`. Falls back to a legacy packaged `COMMIT` file only when `_build_meta.json` is absent (never when `_build_meta.json` is malformed or version-mismatched).
+- **Verified `pubrun` source checkout:** Applies only when `src/pubrun` resides inside a repository root containing both `.git` and a `pyproject.toml` declaring `[project].name = "pubrun"`. Runs one bounded `git -C <repo_root> rev-parse --show-toplevel HEAD` call with a `1.0`s timeout, stripped `GIT_*` override variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`), and `SubprocessSpy` disabled if already loaded. Accepts `HEAD` only when the reported top-level directory matches the checkout root; never falls back to an on-disk `COMMIT` file.
+- **Unknown cases:** Returns `null` when Git is missing, times out, fails, detects a nested-repository ownership mismatch, or when packaged metadata is missing, malformed, or stale.
 
 ---
 
@@ -206,7 +214,7 @@ Git repository state.
 | `branch` | string | Active branch name (e.g., `"main"`). |
 | `dirty` | bool | Whether there are uncommitted changes. |
 | `remote_url` | object | A `redacted_value` object containing the remote URL. |
-| `capture_state` | object | See [Capture State](#capture-state). |
+| `capture_state` | object | See [Capture State](#capture-state). Records `"timeout"` when `[capture.git].timeout` or `[capture.git].total_timeout` expires before `repo_root` is determined, or `"partial"` when a subsequent query (`HEAD`, branch, `status --porcelain`, or `remote get-url origin`) times out or is skipped after budget exhaustion. |
 
 ---
 
@@ -254,7 +262,7 @@ Configuration provenance.
 
 | Field | Type | Description |
 |---|---|---|
-| `resolved_config_path` | string | Filename of the resolved config snapshot (e.g., `"config.resolved.json"`). |
+| `resolved_config_path` | string | Filename of the resolved config snapshot (e.g., `"config.resolved.json"`). Written atomically at startup and rewritten only when effective configuration changes, `run_dir` migrates via mid-run overrides, or the file is missing (under `[core].artifact_durability = "finalize"`, an unchanged startup snapshot is synchronized in place via `os.fsync()` at finalization without rewriting). |
 | `sources_path` | string \| null | Filename of config source tracking, if generated. |
 | `source_files` | list[object] | Config files that contributed to the resolved config, each `{"path": string, "hash"?: object}`. **Currently always empty** (`[]`): pubrun does not yet record per-file config provenance in the manifest, so `source_files` and `sources_path` are reserved and unpopulated today. |
 | `notices` | list[object] | Non-disruptive config notices recorded at run time (never raised into the host; surfaced by `pubrun status`/`inspect`/`show`). Each: `{"code", "setting", "value", "message"}`. Currently emitted for a deprecated, inert `core.profile` set to a non-default value. Empty list when none. |
@@ -271,7 +279,7 @@ Physical hardware details.
 | `cpu` | object | CPU metadata (see below). |
 | `memory_total_bytes` | int | Total system RAM in bytes. |
 | `gpus` | list[object] | Detected GPU devices. |
-| `capture_state` | object | See [Capture State](#capture-state). |
+| `capture_state` | object | See [Capture State](#capture-state). Records `"timeout"` when `[capture.hardware].timeout` or `[capture.hardware].total_timeout` expires and zero probed fields succeeded, or `"partial"` when at least one probed field succeeded before timeout or budget exhaustion. |
 
 ### `hardware.cpu`
 
@@ -470,7 +478,7 @@ Every manifest section includes a `capture_state` object indicating the status o
 - `suppressed` — Capture was disabled by configuration (a `capture.*` `depth`/`mode` set to `off`).
 - `failed` — Capture attempted but failed entirely.
 - `pending` — Transient: the section is captured asynchronously by the background hardware thread and had not completed when the manifest was written. Seen in the **startup manifest** (written at `start()`) and therefore in a run that **crashed before finalizing** — the `hardware`/`host`/`filesystem` sections are `pending` until the thread fills them in. A normally-finalized manifest never leaves a section `pending`.
-- `timeout` — The capture's external tool did not respond within its configured timeout (e.g. `git` on a slow/large repository, or a hung GPU query). Distinct from `unavailable` so a slow repo is never mislabeled as "not a git repository". See `[capture.git].timeout` and `[capture.hardware].timeout`.
+- `timeout`: The capture's external tool did not respond within its configured timeout or total budget (e.g. `git` on a slow/large repository, or a hung GPU query). Distinct from `unavailable` so a slow repo is never mislabeled as "not a git repository". See `[capture.git].timeout`, `[capture.git].total_timeout`, `[capture.hardware].timeout`, and `[capture.hardware].total_timeout`.
 
 ### Redacted Values
 

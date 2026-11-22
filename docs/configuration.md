@@ -52,6 +52,23 @@ Core behaviors governing run initialization and storage.
 | `profile` | string | `"default"` | **Deprecated and inert.** Accepts `"minimal"`/`"default"`/`"deep"` but has **no effect** — `profile` never controlled capture depth and is not wired to any capture engine. Setting it to a non-default value records a deprecation notice in the run manifest (surfaced by `pubrun status`/`inspect`/`show`). To control capture depth, set the specific `capture.*` keys (e.g. `[capture.hardware].depth`, `[capture.packages].mode`). |
 | `output_dir` | string | `""` | Base directory for run output. Empty string defaults to `./runs/` in the current working directory. |
 | `auto_start` | bool | `true` | If `true`, `import pubrun` automatically starts a trace. If `false`, you must call `pubrun.start()` explicitly. Equivalent to `[imports].mode = "noauto"` when set to `false`. |
+| `artifact_durability` | string | `"fsync"` | Explicit disk-synchronization policy for `manifest.json` and `config.resolved.json`, separate from atomic visibility. Valid values: `"fsync"` (default), `"finalize"`, `"atomic"`, `"strict"`. Invalid values log one warning per distinct value and fall back to `"fsync"`. See [Artifact durability policy](#artifact-durability-policy) below. |
+
+#### Artifact durability policy
+
+Atomic visibility is always active under every policy: `pubrun` writes `manifest.json` and `config.resolved.json` to a unique temporary file, calls `flush()`, and swaps the file into place with `os.replace()` so concurrent readers (such as `pubrun status`) never observe truncated JSON. The `[core].artifact_durability` setting controls whether `pubrun` also forces operating-system synchronization:
+
+- `"fsync"` (default): Calls file `os.fsync()` before `os.replace()` on every startup, refresh, and finalized write. Preserves file crash durability without synchronizing the parent directory.
+- `"finalize"`: Skips `os.fsync()` on intermediate startup and refresh snapshots while keeping atomic visibility. Calls file `os.fsync()` on finalized artifacts during `write_artifacts()`. When `config.resolved.json` did not change after startup, `pubrun` synchronizes the existing file in place (`open(..., "r+b")` followed by `os.fsync()`) without rewriting it, falling back to an atomic rewrite only on `OSError`.
+- `"atomic"`: Uses unique temporary files, `flush()`, and `os.replace()` with zero `os.fsync()` calls. Preserves atomic visibility for concurrent readers while delegating disk flush timing to the operating system.
+- `"strict"`: Calls file `os.fsync()` before `os.replace()` and then runs a best-effort Portable Operating System Interface (POSIX) parent-directory `os.fsync()` (opened with `O_DIRECTORY` and `O_CLOEXEC`) after `os.replace()`.
+
+Platform and filesystem limits:
+
+- **Linux:** Uses POSIX `fsync(2)` on files, and on parent directories in `"strict"` mode.
+- **macOS:** Uses POSIX `fsync(2)`, not `F_FULLFSYNC`, so drive-level write caches are not guaranteed to flush to physical media.
+- **Windows:** Uses `FlushFileBuffers` on files only. Parent-directory synchronization is unsupported and skipped cleanly in `"strict"` mode.
+- **Shared or network filesystems (NFS, Lustre):** Each `fsync` triggers synchronous network writeback and remote procedure call (RPC) round trips, which increases latency. Parent-directory `fsync` in `"strict"` mode falls back cleanly if the filesystem rejects directory sync with `OSError`.
 
 ### `[imports]`
 
@@ -167,6 +184,7 @@ Security policies for preventing secret leakage into manifest files.
 | `depth` | string | `"standard"` | Capture depth for Git repository state. |
 | `check_dirty` | bool | `true` | Whether to run `git status --porcelain` to detect uncommitted changes. Set to `false` for faster startup on large or network-mounted repos. |
 | `timeout` | int | `5` | Per-command timeout (seconds) for every git invocation, including repository detection. A timeout is recorded as `capture_state.status = "timeout"` (distinct from "not a git repository"), so a slow/large repo is never mislabeled as "not a repo". |
+| `total_timeout` | number | `5` | Total monotonic wall-clock budget (seconds) across all Git subprocess calls in a single capture (defaults to `timeout` if omitted or invalid; accepts finite non-negative numbers). If the budget expires before `repo_root` is determined, `capture_state.status` is `"timeout"`; if a later query (`HEAD`, branch, `status --porcelain`, or `remote get-url origin`) times out or is skipped after budget exhaustion, `capture_state.status` is `"partial"`. |
 
 ### `[capture.inputs]`
 
@@ -186,6 +204,7 @@ Security policies for preventing secret leakage into manifest files.
 | `capture_cpu_clock_speed` | bool | `false` | Query CPU clock speeds (reads `/proc`). |
 | `capture_cpu_fp_precision` | bool | `false` | Query CPU floating-point precision support. |
 | `timeout` | int | `10` | Per-command timeout (seconds) for hardware-inspection subprocesses (`nvidia-smi`, `system_profiler`, `sysctl`, `wmic`). Bounds a hung tool (e.g. a wedged GPU driver) so it cannot orphan the background hardware thread. |
+| `total_timeout` | number | `10` | Total monotonic wall-clock budget (seconds) across all hardware-inspection subprocess probes in a single capture (defaults to `timeout` if omitted or invalid; accepts finite non-negative numbers). Once the budget expires, remaining subprocess probes are skipped; if any probe timed out or the budget expired, `capture_state.status` is recorded as `"timeout"` if zero probed fields succeeded (`cpu.model`, `memory_total_bytes`, and `gpus` are all absent or empty) or `"partial"` if at least one probed field succeeded. |
 
 ### `[capture.resources]`
 
