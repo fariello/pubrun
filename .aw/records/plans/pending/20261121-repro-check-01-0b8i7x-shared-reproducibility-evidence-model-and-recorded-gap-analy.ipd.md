@@ -52,31 +52,31 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Structured parent hydration reporting
 
-- [ ] E-01 Add `HydrationReport` and `hydrate_manifest_with_report` to `src/pubrun/report/utils.py` while keeping `hydrate_manifest` backwards compatible.
+- [x] E-01 Add `HydrationReport` and `hydrate_manifest_with_report` to `src/pubrun/report/utils.py` while keeping `hydrate_manifest` backwards compatible.
   - Depends on: none
   - Expected outcome: `hydrate_manifest_with_report(manifest_path, manifest)` returns `(hydrated_manifest, warnings, report)` without mutating the caller's raw `manifest` dictionary in place, preserves the existing `.json` extension and `_is_meta_ref_allowed` policy check order before checking path existence or reading files, records `status` (`none`, `hydrated`, `missing`, `blocked_by_policy`, `invalid_extension`, `invalid_json`, `invalid_type`, `failed`), lists `inherited_sections` and `direct_sections` over the six hydrable sections, captures parent snapshot path, timestamp, and numeric age relative to child `timing.started_at_utc` (including negative age when the parent is newer than the child), compares parent and child `host`, `python`, and `git` identity when both exist (handling plain or redacted-dict `host.hostname`), handles malformed or non-dict inputs without raising, and preserves `hydrate_manifest(manifest_path, manifest)` returning `(hydrated_manifest, warnings)` for all existing callers.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Shared reproducibility evidence model and recorded gap engine
 
-- [ ] E-02 Create `src/pubrun/report/reproducibility.py` with the shared evidence taxonomy, recorded-manifest gap analyzer, next-action prioritizer, `assess_run` facade, and plain-text formatters.
+- [x] E-02 Create `src/pubrun/report/reproducibility.py` with the shared evidence taxonomy, recorded-manifest gap analyzer, next-action prioritizer, `assess_run` facade, and plain-text formatters.
   - Depends on: E-01
   - Expected outcome: `src/pubrun/report/reproducibility.py` (CLI/report-only, Python standard library only, never imported by `import pubrun`) defines `EVIDENCE_STATUSES` (`observed`, `inferred`, `asserted`, `inherited`, `unavailable`, `not_checked`), `CATEGORY_STATUSES` (`adequate`, `gaps`, `mismatch`, `uncertain`, `not_checked`), `IMPACT_LEVELS` (`material`, `portability`, `incidental`, `informational`), `COMPARISON_OUTCOMES` (`match`, `mismatch`, `portability_diff`, `unknown`, `not_checked`), `NON_GUARANTEE_DISCLAIMER`, `assess_manifest_reproducibility(...)`, `assess_run(...)`, `format_reproducibility_summary(...)`, and `format_reproducibility_detail(...)` covering all seven structured evidence categories (`source`, `runtime`, `dependencies`, `inputs_outputs`, `capture_completeness`, `parent_metadata`, `invocation`), following explicit severity rules, and emitting zero numerical reproducibility scores.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Integrate into shared checks module
 
-- [ ] E-03 Integrate `assess_manifest_reproducibility` and `assess_run` into `src/pubrun/report/checks.py` as the single shared findings engine.
+- [x] E-03 Integrate `assess_manifest_reproducibility` and `assess_run` into `src/pubrun/report/checks.py` as the single shared findings engine.
   - Depends on: E-02
   - Expected outcome: `pubrun.report.checks.manifest_findings(manifest, current_hostname=None)` delegates to `assess_manifest_reproducibility(manifest, current_hostname=current_hostname)["findings"]` while preserving every existing finding code (`different_host`, `netfs_*`, `resources_off`, `resources_process_scope`, `console_off`, `hardware_off`, `packages_off`, `git_off`, `mode_no_subprocess_patch`, `subprocess_tracking_off`, `subprocess_unknown`, `no_file_provenance`, config notice codes) and dict keys (`severity`, `code`, `message`, `suggestion`), and `pubrun.report.checks` re-exports `assess_run` from `pubrun.report.reproducibility` without duplicating completeness checks or breaking `summarize()` or `--strict` contracts.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Behavioral unit tests and import-isolation verification
 
-- [ ] E-04 Add behavioral unit tests in `tests/test_reproducibility_assessment.py` covering every recorded-evidence scenario, parent hydration case, and import-isolation invariant.
+- [x] E-04 Add behavioral unit tests in `tests/test_reproducibility_assessment.py` covering every recorded-evidence scenario, parent hydration case, and import-isolation invariant.
   - Depends on: E-03
   - Expected outcome: `tests/test_reproducibility_assessment.py` passes via `pytest` and proves behavior for adequate manifests (with explicit non-guarantee disclaimer), sparse and legacy manifests, dirty git state without recorded diff, missing/suppressed/partial/failed/timeout capture, package mode caveats and optional future fields, unhashed/stat-only/asserted versus observed file provenance, redacted CLI arguments and environment variables (both `redacted`/`hashed` representations and heuristic `[REDACTED]` in `plain` values), valid/stale/post-dated/mismatched/missing/policy-blocked/invalid `meta_ref` snapshots, and zero import of `pubrun.report.reproducibility` or `pubrun.report.checks` during `import pubrun`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -169,25 +169,25 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste `pytest tests/test_reports.py tests/test_hpc_hydration_e2e.py tests/test_quality.py -k "Hydrate or hydration or MetaRef" -v` and `pytest tests/test_reproducibility_assessment.py -k hydration -v` output showing exit code 0 and passing assertions that `hydrate_manifest_with_report` leaves the caller's input dict unmutated, preserves extension and policy security checks before file reads, separates inherited versus direct sections, computes parent age and identity mismatches, handles missing/blocked/invalid parent snapshots without inventing completeness, and keeps `hydrate_manifest` backwards compatible.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `pytest tests/test_reports.py tests/test_hpc_hydration_e2e.py tests/test_quality.py -k "Hydrate or hydration or MetaRef" -v -o addopts=""` exited 0 (`10 passed, 82 deselected in 0.58s`); `pytest tests/test_reproducibility_assessment.py -k hydration -v -o addopts=""` exited 0 (`7 passed, 12 deselected in 0.16s`).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Paste `pytest tests/test_reproducibility_assessment.py -v` output showing exit code 0 with behavioral tests covering all six evidence statuses (`observed`, `inferred`, `asserted`, `inherited`, `unavailable`, `not_checked`), all seven categories, explicit severity rules, no numerical reproducibility score, non-guarantee disclaimer on adequate and sparse/legacy manifests, prioritized `next_action`, `assess_run`, and plain-text summary/detail formatters (including zero ANSI escapes when `use_color=False` or `NO_COLOR=1`).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `pytest tests/test_reproducibility_assessment.py -v -o addopts=""` exited 0 (`19 passed in 0.65s`, covering all 6 evidence statuses, all 7 categories, explicit severities, zero score, non-guarantee disclaimer, prioritized `next_action`, `assess_run`, and plain-text/NO_COLOR formatters).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Paste `pytest tests/test_checks_commands.py tests/test_profile_deprecation.py -v` output showing exit code 0 and all existing `manifest_findings`, `live_findings`, `live_checks`, config notice, and `inspect` tests passing after integrating `pubrun.report.checks` with `pubrun.report.reproducibility` and re-exporting `assess_run`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `pytest tests/test_checks_commands.py tests/test_profile_deprecation.py -v -o addopts=""` exited 0 (`39 passed in 3.24s`; all `manifest_findings`, `live_findings`, `live_checks`, config notice, and `inspect` tests passed).
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Paste actual command output of `python -c "import pubrun, sys; assert 'pubrun.report.checks' not in sys.modules and 'pubrun.report.reproducibility' not in sys.modules; print('ISOLATED')"` (printing `ISOLATED`, exit code 0) and full output of `pytest tests/test_reproducibility_assessment.py tests/test_checks_commands.py tests/test_profile_deprecation.py tests/test_reports.py tests/test_hpc_hydration_e2e.py tests/test_quality.py -v` (exit code 0).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python -c "import pubrun, sys; assert 'pubrun.report.checks' not in sys.modules and 'pubrun.report.reproducibility' not in sys.modules; print('ISOLATED')"` exited 0 printing `ISOLATED`; `pytest tests/test_reproducibility_assessment.py tests/test_checks_commands.py tests/test_profile_deprecation.py tests/test_reports.py tests/test_hpc_hydration_e2e.py tests/test_quality.py -v -o addopts=""` exited 0 (`150 passed in 4.62s`).
+  - Result: pass
 
 ## Approval and execution gate
 

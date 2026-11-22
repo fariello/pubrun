@@ -19,6 +19,11 @@ import sys
 import shutil
 from typing import Dict, Any, List, Optional
 
+from pubrun.report.reproducibility import (
+    assess_manifest_reproducibility,
+    assess_run,
+)
+
 # Severity levels (textual, authoritative — color is optional reinforcement only).
 INFO = "info"
 WARN = "warn"
@@ -303,125 +308,18 @@ def manifest_findings(manifest: Dict[str, Any],
                       current_hostname: Optional[str] = None) -> List[Dict[str, Any]]:
     """Capture-completeness + recorded-signal findings for a completed run's manifest.
 
-    Reports what the run captured AND what it could not tell you (and how to enable more),
-    honestly distinguishing "feature OFF" from "on but no records" where the manifest is
-    ambiguous. Never raises.
+    Delegates to the shared reproducibility assessment engine so CLI, TUI, and
+    machine-readable outputs use one canonical findings model. Never raises.
     """
-    findings: List[Dict[str, Any]] = []
     try:
-        # --- Different-system banner data (host identity) ---
-        run_host = None
-        host = manifest.get("host", {})
-        if isinstance(host, dict):
-            hn = host.get("hostname")
-            run_host = hn.get("value") if isinstance(hn, dict) else hn
-        if current_hostname and run_host and current_hostname != run_host:
-            findings.append(_finding(
-                WARN, "different_host",
-                f"this run executed on '{run_host}', but you are inspecting from "
-                f"'{current_hostname}'. Any live environment checks reflect THIS machine, "
-                f"not where the run ran (common on HPC: run on a compute node, inspect on "
-                f"the head node).", None))
-
-        # --- Recorded config notices (e.g. deprecated core.profile) ---
-        cfg = manifest.get("config", {})
-        if isinstance(cfg, dict):
-            for notice in cfg.get("notices", []) or []:
-                if not isinstance(notice, dict):
-                    continue
-                findings.append(_finding(
-                    WARN,
-                    notice.get("code", "config_notice"),
-                    notice.get("message", "a config setting was ignored or deprecated."),
-                    "Update your pubrun configuration; see docs/configuration.md."))
-
-        # --- Recorded network-filesystem signal ---
-        fs_data = manifest.get("filesystem", {})
-        if isinstance(fs_data, dict):
-            for f in _network_fs_findings(fs_data):
-                # reframe as "this run ran on network FS" rather than a live suggestion
-                f["message"] = "this run's " + f["message"]
-                findings.append(f)
-
-        # --- Capture-completeness: DETECTABLE from the manifest ---
-        res = manifest.get("resources", {})
-        res_status = _capture_state_status(res)
-        if res_status == "suppressed":
-            findings.append(_finding(
-                WARN, "resources_off",
-                "resource monitoring was OFF (no RSS/CPU/RAM/load recorded).",
-                "Set `[capture.resources].depth` to `standard` to record resource usage "
-                "(low overhead; see docs/performance.md)."))
-        elif isinstance(res, dict) and res.get("scope") not in ("tree", None):
-            findings.append(_finding(
-                WARN, "resources_process_scope",
-                "process-tree resources were NOT captured (only the main process).",
-                "Set `[capture.resources].scope = \"tree\"` to sum RSS/CPU across child "
-                "processes (multiprocessing/Dask/Ray). Slight extra sampling cost."))
-
-        console = manifest.get("console", {})
-        if isinstance(console, dict) and console.get("capture_mode") == "off":
-            findings.append(_finding(
-                INFO, "console_off",
-                "console output was not captured (capture_mode = off).",
-                "Set `[console].capture_mode = \"standard\"` to record stdout/stderr."))
-
-        for section_name, label, key in (
-            ("hardware", "hardware", None),
-            ("packages", "package inventory", None),
-            ("git", "git/source-code state", None),
-        ):
-            if _capture_state_status(manifest.get(section_name, {})) == "suppressed":
-                findings.append(_finding(
-                    INFO, f"{section_name}_off",
-                    f"{label} was not captured.",
-                    f"Enable `[capture.{section_name}]` if you want it recorded."))
-
-        # Import mode: reveal whether patching was even permitted.
-        imports = manifest.get("pubrun_imports", {})
-        behavior = imports.get("selected_behavior", {}) if isinstance(imports, dict) else {}
-        if isinstance(behavior, dict):
-            if behavior.get("patch_subprocesses") is False:
-                findings.append(_finding(
-                    INFO, "mode_no_subprocess_patch",
-                    f"the import mode ('{imports.get('selected_mode')}') did not permit "
-                    "subprocess tracking.",
-                    "Use the default `import pubrun` (auto) mode to allow subprocess capture."))
-
-        # --- Capture-completeness: AMBIGUOUS unless the flags are present ---
-        cap = manifest.get("capture", {})
-        subs = manifest.get("subprocesses", [])
-        sub_flag = cap.get("subprocesses_enabled") if isinstance(cap, dict) else None
-        if sub_flag is False:
-            findings.append(_finding(
-                WARN, "subprocess_tracking_off",
-                "subprocess tracking was OFF — no child processes were recorded.",
-                "Enable `[capture.subprocesses].enabled = true` to record subprocess calls."))
-        elif sub_flag is None and not subs:
-            # Older manifest without the flag: cannot tell off from unused. Be honest.
-            findings.append(_finding(
-                INFO, "subprocess_unknown",
-                "no subprocesses were recorded — either subprocess tracking was disabled "
-                "or none were spawned (this run's manifest predates the enabled-flag, so it "
-                "cannot be determined).",
-                "pubrun records subprocesses only when `[capture.subprocesses]` is enabled."))
-
-        data_files = manifest.get("data_files", {})
-        inputs = data_files.get("inputs", []) if isinstance(data_files, dict) else []
-        outputs = data_files.get("outputs", []) if isinstance(data_files, dict) else []
-        if not inputs and not outputs:
-            findings.append(_finding(
-                INFO, "no_file_provenance",
-                "no file-I/O provenance was recorded — pubrun does NOT patch open() "
-                "globally, so file reads/writes are only recorded if the script calls "
-                "`pubrun.open()` (or `pubrun.subprocess`).",
-                "Use `pubrun.open(...)` in place of `open(...)` to record input/output "
-                "files (path + hash)."))
-
+        assessment = assess_manifest_reproducibility(
+            manifest,
+            current_hostname=current_hostname,
+        )
+        return list(assessment.get("findings", []))
     except Exception:
         # Completeness assessment must never crash inspect.
-        pass
-    return findings
+        return []
 
 
 def summarize(findings: List[Dict[str, Any]]) -> str:
