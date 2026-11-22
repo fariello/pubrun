@@ -309,6 +309,87 @@ def _run_methods_aggregate(
             print(f"{Colors.CYAN}{line}{Colors.RESET}" if use_color else line, file=sys.stderr)
 
 
+def _reconcile_cli_file_provenance(manifest: dict, assessment: dict) -> dict:
+    """Reconcile canonical file-provenance finding codes from ``checks.py`` into an assessment.
+
+    Preserves structured finding keys (``category``, ``evidence_status``, ``impact``,
+    ``comparison``, ``details``) and synchronizes the ``inputs_outputs`` category
+    counts so CLI outputs agree across ``inspect`` and ``rerun --preflight`` while
+    honoring canonical ``file_provenance_*`` codes.
+    """
+    from pubrun.report.checks import _apply_file_provenance_findings
+
+    orig_findings = assessment.get("findings")
+    if not isinstance(orig_findings, list):
+        return assessment
+
+    reconciled = _apply_file_provenance_findings(manifest, list(orig_findings))
+    default_ev = {
+        "file_provenance_changed": "observed",
+        "file_provenance_hash_failed": "unavailable",
+        "file_provenance_over_budget": "not_checked",
+        "file_provenance_asserted_only": "asserted",
+        "file_provenance_unverified_paths": "not_checked",
+        "no_file_provenance": "not_checked",
+    }
+    normalized: List[dict] = []
+    for item in reconciled:
+        if not isinstance(item, dict):
+            continue
+        if "category" not in item:
+            code = item.get("code", "")
+            sev = item.get("severity", "info")
+            merged = dict(item)
+            merged["category"] = "inputs_outputs"
+            merged["evidence_status"] = default_ev.get(code, "observed")
+            merged["impact"] = "material" if sev == "warn" else "informational"
+            merged["comparison"] = None
+            merged["details"] = {}
+            normalized.append(merged)
+        else:
+            normalized.append(item)
+
+    assessment["findings"] = normalized
+    categories = assessment.get("categories")
+    if isinstance(categories, list):
+        for cat in categories:
+            if isinstance(cat, dict) and cat.get("name") == "inputs_outputs":
+                cat_findings = [f for f in normalized if f.get("category") == "inputs_outputs"]
+                cat["finding_codes"] = [f.get("code") for f in cat_findings if f.get("code")]
+                cat["warn_count"] = sum(1 for f in cat_findings if f.get("severity") == "warn")
+                cat["info_count"] = sum(1 for f in cat_findings if f.get("severity") == "info")
+                break
+    return assessment
+
+
+def _assess_cli_run(
+    hydrated_manifest: dict,
+    *,
+    manifest_path: str,
+    hydration_report,
+    current_hostname: Optional[str],
+    preflight: bool,
+) -> dict:
+    """Run the shared reproducibility engine for CLI commands with file-provenance reconciliation."""
+    from pubrun.report.checks import assess_run
+
+    assessment = assess_run(
+        hydrated_manifest,
+        manifest_path=manifest_path,
+        hydration_report=hydration_report,
+        current_hostname=current_hostname,
+        preflight=preflight,
+    )
+    return _reconcile_cli_file_provenance(hydrated_manifest, assessment)
+
+
+def _format_rerun_cmd_for_platform(rerun_cmd: str) -> str:
+    """Apply platform-specific formatting for printed rerun commands."""
+    if sys.platform == "win32" and "&& python " in rerun_cmd:
+        return rerun_cmd.replace(" && python ", "\npython ").replace("'", '"')
+    return rerun_cmd
+
+
 def _run_rerun(
     run_dir: str,
     filter_str: Optional[str] = None,
@@ -317,8 +398,22 @@ def _run_rerun(
     exit_code: Optional[int] = None,
     not_filter_str: Optional[str] = None,
     not_status_filter: Optional[str] = None,
+    preflight: bool = False,
+    strict: bool = False,
+    fail_on: Optional[str] = None,
+    as_json: bool = False,
 ) -> None:
-    """Print the shell command needed to reproduce a recorded run."""
+    """Print the shell command needed to reproduce a recorded run.
+
+    When ``preflight`` is False, preserves exact backwards-compatible stdout-only
+    piping behavior. When ``preflight`` is True, runs read-only offline preflight
+    comparison against the current environment and emits diagnostics to stderr
+    (or structured JSON to stdout under ``--json``) without executing the command.
+    """
+    if (strict or fail_on is not None or as_json) and not preflight:
+        _print_error("--strict, --fail-on, and --json require --preflight with `pubrun rerun`.")
+        sys.exit(2)
+
     try:
         manifest_path = _get_manifest_path(
             run_dir,
@@ -332,47 +427,206 @@ def _run_rerun(
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
 
-        inv = manifest.get("invocation", {})
-        rerun_cmd = inv.get("rerun_command")
+        inv = manifest.get("invocation", {}) if isinstance(manifest, dict) else {}
+        rerun_cmd = inv.get("rerun_command") if isinstance(inv, dict) else None
 
-        if rerun_cmd:
-            if sys.platform == "win32" and "&& python " in rerun_cmd:
-                rerun_cmd = rerun_cmd.replace(" && python ", "\npython ").replace("'", '"')
-            print(rerun_cmd)
-        else:
+        if not preflight:
+            if rerun_cmd:
+                print(_format_rerun_cmd_for_platform(rerun_cmd))
+            else:
+                _print_error("Target manifest does not contain a valid 'rerun_command' payload.")
+                sys.exit(1)
+            return
+
+        if not isinstance(rerun_cmd, str) or not rerun_cmd:
             _print_error("Target manifest does not contain a valid 'rerun_command' payload.")
             sys.exit(1)
+
+        rerun_cmd = _format_rerun_cmd_for_platform(rerun_cmd)
+
+        from pubrun.report.utils import hydrate_manifest_with_report
+        from pubrun.report.checks import should_fail_strict
+        from pubrun.report.reproducibility import format_reproducibility_summary
+        from pubrun.report.diagnostics import format_redacted_rerun_advisory
+
+        hydrated, _hydration_warnings, hydration_report = hydrate_manifest_with_report(
+            manifest_path, manifest
+        )
+        import socket
+        try:
+            current_hostname = socket.gethostname()
+        except Exception:
+            current_hostname = None
+
+        assessment = _assess_cli_run(
+            hydrated,
+            manifest_path=manifest_path,
+            hydration_report=hydration_report,
+            current_hostname=current_hostname,
+            preflight=True,
+        )
+        strict_enabled = bool(strict or fail_on is not None)
+        strict_failed = strict_enabled and should_fail_strict(
+            assessment, fail_on=fail_on or "warn"
+        )
+        executable_as_printed = "[REDACTED]" not in rerun_cmd
+
+        if as_json:
+            payload = {
+                "rerun_command": rerun_cmd,
+                "executable_as_printed": executable_as_printed,
+                "assessment": assessment,
+            }
+            print(json.dumps(payload, indent=2))
+            if strict_failed:
+                sys.exit(1)
+            return
+
+        # Human / pipe mode: all preflight diagnostics go to stderr; stdout stays clean.
+        print(format_reproducibility_summary(assessment), file=sys.stderr)
+        advisory = format_redacted_rerun_advisory(rerun_cmd)
+        if advisory:
+            _print_warn(advisory)
+        if strict_failed:
+            sys.exit(1)
+        print(rerun_cmd)
     except RunInProgressOrCrashedError as e:
         status = e.run_info.status if e.run_info else "crashed/running"
         lock_data = e.run_info.lock_data if (e.run_info and hasattr(e.run_info, "lock_data")) else None
-        if lock_data:
-            cwd = lock_data.get("cwd")
-            sys_argv = lock_data.get("sys_argv")
-            if not sys_argv:
-                # Reconstruct from script and argv if sys_argv is not present (for compatibility)
-                script = lock_data.get("script") or "script.py"
-                script_filename = script if script.endswith(".py") else f"{script}.py"
-                argv = lock_data.get("argv", [])
-                sys_argv = [script_filename] + argv
-
-            import shlex
-            if sys.platform == "win32":
-                import subprocess as _sp
-                redacted_cmdline = _sp.list2cmdline(sys_argv)
-                cwd_str = _sp.list2cmdline([str(cwd)]) if cwd else "."
-                rerun_cmd = f"cd {cwd_str}\npython {redacted_cmdline}"
-            else:
-                redacted_cmdline = shlex.join(sys_argv)
-                cwd_str = shlex.quote(str(cwd)) if cwd else "."
-                rerun_cmd = f"cd {cwd_str} && python {redacted_cmdline}"
-
-            _print_warn(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json. Reconstructed rerun command from lock file:")
-            if sys.platform == "win32" and "&& python " in rerun_cmd:
-                rerun_cmd = rerun_cmd.replace(" && python ", "\npython ").replace("'", '"')
-            print(rerun_cmd)
-        else:
+        if not lock_data:
             _print_error(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.")
             sys.exit(1)
+
+        cwd = lock_data.get("cwd")
+        sys_argv = lock_data.get("sys_argv")
+        if not sys_argv:
+            # Reconstruct from script and argv if sys_argv is not present (for compatibility)
+            script = lock_data.get("script") or "script.py"
+            script_filename = script if script.endswith(".py") else f"{script}.py"
+            argv = lock_data.get("argv", [])
+            sys_argv = [script_filename] + argv
+
+        import shlex
+        if sys.platform == "win32":
+            import subprocess as _sp
+            redacted_cmdline = _sp.list2cmdline(sys_argv)
+            cwd_str = _sp.list2cmdline([str(cwd)]) if cwd else "."
+            rerun_cmd = f"cd {cwd_str}\npython {redacted_cmdline}"
+        else:
+            redacted_cmdline = shlex.join(sys_argv)
+            cwd_str = shlex.quote(str(cwd)) if cwd else "."
+            rerun_cmd = f"cd {cwd_str} && python {redacted_cmdline}"
+
+        rerun_cmd = _format_rerun_cmd_for_platform(rerun_cmd)
+
+        if not preflight:
+            _print_warn(
+                f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json. "
+                "Reconstructed rerun command from lock file:"
+            )
+            print(rerun_cmd)
+            return
+
+        executable_as_printed = "[REDACTED]" not in rerun_cmd
+        strict_enabled = bool(strict or fail_on is not None)
+
+        if as_json:
+            from pubrun.report.reproducibility import NON_GUARANTEE_DISCLAIMER
+
+            lock_findings = [
+                {
+                    "severity": "warn",
+                    "code": "run_not_finalized",
+                    "message": (
+                        f"Run '{e.run_dir.name}' is currently {status} and does not have a finalized "
+                        "manifest.json; reconstructed rerun command from .pubrun.lock is inferred "
+                        "and offline preflight checks require a finalized manifest.json."
+                    ),
+                    "suggestion": (
+                        "Wait for the run to finalize or inspect crashed-run logs before running preflight."
+                    ),
+                    "category": "capture_completeness",
+                    "evidence_status": "inferred",
+                    "impact": "material",
+                    "comparison": "unknown",
+                    "details": {"status": status, "run_dir": e.run_dir.name},
+                }
+            ]
+            if not executable_as_printed:
+                lock_findings.append(
+                    {
+                        "severity": "warn",
+                        "code": "rerun_command_redacted",
+                        "message": (
+                            "Reconstructed rerun_command contains [REDACTED] placeholders and is "
+                            "not directly executable verbatim without supplying redacted arguments."
+                        ),
+                        "suggestion": (
+                            "Supply the redacted argument values manually before executing the recorded command."
+                        ),
+                        "category": "invocation",
+                        "evidence_status": "inferred",
+                        "impact": "material",
+                        "comparison": "mismatch",
+                        "details": {"rerun_command_redacted": True},
+                    }
+                )
+            lock_assessment = {
+                "schema_version": "1.0",
+                "mode": "preflight",
+                "summary": (
+                    f"Run '{e.run_dir.name}' is currently {status} without a finalized manifest.json; "
+                    "preflight comparison is unknown and the lock-file command is inferred."
+                ),
+                "next_action": lock_findings[0]["suggestion"],
+                "next_actions": [f["suggestion"] for f in lock_findings if f.get("suggestion")],
+                "disclaimer": NON_GUARANTEE_DISCLAIMER,
+                "categories": [],
+                "findings": lock_findings,
+                "parent_metadata": None,
+                "preflight": {
+                    "requested": True,
+                    "status": "unknown",
+                    "counts": {"unknown": 1},
+                    "checks": [
+                        {
+                            "name": "manifest_finalized",
+                            "category": "capture_completeness",
+                            "comparison": "unknown",
+                            "evidence_status": "inferred",
+                            "impact": "material",
+                            "severity": "warn",
+                            "message": (
+                                f"Run '{e.run_dir.name}' is currently {status} without a finalized "
+                                "manifest.json; preflight requires a finalized manifest.json."
+                            ),
+                            "details": {"status": status},
+                        }
+                    ],
+                },
+            }
+            payload = {
+                "rerun_command": rerun_cmd,
+                "executable_as_printed": executable_as_printed,
+                "assessment": lock_assessment,
+            }
+            print(json.dumps(payload, indent=2))
+            if strict_enabled:
+                sys.exit(1)
+            return
+
+        from pubrun.report.diagnostics import format_redacted_rerun_advisory
+
+        _print_warn(
+            f"Run '{e.run_dir.name}' is currently {status} and does not have a finalized manifest.json. "
+            "Preflight requires a finalized manifest.json; reconstructed rerun command from lock file is inferred."
+        )
+        advisory = format_redacted_rerun_advisory(rerun_cmd)
+        if advisory:
+            _print_warn(advisory)
+        if strict_enabled:
+            sys.exit(1)
+        print(rerun_cmd)
     except Exception as e:
         _print_error(f"Failed to fetch rerun command: {e}")
         sys.exit(1)
@@ -964,12 +1218,26 @@ def _run_self_check(show_suggestions: bool, as_json: bool, strict: bool, quiet: 
         sys.exit(1)
 
 
-def _run_inspect(run_dir: Optional[str], show_suggestions: bool, as_json: bool, strict: bool,
-                 filter_str: Optional[str] = None, not_filter_str: Optional[str] = None,
-                 status_filter: Optional[str] = None, not_status_filter: Optional[str] = None,
-                 older_than: Optional[str] = None, exit_code: Optional[int] = None) -> None:
-    """Diagnose a COMPLETED run's manifest: capture-completeness + recorded I/O signals,
-    with a glaring banner when the inspecting host differs from the run's host."""
+def _run_inspect(
+    run_dir: Optional[str],
+    show_suggestions: bool,
+    as_json: bool,
+    strict: bool,
+    filter_str: Optional[str] = None,
+    not_filter_str: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    not_status_filter: Optional[str] = None,
+    older_than: Optional[str] = None,
+    exit_code: Optional[int] = None,
+    preflight: bool = False,
+    fail_on: Optional[str] = None,
+) -> None:
+    """Assess a completed run's reproducibility evidence and optional offline preflight.
+
+    Hydrates parent ``meta_ref`` context via ``hydrate_manifest_with_report``, delegates
+    to the shared reproducibility assessment engine, and renders terse summary, detailed
+    category/finding output, or structured JSON preserving top-level ``findings``.
+    """
     try:
         manifest_path = _get_manifest_path(
             run_dir or "", filter_str=filter_str, status_filter=status_filter,
@@ -996,25 +1264,69 @@ def _run_inspect(run_dir: Optional[str], show_suggestions: bool, as_json: bool, 
     except Exception:
         current_hostname = None
 
-    from pubrun.report.checks import manifest_findings
-    findings = manifest_findings(manifest, current_hostname=current_hostname)
+    from pubrun.report.utils import hydrate_manifest_with_report
+    from pubrun.report.checks import should_fail_strict
+    from pubrun.report.reproducibility import (
+        format_reproducibility_detail,
+        format_reproducibility_summary,
+    )
 
-    # The different-host banner is always shown (never hidden behind --show-suggestions),
-    # because a live-vs-run host mismatch changes how everything else should be read.
-    banner = [f for f in findings if f.get("code") == "different_host"]
-    rest = [f for f in findings if f.get("code") != "different_host"]
-    if banner and not as_json:
+    hydrated, _hydration_warnings, hydration_report = hydrate_manifest_with_report(
+        manifest_path, manifest
+    )
+    assessment = _assess_cli_run(
+        hydrated,
+        manifest_path=manifest_path,
+        hydration_report=hydration_report,
+        current_hostname=current_hostname,
+        preflight=preflight,
+    )
+
+    if as_json:
+        print(json.dumps(assessment, indent=2))
+    else:
         use_color = not os.environ.get("NO_COLOR", "") and sys.stdout.isatty()
-        line = _fmt_finding(banner[0], use_color)
-        bar = "=" * 60
-        print(bar)
-        print(line)
-        print(bar)
+        findings = assessment.get("findings") or []
+        banner = [
+            f for f in findings if isinstance(f, dict) and f.get("code") == "different_host"
+        ]
+        # The different-host banner is always shown once at the top (never duplicated in detail).
+        if banner:
+            line = _fmt_finding(banner[0], use_color)
+            bar = "=" * 60
+            print(bar)
+            print(line)
+            print(bar)
 
-    _emit_findings(rest if not as_json else findings,
-                   show_suggestions=show_suggestions, as_json=as_json,
-                   header="pubrun inspect")
-    if strict and any(f.get("severity") == "warn" for f in findings):
+        header = "pubrun inspect --preflight" if preflight else "pubrun inspect"
+        print(f"{header}:")
+        if show_suggestions:
+            detail_assessment = (
+                {
+                    **assessment,
+                    "findings": [
+                        f
+                        for f in findings
+                        if not (isinstance(f, dict) and f.get("code") == "different_host")
+                    ],
+                }
+                if banner
+                else assessment
+            )
+            print(format_reproducibility_detail(detail_assessment, use_color=use_color))
+        else:
+            print(format_reproducibility_summary(assessment))
+            if preflight:
+                print("Run with --show-suggestions (-v) for per-check and per-finding detail.")
+            else:
+                print(
+                    "Run with --show-suggestions (-v) for category and finding detail, "
+                    "or --preflight to compare against this machine."
+                )
+
+    if (strict or fail_on is not None) and should_fail_strict(
+        assessment, fail_on=fail_on or "warn"
+    ):
         sys.exit(1)
 
 
@@ -2515,20 +2827,30 @@ def main() -> None:
     # ---------------- Inspect Subparser ----------------
     inspect_parser = subparsers.add_parser(
         "inspect",
-        help="Diagnose a completed run: what was captured, what wasn't, and how to capture more.",
-        description="Report-only, post-hoc diagnosis of a completed run's manifest: recorded "
-                    "I/O/RAM/load/filesystem signals, a capture-completeness assessment (what "
-                    "provenance was NOT captured and why), and how to enable more next time "
-                    "with honest performance trade-offs. Prints a glaring banner when the "
-                    "inspecting host differs from where the run executed (e.g. HPC head node "
-                    "vs compute node).",
-        epilog=f"Examples:\n  {prog_name} inspect\n  {prog_name} inspect runs/pubrun-XYZ --show-suggestions\n  {prog_name} inspect -f train.py",
+        help="Assess a completed run's reproducibility evidence and optional offline preflight.",
+        description="Report-only, post-hoc reproducibility assessment of a completed run's "
+                    "manifest (with parent meta_ref hydration): evaluates seven structured "
+                    "evidence categories, prioritizes concrete next steps, and optionally "
+                    "runs a read-only offline preflight comparison (--preflight) against the "
+                    "current machine. Prints a prominent banner when the inspecting host "
+                    "differs from where the run executed (e.g. HPC head node vs compute node).",
+        epilog=f"Examples:\n  {prog_name} inspect\n  {prog_name} inspect runs/pubrun-XYZ --show-suggestions\n"
+               f"  {prog_name} inspect runs/pubrun-XYZ --preflight\n"
+               f"  {prog_name} inspect runs/pubrun-XYZ --preflight --fail-on mismatch\n"
+               f"  {prog_name} inspect -f train.py --json",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     inspect_parser.add_argument("run_dir", type=str, nargs="?", help="Run directory to inspect. Defaults to the most recent matching run.")
-    inspect_parser.add_argument("--show-suggestions", "-v", action="store_true", help="Show per-item detail and how to capture more (with perf trade-offs).")
-    inspect_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit findings as JSON (always full detail).")
-    inspect_parser.add_argument("--strict", action="store_true", help="Exit non-zero if any warning fired.")
+    inspect_parser.add_argument("--show-suggestions", "-v", action="store_true", help="Show per-category status, preflight checks, and per-finding detail with next steps.")
+    inspect_parser.add_argument("--preflight", action="store_true", help="Run read-only offline comparison of supported recorded requirements against the current environment.")
+    inspect_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit the full structured reproducibility assessment as JSON (preserving top-level 'findings').")
+    inspect_parser.add_argument("--strict", action="store_true", help="Exit 1 when the strict threshold triggers (defaults to 'warn' unless --fail-on is given).")
+    inspect_parser.add_argument(
+        "--fail-on",
+        choices=["warn", "mismatch", "unknown"],
+        default=None,
+        help="Strict exit threshold ('warn', 'mismatch', or 'unknown'). Implies strict exit checking and works with or without --preflight.",
+    )
     _add_run_filter_args(inspect_parser, include_limit=False)
 
     # ---------------- Bench Subparser ----------------
@@ -2725,12 +3047,27 @@ def main() -> None:
     # ---------------- Rerun Subparser ----------------
     rerun_parser = subparsers.add_parser(
         "rerun",
-        help="Print the shell command needed to replicate a run.",
-        description="Print the shell command needed to replicate a run.",
-        epilog=f"Examples:\n  {prog_name} rerun\n  {prog_name} rerun runs/pubrun-XYZ",
+        help="Print the shell command needed to replicate a run (with optional --preflight).",
+        description="Print the shell command needed to replicate a run. By default, prints only "
+                    "the command to stdout (safe for piping such as `pubrun rerun | bash`). "
+                    "Pass --preflight to run a read-only offline comparison against the current "
+                    "environment (diagnostics go to stderr; never executes the command).",
+        epilog=f"Examples:\n  {prog_name} rerun\n  {prog_name} rerun runs/pubrun-XYZ\n"
+               f"  {prog_name} rerun runs/pubrun-XYZ --preflight\n"
+               f"  {prog_name} rerun runs/pubrun-XYZ --preflight --strict\n"
+               f"  {prog_name} rerun runs/pubrun-XYZ --preflight --fail-on mismatch --json",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     rerun_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
+    rerun_parser.add_argument("--preflight", action="store_true", help="Run read-only offline preflight comparison before printing the rerun command (diagnostics go to stderr).")
+    rerun_parser.add_argument("--strict", action="store_true", help="Requires --preflight. Exit 1 and suppress stdout when the strict threshold triggers (default: 'warn').")
+    rerun_parser.add_argument(
+        "--fail-on",
+        choices=["warn", "mismatch", "unknown"],
+        default=None,
+        help="Requires --preflight. Strict exit threshold ('warn', 'mismatch', or 'unknown'); implies --strict.",
+    )
+    rerun_parser.add_argument("--json", action="store_true", dest="as_json", help="Requires --preflight. Emit JSON with rerun_command, executable_as_printed, and assessment to stdout.")
     _add_run_filter_args(rerun_parser, include_limit=False)
 
     # ---------------- Resources Subparser ----------------
@@ -2941,6 +3278,10 @@ def main() -> None:
             exit_code=getattr(args, "exit_code", None),
             not_filter_str=getattr(args, "not_filter", None),
             not_status_filter=getattr(args, "not_status", None),
+            preflight=getattr(args, "preflight", False),
+            strict=getattr(args, "strict", False),
+            fail_on=getattr(args, "fail_on", None),
+            as_json=getattr(args, "as_json", False),
         )
         executed = True
 
@@ -2993,6 +3334,8 @@ def main() -> None:
             not_status_filter=getattr(args, "not_status", None),
             older_than=getattr(args, "older_than", None),
             exit_code=getattr(args, "exit_code", None),
+            preflight=getattr(args, "preflight", False),
+            fail_on=getattr(args, "fail_on", None),
         )
         executed = True
 

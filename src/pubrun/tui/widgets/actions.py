@@ -18,6 +18,7 @@ from textual.screen import ModalScreen
 from rich.text import Text
 
 from pubrun.status import RunInfo, clean_runs, STATUS_RUNNING
+from pubrun.report.diagnostics import format_redacted_rerun_advisory
 from pubrun.report.methods import generate_report
 from pubrun.report.utils import hydrate_manifest
 
@@ -87,6 +88,7 @@ class ActionsPanel(Vertical):
         self.output_dir = output_dir
         self.run_info: Optional[RunInfo] = None
         self.raw_manifest: Optional[Dict[str, Any]] = None
+        self.rerun_command: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="grid-container"):
@@ -95,6 +97,7 @@ class ActionsPanel(Vertical):
                 yield Label("CITATION & REPLICABILITY", classes="panel-card-title")
                 yield Label("Rerun Command:", classes="info-label")
                 yield Static("Select a run to view rerun command.", id="lbl-rerun-command", classes="info-value")
+                yield Static("", id="lbl-rerun-advisory", classes="info-value")
                 yield Button("Copy Rerun Command", id="btn-copy-rerun", variant="primary")
                 yield Label("Academic Methods Citation:", classes="info-label")
                 yield ScrollableContainer(Static("", id="lbl-methods-citation"), classes="transcript-area")
@@ -129,12 +132,15 @@ class ActionsPanel(Vertical):
         """Update display citation, rerun, and manifest fields."""
         self.run_info = run_info
         self.raw_manifest = None
+        self.rerun_command = None
 
         rerun_lbl = self.query_one("#lbl-rerun-command", Static)
+        advisory_lbl = self.query_one("#lbl-rerun-advisory", Static)
         citation_lbl = self.query_one("#lbl-methods-citation", Static)
 
         if not run_info:
             rerun_lbl.update("Select a run.")
+            advisory_lbl.update("")
             citation_lbl.update("")
             return
 
@@ -150,7 +156,14 @@ class ActionsPanel(Vertical):
             cwd = run_info.lock_data.get("cwd", "")
             rerun_cmd = f"cd {cwd} && python {script} " + " ".join(argv)
 
-        rerun_lbl.update(rerun_cmd)
+        self.rerun_command = None if rerun_cmd == "-" else rerun_cmd
+        rerun_lbl.update(Text(rerun_cmd))
+
+        advisory = format_redacted_rerun_advisory(self.rerun_command)
+        if advisory:
+            advisory_lbl.update(Text(advisory))
+        else:
+            advisory_lbl.update("")
 
         # Generate Methods Citation
         methods_str = "(No citation available - manifest not complete)"
@@ -171,12 +184,22 @@ class ActionsPanel(Vertical):
             return
 
         if event.button.id == "btn-copy-rerun":
-            cmd = self.query_one("#lbl-rerun-command", Static).renderable
+            cmd = self.rerun_command
             if cmd and cmd != "-":
-                if copy_to_clipboard(str(cmd)):
-                    self.app.notify("Rerun command copied to clipboard.", severity="information")
+                is_redacted = "[REDACTED]" in cmd
+                if copy_to_clipboard(cmd):
+                    if is_redacted:
+                        self.app.notify(
+                            "Rerun command copied to clipboard. Supply [REDACTED] arguments manually before running.",
+                            severity="warning",
+                        )
+                    else:
+                        self.app.notify("Rerun command copied to clipboard.", severity="information")
                 else:
-                    self.app.notify("Failed to copy automatically. Please copy text manually.", severity="warning")
+                    msg = "Failed to copy automatically. Please copy text manually."
+                    if is_redacted:
+                        msg += " Remember to supply [REDACTED] arguments before running."
+                    self.app.notify(msg, severity="warning")
 
         elif event.button.id in ("btn-copy-md", "btn-copy-latex"):
             if not self.raw_manifest:
@@ -290,17 +313,17 @@ class ActionsPanel(Vertical):
                     yes=True,
                     dry_run=dry_run
                 )
-            
+
             # Print output to textual widget
             output_str = buffer.getvalue()
-            
+
             # Strip color escape codes if any
             clean_str = output_str.replace("\033[32m", "").replace("\033[31m", "")
             clean_str = clean_str.replace("\033[35m", "").replace("\033[33m", "")
             clean_str = clean_str.replace("\033[90m", "").replace("\033[0m", "")
-            
+
             log.write(clean_str)
-            
+
             if not dry_run:
                 self.app.notify("Pruning complete.", severity="information")
                 self.app.post_message(self.app.RefreshSidebar())

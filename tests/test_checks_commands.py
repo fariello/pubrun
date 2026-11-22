@@ -727,3 +727,379 @@ class TestFileProvenanceManifestFindings:
         assert res_warn.returncode != 0
         warn_codes = {f["code"] for f in json.loads(res_warn.stdout)["findings"]}
         assert "file_provenance_changed" in warn_codes
+
+
+class TestInspectReproducibilityAndPreflightCLI:
+    """Behavioral CLI tests for shared reproducibility assessment and preflight in `pubrun inspect` (IPD 3lqtlt)."""
+
+    @staticmethod
+    def _write_manifest(run_dir: Path, manifest: dict) -> Path:
+        run_dir.mkdir(parents=True, exist_ok=True)
+        path = run_dir / "manifest.json"
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _clean_manifest(tmp_path: Path, *, hostname: str, extra: dict = None) -> dict:
+        import platform
+
+        script = tmp_path / "train.py"
+        if not script.exists():
+            script.write_text("print('ok')\n", encoding="utf-8")
+        import hashlib
+
+        script_sha = hashlib.sha256(script.read_bytes()).hexdigest()
+        data_file = tmp_path / "input.csv"
+        if not data_file.exists():
+            data_file.write_text("x,y\n1,2\n", encoding="utf-8")
+        data_sha = hashlib.sha256(data_file.read_bytes()).hexdigest()
+
+        m = {
+            "schema_version": "1.0",
+            "manifest_type": "pubrun-manifest",
+            "run": {"run_id": "20261122-010000-clean1", "capture_state": {"status": "complete"}},
+            "timing": {"started_at_utc": 1780250000.0, "elapsed_seconds": 2.0},
+            "status": {"outcome": "completed", "exit_code": 0, "capture_state": {"status": "complete"}},
+            "host": {
+                "hostname": hostname,
+                "os_name": platform.system(),
+                "capture_state": {"status": "complete"},
+            },
+            "python": {
+                "version": platform.python_version(),
+                "executable": sys.executable,
+                "capture_state": {"status": "complete"},
+            },
+            "hardware": {"cpu": {"model": "TestCPU"}, "capture_state": {"status": "complete"}},
+            "packages": {
+                "mode": "full-environment",
+                "records": [],
+                "capture_state": {"status": "complete"},
+            },
+            "git": {"capture_state": {"status": "suppressed"}},
+            "invocation": {
+                "entrypoint_type": "script",
+                "script": {"path": str(script), "basename": "train.py", "sha256": script_sha},
+                "argv": [str(script), "--seed", "7"],
+                "working_directory": {"path": str(tmp_path)},
+                "rerun_command": f"cd {tmp_path} && python {script} --seed 7",
+            },
+            "resources": {"scope": "tree", "capture_state": {"status": "complete"}},
+            "console": {"capture_mode": "standard", "capture_state": {"status": "complete"}},
+            "subprocesses": [],
+            "capture": {"subprocesses_enabled": True, "file_provenance_available": True},
+            "pubrun_imports": {"selected_mode": "auto", "selected_behavior": {"patch_subprocesses": True}},
+            "determinism": {"registered_seeds": [{"name": "random", "value": 7}]},
+            "config": {"notices": []},
+            "errors": {"records": [], "capture_state": {"status": "complete"}},
+            "data_files": {
+                "inputs": [
+                    {
+                        "path": str(data_file),
+                        "sha256": data_sha,
+                        "size_bytes": data_file.stat().st_size,
+                        "hash_status": "completed",
+                        "evidence_source": "observed",
+                        "evidence_strength": "verified_content",
+                    }
+                ],
+                "outputs": [],
+                "mixed": [],
+            },
+        }
+        if extra:
+            m.update(extra)
+        return m
+
+    def test_inspect_json_ten_key_schema_and_preflight_mode(self, tmp_path):
+        import socket
+        from pubrun.report.reproducibility import NON_GUARANTEE_DISCLAIMER
+
+        cur_host = socket.gethostname()
+        run_dir = tmp_path / "runs" / "pubrun-schema1"
+        manifest = self._clean_manifest(tmp_path, hostname=cur_host)
+        self._write_manifest(run_dir, manifest)
+
+        expected_keys = {
+            "schema_version",
+            "mode",
+            "summary",
+            "next_action",
+            "next_actions",
+            "disclaimer",
+            "categories",
+            "findings",
+            "parent_metadata",
+            "preflight",
+        }
+
+        res = run_pubrun("inspect", str(run_dir), "--json", env={"NO_COLOR": "1"})
+        assert res.returncode == 0, res.stderr
+        data = json.loads(res.stdout)
+        assert expected_keys.issubset(set(data.keys()))
+        assert data["mode"] == "manifest"
+        assert data["disclaimer"] == NON_GUARANTEE_DISCLAIMER
+        assert data["preflight"]["requested"] is False
+        assert isinstance(data["findings"], list)
+        assert len(data["categories"]) == 7
+
+        res_pf = run_pubrun("inspect", str(run_dir), "--preflight", "--json", env={"NO_COLOR": "1"})
+        assert res_pf.returncode == 0, res_pf.stderr
+        pf_data = json.loads(res_pf.stdout)
+        assert expected_keys.issubset(set(pf_data.keys()))
+        assert pf_data["mode"] == "preflight"
+        assert pf_data["preflight"]["requested"] is True
+        assert isinstance(pf_data["preflight"]["checks"], list) and pf_data["preflight"]["checks"]
+
+    def test_inspect_human_terse_verbose_no_color_and_different_host_deduplication(self, tmp_path):
+        from pubrun.report.reproducibility import NON_GUARANTEE_DISCLAIMER
+
+        run_dir = tmp_path / "runs" / "pubrun-diffhost"
+        manifest = self._clean_manifest(
+            tmp_path,
+            hostname="remote-compute-node-99",
+            extra={
+                "git": {
+                    "commit": "1234567890abcdef" * 2 + "12345678",
+                    "dirty": True,
+                    "capture_state": {"status": "complete"},
+                },
+            },
+        )
+        self._write_manifest(run_dir, manifest)
+
+        # Terse default: header, banner once, summary, next step, disclaimer, no ANSI under NO_COLOR=1.
+        res_terse = run_pubrun("inspect", str(run_dir), env={"NO_COLOR": "1"})
+        assert res_terse.returncode == 0, res_terse.stderr
+        assert "\033[" not in res_terse.stdout
+        assert "\033[" not in res_terse.stderr
+        assert "pubrun inspect:" in res_terse.stdout.lower()
+        assert "=" * 60 in res_terse.stdout
+        assert res_terse.stdout.count("remote-compute-node-99") >= 1
+        assert "Summary:" in res_terse.stdout
+        assert "Next step:" in res_terse.stdout
+        assert NON_GUARANTEE_DISCLAIMER in res_terse.stdout
+        assert "--preflight" in res_terse.stdout
+
+        # Verbose (-v): banner shown once, different_host NOT duplicated in Findings section.
+        res_verb = run_pubrun("inspect", str(run_dir), "-v", env={"NO_COLOR": "1"})
+        assert res_verb.returncode == 0, res_verb.stderr
+        assert "\033[" not in res_verb.stdout
+        assert "Evidence categories:" in res_verb.stdout
+        assert "Findings:" in res_verb.stdout
+        assert "->" in res_verb.stdout
+        assert res_verb.stdout.count("this run executed on 'remote-compute-node-99'") == 1
+        assert "different_host (" not in res_verb.stdout
+
+        # Preflight verbose with NO_COLOR=1 also emits zero ANSI escapes and includes Preflight checks.
+        res_pf_v = run_pubrun("inspect", str(run_dir), "--preflight", "-v", env={"NO_COLOR": "1"})
+        assert res_pf_v.returncode == 0, res_pf_v.stderr
+        assert "\033[" not in res_pf_v.stdout
+        assert "Preflight checks:" in res_pf_v.stdout
+        assert res_pf_v.stdout.count("this run executed on 'remote-compute-node-99'") == 1
+
+        # JSON retains different_host inside findings.
+        res_json = run_pubrun("inspect", str(run_dir), "--json", env={"NO_COLOR": "1"})
+        assert res_json.returncode == 0
+        codes = [f["code"] for f in json.loads(res_json.stdout)["findings"]]
+        assert "different_host" in codes
+
+    def test_inspect_hydrates_meta_ref_parent_snapshot(self, tmp_path):
+        import socket
+
+        cur_host = socket.gethostname()
+        runs_dir = tmp_path / "runs"
+        run_dir = runs_dir / "pubrun-child1"
+        run_dir.mkdir(parents=True)
+
+        # Parent meta.json placed inside the child run dir (always allowed by default sandbox policy).
+        meta_doc = {
+            "schema_version": "1.0",
+            "manifest_type": "pubrun-meta-snapshot",
+            "timing": {"started_at_utc": 1780249900.0},
+            "host": {"hostname": cur_host, "os_name": "Linux"},
+            "hardware": {"cpu": {"model": "ParentCPU"}, "memory_total_bytes": 16 * 1024**3, "capture_state": {"status": "complete"}},
+            "packages": {
+                "mode": "full-environment",
+                "records": [{"name": "pytest", "version": "8.0.0"}],
+                "capture_state": {"status": "complete"},
+            },
+        }
+        (run_dir / "meta.json").write_text(json.dumps(meta_doc), encoding="utf-8")
+
+        child = self._clean_manifest(
+            tmp_path,
+            hostname=cur_host,
+            extra={
+                "meta_ref": "meta.json",
+                "hardware": {"capture_state": {"status": "suppressed"}},
+                "packages": {"capture_state": {"status": "suppressed"}},
+            },
+        )
+        self._write_manifest(run_dir, child)
+
+        res = run_pubrun("inspect", str(run_dir), "--json", env={"NO_COLOR": "1"})
+        assert res.returncode == 0, res.stderr
+        data = json.loads(res.stdout)
+        assert data["parent_metadata"]["status"] == "hydrated"
+        assert "hardware" in data["parent_metadata"]["inherited_sections"]
+        assert "packages" in data["parent_metadata"]["inherited_sections"]
+        codes = {f["code"] for f in data["findings"]}
+        assert "parent_metadata_inherited" in codes
+        assert "hardware_off" not in codes
+        assert "packages_off" not in codes
+
+        res_human = run_pubrun("inspect", str(run_dir), env={"NO_COLOR": "1"})
+        assert res_human.returncode == 0
+        assert "Inherited from parent snapshot:" in res_human.stdout
+
+    def test_inspect_strict_and_fail_on_thresholds(self, tmp_path):
+        import socket
+
+        cur_host = socket.gethostname()
+
+        # 1. Portability-only WARN (different_host): --strict fails (warn), --fail-on mismatch passes!
+        port_dir = tmp_path / "runs" / "pubrun-portability"
+        port_manifest = self._clean_manifest(tmp_path, hostname="other-cluster-node")
+        self._write_manifest(port_dir, port_manifest)
+
+        assert run_pubrun("inspect", str(port_dir), "--preflight", env={"NO_COLOR": "1"}).returncode == 0
+        assert run_pubrun("inspect", str(port_dir), "--preflight", "--strict", env={"NO_COLOR": "1"}).returncode == 1
+        res_mm_pass = run_pubrun(
+            "inspect", str(port_dir), "--preflight", "--fail-on", "mismatch", env={"NO_COLOR": "1"}
+        )
+        assert res_mm_pass.returncode == 0, res_mm_pass.stdout + res_mm_pass.stderr
+
+        # 2. Material mismatch (missing package version on preflight): --fail-on mismatch exits 1.
+        mm_dir = tmp_path / "runs" / "pubrun-mismatch"
+        mm_manifest = self._clean_manifest(
+            tmp_path,
+            hostname=cur_host,
+            extra={
+                "packages": {
+                    "mode": "full-environment",
+                    "records": [{"name": "definitely-not-installed-pkg-xyz", "version": "9.9.9"}],
+                    "capture_state": {"status": "complete"},
+                }
+            },
+        )
+        self._write_manifest(mm_dir, mm_manifest)
+
+        assert run_pubrun("inspect", str(mm_dir), "--preflight", env={"NO_COLOR": "1"}).returncode == 0
+        assert (
+            run_pubrun("inspect", str(mm_dir), "--preflight", "--fail-on", "mismatch", env={"NO_COLOR": "1"}).returncode
+            == 1
+        )
+
+        # 3. Unknown check (stat-only input without digest): --fail-on mismatch passes, --fail-on unknown exits 1.
+        unk_dir = tmp_path / "runs" / "pubrun-unknown"
+        stat_file = tmp_path / "stat_only.csv"
+        stat_file.write_text("col\n1\n", encoding="utf-8")
+        unk_manifest = self._clean_manifest(
+            tmp_path,
+            hostname=cur_host,
+            extra={
+                "data_files": {
+                    "inputs": [
+                        {
+                            "path": str(stat_file),
+                            "size_bytes": stat_file.stat().st_size,
+                            "hash_status": "disabled",
+                            "evidence_source": "observed",
+                            "evidence_strength": "metadata_only",
+                        }
+                    ],
+                    "outputs": [],
+                    "mixed": [],
+                }
+            },
+        )
+        self._write_manifest(unk_dir, unk_manifest)
+
+        assert (
+            run_pubrun("inspect", str(unk_dir), "--preflight", "--fail-on", "mismatch", env={"NO_COLOR": "1"}).returncode
+            == 0
+        )
+        assert (
+            run_pubrun("inspect", str(unk_dir), "--preflight", "--fail-on", "unknown", env={"NO_COLOR": "1"}).returncode
+            == 1
+        )
+        # --fail-on unknown also activates strict exit checking WITHOUT --preflight (manifest mode).
+        assert (
+            run_pubrun("inspect", str(unk_dir), "--fail-on", "unknown", env={"NO_COLOR": "1"}).returncode == 1
+        )
+
+    def test_cross_surface_agreement_inspect_rerun_show_and_tui_formatter(self, tmp_path):
+        import socket
+        from pubrun.report.reproducibility import (
+            NON_GUARANTEE_DISCLAIMER,
+            assess_run,
+            format_reproducibility_summary,
+        )
+        from pubrun.report.utils import hydrate_manifest_with_report
+
+        cur_host = socket.gethostname()
+        run_dir = tmp_path / "runs" / "pubrun-cross"
+        manifest = self._clean_manifest(
+            tmp_path,
+            hostname=cur_host,
+            extra={
+                "git": {
+                    "commit": "abcdef0123456789" * 2 + "abcdef01",
+                    "dirty": True,
+                    "capture_state": {"status": "complete"},
+                },
+            },
+        )
+        manifest_path = self._write_manifest(run_dir, manifest)
+
+        # 1. inspect --json
+        res_inspect = run_pubrun("inspect", str(run_dir), "--json", env={"NO_COLOR": "1"})
+        assert res_inspect.returncode == 0, res_inspect.stderr
+        data_inspect = json.loads(res_inspect.stdout)
+
+        # 2. inspect --preflight --json
+        res_inspect_pf = run_pubrun("inspect", str(run_dir), "--preflight", "--json", env={"NO_COLOR": "1"})
+        assert res_inspect_pf.returncode == 0, res_inspect_pf.stderr
+        data_inspect_pf = json.loads(res_inspect_pf.stdout)
+
+        # 3. rerun --preflight --json
+        res_rerun_pf = run_pubrun("rerun", str(run_dir), "--preflight", "--json", env={"NO_COLOR": "1"})
+        assert res_rerun_pf.returncode == 0, res_rerun_pf.stderr
+        data_rerun_pf = json.loads(res_rerun_pf.stdout)
+
+        # 4. pubrun show (standard)
+        res_show = run_pubrun("show", str(run_dir), env={"NO_COLOR": "1"})
+        assert res_show.returncode == 0, res_show.stderr
+
+        # 5. Direct engine + TUI formatter
+        hydrated, _, report = hydrate_manifest_with_report(str(manifest_path), manifest)
+        direct_manifest = assess_run(
+            hydrated,
+            manifest_path=str(manifest_path),
+            hydration_report=report,
+            current_hostname=cur_host,
+            preflight=False,
+        )
+        tui_summary = format_reproducibility_summary(direct_manifest)
+
+        # inspect --preflight --json and rerun --preflight --json must match identically.
+        assert data_rerun_pf["assessment"]["categories"] == data_inspect_pf["categories"]
+        assert data_rerun_pf["assessment"]["findings"] == data_inspect_pf["findings"]
+        assert data_rerun_pf["assessment"]["next_action"] == data_inspect_pf["next_action"]
+        assert data_rerun_pf["assessment"]["preflight"] == data_inspect_pf["preflight"]
+
+        # inspect --json and direct engine (used by show + TUI) agree on categories, findings, next_action.
+        assert data_inspect["categories"] == direct_manifest["categories"]
+        assert [f["code"] for f in data_inspect["findings"]] == [
+            f["code"] for f in direct_manifest["findings"]
+        ]
+        assert data_inspect["next_action"] == direct_manifest["next_action"]
+
+        # show and TUI formatter both include the same summary, next_action, and disclaimer.
+        assert direct_manifest["summary"] in res_show.stdout
+        assert direct_manifest["next_action"] in res_show.stdout
+        assert NON_GUARANTEE_DISCLAIMER in res_show.stdout
+        assert direct_manifest["summary"] in tui_summary
+        assert direct_manifest["next_action"] in tui_summary
+        assert NON_GUARANTEE_DISCLAIMER in tui_summary

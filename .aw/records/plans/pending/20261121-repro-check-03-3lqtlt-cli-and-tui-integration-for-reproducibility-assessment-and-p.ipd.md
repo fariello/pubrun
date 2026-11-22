@@ -59,34 +59,34 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Wire `pubrun inspect` and `pubrun rerun` in CLI
 
-- [ ] E-01 Update `_run_inspect` and `inspect` argument parser in `src/pubrun/__main__.py` to hydrate `meta_ref`, run `assess_run(preflight=...)`, render concise or detailed human output with the highest-value next step and non-guarantee disclaimer, emit structured `--json` preserving top-level `"findings"`, and support `--preflight` and `--fail-on {warn,mismatch,unknown}` with `--strict`.
+- [x] E-01 Update `_run_inspect` and `inspect` argument parser in `src/pubrun/__main__.py` to hydrate `meta_ref`, run `assess_run(preflight=...)`, render concise or detailed human output with the highest-value next step and non-guarantee disclaimer, emit structured `--json` preserving top-level `"findings"`, and support `--preflight` and `--fail-on {warn,mismatch,unknown}` with `--strict`.
   - Depends on: none
   - Expected outcome: `src/pubrun/__main__.py::_run_inspect` hydrates `meta_ref` via `hydrate_manifest_with_report` and calls `assess_run(..., preflight=preflight)`. In human mode, it preserves the `pubrun inspect` header, renders the different-host banner once without duplicating it in the detail list, prints a concise summary plus next step and disclaimer by default, and prints category-grouped detail with `->` suggestion arrows under `--show-suggestions` / `-v`. In `--json` mode, it prints `json.dumps(assessment, indent=2)` directly (preserving top-level `"findings"` alongside `"schema_version"`, `"mode"`, `"summary"`, `"next_action"`, `"next_actions"`, `"disclaimer"`, `"categories"`, `"parent_metadata"`, and `"preflight"`). It runs offline preflight only when `--preflight` is passed, exits `0` by default, and exits `1` when `--strict` or `--fail-on` triggers via `should_fail_strict`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update `_run_rerun` and `rerun` argument parser in `src/pubrun/__main__.py` to add opt-in `--preflight`, `--strict`, `--fail-on`, and `--json` while keeping default `pubrun rerun` output and piping 100% backwards compatible.
+- [x] E-02 Update `_run_rerun` and `rerun` argument parser in `src/pubrun/__main__.py` to add opt-in `--preflight`, `--strict`, `--fail-on`, and `--json` while keeping default `pubrun rerun` output and piping 100% backwards compatible.
   - Depends on: E-01
   - Expected outcome: Default `pubrun rerun [RUN_DIR]` prints only `rerun_command` to `stdout` with exit code `0` (safe for `pubrun rerun | bash`). Passing `--strict`, `--fail-on`, or `--json` without `--preflight` fails fast with a clear `stderr` error, empty `stdout`, and exit code `2`. Missing `rerun_command` exits `1` cleanly without crashing. `pubrun rerun --preflight` prints the preflight summary and any redacted-command advisory to `stderr` (gating color on `NO_COLOR` and `sys.stderr.isatty()`) while printing `rerun_command` to `stdout` without executing it. `pubrun rerun --preflight --strict` (or `--fail-on`) exits `1` with empty `stdout` when the strict condition triggers. `pubrun rerun --preflight --json` emits valid JSON (`rerun_command`, `executable_as_printed`, `assessment`) to `stdout` for both finalized and lock-file reconstructed runs.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Surface shared summary in `pubrun show` and TUI widgets
 
-- [ ] E-03 Update `src/pubrun/report/diagnostics.py`, `src/pubrun/tui/widgets/details.py`, and `src/pubrun/tui/widgets/actions.py` to display the shared reproducibility summary and redacted-rerun advisory using `pubrun.report.reproducibility` formatters.
+- [x] E-03 Update `src/pubrun/report/diagnostics.py`, `src/pubrun/tui/widgets/details.py`, and `src/pubrun/tui/widgets/actions.py` to display the shared reproducibility summary and redacted-rerun advisory using `pubrun.report.reproducibility` formatters.
   - Depends on: E-01
   - Expected outcome: `src/pubrun/report/diagnostics.py` defines pure-Python `format_redacted_rerun_advisory(rerun_cmd)` and updates `print_report` (at `standard` and `deep` depths only, never in `basic` or `logs`/`env`/`packages` section extracts) to display a concise reproducibility summary, highest-value next step, and inherited-section note when `meta_ref` hydrated sections, using lazy imports and zero American National Standards Institute (ANSI) `DIM` codes. `RunDetailsView` in `src/pubrun/tui/widgets/details.py` renders the shared reproducibility summary (with `rich.markup.escape` and safe preliminary handling for running runs, never running live preflight). `ActionsPanel` in `src/pubrun/tui/widgets/actions.py` renders `rerun_command` cleanly in `#lbl-rerun-command` (without contaminating clipboard copies or breaking Rich markup) and displays `format_redacted_rerun_advisory` in a dedicated `#lbl-rerun-advisory` widget. No duplicate assessment logic is introduced and TUI stays optional.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: CLI and TUI behavioral tests
 
-- [ ] E-04 Expand `tests/test_checks_commands.py` and `tests/test_cli.py` with behavioral CLI tests for `pubrun inspect`, `pubrun inspect --preflight`, `--json`, `--strict`, `--fail-on`, `NO_COLOR`, `pubrun rerun` piping plus `--preflight` / `--strict` / `--fail-on` / `--json`, `pubrun show` reproducibility output, and cross-surface JSON agreement.
+- [x] E-04 Expand `tests/test_checks_commands.py` and `tests/test_cli.py` with behavioral CLI tests for `pubrun inspect`, `pubrun inspect --preflight`, `--json`, `--strict`, `--fail-on`, `NO_COLOR`, `pubrun rerun` piping plus `--preflight` / `--strict` / `--fail-on` / `--json`, `pubrun show` reproducibility output, and cross-surface JSON agreement.
   - Depends on: E-02
   - Expected outcome: All existing CLI tests pass unchanged. New tests verify `pubrun inspect` with `meta_ref` hydration, `pubrun inspect --preflight` (terse, `-v`, `--json`, `--strict`, `--fail-on mismatch`, `--fail-on unknown`, different-host banner deduplication), invalid `pubrun rerun` flag combinations without `--preflight` (exit `2`, empty `stdout`), default `pubrun rerun` stdout cleanliness for piping, `pubrun rerun --preflight` writing diagnostics only to `stderr`, `pubrun rerun --preflight --strict` / `--fail-on` aborting with exit code `1` and empty `stdout` on mismatch or redacted command, crashed/running lock-file handling with `--preflight` / `--fail-on` / `--json`, `pubrun show` reproducibility rendering (and untouched `basic` / `logs` / `env` / `packages`), cross-surface agreement across `inspect --json`, `inspect --preflight --json`, `rerun --preflight --json`, `show`, and the TUI formatter, and zero ANSI escape sequences under `NO_COLOR=1`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Expand `tests/test_tui.py` with behavioral tests verifying pure-Python reproducibility summary and redacted-rerun advisory formatters (unconditional, zero `textual` dependency) plus live `RunDetailsView` and `ActionsPanel` widget rendering via Textual `Pilot` when `textual` is installed.
+- [x] E-05 Expand `tests/test_tui.py` with behavioral tests verifying pure-Python reproducibility summary and redacted-rerun advisory formatters (unconditional, zero `textual` dependency) plus live `RunDetailsView` and `ActionsPanel` widget rendering via Textual `Pilot` when `textual` is installed.
   - Depends on: E-03
   - Expected outcome: `tests/test_tui.py` passes via `pytest` (running pure-Python formatter and advisory unit tests unconditionally, skipping live `Pilot` tests cleanly via `pytest.importorskip("textual")` when `textual` is absent, and verifying `RunDetailsView` reproducibility rendering, Rich-markup safety, running-run handling, and `ActionsPanel` `#lbl-rerun-advisory` plus clean `#lbl-rerun-command` clipboard text when `textual` is installed).
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -189,30 +189,127 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste `pytest tests/test_checks_commands.py -v` output showing exit code 0 with passing CLI subprocess tests for `pubrun inspect` (terse header, `-v` `->` suggestions, different-host banner deduplication, `meta_ref` hydration), `pubrun inspect --preflight`, `pubrun inspect --json` (preserving top-level `"findings"` and full 10-key schema), `pubrun inspect --strict`, `pubrun inspect --preflight --fail-on mismatch`, `pubrun inspect --preflight --fail-on unknown`, and `NO_COLOR=1`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ PYTHONPATH=src python3 -m pytest tests/test_checks_commands.py -v --no-cov
+    collected 46 items
+    tests/test_checks_commands.py::TestInspectCLI::test_inspect_terse_default PASSED [ 67%]
+    tests/test_checks_commands.py::TestInspectCLI::test_inspect_show_suggestions_expands PASSED [ 69%]
+    tests/test_checks_commands.py::TestInspectCLI::test_inspect_json_full PASSED [ 71%]
+    tests/test_checks_commands.py::TestInspectCLI::test_inspect_no_runs_errors PASSED [ 73%]
+    tests/test_checks_commands.py::TestFileProvenanceManifestFindings::test_inspect_strict_exits_nonzero_on_warn_and_zero_on_info_only PASSED [ 89%]
+    tests/test_checks_commands.py::TestInspectReproducibilityAndPreflightCLI::test_inspect_json_ten_key_schema_and_preflight_mode PASSED [ 91%]
+    tests/test_checks_commands.py::TestInspectReproducibilityAndPreflightCLI::test_inspect_human_terse_verbose_no_color_and_different_host_deduplication PASSED [ 93%]
+    tests/test_checks_commands.py::TestInspectReproducibilityAndPreflightCLI::test_inspect_hydrates_meta_ref_parent_snapshot PASSED [ 95%]
+    tests/test_checks_commands.py::TestInspectReproducibilityAndPreflightCLI::test_inspect_strict_and_fail_on_thresholds PASSED [ 97%]
+    tests/test_checks_commands.py::TestInspectReproducibilityAndPreflightCLI::test_cross_surface_agreement_inspect_rerun_show_and_tui_formatter PASSED [100%]
+    ============================== 46 passed in 7.37s ==============================
+    exit code: 0
+    ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Paste `pytest tests/test_cli.py -k rerun -v` output showing exit code 0, proving default `pubrun rerun` prints only the rerun command to `stdout`, invalid `--strict`/`--fail-on`/`--json` without `--preflight` exits `2` with empty `stdout`, missing `rerun_command` with `--preflight` exits `1`, `pubrun rerun --preflight` prints diagnostics only to `stderr`, `pubrun rerun --preflight --strict` and `--fail-on` exit `1` with empty `stdout` on mismatch or redacted command, `pubrun rerun --preflight --json` emits valid JSON with `executable_as_printed`, and lock-file runs handle `--preflight` / `--fail-on` / `--json` accurately.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ PYTHONPATH=src python3 -m pytest tests/test_cli.py -k rerun -v --no-cov
+    collected 107 items / 89 deselected / 18 selected
+    tests/test_cli.py::TestCliHelp::test_rerun_help PASSED                   [  5%]
+    tests/test_cli.py::TestCliRerun::test_rerun_prints_command PASSED        [ 11%]
+    tests/test_cli.py::TestCliRerun::test_rerun_running_run PASSED           [ 16%]
+    tests/test_cli.py::TestCliRerun::test_rerun_crashed_run_reconstruction PASSED [ 22%]
+    tests/test_cli.py::TestCliRerun::test_rerun_crashed_run_no_color PASSED  [ 27%]
+    tests/test_cli.py::TestCliErrorExitCodes::test_rerun_missing_manifest_exits_1 PASSED [ 33%]
+    tests/test_cli.py::TestCliErrorExitCodes::test_rerun_manifest_without_rerun_command_exits_1 PASSED [ 38%]
+    tests/test_cli.py::TestCliRerunPreflightAndShowReproducibility::test_rerun_default_stdout_is_pipe_clean PASSED [ 44%]
+    tests/test_cli.py::TestCliRerunPreflightAndShowReproducibility::test_rerun_rejects_preflight_only_flags_without_preflight[extra_flags0] PASSED [ 50%]
+    tests/test_cli.py::TestCliRerunPreflightAndShowReproducibility::test_rerun_rejects_preflight_only_flags_without_preflight[extra_flags1] PASSED [ 55%]
+    tests/test_cli.py::TestCliRerunPreflightAndShowReproducibility::test_rerun_rejects_preflight_only_flags_without_preflight[extra_flags2] PASSED [ 61%]
+    tests/test_cli.py::TestCliRerunPreflightAndShowReproducibility::test_rerun_rejects_preflight_only_flags_without_preflight[extra_flags3] PASSED [ 66%]
+    tests/test_cli.py::TestCliRerunPreflightAndShowReproducibility::test_rerun_rejects_preflight_only_flags_without_preflight[extra_flags4] PASSED [ 72%]
+    tests/test_cli.py::TestCliRerunPreflightAndShowReproducibility::test_rerun_preflight_missing_rerun_command_exits_1_cleanly PASSED [ 77%]
+    tests/test_cli.py::TestCliRerunPreflightAndShowReproducibility::test_rerun_preflight_separates_stderr_and_stdout_and_never_executes PASSED [ 83%]
+    tests/test_cli.py::TestCliRerunPreflightAndShowReproducibility::test_rerun_preflight_strict_and_fail_on_suppress_stdout_on_mismatch_and_redaction PASSED [ 88%]
+    tests/test_cli.py::TestCliRerunPreflightAndShowReproducibility::test_rerun_preflight_lock_file_running_and_crashed_runs PASSED [ 94%]
+    tests/test_cli.py::TestCliRerunPreflightAndShowReproducibility::test_show_reproducibility_depths_sections_and_meta_ref PASSED [100%]
+    ====================== 18 passed, 89 deselected in 5.68s =======================
+    exit code: 0
+    ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Paste `pytest tests/test_reports.py tests/test_show_sections.py tests/test_tui.py -v` and `pytest tests/test_cli.py -k "show or report" -v` output showing exit code 0, confirming `print_report` surfaces the concise reproducibility note and inherited-section note in `standard` and `deep` depths without breaking `basic` or `logs`/`env`/`packages` section extracts, `format_redacted_rerun_advisory` works without `textual`, and TUI views render the shared summary and separated redacted-rerun advisory safely.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ PYTHONPATH=src python3 -m pytest tests/test_reports.py tests/test_show_sections.py tests/test_tui.py -v --no-cov
+    collected 83 items
+    tests/test_reports.py::... (57 passed)
+    tests/test_show_sections.py::test_show_full_report PASSED                [ 69%]
+    tests/test_show_sections.py::test_show_env PASSED                        [ 71%]
+    tests/test_show_sections.py::test_show_packages PASSED                   [ 72%]
+    tests/test_show_sections.py::test_show_logs PASSED                       [ 73%]
+    tests/test_show_sections.py::TestShowDataFilesProvenance::test_cli_show_standard_and_deep_with_no_color_and_all_badges PASSED [ 85%]
+    tests/test_show_sections.py::TestShowDataFilesProvenance::test_print_report_color_uses_no_dim_and_handles_legacy_malformed_and_sections PASSED [ 86%]
+    tests/test_tui.py::TestReproducibilityTuiHelpers::test_format_redacted_rerun_advisory PASSED [ 96%]
+    tests/test_tui.py::TestReproducibilityTuiHelpers::test_format_reproducibility_summary_pure_python PASSED [ 97%]
+    tests/test_tui.py::TestTuiReproducibilityAndActions::test_details_reproducibility_markup_safety_running_and_no_live_preflight PASSED [ 98%]
+    tests/test_tui.py::TestTuiReproducibilityAndActions::test_actions_panel_redacted_advisory_clearing_and_clean_clipboard PASSED [100%]
+    ============================== 83 passed in 5.36s ==============================
+    exit code: 0
 
-- [ ] V-04 validates E-04
+    $ PYTHONPATH=src python3 -m pytest tests/test_cli.py -k "show or report" -v --no-cov
+    collected 107 items / 78 deselected / 29 selected
+    tests/test_cli.py::TestCliReport::test_report_valid_run PASSED           [ 13%]
+    tests/test_cli.py::TestCliReport::test_report_basic_depth PASSED         [ 17%]
+    tests/test_cli.py::TestCliReport::test_report_deep_depth PASSED          [ 20%]
+    tests/test_cli.py::TestCliRerunPreflightAndShowReproducibility::test_show_reproducibility_depths_sections_and_meta_ref PASSED [100%]
+    ====================== 29 passed, 78 deselected in 6.99s =======================
+    exit code: 0
+    ```
+  - Result: pass
+
+- [x] V-04 validates E-04
   - Required evidence: Paste full output of `pytest tests/test_checks_commands.py tests/test_cli.py -v` showing exit code 0, zero regressions across existing CLI tests (including `NO_COLOR=1` ANSI suppression), and passing cross-surface agreement checks across `inspect --json`, `inspect --preflight --json`, `rerun --preflight --json`, `show`, and the TUI formatter, plus `python -c "import pubrun, sys; assert 'pubrun.report.checks' not in sys.modules and 'pubrun.report.reproducibility' not in sys.modules; print('ISOLATED')"` printing `ISOLATED` (exit code 0).
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ PYTHONPATH=src python3 -m pytest tests/test_checks_commands.py tests/test_cli.py -v --no-cov -n 4
+    4 workers [153 items]
+    tests/test_checks_commands.py::... (46 passed, including TestInspectReproducibilityAndPreflightCLI::test_cross_surface_agreement_inspect_rerun_show_and_tui_formatter PASSED)
+    tests/test_cli.py::... (107 passed, including TestCliRerunPreflightAndShowReproducibility::test_rerun_default_stdout_is_pipe_clean through test_show_reproducibility_depths_sections_and_meta_ref PASSED)
+    ============================= 153 passed in 11.47s =============================
+    exit code: 0
 
-- [ ] V-05 validates E-05
+    $ PYTHONPATH=src python3 -c "import pubrun, sys; assert 'pubrun.report.checks' not in sys.modules and 'pubrun.report.reproducibility' not in sys.modules; print('ISOLATED')"
+    ISOLATED
+    exit code: 0
+    ```
+  - Result: pass
+
+- [x] V-05 validates E-05
   - Required evidence: Paste full output of `pytest tests/test_tui.py -v` showing exit code 0 (noting whether `textual` was installed in the test environment), proving pure-Python formatter and advisory tests pass unconditionally and live `RunDetailsView` and `ActionsPanel` `Pilot` tests pass when `textual` is installed (or skip cleanly when absent).
   - Observed evidence:
-  - Result: pending
+    ```text
+    Environment note: textual 8.2.8 was installed in this test environment, so both pure-Python and live Pilot tests executed.
+
+    $ PYTHONPATH=src python3 -m pytest tests/test_tui.py -v --no-cov
+    collected 11 items
+    tests/test_tui.py::test_tui_cli_parser_and_run PASSED                    [  9%]
+    tests/test_tui.py::test_tui_missing_dependencies_prints_notice PASSED    [ 18%]
+    tests/test_tui.py::test_tui_toml_serialization PASSED                    [ 27%]
+    tests/test_tui.py::TestResourceDigest::test_summary_and_sparklines PASSED [ 36%]
+    tests/test_tui.py::TestResourceDigest::test_empty_series_message PASSED  [ 45%]
+    tests/test_tui.py::TestResourceDigest::test_tree_metrics_shown_when_present PASSED [ 54%]
+    tests/test_tui.py::TestTuiResourceView::test_resource_view_populates_and_degrades PASSED [ 63%]
+    tests/test_tui.py::TestReproducibilityTuiHelpers::test_format_redacted_rerun_advisory PASSED [ 72%]
+    tests/test_tui.py::TestReproducibilityTuiHelpers::test_format_reproducibility_summary_pure_python PASSED [ 81%]
+    tests/test_tui.py::TestTuiReproducibilityAndActions::test_details_reproducibility_markup_safety_running_and_no_live_preflight PASSED [ 90%]
+    tests/test_tui.py::TestTuiReproducibilityAndActions::test_actions_panel_redacted_advisory_clearing_and_clean_clipboard PASSED [100%]
+    ============================== 11 passed in 2.36s ==============================
+    exit code: 0
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 

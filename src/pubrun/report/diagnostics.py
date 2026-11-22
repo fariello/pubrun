@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
-from pubrun.report.utils import hydrate_manifest
+from pubrun.report.utils import hydrate_manifest, hydrate_manifest_with_report
 
 # The section names `pubrun show <run> <section>` accepts as a bare trailing token.
 # Single source of truth: the CLI shift heuristic, the argparse help, and the render
@@ -457,6 +457,20 @@ def format_resource_digest(series, width: int = 40) -> str:
     _row("CPU (tree)", series.get("tree_cpu", []), lambda v: f"{v:.1f}", "%")
     return "\n".join(lines) if lines else "No resource samples recorded for this run."
 
+def format_redacted_rerun_advisory(rerun_cmd: Optional[str]) -> Optional[str]:
+    """Return a plain-text advisory when a rerun command contains ``[REDACTED]`` placeholders.
+
+    Pure Python with zero TUI or ANSI dependencies so CLI and TUI surfaces share
+    the same advisory wording without duplicating detection logic.
+    """
+    if isinstance(rerun_cmd, str) and "[REDACTED]" in rerun_cmd:
+        return (
+            "Rerun command contains [REDACTED] placeholders and is not directly "
+            "executable verbatim; supply the redacted arguments manually before running."
+        )
+    return None
+
+
 def _supports_unicode(stream) -> bool:
     try:
         "┌".encode(getattr(stream, "encoding", "utf-8") or "utf-8")
@@ -555,7 +569,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     # Hydrate!
     if not isinstance(manifest, dict):
         manifest = {}
-    manifest, warnings = hydrate_manifest(manifest_path, manifest)
+    manifest, warnings, hydration_report = hydrate_manifest_with_report(manifest_path, manifest)
     if not isinstance(manifest, dict):
         manifest = {}
 
@@ -877,6 +891,44 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     df_counts = _summarize_data_files(manifest.get("data_files"))
     if df_counts["total"] > 0:
         print(f"{cyan}Data Files{rst}  : {_format_data_files_summary_line(df_counts)}")
+
+    # Concise reproducibility summary (standard and deep depths only; never in basic or section extracts).
+    try:
+        import socket as _socket
+        try:
+            current_hostname = _socket.gethostname()
+        except Exception:
+            current_hostname = None
+        from pubrun.report.reproducibility import (
+            assess_run as _assess_run,
+            format_reproducibility_summary as _format_repro_summary,
+        )
+        repro = _assess_run(
+            manifest,
+            manifest_path=manifest_path,
+            hydration_report=hydration_report,
+            current_hostname=current_hostname,
+            preflight=False,
+        )
+        repro_lines = _format_repro_summary(repro).splitlines()
+        print(f"\n{blue}{bold}--- Reproducibility ---{rst}")
+        for rline in repro_lines:
+            print(f"  {rline}")
+        if hydration_report.inherited_sections and not any(
+            "Inherited from parent snapshot:" in rl for rl in repro_lines
+        ):
+            inherited_str = ", ".join(hydration_report.inherited_sections)
+            print(
+                f"  Inherited from parent snapshot: {inherited_str} "
+                "(script mtime alone does not prove dependencies matched)."
+            )
+        if not any("pubrun inspect --preflight" in rl for rl in repro_lines):
+            print(
+                f"  {cyan}Preflight{rst}   : Run `pubrun inspect --preflight` to compare "
+                "recorded requirements against this environment."
+            )
+    except Exception:
+        pass
 
     if depth == "standard":
         print()

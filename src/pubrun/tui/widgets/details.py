@@ -4,6 +4,7 @@ Run details widget for presenting telemetry, python packages, and subprocess log
 
 from __future__ import annotations
 import json
+import re
 import time
 from pathlib import Path
 from datetime import datetime
@@ -15,6 +16,7 @@ try:
     from textual.widgets import Static, Label, DataTable, TabbedContent, TabPane, Input
     from rich.text import Text
     from rich.table import Table
+    from rich.markup import escape as rich_escape
 except ImportError:
     ComposeResult = Any  # type: ignore[assignment,misc]
     Vertical = object  # type: ignore[assignment,misc]
@@ -29,7 +31,16 @@ except ImportError:
     Text = Any  # type: ignore[assignment,misc]
     Table = Any  # type: ignore[assignment,misc]
 
+    def rich_escape(markup: str) -> str:  # type: ignore[misc]
+        return markup
+
 from pubrun.status import RunInfo, STATUS_RUNNING, _format_bytes, _format_elapsed, _format_timestamp
+
+
+def _escape_markup(text: str) -> str:
+    """Escape bracketed tokens safely for both Rich and Textual markup parsers."""
+    escaped = rich_escape(text)
+    return re.sub(r"(?<!\\)\[", r"\[", escaped)
 
 
 def _filter_package_rows(
@@ -137,10 +148,10 @@ class RunDetailsView(Vertical):
         lines = []
         lines.append(f"[bold #cba6f7]=== RUN IDENTITY ===[/bold #cba6f7]")
         lines.append(f"  [bold]Run ID:[/]        {r.run_id or '-'}")
-        lines.append(f"  [bold]Script:[/]        {r.script or '-'}")
-        lines.append(f"  [bold]Arguments:[/]     {r.args or '-'}")
+        lines.append(f"  [bold]Script:[/]        {_escape_markup(str(r.script)) if r.script else '-'}")
+        lines.append(f"  [bold]Arguments:[/]     {_escape_markup(str(r.args)) if r.args else '-'}")
         lines.append(f"  [bold]Status:[/]        {r.status.upper()}")
-        lines.append(f"  [bold]Directory:[/]     {r.run_dir}")
+        lines.append(f"  [bold]Directory:[/]     {_escape_markup(str(r.run_dir))}")
         lines.append("")
 
         lines.append(f"[bold #cba6f7]=== TIMING & METRICS ===[/bold #cba6f7]")
@@ -200,6 +211,45 @@ class RunDetailsView(Vertical):
                     lines.append(f"    - [{idx}] {gpu.get('name')} (Driver: {gpu.get('driver_version')})")
         else:
             lines.append("  (No host specs recorded)")
+        lines.append("")
+
+        # Reproducibility & Evidence (read-only manifest summary; never runs live preflight)
+        lines.append("[bold #cba6f7]=== REPRODUCIBILITY & EVIDENCE ===[/bold #cba6f7]")
+        if r.status == STATUS_RUNNING:
+            lines.append(
+                "  Run is still in progress; full reproducibility assessment is available "
+                "once manifest.json finalizes."
+            )
+        elif r.manifest:
+            try:
+                import socket
+                from pubrun.report.utils import hydrate_manifest_with_report
+                from pubrun.report.reproducibility import (
+                    assess_run,
+                    format_reproducibility_summary,
+                )
+
+                manifest_path = str(Path(r.run_dir) / "manifest.json")
+                hydrated, _, hydration_report = hydrate_manifest_with_report(
+                    manifest_path, r.manifest
+                )
+                try:
+                    current_hostname = socket.gethostname()
+                except Exception:
+                    current_hostname = None
+                assessment = assess_run(
+                    hydrated,
+                    manifest_path=manifest_path,
+                    hydration_report=hydration_report,
+                    current_hostname=current_hostname,
+                    preflight=False,
+                )
+                for summary_line in format_reproducibility_summary(assessment).splitlines():
+                    lines.append(f"  {_escape_markup(summary_line)}")
+            except Exception:
+                lines.append("  (Reproducibility assessment unavailable for this run)")
+        else:
+            lines.append("  (No finalized manifest.json available for reproducibility assessment)")
 
         self.query_one("#lbl-general-info", Static).update("\n".join(lines))
 

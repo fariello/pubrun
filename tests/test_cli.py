@@ -9,14 +9,22 @@ from pathlib import Path
 PYTHON = sys.executable
 
 
-def run_pubrun(*args, cwd=None):
+def run_pubrun(*args, cwd=None, env=None):
     """Helper to invoke pubrun CLI and return the completed process."""
     cmd = [PYTHON, "-m", "pubrun"] + list(args)
+    run_env = dict(os.environ)
+    src_dir = Path(__file__).resolve().parents[1] / "src"
+    if src_dir.is_dir():
+        existing = run_env.get("PYTHONPATH", "")
+        run_env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing}" if existing else str(src_dir)
+    if env:
+        run_env.update(env)
     return subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         cwd=cwd or os.getcwd(),
+        env=run_env,
         timeout=30
     )
 
@@ -1478,3 +1486,296 @@ class TestCliResourcesAliases:
                 with pytest.raises(SystemExit) as exc_info:
                     main()
                 assert exc_info.value.code != 0, f"'{dead}' should exit non-zero"
+
+
+class TestCliRerunPreflightAndShowReproducibility:
+    """Behavioral CLI tests for `pubrun rerun --preflight` and `pubrun show` reproducibility (IPD 3lqtlt)."""
+
+    @staticmethod
+    def _make_run(tmp_path: Path, name: str, *, rerun_command, extra: dict = None) -> Path:
+        import platform
+        import socket
+
+        run_dir = tmp_path / "runs" / name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        script = tmp_path / "work.py"
+        if not script.exists():
+            script.write_text("print('hi')\n", encoding="utf-8")
+        manifest = {
+            "schema_version": "1.0",
+            "manifest_type": "pubrun-manifest",
+            "run": {"run_id": name, "capture_state": {"status": "complete"}},
+            "timing": {"started_at_utc": 1780250000.0, "elapsed_seconds": 3.0},
+            "status": {"outcome": "completed", "exit_code": 0, "capture_state": {"status": "complete"}},
+            "host": {
+                "hostname": socket.gethostname(),
+                "os_name": platform.system(),
+                "capture_state": {"status": "complete"},
+            },
+            "python": {
+                "version": platform.python_version(),
+                "executable": sys.executable,
+                "capture_state": {"status": "complete"},
+            },
+            "hardware": {"cpu": {"model": "TestCPU"}, "memory_total_bytes": 8 * 1024**3, "capture_state": {"status": "complete"}},
+            "packages": {"mode": "full-environment", "records": [], "capture_state": {"status": "complete"}},
+            "git": {"capture_state": {"status": "suppressed"}},
+            "invocation": {
+                "entrypoint_type": "script",
+                "script": {"path": str(script), "basename": "work.py"},
+                "argv": [str(script)],
+                "working_directory": {"path": str(tmp_path)},
+                "rerun_command": rerun_command,
+            },
+            "resources": {"scope": "tree", "capture_state": {"status": "complete"}},
+            "console": {"capture_mode": "standard", "capture_state": {"status": "complete"}},
+            "subprocesses": [],
+            "capture": {"subprocesses_enabled": True, "file_provenance_available": True},
+            "pubrun_imports": {"selected_mode": "auto", "selected_behavior": {"patch_subprocesses": True}},
+            "determinism": {"registered_seeds": [{"name": "random", "value": 1}]},
+            "config": {"notices": []},
+            "errors": {"records": [], "capture_state": {"status": "complete"}},
+            "data_files": {"inputs": [], "outputs": [], "mixed": []},
+        }
+        if extra:
+            manifest.update(extra)
+        (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return run_dir
+
+    def test_rerun_default_stdout_is_pipe_clean(self, tmp_path):
+        cmd_str = f"cd {tmp_path} && python work.py --epochs 3"
+        run_dir = self._make_run(tmp_path, "pubrun-pipe-clean", rerun_command=cmd_str)
+        res = run_pubrun("rerun", str(run_dir), env={"NO_COLOR": "1"})
+        assert res.returncode == 0
+        assert res.stderr == ""
+        expected = cmd_str.replace(" && python ", "\npython ").replace("'", '"') if sys.platform == "win32" else cmd_str
+        assert res.stdout.strip() == expected
+
+    @pytest.mark.parametrize(
+        "extra_flags",
+        [
+            ["--strict"],
+            ["--fail-on", "warn"],
+            ["--fail-on", "mismatch"],
+            ["--fail-on", "unknown"],
+            ["--json"],
+        ],
+    )
+    def test_rerun_rejects_preflight_only_flags_without_preflight(self, tmp_path, extra_flags):
+        run_dir = self._make_run(tmp_path, "pubrun-badflags", rerun_command="python work.py")
+        res = run_pubrun("rerun", str(run_dir), *extra_flags, env={"NO_COLOR": "1"})
+        assert res.returncode == 2
+        assert res.stdout == ""
+        assert "--preflight" in res.stderr
+
+    def test_rerun_preflight_missing_rerun_command_exits_1_cleanly(self, tmp_path):
+        run_dir = self._make_run(tmp_path, "pubrun-nocmd", rerun_command=None)
+        res = run_pubrun("rerun", str(run_dir), "--preflight", env={"NO_COLOR": "1"})
+        assert res.returncode == 1
+        assert res.stdout == ""
+        assert "rerun_command" in res.stderr
+
+        res_json = run_pubrun("rerun", str(run_dir), "--preflight", "--json", env={"NO_COLOR": "1"})
+        assert res_json.returncode == 1
+        assert res_json.stdout == ""
+
+    def test_rerun_preflight_separates_stderr_and_stdout_and_never_executes(self, tmp_path):
+        from pubrun.report.reproducibility import NON_GUARANTEE_DISCLAIMER
+
+        marker = tmp_path / "must_not_exist.txt"
+        sentinel_script = tmp_path / "side_effect.py"
+        sentinel_script.write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\n",
+            encoding="utf-8",
+        )
+        cmd_str = f"cd {tmp_path} && python {sentinel_script}"
+        run_dir = self._make_run(tmp_path, "pubrun-pf-sep", rerun_command=cmd_str)
+
+        res = run_pubrun("rerun", str(run_dir), "--preflight", env={"NO_COLOR": "1"})
+        assert res.returncode == 0, res.stderr
+        assert "\033[" not in res.stdout
+        assert "\033[" not in res.stderr
+        expected = cmd_str.replace(" && python ", "\npython ").replace("'", '"') if sys.platform == "win32" else cmd_str
+        assert res.stdout.strip() == expected
+        assert "Summary:" in res.stderr
+        assert "Preflight [" in res.stderr
+        assert NON_GUARANTEE_DISCLAIMER in res.stderr
+        assert not marker.exists(), "pubrun rerun --preflight must never execute the recorded command"
+
+    def test_rerun_preflight_strict_and_fail_on_suppress_stdout_on_mismatch_and_redaction(self, tmp_path):
+        # 1. Package mismatch -> --strict and --fail-on mismatch exit 1 with empty stdout.
+        mm_dir = self._make_run(
+            tmp_path,
+            "pubrun-pf-mismatch",
+            rerun_command=f"cd {tmp_path} && python work.py",
+            extra={
+                "packages": {
+                    "mode": "full-environment",
+                    "records": [{"name": "nonexistent-pkg-for-rerun-test", "version": "1.2.3"}],
+                    "capture_state": {"status": "complete"},
+                }
+            },
+        )
+        res_strict = run_pubrun("rerun", str(mm_dir), "--preflight", "--strict", env={"NO_COLOR": "1"})
+        assert res_strict.returncode == 1
+        assert res_strict.stdout == ""
+        assert "Summary:" in res_strict.stderr
+
+        res_mm = run_pubrun(
+            "rerun", str(mm_dir), "--preflight", "--fail-on", "mismatch", env={"NO_COLOR": "1"}
+        )
+        assert res_mm.returncode == 1
+        assert res_mm.stdout == ""
+
+        # 2. Redacted rerun_command -> advisory on stderr; non-strict prints command, strict suppresses stdout.
+        red_cmd = f"cd {tmp_path} && python work.py --api-key [REDACTED]"
+        red_dir = self._make_run(tmp_path, "pubrun-pf-redacted", rerun_command=red_cmd)
+
+        res_red = run_pubrun("rerun", str(red_dir), "--preflight", env={"NO_COLOR": "1"})
+        assert res_red.returncode == 0
+        assert "[REDACTED]" in res_red.stdout
+        assert "[REDACTED]" in res_red.stderr
+        assert "not directly executable" in res_red.stderr.lower()
+
+        res_red_strict = run_pubrun(
+            "rerun", str(red_dir), "--preflight", "--fail-on", "mismatch", env={"NO_COLOR": "1"}
+        )
+        assert res_red_strict.returncode == 1
+        assert res_red_strict.stdout == ""
+
+        # 3. --preflight --json emits structured payload with executable_as_printed.
+        res_red_json = run_pubrun(
+            "rerun", str(red_dir), "--preflight", "--json", env={"NO_COLOR": "1"}
+        )
+        assert res_red_json.returncode == 0
+        payload = json.loads(res_red_json.stdout)
+        assert payload["executable_as_printed"] is False
+        assert "[REDACTED]" in payload["rerun_command"]
+        assert payload["assessment"]["mode"] == "preflight"
+        assert payload["assessment"]["preflight"]["requested"] is True
+
+        res_red_json_strict = run_pubrun(
+            "rerun", str(red_dir), "--preflight", "--strict", "--json", env={"NO_COLOR": "1"}
+        )
+        assert res_red_json_strict.returncode == 1
+        payload_strict = json.loads(res_red_json_strict.stdout)
+        assert payload_strict["executable_as_printed"] is False
+
+    def test_rerun_preflight_lock_file_running_and_crashed_runs(self, tmp_path):
+        import time
+
+        run_dir = tmp_path / "runs" / "pubrun-lock-pf"
+        run_dir.mkdir(parents=True)
+        lock_data = {
+            "run_id": "lock-pf-id",
+            "pid": 99999,
+            "started_at_utc": time.time() - 200000,
+            "script": "train.py",
+            "argv": ["--token", "[REDACTED]"],
+            "sys_argv": ["train.py", "--token", "[REDACTED]"],
+            "hostname": "otherhost",
+            "cwd": str(tmp_path),
+        }
+        (run_dir / ".pubrun.lock").write_text(json.dumps(lock_data), encoding="utf-8")
+
+        # Human mode without --strict: warns preflight needs finalized manifest, prints inferred command.
+        res = run_pubrun("rerun", str(run_dir), "--preflight", env={"NO_COLOR": "1"})
+        assert res.returncode == 0
+        assert "manifest.json" in res.stderr
+        assert "inferred" in res.stderr.lower()
+        assert "[REDACTED]" in res.stderr
+        assert "train.py" in res.stdout
+
+        # Strict / --fail-on mode: exits 1 with empty stdout.
+        res_strict = run_pubrun(
+            "rerun", str(run_dir), "--preflight", "--fail-on", "unknown", env={"NO_COLOR": "1"}
+        )
+        assert res_strict.returncode == 1
+        assert res_strict.stdout == ""
+
+        # JSON mode: valid JSON with unknown preflight status and inferred evidence_status.
+        res_json = run_pubrun("rerun", str(run_dir), "--preflight", "--json", env={"NO_COLOR": "1"})
+        assert res_json.returncode == 0
+        data = json.loads(res_json.stdout)
+        assert data["executable_as_printed"] is False
+        assert data["assessment"]["mode"] == "preflight"
+        assert data["assessment"]["preflight"]["requested"] is True
+        assert data["assessment"]["preflight"]["status"] == "unknown"
+        assert any(f["evidence_status"] == "inferred" for f in data["assessment"]["findings"])
+
+        # JSON + --strict exits 1 while still emitting valid JSON.
+        res_json_strict = run_pubrun(
+            "rerun", str(run_dir), "--preflight", "--strict", "--json", env={"NO_COLOR": "1"}
+        )
+        assert res_json_strict.returncode == 1
+        assert json.loads(res_json_strict.stdout)["assessment"]["preflight"]["status"] == "unknown"
+
+    def test_show_reproducibility_depths_sections_and_meta_ref(self, tmp_path):
+        from pubrun.report.reproducibility import NON_GUARANTEE_DISCLAIMER
+
+        run_dir = self._make_run(
+            tmp_path,
+            "pubrun-show-repro",
+            rerun_command=f"cd {tmp_path} && python work.py",
+            extra={
+                "meta_ref": "meta.json",
+                "hardware": {"capture_state": {"status": "suppressed"}},
+                "environment": {
+                    "variables": [
+                        {"name": "FOO", "value": {"representation": "plain", "value": "bar"}}
+                    ]
+                },
+                "packages": {
+                    "mode": "full-environment",
+                    "records": [{"name": "pytest", "version": "8.0.0"}],
+                    "capture_state": {"status": "complete"},
+                },
+            },
+        )
+        (run_dir / "meta.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "manifest_type": "pubrun-meta-snapshot",
+                    "timing": {"started_at_utc": 1780249900.0},
+                    "hardware": {
+                        "cpu": {"model": "ParentCPU"},
+                        "memory_total_bytes": 16 * 1024**3,
+                        "capture_state": {"status": "complete"},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        (run_dir / "stdout.log").write_text("log line\n", encoding="utf-8")
+
+        # Standard depth includes Reproducibility summary, inherited note, disclaimer, preflight nudge.
+        res_std = run_pubrun("show", str(run_dir), env={"NO_COLOR": "1"})
+        assert res_std.returncode == 0, res_std.stderr
+        assert "\033[" not in res_std.stdout
+        assert "--- Reproducibility ---" in res_std.stdout
+        assert "Inherited from parent snapshot: hardware" in res_std.stdout
+        assert "Next step:" in res_std.stdout
+        assert NON_GUARANTEE_DISCLAIMER in res_std.stdout
+        assert "pubrun inspect --preflight" in res_std.stdout
+
+        # Deep depth also includes Reproducibility summary and zero ANSI DIM codes when colored.
+        env_color = dict(os.environ)
+        env_color.pop("NO_COLOR", None)
+        res_deep = run_pubrun("show", str(run_dir), "--deep", env={"NO_COLOR": ""})
+        assert res_deep.returncode == 0, res_deep.stderr
+        assert "--- Reproducibility ---" in res_deep.stdout
+        repro_block = res_deep.stdout.split("--- Reproducibility ---", 1)[1].split("--- Deep Information ---", 1)[0]
+        assert "\033[2m" not in repro_block
+
+        # Basic depth excludes Reproducibility summary.
+        res_basic = run_pubrun("show", str(run_dir), "--basic", env={"NO_COLOR": "1"})
+        assert res_basic.returncode == 0
+        assert "--- Reproducibility ---" not in res_basic.stdout
+
+        # Section extracts (logs, env, packages) remain untouched.
+        for sec in ("logs", "env", "packages"):
+            res_sec = run_pubrun("show", str(run_dir), sec, env={"NO_COLOR": "1"})
+            assert res_sec.returncode == 0
+            assert "--- Reproducibility ---" not in res_sec.stdout
+            assert "PUBRUN DIAGNOSTICS" not in res_sec.stdout
