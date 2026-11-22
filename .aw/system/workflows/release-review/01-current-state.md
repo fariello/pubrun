@@ -10,7 +10,8 @@
 
 Understand the repository as it exists now before recommending or making changes. Reconcile actual implementation, tests, documentation, build files, packaging, release artifacts, and recent changes.
 
-This is primarily a review and discovery section. Do not modify tracked project files except for required run setup, such as removing a stale `workflow-artifacts/` line from `.gitignore` so the run artifacts can be tracked.
+This is primarily a review and discovery section. Do not modify tracked project files except for required run setup, such as confirming `.aw/workflow-artifacts/` is gitignored (the framework-owned `.aw/.gitignore` already carries the anchored `/workflow-artifacts/` pattern; check with `git check-ignore -v .aw/workflow-artifacts/`).
+
 
 ## Standing constraints for this section
 
@@ -19,7 +20,7 @@ This is primarily a review and discovery section. Do not modify tracked project 
 - Do not create broad refactors or formatting churn.
 - Use run-specific unique IDs for every finding and action.
 - Update the finding and action registers before leaving this section.
-- Use TodoWrite if available, but treat `workflow-artifacts/release-review/<RUN_ID>/` as authoritative.
+- Use TodoWrite if available, but treat `.aw/workflow-artifacts/release-review/<RUN_ID>/` as authoritative.
 - Mark non-applicable checks explicitly rather than forcing findings.
 - Prefer meaningful fixes, not checklist compliance.
 
@@ -32,16 +33,17 @@ Recommended inspection targets include `README.md`, `CHANGELOG.md`, `CONTRIBUTIN
 
 Also discover, in this section:
 
-- **Guiding-principles document(s):** `GUIDING_PRINCIPLES.md`, `PRINCIPLES.md`, `.agents/GUIDING_PRINCIPLES.md`, a "Principles" section in `README.md`/`CONTRIBUTING.md`, or any equivalent referenced by `AGENTS.md`. Record its location and a concise summary of each principle. If none exists, record that the universal fallback principles in `00-run-protocol.md` apply.
-- **Backlog / TODO sources:** `TODO.md`, `TODO`, `TODOS.md`, `BACKLOG.md`, `ROADMAP.md`, `KNOWN_ISSUES.md`, `.agents/TODO.md`, issue-tracker exports, and in-code `TODO`/`FIXME`/`HACK`/`XXX` markers. Inventory each source and roughly how many open items it holds. Do not triage them yet beyond noting obvious release blockers; full triage happens across Sections 2 through 7 and is consolidated in `todo-reconciliation.md`.
-- **Pending agent plans and staged prompts:** implementation plans / IPDs and queued prompt files that were prepared but not yet executed. Check `.agents/plans/pending/` (and any sibling `pending/`-style plan-staging dir), IPDs anywhere whose `Status:` line marks them pending/awaiting-approval/not-executed, `prompts/`/`.agents/prompts/` or similar staging dirs, and any status/location mismatch (a plan in `done/` still marked pending, or vice versa). List each pending plan or staged prompt with its path and apparent status. Do NOT execute any of them. Classify each against this release (in-scope-and-pending, deferred to a later release, or stale/superseded); this list feeds the loud Section 8 Go/No-Go warning per `00-run-protocol.md`.
+- **Guiding-principles document(s):** `GUIDING_PRINCIPLES.md`, `PRINCIPLES.md`, `.aw/GUIDING_PRINCIPLES.md` or legacy `.agents/GUIDING_PRINCIPLES.md`, a "Principles" section in `README.md`/`CONTRIBUTING.md`, or any equivalent referenced by `AGENTS.md`. Record its location and a concise summary of each principle. If none exists, record that the universal fallback principles in `00-run-protocol.md` apply.
+- **Backlog / TODO sources:** `TODO.md`, `TODO`, `TODOS.md`, `BACKLOG.md`, `ROADMAP.md`, `KNOWN_ISSUES.md`, `.aw/` backlog or legacy `.agents/TODO.md`, issue-tracker exports, and in-code `TODO`/`FIXME`/`HACK`/`XXX` markers. Inventory each source and roughly how many open items it holds. Do not triage them yet beyond noting obvious release blockers; full triage happens across Sections 2 through 7 and is consolidated in `todo-reconciliation.md`.
+- **Pending agent plans and staged prompts:** implementation plans / IPDs and queued prompt files that were prepared but not yet executed. Check `.aw/records/plans/pending/` (or legacy `.agents/plans/pending/`, and any sibling `pending/`-style plan-staging dir), IPDs anywhere whose `Status:` line marks them pending/awaiting-approval/not-executed, `.aw/records/prompts/`/`prompts/` (or legacy `.agents/prompts/`) or similar staging dirs, and any status/location mismatch (a plan in `done/` still marked pending, or vice versa). List each pending plan or staged prompt with its path and apparent status. Do NOT execute any of them. Classify each against this release (in-scope-and-pending, deferred to a later release, or stale/superseded); this list feeds the loud Section 8 Go/No-Go warning per `00-run-protocol.md`.
  - **Project intent and stakeholders:** what outcome/goal the project exists to serve, and who its users, operators, and stakeholders are. This grounds the eight-persona review.
 
 After the discovery above and BEFORE starting the audit (and before any parallel audit lanes), apply the **Section 1 pre-flight gate** defined in `00-run-protocol.md`: a cursory look at the discovered TODO/backlog items and pending plans/prompts, and a single bounded ask ONLY when a real signal exists (a pending plan/prompt, a status/location mismatch, or an obviously risky/blocking item) - when clean, skip the ask and proceed silently. When it fires, the ask is verdict-free (names the items, does not assert readiness), ABORT-to-discuss on "yes" (recorded in `00-run-metadata.md`), forget-and-proceed on "no", and the loud-WARNING fallback when non-interactive. This is an early safety net in addition to the Section 7 reconciliation and the Section 8 warning.
 
 ## Allowed actions
 
-Allowed: inspect files, run non-destructive discovery commands, create and update run artifacts, remove a stale `workflow-artifacts/` line from `.gitignore` if present (run artifacts are committed deliverables), and make a local setup commit of the initialized run artifacts (and any `.gitignore` change) when safe.
+Allowed: inspect files, run non-destructive discovery commands, create and update local run artifacts, and confirm `.aw/workflow-artifacts/` is gitignored (`git check-ignore -v .aw/workflow-artifacts/`; the framework-owned `.aw/.gitignore` supplies the anchored `/workflow-artifacts/` pattern).
+
 
 Not allowed: product code changes, test changes, documentation changes except run artifacts, deleting files, or moving files.
 
@@ -49,7 +51,7 @@ Not allowed: product code changes, test changes, documentation changes except ru
 
 Determine what the project currently does, likely project type and scope, likely public contract, existing tests and validation commands, documentation and specifications, build/packaging/deployment/CI/release artifacts, recent changes, obvious drift among artifacts, stale or obsolete candidates, and major ambiguities that affect later sections.
 
-Apply the review scope exclusions from `00-run-protocol.md`: do not inventory or characterize `release-review/` (the runbook) or `workflow-artifacts/` (run records) as part of the project. Exclude them from project type, size, structure, test, and documentation assessments. Record in `01-repository-inventory.md` that these directories are present but out of scope (unless the user has explicitly made the framework itself the subject of the review).
+Apply the review scope exclusions from `00-run-protocol.md`: do not inventory or characterize `release-review/` (the runbook) or `.aw/workflow-artifacts/` (run records) as part of the project. Exclude them from project type, size, structure, test, and documentation assessments. Record in `01-repository-inventory.md` that these directories are present but out of scope (unless the user has explicitly made the framework itself the subject of the review).
 
 ## Required outputs
 
@@ -83,7 +85,7 @@ Use parallel lanes when the repository is large, unfamiliar, or has clearly sepa
 
 If using parallel lanes:
 
-1. Create `workflow-artifacts/release-review/<RUN_ID>/audit-lanes/`.
+1. Create `.aw/workflow-artifacts/release-review/<RUN_ID>/audit-lanes/`.
 2. Define lane scopes.
 3. Instruct lanes to remain read-only.
 4. Require each lane to use `templates/audit-lane-report.md`.
@@ -103,4 +105,4 @@ Do not proceed to Section 2 until all are true (MUST):
 - [ ] `deprecation-candidates.md`, `todo-reconciliation.md`, `guiding-principles-assessment.md`, `persona-review.md` are initialized.
 - [ ] Parallel-audit decision recorded in `05-decisions.md`.
 - [ ] Per-phase report `section-summaries/01-current-state.md` written.
-- [ ] Checkpoint recorded in `08-checkpoints.md` and committed.
+- [ ] Checkpoint recorded in `08-checkpoints.md` (local-only); the section's tracked product changes, if any, committed. The checkpoint file itself stays local-only; do not commit it.

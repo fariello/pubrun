@@ -6,10 +6,21 @@ Establish review scope, project rules, evidence, and the pre-review plan state.
 
 ## 1. Build the scope ledger
 
-List every requested candidate plan and mark it:
+The ledger contains ONLY the plans explicitly named in the invocation, plus any
+that the project's own documented eligibility rules add. Do NOT enumerate other
+plans in the repository (e.g. everything in `pending/` or `executed/`) to build
+the ledger. A "candidate" is a ledger entry: an explicitly named target, or a
+plan a documented eligibility rule adds. A plan that was never a candidate is an
+"incidental file" and MUST NOT appear in the ledger or the final report.
+
+Mark each candidate:
 
 - `ELIGIBLE` - review it.
-- `NOT REVIEWED` - skip it and record the exact reason.
+- `NOT REVIEWED` - a candidate skipped, with the exact reason (missing,
+  unreadable, malformed beyond review, not a planning document, or wrong status
+  per project rules). NOT REVIEWED NEVER lists a plan that was never a candidate;
+  if the ledger is exactly the requested target(s) and none were skipped, the
+  final NOT REVIEWED section is `(none)`.
 
 Use project eligibility and status rules when they exist. Otherwise review an
 explicitly requested plan unless it is missing, unreadable, malformed beyond
@@ -53,7 +64,14 @@ For each plan:
 2. List its material files, requirements, issues, ADRs, APIs, schemas, tests,
    and behavior claims.
 3. Open the actual evidence.
-4. Verify material claims with `path:line` citations.
+4. Verify material claims with `path:line` evidence:
+   - Locate the cited construct by symbol, heading, section ID, or quoted string, treating the line number as a hint (spec `ipd-structure-and-linting` Section 10.2).
+   - Disposition:
+     - Anchor resolves and only the line moved: no finding, or at most one LOW batched finding per plan noting the drift.
+     - Anchor does not resolve anywhere, or resolves to something that contradicts the claim: a real evidence finding at the severity of the claim it supports.
+     - Bare `path:line` with no anchor that no longer matches: search for the described construct before judging, and record which case applied.
+   - Costlier error: rejecting a citation the reviewer merely failed to re-locate is WORSE than under-reporting drift, because a review finding is durable and tracked while drift is not. Measured in this repository: backlog `88manw` recorded that plan `si24ia`'s review finding PR-305 rejected a correct spec section citation and substituted a wrong one, which subsequent readers propagated. The rule covers section or heading anchors in specs and docs, not only code symbols.
+   - Git ref asymmetry: the same costlier error rule applies to git citations. The trigger is narrow: ONLY when a reviewer is about to declare that a branch, lane, or commit cited as evidence no longer exists. `git branch -a` answers a question about REFS while the evidence lives in OBJECTS. Before declaring lane or branch evidence unrecoverable, a reviewer must search dangling objects by subject (e.g. via `runner_shared.find_dangling_commits_by_subject` or `git fsck --connectivity-only`), and must record which check was run. Precedent: backlog `1ffh63` recorded that review finding PR-001 on plan `kl18sz` declared a replay source unsatisfiable on a refs-only reading and weakened V-01 to a 4-path substitute plus a synthetic fallback, while the finalize tip was resolvable and the real replay was LARGER than claimed. Limits: dangling objects are LOCAL to one checkout, are NOT cloned, and expire to gc; a resolving dangling commit is a legitimate evidence source and NEVER a durable archive, and a plan must not be written to depend on one persisting.
 5. Record missing, stale, contradictory, or inaccessible evidence.
 6. Do not infer unsupported implementation details.
 
@@ -77,6 +95,19 @@ Before editing:
 If Git is unavailable or a safe commit cannot be made, continue when safe and
 record the reason.
 
+## 5. Structural preflight (before the audit lanes)
+
+For each eligible agent-executable IPD, run the deterministic structural linter as a GATE before
+opening the audit lanes:
+
+    aw ipd lint --phase author --agent <plan-file>
+
+Only a `conforming` disposition proceeds. Exit `1` is a distinct STRUCTURAL finding to repair
+before a passing verdict; exit `2` (the linter could not run) is a hard stop, not a skip. INVOKE
+the linter; do not paraphrase its checks. It proves STRUCTURE and STATE only; the semantic audit
+lanes remain fully required and separate. (The `machine preflight unavailable: bootstrap` label
+applies only while the linter does not yet exist.)
+
 ## Exit gate
 
 Do not proceed until:
@@ -87,3 +118,4 @@ Do not proceed until:
 - [ ] Material plan claims are grounded in repository evidence.
 - [ ] Documentation/specification impact is identified.
 - [ ] Pre-review snapshot is committed, skipped, or explained.
+- [ ] Structural preflight (`aw ipd lint --phase author`) is `conforming`, or its findings are recorded to repair before a passing verdict.

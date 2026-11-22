@@ -1,4 +1,4 @@
-# .agents/comms/
+# .aw/records/comms/
 
 Filesystem inter-agent communication (IAC). A portable, agent-agnostic convention for leaving
 messages between agents (and between an agent and a human). It works WITH OR WITHOUT any broker or
@@ -6,13 +6,13 @@ daemon: without one, messages simply wait on disk and are picked up when an agen
 
 ## Layout
 
-- `local/` (gitignored): this box only, ephemeral. `inbox/` incoming, `sent/` your outgoing copies,
+- `untracked/` (gitignored): this box only, ephemeral. `inbox/` incoming, `sent/` your outgoing copies,
   `archive/` processed, `scheduled/` messages whose `Not-Before` time has not arrived, `acks/`
   acknowledgement files. Never committed.
 - `shared/` (tracked): deliberate, durable messages that should travel with the repo. Commit these
   like any other artifact.
 
-The directory you write to IS the privilege level: `local/` = ephemeral/untracked, `shared/` =
+The directory you write to IS the privilege level: `untracked/` = ephemeral/untracked, `shared/` =
 durable/tracked.
 
 ## Message format
@@ -44,4 +44,7 @@ target agent (read/in-progress/done/not-done/executed/not-executed). A target-as
 `executed` is a CLAIM by that agent, not proof; no automation may treat it as proof. Anything needing
 prose is a reply message, not an ack.
 
-See the agent-comms convention spec under `.agents/docs/specs/` for the full definition.
+After reading a message, a target agent MAY record its progress by running
+`python3 -m agent_workflows.comms_acks ack <msg-id> read --by <proj.agent>` (and later
+`done`/`executed`/etc.), writing an acknowledgement file into the `untracked/acks/` lane.
+Acknowledgements are entirely optional because the convention works without them.

@@ -10,13 +10,21 @@
     "state_runtime": "target-ignored",
     "records": "target-tracked"
   },
-  "git_policies": {},
+  "git_policies": {
+    "system": "target-git",
+    "config_project": "target-git",
+    "config_local": "ignored",
+    "state_durable": "ignored",
+    "state_runtime": "ignored",
+    "records": "target-git"
+  },
   "enabled_hosts": [
     "opencode",
     "claude",
     "antigravity"
   ],
   "non_secret_consent": {},
+  "delivery_mode": "tracked",
   "records_backend": "repository",
   "cutovers": {
     "spec_id6": "2026-11-22",

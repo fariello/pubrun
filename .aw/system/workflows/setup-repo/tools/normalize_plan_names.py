@@ -26,17 +26,18 @@ the git-first-commit date differ by more than a day (the tell-tale of an importe
 file, whose git-commit records when it entered THIS repo, not when it was authored), the
 file is flagged `imported?` and held from auto-rename unless `--assume-dates` is passed.
 
-Scope (D50): by default scans `.agents/plans/`, `.agents/prompts/`, and `.agents/docs/`. `--area NAME`
-(repeatable) replaces that set with exactly the named top-level areas; `--all` scans every
-top-level area under `.agents/`. Only `*.md` whose IMMEDIATE parent is a lifecycle dir
-(pending/executed/superseded/not-executed/reusable/done) is rename-eligible; files nested
-deeper are reported but not renamed unless `--include-nested`. `.agents/workflows/` is never
-a rename target.
+Scope (D50; layout-aware per IPD awretrofit Order 02): the records base is `.aw/records/` when
+present, else legacy `.agents/`. By default scans the `plans/`, `prompts/`, and `docs/` areas under
+that base. `--area NAME` (repeatable) replaces that set with exactly the named top-level areas;
+`--all` scans every top-level area under the records base. Only `*.md` whose IMMEDIATE parent is a
+lifecycle dir (pending/executed/superseded/not-executed/reusable/done) is rename-eligible; files
+nested deeper are reported but not renamed unless `--include-nested`. The framework `workflows/` tree
+is never a rename target.
 
 Usage:
   python3 normalize_plan_names.py --repo .                       # check (text)
   python3 normalize_plan_names.py --repo . --format json          # machine-readable
-  python3 normalize_plan_names.py --repo . --all                  # scan every .agents/ area
+  python3 normalize_plan_names.py --repo . --all                  # scan every records area
   python3 normalize_plan_names.py --repo . --area plans           # only plans/
   python3 normalize_plan_names.py --repo . --exclude '*/drafts/*' # extra exclusion
   python3 normalize_plan_names.py --repo . --apply                # staged git mv renames
@@ -60,6 +61,10 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 AGENTS_DIR = ".agents"
+# Migrated layout: records live under `.aw/records/` (areas: plans, prompts, docs). This shipped
+# tool is standalone/dependency-free (it cannot import agent_workflows.record_producers), so it
+# resolves the records base inline: prefer `.aw/records/` when present, else legacy `.agents/`.
+AW_RECORDS_DIR = ".aw/records"
 DEFAULT_AREAS = ("plans", "prompts", "docs")
 LIFECYCLE_SUBDIRS = (
     "pending",
@@ -74,33 +79,55 @@ DOCS_SUBDIRS = (
     "walkthroughs",
     "specs",
     "prompts",
+    "releases",
 )
 # The framework tree is never a rename target regardless of flags.
 NEVER_AREA = "workflows"
+
+
+def _resolve_records_base(repo_root):
+    """Resolve the records base dir, layout-aware (IPD awretrofit Order 02).
+
+    Prefer the migrated ``.aw/records/`` when it exists, else fall back to legacy ``.agents/``.
+    Inline (no ``agent_workflows`` import) because this is a shipped standalone script.
+    """
+
+    aw_base = repo_root / AW_RECORDS_DIR
+    if aw_base.is_dir():
+        return aw_base
+    return repo_root / AGENTS_DIR
+
 
 # Default exclusions: only README.md (the sole framework-owned file that must never be
 # renamed). We deliberately do NOT hardcode personal-layout globs like */sources/* (D50).
 DEFAULT_EXCLUDES = ("*/README.md", "README.md")
 
-# Canonical form: YYYYMMDD-HHMM-NN-<slug>.md
-_NEW_RE = re.compile(
-    r"^(?P<date>\d{8})-(?P<time>\d{4})-(?P<nn>\d{2})-(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)\.md$"
-)
-# Legacy shapes (ordered; first match wins). Each yields date + optional time/nn + slug.
-_LEGACY_RES = (
-    # YYYYMMDD-HHMM-<slug>  (time, no NN): 4-digit group
-    re.compile(r"^(?P<date>\d{8})-(?P<time>\d{4})-(?P<slug>.+)\.md$"),
-    # YYYYMMDD-NN-<slug>    (NN, no time): 2-digit group
-    re.compile(r"^(?P<date>\d{8})-(?P<nn>\d{2})-(?P<slug>.+)\.md$"),
-    # YYYY-MM-DD-NN-<slug>  (hyphenated date + NN)
-    re.compile(
-        r"^(?P<y>\d{4})-(?P<mo>\d{2})-(?P<d>\d{2})-(?P<nn>\d{2})-(?P<slug>.+)\.md$"
-    ),
-    # YYYY-MM-DD-<slug>     (hyphenated date)
-    re.compile(r"^(?P<y>\d{4})-(?P<mo>\d{2})-(?P<d>\d{2})-(?P<slug>.+)\.md$"),
-    # YYYYMMDD-<slug>       (date only)
-    re.compile(r"^(?P<date>\d{8})-(?P<slug>.+)\.md$"),
-)
+# The Set-clustering grammar and the facet list come from THE ONE file-name library,
+# `agent_workflows.artifact_naming` (maintainer ruling 2026-11-09: one parser, no private copies).
+# This script therefore requires the toolkit package, which every supported install provides: the
+# `aw` command itself is that package, and `aw install` is how this file reaches a repository.
+# Run it with the same Python that runs `aw` (for example `aw` is on PATH; `python3 -m pip show
+# agent-workflows` names the environment). A missing package is reported with that instruction
+# rather than guessed around, because a second copy of the grammar is how the linter and the board
+# came to disagree with the library.
+try:
+    from agent_workflows import artifact_naming as _naming
+except (
+    ImportError
+) as _exc:  # pragma: no cover - environment error, reported to the user
+    raise SystemExit(
+        "normalize_plan_names.py needs the agent-workflows package (the `aw` command). Run it with "
+        "the Python environment that runs `aw`, or install the toolkit there. "
+        f"(import error: {_exc})"
+    )
+
+_ARTIFACT_TYPE_FACETS = tuple(_naming.ARTIFACT_TYPE_FACETS)
+_FACET_ALT = _naming._FACET_ALT
+_CLUSTERED_RE = _naming._CLUSTERED_RE
+# Canonical legacy form YYYYMMDD-HHMM-NN-<slug>.md, the plan-name conformance rule (library-owned).
+_NEW_RE = _naming._LEGACY_TIMESTAMP_CONFORMANT_RE
+# Pre-standard legacy shapes (renamable inputs), owned by the library.
+_LEGACY_RES = _naming.LEGACY_RENAMABLE_RES
 # A parseable YYYYMMDD embedded anywhere in a name (for non-numeric renaming, D50/OQ2).
 _EMBEDDED_DATE_RE = re.compile(r"(?<!\d)(\d{8})(?!\d)")
 
@@ -108,7 +135,14 @@ _EMBEDDED_DATE_RE = re.compile(r"(?<!\d)(\d{8})(?!\d)")
 def _framework_version() -> str:
     """Return the framework version from the neighboring VERSION file (three dirs up)."""
 
-    version_path = Path(__file__).resolve().parent.parent.parent / "VERSION"
+    _tool_root = Path(__file__).resolve().parent.parent.parent
+    # VERSION lives at the bundle root (legacy .agents/workflows/VERSION) OR, under the
+    # nested .aw/system/ layout, as the system-root SIBLING one level up (.aw/system/VERSION).
+    version_path = (
+        _tool_root / "VERSION"
+        if (_tool_root / "VERSION").is_file()
+        else _tool_root.parent / "VERSION"
+    )
     try:
         value = version_path.read_text(encoding="utf-8").strip()
     except OSError:
@@ -138,10 +172,18 @@ def parse_name(filename: str) -> Optional[Parsed]:
     a date), or None if the name matches no known shape (e.g. non-numeric).
     """
 
+    # Strip a known uniform-grammar facet (`<...>.<type>.md` -> `<...>.md`) so a faceted name parses
+    # identically to its bare form (spec 20260817-2147-01). Only a CLOSED-enum facet is stripped.
+    for _facet in _ARTIFACT_TYPE_FACETS:
+        _suffix = f".{_facet}.md"
+        if filename.endswith(_suffix):
+            filename = filename[: -len(_suffix)] + ".md"
+            break
+
     m = _NEW_RE.match(filename)
     if m:
         return Parsed(
-            m.group("date"), m.group("time"), m.group("nn"), m.group("slug"), True
+            m.group("date"), m.group("hhmm"), m.group("nn"), m.group("slug"), True
         )
     for rx in _LEGACY_RES:
         m = rx.match(filename)
@@ -157,10 +199,28 @@ def parse_name(filename: str) -> Optional[Parsed]:
     return None
 
 
-def is_conformant(filename: str) -> bool:
-    """True only for a fully valid canonical name with a clean lowercase-kebab slug."""
+def is_conformant(
+    filename: str, expected_type: str = "ipd", require_id6: bool = False
+) -> bool:
+    """True for a valid canonical plan name: either the Set-clustering grammar
+    ``YYYYMMDD-<set-id>-<NN>-<id6>-<slug>[.<type>].md`` (current, plans-adopter) or the older
+    ``YYYYMMDD-HHMM-NN-<slug>.md`` form (accepted for compatibility). Both use clean
+    lowercase-kebab slugs.
 
-    return _NEW_RE.match(filename) is not None
+    When a clustered name carries a `.<type>` facet it must match ``expected_type`` (a plan is an
+    ``ipd``); a facet of the wrong type (e.g. a plan named ``...-slug.spec.md``) is NONCONFORMANT
+    even though the facet is a known token (spec 20260817-2147-01).
+
+    ``require_id6`` (IPD ha55fi E-02): when True the legacy ``YYYYMMDD-HHMM-NN-<slug>`` form is NOT
+    accepted - only the clustered id6-bearing grammar conforms. The DEFAULT (False) preserves the
+    exact prior behavior for every artifact type, so pre-cutover artifacts still validate; the
+    spec-id6 checker cutover (check_engine) is the only caller that passes ``require_id6=True``, and
+    only for specs dated at/after the configured cutover. The legacy ``_NEW_RE`` is deliberately NOT
+    removed: other types and pre-cutover artifacts still rely on it."""
+
+    return _naming.is_plan_name_conformant(
+        filename, expected_type=expected_type, require_id6=require_id6
+    )
 
 
 # --------------------------------------------------------------------------------------
@@ -324,7 +384,7 @@ def _is_excluded(rel: str, excludes) -> bool:
 
 
 def _resolve_areas(all_areas: bool, areas) -> Optional[list]:
-    """Return the list of area names to scan; None means 'every top-level area under .agents/'."""
+    """Return the list of area names to scan; None means 'every top-level area under the records base'."""
 
     if all_areas:
         return None
@@ -357,7 +417,7 @@ def scan(
     base = list(DEFAULT_EXCLUDES) if include_default_excludes else []
     excludes = base + list(excludes or [])
     area_list = _resolve_areas(all_areas, areas)
-    agents = repo_root / AGENTS_DIR
+    agents = _resolve_records_base(repo_root)
 
     # Determine which top-level area dirs to walk.
     if area_list is None:
@@ -524,14 +584,14 @@ def main(argv=None) -> int:
         "--area",
         action="append",
         default=None,
-        help="Top-level .agents/ area to scan (repeatable); replaces the default "
+        help="Top-level records-base area to scan (repeatable); replaces the default "
         "plans+prompts set. E.g. --area plans --area prompts.",
     )
     ap.add_argument(
         "--all",
         dest="all_areas",
         action="store_true",
-        help="Scan every top-level area under .agents/ (never .agents/workflows/).",
+        help="Scan every top-level area under the records base (never .agents/workflows/).",
     )
     ap.add_argument(
         "--exclude",
@@ -618,7 +678,7 @@ def main(argv=None) -> int:
         reportable = [r for r in items if r.reason != "conformant"]
         if not reportable:
             print(
-                "All scanned plan/prompt filenames conform to YYYYMMDD-HHMM-NN-<slug>.md."
+                "All scanned filenames conform to the naming grammar (YYYYMMDD-<setid>-NN-<id6>-<slug>.<type>.md; the legacy YYYYMMDD-HHMM-NN-<slug>.md form is also accepted)."
             )
         else:
             print("Filenames that are not canonical (old -> proposed new / status):")

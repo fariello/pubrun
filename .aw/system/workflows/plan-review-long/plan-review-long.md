@@ -20,6 +20,7 @@ These rules apply in every step:
 7. Never push or include unrelated files in a commit.
 8. The reviewed/not-reviewed enumeration is the final output.
 9. A gate or interactive question MUST NOT assert or imply the verdict it precedes (readiness, approval, GO); it states what was found and asks what to do. The verdict is formed only from the reviewed work's evidence.
+10. Review the plan's writing against the technical writing standard (`../technical-writing/technical-writing.md`), including requirement 12 (diagrams); every wording fix must preserve meaning, obligations, and recorded evidence.
 
 Use `../release-review/fix-decision-policy.md` for the Fix Bar and
 `../release-review/00-run-protocol.md` for the eight personas. Security is a
@@ -87,6 +88,10 @@ The run is complete only when:
 - every deferral passes the Fix Bar;
 - every resolvable question is resolved and written into the plan;
 - plan status and workflow history are updated;
+- the structured `- Readiness: <go | go-pending-approval | no-go>` front-matter field is written
+  into every reviewed plan (the mapping and the rule that history-line prose is NOT the machine
+  signal are stated in `03-resolve-and-finalize.md`; this is kept identical to the single-file
+  `../plan-review/plan-review.md` (and `../plan-review/steps/s7-finalize.md`) per the parity note above);
 - commits are made or explained;
 - the final report uses `report-template.md` exactly; and
 - no output follows its final reviewed/not-reviewed enumeration.

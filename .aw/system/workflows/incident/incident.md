@@ -28,7 +28,7 @@ the same failure harder next time, not to assign fault.
 Write the post-mortem to the project's convention (ask if unclear): `docs/incidents/`,
 `docs/postmortems/`, or create `docs/incidents/`. Name it
 `YYYY-MM-DD-<incident-slug>.md`. Emit follow-up action IPDs into the project's pending
-plans directory (default `.agents/plans/pending/`), one per action, dated and named. These
+plans directory (default `.aw/records/plans/pending/`), one per action, dated and named. These
 run through the normal IPD -> plan-review -> approve -> execute pipeline.
 
 ## Protocol
@@ -52,6 +52,11 @@ run through the normal IPD -> plan-review -> approve -> execute pipeline.
    (or `draft` if a stub) and a `## Workflow history` line
    (`- <date> /incident (<agent/model>): emitted from post-mortem <slug>`). **Commit** the
    post-mortem and the action IPDs, and NEVER push (commit-only).
+8. **Closing report.** End by presenting the shared closing report
+   (`../assess/templates/closing-report.md`): the artifacts CREATED (the post-mortem path and
+   EACH action IPD path, one per line), or - if the post-mortem yielded no follow-up actions -
+   that no action IPDs were created and why (only the post-mortem was written), plus the next
+   steps (review the post-mortem; `/plan-review` each action IPD, then approve).
 
 ## Post-mortem structure
 

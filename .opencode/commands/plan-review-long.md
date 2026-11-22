@@ -3,8 +3,11 @@ description: Same as plan-review, in a multi-file orchestrator form: a small mem
 agent: build
 ---
 
-Read and execute @.agents/workflows/plan-review-long/plan-review-long.md.
+<!-- Deprecation notice: `/plan-review-long` is deprecated; prefer `/aw plan-review-long`. This alias continues to work for now but will eventually be pruned. -->
+
+Read and execute @.aw/system/workflows/plan-review-long/plan-review-long.md.
 
 If the user provided arguments, treat them as the target path(s) and/or flags for this workflow: $ARGUMENTS
 
 Treat the referenced file as the controlling instruction and follow it fully.
+Reporting: follow `AGENTS.md#aw:reporting` (concise prose; required reports still in full).

@@ -8,6 +8,9 @@ Guided and interactive, like `setup-repo`: you ask questions, the user answers, 
 produce the spec document with per-step confirmation. It writes a planning artifact; it
 does not write code.
 
+Write the spec to the technical writing standard (`../technical-writing/technical-writing.md`): check the complete draft against
+every numbered requirement, including requirement 12 (diagrams), before you present it.
+
 ## Division of labor with `/advise spec-editor`
 
 - **`spec` PRODUCES the artifact** (this workflow): it drafts the specification document.
@@ -21,14 +24,16 @@ hand off.
 ## Where the spec goes
 
 Detect the project's convention (ask if unclear): a specs/RFC/ADR directory
-(`.agents/docs/specs/`, `docs/rfcs/`, `.agents/plans/`), or create `.agents/docs/specs/` if none exists.
+(`.aw/records/specs/`, `docs/rfcs/`, `.aw/records/plans/`), or create `.aw/records/specs/` if none exists.
 Name the file `YYYY-MM-DD-<slug>.md`. Confirm the location with the user before writing.
 
 ## Protocol
 
 1. **Understand the request.** Read `$ARGUMENTS` and any referenced material. Restate the
    request in one or two sentences and confirm you have it right before going further.
-2. **Interview for the essentials** (ask in small batches, not all at once):
+2. **Interview for the essentials** (ask in small batches, not all at once; when a question
+   is a picker/decision, put its full question set - context, question, options - inside the
+   interactive prompt itself, per GUIDING_PRINCIPLES P12):
    - The problem and the goal (the job to be done, and for whom).
    - Non-goals and explicit scope boundaries.
    - Users/actors and their key scenarios.
@@ -41,8 +46,12 @@ Name the file `YYYY-MM-DD-<slug>.md`. Confirm the location with the user before 
    the file.
 5. **Write the file** to the confirmed location, add a `## Workflow history` line
    (`- <date> /spec (<agent/model>): drafted spec`), then **commit** it and NEVER push
-   (commit-only). Point the user at the next steps: `/advise spec-editor <file>` to harden
-   it, then `/plan-review` on the implementation plan when one exists.
+   (commit-only).
+6. **Closing report.** End by presenting the shared closing report
+   (`../assess/templates/closing-report.md`): the artifact CREATED (the spec file path), or -
+   if the user declined the write - that none was created and why, plus the next steps:
+   `/advise spec-editor <file>` to harden it, then `/plan-review` on the implementation plan
+   when one exists.
 
 ## Spec structure
 
@@ -58,6 +67,7 @@ Name the file `YYYY-MM-DD-<slug>.md`. Confirm the location with the user before 
 - **Constraints and dependencies:** what bounds the solution; what it relies on.
 - **Risks and open questions:** known unknowns, decisions still needed.
 - **Out-of-scope / future:** deliberately deferred ideas.
+- Diagrams where requirement 12 of the writing standard applies (entities and relationships, flows and lifecycles).
 
 ## Honesty and guardrails
 

@@ -17,6 +17,26 @@ A **lens** file selects the concern (performance, security, accessibility, ...) 
 supplies the concern-specific rubric and lead personas. Read it and apply it on top of
 this shared protocol.
 
+## What you are assessing (the SUBJECT), stated once
+
+**The subject is the project's own substance: its source code, tests, docs, configuration,
+UI/CLI text, and dependencies.** With no scope argument, assess the whole project's
+substance. With a scope argument, assess exactly what was named (a subdirectory, module,
+feature, or set of files) and nothing wider.
+
+**The IPD is this workflow's OUTPUT, never its subject.** This file says "IPD" often, and
+every lens row in the manifest ends with "propose an IPD", because emitting a plan is what
+the workflow DOES with its findings. That is not an instruction to review plans. Likewise,
+Step 0 below spends many lines discovering the plan/IPD lifecycle purely so you know WHERE
+TO FILE your output; reading that section is not assessing it.
+
+So a bare `/assess bugs` hunts defects in the PROJECT'S CODE, not in the structure, naming,
+or conformance of the IPDs under `.aw/records/plans/`. The records trees (`.aw/records/`:
+plans, specs, backlog, research, walkthroughs) are the project's process artifacts, not its
+substance, and are OUT of a bare run's scope; assess them only when a scope argument names
+them explicitly (e.g. `/assess prose .aw/records/specs/`). A lens that does not name its own
+subject inherits this rule; it does not widen it.
+
 ## Selecting the concern (which lens)
 
 This workflow is invoked as `/assess <concern> [scope]` (or, in agents without native
@@ -42,7 +62,7 @@ If this file was invoked with a specific lens already named (an explicit
 `lenses/<concern>.md` reference), just use it.
 
 It shares this framework's policies rather than redefining them (the release-review
-runbook is a sibling under `.agents/workflows/`):
+runbook is a sibling under `.aw/system/workflows/`):
 
 - **Fix Bar - applied here as "what to propose":** `../release-review/fix-decision-policy.md`.
   Propose addressing every finding by default; recommend deferring only when the
@@ -68,7 +88,7 @@ memory: fix-by-default gated by Remediation Risk, and multi-perspective review.
 
 It **does** write two durable outputs: the IPD (the proposal, in the pending-plans
 directory) and a run record (the evidence and report of this assessment, under
-`workflow-artifacts/`). See below.
+`.aw/workflow-artifacts/`). See below.
 
 ---
 
@@ -79,14 +99,18 @@ directory) and a run record (the evidence and report of this assessment, under
 2. **Guiding principles** - `GUIDING_PRINCIPLES.md` or equivalent; or the universal
    fallback in `../release-review/00-run-protocol.md`.
 3. **Plan/IPD lifecycle location and format** - where plans live and any required
-   structure. Discover the project's existing convention and USE it (do not impose a
-   different one): a pending dir (e.g. `.agents/plans/pending/`, `docs/rfcs/`, an ADR
-   dir) and terminal dirs for finished plans. If none exists, create and use the
-   canonical five-state lifecycle: `.agents/plans/pending/` (new/awaiting-approval IPDs),
-   `.agents/plans/executed/` (terminal; implemented, verified, and tested),
-   `.agents/plans/superseded/` (replaced by a better/subsequent plan; kept for the
-   record), `.agents/plans/not-executed/` (deliberately decided against, no replacement),
-   and `.agents/plans/reusable/` (recurring plans meant to be re-run repeatedly, e.g. a
+   structure. In an `aw`-managed repository, run `aw path records` to locate the active
+   records root and create plans with `aw ipd scaffold` (or under `<aw path records>/plans/pending/`).
+   In `public-target-private-companion` repositories, durable records live in the external
+   companion repository, so target-local `.aw/records/` must never receive plans. Outside
+   `aw`-managed repositories, discover the project's existing convention and USE it (do not
+   impose a different one): a pending dir (e.g. `.aw/records/plans/pending/`, `docs/rfcs/`,
+   an ADR dir) and terminal dirs for finished plans. If none exists, create and use the
+   canonical five-state lifecycle: `.aw/records/plans/pending/` (new/awaiting-approval IPDs),
+   `.aw/records/plans/executed/` (terminal; implemented, verified, and tested),
+   `.aw/records/plans/superseded/` (replaced by a better/subsequent plan; kept for the
+   record), `.aw/records/plans/not-executed/` (deliberately decided against, no replacement),
+   and `.aw/records/plans/reusable/` (recurring plans meant to be re-run repeatedly, e.g. a
    periodic audit or rollout runbook - these stay here rather than moving on after a run).
    Plan files are named `YYYYMMDD-HHMM-NN-<slug>.md` (local date+time; `NN` a two-digit
    per-minute sequence, `00` reserved for an orchestrator, `01+` otherwise; lowercase-kebab
@@ -101,8 +125,10 @@ directory) and a run record (the evidence and report of this assessment, under
    canonical vocabulary). A newly-written IPD is born `to-review`.
 4. **Contributor contract** - `AGENTS.md`/`CONTRIBUTING.md` for plan/spec-sync rules.
 5. **Apply the review scope exclusions** from `../release-review/00-run-protocol.md`:
-   do not assess the framework's own directory (`.agents/workflows/`) or
-   `workflow-artifacts/` run records as if they were the project.
+   do not assess the framework's own directory (`.aw/system/workflows/`), the
+   `.aw/workflow-artifacts/` run records, or the `.aw/records/` process artifacts (plans,
+   specs, backlog, research, walkthroughs) as if they were the project. Each lifts only on
+   an explicit scope argument naming it, per the SUBJECT section above.
 
 Then read the selected lens file and adopt its focus, lead personas, and rubric.
 
@@ -121,26 +147,38 @@ Then read the selected lens file and adopt its focus, lead personas, and rubric.
    Fix-by-default: propose acting on everything unless Remediation Risk is Medium-High
    or higher (then propose deferral with the named axis). Down-scope to the safe part
    where possible; never silently drop a finding.
-4. **Guard scope (KISS):** the Complexity axis is the counterweight to fix-by-default.
+4. **Guard scope and right-sizing (KISS):** the Complexity axis is the counterweight to fix-by-default.
    Flag over-scope (untraceable to a need - propose removal/deferral) and under-scope
-   (a needed capability that is missing - propose adding it). Do not gold-plate.
-5. **Write the IPD** to the pending-plans directory using `templates/ipd.md`, named per
-   the project's filename convention (canonical: `YYYYMMDD-HHMM-NN-<slug>.md`, local
+   (a needed capability that is missing - propose adding it). Enforce right-sizing: each E-item
+   must address one concern and be executable in one focused pass; split when an E-item names
+   multiple distinct deliverables or touches multiple independent test-surfaces. Do not gold-plate.
+5. **Write the IPD** to the pending-plans directory. In an `aw`-managed repository, create
+   the plan via `aw ipd scaffold` (or write it under `<aw path records>/plans/pending/`).
+   In `public-target-private-companion` repositories, target-local `.aw/records/` must never
+   receive plans; write the plan only under the companion records root returned by
+   `aw path records`. When `aw` tooling is unavailable, write the IPD using `templates/ipd.md`,
+   named per the project's filename convention (canonical: `YYYYMMDD-HHMM-NN-<slug>.md`, local
    date+time, `NN` a two-digit per-minute sequence with `00` reserved for an orchestrator),
    e.g. `<plans-pending>/YYYYMMDD-HHMM-NN-assess-<concern>.md`. Set the IPD's front-matter
    `Status: to-review` (assess produces a complete proposal, which is review-ready by
    default; use `draft` only if you are deliberately emitting a stub), and add the first
    `## Workflow history` line: `- <date> /assess <concern> (<agent/model>): assessed;
    proposed N changes`.
-6. **Write the run record** to `workflow-artifacts/assess-<concern>/<RUN_ID>/` (see the
+6. **Write the run record** to `.aw/workflow-artifacts/assess-<concern>/<RUN_ID>/` (see the
    next section) so the report and evidence are durable, not just shown in chat.
-7. **Commit** the IPD and the run record, and NEVER push (commit-only; no remote changes).
-   They are committed deliverables by default (the same policy as release-review; keep
-   local only if the user asks). Do not commit unrelated changes; run `git status --short`
-   first.
-8. **Report and stop.** Present the report (below) to the user with the IPD and run-
-   record paths, and ask them to review and approve (optionally via `plan-review`)
-   before execution. Do not execute.
+7. **Commit ONLY the IPD**, and NEVER push (commit-only; no remote changes). In
+   `public-target-private-companion` (companion) mode, never commit the IPD into the target
+   repository; commit it only inside the companion Git repository if initialized, and never
+   push. The run record in `.aw/workflow-artifacts/` is local-only working material: the
+   framework-owned `.aw/.gitignore` ignores it (the anchored pattern `/workflow-artifacts/`,
+   verifiable with `git check-ignore -v .aw/workflow-artifacts/`), so do NOT commit or
+   force-add it. Do not commit unrelated changes; run `git status --short` first.
+
+8. **Report and stop.** Present the report (below) to the user, ending with the shared
+   closing report (`templates/closing-report.md`): the artifact paths CREATED (the IPD and
+   the run record), or - if the assessment proposed no IPD - that NONE was created and WHY,
+   plus the next steps. Ask them to review and approve (optionally via `plan-review`) before
+   execution. Do not execute.
 
 ---
 
@@ -154,6 +192,10 @@ tests/validation; spec/doc sync if behavior changes; open questions; and an expl
 **approval and execution gate** stating the plan must be human-approved before
 execution and is not auto-run.
 
+Structure each task group and execution leaf around one concern executable in one focused pass;
+split when an E-item names multiple distinct deliverables or touches multiple independent
+test-surfaces. A passing count-based size lint measures count, not conceptual density.
+
 Keep the IPD honest and self-contained enough that a different agent or engineer could
 execute it later with no other context (the cold-start standard).
 
@@ -165,11 +207,11 @@ Persist the assessment's report and evidence so it is durable and auditable, mir
 release-review's run record but scaled to this lighter workflow. Create:
 
 ```text
-workflow-artifacts/assess-<concern>/<RUN_ID>/
+.aw/workflow-artifacts/assess-<concern>/<RUN_ID>/
 ```
 
 Use a timestamp run ID (`YYYYMMDD-HHMMSS`); the workflow name is the concern
-(e.g. `workflow-artifacts/assess-security/20260630-101500/`). Write:
+(e.g. `.aw/workflow-artifacts/assess-security/20260630-101500/`). Write:
 
 | File | Contents |
 |---|---|
@@ -179,12 +221,14 @@ Use a timestamp run ID (`YYYYMMDD-HHMMSS`); the workflow name is the concern
 | `evidence.md` | What was inspected (files/paths/commands run) so the assessment is reproducible; note any content that was truncated/sampled. |
 | `ipd-link.md` | The path to the IPD this run wrote, and a one-line summary, so the run record and the plan cross-reference each other. |
 
-The `workflow-artifacts/` directory is a committed deliverable and is out of review
-scope (never assess it as if it were the project). Do not git-ignore it. Keep the run
-record local only if the user explicitly asks for local-only artifacts.
+The `.aw/workflow-artifacts/` directory contains local-only working material and is out of review
+scope (never assess it as if it were the project). The framework-owned `.aw/.gitignore` ignores it
+(the anchored pattern `/workflow-artifacts/`; confirm with `git check-ignore -v
+.aw/workflow-artifacts/` rather than trusting this sentence). Do not commit or force-add it.
+
 
 Distinction: the **IPD** (in the pending-plans dir) is the living proposal that moves
-through the approval/execution lifecycle; the **run record** (in `workflow-artifacts/`)
+through the approval/execution lifecycle; the **run record** (in `.aw/workflow-artifacts/`)
 is the durable evidence and report of *this assessment run*.
 
 ---
@@ -194,7 +238,6 @@ is the durable evidence and report of *this assessment run*.
 ```
 ## Assessment - <concern> <scope if narrowed>
 Verdict: <strong / adequate / needs work / at risk> for <concern>
-IPD written: <path>
 
 ### Top findings
 | ID | Severity | Remediation Risk | Persona | Finding |
@@ -206,8 +249,26 @@ IPD written: <path>
 ### Deferred (with reason)
 - <finding>: Remediation Risk <Medium-High|High> on <axis> because <reason>.
 
+### Artifacts and next steps (see templates/closing-report.md)
+Created:
+  IPD:        <path to the IPD in the pending-plans dir>
+  Run record: <path>   (or: not written (local-only / skipped / none))
+
 Next step: review the IPD (optionally run plan-review on it) and approve before
 execution. This workflow does not execute the plan.
+```
+
+If the assessment proposed NO IPD (the current state is adequate, or the user declined the
+write), present the not-created form of the closing report instead of `Created: IPD: ...`:
+
+```
+### Artifacts and next steps (see templates/closing-report.md)
+Created: none.
+Reason:  <assessed <concern> across <scope> and found nothing warranting a plan | the user
+         declined the write | aborted at <point>>.
+  Run record: <path>   (or: not written (...))
+
+Next step: <no action required; re-run after relevant changes | the specific follow-up>.
 ```
 
 Be rigorous and specific, cite evidence, and do not invent issues where there are

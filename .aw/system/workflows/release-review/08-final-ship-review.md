@@ -20,7 +20,7 @@ Be practical but conservative. The goal is not to claim perfection. The goal is 
 - Do not create broad refactors or formatting churn.
 - Use run-specific unique IDs for every finding and action.
 - Update the finding and action registers before leaving this section.
-- Use TodoWrite if available, but treat `workflow-artifacts/release-review/<RUN_ID>/` as authoritative.
+- Use TodoWrite if available, but treat `.aw/workflow-artifacts/release-review/<RUN_ID>/` as authoritative.
 - Mark non-applicable checks explicitly rather than forcing findings.
 - Prefer meaningful fixes, not checklist compliance.
 
@@ -57,7 +57,7 @@ Before writing the final report:
 Before writing the final report, create or update:
 
 ```text
-workflow-artifacts/release-review/<RUN_ID>/final-bug-security-audit.md
+.aw/workflow-artifacts/release-review/<RUN_ID>/final-bug-security-audit.md
 ```
 
 This is not a full repeat of Section 2. It is a final post-implementation sanity audit focused on whether changes made during the run introduced or left unresolved material issues.
@@ -86,9 +86,17 @@ If a new material issue is found, update the finding and action registers and de
 
 Run the most appropriate repository-native validation commands available and safe. Record all results in `10-validation-results.md`. If validation cannot be run, explain why and assess release risk.
 
-Use the `verify` workflow (`verify/tools/run_checks.py`) to run the repo's own checks and produce machine-checkable evidence (`workflow-artifacts/verify/<RUN_ID>/verify-results.json`): actual commands, exit codes, metrics, and logs. `10-validation-results.md` should CITE that evidence rather than assert results from reading the code.
+**Full test suite required for release evidence.** The test evidence backing the GO recommendation MUST come from the repository's FULL test target, running every test including every marker or category that routine/default runs deselect (in this toolkit that is `make test-all` or `aw suite --thorough`, i.e. `python3 -m pytest tests/ -m ''`). A default test run (`python3 -m pytest`, which runs the core tier and runner merge gate; an explicit path runs everything non-slow it names) is a fast subset for routine development and is NOT valid release evidence. Every failure in the full test run must either be fixed before release or explicitly listed as a tracked release blocker with its backlog item ID.
+
+Use the `verify` workflow (`verify/tools/run_checks.py`) to run the repo's own checks and produce machine-checkable evidence (`.aw/workflow-artifacts/verify/<RUN_ID>/verify-results.json`): actual commands, exit codes, metrics, and logs. `10-validation-results.md` should CITE that evidence rather than assert results from reading the code.
 
 **Evidence gate on the recommendation.** The GO / CONDITIONAL GO / NO-GO recommendation must be backed by this evidence. If a relevant test/lint/build/type-check could not be verified (no runnable setup, needs services/credentials, or blocked by the safety denylist), the recommendation may not be a clean GO: downgrade to CONDITIONAL GO with the unverified checks listed as explicit prerequisites, and state plainly which claims are unverified. Never issue a GO whose basis is the agent's self-report where deterministic evidence was available but not produced. "Could not verify" must appear as prominently as "verified".
+
+**Release-readiness report gate (`aw releases readiness`).** The readiness step is generic and runs in release-review in EVERY repository (no repository-specific carve-out). Run `aw releases readiness --suite-passed` (or `--suite-failed` if the full test target failed; never pass `--residual-risk-signer` before the human answers the Section 8 decision banner) and record its full gate table in `10-validation-results.md` and `12-final-response.md` (matching `ReleaseReviewCoordinator.verify_readiness` in `STAGE_VERIFY`). Counts must be recorded reading `N passed, M not-applicable, K failed`, never folding M into N. The gate classes are treated deterministically:
+- **Attestation gate (`residual_risk`):** before the human answers the decision banner, `residual_risk` is unsigned and fails. When `residual_risk` is the ONLY failing gate (every other applicable gate passed), Section 8 treats the check as eligible for a `GO` recommendation (`pending_human_attestation=True`), with the human's subsequent Section 8->9 approval supplying `--residual-risk-signer "<approver>"`.
+- **Standing corpus / seed-data gates (`ipd_lint`, `capability_freshness`):** when either gate fails and no hard gate fails, the recommendation cannot be a clean `GO`. If untriaged or in-scope for this release, the recommendation is `NO-GO`. If triaged as an out-of-scope pending plan or tracked standing item, the recommendation is capped at `CONDITIONAL GO`, and each failing gate must be named in the `RELEASE REVIEW DECISION` banner's `Blocking / pending items` and `Conditions` lines.
+- **Hard technical / release-integrity gates (`full_suite`, `leak_scan`, `benchmark_thresholds`, `generated_drift`, `docs_checks`, `workflow_disposition`, `changelog_versioning`, `artifact_manifest`):** any failure in these 8 gates forces `NO-GO` unconditionally (unless a `full_suite` failure is already tracked as an explicit release blocker, which still caps the recommendation at `CONDITIONAL GO` or `NO-GO`, never `GO`). Hard gates can never be triaged as standing corpus noise.
+- **Not-applicable gates:** a gate whose input files are absent is reported NOT-APPLICABLE, does not force `NO-GO`, needs no triage or waiver, and is NEVER counted or described as passed. A not-applicable `full_suite` or `residual_risk` is a hard failure (fail closed). Every not-applicable gate must be named in a bold `WARNING` in the Go/No-Go section and the summary, and in the `RELEASE REVIEW DECISION` banner's `Blocking / pending items` line, with the reason "input absent, NOT verified".
 
 ## Final schema validation check
 
@@ -114,7 +122,7 @@ Use `REL` IDs for final release decisions and blockers. Preserve earlier IDs whe
 
 ## Push/no-push plan
 
-Create or update `workflow-artifacts/release-review/<RUN_ID>/11-push-plan.md` with current branch, local commits, Git status, whether the user explicitly permitted pushing, push recommendation, risks, suggested command if permitted, and no-push rationale if permission is absent.
+Create or update `.aw/workflow-artifacts/release-review/<RUN_ID>/11-push-plan.md` with current branch, local commits, Git status, whether the user explicitly permitted pushing, push recommendation, risks, suggested command if permitted, and no-push rationale if permission is absent.
 
 Do not push unless explicitly permitted.
 
@@ -124,7 +132,7 @@ Decide whether a new review run should be started. Recommend restart only when i
 
 ## Final report
 
-Save the final report to `workflow-artifacts/release-review/<RUN_ID>/12-final-response.md`, then present the same content to the user.
+Save the final report to `.aw/workflow-artifacts/release-review/<RUN_ID>/12-final-response.md`, then present the same content to the user.
 
 Create or update `section-summaries/08-final-ship-review.md` with the Section 8 final ship review summary.
 
@@ -167,6 +175,7 @@ The primary fork the user sees is candidate-versus-full, so the two cannot be co
 The run is complete only when all are true (MUST):
 
 - [ ] `final-bug-security-audit.md` written; final validation run and recorded in `10-validation-results.md`.
+- [ ] **Release-readiness gate (`aw releases readiness`):** run with the honest `--suite-passed` / `--suite-failed` flag (and without forging `--residual-risk-signer`), recorded in `10-validation-results.md` and `12-final-response.md` with counts `N passed, M not-applicable, K failed`, its standing-`NO-GO` rules applied to the recommendation, and every not-applicable gate named in a bold `WARNING` ("input absent, NOT verified") in the summary, Go/No-Go section, and decision banner.
 - [ ] Eight-persona sign-off completed in `persona-review.md` and the report.
 - [ ] TODO/backlog reconciliation, guiding-principles assessment, self-documenting assessment, and cold-start orientation verdict finalized.
 - [ ] Live-surface / data-integrity gate applied to the GO/CONDITIONAL GO/NO-GO recommendation.

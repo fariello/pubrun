@@ -7,8 +7,8 @@ This file defines the global rules for the release review. These rules apply to 
 1. `README.md` is the controlling instruction.
 2. This file defines shared rules.
 3. Section files `01` through `09` define phase-specific tasks (`09` runs only after a GO/CONDITIONAL GO and explicit user approval to release).
-3a. `fix-decision-policy.md` is the authoritative fix policy. `reference.md` holds on-demand look-up tables (type codes, ID examples, schema/CI lists) and is not part of the always-read core.
-4. `workflow-artifacts/release-review/<RUN_ID>/` is the authoritative run record.
+   - `fix-decision-policy.md` is the authoritative fix policy. `reference.md` holds on-demand look-up tables (type codes, ID examples, schema/CI lists) and is not part of the always-read core.
+4. `.aw/workflow-artifacts/release-review/<RUN_ID>/` is the authoritative run record.
 5. TodoWrite, if available, is live progress tracking only.
 
 If a section file appears to conflict with this protocol, follow this protocol and record the conflict in `05-decisions.md`.
@@ -17,17 +17,19 @@ If a section file appears to conflict with this protocol, follow this protocol a
 
 The review operates on the **target project**. The framework's own files and its run records are NOT part of the project under review. Unless the user explicitly states that the framework itself is the subject of this review, exclude the following from the audit scope of every section (and every parallel audit lane):
 
-- **This framework's own directory** (wherever it is installed - e.g. `.agents/workflows/release-review/` and the sibling `plan-review/`, or a `release-review/` directory at the repo root) and any agent-tooling wrappers it ships (`.opencode/commands/`, `.claude/commands/`, `.agents/workflows/index.md`). Do not file findings about the runbook, do not assess it for quality/docs/usability, and do not modify it as part of fixing the target project. You are *executing* these instructions, not reviewing or editing them.
-- **`workflow-artifacts/`** - the authoritative run records (this run and any prior runs). Do not audit them as if they were project code or docs.
+- **This framework's own directory** (wherever it is installed - e.g. `.aw/system/workflows/release-review/` and the sibling `plan-review/`, or a `release-review/` directory at the repo root) and any agent-tooling wrappers it ships (`.opencode/commands/`, `.claude/commands/`, `.aw/system/workflows/index.md`). Do not file findings about the runbook, do not assess it for quality/docs/usability, and do not modify it as part of fixing the target project. You are *executing* these instructions, not reviewing or editing them.
+- **`.aw/workflow-artifacts/`** - the authoritative run records (this run and any prior runs). Do not audit them as if they were project code or docs.
+- **`.aw/records/`** (plans, specs, backlog, research, walkthroughs) - the project's PROCESS artifacts, not its substance. Do not audit an IPD, spec, or backlog item as if it were project code, docs, or user-facing prose: do not file findings about a plan's structure, id numbering, filename conformance, or writing quality, and do not treat the plans tree as the codebase under review. Assess these trees only when the user's scope argument names one explicitly (e.g. `/assess prose .aw/records/specs/`), which is the general explicit-scope override below. **This exclusion is narrower than it looks, and does NOT suppress the reads these runbooks require:** the pending-plans / staged-prompts blocker signal (see "Pending agent plans and staged prompts" below) still discovers, inventories, and loudly surfaces pending work, and `aw check` / `aw ipd lint` / `aw attention` remain the authority on records conformance. Those consume a plan's STATUS as release signal; they do not review its craft.
 
 This is an exclusion from *review scope*, not from all action:
 
-1. You still **create, write, and commit** `workflow-artifacts/release-review/<RUN_ID>/` - that is the run's own output, not a review target.
-2. You **may read** prior `workflow-artifacts/release-review/<RUN_ID>/` records as input (e.g. to see what an earlier run did), but do not generate findings about them.
+1. You still **create and write** `.aw/workflow-artifacts/release-review/<RUN_ID>/` - that is the run's own output, not a review target. The same holds for a workflow that files into `.aw/records/` (for example `assess` writing its IPD to `.aw/records/plans/pending/`): writing your own output there is not reviewing the tree.
+
+2. You **may read** prior `.aw/workflow-artifacts/release-review/<RUN_ID>/` records as input (e.g. to see what an earlier run did), but do not generate findings about them.
 3. Do not count these directories when assessing project size, structure, test coverage, documentation, or cold-start orientation. A project's `README`, `ARCHITECTURE`, tests, etc. are the project's own, not the framework's.
 4. **Self-modification guard:** never edit the framework's own files during a run. If the runbook itself seems wrong, record it as a `Q`/`DEC` note in `05-decisions.md` for the user; do not change the instructions mid-run.
 
-**Explicit-subject exception:** if the user explicitly asks to review the framework itself (for example, when the target repository *is* the project that maintains this runbook), then the framework directory is in scope as ordinary project code and these exclusions are lifted for it - but `workflow-artifacts/` run records remain excluded regardless.
+**Explicit-subject exception:** if the user explicitly asks to review the framework itself (for example, when the target repository *is* the project that maintains this runbook), then the framework directory is in scope as ordinary project code and these exclusions are lifted for it - but `.aw/workflow-artifacts/` run records remain excluded regardless. The `.aw/records/` exclusion lifts the same way, and only the same way: a scope argument or an explicit request that NAMES those trees puts them in scope. A repository that merely *happens* to maintain this framework does not thereby put its own plans and specs under review, because a bare run's subject is still the project's substance.
 
 When in doubt, treat both directories as out of scope and note the assumption in `05-decisions.md`.
 
@@ -44,7 +46,7 @@ Every obligation in this framework is one of two tiers:
 
 When a section uses the words MUST or SHOULD (or "mandatory"), read them in this sense. The MUST set is small on purpose so it is never dropped; the global MUSTs are:
 
-1. Create and maintain the `workflow-artifacts/release-review/<RUN_ID>/` artifacts (registers, decisions, the per-phase report for each section).
+1. Create and maintain the `.aw/workflow-artifacts/release-review/<RUN_ID>/` artifacts (registers, decisions, the per-phase report for each section).
 2. Apply the Fix Bar to every finding and record Remediation Risk; never silently drop a finding.
 3. Fix or explicitly escalate every `LIVE`/High data-integrity finding (never silently defer to `TODO.md`).
 4. Write the per-section exit-gate items before leaving a section.
@@ -68,7 +70,7 @@ On a high-capability model, perform the full depth of every SHOULD (rich persona
 
 ### Phase-isolated execution mode (optional)
 
-Because `workflow-artifacts/release-review/<RUN_ID>/` is the authoritative state, each audit phase can run with its own fresh context instead of one long continuous transcript. This is optional and useful on fast/small models or very large repositories, where a long transcript degrades.
+Because `.aw/workflow-artifacts/release-review/<RUN_ID>/` is the authoritative state, each audit phase can run with its own fresh context instead of one long continuous transcript. This is optional and useful on fast/small models or very large repositories, where a long transcript degrades.
 
 If running phase-isolated:
 
@@ -113,7 +115,7 @@ You do not have to write eight separate persona analyses in every section. Inste
 
 ## Guiding principles adherence
 
-If the repository contains a guiding-principles document (`GUIDING_PRINCIPLES.md`, `PRINCIPLES.md`, `.agents/GUIDING_PRINCIPLES.md`, a "Principles" section in `README.md`/`CONTRIBUTING.md`, or an equivalent named in `AGENTS.md`), treat it as a binding contract for this review:
+If the repository contains a guiding-principles document (`GUIDING_PRINCIPLES.md`, `PRINCIPLES.md`, `.aw/GUIDING_PRINCIPLES.md` or legacy `.agents/GUIDING_PRINCIPLES.md`, a "Principles" section in `README.md`/`CONTRIBUTING.md`, or an equivalent named in `AGENTS.md`), treat it as a binding contract for this review:
 
 1. Discover and read it during Section 1; record its location and a summary in `01-repository-inventory.md`.
 2. In every audit section, check the project against each stated principle and file findings for violations (type `GP`).
@@ -146,7 +148,7 @@ The target knowledge set (adapt names to the project's existing convention):
 | Intent, goals, objectives, audience | `README.md` top section or `docs/OVERVIEW.md` | Why the project exists, who it serves, what success looks like, scope and non-goals. |
 | Philosophy / guiding principles | `GUIDING_PRINCIPLES.md` (or equivalent) | The values and design philosophy the project commits to. Establish this if absent (see Section 5). |
 | Architecture and approach | `ARCHITECTURE.md` / `DESIGN.md` / `docs/architecture/` | How the system is structured, the main components and how they fit, the approach taken and why that shape. |
-| Design / architectural decision rationale | `DECISIONS.md`, an ADR directory (`docs/adr/`, `.agents/decisions/`), or equivalent | Significant decisions, the *why*, alternatives considered, and trade-offs. Append-only and dated where practical. |
+| Design / architectural decision rationale | `DECISIONS.md`, an ADR directory (`docs/adr/`, `.aw/records/` or legacy `.agents/decisions/`), or equivalent | Significant decisions, the *why*, alternatives considered, and trade-offs. Append-only and dated where practical. |
 
 **Respect the project's existing convention.** If the project already keeps this knowledge somewhere (ADRs, a `docs/` tree, a wiki pointer, a `METHODS/` directory, design docs), detect it and extend/correct that rather than imposing new files. Only introduce a new file when the knowledge has no existing home. Do not duplicate the same rationale in multiple places; link instead.
 
@@ -169,7 +171,7 @@ If intent or decision rationale is genuinely missing and cannot be recovered fro
 
 ## TODO.md and tracked-backlog reconciliation
 
-Many repositories carry a `TODO.md` (or equivalent: `TODO`, `TODOS.md`, `BACKLOG.md`, `ROADMAP.md`, `KNOWN_ISSUES.md`, `.agents/TODO.md`, issue-tracker exports, or `TODO`/`FIXME`/`HACK`/`XXX` markers in code). These often contain items that should - or might need to - be addressed before a release. This review must not ignore them.
+Many repositories carry a `TODO.md` (or equivalent: `TODO`, `TODOS.md`, `BACKLOG.md`, `ROADMAP.md`, `KNOWN_ISSUES.md`, `.aw/` backlog or legacy `.agents/TODO.md`, issue-tracker exports, or `TODO`/`FIXME`/`HACK`/`XXX` markers in code). These often contain items that should - or might need to - be addressed before a release. This review must not ignore them.
 
 1. **Discover** all such backlog sources in Section 1 and inventory them in `01-repository-inventory.md`.
 2. **Triage** every TODO-like item against this release. For each, classify it as:
@@ -186,8 +188,8 @@ Many repositories carry a `TODO.md` (or equivalent: `TODO`, `TODOS.md`, `BACKLOG
 Repositories driven by agent workflows often accumulate **planned-but-not-executed work**: implementation plans / IPDs awaiting approval or execution, and staged prompt files queued to be run. These are distinct from `TODO.md` backlog items - they are concrete, often-approved units of work that were prepared and then left un-actioned. Shipping while such plans sit pending frequently means releasing with known, already-planned work deliberately or accidentally skipped. This review must surface them **loudly**, not silently.
 
 1. **Discover** in Section 1 and inventory in `01-repository-inventory.md`. Common locations (check those that exist, do not invent):
-   - `.agents/plans/pending/` (and any sibling `pending/`-style plan staging dir); IPDs anywhere clearly marked pending/awaiting-approval/not-executed by their `Status:` line.
-   - `prompts/`, `.agents/prompts/`, or a similar staging directory holding prompt files queued for execution.
+   - `.aw/records/plans/pending/` (or legacy `.agents/plans/pending/`, and any sibling `pending/`-style plan staging dir); IPDs anywhere clearly marked pending/awaiting-approval/not-executed by their `Status:` line.
+   - `prompts/`, `.aw/records/prompts/` (or legacy `.agents/prompts/`), or a similar staging directory holding prompt files queued for execution.
    - Plans in a `done/`/executed dir whose `Status:` still says pending, or vice versa (a status/location mismatch).
 2. **Do not execute them.** Discovering a pending plan or staged prompt never authorizes running it during the review.
 3. **Classify** each pending plan/prompt against this release: is it work that was expected to ship in this release (a blocker signal), legitimately deferred to a later release, or stale/superseded?
@@ -198,7 +200,7 @@ Repositories driven by agent workflows often accumulate **planned-but-not-execut
 
 After Section 1 discovery (above) and BEFORE any audit work - specifically BEFORE starting any parallel audit lanes, so an abort saves the whole run - apply an early, interactive pre-flight gate. This is an EARLY safety net that is DISTINCT from, and in addition to, the thorough Section 7 TODO reconciliation and the Section 8 pending-plans WARNING (all of which remain). Its purpose: catch "did you mean to ship without handling this?" before spending a full review.
 
-1. **Cursory look, not a second triage.** Take a genuinely cursory pass over (a) the discovered `TODO.md`/backlog items and (b) the discovered pending agent plans (`.agents/plans/pending/`) and staged prompts (`.agents/prompts/pending/`), including any status/location mismatch. You are only judging whether a REAL SIGNAL exists that should be confirmed, addressed, or actively ignored before contemplating a release: a pending plan/IPD or staged prompt, a status/location mismatch, or an obviously risky/blocking TODO item. You are not scoring every item.
+1. **Cursory look, not a second triage.** Take a genuinely cursory pass over (a) the discovered `TODO.md`/backlog items and (b) the discovered pending agent plans (`.aw/records/plans/pending/` or legacy `.agents/plans/pending/`) and staged prompts (`.aw/records/prompts/pending/` or legacy `.agents/prompts/pending/`), including any status/location mismatch. You are only judging whether a REAL SIGNAL exists that should be confirmed, addressed, or actively ignored before contemplating a release: a pending plan/IPD or staged prompt, a status/location mismatch, or an obviously risky/blocking TODO item. You are not scoring every item.
 2. **Ask ONLY when a real signal exists.** If the cursory look surfaces such a signal, ASK the user a single, bounded pre-flight question that names the specific items found (TODO items AND pending plans/prompts together, one interruption, not two). If the look is CLEAN (no such signal), SKIP the ask and proceed silently to the audit - do NOT manufacture a question, and do NOT manufacture a "nothing found" verdict.
 3. **Verdict-free framing (MUST).** When the ask fires, it states WHAT WAS FOUND and asks what to do about it; it MUST NOT assert or imply any release-readiness verdict - no "no blockers", "looks clean", "release-ready", or pre-classifying a signal as "not a blocker". The readiness call is Section 8's alone, earned from the full audit. General principle: a gate question must not leak the verdict the gate precedes. Phrase it item-anchored, e.g.: "Found <items>. Handle any of these before I audit (abort to discuss), or proceed?"
 4. **On "yes, address first" -> ABORT (a first-class outcome).** Stop before the audit. Record the abort in `00-run-metadata.md` (which gate fired, which items, the user's answer) and tell the user how to resume once they have discussed/addressed the items. This ABORTED-PRE-FLIGHT result is distinct from a Section 8 NO-GO (which follows a full audit).
@@ -228,7 +230,7 @@ If a concern is genuinely not applicable, the owner section records that once; d
 Each section (Sections 1 through 9) must produce a per-phase report saved under:
 
 ```text
-workflow-artifacts/release-review/<RUN_ID>/section-summaries/<NN>-<short-name>.md
+.aw/workflow-artifacts/release-review/<RUN_ID>/section-summaries/<NN>-<short-name>.md
 ```
 
 Use `templates/per-phase-report.md`. Every per-phase report must explicitly cover three things:
@@ -241,12 +243,12 @@ These reports are part of the deliverable. They give the user a readable, audita
 
 ## Commit-between-phases policy
 
-In addition to committing meaningful tracked product changes (see Commit policy below), commit at every section boundary so the run is recoverable and the per-phase narrative is preserved:
+Run records under `.aw/workflow-artifacts/` are LOCAL-ONLY working material (ignored by the framework-owned `.aw/.gitignore` via the anchored `/workflow-artifacts/` pattern; see the Commit policy and `01-current-state.md`): do NOT commit or force-add them. The section-boundary commit discipline below therefore applies to the run's TRACKED PRODUCT changes, not to the run-record tree. Still WRITE each section's per-phase report and registers to `.aw/workflow-artifacts/` at the boundary (so the run is recoverable locally and the per-phase narrative is preserved on disk); you just do not commit them.
 
-1. After completing each section, commit that section's tracked product changes (if any) as a coherent unit referencing the section's action IDs.
-2. Commit the section's per-phase report and updated registers at the boundary too, since run artifacts are committed deliverables by default. Keep them local only if the user explicitly requested local-only artifacts for this run.
+1. After completing each section, commit that section's tracked PRODUCT changes (if any) as a coherent unit referencing the section's action IDs.
+2. Write (do NOT commit) the section's per-phase report and updated registers under `.aw/workflow-artifacts/` at the boundary; they stay local-only.
 3. Never bundle changes from two different sections into one commit unless they are genuinely one logical change.
-4. Record each commit in `07-commits.md` and at the section checkpoint in `08-checkpoints.md`.
+4. Record each PRODUCT commit in `07-commits.md` and note the section boundary in `08-checkpoints.md` (these registers are themselves local-only run records).
 
 ## Core behavior
 
@@ -256,7 +258,7 @@ Section 9 (release execution: pushing, tagging, publishing, deploying) is perfor
 
 There are two distinct plan artifacts; do not conflate them. `02-execution-plan.md` is the lightweight plan of *how the review itself will run*, created early in Section 1. `implementation-plan.md` is the consolidated plan of *what fixes to make*, created after Sections 1 through 6 and before Section 7.
 
-In planning-only mode, the agent still completes Sections 1 through 6 in full, including each section's per-phase report, register updates, checkpoints, and commits (run artifacts are committed deliverables). It creates `implementation-plan.md`, then stops before Section 7 implementation and presents the plan. Planning-only mode makes no product-code changes and no Section 7 commits.
+In planning-only mode, the agent still completes Sections 1 through 6 in full, WRITING each section's per-phase report, register updates, and checkpoints to `.aw/workflow-artifacts/` as local-only working material (not committed). It creates `implementation-plan.md`, then stops before Section 7 implementation and presents the plan. Planning-only mode makes no product-code changes and no commits.
 
 Proceed autonomously through the full review. Use judgment. Do not stop for minor uncertainty. Record assumptions and proceed conservatively.
 
@@ -269,10 +271,10 @@ Execute one section at a time using the per-section execution loop defined in `R
 Create:
 
 ```text
-workflow-artifacts/release-review/<RUN_ID>/
+.aw/workflow-artifacts/release-review/<RUN_ID>/
 ```
 
-Run records live under `workflow-artifacts/<workflow-name>/<RUN_ID>/` - one
+Run records live under `.aw/workflow-artifacts/<workflow-name>/<RUN_ID>/` - one
 timestamped directory per run, namespaced by the workflow that produced it (this
 runbook uses `release-review`). The run ID already encodes the timestamp, so there is
 no separate date level. Use a timestamp run ID:
@@ -281,7 +283,8 @@ no separate date level. Use a timestamp run ID:
 YYYYMMDD-HHMMSS
 ```
 
-The `workflow-artifacts/release-review/<RUN_ID>/` artifacts are committed deliverables of the review, not throwaway local notes. Do NOT add `workflow-artifacts/` to `.gitignore`. If a prior run or a stale package added `workflow-artifacts/` to `.gitignore`, remove that ignore line so the artifacts can be tracked, and record the change. Only keep run artifacts local if the user explicitly asks for that on a given run.
+The `.aw/workflow-artifacts/release-review/<RUN_ID>/` artifacts are local-only working material of the review, not committed deliverables. Do NOT commit or force-add `.aw/workflow-artifacts/`. Its ignore line is the anchored `/workflow-artifacts/` pattern in the framework-owned `.aw/.gitignore` (verify with `git check-ignore -v .aw/workflow-artifacts/`); do NOT remove it. Keep run records local to avoid tracking environment paths, usernames, or session details in project history.
+
 
 Required artifacts:
 
@@ -387,7 +390,7 @@ interactively with the human before any edit or commit.
 7. Lanes must not make final release decisions.
 8. Lanes must not assign official run-specific IDs.
 9. Lanes should use temporary candidate IDs only.
-10. Lanes must produce compact reports under `workflow-artifacts/release-review/<RUN_ID>/audit-lanes/` using `templates/audit-lane-report.md`.
+10. Lanes must produce compact reports under `.aw/workflow-artifacts/release-review/<RUN_ID>/audit-lanes/` using `templates/audit-lane-report.md`.
 11. The main agent must synthesize all lane reports before creating `implementation-plan.md`.
 12. The main agent must deduplicate findings, assign official IDs, decide severity, update registers, and record decisions.
 13. Section 7 implementation must remain serial.
@@ -422,11 +425,12 @@ Do not paste secrets or excessive logs. Summarize long outputs and save only rel
 
 ## Commit policy
 
-Use local commits for meaningful tracked repository changes when safe. The `workflow-artifacts/release-review/<RUN_ID>/` run artifacts are committed deliverables by default: commit them alongside the run so the per-phase reports, registers, plans, and final report become part of the project history. Keep them out of commits only if the user explicitly requests local-only artifacts for that run.
+Use local commits for meaningful tracked repository changes when safe. The `.aw/workflow-artifacts/release-review/<RUN_ID>/` run artifacts are local-only working material by default: do NOT commit them. Keep them out of commits so machine-specific paths, usernames, and session details are not tracked in project history.
 
 Before any commit, run `git status --short`, confirm the files to commit were changed by this run, avoid committing unrelated pre-existing changes, and run appropriate validation first or state why validation could not be run.
 
-Commit at logical checkpoints: after run setup (including the initialized `workflow-artifacts/release-review/<RUN_ID>/` artifacts), at each section boundary (per-phase report plus that section's product changes), after coherent implementation batches, after test/docs/CI updates when they form a reviewable unit, and after final validation cleanup. Keep run-artifact commits separate from product-code commits when practical so history stays readable.
+Commit at logical checkpoints: at each section boundary when product changes are made, after coherent implementation batches, after test/docs/CI updates when they form a reviewable unit, and after final validation cleanup. Never force-add or commit `.aw/workflow-artifacts/` run records.
+
 
 Use commit messages that reference action IDs. If changes cannot be separated from pre-existing user changes, do not commit. Record the blocker.
 
@@ -482,7 +486,7 @@ Some repositories will not have APIs, CLIs, UIs, packaging, deployment, docs, te
 
 ## Final report requirements
 
-Save the final report to `workflow-artifacts/release-review/<RUN_ID>/12-final-response.md`, then present the same content to the user.
+Save the final report to `.aw/workflow-artifacts/release-review/<RUN_ID>/12-final-response.md`, then present the same content to the user.
 
 The final report must follow the exact structure in `templates/final-response.md`, which is the single canonical definition of the report (column shapes included). Do not invent different table columns; use the template's.
 

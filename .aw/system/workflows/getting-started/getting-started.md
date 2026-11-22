@@ -19,7 +19,7 @@ off. Keep the tour short and adaptive.
 Quietly check the repo so the tour fits the situation:
 
 - Is the toolkit freshly installed, or already in use (any run records under
-  `workflow-artifacts/`, any IPDs under `.agents/plans/`)?
+  `.aw/workflow-artifacts/`, any IPDs under `.aw/records/plans/`)?
 - Has `setup-repo` likely been run (secret-scanning config, CI, `.gitignore`, the plan
   lifecycle dirs present)?
 - What kind of repo is this (language/build, app vs. library, has tests/CI)?
@@ -39,12 +39,15 @@ In a few sentences, not a lecture:
 - **Coaching** (`advise <persona>`) is a conversation, not a report.
 - **Guided/meta** workflows change files with your confirmation (`setup-repo`, `scaffold`);
   `verify` produces evidence; `list-workflows` shows everything.
-- Where things land: assessment/plan proposals as IPDs in `.agents/plans/pending/`; durable
-  run records under `workflow-artifacts/<workflow>/<RUN_ID>/`.
+- Where things land: assessment/plan proposals as IPDs in `.aw/records/plans/pending/`; durable
+  run records under `.aw/workflow-artifacts/<workflow>/<RUN_ID>/`; raw external research or
+  notes awaiting adoption in `.aw/inbox/` (adopted with `aw adopt`).
 
 ## Step 3: Ask the goal and route
 
-Ask what they are trying to do, and route (offer to run the chosen workflow, with consent):
+Ask what they are trying to do, and route (offer to run the chosen workflow, with consent).
+When you pose a choice interactively, put its full question set (context, question, options)
+inside the prompt itself so it is decidable from the prompt alone (GUIDING_PRINCIPLES P12):
 
 - "Set this repo up / make it conformant" -> `setup-repo`
 - "Understand what this toolkit can do" -> `list-workflows`
@@ -56,10 +59,12 @@ Ask what they are trying to do, and route (offer to run the chosen workflow, wit
 - "Measure or understand performance (with environment context)" -> `benchmark`
 - "Turn a fuzzy idea into a spec" -> `spec`; then `advise spec-editor` to harden it
 - "Get expert questions on my design/plan" -> `advise <persona>`
+- "Put the open decisions in front of me so I can answer them" -> `askme`
 - "Plan a risky migration" -> `migrate`
 - "Write release notes / bump the version" -> `release-notes`
 - "Do a post-mortem" -> `incident`
 - "Add a new workflow/lens/persona to the toolkit" -> `scaffold`
+- "Adopt external research or raw notes into records" -> drop files into `.aw/inbox/` and run `aw adopt`
 
 If the goal is unclear, ask a clarifying question rather than guessing. If several fit,
 recommend the best first step and explain why.
@@ -70,7 +75,7 @@ recommend the best first step and explain why.
   `/advise skeptic`. Arguments are supported.
 - **Codex, Cursor, Antigravity, VS Code Copilot, any other agent:** no repo-file
   slash-command mechanism - use the universal fallback: "Read and execute
-  `.agents/workflows/<body path>`" (the body path is in `index.md` / `/list-workflows`).
+  `.aw/system/workflows/<body path>`" (the body path is in `index.md` / `/list-workflows`).
 
 Confirm which tool the user is in and give the exact invocation for the workflow you
 routed to.

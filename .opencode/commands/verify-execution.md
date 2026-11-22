@@ -1,10 +1,13 @@
 ---
-description: Post-execution cross-check: verify an EXECUTED plan (IPD) was actually done as written (read the diff, check each required change, re-run the repo's real validation via /verify), always write a run record, and EMIT a corrective IPD for any gap (never fixes in place; commits only its own files path-scoped, safe to run while another agent works). Verdict MATCHES/DIVERGES/INCOMPLETE + GO/NO-GO on "truly executed?". Used to cross-check another agent's or a past session's work.
+description: Post-execution cross-check: verify an EXECUTED plan (IPD) was actually done as written AND in spirit. Runs a 5-dimension Intent & Spirit Audit (explicit requirements, implicit intent, empirical validation, scope, artifacts) against the real diff, MANDATES re-running the repo's real validation with captured output (no un-run "tests pass" claims), and rates execution fidelity (FIDELITY_EXEMPLARY..DIVERGED) mapped onto the verdict. Always writes a run record and EMITS a corrective IPD for any gap (never fixes in place; commits only its own files path-scoped, safe to run while another agent works). Verdict MATCHES/DIVERGES/INCOMPLETE + GO/NO-GO on "truly executed?". Used to cross-check another agent's or a past session's work.
 agent: build
 ---
 
-Read and execute @.agents/workflows/verify-execution/verify-execution.md.
+<!-- Deprecation notice: `/verify-execution` is deprecated; prefer `/aw verify-execution`. This alias continues to work for now but will eventually be pruned. -->
+
+Read and execute @.aw/system/workflows/verify-execution/verify-execution.md.
 
 If the user provided arguments, treat them as the target path(s) and/or flags for this workflow: $ARGUMENTS
 
 Treat the referenced file as the controlling instruction and follow it fully.
+Reporting: follow `AGENTS.md#aw:reporting` (concise prose; required reports still in full).

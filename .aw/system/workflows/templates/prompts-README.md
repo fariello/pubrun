@@ -1,29 +1,45 @@
-# .agents/prompts/
+# .aw/records/prompts/
 
-Operational STAGING for prompts, organized by lifecycle state. Prompt files are named
-`YYYYMMDD-HHMM-NN-<slug>.md` (the creating machine's local date and time; `NN` is a two-digit
-per-minute sequence; `<slug>` is lowercase kebab-case), the same convention as plans.
+Operational STAGING for prompts, organized by lifecycle state. Prompt files use the uniform artifact
+grammar `YYYYMMDD-<setid>-NN-<id6>-<slug>.prompt.md` (the creating machine's local date; `<setid>` is
+the Set id, defaulting to the slug for a prompt that belongs to no group; `NN` is the order within
+that Set; `<id6>` is the prompt's own stable 6-character citation handle; `<slug>` is lowercase
+kebab-case; `.prompt` is the uniform artifact-type facet), the same convention as plans and specs.
+Do NOT hand-name a staged prompt: `aw prompts new` mints the id6 and derives the name and metadata
+(dry-run by default, `--apply` to write, never auto-staged).
 
-Recognized prompt kinds (front-matter `Kind:`): run-once / research prompts QUEUED to be executed
-(the original staging use), and `Kind: session-handoff` resume prompts produced by `/handoff` (a
+A legacy `YYYYMMDD-HHMM-NN-<slug>.prompt.md` name dated before this repository's `prompt_id6` cutover
+stays valid and is grandfathered; convert one on demand with
+`aw rename prompts <legacy-name> --to-id6`.
+
+Pipeline metadata lives in a SINGLE leading HTML comment on the first line of the file, and the
+prompt's `Id:` is one of its fields (never a `- Id:` bullet, which would render as visible text above
+the prompt body):
+
+```text
+<!-- aw-prompt: Kind: research | Id: <id6> | Set: <setid> | Status: pending | Created: 2026-08-30 | Author: <agent> (<model>) | Targets: ... | Concerns: ... -->
+```
+
+Recognized prompt kinds (the `Kind:` field of that comment): run-once / research prompts QUEUED to be
+executed (the original staging use), and `session-handoff` resume prompts produced by `/handoff` (a
 prompt for the NEXT session rather than a task to run now). Handoff drafts are written to the
-gitignored `local/` lane (below) and promoted only after review.
+gitignored `untracked/` lane (below) and promoted only after review.
 
-This is NOT the same as `.agents/docs/prompts/`. The two prompt homes are:
+This is NOT the same as `.aw/records/prompt-library/`. The two prompt homes are:
 
-- **`.agents/prompts/`** (here): operational staging. "What prompt is queued to run?" A prompt lands
+- **`.aw/records/prompts/`** (here): operational staging. "What prompt is queued to run?" A prompt lands
   in `pending/`, is run, and its lifecycle is tracked by MOVING it between the buckets below. Answer
-  the question `ls .agents/prompts/pending/` with a glance.
-- **`.agents/docs/prompts/`**: the evergreen, copy-paste prompt LIBRARY (reference material, not stamped
+  the question `ls .aw/records/prompts/pending/` with a glance.
+- **`.aw/records/prompt-library/`**: the evergreen, copy-paste prompt LIBRARY (reference material, not stamped
   with a framework version, not a run queue).
 
 ## The prompt -> results convention
 
 A staged prompt produces RESULTS. Keep them apart:
 
-- The PROMPT lives here (`.agents/prompts/<bucket>/`).
+- The PROMPT lives here (`.aw/records/prompts/<bucket>/`).
 - Its RESULTS (the durable research/analysis you rely on) are filed under
-  `.agents/docs/research/<topic>/` (see `.agents/docs/research/README.md`).
+  `.aw/records/research/<topic>/` (see `.aw/records/research/README.md`).
 
 This separation follows the filesystem-encoded-state principle (GUIDING_PRINCIPLES P5, DECISIONS D91):
 the prompt's lifecycle is glanceable from its directory; the results are durable, path-cited artifacts.
@@ -41,20 +57,23 @@ Retire a prompt by prepending a `RETIRED YYYY-MM-DD: <reason>; superseded by <pa
 `git mv`ing it to `superseded/` or `not-executed/`. Never silently delete a prompt; retiring preserves
 the record and the reason.
 
-## The `local/` quarantine lane (gitignored) - DECISIONS D94
+## The `untracked/` quarantine lane (gitignored) - DECISIONS D94
 
-`.agents/prompts/local/` is a GITIGNORED quarantine lane for raw, sensitive, or work-in-progress
+`.aw/records/prompts/untracked/` is a GITIGNORED quarantine lane for raw, sensitive, or work-in-progress
 prompts that must NOT be accidentally committed - most importantly `/handoff` session-handoff drafts,
-which capture raw session context. It mirrors the inter-agent comms `local/` lane (D81): the directory
+which capture raw session context. It mirrors the inter-agent comms `untracked/` lane (D81): the directory
 you write to IS the privilege level.
 
-- **`local/`** (gitignored): never committed. Write raw/sensitive/WIP prompts here. A nested
-  `.agents/prompts/.gitignore` ignores it (a created deliverable; it does not touch the repo root
-  `.gitignore`). The installer materializes the dir so it is discoverable, but git does not track it
-  empty and its contents can never be committed.
+This lane is named `untracked/`; its retired name was `local/`, which an older checkout or an older
+adopter repo may still show for the same lane. Run `aw normalize-lanes` to rename it forward.
+
+- **`untracked/`** (gitignored): never committed. Write raw/sensitive/WIP prompts here. The
+  framework-owned `.aw/.gitignore` ignores it via `records/*/untracked/` (it does not touch the repo
+  root `.gitignore`). The installer materializes the dir so it is discoverable, but git does not track
+  it empty and its contents can never be committed.
 - **The tracked lifecycle buckets** (`pending/`, `executed/`, ...): durable prompts that travel with the
   repo, visible to other agents and humans.
 
-To make a `local/` prompt durable: REVIEW and scrub it (remove secrets, personal/sensitive content;
-consider `aw check-local-leaks`), then `git mv .agents/prompts/local/<file> .agents/prompts/pending/<file>`.
+To make an `untracked/` prompt durable: REVIEW and scrub it (remove secrets, personal/sensitive content;
+consider `aw check-local-leaks`), then `git mv .aw/records/prompts/untracked/<file> .aw/records/prompts/pending/<file>`.
 Promotion is a deliberate human act, never automatic.

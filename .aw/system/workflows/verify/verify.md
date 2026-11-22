@@ -62,7 +62,7 @@ outside the helper. Never silently bypass the denylist.
 Create:
 
 ```
-workflow-artifacts/verify/<RUN_ID>/
+.aw/workflow-artifacts/verify/<RUN_ID>/
 ```
 
 `<RUN_ID>` is a local-time timestamp `YYYYMMDD-HHMMSS`. Write:
@@ -73,7 +73,8 @@ workflow-artifacts/verify/<RUN_ID>/
   WHY (denied / unclassified / declined / timed-out / no-checks-found), and the honest
   bottom line.
 
-These are committed deliverables (evidence), like release-review's and assess's records.
+These are local-only working records (evidence), like release-review's and assess's records.
+
 
 ## Honesty requirement (non-negotiable)
 

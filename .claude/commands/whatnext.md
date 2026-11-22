@@ -3,8 +3,11 @@ description: Surveyor and next-action recommender: survey the repo's plans/IPDs,
 argument-hint: "[treat them as an optional focus filter to narrow the survey and recommendation (a concern, area, or path, e.g. `security` or `release`); omit to survey everything]"
 ---
 
-Read and execute @.agents/workflows/whatnext/whatnext.md.
+<!-- Deprecation notice: `/whatnext` is deprecated; prefer `/aw whatnext`. This alias continues to work for now but will eventually be pruned. -->
+
+Read and execute @.aw/system/workflows/whatnext/whatnext.md.
 
 If the user provided arguments, treat them as an optional focus filter to narrow the survey and recommendation (a concern, area, or path, e.g. `security` or `release`); omit to survey everything: $ARGUMENTS
 
 Treat the referenced file as the controlling instruction and follow it fully.
+Reporting: follow `AGENTS.md#aw:reporting` (concise prose; required reports still in full).

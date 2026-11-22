@@ -1,8 +1,8 @@
-# .agents/docs/
+# .aw/records/
 
 Durable reference documentation, research notes, and narrative execution walkthroughs.
 
-These are the STANDARD buckets. The list sets expectations; it does NOT limit what may live under `.agents/docs/` (other durable-doc content is allowed):
+These are the STANDARD buckets. The list sets expectations; it does NOT limit what may live under `.aw/records/` (other durable-doc content is allowed):
 
 - **`research/`** - durable research, surveys, or analysis that an agent relied on for design or architecture decisions.
 - **`walkthroughs/`** - narrative walkthroughs documenting the execution, validation, and verification details of implemented plans.
@@ -10,4 +10,4 @@ These are the STANDARD buckets. The list sets expectations; it does NOT limit wh
 - **`prompts/`** - a historical/reference prompt library, kept as origin material; not maintained in lockstep with the workflows and not the current spec.
 - **`roadmaps/`** - forward-looking roadmap and consideration documents.
 
-Buckets follow the standard naming convention: `YYYYMMDD-HHMM-NN-<slug>.md` (local time). Walkthrough files end with `-walkthrough.md`. The `prompts/` bucket keeps its historical filenames.
+Buckets follow the standard naming convention: `YYYYMMDD-HHMM-NN-<slug>.md` (local time), except where a type has adopted the uniform artifact grammar `YYYYMMDD-<setid>-NN-<id6>-<slug>.<type>.md` (plans, specs, prompts, research, backlog). Walkthrough files end with `-walkthrough.md`. A prompt is named by `aw prompts new` in that uniform grammar (`.prompt.md`, with a minted `<id6>`); pre-cutover historical prompt filenames remain valid and are grandfathered.

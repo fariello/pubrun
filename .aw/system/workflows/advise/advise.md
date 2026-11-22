@@ -26,7 +26,9 @@ reading and executing this file with a named persona). Resolve the persona:
    name, try these, then a closest-match against `personas/*.md`.
 3. **Unknown persona:** show the closest matches and the full list, and ask. Do not guess.
 4. **No persona given (bare `/advise`):** list the available personas with their one-line
-   charter and ask which to use. This is the picker.
+   charter and ask which to use. This is the picker. When you ask interactively, put the full
+   question set (context, question, options) inside the prompt itself so it is decidable from
+   the prompt alone (GUIDING_PRINCIPLES P12).
 5. **Further arguments** name the artifact to examine (path). With none, examine the
    current context / the thing under discussion.
 
@@ -58,7 +60,7 @@ the exception, taken with confirmation. Never change source code, and never run 
 Unless the user opts out, save a short session summary to:
 
 ```
-workflow-artifacts/advise-<persona>/<RUN_ID>/
+.aw/workflow-artifacts/advise-<persona>/<RUN_ID>/
 ```
 
 `<RUN_ID>` is a local-time timestamp `YYYYMMDD-HHMMSS`. Write `session-summary.md`:
@@ -69,8 +71,9 @@ workflow-artifacts/advise-<persona>/<RUN_ID>/
 - the improvements agreed (and any applied edits, with the consent noted);
 - open follow-ups the author still owes.
 
-This turns a conversation into a durable, committed deliverable, consistent with assess
+This turns a conversation into a durable local-only working record, consistent with assess
 and verify. It is not an IPD and does not gate anything; it is a record of the session.
+
 
 ## Scope and guardrails
 

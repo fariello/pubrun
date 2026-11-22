@@ -199,6 +199,11 @@ SKIP_DIR_NAMES = {
     ".cache",
     # Agent-workflow run records are generated deliverables (they may even contain a prior
     # scan's own redacted output); scanning them just re-flags noise, not committed secrets.
+    # DELIBERATELY BARE, not `.aw/workflow-artifacts` (wfartifacts Order 03): this set holds
+    # single path SEGMENT names, matched by `set(rel_posix.split("/")) & SKIP_DIR_NAMES` in
+    # `is_skipped_path`. A segment never contains a slash, so the prefixed spelling could match
+    # NOTHING and would silently stop excluding run records; the bare name already matches the
+    # relocated `.aw/workflow-artifacts/` AND any legacy repo-root copy, which is what we want.
     "workflow-artifacts",
 }
 # Generated lockfiles are high-entropy hash soup, not human-authored secrets.
@@ -754,12 +759,19 @@ def emit(
 def _framework_version() -> str:
     """Return the agent-workflows framework version this tool ships with.
 
-    The VERSION file lives at the framework root (.agents/workflows/VERSION); this script
-    is at .agents/workflows/assess/tools/scan_secrets.py, so it is three directories up.
+    The VERSION file lives at the framework root (.aw/system/workflows/VERSION); this script
+    is at .aw/system/workflows/assess/tools/scan_secrets.py, so it is three directories up.
     Returns "unknown" if the file is absent (e.g. run standalone outside the framework).
     """
 
-    version_path = Path(__file__).resolve().parent.parent.parent / "VERSION"
+    _tool_root = Path(__file__).resolve().parent.parent.parent
+    # VERSION lives at the bundle root (legacy .aw/system/workflows/VERSION) OR, under the
+    # nested .aw/system/ layout, as the system-root SIBLING one level up (.aw/system/VERSION).
+    version_path = (
+        _tool_root / "VERSION"
+        if (_tool_root / "VERSION").is_file()
+        else _tool_root.parent / "VERSION"
+    )
     try:
         value = version_path.read_text(encoding="utf-8").strip()
     except OSError:
