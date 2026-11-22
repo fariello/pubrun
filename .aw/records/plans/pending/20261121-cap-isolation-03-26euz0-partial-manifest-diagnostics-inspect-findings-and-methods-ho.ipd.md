@@ -143,6 +143,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - Engine hook ownership and safe diagnostic redaction primitives belong to prerequisite plan `p6pon8` (safe diagnostic redaction and hook ownership rollback across capture engines).
   - Carrier: p6pon8
+  - Carrier-Evidence: .aw/records/plans/executed/20261121-cap-isolation-01-p6pon8-safe-diagnostic-redaction-and-hook-ownership-rollback-across.ipd.md
 - Tracker per-engine failure isolation, narrow ghost mode, and independent finalization belong to prerequisite plan `ed0yds` (tracker per-engine failure isolation, narrow ghost mode, and independent finalization).
   - Carrier: ed0yds
 - Documentation updates and overhead benchmarking belong to child plan `zp2yyu` (isolation overhead measurement, documentation reconciliation, and whole-Set verification).

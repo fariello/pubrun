@@ -144,7 +144,7 @@ def _redact_value_string_heuristics(val: str, config: Optional[Dict[str, Any]] =
     # 3. Known API keys / Tokens
     openai_pattern = re.compile(r"sk-[a-zA-Z0-9]{20,}")
     val = openai_pattern.sub("[REDACTED]", val)
-    
+
     bearer_pattern = re.compile(r"(?i)(bearer|token|auth)\s+([a-zA-Z0-9._~+/-]+=*)")
     val = bearer_pattern.sub(r"\1 [REDACTED]", val)
 
@@ -229,3 +229,125 @@ def redact_argv(argv: list, config: Optional[Dict[str, Any]] = None) -> list:
 
     return result
 
+
+# Pre-compiled patterns for bounded diagnostic error-message redaction.
+_DIAG_URI_USERPASS_RE = re.compile(
+    r"([a-zA-Z0-9+.-]+)://([^\s/:@]+):([^\s/@]+)@([^\s/]+)"
+)
+_DIAG_URI_TOKEN_RE = re.compile(
+    r"([a-zA-Z0-9+.-]+)://([^\s/:@]+)@([^\s/]+)"
+)
+_DIAG_PREFIXED_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
+_DIAG_KV_EQ_RE = re.compile(
+    r"(?P<prefix>(?:^|[\s,(\[{;]))"
+    r"(?P<key>-{0,2}[A-Za-z_][A-Za-z0-9_.-]*)"
+    r"(?P<sep>\s*=\s*)"
+    r"(?P<val>\"[^\"]*\"|'[^']*'|[^\s,)\];]+)"
+)
+_DIAG_KV_COLON_RE = re.compile(
+    r"(?P<prefix>(?:^|[\s,(\[{;]))"
+    r"(?P<key>[A-Za-z_][A-Za-z0-9_.-]*)"
+    r"(?P<sep>:(?!//)\s*)"
+    r"(?P<val>\"[^\"]*\"|'[^']*'|[^\s,)\];]+)"
+)
+_DIAG_FLAG_PREFIX_RE = re.compile(
+    r"(?:^|(?<=[\s,(\[{;]))(-{1,2}[A-Za-z_][A-Za-z0-9_.-]*)(\s+)"
+)
+_DIAG_TOKEN_VAL_RE = re.compile(r"\"[^\"]*\"|'[^']*'|[^\s,)\];]+")
+
+
+def _truncate_detail(text: str, max_len: int) -> str:
+    """Truncate text to at most max_len characters, preserving '...' when max_len > 3."""
+    if max_len <= 0:
+        return ""
+    if len(text) <= max_len:
+        return text
+    if max_len > 3:
+        return text[: max_len - 3] + "..."
+    return text[:max_len]
+
+
+def _redact_flag_space_values(text: str, pattern: re.Pattern) -> str:
+    """Redact values following sensitive '--flag value' or '-flag value' pairs."""
+    out: List[str] = []
+    pos = 0
+    while pos < len(text):
+        match = _DIAG_FLAG_PREFIX_RE.search(text, pos)
+        if match is None:
+            out.append(text[pos:])
+            break
+        key_name = match.group(1).lstrip("-")
+        if pattern.search(key_name):
+            val_match = _DIAG_TOKEN_VAL_RE.match(text, match.end())
+            if val_match is not None:
+                out.append(text[pos : match.end()])
+                out.append("[REDACTED]")
+                pos = val_match.end()
+                continue
+        out.append(text[pos : match.end()])
+        pos = match.end()
+    return "".join(out)
+
+
+def _redact_diagnostic_message(
+    message: str, config: Optional[Dict[str, Any]] = None
+) -> str:
+    """Apply heuristic and key-value secret redaction to a single-line error message."""
+    pattern = _get_secret_pattern(config)
+    redacted = _DIAG_URI_USERPASS_RE.sub(r"\1://\2:[REDACTED]@\4", message)
+    redacted = _DIAG_URI_TOKEN_RE.sub(r"\1://[REDACTED]@\3", redacted)
+    redacted = _redact_value_string_heuristics(redacted, config)
+    redacted = _DIAG_PREFIXED_KEY_RE.sub("[REDACTED]", redacted)
+
+    def _replace_kv(match: re.Match) -> str:
+        key = match.group("key")
+        if pattern.search(key.lstrip("-")):
+            return f"{match.group('prefix')}{key}{match.group('sep')}[REDACTED]"
+        return match.group(0)
+
+    redacted = _DIAG_KV_EQ_RE.sub(_replace_kv, redacted)
+    redacted = _DIAG_KV_COLON_RE.sub(_replace_kv, redacted)
+    redacted = _redact_flag_space_values(redacted, pattern)
+    return redacted
+
+
+def format_safe_error_detail(
+    exc: BaseException,
+    config: Optional[Dict[str, Any]] = None,
+    max_len: int = 240,
+) -> str:
+    """Format an exception as a single-line, redacted, length-bounded detail string.
+
+    Produces ``"ExcType: redacted message"`` (or ``"ExcType"`` when the message is
+    empty) with no traceback. If redaction with a custom ``config`` raises, retries
+    with default patterns (``config=None``). If redaction still fails, falls back
+    to ``type(exc).__name__`` so this helper never raises or leaks raw text.
+    """
+    exc_type = type(exc).__name__
+    try:
+        raw_msg = str(exc)
+    except Exception:
+        raw_msg = ""
+
+    collapsed = re.sub(r"[\r\n]+", " ", raw_msg).strip()
+    if not collapsed:
+        return _truncate_detail(exc_type, max_len)
+
+    redacted_msg: Optional[str] = None
+    try:
+        redacted_msg = _redact_diagnostic_message(collapsed, config)
+    except Exception:
+        if config is not None:
+            try:
+                redacted_msg = _redact_diagnostic_message(collapsed, None)
+            except Exception:
+                redacted_msg = None
+
+    if redacted_msg is None:
+        return _truncate_detail(exc_type, max_len)
+
+    redacted_msg = re.sub(r"[\r\n]+", " ", redacted_msg).strip()
+    if not redacted_msg:
+        return _truncate_detail(exc_type, max_len)
+
+    return _truncate_detail(f"{exc_type}: {redacted_msg}", max_len)

@@ -6,7 +6,7 @@
 - Scope: Add `format_safe_error_detail()` in `src/pubrun/capture/redaction.py`; enforce transactional install, pre-existing wrapper chaining, and ownership-guarded rollback/uninstall in `src/pubrun/capture/subprocesses.py`, `src/pubrun/capture/console.py`, `src/pubrun/capture/signals.py`, and `src/pubrun/capture/resources.py`; sanitize fallback failure data in `src/pubrun/capture/invocation.py`; add behavioral ownership and rollback tests in `tests/test_hook_ownership_rollback.py`.
 - Scope-Paths: src/pubrun/capture/redaction.py, src/pubrun/capture/subprocesses.py, src/pubrun/capture/console.py, src/pubrun/capture/signals.py, src/pubrun/capture/resources.py, src/pubrun/capture/invocation.py, tests/test_hook_ownership_rollback.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Add bounded redacted error formatting and transactional ownership-guarded install/uninstall for subprocess, console, signal, and resource engines
@@ -19,12 +19,12 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: p6pon8
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: p6pon8 verified (set cap-isolation, attempt 1).
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007, PR-008
 - 2026-11-22 draft (agent): created.
@@ -69,32 +69,32 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Safe error redaction and global-hook ownership rollback
 
-- [ ] E-01 Add `format_safe_error_detail()` to `src/pubrun/capture/redaction.py` and harden the fallback exception path in `src/pubrun/capture/invocation.py`.
+- [x] E-01 Add `format_safe_error_detail()` to `src/pubrun/capture/redaction.py` and harden the fallback exception path in `src/pubrun/capture/invocation.py`.
   - Depends on: none
   - Expected outcome: `format_safe_error_detail(exc, config=None, max_len=240)` returns a single-line, redacted, length-bounded `"ExcType: message"` string (or `ExcType` when the message is empty) without tracebacks or sensitive values, falling back to default-pattern redaction and then `type(exc).__name__` if redaction raises. `get_invocation()` fallback redacts `argv` safely (or falls back to `[]` if redaction fails) and uses `format_safe_error_detail()` for `capture_state.detail`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Refactor `SubprocessSpy` in `src/pubrun/capture/subprocesses.py` to capture live pre-existing targets at `install()` time, chain to them, roll back partial installs transactionally, and enforce owner- and identity-guarded `uninstall()`.
+- [x] E-02 Refactor `SubprocessSpy` in `src/pubrun/capture/subprocesses.py` to capture live pre-existing targets at `install()` time, chain to them, roll back partial installs transactionally, and enforce owner- and identity-guarded `uninstall()`.
   - Depends on: E-01
   - Expected outcome: `SubprocessSpy.install()` accepts an optional `owner` token, snapshots current `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` at install time, chains to those saved pre-existing targets, and rolls back any already-patched target if a later patch fails. Each install generation tags spawned `Popen` instances with its state object (and holds a direct record reference in `os.system`) so post-uninstall calls and concurrent uninstalls never corrupt a newer run's records or raise `IndexError`, and failed subprocess `capture_state.detail` values use `format_safe_error_detail()`. `SubprocessSpy.uninstall(owner=None)` restores each target independently only when it still equals the wrapper `SubprocessSpy` installed, leaving later third-party wrappers intact while deactivating recording into passive passthrough.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Refactor `ConsoleInterceptor` and `TqdmSafeTee` in `src/pubrun/capture/console.py` to roll back partial `start()` failures honestly, preserve prior `faulthandler` state, run cleanup steps independently in `stop()`, and bound runtime log-write warnings without recursion.
+- [x] E-03 Refactor `ConsoleInterceptor` and `TqdmSafeTee` in `src/pubrun/capture/console.py` to roll back partial `start()` failures honestly, preserve prior `faulthandler` state, run cleanup steps independently in `stop()`, and bound runtime log-write warnings without recursion.
   - Depends on: E-01
   - Expected outcome: `ConsoleInterceptor.start()` snapshots live `sys.stdout`, `sys.stderr`, and `faulthandler.is_enabled()`, rolls back opened files, replaced streams, and owned `faulthandler` state on any setup error, and records honest failed state (`stdout.captured = False`, `stderr.captured = False`, `capture_state.status = "failed"`, bounded redacted `detail`) instead of falsely reporting `"complete"`. `ConsoleInterceptor.stop()` is idempotent, detaches `tee.log_file = None`, restores or disables `faulthandler` strictly according to prior ownership before closing `stderr_log`, and runs every cleanup step independently. `TqdmSafeTee` detaches broken `log_file` handles on write or flush failure, guards `original_stream.flush()` on closed streams, and avoids recursive logging into a wrapped `sys.stderr`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Refactor `SignalExitCapture` in `src/pubrun/capture/signals.py` and `ResourceWatcher` in `src/pubrun/capture/resources.py` for identity-guarded signal restoration, transactional rollback, independent cleanup, and honest failure states.
+- [x] E-04 Refactor `SignalExitCapture` in `src/pubrun/capture/signals.py` and `ResourceWatcher` in `src/pubrun/capture/resources.py` for identity-guarded signal restoration, transactional rollback, independent cleanup, and honest failure states.
   - Depends on: E-01
   - Expected outcome: `SignalExitCapture` records each installed shim in `_installed_handlers[signum]`, preserves expected per-signal `(OSError, ValueError)` skipping off the main thread (`capture_state.status = "partial"`), rolls back already-registered signal handlers on unexpected install or excepthook errors, restores each signal handler in `_restore_signal_handlers()` only when `signal.getsignal(signum) is shim`, and runs signal restore and `sys.excepthook` restore independently. Both `_make_handler()` and `_excepthook()` capture their prior handler/hook in local closure variables and check `_active`, forwarding passively without recording, calling `_finalize_active_run()`, or reinstalling on `SIG_DFL` after `uninstall()`, while redacting active `_exit_exception` messages via `format_safe_error_detail()`. `ResourceWatcher.stop()` is idempotent, skips `join()` and final polling on unstarted or already self-aborted threads, isolates poll and `event_stream.emit()` exceptions, stops emitting events after stop, and reports honest `"partial"` or `"failed"` `capture_state` after consecutive poll failures trigger self-abort.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Behavioral ownership and rollback verification
 
-- [ ] E-05 Create `tests/test_hook_ownership_rollback.py` covering safe error redaction, pre-existing and post-install third-party wrappers, transactional partial-install rollback, `faulthandler` preservation, and second-cleanup-failure resilience across all four hook/worker engines, then run the targeted test suite.
+- [x] E-05 Create `tests/test_hook_ownership_rollback.py` covering safe error redaction, pre-existing and post-install third-party wrappers, transactional partial-install rollback, `faulthandler` preservation, and second-cleanup-failure resilience across all four hook/worker engines, then run the targeted test suite.
   - Depends on: E-02, E-03, E-04
   - Expected outcome: `pytest tests/test_hook_ownership_rollback.py tests/test_signals.py tests/test_capture.py tests/test_resources.py tests/test_redaction.py tests/test_quality.py tests/test_edge_cases.py tests/test_pause_resume.py -v` and `pytest tests/test_cli.py -k "faulthandler or excepthook" -v` exit 0 with all tests passing.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -278,30 +278,30 @@ Deferred to child plan `zp2yyu` (isolation overhead measurement, documentation r
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Diff of `src/pubrun/capture/redaction.py` and `src/pubrun/capture/invocation.py` showing `format_safe_error_detail()` (bounded, single-line, redacted, empty-message and invalid-regex fallback-safe) and redacted `get_invocation()` fallback, plus pasted `pytest tests/test_redaction.py -v` output (exit code 0).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff src/pubrun/capture/redaction.py src/pubrun/capture/invocation.py`: `format_safe_error_detail(exc, config=None, max_len=240)` (+124 lines in `src/pubrun/capture/redaction.py`) collapses newlines, redacts URI user:pass/token, `Bearer`, `sk-...` prefixed keys, `key=value`, `--flag=value`, `key: value`, and `--flag value` tokens against `_get_secret_pattern(config)`, truncates to `max_len` with `"..."` when `max_len > 3`, retries with `config=None` on custom regex failure, and falls back to `type(exc).__name__` if redaction fails. `src/pubrun/capture/invocation.py::get_invocation` fallback redacts `list(sys.argv)` via `redact_argv()` (falling back to `[]`) and formats `capture_state.detail` via `format_safe_error_detail(e, config)`. Runner output for `pytest tests/test_redaction.py -v` (exit code 0): `collected 35 items ... ============================== 35 passed in 1.75s ==============================`.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Diff of `src/pubrun/capture/subprocesses.py` showing live target snapshotting at `install()`, transactional rollback on partial patch failure, owner-guarded and identity-guarded `uninstall()`, generation-tagged `Popen` records, direct record reference in `os.system`, redacted failure details, and passive passthrough when deactivated.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff src/pubrun/capture/subprocesses.py` (+265/-130 lines): `SubprocessSpy.install(max_records=5000, config=None, owner=None) -> bool` snapshots live `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` under `cls._lock`, constructs generation-scoped closures with `state["active"]` passthrough, tags spawned `Popen` instances with `_pubrun_state`/`_pubrun_rec`, holds direct `rec` reference in `_patched_os_system`, redacts failed `Popen.__init__`/`os.system` details via `format_safe_error_detail()`, and rolls back already-patched targets on mid-install exception. `SubprocessSpy.uninstall(owner=None)` enforces ownership when both `owner` and `_owner` are set, flips `state["active"] = False`, and independently restores each target only when still identical to the installed wrapper.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Diff of `src/pubrun/capture/console.py` showing transactional `start()` rollback with honest `"failed"` `capture_state`, prior `faulthandler.is_enabled()` ownership preservation, idempotent independent cleanup steps in `stop()`, and non-recursive bounded `TqdmSafeTee` log-write/flush error handling.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff src/pubrun/capture/console.py` (+263/-80 lines): `ConsoleInterceptor.start() -> bool` snapshots live `sys.stdout`/`sys.stderr` and `faulthandler.is_enabled()`, enables `faulthandler` onto `stderr_log` only when not previously enabled (`_faulthandler_owned`), and rolls back via `_cleanup_resources()` with bounded redacted `_failed_detail` on any setup error. `ConsoleInterceptor.stop()` is idempotent (deep-copy cached result), runs all 7 cleanup steps independently (restoring `sys.stdout`/`sys.stderr` only when identity matches, flushing tees and detaching `log_file = None`, disabling `faulthandler` only when owned before closing `stderr_log`, and closing both log files), and reports honest `"failed"`, `"partial"`, or `"complete"` `capture_state`. `TqdmSafeTee` guards `original_stream.flush()` on `(BrokenPipeError, OSError, ValueError)` and detaches broken `log_file` handles via `_handle_log_error()` with `_in_error_log` re-entry guard preventing recursive stderr writes.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Diff of `src/pubrun/capture/signals.py` and `src/pubrun/capture/resources.py` showing `_installed_handlers` identity-guarded signal restoration, preserved non-main-thread `(OSError, ValueError)` partial behavior, transactional `install()` rollback, independent `uninstall()` cleanup, closure-captured `prev_hook` and `_active` deactivation on both signal shims and `_excepthook`, redacted `_exit_exception`, and safe idempotent `ResourceWatcher.stop()` (skipping join/poll on unstarted or aborted watchers) with honest self-abort `capture_state`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff src/pubrun/capture/signals.py src/pubrun/capture/resources.py`: `SignalExitCapture` tracks `_installed_handlers`, `_active`, `_signals_unavailable`, and `_install_error`; preserves per-signal `(OSError, ValueError)` skipping (`capture_state.status = "partial"` when all skipped); rolls back registered handlers on unexpected install/excepthook errors (`capture_state.status = "failed"`); checks `signal.getsignal(signum) is installed_shim` in `_restore_signal_handlers()`; runs signal and excepthook restores independently in `uninstall()`; captures `previous_handler` and `prev_hook` in local closures with `_active` passive passthrough; preserves `"SystemExit(42)"` and redacts other exceptions via `format_safe_error_detail()`. `ResourceWatcher` isolates poll and `event_stream.emit()` exceptions, suppresses post-stop event emission, makes `stop()` idempotent while skipping `join()` and final polling on unstarted (`self.ident is None`) or self-aborted threads, and reports `"partial"` (when `_successful_samples > 0`) or `"failed"` (when `_successful_samples == 0`) after consecutive-failure self-abort.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted `pytest tests/test_hook_ownership_rollback.py tests/test_signals.py tests/test_capture.py tests/test_resources.py tests/test_redaction.py tests/test_quality.py tests/test_edge_cases.py tests/test_pause_resume.py -v` and `pytest tests/test_cli.py -k "faulthandler or excepthook" -v` output showing exit code 0 and zero failures across all ownership, rollback, third-party wrapper, `faulthandler`, and second-cleanup-failure tests.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Created `tests/test_hook_ownership_rollback.py` (39 behavioral tests). Ran required targeted suites (exit code 0): `pytest tests/test_hook_ownership_rollback.py tests/test_signals.py tests/test_capture.py tests/test_resources.py tests/test_redaction.py tests/test_quality.py tests/test_edge_cases.py tests/test_pause_resume.py -v` -> `collected 208 items ... ============================= 208 passed in 8.82s ==============================`; `pytest tests/test_cli.py -k "faulthandler or excepthook" -v` -> `collected 96 items / 94 deselected / 2 selected ... tests/test_cli.py::TestCliNewFeatures::test_faulthandler_segfault_captured PASSED [ 50%] tests/test_cli.py::TestCliNewFeatures::test_excepthook_stream_flushing PASSED [100%] ======================= 2 passed, 94 deselected in 3.64s =======================`; also verified subprocess tests against worktree `src/` via `PYTHONPATH="$PWD/src" python3 -m pytest tests/test_cli.py -k "faulthandler or excepthook or test_version_includes_commit_when_available" -v` -> `3 passed, 93 deselected in 3.29s` (exit code 0).
+  - Result: pass
 
 ## Approval and execution gate
 
