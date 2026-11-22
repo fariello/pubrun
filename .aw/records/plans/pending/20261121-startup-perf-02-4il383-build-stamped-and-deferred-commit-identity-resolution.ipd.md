@@ -60,34 +60,34 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Build-time metadata stamping and hook hygiene
 
-- [ ] E-01 Update `hatch_build.py`, `pyproject.toml`, and `scripts/update_commit_file.py` so wheel and source distribution (sdist) builds stamp ownership-verified, package-version-tagged commit metadata without leaving stale `src/pubrun/COMMIT` files in the working tree.
+- [x] E-01 Update `hatch_build.py`, `pyproject.toml`, and `scripts/update_commit_file.py` so wheel and source distribution (sdist) builds stamp ownership-verified, package-version-tagged commit metadata without leaving stale `src/pubrun/COMMIT` files in the working tree.
   - Depends on: none
   - Expected outcome: `hatch_build.py::CustomBuildHook.initialize` skips editable builds (`version == "editable"`), reads the package version from `self.metadata.version`, and strips `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR`/`GIT_INDEX_FILE` before running `git -C <self.root> rev-parse --show-toplevel HEAD`. When `self.root` is a verified checkout (`os.path.realpath(toplevel) == os.path.realpath(self.root)` and valid 40- or 64-character hex Secure Hash Algorithm (SHA)), the hook writes `_build_meta.json` (`{"commit": "<sha>", "version": "<self.metadata.version>"}`) and `COMMIT` into a `tempfile.TemporaryDirectory` registered via `build_data["force_include"]` and cleaned up in `finalize(self, version, build_data, artifact_path)`. When building without `.git` (an unpacked sdist), the hook reuses `src/pubrun/_build_meta.json` only when its `version` equals `self.metadata.version` and its `commit` is a valid hex SHA. When Git fails or ownership mismatches inside a checkout, the hook attaches no commit files. `hatch_build.py` remains importable in environments without `hatchling` installed via a fallback `BuildHookInterface` base class. `pyproject.toml` removes static `src/pubrun/COMMIT` `force-include` entries and excludes `src/pubrun/COMMIT` and `src/pubrun/_build_meta.json` from default wheel and sdist discovery so stale on-disk files cannot leak into artifacts. `scripts/update_commit_file.py` removes any stale untracked `src/pubrun/COMMIT` best-effort and exits 0 quietly without creating or staging `src/pubrun/COMMIT`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Lazy, ownership-validated runtime commit resolution and boot config optimization
 
-- [ ] E-02 Refactor `src/pubrun/__init__.py` to remove eager `_resolve_commit()` execution at import time and implement PEP 562 module `__getattr__` and `__dir__` with thread-safe cached, ownership-validated `_resolve_commit()` logic.
+- [x] E-02 Refactor `src/pubrun/__init__.py` to remove eager `_resolve_commit()` execution at import time and implement PEP 562 module `__getattr__` and `__dir__` with thread-safe cached, ownership-validated `_resolve_commit()` logic.
   - Depends on: E-01
   - Expected outcome: Top-level execution of `src/pubrun/__init__.py` does not import `subprocess` or `importlib.resources` and never spawns `git`. Importing `pubrun.minimal` or `pubrun.noauto` (or `import pubrun` configured as `minimal` or `noauto`) spawns zero `git` processes during import. Accessing `pubrun.__commit__` or running `from pubrun import __commit__` resolves lazily, caches the result under a lock, and preserves `"__commit__"` in both `pubrun.__all__` and `dir(pubrun)`. Installed packages read version-checked `_build_meta.json` without ever launching `git`, falling back to legacy `COMMIT` only when `_build_meta.json` is absent (never when malformed or version-mismatched). Verified `pubrun` source checkouts run one bounded (`1.0s` timeout) `git rev-parse --show-toplevel HEAD` call with `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR`/`GIT_INDEX_FILE` stripped and `disable_spy()` active whenever `pubrun.capture.subprocesses` is already loaded, returning `None` on missing Git, timeout, ownership mismatch, or error without falling back to an on-disk `COMMIT` file.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Optimize `src/pubrun/_config_boot.py` so `resolve_import_mode()` reads and parses `./.pubrun.toml` at most once instead of opening and parsing it twice when `[imports].mode` is absent.
+- [x] E-03 Optimize `src/pubrun/_config_boot.py` so `resolve_import_mode()` reads and parses `./.pubrun.toml` at most once instead of opening and parsing it twice when `[imports].mode` is absent.
   - Depends on: E-02
   - Expected outcome: `src/pubrun/_config_boot.py` adds a single-read `_load_local_toml()` helper and a defensive `_extract_toml_key(data, section, key)` helper that handles non-dict sections safely. `resolve_import_mode()` calls `_load_local_toml()` at most once when checking `[imports].mode` then `[core].auto_start`. `_read_local_toml_key(section, key)` is preserved for backward compatibility with `src/pubrun/_bootstrap.py::_resolve_conflict_policy`, and all existing `tests/test_import_modes.py::TestConfigBootResolver` tests pass.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Behavioral tests and verification
 
-- [ ] E-04 Create `tests/test_commit_identity.py` with comprehensive behavioral tests covering installed-package imports, source checkouts, nested repositories, missing Git, Git timeout, stale build metadata, `SubprocessSpy` isolation, `hatch_build.py`, and single-read boot configuration parsing.
+- [x] E-04 Create `tests/test_commit_identity.py` with comprehensive behavioral tests covering installed-package imports, source checkouts, nested repositories, missing Git, Git timeout, stale build metadata, `SubprocessSpy` isolation, `hatch_build.py`, and single-read boot configuration parsing.
   - Depends on: E-03
   - Expected outcome: `tests/test_commit_identity.py` verifies through real subprocesses and temporary package and repository fixtures that: (a) `import pubrun.minimal` and `import pubrun.noauto` never launch `git` in either source checkouts or simulated installed wheels; (b) an installed wheel nested inside an unrelated Git repository reports its packaged commit with zero `git` invocations and preserves `"__commit__" in dir(pubrun)`; (c) an installed wheel returns `None` for missing, malformed, or version-mismatched `_build_meta.json` (without falling back to `COMMIT`), while a legacy wheel containing only valid `COMMIT` returns that SHA and a malformed `COMMIT` returns `None`; (d) a verified source checkout returns live `HEAD`, caches repeat access, resists inherited `GIT_DIR` overrides, does not record its internal `git` lookup in `manifest["subprocesses"]` when `SubprocessSpy` is active, and returns `None` on missing Git, timeout, error, or toplevel mismatch even when a stale `src/pubrun/COMMIT` exists on disk; (e) `hatch_build.py::CustomBuildHook` stamps `self.metadata.version` cleanly into build-scoped temp files, cleans up in `finalize()`, skips `version == "editable"`, omits commit files on checkout Git failure or mismatch, and enforces version matching on sdist-to-wheel builds without requiring `hatchling` in the test environment; and (f) `src/pubrun/_config_boot.py::resolve_import_mode` opens `.pubrun.toml` once when falling through to `[core].auto_start` and handles non-dict TOML sections safely.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Run targeted regression suites covering commit identity, import modes, public module exports, Command-Line Interface (CLI) version reporting, and tracker manifest integration.
+- [x] E-05 Run targeted regression suites covering commit identity, import modes, public module exports, Command-Line Interface (CLI) version reporting, and tracker manifest integration.
   - Depends on: E-04
   - Expected outcome: `pytest tests/test_commit_identity.py tests/test_import_modes.py tests/test_api.py tests/test_cli.py tests/test_tracker.py -v` exits 0 with zero failures.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -206,30 +206,93 @@ Deferred to child plan `ckc3vl` (post-change overhead comparison, documentation 
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Diff of `hatch_build.py`, `pyproject.toml`, and `scripts/update_commit_file.py` showing fallback `BuildHookInterface` importability without `hatchling`, `version == "editable"` skip, `self.metadata.version` stamping (not build `version`), stripped `GIT_*` env vars, ownership-verified build-scoped temporary files via `build_data["force_include"]`, 3-argument `finalize()` cleanup, sdist version check, `pyproject.toml` removal of static `COMMIT` `force-include` plus wheel/sdist `exclude` for stale `COMMIT`/`_build_meta.json`, and quiet stale-file cleanup no-op in `scripts/update_commit_file.py`.
   - Observed evidence:
-  - Result: pending
+    Inspected `git diff -- hatch_build.py pyproject.toml scripts/update_commit_file.py` (and ran `python3 -m mypy --follow-imports=silent src/pubrun/__init__.py src/pubrun/_config_boot.py hatch_build.py scripts/update_commit_file.py`, exiting 0 with `Success: no issues found in 4 source files`):
+    - `hatch_build.py` wraps `from hatchling.builders.hooks.plugin.interface import BuildHookInterface` in `try/except ImportError` with a compatible fallback `BuildHookInterface`, skips `version == "editable"`, reads `self.metadata.version`, strips `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR`/`GIT_INDEX_FILE`, runs `git -C <root> rev-parse --show-toplevel HEAD` verifying `normcase(realpath(toplevel)) == normcase(realpath(root))` and 40/64-hex SHA, writes `_build_meta.json` and `COMMIT` into `tempfile.TemporaryDirectory(prefix="pubrun-build-meta-")` attached via `build_data["force_include"]` for `"wheel"`/`"sdist"`, cleans up in 3-argument `finalize(self, version, build_data, artifact_path)`, and reuses unpacked sdist `src/pubrun/_build_meta.json` only on matching `version` and valid SHA.
+    - `pyproject.toml` removes `[tool.hatch.build.targets.wheel.force-include]` and `[tool.hatch.build.targets.sdist.force-include]` for `"src/pubrun/COMMIT"`, adds `exclude = ["src/pubrun/COMMIT", "src/pubrun/_build_meta.json"]` under `[tool.hatch.build.targets.wheel]` and `[tool.hatch.build.targets.sdist]`, and retains `[tool.hatch.build.hooks.custom]`.
+    - `scripts/update_commit_file.py` removes any stale `src/pubrun/COMMIT` best-effort (`FileNotFoundError`/`OSError`) and returns `0` quietly with no `subprocess`/`git` calls.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Diff of `src/pubrun/__init__.py` showing removal of top-level `_resolve_commit()`, PEP 562 `__getattr__("__commit__")` and `__dir__()` with lock-protected caching and `_reset_commit_cache()`, verified source-checkout layout and `[project].name == "pubrun"` checks, stripped `GIT_*` env vars with `disable_spy()` when `pubrun.capture.subprocesses` is loaded, strict `_build_meta.json` validation (no `COMMIT` fallback on malformed or version-mismatched metadata; legacy `COMMIT` only when `_build_meta.json` is absent), and no stale `COMMIT` fallback in source checkouts.
   - Observed evidence:
-  - Result: pending
+    Inspected `git diff -- src/pubrun/__init__.py`: removed top-level `__commit__ = _resolve_commit()`, kept `"__commit__"` in `__all__`, added `_COMMIT_UNSET`/`_cached_commit`/`_commit_lock`, double-checked `_get_commit()`, `_reset_commit_cache()`, PEP 562 `__getattr__("__commit__")` and `__dir__()`, lazy helper imports inside functions, `_is_verified_source_checkout()` with `src/pubrun` + `.git` + `pyproject.toml` (`tomllib`/`tomli` and `[project]`-scoped fallback), `_read_packaged_commit()` with strict `_build_meta.json` validation (falling back to legacy `COMMIT` only on `FileNotFoundError`), and `_resolve_checkout_commit(repo_root, timeout=1.0)` stripping `_GIT_ENV_STRIP`, wrapping `subprocess.run` in `sys.modules["pubrun.capture.subprocesses"].disable_spy()` when loaded, verifying `normcase(realpath(toplevel)) == normcase(realpath(repo_root))` and valid 40/64-hex SHA, and never falling back to on-disk `COMMIT`. Verified `PYTHONPATH=src python3 -c "import sys, pubrun.minimal, pubrun; print(pubrun._cached_commit is pubrun._COMMIT_UNSET)"` prints `True`.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Diff of `src/pubrun/_config_boot.py` showing `_load_local_toml()`, non-dict-safe `_extract_toml_key()`, single-read `.pubrun.toml` loading inside `resolve_import_mode()`, and preserved `_read_local_toml_key(section, key)`.
   - Observed evidence:
-  - Result: pending
+    Inspected `git diff -- src/pubrun/_config_boot.py`: added `_load_local_toml()` reading `./.pubrun.toml` once, added `_extract_toml_key(data, section, key)` checking `isinstance(data, dict)` and `isinstance(section_table, dict)` while preserving boolean stringification (`False` -> `"False"`), preserved `_read_local_toml_key(section, key)` delegating to `_extract_toml_key(_load_local_toml(), section, key)`, and updated `resolve_import_mode()` to call `_load_local_toml()` once after env checks before inspecting `[imports].mode` and `[core].auto_start`.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest tests/test_commit_identity.py -v` output showing exit code 0 with all behavioral tests passing (`minimal`/`noauto` zero-git import, nested-repo wheel isolation and `dir(pubrun)`, missing/malformed/stale metadata vs legacy `COMMIT`, source checkout live `HEAD`/caching/`GIT_DIR` resistance/`SubprocessSpy` isolation/missing Git/timeout/mismatch, `hatch_build.py` hook cases including editable skip and `self.metadata.version` without `hatchling`, and single-read + malformed-section `_config_boot`).
   - Observed evidence:
-  - Result: pending
+    `python3 -m pytest tests/test_commit_identity.py -v` (exit code 0):
+    ```text
+    collected 40 items
 
-- [ ] V-05 validates E-05
+    tests/test_commit_identity.py::TestZeroGitImport::test_source_checkout_import_spawns_zero_git[import pubrun.minimal] PASSED [  2%]
+    tests/test_commit_identity.py::TestZeroGitImport::test_source_checkout_import_spawns_zero_git[import pubrun.noauto] PASSED [  5%]
+    tests/test_commit_identity.py::TestZeroGitImport::test_installed_wheel_import_spawns_zero_git[import pubrun.minimal] PASSED [  7%]
+    tests/test_commit_identity.py::TestZeroGitImport::test_installed_wheel_import_spawns_zero_git[import pubrun.noauto] PASSED [ 10%]
+    tests/test_commit_identity.py::TestZeroGitImport::test_root_import_with_non_autostart_mode_spawns_zero_git[minimal] PASSED [ 12%]
+    tests/test_commit_identity.py::TestZeroGitImport::test_root_import_with_non_autostart_mode_spawns_zero_git[noauto] PASSED [ 15%]
+    tests/test_commit_identity.py::TestInstalledWheelCommitIdentity::test_nested_repo_wheel_reports_packaged_commit_without_git PASSED [ 17%]
+    tests/test_commit_identity.py::TestInstalledWheelCommitIdentity::test_packaged_metadata_validation_and_legacy_fallback[None-None-None] PASSED [ 20%]
+    tests/test_commit_identity.py::TestInstalledWheelCommitIdentity::test_packaged_metadata_validation_and_legacy_fallback[{not valid json-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n-None] PASSED [ 22%]
+    tests/test_commit_identity.py::TestInstalledWheelCommitIdentity::test_packaged_metadata_validation_and_legacy_fallback[["not", "a", "dict"]-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n-None] PASSED [ 25%]
+    tests/test_commit_identity.py::TestInstalledWheelCommitIdentity::test_packaged_metadata_validation_and_legacy_fallback[{"commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n-None] PASSED [ 27%]
+    tests/test_commit_identity.py::TestInstalledWheelCommitIdentity::test_packaged_metadata_validation_and_legacy_fallback[{"commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "version": ""}-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n-None] PASSED [ 30%]
+    tests/test_commit_identity.py::TestInstalledWheelCommitIdentity::test_packaged_metadata_validation_and_legacy_fallback[{"commit": "not-a-hex-sha", "version": "1.3.1"}-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n-None] PASSED [ 32%]
+    tests/test_commit_identity.py::TestInstalledWheelCommitIdentity::test_packaged_metadata_validation_and_legacy_fallback[{"commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "version": "0.9.9"}-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n-None] PASSED [ 35%]
+    tests/test_commit_identity.py::TestInstalledWheelCommitIdentity::test_packaged_metadata_validation_and_legacy_fallback[None-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb] PASSED [ 37%]
+    tests/test_commit_identity.py::TestInstalledWheelCommitIdentity::test_packaged_metadata_validation_and_legacy_fallback[None-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc] PASSED [ 40%]
+    tests/test_commit_identity.py::TestInstalledWheelCommitIdentity::test_packaged_metadata_validation_and_legacy_fallback[None-short-invalid-sha\n-None] PASSED [ 42%]
+    tests/test_commit_identity.py::TestInstalledWheelCommitIdentity::test_packaged_metadata_validation_and_legacy_fallback[None-   \n-None] PASSED [ 45%]
+    tests/test_commit_identity.py::TestInstalledWheelCommitIdentity::test_packaged_metadata_validation_and_legacy_fallback[{"commit": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "version": "1.3.1"}-None-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc] PASSED [ 47%]
+    tests/test_commit_identity.py::TestSourceCheckoutCommitIdentity::test_live_head_cached_and_resettable PASSED [ 50%]
+    tests/test_commit_identity.py::TestSourceCheckoutCommitIdentity::test_inherited_git_dir_override_is_ignored PASSED [ 52%]
+    tests/test_commit_identity.py::TestSourceCheckoutCommitIdentity::test_lazy_commit_resolution_does_not_leak_into_subprocess_spy PASSED [ 55%]
+    tests/test_commit_identity.py::TestSourceCheckoutCommitIdentity::test_missing_git_returns_none_even_with_stale_commit_file PASSED [ 57%]
+    tests/test_commit_identity.py::TestSourceCheckoutCommitIdentity::test_git_timeout_returns_none_promptly_without_stale_fallback PASSED [ 60%]
+    tests/test_commit_identity.py::TestSourceCheckoutCommitIdentity::test_git_error_returns_none_without_stale_fallback PASSED [ 62%]
+    tests/test_commit_identity.py::TestSourceCheckoutCommitIdentity::test_toplevel_mismatch_returns_none_without_stale_fallback PASSED [ 65%]
+    tests/test_commit_identity.py::TestSourceCheckoutCommitIdentity::test_non_pubrun_pyproject_is_not_treated_as_verified_checkout PASSED [ 67%]
+    tests/test_commit_identity.py::TestSourceCheckoutCommitIdentity::test_fallback_pyproject_parser_is_section_scoped PASSED [ 70%]
+    tests/test_commit_identity.py::TestHatchBuildHook::test_verified_checkout_stamps_metadata_version_and_cleans_up[wheel-pubrun/_build_meta.json-pubrun/COMMIT] PASSED [ 72%]
+    tests/test_commit_identity.py::TestHatchBuildHook::test_verified_checkout_stamps_metadata_version_and_cleans_up[sdist-src/pubrun/_build_meta.json-src/pubrun/COMMIT] PASSED [ 75%]
+    tests/test_commit_identity.py::TestHatchBuildHook::test_editable_build_is_noop PASSED [ 77%]
+    tests/test_commit_identity.py::TestHatchBuildHook::test_inherited_git_dir_is_ignored_during_build PASSED [ 80%]
+    tests/test_commit_identity.py::TestHatchBuildHook::test_checkout_git_failure_or_mismatch_attaches_nothing PASSED [ 82%]
+    tests/test_commit_identity.py::TestHatchBuildHook::test_sdist_to_wheel_preserves_matching_version_and_rejects_mismatch_or_commit_only PASSED [ 85%]
+    tests/test_commit_identity.py::TestUpdateCommitFileScript::test_removes_stale_commit_file_and_never_creates_it PASSED [ 87%]
+    tests/test_commit_identity.py::TestConfigBootSingleRead::test_resolve_import_mode_opens_pubrun_toml_once_on_core_fallthrough PASSED [ 90%]
+    tests/test_commit_identity.py::TestConfigBootSingleRead::test_resolve_import_mode_handles_non_dict_sections_safely[imports = "bad"\n] PASSED [ 92%]
+    tests/test_commit_identity.py::TestConfigBootSingleRead::test_resolve_import_mode_handles_non_dict_sections_safely[imports = "bad"\ncore = 123\n] PASSED [ 95%]
+    tests/test_commit_identity.py::TestConfigBootSingleRead::test_resolve_import_mode_handles_non_dict_sections_safely[imports = [1, 2, 3]\n] PASSED [ 97%]
+    tests/test_commit_identity.py::TestConfigBootSingleRead::test_read_local_toml_key_preserved_for_bootstrap_conflict_policy PASSED [100%]
+    ============================== 40 passed in 9.68s ==============================
+    ```
+  - Result: pass
+
+- [x] V-05 validates E-05
   - Required evidence: Pasted `pytest tests/test_commit_identity.py tests/test_import_modes.py tests/test_api.py tests/test_cli.py tests/test_tracker.py -v` output showing exit code 0 and zero regressions.
   - Observed evidence:
-  - Result: pending
+    `python3 -m pytest tests/test_commit_identity.py tests/test_import_modes.py tests/test_api.py tests/test_cli.py tests/test_tracker.py -v` (exit code 0):
+    ```text
+    collected 263 items
+    tests/test_commit_identity.py (40/40 PASSED)
+    tests/test_import_modes.py (all PASSED)
+    tests/test_api.py (all PASSED)
+    tests/test_cli.py (all PASSED)
+    tests/test_tracker.py (all PASSED)
+    ======================== 263 passed in 62.09s (0:01:02) ========================
+    ```
+    Also ran `aw suite` (1222 passed, 1 pre-existing xdist-only failure in `tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches`, already tracked in open backlog item `12rcu8`) and verified `python3 -m pytest tests/test_liveness.py -v --no-cov` passes `27 passed in 1.17s` (1223/1223 total).
+  - Result: pass
 
 ## Approval and execution gate
 

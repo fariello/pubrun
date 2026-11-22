@@ -35,6 +35,7 @@ Usage
     import pubrun.minimal as pubrun  # No auto-start, no hooks.
 """
 import sys
+import threading as _threading
 
 # -- Metadata ----------------------------------------------------------------
 try:
@@ -46,38 +47,207 @@ try:
 except Exception:
     __version__ = "1.0.0"  # fallback for editable installs / dev
 
-# Commit hash resolution. A file cannot contain its own commit's hash, so prefer the LIVE
-# HEAD when running from a git checkout (always exact, never one commit behind), and fall
-# back to the packaged COMMIT file for installed wheels (stamped by the post-commit hook and
-# the build). Both paths are best-effort and stdlib-only, preserving the zero-runtime-dep
-# invariant; any failure yields None rather than raising at import time.
-def _resolve_commit():
-    # 1) Live git HEAD from the checkout containing this file (dev / source use).
+# Commit hash resolution is deferred via PEP 562 module __getattr__ so importing
+# pubrun (especially pubrun.minimal / pubrun.noauto and installed wheels) never
+# launches a git subprocess at import time. Installed wheels read version-checked
+# build metadata without invoking git; verified pubrun source checkouts resolve
+# live HEAD lazily with ownership validation and no stale COMMIT fallback.
+_COMMIT_UNSET = object()
+_cached_commit = _COMMIT_UNSET
+_commit_lock = _threading.Lock()
+_GIT_ENV_STRIP = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
+
+
+def _is_valid_sha(value):
+    if not isinstance(value, str):
+        return False
+    import re as _re
+    return bool(_re.fullmatch(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?", value))
+
+
+def _pyproject_declares_pubrun(pyproject_path):
+    toml_mod = None
+    if sys.version_info >= (3, 11):
+        try:
+            import tomllib as toml_mod
+        except ImportError:
+            toml_mod = None
+    else:
+        try:
+            import tomli as toml_mod
+        except ImportError:
+            toml_mod = None
+
+    if toml_mod is not None:
+        with open(pyproject_path, "rb") as fh:
+            data = toml_mod.load(fh)
+        if not isinstance(data, dict):
+            return False
+        project = data.get("project")
+        return isinstance(project, dict) and project.get("name") == "pubrun"
+
+    # Fallback parser used only when neither tomllib nor tomli is importable.
+    import re as _re
+    in_project = False
+    name_re = _re.compile(r"""^name\s*=\s*(?:"pubrun"|'pubrun')(?:\s*(?:#.*)?)?$""")
+    with open(pyproject_path, "r", encoding="utf-8") as fh:
+        for raw_line in fh:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("["):
+                if in_project:
+                    return False
+                header = line.split("#", 1)[0].strip()
+                if header == "[project]":
+                    in_project = True
+                continue
+            if in_project and name_re.match(line):
+                return True
+    return False
+
+
+def _is_verified_source_checkout(pkg_dir):
+    """Return repo root Path when pkg_dir is a verified pubrun source checkout."""
     try:
-        import os as _os
-        import subprocess as _sp
-        _repo = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-        _proc = _sp.run(
-            ["git", "-C", _repo, "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if _proc.returncode == 0:
-            _head = _proc.stdout.strip()
-            if _head:
-                return _head
-    except Exception:
-        pass
-    # 2) Packaged COMMIT file (installed wheel / no git available).
-    try:
-        import importlib.resources as _pkg_resources
-        if sys.version_info >= (3, 9):
-            return _pkg_resources.files("pubrun").joinpath("COMMIT").read_text(encoding="utf-8").strip()
-        return _pkg_resources.read_text("pubrun", "COMMIT").strip()
+        from pathlib import Path
+        pkg_path = Path(pkg_dir)
+        if pkg_path.name != "pubrun" or pkg_path.parent.name != "src":
+            return None
+        repo_root = pkg_path.parent.parent
+        if not (repo_root / ".git").exists():
+            return None
+        pyproject_path = repo_root / "pyproject.toml"
+        if not pyproject_path.is_file():
+            return None
+        if not _pyproject_declares_pubrun(pyproject_path):
+            return None
+        return repo_root
     except Exception:
         return None
 
 
-__commit__ = _resolve_commit()
+def _read_packaged_resource(filename):
+    import importlib.resources as _pkg_resources
+    if sys.version_info >= (3, 9):
+        return _pkg_resources.files(__name__).joinpath(filename).read_text(encoding="utf-8")
+    return _pkg_resources.read_text(__name__, filename, encoding="utf-8")
+
+
+def _read_packaged_commit(expected_version):
+    """Read build-stamped commit identity for an installed package without git."""
+    try:
+        raw_meta = _read_packaged_resource("_build_meta.json")
+    except FileNotFoundError:
+        # Legacy wheel fallback: COMMIT is consulted only when _build_meta.json is absent.
+        try:
+            raw_commit = _read_packaged_resource("COMMIT").strip()
+            return raw_commit if _is_valid_sha(raw_commit) else None
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+    try:
+        import json as _json
+        meta = _json.loads(raw_meta)
+    except Exception:
+        return None
+
+    if not isinstance(meta, dict):
+        return None
+    commit = meta.get("commit")
+    meta_version = meta.get("version")
+    if not _is_valid_sha(commit):
+        return None
+    if not isinstance(meta_version, str) or not meta_version.strip():
+        return None
+    if expected_version and meta_version != expected_version:
+        return None
+    return commit
+
+
+def _resolve_checkout_commit(repo_root, timeout=1.0):
+    """Resolve live HEAD in a verified pubrun source checkout with one bounded git call."""
+    try:
+        import os as _os
+        import subprocess as _sp
+
+        clean_env = {k: v for k, v in _os.environ.items() if k not in _GIT_ENV_STRIP}
+        cmd = ["git", "-C", str(repo_root), "rev-parse", "--show-toplevel", "HEAD"]
+        spy_mod = sys.modules.get("pubrun.capture.subprocesses")
+        if spy_mod is not None and hasattr(spy_mod, "disable_spy"):
+            with spy_mod.disable_spy():
+                proc = _sp.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    env=clean_env,
+                )
+        else:
+            proc = _sp.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=clean_env,
+            )
+
+        if proc.returncode != 0:
+            return None
+        lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+        if len(lines) != 2:
+            return None
+        toplevel, head = lines
+        if _os.path.normcase(_os.path.realpath(toplevel)) != _os.path.normcase(
+            _os.path.realpath(str(repo_root))
+        ):
+            return None
+        if not _is_valid_sha(head):
+            return None
+        return head
+    except Exception:
+        return None
+
+
+def _resolve_commit():
+    try:
+        from pathlib import Path
+        pkg_dir = Path(__file__).resolve().parent
+    except Exception:
+        return None
+    repo_root = _is_verified_source_checkout(pkg_dir)
+    if repo_root is not None:
+        return _resolve_checkout_commit(repo_root)
+    return _read_packaged_commit(__version__)
+
+
+def _get_commit():
+    global _cached_commit
+    if _cached_commit is _COMMIT_UNSET:
+        with _commit_lock:
+            if _cached_commit is _COMMIT_UNSET:
+                _cached_commit = _resolve_commit()
+    return _cached_commit
+
+
+def _reset_commit_cache():
+    """Reset cached commit resolution state for deterministic test isolation."""
+    global _cached_commit
+    with _commit_lock:
+        _cached_commit = _COMMIT_UNSET
+        globals().pop("__commit__", None)
+
+
+def __getattr__(name):
+    if name == "__commit__":
+        return _get_commit()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))
 
 # Publication name (matches the author's existing academic publication record so
 # citations aggregate correctly). The full legal name appears in LICENSE/NOTICE.
