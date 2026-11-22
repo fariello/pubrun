@@ -5,8 +5,9 @@
 - Concern: Bugs and correctness (diagnostic self-checks, meta snapshot depth handling, resource report labeling, null-safe CPU formatting, and manifest hydration).
 - Scope: `src/pubrun/report/checks.py`, `src/pubrun/report/meta_snapshot.py`, `src/pubrun/report/diagnostics.py`, `src/pubrun/report/utils.py`, `tests/test_reproducibility_assessment.py`, and regression tests in `tests/test_report_checks_bugs.py`.
 - Scope-Paths: src/pubrun/report/checks.py, src/pubrun/report/meta_snapshot.py, src/pubrun/report/diagnostics.py, src/pubrun/report/utils.py, tests/test_reproducibility_assessment.py, tests/test_report_checks_bugs.py
+- Scope-Exceeded: .aw/records/backlog/open/20261122-ivpkar-01-ivpkar-parallel-test-suite-aw-suite-pytest-n-fails-tests.backlog.md (Defect carrier required by the driver's defect-report contract: records pre-existing xdist-only test failures test_liveness, test_tui observed during E-05 validation reproduces on unmodified base a354...); .aw/records/backlog/open/20261122-rmssqd-01-rmssqd-print-report-renders-literal-none-in-the-host-line.backlog.md (Defect carrier required by the driver's defect-report contract: records adjacent bug found while pinning BUG-64a print_report renders literal None for missing host.os_version)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix malformed TOML detection in self-check, meta depth flags, SGE/PBS check precedence, multi-mount reporting, and manifest hydration bugs
@@ -18,12 +19,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: ihh27o
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): aw oc run self-finalize: ihh27o verified (set bugs-audit, attempt 2). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261122-ivpkar-01-ivpkar-parallel-test-suite-aw-suite-pytest-n-fails-tests.backlog.md: Defect carrier required by the driver's defect-report contract: records pre-existing xdist-only test failures (test_liveness, test_tui) observed during E-05 validation; reproduces on unmodified base a3546cd; out-of-scope .aw/records/backlog/open/20261122-rmssqd-01-rmssqd-print-report-renders-literal-none-in-the-host-line.backlog.md: Defect carrier required by the driver's defect-report contract: records adjacent bug found while pinning BUG-64a (print_report renders literal None for missing host.os_version)]
 - 2026-11-22 execution attempt 2 (aw oc run): carried attempt-1 work forward from `aw/lane/ihh27o`, re-ran validation, recorded scope reasons for backlog carriers `ivpkar` and `rmssqd`.
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
