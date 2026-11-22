@@ -5,8 +5,9 @@
 - Concern: File provenance record contract, per-file and run-wide hashing budgets, identity and change detection, streaming-hash evaluation, manifest schema reconciliation, and `ProvenanceFileProxy` hardening
 - Scope: Add run-wide hashing budget defaults in `src/pubrun/resources/default.toml`, reconcile and extend `data_files` in `schemas/manifest.schema.json`, create `src/pubrun/capture/file_io.py`, wire `src/pubrun/core.py` and `src/pubrun/tracker.py`, and add behavioral and schema tests in `tests/test_file_io_provenance.py` and `tests/test_manifest_schema.py`.
 - Scope-Paths: src/pubrun/resources/default.toml, schemas/manifest.schema.json, src/pubrun/capture/file_io.py, src/pubrun/core.py, src/pubrun/tracker.py, tests/test_file_io_provenance.py, tests/test_manifest_schema.py
+- Scope-Exceeded: .aw/records/backlog/open/20261122-12rcu8-01-12rcu8-fix-testissameprocess-test-expected-script-matches.backlog.md (Defect report backlog carrier required by driver contract for pre-existing xdist failure in tests/test_liveness.py)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Build file provenance core, budgets, change detection, streaming evaluation, schema, and proxy hardening
@@ -18,12 +19,12 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: xxi3nc
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: xxi3nc verified (set file-prov, attempt 1). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261122-12rcu8-01-12rcu8-fix-testissameprocess-test-expected-script-matches.backlog.md: Defect report backlog carrier required by driver contract for pre-existing xdist failure in tests/test_liveness.py]
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007
 - 2026-11-21 to-review (agent): authored child plan 01 of Set `file-prov` graduating backlog item `x6alw4`.
