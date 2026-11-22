@@ -1,13 +1,15 @@
-# IPD: Fix sanitizer script, build hook, and benchmark hotpath workload bugs
+# IPD: Fix sanitizer script bugs (and retire already-fixed build hook and benchmark hotpath items)
 
 - Date: 2026-11-22
 - Kind: child
-- Concern: Bugs and correctness (path-sanitizer binary handling, staged `--fix` data loss, glob/home-user/IPv6 matching, non-git tarball wheel builds, and benchmark hotpath workload accuracy).
-- Scope: `scripts/sanitize_paths.py`, `scripts/update_commit_file.py`, `hatch_build.py`, `pyproject.toml`, `benchmarks/scenarios.py`, `benchmarks/workloads/file_read.py`, and regression tests in `tests/test_repo_scripts_bugs.py`.
-- Scope-Paths: scripts/sanitize_paths.py, scripts/update_commit_file.py, hatch_build.py, pyproject.toml, benchmarks/scenarios.py, benchmarks/workloads/file_read.py, tests/test_repo_scripts_bugs.py
+- Concern: Bugs and correctness (path-sanitizer binary handling, `--repo-root` forwarding, staged `--fix` data-loss prevention, and `glob`/`home-user`/IPv6 matching; build-hook `BUG-59` and benchmark hotpath `BUG-57` verified already fixed in `HEAD`).
+- Scope: `scripts/sanitize_paths.py` and regression tests in `tests/test_repo_scripts_bugs.py`.
+- Scope-Paths: scripts/sanitize_paths.py, tests/test_repo_scripts_bugs.py
 - Item-Dependencies: none
-- Status: to-review
-- Short-Description: Fix sanitize_paths binary crash, staged --fix data loss, glob/home-user/IPv6 bugs, non-git tarball build hook, and hotpath-open-pubrun workload
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: complex
+- Short-Description: Fix sanitize_paths binary crash, --repo-root, staged --fix data loss, and glob/home-user/IPv6 matching
 - Work-Kind: bug
 - Priority: high
 - Blocks-Release: next
@@ -21,91 +23,116 @@
 
 ## Workflow history
 
-- 2026-11-22 draft (Antigravity): created from `/assess-bugs` audit.
+- 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-22 to-review (Antigravity): authored fix steps, citations, and falsifiable validation criteria.
+- 2026-11-22 draft (Antigravity): created from `/assess-bugs` audit.
 
 ## Goal
 
-Fix 6 confirmed bug groups across repository tooling and packaging: prevent `scripts/sanitize_paths.py` from crashing on staged binary files, destroying unstaged working-tree edits under `--fix`, or misfiring on glob/`home-user`/IPv6 rules; fix `hatch_build.py` / `pyproject.toml` / `scripts/update_commit_file.py` so builds succeed from non-git source tarballs; and make `hotpath-open-pubrun` actually exercise `pubrun.open()`.
+Fix all 4 live correctness and safety bugs in `scripts/sanitize_paths.py` (`BUG-25`, `BUG-26`, `BUG-27`, `BUG-58`): prevent staged binary files from crashing with `UnicodeDecodeError`, honor `--repo-root` across every Git subprocess and file write while refusing staged `--fix` rewrites when a file also has unstaged working-tree edits, fix `glob` blacklist translation and `home-user` boundary/tail matching, and replace `_IPV6_RE` so compressed Internet Protocol version 6 (IPv6) literals match without false positives on timestamps or `module::Symbol` tokens. Two additional items originally listed here (`BUG-59` in `scripts/update_commit_file.py` / `hatch_build.py` / `pyproject.toml`, and `BUG-57` in `benchmarks/scenarios.py` / `benchmarks/workloads/file_read.py`) were verified already fixed in `HEAD` by executed plans `4il383` and `4gpguy` and are retired from this plan's scope so execution cannot regress them.
+
+### Staged-mode safety and `--repo-root` flow
+
+```mermaid
+flowchart TD
+    START["main() resolves repo_root and target list"] --> MODE{"Scan mode"}
+    MODE -- "explicit files" --> READ_F["Read Path(path) as UTF-8"]
+    MODE -- "--all" --> LS["git ls-files (cwd=repo_root)"]
+    LS --> READ_A["Read repo_root / path as UTF-8"]
+    MODE -- "staged (default)" --> STAGED["git diff --cached + git diff --name-only (cwd=repo_root)"]
+    STAGED --> SHOW["git show :path (text=False, cwd=repo_root)"]
+    SHOW --> BIN{"Non-zero, NUL byte, or invalid UTF-8?"}
+    BIN -- "yes" --> SKIP["Skip binary/unreadable file cleanly"]
+    BIN -- "no" --> SCAN["scan_text() with glob, home-user, and IPv6 rules"]
+    READ_F --> SCAN
+    READ_A --> SCAN
+    SCAN --> FIX{"--fix (non-dry-run) with findings?"}
+    FIX -- "no" --> EXIT_CHK["--check exits 1 on findings, 0 otherwise"]
+    FIX -- "yes, staged + unstaged diff" --> REFUSE["Warn to stderr, skip write/git add, exit 1"]
+    FIX -- "yes, safe target" --> WRITE["Write fp (Path(path) for files, else repo_root / path)"]
+    WRITE --> RESTAGE["If staged: git add -- fixed_paths (cwd=repo_root)"]
+    RESTAGE --> EXIT_FIX["Exit 0 if all findings fixed and git add succeeded, else 1"]
+```
 
 ## Detailed Implementation Checklist (TODO)
 
 Execution-state rule: mark an `E-*` item complete only after performing the action. That mark is not validation. Right-sizing rule: each E-item is one focused pass with its own V-item check (`IPD-Z603`). Accepted execution states: blocked, failed, pending, performed; terminal gate demands 'performed'.
 
-### Task group 1: `scripts/sanitize_paths.py` correctness and safety
+### Task group 1: `scripts/sanitize_paths.py` binary, `--repo-root`, and staged `--fix` safety
 
-- [ ] E-01 Fix binary staged-file reading, `--repo-root` forwarding to git helpers, and staged `--fix` safety in `scripts/sanitize_paths.py`.
+- [ ] E-01 Fix binary staged-file reading, `--repo-root` forwarding to Git helpers and file writes, and staged `--fix` data-loss protection in `scripts/sanitize_paths.py`, and add regression tests for `BUG-25` and `BUG-26` in `tests/test_repo_scripts_bugs.py`.
   - Depends on: none
-  - Expected outcome: `_read_staged` reads raw bytes (`text=False`), skips binary files containing `b"\x00"` or invalid UTF-8 without raising `UnicodeDecodeError`; `_staged_files`, `_tracked_files`, `_read_staged`, and `git add` pass `cwd=repo_root` so `--repo-root` works from any directory; `--fix` on staged files refuses to clobber files that have unstaged working-tree modifications (warning clearly instead of overwriting the working tree with the staged index blob).
+  - Expected outcome:
+    - `scripts/sanitize_paths.py::_read_staged(path, repo_root=None)` runs `git show :<path>` with `text=False` and `cwd=repo_root`, returning `None` if `returncode != 0`, if `b"\x00" in out.stdout`, or if `.decode("utf-8")` raises `UnicodeDecodeError` (no uncaught exception on staged binary or non-Unicode Transformation Format 8 (UTF-8) blobs).
+    - `scripts/sanitize_paths.py::_staged_files(repo_root=None)`, `scripts/sanitize_paths.py::_tracked_files(repo_root=None)`, a new helper `scripts/sanitize_paths.py::_unstaged_files(repo_root=None)` (`git diff --name-only`), `scripts/sanitize_paths.py::_read_staged(path, repo_root=None)`, and the staged `git add -- <fixed_paths>` call in `scripts/sanitize_paths.py::main` all accept/pass `cwd=repo_root` (defaulting `repo_root=None` on helpers for backwards compatibility), and `main` resolves write targets as `fp = Path(path) if args.files else (repo_root / path)` so `--repo-root` works from any current working directory (CWD) in both `--all` and staged modes.
+    - Under `--fix` (non-`--dry-run`) in staged mode (`not args.files and not args.all`), `main` queries `unstaged = set(_unstaged_files(repo_root))`; if a matched file is in `unstaged`, it refuses to overwrite the working tree or run `git add` on that file, prints a clear warning to `stderr` (never leaking raw matched values), records it as unfixed, and exits `1` (fail closed) whenever any finding remains unfixed or `git add` returns non-zero; it exits `0` when all findings are fixed and re-staged cleanly (preserving `tests/test_sanitize_paths.py::test_fix_rewrites_and_exits_zero`).
+    - `tests/test_repo_scripts_bugs.py` covers staged binary/non-UTF-8 files (`BUG-25`), `--repo-root` execution from a different CWD in `--all` and staged modes (`BUG-26`), and refusing `--fix` on a partially staged file with unstaged edits without modifying the working tree (`BUG-26`).
   - Execution state: pending
 
-- [ ] E-02 Fix `glob` blacklist translation, `home-user` boundary/tail matching, and `_IPV6_RE` compressed address matching in `scripts/sanitize_paths.py`.
+- [ ] E-02 Fix `glob` blacklist translation, `home-user` boundary and subpath-tail matching, and `_IPV6_RE` compressed address matching in `scripts/sanitize_paths.py`, and add regression tests for `BUG-27` and `BUG-58` in `tests/test_repo_scripts_bugs.py`.
   - Depends on: none
-  - Expected outcome: `glob` blacklist rules compile without `fnmatch.translate`'s end-of-string `\Z` / `(?s:...)` newline-eating anchor so inline matches trigger and `*` stops at line/token boundaries; `home-user` matches the full path with a path boundary (`(?:/|$)`) and preserves the subpath tail (so a short prefix home directory like `HOME` ending in `al` never corrupts a longer username like `alice` into `~ice/work`, and `<home>/*` whitelists work identically for `home-user` and `home-any`); `_IPV6_RE` matches compressed IPv6 literals (`::1`, `fe80::1`, `2001:db8::1`).
+  - Expected outcome:
+    - `scripts/sanitize_paths.py::build_rules` compiles `glob` blacklist entries through a dedicated inline glob-to-regex helper (instead of `fnmatch.translate`, which injects `(?s:...)` and `\Z`) that translates `*` to `[^\s"'`()\[\]{}<>,;]*`, `?` to `[^\s]`, and `[seq]` / `[!seq]` character classes while escaping regex metacharacters, so inline `glob` blacklists match mid-line without crossing whitespace, delimiters, or newlines.
+    - `scripts/sanitize_paths.py::build_rules` constructs `home-user` prefixes from `[home.rstrip("/"), f"/home/{user}"]`, skips empty/`"~"`/`"/"` values (preserving `tests/test_sanitize_paths.py` tests where `HOME="~"`), deduplicates longest-first, and compiles `re.compile(re.escape(base) + r"((?:/[A-Za-z0-9_.+-]+)*)(?![A-Za-z0-9_.-])")` with replacement `r"~\1"`. As a result, a short prefix such as a `HOME` path ending in `al` never corrupts `/home/alice/work` into `~ice/work`, and `<home>/*` whitelists match full paths identically under `home-user` and `home-any` while preserving `tests/test_sanitize_paths.py::test_author_name_and_email_are_never_matched`.
+    - `scripts/sanitize_paths.py::_IPV6_RE` uses an RFC-4291 full-and-compressed IPv6 regular expression bounded by `(?<![A-Za-z0-9_:])` and `(?![A-Za-z0-9_:])` so it matches compressed addresses (`::1`, `fe80::1`, `2001:db8::1`, `2001:db8::`) and full 8-group addresses (`2001:0db8:85a3:0000:0000:8a2e:0370:7334`) while rejecting bare `::`, `module::Symbol` tokens (`foo::1`, `os::a`), timestamps (`12:34:56`), and invalid double-`::` strings (`a::b::c`).
+    - `tests/test_repo_scripts_bugs.py` verifies inline `glob` blacklists (including multi-line text), prefix-sharing `HOME` boundary safety and `<home>/*` whitelisting under `home-user`, and `_IPV6_RE` compressed/full matches and false-positive rejections.
   - Execution state: pending
 
-### Task group 2: Build hook and commit metadata script fixes
+### Task group 2: Full regression and repository sanitizer verification
 
-- [ ] E-03 Fix `scripts/update_commit_file.py`, `hatch_build.py`, and `pyproject.toml` for gitignored `src/pubrun/COMMIT` and non-git source tarballs.
-  - Depends on: none
-  - Expected outcome: `scripts/update_commit_file.py` wraps file writes inside `try/except` and stops calling `git add` on gitignored `src/pubrun/COMMIT`; `hatch_build.py` dynamically registers `src/pubrun/COMMIT` in `build_data["force_include"]` only when created (or writes an `"unknown"` fallback outside git repos) while removing the fragile static `force-include` entry from `pyproject.toml` so `pip wheel` / `hatch build` succeeds cleanly from a non-git source tarball.
-  - Execution state: pending
-
-### Task group 3: Benchmark hotpath file-open workload fix
-
-- [ ] E-04 Fix `benchmarks/workloads/file_read.py` and `benchmarks/scenarios.py` so `hotpath-open-pubrun` exercises `pubrun.open()` instead of unpatched `builtins.open()`.
-  - Depends on: none
-  - Expected outcome: Under `pubrun` mode (`hotpath-open-pubrun`), `file_read.py` opens files through `pubrun.open()` (while `hotpath-open-baseline` continues using `builtins.open()`), actually measuring pubrun's file-open overhead rather than a no-op.
-  - Execution state: pending
-
-### Task group 4: Regression test suite and sanitizer verification
-
-- [ ] E-05 Add regression tests in `tests/test_repo_scripts_bugs.py`, run `python3 scripts/sanitize_paths.py --check --all`, and verify the full `pytest` suite passes.
-  - Depends on: E-01, E-02, E-03, E-04
-  - Expected outcome: `tests/test_repo_scripts_bugs.py` verifies all sanitizer, build-hook, and workload fixes; `python3 scripts/sanitize_paths.py --check --all` exits 0; full `pytest -q` passes with zero regressions.
+- [ ] E-03 Run `tests/test_repo_scripts_bugs.py`, `tests/test_sanitize_paths.py`, `tests/test_commit_identity.py`, `python3 scripts/sanitize_paths.py --check --all`, and the full `pytest -q` suite to confirm zero regressions.
+  - Depends on: E-01, E-02
+  - Expected outcome: All targeted regression suites (`tests/test_repo_scripts_bugs.py`, `tests/test_sanitize_paths.py`, `tests/test_commit_identity.py`), `python3 scripts/sanitize_paths.py --check --all` (exit 0 with no false positives on tracked files), and full `pytest -q` pass with zero failures.
   - Execution state: pending
 
 ## Project conventions discovered (Step 0)
 
-- `scripts/sanitize_paths.py` is stdlib-only and runs in CI and pre-commit; verify `python3 scripts/sanitize_paths.py --check --all` passes after changing rule matching so no unintended false positives break existing repo files.
-- `benchmarks/data/` already contains a baseline submission for `hotpath-open-pubrun`; see `OQ-01` below (non-blocking) on whether to keep the existing scenario name or add a versioned name.
+- `scripts/sanitize_paths.py` is Python standard-library-only and runs in Continuous Integration (CI) and `.pre-commit-config.yaml` (pre-commit hook `sanitize-paths`); `python3 scripts/sanitize_paths.py --check --all` must exit 0 after any rule change so no unintended false positives break existing repository files.
+- `tests/test_sanitize_paths.py` sets `HOME="~"` in `test_author_name_and_email_are_never_matched` and expects `--fix` to exit `0` when all findings are rewritten (`test_fix_rewrites_and_exits_zero`).
+- Executed plans `4il383` (commit `44cee0a`) and `4gpguy` (commit `c7cc2db`) already resolved `BUG-59` (`scripts/update_commit_file.py`, `hatch_build.py`, `pyproject.toml`) and `BUG-57` (`benchmarks/scenarios.py`, `benchmarks/workloads/file_read.py`); see `## Deferred / out of scope (with reason)` below.
 
 ## Findings
 
 | Bug ID | Severity | Remediation Risk | Location (symbol) | Defect |
 |---|---|---|---|---|
-| `BUG-25` | High | Low | `scripts.sanitize_paths._read_staged` | Uses `text=True` (strict UTF-8) and crashes with `UnicodeDecodeError` on any staged binary file before `_looks_binary()`. |
-| `BUG-26` | High | Low | `scripts.sanitize_paths.main`, `_staged_files`, `_tracked_files`, `_read_staged` | `--fix` on staged files overwrites the working tree with the staged index blob (destroying unstaged edits); git helpers ignore `--repo-root`. |
-| `BUG-27` | High | Low | `scripts.sanitize_paths.build_rules` | `fnmatch.translate()` anchors glob blacklists to `\Z` and eats trailing newlines; `home-user` lacks path boundary/tail, breaking `<home>/*` whitelists and corrupting a prefix-sharing user path (e.g. `al` vs `alice`) to `~ice`. |
-| `BUG-57` | Medium | Low | `benchmarks.scenarios.default_scenarios`, `benchmarks/workloads/file_read.py` | `hotpath-open-pubrun` calls `builtins.open()` instead of `pubrun.open()`, never exercising pubrun's file-open path. |
-| `BUG-58` | Medium | Low | `scripts.sanitize_paths._IPV6_RE` | Fails to match compressed (`::`) IPv6 addresses (`::1`, `2001:db8::1`, `fe80::1`). |
-| `BUG-59` | Medium | Medium | `scripts.update_commit_file`, `hatch_build.py`, `pyproject.toml` | `git add` on gitignored `src/pubrun/COMMIT` always fails (and write is outside `try/except`); static `force-include` breaks builds from non-git GitHub source tarballs. |
+| `BUG-25` | High | Low | `scripts/sanitize_paths.py::_read_staged` | Uses `text=True` (strict UTF-8) and crashes with `UnicodeDecodeError` on any staged binary file before `_looks_binary()`. |
+| `BUG-26` | High | Low | `scripts/sanitize_paths.py::main`, `scripts/sanitize_paths.py::_staged_files`, `scripts/sanitize_paths.py::_tracked_files`, `scripts/sanitize_paths.py::_read_staged` | `--fix` on staged files overwrites the working tree with the staged index blob (destroying unstaged edits); Git helpers ignore `--repo-root`, and `main` resolves staged write paths against CWD (`Path(path)`) instead of `repo_root / path`. |
+| `BUG-27` | High | Low | `scripts/sanitize_paths.py::build_rules` | `fnmatch.translate()` anchors `glob` blacklists to `\Z` and eats trailing newlines via `(?s:...)`; `home-user` lacks path boundary and subpath tail capture, breaking `<home>/*` whitelists and corrupting a prefix-sharing username path (for example a `HOME` ending in `al` turning `/home/alice/work` into `~ice/work`). |
+| `BUG-58` | Medium | Low | `scripts/sanitize_paths.py::_IPV6_RE` | Fails to match compressed (`::`) IPv6 addresses (`::1`, `2001:db8::1`, `fe80::1`) while falsely matching 3-group timestamps such as `12:34:56`. |
 
 ## Proposed changes (ordered, validatable)
 
-1. In `scripts/sanitize_paths.py`: read raw bytes in `_read_staged`, detect binary via `b"\x00"` / decode fallback, pass `cwd=repo_root` to all git subprocess calls, refuse `--fix` on staged files with unstaged working-tree diffs (`git diff --name-only`), translate `glob` rules cleanly without `\Z`/`(?s:...)`, anchor `home-user` with a subpath tail and boundary matching `_HOME_ANY_RE`, and update `_IPV6_RE` to recognize compressed `::` IPv6 addresses.
-2. In `scripts/update_commit_file.py`, `hatch_build.py`, and `pyproject.toml`: remove `git add` on gitignored `COMMIT`, wrap writes in `try/except`, move `src/pubrun/COMMIT` force-include into `hatch_build.py`'s `build_data["force_include"]` when the file exists, and verify building from a copied non-git directory.
-3. In `benchmarks/workloads/file_read.py` and `benchmarks/scenarios.py`: use `pubrun.open` when running under `pubrun` mode in `hotpath-open-pubrun`.
-4. Add `tests/test_repo_scripts_bugs.py`.
+1. In `scripts/sanitize_paths.py`:
+   - Change `_read_staged(path, repo_root=None)` to run `git show :<path>` with `text=False` and `cwd=repo_root`, returning `None` on non-zero returncode, `b"\x00"` bytes, or `UnicodeDecodeError`.
+   - Thread `repo_root=None` (`cwd=repo_root`) through `_staged_files`, `_tracked_files`, a new `_unstaged_files` (`git diff --name-only`), `_read_staged`, and the staged `git add --` call in `main`.
+   - Fix `main` write path resolution from `Path(path) if (args.files or not args.all) else (repo_root / path)` to `Path(path) if args.files else (repo_root / path)`.
+   - In staged `--fix` mode (non-`--dry-run`), skip files present in `_unstaged_files(repo_root)`, warn to `stderr`, and exit `1` if any finding could not be fixed or if `git add` fails.
+   - Replace `fnmatch.translate(pat)` for `glob` blacklist entries in `build_rules` with a dedicated inline glob-to-regex translator without `\Z` or `DOTALL`.
+   - Update `home-user` in `build_rules` to skip empty/`"~"`/`"/"` prefixes, deduplicate longest-first, and match `re.escape(base) + r"((?:/[A-Za-z0-9_.+-]+)*)(?![A-Za-z0-9_.-])"` with replacement `r"~\1"`.
+   - Replace `_IPV6_RE` with an RFC-4291 full-and-compressed IPv6 pattern bounded by `(?<![A-Za-z0-9_:])` and `(?![A-Za-z0-9_:])`.
+2. In `tests/test_repo_scripts_bugs.py`: add behavioral regression tests for `BUG-25`, `BUG-26`, `BUG-27`, and `BUG-58` (testing real subprocess/CLI/function outcomes, no code-pinning assertions).
 
 ## Deferred / out of scope (with reason)
 
-None.
+- `BUG-59` (`scripts/update_commit_file.py`, `hatch_build.py`, `pyproject.toml` non-git tarball builds and gitignored `COMMIT`): Already fixed in `HEAD` by commit `44cee0a`. `scripts/update_commit_file.py` is already a cleanup-only no-op inside `try/except`, `hatch_build.py` dynamically injects verified `_build_meta.json` and `COMMIT` via `tempfile.TemporaryDirectory` into `build_data["force_include"]` and omits them cleanly on non-git tarballs, and `pyproject.toml` has no static `force-include` entry (verified by `tests/test_commit_identity.py`). Re-applying the originally drafted `"unknown"` fallback would regress `tests/test_commit_identity.py::test_checkout_git_failure_or_mismatch_attaches_nothing`.
+  - Carrier-Evidence: .aw/records/plans/executed/20261121-startup-perf-02-4il383-build-stamped-and-deferred-commit-identity-resolution.ipd.md
+- `BUG-57` (`benchmarks/scenarios.py`, `benchmarks/workloads/file_read.py` `hotpath-open-pubrun` workload): Already fixed in `HEAD` by commit `c7cc2db`. `benchmarks/scenarios.py::all_scenarios` retired `hotpath-open-pubrun` in favor of explicit `hotpath-open-stat`, `hotpath-open-hash-stream`, `hotpath-open-hash-fallback`, `hotpath-register-stat`, and `hotpath-register-hash` scenarios, and `benchmarks/workloads/file_read.py` already invokes `pubrun.open()` in pubrun modes and `builtins.open()` in `baseline` mode.
+  - Carrier-Evidence: .aw/records/plans/executed/20261121-file-prov-05-4gpguy-external-file-example-stat-vs-hash-benchmarks-docs-sync-and.ipd.md
 
 ## Scope check
 
-- Over-scope: none.
-- Under-scope: none.
+- Over-scope: Retired former `E-03` (`BUG-59`: `scripts/update_commit_file.py`, `hatch_build.py`, `pyproject.toml`) and former `E-04` (`BUG-57`: `benchmarks/scenarios.py`, `benchmarks/workloads/file_read.py`) after verifying both are already fixed in `HEAD` by executed plans `4il383` and `4gpguy`.
+- Under-scope: none; all 4 live `scripts/sanitize_paths.py` bugs (`BUG-25`, `BUG-26`, `BUG-27`, `BUG-58`) plus the discovered staged-mode `Path(path)` write-path bug in `scripts/sanitize_paths.py::main` are covered.
 
 ## Required tests / validation
 
-- Run `pytest tests/test_repo_scripts_bugs.py -v` and paste actual output.
-- Run `python3 scripts/sanitize_paths.py --check --all` and paste actual output.
+- Run `pytest tests/test_repo_scripts_bugs.py tests/test_sanitize_paths.py tests/test_commit_identity.py -v` and paste actual output.
+- Run `python3 scripts/sanitize_paths.py --check --all` and paste actual output confirming exit code 0.
 - Run full `pytest -q` and paste actual output confirming zero regressions.
 
 ## Spec / documentation sync
 
-N/A: fixes internal scripts, packaging hook, and benchmark workload accuracy.
+Checked `.pre-commit-config.yaml` (`sanitize-paths` hook invoking `python3 scripts/sanitize_paths.py --check`), `.sanitize-allow.toml` (allowlist/exclude configuration), and `tests/test_sanitize_paths.py`. No CLI flag names, config file schema keys, or pre-commit hook arguments change in `scripts/sanitize_paths.py`, so no documentation or hook configuration update is required.
 
 ## Open questions
 
@@ -113,35 +140,25 @@ N/A: fixes internal scripts, packaging hook, and benchmark workload accuracy.
 
 - Blocking: no
 - Status: resolved
-- Owner: plan author
-- Resolution or deferral rationale: Fix `hotpath-open-pubrun` in place to call `pubrun.open()` so the scenario measures what its name claims, and note the semantic change in benchmark release notes (prior `benchmarks/data/` entries measured unpatched `builtins.open()`). Human plan approval confirms keeping the scenario name rather than renaming to `hotpath-pubrun-open` before execution.
+- Owner: plan reviewer
+- Resolution or deferral rationale: Superseded by executed plan `4gpguy` (commit `c7cc2db`), which already retired `hotpath-open-pubrun` in `benchmarks/scenarios.py::all_scenarios`, replaced it with explicit `hotpath-open-stat` / `hotpath-open-hash-stream` / `hotpath-open-hash-fallback` scenarios calling `pubrun.open()` in `benchmarks/workloads/file_read.py`, and retained legacy baseline pairing only in `benchmarks/aggregate.py::_HOTPATH_BASELINE`. No action remains for `kqzd15`.
 
 ## Validation and cross-check (verify before reporting done)
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'.
 
 - [ ] V-01 validates E-01
-  - Required evidence: Pasted `pytest tests/test_repo_scripts_bugs.py -v` output confirming staged binary files are skipped cleanly, `--repo-root` works from a different CWD, and `--fix` does not clobber unstaged edits in a partially staged file.
+  - Required evidence: Pasted `pytest tests/test_repo_scripts_bugs.py -v` output confirming (1) staged binary files containing NUL bytes or invalid UTF-8 are skipped cleanly without `UnicodeDecodeError`, (2) `--repo-root` works from a different CWD in both `--all` and staged modes (including writing fixed files under `repo_root`), and (3) staged `--fix` refuses to overwrite a partially staged file that has unstaged working-tree edits, prints a warning to `stderr`, leaves the working-tree edits intact, and exits `1` (while exiting `0` when all staged findings are safely fixed and re-staged).
   - Observed evidence:
   - Result: pending
 
 - [ ] V-02 validates E-02
-  - Required evidence: Pasted `pytest tests/test_repo_scripts_bugs.py -v` output confirming inline `glob` blacklists match without eating newlines, a prefix-sharing `HOME` (`al`) does not corrupt a longer username (`alice`) into `~ice/work`, `<home>/*` whitelists work under `home-user`, and `_IPV6_RE` matches `::1`, `fe80::1`, and `2001:db8::1`.
+  - Required evidence: Pasted `pytest tests/test_repo_scripts_bugs.py -v` output confirming (1) inline `glob` blacklists match mid-line without eating trailing newlines or delimiters, (2) a short prefix `HOME` ending in `al` does not corrupt `/home/alice/work` into `~ice/work` while still sanitizing `<home>/work` to `~/work` and honoring `<home>/*` whitelists under `home-user`, and (3) `_IPV6_RE` matches `::1`, `fe80::1`, `2001:db8::1`, `2001:db8::`, and full 8-group IPv6 addresses while rejecting bare `::`, `foo::1`, `12:34:56`, and `a::b::c`.
   - Observed evidence:
   - Result: pending
 
 - [ ] V-03 validates E-03
-  - Required evidence: Pasted `pytest tests/test_repo_scripts_bugs.py -v` output confirming `hatch_build.py` and `update_commit_file.py` succeed cleanly in a temporary directory with no `.git` folder and never call `git add` on gitignored `COMMIT`.
-  - Observed evidence:
-  - Result: pending
-
-- [ ] V-04 validates E-04
-  - Required evidence: Pasted `pytest tests/test_repo_scripts_bugs.py -v` output confirming `benchmarks/workloads/file_read.py` invokes `pubrun.open` under pubrun mode and `builtins.open` under baseline mode.
-  - Observed evidence:
-  - Result: pending
-
-- [ ] V-05 validates E-05
-  - Required evidence: Pasted output from `python3 scripts/sanitize_paths.py --check --all` (exit 0) and full `pytest -q` showing `tests/test_repo_scripts_bugs.py` and all pre-existing tests pass with zero failures.
+  - Required evidence: Pasted output from `pytest tests/test_repo_scripts_bugs.py tests/test_sanitize_paths.py tests/test_commit_identity.py -v`, `python3 scripts/sanitize_paths.py --check --all` (exit 0), and full `pytest -q` showing all tests pass with zero failures.
   - Observed evidence:
   - Result: pending
 
@@ -150,4 +167,10 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 - Size assessment: standard
 - Cohesion rationale: not required
 
-Wait for human approval (`- Status: approved`) before executing. Commit only files listed in `Scope-Paths` via `aw commit kqzd15 -- scripts/sanitize_paths.py scripts/update_commit_file.py hatch_build.py pyproject.toml benchmarks/scenarios.py benchmarks/workloads/file_read.py tests/test_repo_scripts_bugs.py`, then move this plan to `.aw/records/plans/executed/` through the post-gate lifecycle transition.
+### Execution contract
+
+1. Precondition: wait for human approval (`- Status: approved`) before editing production code or tests; do not self-approve.
+2. Scope and drift: edit only the paths declared in `- Scope-Paths:` (`scripts/sanitize_paths.py`, `tests/test_repo_scripts_bugs.py`). If an unexpected file outside `- Scope-Paths:` is required, stop and record `--scope-reason` / `--scope-ack` or emit a follow-up plan before touching it.
+3. Validation honesty (HARD MUST): run every command listed in `## Required tests / validation` and `V-01`..`V-03`, and paste the actual runner output verbatim into each `V-*` `Observed evidence:` field; never claim a test or check passed without running it, and never author code-pinning tests (`inspect`, `ast`, regex/substring checks on source code).
+4. Commit and push boundary: commit only the files you changed for this plan using `aw commit kqzd15 -- scripts/sanitize_paths.py tests/test_repo_scripts_bugs.py` (never `git add -A`, never raw `git commit`, never sweep unrelated working-tree changes), and never `git push`, tag, or release.
+5. Lifecycle transition ownership: once all `E-01`..`E-03` items are `performed` and all `V-01`..`V-03` items are `pass` with pasted evidence, run `aw ipd finalize kqzd15` ONLY when executing standalone; when running under an autonomous driver (`aw oc run` / `aw agy run`), leave finalization to the driver so lane integration handles the terminal transition.
