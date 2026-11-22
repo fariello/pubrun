@@ -128,6 +128,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - Manifest schema additions (`$defs.subprocess_record`) are implemented in prerequisite child plan `e1fwy2` (manifest timing schema and tracker monotonic lifecycle).
   - Carrier: e1fwy2
+  - Carrier-Evidence: .aw/records/plans/executed/20261121-timing-acc-01-e1fwy2-manifest-timing-schema-and-tracker-monotonic-lifecycle.ipd.md
 - Diagnostic report and Terminal User Interface (TUI) rendering of subprocess `elapsed_seconds` (with fallback for legacy manifests) are implemented in child plan `vrr1fv` (reports, status, diff, and TUI timing semantics).
   - Carrier: vrr1fv
 - Documentation and `examples/05_execution_phases.py` updates are implemented in child plan `3tvesf` (timing docs, examples, benchmark, and whole-Set verification).

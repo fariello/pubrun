@@ -170,6 +170,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - Producer timing mechanics in `src/pubrun/tracker.py`, `src/pubrun/writer.py`, and `schemas/manifest.schema.json` are implemented in prerequisite child plan `e1fwy2` (manifest timing schema and tracker monotonic lifecycle).
   - Carrier: e1fwy2
+  - Carrier-Evidence: .aw/records/plans/executed/20261121-timing-acc-01-e1fwy2-manifest-timing-schema-and-tracker-monotonic-lifecycle.ipd.md
 - Phase, `SubprocessSpy`, explicit subprocess wrapper, and `ResourceWatcher` timing mechanics in `src/pubrun/core.py`, `src/pubrun/capture/subprocesses.py`, and `src/pubrun/capture/resources.py` are implemented in prerequisite child plan `8co0wy` (monotonic phase, subprocess, and resource timing).
   - Carrier: 8co0wy
 - Documentation, examples, benchmarking, and whole-Set verification are implemented in downstream child plan `3tvesf` (timing docs, examples, benchmark, and whole-Set verification).
