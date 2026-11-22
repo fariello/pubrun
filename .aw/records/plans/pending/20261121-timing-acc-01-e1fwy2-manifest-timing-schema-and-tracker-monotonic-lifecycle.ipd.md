@@ -6,7 +6,7 @@
 - Scope: Define the run timing interval model; update `schemas/manifest.schema.json` additively; update `Run` (`src/pubrun/tracker.py`) and `ArtifactWriter` (`src/pubrun/writer.py`); add deterministic timing and schema conformance tests.
 - Scope-Paths: schemas/manifest.schema.json, src/pubrun/tracker.py, src/pubrun/writer.py, tests/test_timing_accuracy.py, tests/test_manifest_schema.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Add monotonic interval schema fields and separate startup, workload, and finalization timing in Run and ArtifactWriter
@@ -19,11 +19,13 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: e1fwy2
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-22 draft (agent): created.
 - 2026-11-22 to-review (agent): authored review-ready child plan from backlog item `6hp1zu`.

@@ -6,7 +6,7 @@
 - Scope: Full-Set coordination for backlog item `6hp1zu` across manifest schema, tracker lifecycle, phase/subprocess/resource capture, status/diagnostics/diff/TUI consumers, documentation, examples, and instrumentation benchmarking.
 - Scope-Paths: .aw/records/plans/pending/20261121-timing-acc-00-nr63qr-timing-accuracy-and-overhead-separation.ipd.md
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: orchestrator
 - Coverage: pass
@@ -22,11 +22,13 @@
 - Highest E allocated: 04
 - Author: agent
 - Id: nr63qr
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-22 coverage pass (aw oc run): fingerprint 2bb68f399dda, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-22 coverage pass (aw oc run): fingerprint e35cd90b7a9b, model uri/its_direct/pt3-claude-opus-5.5-1m-us

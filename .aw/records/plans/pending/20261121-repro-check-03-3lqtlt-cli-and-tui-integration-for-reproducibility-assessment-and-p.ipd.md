@@ -6,7 +6,7 @@
 - Scope: Wire the shared reproducibility assessment and opt-in `--preflight` engine into `pubrun inspect`, `pubrun rerun`, `pubrun show`, and TUI widgets (`RunDetailsView`, `ActionsPanel`), add `--strict` / `--fail-on` exit options without breaking default exit codes or `pubrun rerun` stdout piping, and add CLI and TUI behavioral tests.
 - Scope-Paths: src/pubrun/__main__.py, src/pubrun/report/diagnostics.py, src/pubrun/tui/widgets/details.py, src/pubrun/tui/widgets/actions.py, tests/test_checks_commands.py, tests/test_cli.py, tests/test_tui.py
 - Item-Dependencies: executed:tusvtd
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Work-Kind: feature
@@ -17,12 +17,14 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: 3lqtlt
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 - Short-Description: Integrate shared reproducibility assessment and preflight into inspect, rerun, show, and TUI with strict exit behavior
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-21 to-review (agent): created child plan 03 of Set `repro-check` graduating backlog item `q3bll1`.
 

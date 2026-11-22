@@ -6,7 +6,7 @@
 - Scope: Add shared package-name normalization and distribution lookup helpers in `src/pubrun/capture/packages.py`, implement `compare_with_current_environment` in `src/pubrun/report/reproducibility.py`, wire `preflight=True` into `assess_run` in `src/pubrun/report/reproducibility.py` and `src/pubrun/report/checks.py`, and add unit and safety-invariant tests in `tests/test_reproducibility_preflight.py`.
 - Scope-Paths: src/pubrun/capture/packages.py, src/pubrun/report/reproducibility.py, src/pubrun/report/checks.py, tests/test_reproducibility_preflight.py
 - Item-Dependencies: executed:0b8i7x
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Work-Kind: feature
@@ -17,12 +17,14 @@
 - Highest E allocated: 04
 - Author: agent
 - Id: tusvtd
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 - Short-Description: Add read-only offline comparison of recorded runtime, package, source, and input evidence against current environment
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007
 - 2026-11-21 to-review (agent): created child plan 02 of Set `repro-check` graduating backlog item `q3bll1`.
 

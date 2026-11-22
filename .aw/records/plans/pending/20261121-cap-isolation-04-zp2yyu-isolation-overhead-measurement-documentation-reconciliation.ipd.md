@@ -6,7 +6,7 @@
 - Scope: Measure startup and hot-path (`TqdmSafeTee.write`, `SubprocessSpy` wrapper, `EventStream.emit`) overhead locally against a pre-isolation baseline without publishing or submitting; reconcile `docs/architecture.md`, `docs/functional_spec.md`, `docs/manifest.md`, `docs/api.md`, and `docs/performance.md` against the implemented behavior from `p6pon8`, `ed0yds`, and `26euz0`; run the full test suite, example verification, and path sanitizer.
 - Scope-Paths: docs/architecture.md, docs/functional_spec.md, docs/manifest.md, docs/api.md, docs/performance.md
 - Item-Dependencies: executed:p6pon8, executed:ed0yds, executed:26euz0
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Benchmark capture-isolation startup and hot-path overhead, reconcile architecture/spec/manifest/API docs, and run whole-Set verification
@@ -19,11 +19,13 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: zp2yyu
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-22 to-review (agent): authored review-ready child plan from backlog item `x21s6w`.
 - 2026-11-22 draft (agent): created.

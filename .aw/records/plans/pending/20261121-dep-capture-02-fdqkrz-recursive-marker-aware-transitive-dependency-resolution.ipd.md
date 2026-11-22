@@ -6,7 +6,7 @@
 - Scope: Create a pure standard-library PEP 508 requirement and marker evaluator in `src/pubrun/capture/_markers.py`, refactor `imported-transitive` in `src/pubrun/capture/packages.py` to compute a recursive marker-aware closure with honest handling of optional extras, missing transitive dependencies, and unparseable markers, add behavioral tests in `tests/test_package_transitive.py`, and reconcile `tests/test_new_features.py`.
 - Scope-Paths: src/pubrun/capture/_markers.py, src/pubrun/capture/packages.py, tests/test_package_transitive.py, tests/test_new_features.py
 - Item-Dependencies: executed:uil22c
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Add stdlib PEP 508 requirement/marker evaluator and recursive, cycle-safe, extra-honest imported-transitive closure
@@ -19,11 +19,13 @@
 - Highest E allocated: 04
 - Author: agent
 - Id: fdqkrz
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-21 draft (agent): created.
 - 2026-11-21 to-review (agent): authored review-ready child plan 02 of Set `dep-capture` graduating backlog item `w4hxkh`.

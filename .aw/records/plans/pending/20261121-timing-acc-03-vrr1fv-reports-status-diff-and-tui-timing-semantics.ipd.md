@@ -6,7 +6,7 @@
 - Scope: Update `src/pubrun/status.py`, `src/pubrun/report/diagnostics.py`, `src/pubrun/analysis/diff.py`, `src/pubrun/analysis/render.py`, `src/pubrun/tui/widgets/details.py`, and `src/pubrun/tui/widgets/diff.py`; add behavioral compatibility and labeling tests in `tests/test_timing_consumers.py` and `tests/test_diff_usability.py`.
 - Scope-Paths: src/pubrun/status.py, src/pubrun/report/diagnostics.py, src/pubrun/analysis/diff.py, src/pubrun/analysis/render.py, src/pubrun/tui/widgets/details.py, src/pubrun/tui/widgets/diff.py, tests/test_timing_consumers.py, tests/test_diff_usability.py
 - Item-Dependencies: executed:e1fwy2, executed:8co0wy
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Preserve legacy manifest readability and label old vs new timing semantics across status, diagnostics, diff, and TUI
@@ -19,11 +19,13 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: vrr1fv
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007
 - 2026-11-22 draft (agent): created.
 - 2026-11-22 to-review (agent): authored review-ready child plan from backlog item `6hp1zu`.

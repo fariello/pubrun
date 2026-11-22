@@ -6,7 +6,7 @@
 - Scope: Orchestrate five child plans implementing the core file-provenance engine and proxy hardening, explicit external file registration, import-mode application programming interface (API) parity, report and check evidence distinction, and example, benchmark, documentation, and whole-Set verification for backlog item `x6alw4`.
 - Scope-Paths: .aw/records/plans/pending/20261121-file-prov-00-vtkkn1-external-file-registration-and-explicit-hashing-guarantees.ipd.md
 - Item-Dependencies: executed:xxi3nc, executed:52dl55, executed:98j0a3, executed:hm32d9, executed:4gpguy
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: orchestrator
 - Coverage: pass
@@ -21,11 +21,13 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: vtkkn1
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-22 coverage pass (aw oc run): fingerprint e8fd48e6a894, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-22 coverage pass (aw oc run): fingerprint 594ad82ba254, model uri/its_direct/pt3-claude-opus-5.5-1m-us

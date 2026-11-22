@@ -6,7 +6,7 @@
 - Scope: Add structured parent hydration metadata in `src/pubrun/report/utils.py`, create `src/pubrun/report/reproducibility.py` with the shared evidence model and recorded-manifest gap engine, integrate it into `src/pubrun/report/checks.py`, and add unit tests in `tests/test_reproducibility_assessment.py`.
 - Scope-Paths: src/pubrun/report/utils.py, src/pubrun/report/reproducibility.py, src/pubrun/report/checks.py, tests/test_reproducibility_assessment.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Work-Kind: feature
@@ -17,12 +17,14 @@
 - Highest E allocated: 04
 - Author: agent
 - Id: 0b8i7x
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 - Short-Description: Build shared evidence taxonomy, structured parent hydration report, and recorded-manifest gap assessment
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-21 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007
 - 2026-11-21 to-review (agent): created child plan 01 of Set `repro-check` graduating backlog item `q3bll1`.
 

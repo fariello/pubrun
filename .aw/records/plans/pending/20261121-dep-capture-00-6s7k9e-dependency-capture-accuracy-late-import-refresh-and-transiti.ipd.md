@@ -6,7 +6,7 @@
 - Scope: Coordinate four ordered child plans graduating backlog item `w4hxkh` across distribution identity resolution and caching, recursive marker-aware transitive resolution, startup-to-finalization manifest lifecycle and consumer integration, and benchmarking plus documentation and whole-Set validation.
 - Scope-Paths: .aw/records/plans/pending/20261121-dep-capture-00-6s7k9e-dependency-capture-accuracy-late-import-refresh-and-transiti.ipd.md
 - Item-Dependencies: executed:uil22c, executed:fdqkrz, executed:ijipnx, executed:iflqsl
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: orchestrator
 - Coverage: pass
@@ -22,11 +22,13 @@
 - Highest E allocated: 04
 - Author: agent
 - Id: 6s7k9e
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-22 coverage pass (aw oc run): fingerprint f8de33231a6c, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-22 coverage pass (aw oc run): fingerprint 52d2930d50dd, model uri/its_direct/pt3-claude-opus-5.5-1m-us

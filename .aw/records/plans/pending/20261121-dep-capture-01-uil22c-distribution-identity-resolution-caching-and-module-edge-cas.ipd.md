@@ -6,7 +6,7 @@
 - Scope: Implement Python Enhancement Proposal (PEP) 503 normalization, a cached distribution index with Python 3.8 through 3.14 single-pass mapping, shared installed-distribution lookup helpers, safe concurrent `sys.modules` snapshotting, and explicit resolution of import-name mismatches, namespace packages, ambiguous mappings, standard-library modules, local-only modules, editable installs, and missing metadata in `src/pubrun/capture/packages.py`, with deterministic local fixture tests in `tests/test_package_resolution.py` and `tests/test_capture_engines.py`.
 - Scope-Paths: src/pubrun/capture/packages.py, tests/test_capture_engines.py, tests/test_package_resolution.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Resolve import names to distributions with Python 3.8+ fallback, environment-fingerprinted cache, and explicit edge-case handling
@@ -19,11 +19,13 @@
 - Highest E allocated: 04
 - Author: agent
 - Id: uil22c
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-21 /plan-review (Antigravity/Gemini): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007, PR-008, PR-009, PR-010, PR-011
 - 2026-11-21 draft (agent): created.
 - 2026-11-21 to-review (agent): authored review-ready child plan 01 of Set `dep-capture` graduating backlog item `w4hxkh`.

@@ -6,7 +6,7 @@
 - Scope: Update `src/pubrun/report/diagnostics.py`, `src/pubrun/report/checks.py`, and `src/pubrun/report/methods.py` to tolerate failed or null section fields and surface capture failures honestly; add behavioral tests in `tests/test_reports.py`, `tests/test_checks_commands.py`, and `tests/test_edge_cases.py`.
 - Scope-Paths: src/pubrun/report/diagnostics.py, src/pubrun/report/checks.py, src/pubrun/report/methods.py, tests/test_reports.py, tests/test_checks_commands.py, tests/test_edge_cases.py
 - Item-Dependencies: executed:ed0yds
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Surface capture errors and failed sections accurately across report, inspect, methods, and status without crashing on degraded manifests
@@ -19,11 +19,13 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: 26euz0
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-22 draft (agent): created.
 - 2026-11-22 to-review (agent): authored review-ready child plan from backlog item `x21s6w`.

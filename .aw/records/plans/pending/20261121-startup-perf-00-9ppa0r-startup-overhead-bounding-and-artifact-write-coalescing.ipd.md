@@ -6,7 +6,7 @@
 - Scope: Full-Set coordination for backlog item `t1xqpw` across baseline measurement, commit identity and boot configuration loading, snapshot write coalescing, explicit durability policy, bounded Git and hardware capture budgets, post-change benchmark comparison, documentation reconciliation, and whole-Set verification.
 - Scope-Paths: .aw/records/plans/pending/20261121-startup-perf-00-9ppa0r-startup-overhead-bounding-and-artifact-write-coalescing.ipd.md
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: orchestrator
 - Coverage: pass
@@ -21,11 +21,13 @@
 - Highest E allocated: 04
 - Author: agent
 - Id: 9ppa0r
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-22 coverage pass (aw oc run): fingerprint e17394621eff, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-22 coverage pass (aw oc run): fingerprint dd7a784cfa1b, model uri/its_direct/pt3-claude-opus-5.5-1m-us

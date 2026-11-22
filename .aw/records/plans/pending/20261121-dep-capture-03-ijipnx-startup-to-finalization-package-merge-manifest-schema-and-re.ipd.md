@@ -6,7 +6,7 @@
 - Scope: Extend `schemas/manifest.schema.json` additively for richer package metadata, implement `merge_package_snapshots()` and stage-aware package capture in `src/pubrun/capture/packages.py`, wire startup snapshot plus finalization refresh and merge into `src/pubrun/tracker.py`, update `src/pubrun/report/methods.py`, `src/pubrun/report/diagnostics.py`, and `src/pubrun/tui/widgets/details.py`, and add lifecycle and schema conformance tests in `tests/test_package_lifecycle.py` and `tests/test_manifest_schema.py`.
 - Scope-Paths: schemas/manifest.schema.json, src/pubrun/capture/packages.py, src/pubrun/tracker.py, src/pubrun/report/methods.py, src/pubrun/report/diagnostics.py, src/pubrun/tui/widgets/details.py, tests/test_manifest_schema.py, tests/test_package_lifecycle.py
 - Item-Dependencies: executed:fdqkrz
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Extend manifest schema additively, refresh and merge packages at finalization, and update methods, diagnostics, and TUI consumers
@@ -19,11 +19,13 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: ijipnx
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007, PR-008
 - 2026-11-21 to-review (agent): authored review-ready child plan 03 of Set `dep-capture` graduating backlog item `w4hxkh`.
 - 2026-11-21 draft (agent): created.
