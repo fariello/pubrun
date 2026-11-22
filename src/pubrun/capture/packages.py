@@ -1025,10 +1025,15 @@ def _resolve_imported_modules(
         )
 
         # Match indexed distributions that omit package files in RECORD/top_level.txt
-        # (such as PEP 660 editable .pth installs like pubrun itself) in O(1).
+        # (such as PEP 660 editable .pth installs or setuptools __editable__ finder
+        # shims) in O(1).
         direct_info = index.by_normalized_name.get(norm_top)
+        has_only_editable_shims = direct_info is not None and (
+            direct_info.editable is True
+            and all(t.startswith("__editable__") for t in direct_info.top_levels)
+        )
         if direct_info is not None and (
-            not direct_info.top_levels or in_site_packages
+            not direct_info.top_levels or in_site_packages or has_only_editable_shims
         ):
             _merge_imported_record(
                 resolved_by_key,
@@ -1157,7 +1162,7 @@ def resolve_packages_snapshot(config: Dict[str, Any]) -> Dict[str, Any]:
     The returned dict includes ``records`` (with per-record ``import_names`` for
     imported distributions), ``unresolved``, ``local_modules``, and ``capture_state``.
     """
-    cfg = config.get("capture", {}).get("packages", {})
+    cfg = (config.get("capture") or {}).get("packages") or {}
     mode = cfg.get("mode", "imported-only")
 
     if mode == "off":

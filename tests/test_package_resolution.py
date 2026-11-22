@@ -512,6 +512,37 @@ def test_editable_direct_url_variants_and_no_url_leak(tmp_path, monkeypatch):
     assert "private.example.invalid" not in serialized
 
 
+def test_editable_pep660_setuptools_finder_resolves_outside_site_packages(tmp_path, monkeypatch):
+    site_dir = tmp_path / "site_pep660"
+    src_dir = tmp_path / "repo_src"
+    pkg_dir = src_dir / "synth_pep660_pkg"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "__init__.py").write_text("PEP660 = True\n", encoding="utf-8")
+
+    # Setuptools PEP 660 editable installs omit top_level.txt and package files
+    # from RECORD, recording only the __editable__ finder shim and direct_url.json.
+    _write_dist(
+        site_dir,
+        "synth-pep660-pkg",
+        "1.2.0",
+        top_levels=None,
+        files={"__editable___synth_pep660_pkg_1_2_0_finder.py": "# finder shim\n"},
+        direct_url=json.dumps({"dir_info": {"editable": True}, "url": f"file://{src_dir}"}),
+    )
+    monkeypatch.syspath_prepend(str(site_dir))
+    monkeypatch.syspath_prepend(str(src_dir))
+    _import_tracked(monkeypatch, "synth_pep660_pkg")
+
+    snap = pkgs.resolve_packages_snapshot({"capture": {"packages": {"mode": "imported-only"}}})
+    rec = _find_record(snap, "synth-pep660-pkg")
+    assert rec is not None
+    assert rec["name"] == "synth-pep660-pkg"
+    assert rec["version"] == "1.2.0"
+    assert rec["editable"] is True
+    assert rec["import_names"] == ["synth_pep660_pkg"]
+    assert "synth_pep660_pkg" not in snap["local_modules"]
+
+
 def test_missing_metadata_and_corrupt_dist_degrade_to_partial(tmp_path, monkeypatch):
     site_dir = tmp_path / "site_missing_meta"
     _write_dist(
