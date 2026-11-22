@@ -1,5 +1,6 @@
 - Id: w4hxkh
-- Status: open
+- Status: graduated
+- Graduated-To: dep-capture
 - Blocks-Release: next
 - Set: pubrun-improve
 - Work-Kind: bug
@@ -10,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-22 graduated (aw backlog): graduated by run run-20261122T010822Z-2359880: 6s7k9e, fdqkrz, iflqsl, ijipnx, uil22c
 - 2026-11-22 same-status (aw set): Gate next release per check.live-bug-ungated
 - 2026-11-21 created (aw backlog): Maintainer requested detailed backlog capture; implementation remains future work.
 
