@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/report/checks.py`, `src/pubrun/report/meta_snapshot.py`, `src/pubrun/report/diagnostics.py`, `src/pubrun/report/utils.py`, `tests/test_reproducibility_assessment.py`, and regression tests in `tests/test_report_checks_bugs.py`.
 - Scope-Paths: src/pubrun/report/checks.py, src/pubrun/report/meta_snapshot.py, src/pubrun/report/diagnostics.py, src/pubrun/report/utils.py, tests/test_reproducibility_assessment.py, tests/test_report_checks_bugs.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix malformed TOML detection in self-check, meta depth flags, SGE/PBS check precedence, multi-mount reporting, and manifest hydration bugs
@@ -18,11 +18,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: ihh27o
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-22 to-review (Antigravity): authored fix steps, citations, and falsifiable validation criteria.
 - 2026-11-22 draft (Antigravity): created from `/assess-bugs` audit.

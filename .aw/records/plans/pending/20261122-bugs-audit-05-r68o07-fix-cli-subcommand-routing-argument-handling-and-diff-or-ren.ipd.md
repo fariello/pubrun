@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/__main__.py`, `src/pubrun/analysis/diff.py`, `src/pubrun/analysis/render.py`, dedicated regression tests in `tests/test_cli_diff_bugs.py`, and additive `show` documentation sync in `docs/cli.md`.
 - Scope-Paths: src/pubrun/__main__.py, src/pubrun/analysis/diff.py, src/pubrun/analysis/render.py, tests/test_cli_diff_bugs.py, docs/cli.md
 - Item-Dependencies: executed:njn1up
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix CLI subcommands allowlist, exit codes, show/combined/diff/bench flags, hashed-redaction diff, and path/table rendering bugs
@@ -18,11 +18,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: r68o07
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-22 to-review (Antigravity): authored fix steps, citations, and falsifiable validation criteria.
 - 2026-11-22 draft (Antigravity): created from `/assess-bugs` audit.

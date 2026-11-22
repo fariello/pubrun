@@ -6,7 +6,7 @@
 - Scope: `benchmarks/harness.py`, `benchmarks/share_safety.py`, `benchmarks/aggregate.py`, `benchmarks/pull_submissions.py`, `.github/scripts/extract_attachment_url.py`, `.github/scripts/validate_benchmark_submission.py`, and regression tests in `tests/test_benchmark_intake_bugs.py`.
 - Scope-Paths: benchmarks/harness.py, benchmarks/share_safety.py, benchmarks/aggregate.py, benchmarks/pull_submissions.py, .github/scripts/extract_attachment_url.py, .github/scripts/validate_benchmark_submission.py, tests/test_benchmark_intake_bugs.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix share_safety None handling, Slurm hostname leak, short-username redaction corruption, intake URL/schema/NaN safety, and aggregate crashes
@@ -18,11 +18,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: 8k73qj
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-22 to-review (Antigravity): authored fix steps, citations, and falsifiable validation criteria.
 - 2026-11-22 draft (Antigravity): created from `/assess-bugs` audit.

@@ -6,7 +6,7 @@
 - Scope: `scripts/sanitize_paths.py` and regression tests in `tests/test_repo_scripts_bugs.py`.
 - Scope-Paths: scripts/sanitize_paths.py, tests/test_repo_scripts_bugs.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix sanitize_paths binary crash, --repo-root, staged --fix data loss, and glob/home-user/IPv6 matching
@@ -18,11 +18,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: kqzd15
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-22 to-review (Antigravity): authored fix steps, citations, and falsifiable validation criteria.
 - 2026-11-22 draft (Antigravity): created from `/assess-bugs` audit.

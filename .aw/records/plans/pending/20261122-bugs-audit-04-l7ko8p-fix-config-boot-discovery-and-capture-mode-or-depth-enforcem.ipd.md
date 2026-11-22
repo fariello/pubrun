@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/_config_boot.py`, `src/pubrun/config.py`, `src/pubrun/capture/environment.py`, `src/pubrun/capture/git.py`, `src/pubrun/capture/host.py`, `src/pubrun/capture/process.py`, `src/pubrun/capture/python_runtime.py`, `src/pubrun/resources/default.toml`, `docs/configuration.md`, and regression tests in `tests/test_config_capture_modes.py`.
 - Scope-Paths: src/pubrun/_config_boot.py, src/pubrun/config.py, src/pubrun/capture/environment.py, src/pubrun/capture/git.py, src/pubrun/capture/host.py, src/pubrun/capture/process.py, src/pubrun/capture/python_runtime.py, src/pubrun/resources/default.toml, docs/configuration.md, tests/test_config_capture_modes.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Honor environment allowlist mode, per-collector depth=off, XDG/global boot config files, and non-mutating config resolution
@@ -18,11 +18,13 @@
 - Highest E allocated: 04
 - Author: Antigravity
 - Id: l7ko8p
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001 (resolved via OQ-01), PR-002, PR-003, PR-004, PR-005
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): REVIEWED - OPEN QUESTIONS; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-22 to-review (Antigravity): authored fix steps, citations, and falsifiable validation criteria.

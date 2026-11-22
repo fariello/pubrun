@@ -6,7 +6,7 @@
 - Scope: Whole repository substance (`src/pubrun/`, `benchmarks/`, `scripts/sanitize_paths.py`, `.github/scripts/`, and additive documentation sync in `docs/cli.md`, `docs/functional_spec.md`, and `docs/configuration.md`), excluding `.aw/` workflow infrastructure and work already owned by the 6 pending IPD Sets (`file-prov`, `repro-check`, `startup-perf`, `cap-isolation`, `dep-capture`, `timing-acc`).
 - Scope-Paths: .aw/records/plans/pending/20261122-bugs-audit-00-jqqvkh-bugs-and-correctness-audit-remediation.ipd.md
 - Item-Dependencies: executed:njn1up, executed:2nm0pq, executed:m780uj, executed:l7ko8p, executed:r68o07, executed:ihh27o, executed:8ebjeg, executed:8k73qj, executed:kqzd15
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: orchestrator
 - Coverage: pass
@@ -21,11 +21,13 @@
 - Highest E allocated: 09
 - Author: Antigravity
 - Id: jqqvkh
+- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 coverage pass (aw oc run): fingerprint beae1eeb107a, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-22 coverage fail (aw oc run): fingerprint 7e832cc9ba0a, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
