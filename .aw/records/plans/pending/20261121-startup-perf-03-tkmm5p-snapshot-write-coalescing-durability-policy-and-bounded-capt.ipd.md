@@ -227,6 +227,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - Commit identity resolution (`src/pubrun/__init__.py`, `hatch_build.py`) belongs to child plan `4il383` (build-stamped and deferred commit identity resolution).
   - Carrier: 4il383
+  - Carrier-Evidence: .aw/records/plans/executed/20261121-startup-perf-02-4il383-build-stamped-and-deferred-commit-identity-resolution.ipd.md
 - Post-change benchmark comparison and documentation updates (`docs/configuration.md`, `docs/architecture.md`, `docs/functional_spec.md`, `docs/manifest.md`, `docs/performance.md`) belong to child plan `ckc3vl` (post-change overhead comparison, documentation sync, and whole-Set verification).
   - Carrier: ckc3vl
 - Package capture changes (`src/pubrun/capture/packages.py`) belong to sibling backlog item `w4hxkh` (dependency capture accuracy and transitive resolution); do not modify `src/pubrun/capture/packages.py`.
