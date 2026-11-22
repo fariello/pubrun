@@ -52,11 +52,30 @@ ALL_RULESETS = ("home-user", "home-any", "hostname", "ip")
 _HOME_ANY_RE = re.compile(
     r"(?:/home|/Users)/[A-Za-z0-9_][A-Za-z0-9_.-]*((?:/[A-Za-z0-9_.+-]+)*)"
 )
-# IPv4 (each octet 0-255) and a permissive IPv6.
+# IPv4 (each octet 0-255) and IPv6 (RFC 4291 full and "::"-compressed text forms).
 _IPV4_RE = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"
 )
-_IPV6_RE = re.compile(r"\b(?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{0,4}\b")
+_H16 = r"[0-9A-Fa-f]{1,4}"
+# The look-arounds reject a match glued to an identifier or another colon, so
+# `module::Symbol`, `a::b::c`, and bare `::` never match. Every alternative is either the
+# full 8-group form or contains exactly one "::", so `12:34:56` timestamps never match.
+_IPV6_RE = re.compile(
+    r"(?<![A-Za-z0-9_:])(?:"
+    rf"(?:{_H16}:){{7}}{_H16}"
+    rf"|(?:{_H16}:){{1,7}}:"
+    rf"|(?:{_H16}:){{1,6}}:{_H16}"
+    rf"|(?:{_H16}:){{1,5}}(?::{_H16}){{1,2}}"
+    rf"|(?:{_H16}:){{1,4}}(?::{_H16}){{1,3}}"
+    rf"|(?:{_H16}:){{1,3}}(?::{_H16}){{1,4}}"
+    rf"|(?:{_H16}:){{1,2}}(?::{_H16}){{1,5}}"
+    rf"|{_H16}:(?::{_H16}){{1,6}}"
+    rf"|:(?::{_H16}){{1,7}}"
+    r")(?![A-Za-z0-9_:])"
+)
+# Inline glob translation: `*` stops at whitespace and common delimiters so a blacklist
+# glob scrubs one token mid-line instead of running to the end of the line.
+_GLOB_STAR = r"""[^\s"'`()\[\]{}<>,;]*"""
 
 
 @dataclass
@@ -150,18 +169,61 @@ def _hostname_needles() -> list:
     return sorted(needles, key=len, reverse=True)
 
 
+def _glob_to_regex(pat: str) -> str:
+    """Translate a glob into an unanchored regex that matches within a line.
+
+    Unlike `fnmatch.translate`, the result carries no `(?s:...)` or `\\Z`, so it does not
+    swallow the rest of the line (or its newline). `*` and `?` never cross whitespace.
+    """
+    out = []
+    i, n = 0, len(pat)
+    while i < n:
+        c = pat[i]
+        i += 1
+        if c == "*":
+            out.append(_GLOB_STAR)
+        elif c == "?":
+            out.append(r"[^\s]")
+        elif c == "[":
+            j = i
+            if j < n and pat[j] == "!":
+                j += 1
+            if j < n and pat[j] == "]":
+                j += 1
+            while j < n and pat[j] != "]":
+                j += 1
+            if j >= n:
+                out.append(re.escape(c))
+                continue
+            body = pat[i:j]
+            i = j + 1
+            negate = body.startswith("!")
+            if negate:
+                body = body[1:]
+            body = body.replace("\\", "\\\\").replace("[", "\\[").replace("^", "\\^")
+            out.append("[^" + body + "\\s]" if negate else "[" + body + "]")
+        else:
+            out.append(re.escape(c))
+    return "".join(out)
+
+
 def build_rules(cfg: Config) -> list:
     rules: list = []
     enabled = set(cfg.enabled)
     home = os.environ.get("HOME") or str(Path.home())
     user = getpass.getuser()
 
-    if "home-user" in enabled and home:
-        rules.append(Rule("home-user", re.compile(re.escape(home.rstrip("/"))), "~"))
-        # Also catch the canonical /home/<user> form if HOME differs.
-        canon = f"/home/{user}"
-        if canon != home.rstrip("/"):
-            rules.append(Rule("home-user", re.compile(re.escape(canon)), "~"))
+    if "home-user" in enabled:
+        # HOME plus the canonical /home/<user> form, longest first. The prefix must end at
+        # a path boundary (so HOME=/home/user never rewrites /home/users), and group 1 keeps
+        # the sub-path tail so the whole path is matched, replaced, and whitelisted.
+        bases = []
+        for base in ((home or "").rstrip("/"), f"/home/{user}" if user else ""):
+            if base and base not in ("~", "/") and base not in bases:
+                bases.append(base)
+        for base in sorted(bases, key=len, reverse=True):
+            rx = re.compile(re.escape(base) + r"((?:/[A-Za-z0-9_.+-]+)*)(?![A-Za-z0-9_.-])")
+            rules.append(Rule("home-user", rx, r"~\1"))
     if "home-any" in enabled:
         # \1 keeps the sub-path tail: /home/alice/docs -> ~/docs
         rules.append(Rule("home-any", _HOME_ANY_RE, r"~\1"))
@@ -176,7 +238,7 @@ def build_rules(cfg: Config) -> list:
     for kind, pat, repl in cfg.blacklist:
         try:
             rx = re.compile(pat if kind == "regex" else re.escape(pat) if kind == "literal"
-                            else fnmatch.translate(pat))
+                            else _glob_to_regex(pat))
         except re.error:
             continue
         rules.append(Rule("blacklist", rx, repl))
@@ -223,22 +285,39 @@ def scan_text(text: str, path: str, rules: list, cfg: Config):
     return findings, "".join(new_lines)
 
 
-def _staged_files():
+def _staged_files(repo_root=None):
     out = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, cwd=repo_root,
     )
     return [f for f in out.stdout.splitlines() if f]
 
 
-def _tracked_files():
-    out = subprocess.run(["git", "ls-files"], capture_output=True, text=True)
+def _unstaged_files(repo_root=None):
+    """Paths whose working-tree copy differs from the index (unstaged edits)."""
+    out = subprocess.run(
+        ["git", "diff", "--name-only"], capture_output=True, text=True, cwd=repo_root,
+    )
     return [f for f in out.stdout.splitlines() if f]
 
 
-def _read_staged(path: str):
-    out = subprocess.run(["git", "show", f":{path}"], capture_output=True, text=True)
-    return out.stdout if out.returncode == 0 else None
+def _tracked_files(repo_root=None):
+    out = subprocess.run(["git", "ls-files"], capture_output=True, text=True, cwd=repo_root)
+    return [f for f in out.stdout.splitlines() if f]
+
+
+def _read_staged(path: str, repo_root=None):
+    """The staged (index) blob as text, or None when it is missing, binary, or not UTF-8."""
+    out = subprocess.run(["git", "show", f":{path}"], capture_output=True, cwd=repo_root)
+    if out.returncode != 0 or b"\x00" in out.stdout:
+        return None
+    try:
+        text = out.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    # Universal newlines, as `text=True` gave before, so a --fix write_text() does not
+    # turn a CRLF blob into CR CR LF on Windows.
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _looks_binary(data: str) -> bool:
@@ -275,20 +354,26 @@ def main(argv=None) -> int:
     else:
         rules = build_rules(cfg)
 
+    staged_mode = not args.files and not args.all
+    writing = args.fix and not args.dry_run
     if args.files:
         targets = args.files
         read = lambda p: (Path(p).read_text(encoding="utf-8", errors="replace")
                           if Path(p).is_file() else None)
     elif args.all:
-        targets = _tracked_files()
+        targets = _tracked_files(repo_root)
         read = lambda p: (Path(repo_root / p).read_text(encoding="utf-8", errors="replace")
                           if (repo_root / p).is_file() else None)
     else:
-        targets = _staged_files()
-        read = _read_staged
+        targets = _staged_files(repo_root)
+        read = lambda p: _read_staged(p, repo_root)
+    # A staged fix writes the fixed INDEX blob over the working tree, so it is only safe
+    # when the working tree has no unstaged edits to that file.
+    unstaged = set(_unstaged_files(repo_root)) if (writing and staged_mode) else set()
 
     all_findings = []
     fixed_paths = []
+    unfixed_paths = []
     for path in targets:
         if _path_excluded(path, cfg):
             continue
@@ -299,11 +384,22 @@ def main(argv=None) -> int:
         if not findings:
             continue
         all_findings.extend(findings)
-        if args.fix and not args.dry_run and new_text != content:
-            fp = Path(path) if (args.files or not args.all) else (repo_root / path)
-            if fp.is_file():
+        if writing:
+            if path in unstaged:
+                print(
+                    f"sanitize-paths: refusing to --fix {path}: it has unstaged working-tree "
+                    "edits that the staged copy would overwrite. Stage or stash them, or "
+                    f"run: python3 scripts/sanitize_paths.py --fix {path}",
+                    file=sys.stderr,
+                )
+                unfixed_paths.append(path)
+                continue
+            fp = Path(path) if args.files else (repo_root / path)
+            if new_text != content and fp.is_file():
                 fp.write_text(new_text, encoding="utf-8")
                 fixed_paths.append(path)
+            else:
+                unfixed_paths.append(path)
         elif args.dry_run and new_text != content:
             fixed_paths.append(path)
 
@@ -325,10 +421,17 @@ def main(argv=None) -> int:
             file=sys.stderr,
         )
 
-    if args.fix and not args.dry_run:
-        if fixed_paths and (not args.files and not args.all):
-            subprocess.run(["git", "add", "--"] + fixed_paths)
-        return 0
+    if writing:
+        restaged = True
+        if fixed_paths and staged_mode:
+            restaged = subprocess.run(["git", "add", "--"] + fixed_paths,
+                                      cwd=repo_root).returncode == 0
+            if not restaged:
+                print("sanitize-paths: `git add` of the fixed files failed", file=sys.stderr)
+        if unfixed_paths:
+            print(f"sanitize-paths: {len(unfixed_paths)} file(s) left unfixed",
+                  file=sys.stderr)
+        return 0 if (restaged and not unfixed_paths) else 1
     if args.dry_run:
         if fixed_paths:
             print(f"\n(dry-run) would rewrite {len(fixed_paths)} file(s).", file=sys.stderr)
