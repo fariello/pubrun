@@ -1,0 +1,285 @@
+# IPD: Manifest Timing Schema and Tracker Monotonic Lifecycle
+
+- Date: 2026-11-21
+- Kind: child
+- Concern: Monotonic run duration measurement, workload/capture overhead separation, and additive manifest timing schema.
+- Scope: Define the run timing interval model; update `schemas/manifest.schema.json` additively; update `Run` (`src/pubrun/tracker.py`) and `ArtifactWriter` (`src/pubrun/writer.py`); add deterministic timing and schema conformance tests.
+- Scope-Paths: schemas/manifest.schema.json, src/pubrun/tracker.py, src/pubrun/writer.py, tests/test_timing_accuracy.py, tests/test_manifest_schema.py
+- Item-Dependencies: none
+- Status: to-review
+- Short-Description: Add monotonic interval schema fields and separate startup, workload, and finalization timing in Run and ArtifactWriter
+- Work-Kind: bug
+- Priority: high
+- From-Backlog: 6hp1zu
+- Blocks-Release: next
+- Set: timing-acc
+- Order: 1
+- Highest E allocated: 05
+- Author: agent
+- Id: e1fwy2
+
+> Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
+
+## Workflow history
+
+- 2026-11-22 draft (agent): created.
+- 2026-11-22 to-review (agent): authored review-ready child plan from backlog item `6hp1zu`.
+
+## Goal
+
+Replace wall-clock subtraction in `Run` with monotonic duration tracking (`time.perf_counter()`), separate synchronous startup capture, observed tracked workload, synchronous finalization overhead, and overlapping background hardware capture, and extend `schemas/manifest.schema.json` additively so both legacy v1.0 manifests and new manifests validate.
+
+### Timing interval model and lifecycle
+
+The text in `## Proposed changes (ordered, validatable)` is normative. These diagrams summarize the `Run` timing lifecycle and the relationships between persisted timing entities.
+
+```mermaid
+flowchart TD
+    A["t0: Run.__init__ entry (started_at_utc, _start_mono)"] --> B["Create run_dir, bootstrap engines, start pubrun-hw, write startup manifest"]
+    B --> C{"Startup succeeded?"}
+    C -->|No| G["Ghost mode: workload_seconds=null, capture_state=partial"]
+    C -->|Yes| D["t1: Mark workload start (workload_started_at_utc, _workload_start_mono, startup_overhead_seconds)"]
+    D --> E["Observed tracked workload interval (pubrun-hw overlaps concurrently)"]
+    E --> F{"stop() or atexit with ref_count == 0?"}
+    F -->|No| E
+    F -->|Yes| H["t2: _finalize_state entry under _run_lock (ended_at_utc, _workload_end_mono, workload_seconds)"]
+    H --> I["Wait for _hardware_future_done (hardware_wait_seconds) and shut down engines"]
+    I --> J["ArtifactWriter writes config.resolved.json"]
+    J --> K["t3: _mark_finalization_end (finalized_at_utc, finalization_overhead_seconds, session_seconds)"]
+    K --> L["Serialize and atomically write manifest.json, then write methods; record in-memory writer_overhead_seconds"]
+```
+
+```mermaid
+erDiagram
+    TIMING_RECORD ||--o{ SEQUENTIAL_INTERVAL : "contains disjoint"
+    TIMING_RECORD ||--o{ OVERLAPPING_INTERVAL : "contains concurrent"
+    TIMING_RECORD ||--|| UTC_CHRONOLOGY : "anchors absolute order"
+    TIMING_RECORD ||--|| TIMING_METADATA : "declares semantics"
+```
+
+## Detailed Implementation Checklist (TODO)
+
+Execution-state rule: mark an `E-*` item complete only after performing the action. That mark is not validation. Right-sizing rule: write for a modest executor that cannot hold much in its head. Each E-item is one step (one concern, about one file, executable in one focused pass) and its V-item names each unit it covers with its own check; a plan stays at about 5 E-items and 8 work Scope-Paths, else split it into more child plans (guidance, `IPD-Z603`). Accepted execution states: blocked, failed, pending, performed; terminal gate demands 'performed'.
+
+### Task group 1: Schema and core lifecycle implementation
+
+- [ ] E-01 Extend `schemas/manifest.schema.json` additively under `$defs.timing` and `$defs.subprocess_record`.
+  - Depends on: none
+  - Expected outcome: `$defs.timing` declares optional fields `workload_started_at_utc`, `finalized_at_utc`, `workload_seconds`, `startup_overhead_seconds`, `finalization_overhead_seconds`, `session_seconds`, `hardware_wait_seconds`, `background_hardware_seconds`, `duration_clock`, `elapsed_basis`, and `interval_scope` with nonnegativity constraints (`minimum: 0`) and strict enums; `$defs.subprocess_record` declares optional `elapsed_seconds` (`minimum: 0`), `duration_clock`, `pid`, and `error` so child `8co0wy` records also validate cleanly; `required` arrays remain unchanged so all legacy v1.0 manifests stay valid.
+  - Execution state: pending
+
+- [ ] E-02 Implement monotonic interval anchors and workload/overhead separation in `src/pubrun/tracker.py` (`Run.__init__`, `Run._bootstrap_engines`, `Run._finalize_state`, `Run._mark_finalization_end`, `Run.stop`, `Run.to_manifest_dict`).
+  - Depends on: E-01
+  - Expected outcome: `Run` captures Coordinated Universal Time (UTC) epoch floats via `time.time()` for chronology and monotonic counter readings via `time.perf_counter()` in private attributes only (never serialized); marks `t1` after `write_startup_manifest()`; tracks background hardware wall duration (`background_hardware_seconds`) separately as an overlapping interval; marks workload end `t2` under `_run_lock` at the start of `_finalize_state()` before waiting on `_hardware_future_done.wait(timeout=2.0)`; measures `hardware_wait_seconds`; marks pre-manifest finalization end `t3` via `_mark_finalization_end()`; sets `elapsed_seconds = workload_seconds`, `duration_clock = "monotonic"`, `elapsed_basis = "workload"`, and `interval_scope = "tracked_interval"`; handles partial startup/ghost mode, nested `ref_count`, exceptions, interruptions, and double-`stop()` idempotency.
+  - Execution state: pending
+
+- [ ] E-03 Update `src/pubrun/writer.py` (`ArtifactWriter.write_artifacts`) to write `config.resolved.json` before `manifest.json`, stamp `t3` before `to_manifest_dict()`, and record post-manifest writer duration in memory.
+  - Depends on: E-02
+  - Expected outcome: `ArtifactWriter.write_artifacts()` calls `self.run._finalize_state()`, writes `config.resolved.json` atomically, calls `self.run._mark_finalization_end()` right before `self.run.to_manifest_dict()`, writes `manifest.json` once atomically, writes `methods.{md,tex}`, and records total writer duration on `self.run.writer_overhead_seconds` in memory without performing a second `manifest.json` write.
+  - Execution state: pending
+
+### Task group 2: Deterministic behavioral and schema verification
+
+- [ ] E-04 Create `tests/test_timing_accuracy.py` with deterministic behavioral tests using controlled fake wall and monotonic clocks.
+  - Depends on: E-03
+  - Expected outcome: Tests exercise forward and backward wall-clock jumps, deterministic hardware-worker delay, deterministic writer delay, short runs, automatic `atexit` finalization, explicit `stop()`, nested reference-counted `start()`/`stop()`, `tracked_run` and `audit_run` normal and exception paths, `KeyboardInterrupt`/signal interruption, partial startup/ghost mode, and verification that no raw monotonic counter values appear in `manifest.json`, without depending on real-time sleeps.
+  - Execution state: pending
+
+- [ ] E-05 Extend `tests/test_manifest_schema.py` with conformance tests for new timing-rich manifests, legacy v1.0 manifests (without new timing fields), and startup/partial manifests, then run the targeted test suite.
+  - Depends on: E-04
+  - Expected outcome: `pytest tests/test_timing_accuracy.py tests/test_manifest_schema.py tests/test_tracker.py tests/test_writer.py -v` exits 0 with all tests passing.
+  - Execution state: pending
+
+## Project conventions discovered (Step 0)
+
+- `src/pubrun/tracker.py` (`Run.__init__`, `Run._finalize_state`, `Run.to_manifest_dict`) uses `time.time()` for `started_at_utc` and `ended_at_utc`, sets `ended_at_utc` after `self._hardware_future_done.wait(timeout=2.0)`, and computes `elapsed = self.ended_at_utc - self.started_at_utc`.
+- `src/pubrun/tracker.py` protects `_finalized` latching and the background hardware thread startup re-write with `pubrun._run_lock` to prevent a Time-Of-Check to Time-Of-Use (TOCTOU) race where the background thread overwrites a finalized manifest.
+- `src/pubrun/writer.py` (`ArtifactWriter.write_artifacts`) currently writes `manifest.json`, then `config.resolved.json`, then `methods.{md,tex}`, using `_atomic_json_write` (temp file + `fsync` + `os.replace`) and catching all exceptions so `pubrun` never crashes the host script.
+- `schemas/manifest.schema.json` enforces `"additionalProperties": false` on `$defs.timing` and `$defs.subprocess_record`, and `tests/test_manifest_schema.py` (`test_full_manifest_conforms_to_schema`, `test_startup_manifest_conforms_to_schema`) acts as a hard schema gate.
+- `pyproject.toml` supports Python `>=3.8` through `3.14` with standard-library runtime only (except `tomli` on Python `<3.11`).
+- Tests must assert on observable behavior, outputs, exit codes, and side effects rather than inspecting production source code.
+
+## Findings
+
+- **F-01 (Wall-clock distortion):** `Run.to_manifest_dict` derives `elapsed_seconds` by subtracting `self.started_at_utc` from `self.ended_at_utc`. A Network Time Protocol (NTP) adjustment or manual clock step shifts `elapsed_seconds` and can produce a negative number that violates `schemas/manifest.schema.json` (`minimum: 0`).
+- **F-02 (Teardown inflation):** `Run._finalize_state` waits up to `2.0` seconds on `self._hardware_future_done.wait(timeout=2.0)` before setting `self.ended_at_utc`. A short script therefore reports up to 2 seconds of hardware-detection wait inside its run duration.
+- **F-03 (Startup capture mixed into run duration):** `Run.__init__` sets `self.started_at_utc` before `mkdir()`, `_bootstrap_engines()`, and `write_startup_manifest()`, mixing synchronous startup capture cost with user workload time.
+- **F-04 (Unlabeled interval semantics):** `timing` does not state which clock produced `elapsed_seconds`, what interval `elapsed_seconds` spans, or that a late import observes only the tracked interval rather than full process lifetime.
+
+## Proposed changes (ordered, validatable)
+
+### 1. Normative timing interval contract
+
+Every `Run` records four ordered monotonic anchor points in memory using `time.perf_counter()` (never persisted as raw counter values) alongside Portable Operating System Interface (POSIX) UTC epoch floats (`time.time()`) for chronology:
+
+| Anchor | When captured | UTC field (persisted) | Monotonic attribute (in-memory only) |
+|---|---|---|---|
+| `t0` | Entry to `Run.__init__` before directory creation and engine bootstrap | `started_at_utc` | `_start_mono` |
+| `t1` | End of `Run.__init__` immediately after `write_startup_manifest()` returns | `workload_started_at_utc` | `_workload_start_mono` |
+| `t2` | Entry to `Run._finalize_state()` under `_run_lock` when `_finalized` transitions `False -> True`, before `_hardware_future_done.wait(timeout=2.0)` | `ended_at_utc` | `_workload_end_mono` |
+| `t3` | End of pre-manifest finalization (`Run._mark_finalization_end()`), after `_finalize_state()` teardown and `config.resolved.json` write, immediately before `to_manifest_dict()` | `finalized_at_utc` | `_finalize_end_mono` |
+
+Intervals derived from these anchors (all clamped with `max(0.0, ...)` and `None` when an endpoint was not reached):
+
+- **Sequential disjoint intervals (non-overlapping):**
+  - `startup_overhead_seconds = max(0.0, t1 - t0)`: synchronous initialization (`mkdir`, `_bootstrap_engines`, initial `write_startup_manifest`).
+  - `workload_seconds = max(0.0, t2 - t1)`: observed tracked workload interval. Measures only the tracked window between startup completion and stop/exit boundary, not full process lifetime when `pubrun` is imported or started late.
+  - `finalization_overhead_seconds = max(0.0, t3 - t2)`: synchronous finalization before `manifest.json` serialization (blocking hardware wait, engine shutdown, and pre-manifest `config.resolved.json` write). Excludes the final atomic write of `manifest.json` and `methods.{md,tex}` so `manifest.json` is never written twice; total writer time is tracked in memory on `Run.writer_overhead_seconds`.
+  - `session_seconds = max(0.0, t3 - t0)`: total tracked session span from `Run.__init__` entry to pre-manifest finalization completion.
+- **Overlapping intervals (MUST NOT be summed with `workload_seconds` or `finalization_overhead_seconds`):**
+  - `background_hardware_seconds`: monotonic duration of the background `pubrun-hw` daemon thread from thread entry to `_hardware_future_done.set()` (or `None` if hardware capture did not finish before `t3` or did not run). Overlaps concurrently with `workload_seconds` and potentially with `finalization_overhead_seconds`.
+  - `hardware_wait_seconds`: monotonic time `_finalize_state()` spent blocked in `_hardware_future_done.wait(timeout=2.0)`. This is a sub-interval of `finalization_overhead_seconds`.
+- **Compatibility and self-describing metadata:**
+  - `elapsed_seconds`: equals `workload_seconds` when `t1` and `t2` exist; `None` while still running or on ghost/partial startup where `t1` or `t2` was not reached.
+  - `duration_clock`: `"monotonic"` for tracker-measured runs (`"wall_clock_estimated"` reserved for crashed closeout in child `vrr1fv`).
+  - `elapsed_basis`: `"workload"` for tracker-measured runs (`"crashed_estimate"` reserved for crashed closeout; absence of `elapsed_basis` identifies legacy wall-clock manifests).
+  - `interval_scope`: `"tracked_interval"`.
+  - `capture_state`: `{"status": "complete"}` on finalized runs with valid `t0..t3`; `{"status": "partial"}` on startup snapshots (before finalization) and on ghost/partial startup where initialization aborted before `t1`.
+
+### 2. Schema updates (`schemas/manifest.schema.json`)
+
+- Under `$defs.timing.properties`, add optional properties:
+  - `workload_started_at_utc` (`utc_datetime | null`)
+  - `finalized_at_utc` (`utc_datetime | null`)
+  - `workload_seconds` (`number | null`, `minimum: 0`)
+  - `startup_overhead_seconds` (`number | null`, `minimum: 0`)
+  - `finalization_overhead_seconds` (`number | null`, `minimum: 0`)
+  - `session_seconds` (`number | null`, `minimum: 0`)
+  - `hardware_wait_seconds` (`number | null`, `minimum: 0`)
+  - `background_hardware_seconds` (`number | null`, `minimum: 0`)
+  - `duration_clock` (`string | null`, enum `["monotonic", "wall_clock", "wall_clock_estimated", null]`)
+  - `elapsed_basis` (`string | null`, enum `["workload", "session", "wall_clock_legacy", "crashed_estimate", null]`)
+  - `interval_scope` (`string | null`, enum `["tracked_interval", null]`)
+- Under `$defs.subprocess_record.properties`, add optional properties needed by child `8co0wy`:
+  - `elapsed_seconds` (`number | null`, `minimum: 0`)
+  - `duration_clock` (`string | null`, enum `["monotonic", "wall_clock", null]`)
+  - `pid` (`integer | null`, `minimum: 0`)
+  - `error` (`string | null`)
+- Keep `$defs.timing.required` (`["started_at_utc", "capture_state"]`) and `$defs.subprocess_record.required` (`["argv", "capture_state"]`) unchanged so legacy v1.0 manifests validate without modification.
+
+### 3. Tracker lifecycle (`src/pubrun/tracker.py`)
+
+- In `Run.__init__`:
+  - Capture `self.started_at_utc = time.time()` and `self._start_mono = time.perf_counter()` at `t0`.
+  - Initialize `self.workload_started_at_utc = None`, `self._workload_start_mono = None`, `self.ended_at_utc = None`, `self._workload_end_mono = None`, `self.finalized_at_utc = None`, `self._finalize_end_mono = None`, `self._hardware_wait_seconds = None`, `self._background_hardware_seconds = None`, `self.writer_overhead_seconds = None`.
+  - In ghost-mode early returns (unwritable `run_dir` or `_bootstrap_engines()` exception), leave `_workload_start_mono = None` and `_workload_end_mono = None`, and emit `capture_state = {"status": "partial", "detail": "ghost mode: startup did not complete"}` in `timing`.
+  - After `self.writer.write_startup_manifest()`, record `t1`: `self._workload_start_mono = time.perf_counter()` and `self.workload_started_at_utc = time.time()`. Note: because the initial startup manifest is written before `t1`, the startup manifest cleanly reports `workload_started_at_utc: None`, `elapsed_seconds: None`, `capture_state: {"status": "partial"}` until finalization.
+- In `Run._bootstrap_engines`:
+  - Inside `_collect_hardware()`, record `hw_start = time.perf_counter()` at thread start and `self._background_hardware_seconds = max(0.0, time.perf_counter() - hw_start)` before `self._hardware_future_done.set()`.
+- In `Run._finalize_state`:
+  - Under `_run_lock`, right after setting `self._finalized = True` and while `self.is_active` is true, record `t2` BEFORE releasing the lock and BEFORE waiting for hardware: `self._workload_end_mono = time.perf_counter()`, `self.ended_at_utc = time.time()`, and `self.is_active = False`.
+  - Around `self._hardware_future_done.wait(timeout=2.0)`, measure `hw_wait_start = time.perf_counter()`, call `wait(timeout=2.0)`, and record `self._hardware_wait_seconds = max(0.0, time.perf_counter() - hw_wait_start)`.
+  - At the end of `_finalize_state()` (after shutting down all engines and removing `.pubrun.lock`), call `self._mark_finalization_end()` so direct callers of `_finalize_state()` always have a valid `t3`.
+- Add `Run._mark_finalization_end()`:
+  - Updates `self._finalize_end_mono = time.perf_counter()` and `self.finalized_at_utc = time.time()` only if `self._workload_end_mono is not None` and `not getattr(self, "_manifest_timing_frozen", False)`.
+  - In `Run.to_manifest_dict()`: compute durations strictly from monotonic deltas (`max(0.0, ...)`); freeze manifest timing once serialized after finalization (or keep `to_manifest_dict()` idempotent on repeated calls after `stop()` so double-`stop()` never mutates `elapsed_seconds` or `finalization_overhead_seconds`).
+- In `Run.stop()`:
+  - Preserve nested reference-count behavior: when `self.ref_count > 0` after decrement, return immediately without marking `t2` or finalizing.
+  - When `self.ref_count` reaches `0`, call `self._finalize_state()` and `self.writer.write_artifacts()`.
+
+### 4. Writer ordering and overhead accounting (`src/pubrun/writer.py`)
+
+- In `ArtifactWriter.write_artifacts()`:
+  - Guard against re-writing a finalized run on a second `stop()` or redundant `atexit` invocation (track `self._artifacts_written = True` after writing once for a finalized run, preserving `test_double_stop_preserves_manifest`).
+  - Record `write_start_mono = time.perf_counter()`.
+  - Call `self.run._finalize_state()`.
+  - Ensure `out_dir` exists.
+  - Write `config.resolved.json` atomically BEFORE serializing `manifest.json`.
+  - Call `self.run._mark_finalization_end()` so hardware wait, engine teardown, and `config.resolved.json` write duration are captured in `finalization_overhead_seconds`, then freeze manifest timing and build `manifest_data = self.run.to_manifest_dict()`.
+  - Write `manifest.json` atomically (single write).
+  - Write `methods.{md,tex}` (best-effort, non-fatal).
+  - Record `self.run.writer_overhead_seconds = max(0.0, time.perf_counter() - write_start_mono)` in memory.
+
+### 5. Deterministic behavioral tests (`tests/test_timing_accuracy.py`, `tests/test_manifest_schema.py`)
+
+- Implement a deterministic fake clock helper in `tests/test_timing_accuracy.py` that patches `time.time` and `time.perf_counter` independently so tests control wall-clock jumps (`+3600s`, `-3600s`) and exact monotonic advances with zero `time.sleep` flakiness.
+- Test cases required:
+  1. Forward wall-clock jump (`+7200s`) during workload: `workload_seconds` and `elapsed_seconds` match monotonic delta, remain unaffected by wall-clock jump, and `started_at_utc` / `ended_at_utc` retain UTC chronology.
+  2. Backward wall-clock jump (`-7200s`) during workload: `workload_seconds`, `elapsed_seconds`, `startup_overhead_seconds`, `finalization_overhead_seconds`, and `session_seconds` are all nonnegative (`>= 0.0`) and match monotonic deltas.
+  3. Deterministic hardware-worker delay (e.g., fake monotonic clock advances by `+1.5s` inside `_hardware_future_done.wait` or a blocked hardware thread released after a controlled event): `hardware_wait_seconds` and `finalization_overhead_seconds` reflect the `+1.5s` delay while `workload_seconds` and `elapsed_seconds` remain at the small workload delta (e.g., `0.05s`).
+  4. Deterministic writer delay (advancing monotonic clock during `config.resolved.json` write and during `manifest.json` write): `config.resolved.json` delay appears in `finalization_overhead_seconds` and `writer_overhead_seconds`, `manifest.json` write delay appears in `writer_overhead_seconds`, and neither inflates `workload_seconds` or `elapsed_seconds`.
+  5. Short run (`0.001s` workload with `0.2s` startup capture): `startup_overhead_seconds` captures startup cost, `workload_seconds` captures only `0.001s`, and `session_seconds == startup_overhead_seconds + workload_seconds + finalization_overhead_seconds` within floating-point tolerance (`1e-9`).
+  6. Lifecycle entry/exit modes: explicit `start()`/`stop()`, `atexit` finalization (`writer.write_artifacts()` directly without prior `stop()`), nested reference-counted `start()`/`stop()` (inner `stop()` does not freeze `t2`; outer `stop()` does), `tracked_run` normal and exception paths, `@audit_run` normal and exception paths, `KeyboardInterrupt` / termination signal interruption, double-`stop()` idempotency (second `stop()` does not alter recorded durations), and partial startup / ghost mode (read-only `run_dir` or engine init crash).
+  7. No raw monotonic counter values leaked: set fake `perf_counter()` base to a distinctive large offset (e.g., `987654.321`) and assert no field in `manifest.json` contains that offset or any value derived directly from raw `perf_counter()`.
+- In `tests/test_manifest_schema.py`: validate new finalized manifests, startup manifests, ghost manifests, and a legacy v1.0 manifest fixture lacking the new timing fields against `schemas/manifest.schema.json`.
+
+## Deferred / out of scope (with reason)
+
+- `pubrun.phase()`, `SubprocessSpy`, explicit `pubrun.subprocess.*`/`pubrun.popen`, and `ResourceWatcher` timing updates are owned by child plan `8co0wy`.
+- Consumer rendering, legacy semantic labeling, `status.py`, `report/diagnostics.py`, `analysis/diff.py`, and TUI updates are owned by child plan `vrr1fv`.
+- Documentation, example updates, and instrumentation benchmarking are owned by child plan `3tvesf`.
+- Coalescing redundant `config.resolved.json` writes across startup/hardware-refresh/finalization is owned by backlog item `t1xqpw`; this plan preserves atomic single-write behavior at finalization without blocking `t1xqpw`.
+
+## Scope check
+
+- Over-scope: none. Touches only schema, `tracker.py`, `writer.py`, and their direct tests (5 Scope-Paths, 5 E-items).
+- Under-scope: none. Covers every tracker, writer, and schema requirement from `6hp1zu`.
+
+## Required tests / validation
+
+Run inside the repository root and capture actual runner output and exit code:
+
+```bash
+pytest tests/test_timing_accuracy.py tests/test_manifest_schema.py tests/test_tracker.py tests/test_writer.py -v
+```
+
+## Spec / documentation sync
+
+Deferred to child plan `3tvesf`, which updates `docs/manifest.md`, `docs/architecture.md`, `docs/functional_spec.md`, `docs/api.md`, `docs/performance.md`, and `examples/` after `e1fwy2`, `8co0wy`, and `vrr1fv` land.
+
+## Open questions
+
+### OQ-01: Semantics of `timing.elapsed_seconds`
+
+- Blocking: no
+- Status: resolved
+- Owner: maintainer (confirmed upon plan approval)
+- Resolution or deferral rationale: Set `timing.elapsed_seconds` to `workload_seconds` (monotonic `[t1, t2]`) and emit `elapsed_basis: "workload"`, `duration_clock: "monotonic"`, and `interval_scope: "tracked_interval"`, alongside `session_seconds`, `startup_overhead_seconds`, and `finalization_overhead_seconds`. This directly resolves the backlog problem that short scripts appear slow due to capture overhead, while allowing consumers (`vrr1fv`) to distinguish old wall-clock manifests (missing `elapsed_basis`/`duration_clock`) from new manifests.
+
+### OQ-02: Accounting for `ArtifactWriter` delay without double-writing `manifest.json`
+
+- Blocking: no
+- Status: resolved
+- Owner: maintainer (confirmed upon plan approval)
+- Resolution or deferral rationale: Write `config.resolved.json` before `manifest.json`, stamp `t3` immediately before `to_manifest_dict()` so pre-manifest teardown and `config.resolved.json` write delays are persisted in `finalization_overhead_seconds`, and record total writer duration (including `manifest.json` and `methods` writes) in memory on `Run.writer_overhead_seconds`. This avoids a second `manifest.json` write (staying aligned with `t1xqpw`) while ensuring writer delays never inflate `workload_seconds`.
+
+## Validation and cross-check (verify before reporting done)
+
+Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
+
+- [ ] V-01 validates E-01
+  - Required evidence: Diff of `schemas/manifest.schema.json` showing the additive `$defs.timing` and `$defs.subprocess_record` properties with `minimum: 0` constraints and unchanged `required` lists, plus pasted `pytest tests/test_manifest_schema.py -v` output showing schema draft check passes.
+  - Observed evidence:
+  - Result: pending
+
+- [ ] V-02 validates E-02
+  - Required evidence: Diff of `src/pubrun/tracker.py` showing monotonic anchors (`t0..t3`), `t2` captured under `_run_lock` before `_hardware_future_done.wait(timeout=2.0)`, separate overlapping `background_hardware_seconds` and `hardware_wait_seconds`, and no raw monotonic readings serialized in `to_manifest_dict()`.
+  - Observed evidence:
+  - Result: pending
+
+- [ ] V-03 validates E-03
+  - Required evidence: Diff of `src/pubrun/writer.py` showing `config.resolved.json` written before `manifest.json`, `_mark_finalization_end()` called before `to_manifest_dict()`, single atomic `manifest.json` write, and `writer_overhead_seconds` recorded on `Run`.
+  - Observed evidence:
+  - Result: pending
+
+- [ ] V-04 validates E-04
+  - Required evidence: Pasted `pytest tests/test_timing_accuracy.py -v` output showing every deterministic behavioral test (wall-clock forward/backward jumps, hardware delay, writer delay, short run, auto-exit, explicit stop, nested ref-counted runs, `tracked_run`/`audit_run` success and failure, interruption, partial startup/ghost mode, double-stop idempotency, no leaked monotonic offset) passes with exit code 0.
+  - Observed evidence:
+  - Result: pending
+
+- [ ] V-05 validates E-05
+  - Required evidence: Pasted `pytest tests/test_timing_accuracy.py tests/test_manifest_schema.py tests/test_tracker.py tests/test_writer.py -v` output showing exit code 0 and zero failures across new, startup, ghost, and legacy v1.0 manifests.
+  - Observed evidence:
+  - Result: pending
+
+## Approval and execution gate
+
+- Size assessment: standard
+- Cohesion rationale: not required
+
+Execution contract:
+1. All open questions (OQ-01, OQ-02) are resolved for review; do not execute until a human approves this plan (`- Status: approved`).
+2. Scope fence: edit only `schemas/manifest.schema.json`, `src/pubrun/tracker.py`, `src/pubrun/writer.py`, `tests/test_timing_accuracy.py`, and `tests/test_manifest_schema.py`. Do not expand scope; if additional files seem required, STOP and report.
+3. Honesty rule: paste the actual `pytest` runner output and exit code into each `V-*` `Observed evidence:` field; never claim tests passed without running them.
+4. Commit discipline: commit only the files listed in `- Scope-Paths:` using `aw commit e1fwy2 -- <paths>`; never use `git add -A`, `git add .`, or `git commit -a`; never push without explicit human instruction.
+5. Lifecycle move on completion: after `aw ipd lint --phase pre-transition` passes, move this plan from `.aw/records/plans/pending/` to `.aw/records/plans/executed/`, set `- Status: executed`, append a dated `## Workflow history` line, and commit the lifecycle move path-scoped.
