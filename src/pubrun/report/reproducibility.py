@@ -11,7 +11,17 @@ IMPORTANT: this module is CLI/report-only and must never be imported by
 ``import pubrun`` or the runtime capture path.
 """
 
+import hashlib
+import math
 import os
+import platform
+import re
+import socket
+import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pubrun.report.utils import HYDRABLE_SECTIONS, HydrationReport
@@ -74,6 +84,19 @@ CATEGORY_LABELS: Dict[str, str] = {
 }
 
 DEFAULT_STALE_PARENT_SECONDS: float = 86400.0
+DEFAULT_MAX_HASH_BYTES: int = 104_857_600  # 100 MiB (OQ-01)
+DEFAULT_GIT_TIMEOUT: float = 5.0
+FAIL_ON_MODES: Tuple[str, ...] = ("warn", "mismatch", "unknown")
+
+_HASH_CHUNK_BYTES: int = 65536  # 64 KiB read-only streaming chunks
+_SUPPORTED_PREFLIGHT_HASH_ALGS: Tuple[str, ...] = ("sha256", "md5", "sha1", "sha512")
+_GIT_ENV_STRIP_KEYS: Tuple[str, ...] = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+)
+_PY_VERSION_RE = re.compile(r"^\s*(\d+)\.(\d+)(?:\.(\d+))?")
 
 NON_GUARANTEE_DISCLAIMER: str = (
     "Recorded provenance and an absence of findings support reproduction analysis, "
@@ -84,6 +107,11 @@ NON_GUARANTEE_DISCLAIMER: str = (
 _DEFAULT_NEXT_ACTION: str = (
     "Run `pubrun inspect --preflight` on the target machine to compare recorded "
     "requirements against the current environment."
+)
+
+_DEFAULT_PREFLIGHT_NEXT_ACTION: str = (
+    "Review the preflight comparison checks above before re-running; matching "
+    "preflight checks do not guarantee identical results."
 )
 
 _CORE_MANIFEST_SECTIONS: Tuple[str, ...] = (
@@ -1796,7 +1824,11 @@ def _finding_action_priority(finding: Dict[str, Any]) -> Tuple[int, int, str]:
     return (tier, cat_idx, code)
 
 
-def _prioritize_next_actions(findings: List[Dict[str, Any]]) -> Tuple[str, List[str]]:
+def _prioritize_next_actions(
+    findings: List[Dict[str, Any]],
+    *,
+    default_action: str = _DEFAULT_NEXT_ACTION,
+) -> Tuple[str, List[str]]:
     """Return ``(next_action, next_actions)`` deduplicated in deterministic priority order."""
     candidates = [f for f in findings if isinstance(f.get("suggestion"), str) and f["suggestion"].strip()]
     ordered = sorted(candidates, key=_finding_action_priority)
@@ -1809,13 +1841,15 @@ def _prioritize_next_actions(findings: List[Dict[str, Any]]) -> Tuple[str, List[
             seen.add(sugg)
             next_actions.append(sugg)
 
-    next_action = next_actions[0] if next_actions else _DEFAULT_NEXT_ACTION
+    next_action = next_actions[0] if next_actions else default_action
     return next_action, next_actions
 
 
 def _build_summary(
     categories: List[Dict[str, Any]],
     findings: List[Dict[str, Any]],
+    *,
+    preflight: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build a concise one-line human summary of the assessment without any score."""
     warn_count = sum(1 for f in findings if f.get("severity") == WARN)
@@ -1825,6 +1859,38 @@ def _build_summary(
     uncertain_cats = [
         c["name"] for c in categories if c.get("status") in ("uncertain", "not_checked")
     ]
+
+    if isinstance(preflight, dict) and preflight.get("requested") is True:
+        counts = preflight.get("counts") if isinstance(preflight.get("counts"), dict) else {}
+        mismatch_n = int(counts.get("mismatch", 0))
+        unknown_n = int(counts.get("unknown", 0))
+        not_checked_n = int(counts.get("not_checked", 0))
+        port_n = int(counts.get("portability_diff", 0))
+        match_n = int(counts.get("match", 0))
+        if warn_count == 0 and mismatch_n == 0 and not mismatch_cats and not gap_cats:
+            if unknown_n > 0 or not_checked_n > 0 or uncertain_cats:
+                return (
+                    f"Preflight found no material mismatches ({match_n} matched, "
+                    f"{port_n} portability diff(s), {unknown_n} unknown, "
+                    f"{not_checked_n} not checked); reproduction is not guaranteed."
+                )
+            return (
+                f"Preflight checks matched across checked requirements ({match_n} matched, "
+                f"{port_n} portability diff(s); reproduction is not guaranteed)."
+            )
+        parts: List[str] = []
+        if mismatch_n > 0 or mismatch_cats:
+            cat_str = f" in {', '.join(mismatch_cats)}" if mismatch_cats else ""
+            parts.append(f"{mismatch_n} preflight mismatch(es){cat_str}")
+        if gap_cats:
+            parts.append(f"gaps in {', '.join(gap_cats)}")
+        if not parts:
+            parts.append("portability or configuration warnings")
+        return (
+            f"Preflight found {warn_count} warning(s) and {info_count} informational note(s): "
+            + "; ".join(parts)
+            + "."
+        )
 
     if warn_count == 0 and not mismatch_cats and not gap_cats:
         if not uncertain_cats:
@@ -1838,7 +1904,7 @@ def _build_summary(
             f"have unverified or incomplete evidence ({cat_list})."
         )
 
-    parts: List[str] = []
+    parts = []
     if mismatch_cats:
         parts.append(f"mismatches in {', '.join(mismatch_cats)}")
     if gap_cats:
@@ -1851,6 +1917,2414 @@ def _build_summary(
         + "; ".join(parts)
         + "."
     )
+
+
+def _make_preflight_check(
+    name: str,
+    category: str,
+    comparison: str,
+    evidence_status: str,
+    impact: str,
+    severity: str,
+    message: str,
+    *,
+    details: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build one JSON-serializable preflight comparison check record."""
+    return {
+        "name": name,
+        "category": category,
+        "comparison": comparison,
+        "evidence_status": evidence_status,
+        "impact": impact,
+        "severity": severity,
+        "message": message,
+        "details": dict(details) if isinstance(details, dict) else {},
+    }
+
+
+def _unwrap_preflight_hostname(raw_hostname: Any) -> Optional[str]:
+    """Extract a plain hostname string for comparison, ignoring redacted markers."""
+    if isinstance(raw_hostname, str):
+        cleaned = raw_hostname.strip()
+        if cleaned and "[REDACTED]" not in cleaned:
+            return cleaned
+        return None
+    if isinstance(raw_hostname, dict):
+        if raw_hostname.get("representation") == "plain":
+            val = raw_hostname.get("value")
+            if isinstance(val, str):
+                cleaned = val.strip()
+                if cleaned and "[REDACTED]" not in cleaned:
+                    return cleaned
+    return None
+
+
+def _safe_gethostname() -> Optional[str]:
+    """Return the current machine hostname, or None if unavailable."""
+    try:
+        host = socket.gethostname()
+        return host.strip() if isinstance(host, str) and host.strip() else None
+    except Exception:
+        return None
+
+
+def _stream_file_digest(path: Path, algorithm: str) -> str:
+    """Compute a hex digest of a regular file read-only in 64 KiB streaming chunks."""
+    hasher = hashlib.new(algorithm)
+    with open(path, "rb") as fh:
+        while True:
+            chunk = fh.read(_HASH_CHUNK_BYTES)
+            if not chunk:
+                break
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _preflight_runtime(
+    manifest_dict: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Compare recorded Python runtime, host platform, and CPU architecture."""
+    checks: List[Dict[str, Any]] = []
+    findings: List[Dict[str, Any]] = []
+
+    # --- Python runtime ---
+    python_sec = manifest_dict.get("python")
+    python_dict = python_sec if isinstance(python_sec, dict) else {}
+    py_cap = _capture_state_status(python_dict)
+    cur_major, cur_minor, cur_patch = (
+        sys.version_info[0],
+        sys.version_info[1],
+        sys.version_info[2],
+    )
+    cur_ver_str = f"{cur_major}.{cur_minor}.{cur_patch}"
+
+    if not python_dict or py_cap == "suppressed":
+        checks.append(
+            _make_preflight_check(
+                "python_version",
+                "runtime",
+                "unknown",
+                "not_checked",
+                "informational",
+                INFO,
+                f"Recorded Python runtime metadata was not captured; cannot compare against current Python {cur_ver_str}.",
+                details={"current_version": cur_ver_str},
+            )
+        )
+    elif py_cap in ("failed", "timeout", "unavailable"):
+        checks.append(
+            _make_preflight_check(
+                "python_version",
+                "runtime",
+                "unknown",
+                "unavailable",
+                "informational",
+                INFO,
+                f"Recorded Python runtime metadata is unavailable ({py_cap}); cannot compare against current Python {cur_ver_str}.",
+                details={"capture_status": py_cap, "current_version": cur_ver_str},
+            )
+        )
+    else:
+        raw_ver = python_dict.get("version")
+        ver_match = _PY_VERSION_RE.match(raw_ver) if isinstance(raw_ver, str) else None
+        if ver_match is None:
+            checks.append(
+                _make_preflight_check(
+                    "python_version",
+                    "runtime",
+                    "unknown",
+                    "unavailable",
+                    "informational",
+                    INFO,
+                    f"Recorded Python version is missing or unparseable; cannot compare against current Python {cur_ver_str}.",
+                    details={"recorded_version": raw_ver, "current_version": cur_ver_str},
+                )
+            )
+        else:
+            rec_major = int(ver_match.group(1))
+            rec_minor = int(ver_match.group(2))
+            rec_patch = int(ver_match.group(3)) if ver_match.group(3) is not None else None
+            rec_ver_str = (
+                f"{rec_major}.{rec_minor}.{rec_patch}"
+                if rec_patch is not None
+                else f"{rec_major}.{rec_minor}"
+            )
+            ver_details = {
+                "recorded_version": rec_ver_str,
+                "current_version": cur_ver_str,
+            }
+            if (rec_major, rec_minor) != (cur_major, cur_minor):
+                msg = (
+                    f"Recorded Python version is {rec_ver_str}, while the current "
+                    f"interpreter is {cur_ver_str} (major.minor differs; behavior or "
+                    f"package compatibility may vary)."
+                )
+                checks.append(
+                    _make_preflight_check(
+                        "python_version",
+                        "runtime",
+                        "mismatch",
+                        "observed",
+                        "material",
+                        WARN,
+                        msg,
+                        details=ver_details,
+                    )
+                )
+                findings.append(
+                    _make_finding(
+                        WARN,
+                        "preflight_python_version_mismatch",
+                        msg,
+                        f"Use a Python {rec_major}.{rec_minor} environment to match the recorded interpreter version.",
+                        category="runtime",
+                        evidence_status="observed",
+                        impact="material",
+                        comparison="mismatch",
+                        details=ver_details,
+                    )
+                )
+            elif rec_patch is not None and rec_patch != cur_patch:
+                msg = (
+                    f"Recorded Python patch version is {rec_ver_str}, while the current "
+                    f"interpreter is {cur_ver_str} (same major.minor, different patch release)."
+                )
+                checks.append(
+                    _make_preflight_check(
+                        "python_version",
+                        "runtime",
+                        "portability_diff",
+                        "observed",
+                        "portability",
+                        INFO,
+                        msg,
+                        details=ver_details,
+                    )
+                )
+                findings.append(
+                    _make_finding(
+                        INFO,
+                        "preflight_python_patch_diff",
+                        msg,
+                        None,
+                        category="runtime",
+                        evidence_status="observed",
+                        impact="portability",
+                        comparison="portability_diff",
+                        details=ver_details,
+                    )
+                )
+            else:
+                checks.append(
+                    _make_preflight_check(
+                        "python_version",
+                        "runtime",
+                        "match",
+                        "observed",
+                        "informational",
+                        INFO,
+                        f"Current Python version {cur_ver_str} matches recorded Python {rec_ver_str}.",
+                        details=ver_details,
+                    )
+                )
+
+        # Python implementation.
+        rec_impl = python_dict.get("implementation")
+        cur_impl = getattr(sys.implementation, "name", None) or ""
+        if not isinstance(rec_impl, str) or not rec_impl.strip():
+            checks.append(
+                _make_preflight_check(
+                    "python_implementation",
+                    "runtime",
+                    "unknown",
+                    "unavailable",
+                    "informational",
+                    INFO,
+                    f"Recorded Python implementation was not captured; current interpreter is '{cur_impl}'.",
+                    details={"current_implementation": cur_impl},
+                )
+            )
+        else:
+            rec_impl_clean = rec_impl.strip()
+            impl_details = {
+                "recorded_implementation": rec_impl_clean,
+                "current_implementation": cur_impl,
+            }
+            if rec_impl_clean.lower() != cur_impl.lower():
+                msg = (
+                    f"Recorded Python implementation is '{rec_impl_clean}', while the "
+                    f"current interpreter is '{cur_impl}'."
+                )
+                checks.append(
+                    _make_preflight_check(
+                        "python_implementation",
+                        "runtime",
+                        "mismatch",
+                        "observed",
+                        "material",
+                        WARN,
+                        msg,
+                        details=impl_details,
+                    )
+                )
+                findings.append(
+                    _make_finding(
+                        WARN,
+                        "preflight_python_implementation_mismatch",
+                        msg,
+                        f"Run under a '{rec_impl_clean}' interpreter to match the recorded runtime implementation.",
+                        category="runtime",
+                        evidence_status="observed",
+                        impact="material",
+                        comparison="mismatch",
+                        details=impl_details,
+                    )
+                )
+            else:
+                checks.append(
+                    _make_preflight_check(
+                        "python_implementation",
+                        "runtime",
+                        "match",
+                        "observed",
+                        "informational",
+                        INFO,
+                        f"Current Python implementation '{cur_impl}' matches recorded '{rec_impl_clean}'.",
+                        details=impl_details,
+                    )
+                )
+
+        # Python environment kind (unwrapping dict from python_runtime.environment_kind()).
+        rec_env_kind = python_dict.get("environment_kind")
+        cur_env_kind: Optional[str] = None
+        try:
+            from pubrun.capture.python_runtime import environment_kind as _get_env_kind
+
+            env_info = _get_env_kind()
+            if isinstance(env_info, dict):
+                raw_kind = env_info.get("environment_kind")
+                if isinstance(raw_kind, str) and raw_kind.strip():
+                    cur_env_kind = raw_kind.strip()
+        except Exception:
+            cur_env_kind = None
+
+        if not isinstance(rec_env_kind, str) or not rec_env_kind.strip() or not cur_env_kind:
+            checks.append(
+                _make_preflight_check(
+                    "python_environment_kind",
+                    "runtime",
+                    "unknown",
+                    "unavailable",
+                    "informational",
+                    INFO,
+                    "Recorded or current Python environment kind is unavailable.",
+                    details={
+                        "recorded_environment_kind": rec_env_kind,
+                        "current_environment_kind": cur_env_kind,
+                    },
+                )
+            )
+        else:
+            rec_kind_clean = rec_env_kind.strip()
+            env_details = {
+                "recorded_environment_kind": rec_kind_clean,
+                "current_environment_kind": cur_env_kind,
+            }
+            if rec_kind_clean != cur_env_kind:
+                msg = (
+                    f"Recorded Python environment kind is '{rec_kind_clean}', while the "
+                    f"current environment is '{cur_env_kind}'."
+                )
+                checks.append(
+                    _make_preflight_check(
+                        "python_environment_kind",
+                        "runtime",
+                        "portability_diff",
+                        "observed",
+                        "portability",
+                        INFO,
+                        msg,
+                        details=env_details,
+                    )
+                )
+                findings.append(
+                    _make_finding(
+                        INFO,
+                        "preflight_python_env_kind_diff",
+                        msg,
+                        None,
+                        category="runtime",
+                        evidence_status="observed",
+                        impact="portability",
+                        comparison="portability_diff",
+                        details=env_details,
+                    )
+                )
+            else:
+                checks.append(
+                    _make_preflight_check(
+                        "python_environment_kind",
+                        "runtime",
+                        "match",
+                        "observed",
+                        "informational",
+                        INFO,
+                        f"Current Python environment kind '{cur_env_kind}' matches recorded '{rec_kind_clean}'.",
+                        details=env_details,
+                    )
+                )
+
+    # --- Host OS, OS minor release, and hostname ---
+    host_sec = manifest_dict.get("host")
+    host_dict = host_sec if isinstance(host_sec, dict) else {}
+    host_cap = _capture_state_status(host_dict)
+    cur_os = platform.system()
+    cur_os_ver = platform.release()
+    cur_host = _safe_gethostname()
+
+    if not host_dict or host_cap == "suppressed":
+        checks.append(
+            _make_preflight_check(
+                "host_os",
+                "runtime",
+                "unknown",
+                "not_checked",
+                "informational",
+                INFO,
+                f"Recorded host metadata was not captured; current OS is '{cur_os}'.",
+                details={"current_os_name": cur_os},
+            )
+        )
+    elif host_cap in ("failed", "timeout", "unavailable"):
+        checks.append(
+            _make_preflight_check(
+                "host_os",
+                "runtime",
+                "unknown",
+                "unavailable",
+                "informational",
+                INFO,
+                f"Recorded host metadata is unavailable ({host_cap}); current OS is '{cur_os}'.",
+                details={"capture_status": host_cap, "current_os_name": cur_os},
+            )
+        )
+    else:
+        rec_os = host_dict.get("os_name")
+        if not isinstance(rec_os, str) or not rec_os.strip():
+            checks.append(
+                _make_preflight_check(
+                    "host_os",
+                    "runtime",
+                    "unknown",
+                    "unavailable",
+                    "informational",
+                    INFO,
+                    f"Recorded host OS name is missing; current OS is '{cur_os}'.",
+                    details={"current_os_name": cur_os},
+                )
+            )
+        else:
+            rec_os_clean = rec_os.strip()
+            os_details = {"recorded_os_name": rec_os_clean, "current_os_name": cur_os}
+            if rec_os_clean != cur_os:
+                msg = (
+                    f"Recorded operating system is '{rec_os_clean}', while the current "
+                    f"machine runs '{cur_os}' (platform portability difference)."
+                )
+                checks.append(
+                    _make_preflight_check(
+                        "host_os",
+                        "runtime",
+                        "portability_diff",
+                        "observed",
+                        "portability",
+                        INFO,
+                        msg,
+                        details=os_details,
+                    )
+                )
+                findings.append(
+                    _make_finding(
+                        INFO,
+                        "preflight_os_diff",
+                        msg,
+                        None,
+                        category="runtime",
+                        evidence_status="observed",
+                        impact="portability",
+                        comparison="portability_diff",
+                        details=os_details,
+                    )
+                )
+            else:
+                checks.append(
+                    _make_preflight_check(
+                        "host_os",
+                        "runtime",
+                        "match",
+                        "observed",
+                        "informational",
+                        INFO,
+                        f"Current operating system '{cur_os}' matches recorded '{rec_os_clean}'.",
+                        details=os_details,
+                    )
+                )
+                rec_os_ver = host_dict.get("os_version")
+                if isinstance(rec_os_ver, str) and rec_os_ver.strip():
+                    rec_os_ver_clean = rec_os_ver.strip()
+                    os_ver_details = {
+                        "recorded_os_version": rec_os_ver_clean,
+                        "current_os_version": cur_os_ver,
+                    }
+                    if rec_os_ver_clean != cur_os_ver:
+                        msg = (
+                            f"Recorded OS release is '{rec_os_ver_clean}', while the current "
+                            f"machine reports '{cur_os_ver}' (incidental OS release difference)."
+                        )
+                        checks.append(
+                            _make_preflight_check(
+                                "host_os_version",
+                                "runtime",
+                                "portability_diff",
+                                "observed",
+                                "incidental",
+                                INFO,
+                                msg,
+                                details=os_ver_details,
+                            )
+                        )
+                        findings.append(
+                            _make_finding(
+                                INFO,
+                                "preflight_os_version_diff",
+                                msg,
+                                None,
+                                category="runtime",
+                                evidence_status="observed",
+                                impact="incidental",
+                                comparison="portability_diff",
+                                details=os_ver_details,
+                            )
+                        )
+                    else:
+                        checks.append(
+                            _make_preflight_check(
+                                "host_os_version",
+                                "runtime",
+                                "match",
+                                "observed",
+                                "informational",
+                                INFO,
+                                f"Current OS release '{cur_os_ver}' matches recorded '{rec_os_ver_clean}'.",
+                                details=os_ver_details,
+                            )
+                        )
+
+        # Hostname (safely unwrapping redacted-value dicts).
+        raw_hostname = host_dict.get("hostname")
+        rec_host = _unwrap_preflight_hostname(raw_hostname)
+        if rec_host is None or cur_host is None:
+            rep = (
+                raw_hostname.get("representation")
+                if isinstance(raw_hostname, dict)
+                else None
+            )
+            reason = f"redacted or {rep}" if rep else "unavailable"
+            checks.append(
+                _make_preflight_check(
+                    "host_hostname",
+                    "runtime",
+                    "unknown",
+                    "unavailable",
+                    "incidental",
+                    INFO,
+                    f"Recorded hostname is {reason} and was not compared against current host '{cur_host or 'unknown'}'.",
+                    details={
+                        "recorded_hostname_representation": rep,
+                        "current_hostname": cur_host,
+                    },
+                )
+            )
+        elif rec_host != cur_host:
+            host_details = {
+                "recorded_hostname": rec_host,
+                "current_hostname": cur_host,
+            }
+            msg = (
+                f"Recorded hostname is '{rec_host}', while the current machine is "
+                f"'{cur_host}' (incidental host difference)."
+            )
+            checks.append(
+                _make_preflight_check(
+                    "host_hostname",
+                    "runtime",
+                    "portability_diff",
+                    "observed",
+                    "incidental",
+                    INFO,
+                    msg,
+                    details=host_details,
+                )
+            )
+            findings.append(
+                _make_finding(
+                    INFO,
+                    "preflight_hostname_diff",
+                    msg,
+                    None,
+                    category="runtime",
+                    evidence_status="observed",
+                    impact="incidental",
+                    comparison="portability_diff",
+                    details=host_details,
+                )
+            )
+        else:
+            checks.append(
+                _make_preflight_check(
+                    "host_hostname",
+                    "runtime",
+                    "match",
+                    "observed",
+                    "informational",
+                    INFO,
+                    f"Current hostname '{cur_host}' matches recorded hostname.",
+                    details={
+                        "recorded_hostname": rec_host,
+                        "current_hostname": cur_host,
+                    },
+                )
+            )
+
+    # --- Hardware CPU architecture ---
+    hw_sec = manifest_dict.get("hardware")
+    hw_dict = hw_sec if isinstance(hw_sec, dict) else {}
+    hw_cap = _capture_state_status(hw_dict)
+    cur_arch = platform.machine()
+
+    if not hw_dict or hw_cap == "suppressed":
+        checks.append(
+            _make_preflight_check(
+                "cpu_architecture",
+                "runtime",
+                "unknown",
+                "not_checked",
+                "informational",
+                INFO,
+                f"Recorded hardware metadata was not captured; current CPU architecture is '{cur_arch}'.",
+                details={"current_architecture": cur_arch},
+            )
+        )
+    elif hw_cap in ("failed", "timeout", "unavailable"):
+        checks.append(
+            _make_preflight_check(
+                "cpu_architecture",
+                "runtime",
+                "unknown",
+                "unavailable",
+                "informational",
+                INFO,
+                f"Recorded hardware metadata is unavailable ({hw_cap}); current CPU architecture is '{cur_arch}'.",
+                details={"capture_status": hw_cap, "current_architecture": cur_arch},
+            )
+        )
+    else:
+        cpu_dict = hw_dict.get("cpu") if isinstance(hw_dict.get("cpu"), dict) else {}
+        rec_arch = cpu_dict.get("architecture")
+        if not isinstance(rec_arch, str) or not rec_arch.strip():
+            checks.append(
+                _make_preflight_check(
+                    "cpu_architecture",
+                    "runtime",
+                    "unknown",
+                    "unavailable",
+                    "informational",
+                    INFO,
+                    f"Recorded CPU architecture is missing; current machine reports '{cur_arch}'.",
+                    details={"current_architecture": cur_arch},
+                )
+            )
+        else:
+            rec_arch_clean = rec_arch.strip()
+            arch_details = {
+                "recorded_architecture": rec_arch_clean,
+                "current_architecture": cur_arch,
+            }
+            if rec_arch_clean.lower() != (cur_arch or "").lower():
+                msg = (
+                    f"Recorded CPU architecture is '{rec_arch_clean}', while the current "
+                    f"machine reports '{cur_arch}' (architecture portability difference)."
+                )
+                checks.append(
+                    _make_preflight_check(
+                        "cpu_architecture",
+                        "runtime",
+                        "portability_diff",
+                        "observed",
+                        "portability",
+                        INFO,
+                        msg,
+                        details=arch_details,
+                    )
+                )
+                findings.append(
+                    _make_finding(
+                        INFO,
+                        "preflight_cpu_arch_diff",
+                        msg,
+                        None,
+                        category="runtime",
+                        evidence_status="observed",
+                        impact="portability",
+                        comparison="portability_diff",
+                        details=arch_details,
+                    )
+                )
+            else:
+                checks.append(
+                    _make_preflight_check(
+                        "cpu_architecture",
+                        "runtime",
+                        "match",
+                        "observed",
+                        "informational",
+                        INFO,
+                        f"Current CPU architecture '{cur_arch}' matches recorded '{rec_arch_clean}'.",
+                        details=arch_details,
+                    )
+                )
+
+    return checks, findings
+
+
+def _preflight_packages(
+    manifest_dict: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Compare recorded package versions against currently installed distributions."""
+    checks: List[Dict[str, Any]] = []
+    findings: List[Dict[str, Any]] = []
+
+    pkg_sec = manifest_dict.get("packages")
+    pkg_dict = pkg_sec if isinstance(pkg_sec, dict) else {}
+    pkg_cap = _capture_state_status(pkg_dict)
+
+    if not pkg_dict or pkg_cap == "suppressed":
+        checks.append(
+            _make_preflight_check(
+                "packages",
+                "dependencies",
+                "not_checked",
+                "not_checked",
+                "informational",
+                INFO,
+                "Recorded package inventory was not captured; installed packages were not compared.",
+            )
+        )
+        return checks, findings
+
+    if pkg_cap in ("failed", "timeout", "unavailable"):
+        checks.append(
+            _make_preflight_check(
+                "packages",
+                "dependencies",
+                "unknown",
+                "unavailable",
+                "informational",
+                INFO,
+                f"Recorded package inventory is unavailable ({pkg_cap}); installed packages could not be compared.",
+                details={"capture_status": pkg_cap},
+            )
+        )
+        return checks, findings
+
+    raw_records = pkg_dict.get("records")
+    if not isinstance(raw_records, list):
+        checks.append(
+            _make_preflight_check(
+                "packages",
+                "dependencies",
+                "unknown",
+                "unavailable",
+                "informational",
+                INFO,
+                "Recorded package list is missing or malformed; installed packages could not be compared.",
+            )
+        )
+        return checks, findings
+
+    valid_records = [
+        rec
+        for rec in raw_records
+        if isinstance(rec, dict)
+        and isinstance(rec.get("name"), str)
+        and rec["name"].strip()
+    ]
+    if not valid_records:
+        checks.append(
+            _make_preflight_check(
+                "packages",
+                "dependencies",
+                "not_checked",
+                "not_checked",
+                "informational",
+                INFO,
+                "Manifest recorded zero named packages; no package versions were checked.",
+                details={"mode": pkg_dict.get("mode")},
+            )
+        )
+        return checks, findings
+
+    try:
+        from pubrun.capture.packages import (
+            get_installed_distribution_versions,
+            normalize_package_name,
+        )
+
+        installed = get_installed_distribution_versions()
+    except Exception as exc:
+        msg = f"Could not inspect installed Python packages in the current environment ({type(exc).__name__})."
+        checks.append(
+            _make_preflight_check(
+                "packages",
+                "dependencies",
+                "unknown",
+                "unavailable",
+                "material",
+                WARN,
+                msg,
+                details={"error": type(exc).__name__},
+            )
+        )
+        findings.append(
+            _make_finding(
+                WARN,
+                "preflight_packages_probe_failed",
+                msg,
+                "Verify Python environment package metadata is readable.",
+                category="dependencies",
+                evidence_status="unavailable",
+                impact="material",
+                comparison="unknown",
+                details={"error": type(exc).__name__},
+            )
+        )
+        return checks, findings
+
+    pkg_mode = pkg_dict.get("mode") if isinstance(pkg_dict.get("mode"), str) else None
+    seen_norms = set()
+    matched_names: List[str] = []
+    editable_caveat_names: List[str] = []
+    installed_only_editable: List[str] = []
+
+    for rec in valid_records:
+        rec_name = rec["name"].strip()
+        norm_name = normalize_package_name(rec_name)
+        if norm_name in seen_norms:
+            continue
+        seen_norms.add(norm_name)
+
+        rec_ver = rec.get("version")
+        rec_editable = rec.get("editable") is True
+        inst_entry = installed.get(norm_name)
+
+        if inst_entry is None:
+            ver_label = (
+                str(rec_ver)
+                if rec_ver is not None and str(rec_ver).strip()
+                else "unknown"
+            )
+            details = {
+                "package": rec_name,
+                "normalized_name": norm_name,
+                "recorded_version": rec_ver,
+                "installed_version": None,
+                "status": "missing",
+            }
+            msg = (
+                f"Recorded package '{rec_name}' (version {ver_label}) is missing from "
+                f"the current Python environment."
+            )
+            sugg = (
+                f"Install '{rec_name}=={rec_ver}' in your target environment before re-running."
+                if isinstance(rec_ver, str) and rec_ver.strip() and rec_ver.strip().lower() != "unknown"
+                else f"Install '{rec_name}' in your target environment before re-running."
+            )
+            checks.append(
+                _make_preflight_check(
+                    f"package:{norm_name}",
+                    "dependencies",
+                    "mismatch",
+                    "observed",
+                    "material",
+                    WARN,
+                    msg,
+                    details=details,
+                )
+            )
+            findings.append(
+                _make_finding(
+                    WARN,
+                    "preflight_package_missing",
+                    msg,
+                    sugg,
+                    category="dependencies",
+                    evidence_status="observed",
+                    impact="material",
+                    comparison="mismatch",
+                    details=details,
+                )
+            )
+            continue
+
+        inst_ver = inst_entry.get("version")
+        inst_editable = inst_entry.get("editable") is True
+
+        rec_ver_unknown = (
+            rec_ver is None
+            or (isinstance(rec_ver, str) and rec_ver.strip().lower() in ("", "unknown"))
+        )
+        if rec_ver_unknown:
+            details = {
+                "package": rec_name,
+                "normalized_name": norm_name,
+                "recorded_version": rec_ver,
+                "installed_version": inst_ver,
+            }
+            msg = (
+                f"Package '{rec_name}' is installed (version {inst_ver or 'unknown'}), "
+                f"but the recorded version was missing or unknown."
+            )
+            checks.append(
+                _make_preflight_check(
+                    f"package:{norm_name}",
+                    "dependencies",
+                    "unknown",
+                    "unavailable",
+                    "informational",
+                    INFO,
+                    msg,
+                    details=details,
+                )
+            )
+            findings.append(
+                _make_finding(
+                    INFO,
+                    "preflight_package_version_unknown",
+                    msg,
+                    None,
+                    category="dependencies",
+                    evidence_status="unavailable",
+                    impact="informational",
+                    comparison="unknown",
+                    details=details,
+                )
+            )
+            continue
+
+        rec_ver_str = str(rec_ver).strip()
+        if inst_ver is None or not str(inst_ver).strip():
+            details = {
+                "package": rec_name,
+                "normalized_name": norm_name,
+                "recorded_version": rec_ver_str,
+                "installed_version": None,
+            }
+            msg = (
+                f"Package '{rec_name}' is installed, but its current version metadata "
+                f"is unavailable to compare against recorded version {rec_ver_str}."
+            )
+            checks.append(
+                _make_preflight_check(
+                    f"package:{norm_name}",
+                    "dependencies",
+                    "unknown",
+                    "unavailable",
+                    "informational",
+                    INFO,
+                    msg,
+                    details=details,
+                )
+            )
+            continue
+
+        inst_ver_str = str(inst_ver).strip()
+        if inst_ver_str != rec_ver_str:
+            details = {
+                "package": rec_name,
+                "normalized_name": norm_name,
+                "recorded_version": rec_ver_str,
+                "installed_version": inst_ver_str,
+                "recorded_editable": rec_editable,
+                "installed_editable": inst_editable,
+            }
+            msg = (
+                f"Package '{rec_name}' version differs: recorded {rec_ver_str}, "
+                f"installed {inst_ver_str}."
+            )
+            checks.append(
+                _make_preflight_check(
+                    f"package:{norm_name}",
+                    "dependencies",
+                    "mismatch",
+                    "observed",
+                    "material",
+                    WARN,
+                    msg,
+                    details=details,
+                )
+            )
+            findings.append(
+                _make_finding(
+                    WARN,
+                    "preflight_package_version_mismatch",
+                    msg,
+                    f"Install '{rec_name}=={rec_ver_str}' if exact dependency version parity is required.",
+                    category="dependencies",
+                    evidence_status="observed",
+                    impact="material",
+                    comparison="mismatch",
+                    details=details,
+                )
+            )
+            continue
+
+        matched_names.append(rec_name)
+        if rec_editable or inst_editable:
+            editable_caveat_names.append(rec_name)
+            if inst_editable and not rec_editable:
+                installed_only_editable.append(rec_name)
+
+    if matched_names:
+        caveats: List[str] = []
+        if editable_caveat_names:
+            preview = ", ".join(editable_caveat_names[:5])
+            extra = (
+                ""
+                if len(editable_caveat_names) <= 5
+                else f" (+{len(editable_caveat_names) - 5} more)"
+            )
+            caveats.append(
+                f"editable install(s) present ({preview}{extra}); version equality does not verify local editable source"
+            )
+        if pkg_mode == "imported-only":
+            caveats.append(
+                "recorded packages.mode was 'imported-only', so unrecorded or transitive packages were not checked"
+            )
+        caveat_suffix = f" ({'; '.join(caveats)})" if caveats else ""
+        checks.append(
+            _make_preflight_check(
+                "packages_matched",
+                "dependencies",
+                "match",
+                "observed",
+                "informational",
+                INFO,
+                f"{len(matched_names)} recorded package(s) match installed versions{caveat_suffix}.",
+                details={
+                    "matched_count": len(matched_names),
+                    "matched_packages": matched_names,
+                    "editable_caveat_packages": editable_caveat_names,
+                    "mode": pkg_mode,
+                    "caveats": caveats,
+                },
+            )
+        )
+        if installed_only_editable:
+            preview = ", ".join(installed_only_editable[:5])
+            extra = (
+                ""
+                if len(installed_only_editable) <= 5
+                else f" (+{len(installed_only_editable) - 5} more)"
+            )
+            findings.append(
+                _make_finding(
+                    INFO,
+                    "preflight_packages_editable_caveat",
+                    f"{len(installed_only_editable)} matched package(s) are currently installed in editable mode ({preview}{extra}); version match alone does not prove identical code.",
+                    "Verify the editable source tree matches the recorded run or install versioned distributions.",
+                    category="dependencies",
+                    evidence_status="observed",
+                    impact="portability",
+                    comparison="match",
+                    details={"packages": installed_only_editable[:20]},
+                )
+            )
+
+    return checks, findings
+
+
+def _preflight_source(
+    manifest_dict: Dict[str, Any],
+    *,
+    cwd: Optional[Union[str, os.PathLike]],
+    check_hashes: bool,
+    max_hash_bytes: int,
+    git_timeout: float,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Compare recorded Git commit/dirty state and entrypoint script identity."""
+    checks: List[Dict[str, Any]] = []
+    findings: List[Dict[str, Any]] = []
+
+    # --- Git state ---
+    git_sec = manifest_dict.get("git")
+    git_dict = git_sec if isinstance(git_sec, dict) else {}
+    git_cap = _capture_state_status(git_dict)
+    rec_commit_raw = git_dict.get("commit")
+    rec_commit = (
+        rec_commit_raw.strip()
+        if isinstance(rec_commit_raw, str) and rec_commit_raw.strip()
+        else None
+    )
+    rec_dirty = git_dict.get("dirty")
+    rec_repo_root_raw = git_dict.get("repo_root")
+    rec_repo_root = (
+        rec_repo_root_raw.strip()
+        if isinstance(rec_repo_root_raw, str) and rec_repo_root_raw.strip()
+        else None
+    )
+
+    if not git_dict or git_cap == "suppressed":
+        checks.append(
+            _make_preflight_check(
+                "git_source",
+                "source",
+                "unknown",
+                "not_checked",
+                "informational",
+                INFO,
+                "Recorded Git provenance was not captured; current repository state was not compared.",
+            )
+        )
+    elif git_cap in ("unavailable", "failed", "timeout", "partial") or not rec_commit:
+        checks.append(
+            _make_preflight_check(
+                "git_source",
+                "source",
+                "unknown",
+                "unavailable",
+                "informational",
+                INFO,
+                "Recorded Git commit is unavailable; current repository state cannot be verified against it.",
+                details={"capture_status": git_cap},
+            )
+        )
+    else:
+        try:
+            timeout_val = float(git_timeout)
+            if not math.isfinite(timeout_val) or timeout_val <= 0:
+                timeout_val = DEFAULT_GIT_TIMEOUT
+        except (TypeError, ValueError):
+            timeout_val = DEFAULT_GIT_TIMEOUT
+
+        deadline = time.monotonic() + timeout_val
+        clean_env = {
+            k: v for k, v in os.environ.items() if k not in _GIT_ENV_STRIP_KEYS
+        }
+
+        def _run_readonly_git(
+            target: Path, git_args: List[str]
+        ) -> Tuple[str, Optional[str]]:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return ("timeout", None)
+            try:
+                from pubrun.capture.subprocesses import disable_spy
+
+                with disable_spy():
+                    res = subprocess.run(
+                        ["git", "-C", str(target)] + git_args,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=remaining,
+                        env=clean_env,
+                    )
+                if res.returncode == 0:
+                    return ("ok", res.stdout)
+                return ("error", res.stderr)
+            except subprocess.TimeoutExpired:
+                return ("timeout", None)
+            except FileNotFoundError:
+                return ("missing_git", None)
+            except OSError as exc:
+                return ("error", str(exc))
+
+        if cwd is not None:
+            probed_dir = Path(cwd)
+            head_status, head_out = _run_readonly_git(probed_dir, ["rev-parse", "HEAD"])
+        else:
+            probed_dir = Path.cwd()
+            head_status, head_out = _run_readonly_git(probed_dir, ["rev-parse", "HEAD"])
+            if head_status == "error" and rec_repo_root:
+                try:
+                    fallback_dir = Path(rec_repo_root)
+                    if fallback_dir.is_dir() and fallback_dir != probed_dir:
+                        probed_dir = fallback_dir
+                        head_status, head_out = _run_readonly_git(
+                            probed_dir, ["rev-parse", "HEAD"]
+                        )
+                except OSError:
+                    pass
+
+        short_rec = rec_commit[:8]
+        if head_status == "timeout":
+            msg = f"Read-only Git probe timed out after {timeout_val:g}s while checking repository '{probed_dir}'."
+            details = {
+                "recorded_commit": rec_commit,
+                "probed_dir": str(probed_dir),
+                "git_timeout": timeout_val,
+            }
+            checks.append(
+                _make_preflight_check(
+                    "git_source",
+                    "source",
+                    "unknown",
+                    "unavailable",
+                    "material",
+                    WARN,
+                    msg,
+                    details=details,
+                )
+            )
+            findings.append(
+                _make_finding(
+                    WARN,
+                    "preflight_git_timeout",
+                    msg,
+                    "Verify repository filesystem health or pass a larger `git_timeout` to compare Git state.",
+                    category="source",
+                    evidence_status="unavailable",
+                    impact="material",
+                    comparison="unknown",
+                    details=details,
+                )
+            )
+        elif head_status in ("missing_git", "error"):
+            reason_text = (
+                "git binary is not installed"
+                if head_status == "missing_git"
+                else f"'{probed_dir}' is not a readable Git repository"
+            )
+            checks.append(
+                _make_preflight_check(
+                    "git_source",
+                    "source",
+                    "unknown",
+                    "unavailable",
+                    "informational",
+                    INFO,
+                    f"Current Git state could not be checked ({reason_text}); recorded commit was {short_rec}.",
+                    details={
+                        "recorded_commit": rec_commit,
+                        "probed_dir": str(probed_dir),
+                        "reason": head_status,
+                    },
+                )
+            )
+        else:
+            cur_commit = (head_out or "").strip()
+            short_cur = cur_commit[:8] if cur_commit else "unknown"
+            if cur_commit != rec_commit:
+                details = {
+                    "recorded_commit": rec_commit,
+                    "current_commit": cur_commit,
+                    "probed_dir": str(probed_dir),
+                }
+                msg = (
+                    f"Git commit differs in '{probed_dir}': recorded {short_rec}, "
+                    f"current HEAD is {short_cur}."
+                )
+                checks.append(
+                    _make_preflight_check(
+                        "git_source",
+                        "source",
+                        "mismatch",
+                        "observed",
+                        "material",
+                        WARN,
+                        msg,
+                        details=details,
+                    )
+                )
+                findings.append(
+                    _make_finding(
+                        WARN,
+                        "preflight_git_commit_mismatch",
+                        msg,
+                        f"Check out commit {short_rec} in a separate worktree or branch before re-running.",
+                        category="source",
+                        evidence_status="observed",
+                        impact="material",
+                        comparison="mismatch",
+                        details=details,
+                    )
+                )
+            else:
+                st_status, st_out = _run_readonly_git(
+                    probed_dir, ["status", "--porcelain"]
+                )
+                if st_status == "timeout":
+                    msg = f"Read-only `git status` timed out after {timeout_val:g}s while checking repository '{probed_dir}'."
+                    details = {
+                        "recorded_commit": rec_commit,
+                        "current_commit": cur_commit,
+                        "probed_dir": str(probed_dir),
+                        "git_timeout": timeout_val,
+                    }
+                    checks.append(
+                        _make_preflight_check(
+                            "git_source",
+                            "source",
+                            "unknown",
+                            "unavailable",
+                            "material",
+                            WARN,
+                            msg,
+                            details=details,
+                        )
+                    )
+                    findings.append(
+                        _make_finding(
+                            WARN,
+                            "preflight_git_timeout",
+                            msg,
+                            "Verify repository filesystem health or pass a larger `git_timeout` to compare Git working-tree state.",
+                            category="source",
+                            evidence_status="unavailable",
+                            impact="material",
+                            comparison="unknown",
+                            details=details,
+                        )
+                    )
+                elif st_status != "ok":
+                    checks.append(
+                        _make_preflight_check(
+                            "git_source",
+                            "source",
+                            "unknown",
+                            "unavailable",
+                            "informational",
+                            INFO,
+                            f"Git HEAD matches {short_rec}, but current working-tree cleanliness could not be queried.",
+                            details={
+                                "recorded_commit": rec_commit,
+                                "current_commit": cur_commit,
+                                "probed_dir": str(probed_dir),
+                            },
+                        )
+                    )
+                else:
+                    cur_dirty = bool((st_out or "").strip())
+                    details = {
+                        "recorded_commit": rec_commit,
+                        "current_commit": cur_commit,
+                        "recorded_dirty": rec_dirty,
+                        "current_dirty": cur_dirty,
+                        "probed_dir": str(probed_dir),
+                    }
+                    if rec_dirty is True:
+                        dirty_note = (
+                            " The current working tree also has uncommitted changes."
+                            if cur_dirty
+                            else ""
+                        )
+                        msg = (
+                            f"Git HEAD matches recorded commit {short_rec}, but the recorded run "
+                            f"had uncommitted changes that were not captured, so HEAD equality "
+                            f"does not prove identical source.{dirty_note}"
+                        )
+                        checks.append(
+                            _make_preflight_check(
+                                "git_source",
+                                "source",
+                                "unknown",
+                                "observed",
+                                "material",
+                                WARN,
+                                msg,
+                                details=details,
+                            )
+                        )
+                        findings.append(
+                            _make_finding(
+                                WARN,
+                                "preflight_git_recorded_dirty",
+                                msg,
+                                "Inspect any saved diff or compare source files manually because the recorded run had uncaptured uncommitted changes.",
+                                category="source",
+                                evidence_status="observed",
+                                impact="material",
+                                comparison="unknown",
+                                details=details,
+                            )
+                        )
+                    elif cur_dirty:
+                        msg = (
+                            f"Git HEAD matches recorded commit {short_rec}, but the current "
+                            f"working tree in '{probed_dir}' has uncommitted changes."
+                        )
+                        checks.append(
+                            _make_preflight_check(
+                                "git_source",
+                                "source",
+                                "mismatch",
+                                "observed",
+                                "material",
+                                WARN,
+                                msg,
+                                details=details,
+                            )
+                        )
+                        findings.append(
+                            _make_finding(
+                                WARN,
+                                "preflight_git_working_tree_dirty",
+                                msg,
+                                "Commit, stash, or revert local changes before re-running to match the clean recorded commit.",
+                                category="source",
+                                evidence_status="observed",
+                                impact="material",
+                                comparison="mismatch",
+                                details=details,
+                            )
+                        )
+                    elif rec_dirty is False:
+                        checks.append(
+                            _make_preflight_check(
+                                "git_source",
+                                "source",
+                                "match",
+                                "observed",
+                                "informational",
+                                INFO,
+                                f"Current Git HEAD {short_cur} matches recorded commit {short_rec} and both trees are clean.",
+                                details=details,
+                            )
+                        )
+                    else:
+                        checks.append(
+                            _make_preflight_check(
+                                "git_source",
+                                "source",
+                                "unknown",
+                                "not_checked",
+                                "informational",
+                                INFO,
+                                f"Current Git HEAD {short_cur} matches recorded commit {short_rec} and is clean, but recorded dirty state was not checked.",
+                                details=details,
+                            )
+                        )
+
+    # --- Entrypoint script ---
+    inv_sec = manifest_dict.get("invocation")
+    inv_dict = inv_sec if isinstance(inv_sec, dict) else {}
+    entrypoint_type = inv_dict.get("entrypoint_type")
+    script_dict = inv_dict.get("script") if isinstance(inv_dict.get("script"), dict) else {}
+    raw_path = (
+        script_dict.get("path").strip()
+        if isinstance(script_dict.get("path"), str) and script_dict.get("path").strip()
+        else None
+    )
+    raw_real = (
+        script_dict.get("real_path").strip()
+        if isinstance(script_dict.get("real_path"), str) and script_dict.get("real_path").strip()
+        else None
+    )
+
+    if entrypoint_type != "script" or (not raw_path and not raw_real):
+        checks.append(
+            _make_preflight_check(
+                "entrypoint_script",
+                "source",
+                "not_checked",
+                "not_checked",
+                "informational",
+                INFO,
+                "Entrypoint is not a recorded script file; script identity was not checked.",
+                details={"entrypoint_type": entrypoint_type},
+            )
+        )
+        return checks, findings
+
+    base_dir = Path(cwd) if cwd is not None else Path.cwd()
+    if raw_path:
+        path_obj = Path(raw_path)
+        if not path_obj.is_absolute():
+            candidate = base_dir / path_obj
+            if cwd is None and not candidate.exists() and raw_real:
+                resolved_script = Path(raw_real)
+            else:
+                resolved_script = candidate
+        else:
+            if not path_obj.exists() and raw_real and Path(raw_real).exists():
+                resolved_script = Path(raw_real)
+            else:
+                resolved_script = path_obj
+    else:
+        resolved_script = Path(raw_real)  # type: ignore[arg-type]
+
+    try:
+        st = os.stat(resolved_script)
+    except OSError:
+        st = None
+
+    if st is None or not stat.S_ISREG(st.st_mode):
+        msg = f"Recorded entrypoint script '{resolved_script}' is missing, unreadable, or not a regular file."
+        details = {
+            "recorded_path": raw_path,
+            "recorded_real_path": raw_real,
+            "resolved_path": str(resolved_script),
+        }
+        checks.append(
+            _make_preflight_check(
+                "entrypoint_script",
+                "source",
+                "mismatch",
+                "unavailable",
+                "material",
+                WARN,
+                msg,
+                details=details,
+            )
+        )
+        findings.append(
+            _make_finding(
+                WARN,
+                "preflight_script_missing",
+                msg,
+                "Locate the recorded entrypoint script or run preflight from the project working directory.",
+                category="source",
+                evidence_status="unavailable",
+                impact="material",
+                comparison="mismatch",
+                details=details,
+            )
+        )
+        return checks, findings
+
+    rec_sha256 = (
+        script_dict.get("sha256").strip()
+        if isinstance(script_dict.get("sha256"), str) and script_dict.get("sha256").strip()
+        else None
+    )
+    rec_size = (
+        script_dict.get("size")
+        if isinstance(script_dict.get("size"), int) and not isinstance(script_dict.get("size"), bool)
+        else None
+    )
+
+    if rec_sha256 and check_hashes:
+        if st.st_size > max_hash_bytes:
+            checks.append(
+                _make_preflight_check(
+                    "entrypoint_script",
+                    "source",
+                    "not_checked",
+                    "not_checked",
+                    "informational",
+                    INFO,
+                    f"Entrypoint script '{resolved_script}' ({st.st_size} bytes) exceeds max_hash_bytes ({max_hash_bytes} bytes); content hash was not checked.",
+                    details={
+                        "resolved_path": str(resolved_script),
+                        "size_bytes": st.st_size,
+                        "max_hash_bytes": max_hash_bytes,
+                    },
+                )
+            )
+            return checks, findings
+
+        try:
+            cur_sha256 = _stream_file_digest(resolved_script, "sha256")
+        except OSError as exc:
+            msg = f"Entrypoint script '{resolved_script}' could not be read for SHA-256 verification ({type(exc).__name__})."
+            details = {"resolved_path": str(resolved_script), "error": type(exc).__name__}
+            checks.append(
+                _make_preflight_check(
+                    "entrypoint_script",
+                    "source",
+                    "mismatch",
+                    "unavailable",
+                    "material",
+                    WARN,
+                    msg,
+                    details=details,
+                )
+            )
+            findings.append(
+                _make_finding(
+                    WARN,
+                    "preflight_script_missing",
+                    msg,
+                    "Ensure the entrypoint script is readable before re-running.",
+                    category="source",
+                    evidence_status="unavailable",
+                    impact="material",
+                    comparison="mismatch",
+                    details=details,
+                )
+            )
+            return checks, findings
+
+        if cur_sha256.lower() == rec_sha256.lower():
+            checks.append(
+                _make_preflight_check(
+                    "entrypoint_script",
+                    "source",
+                    "match",
+                    "observed",
+                    "informational",
+                    INFO,
+                    f"Entrypoint script '{resolved_script}' matches recorded SHA-256 digest.",
+                    details={
+                        "resolved_path": str(resolved_script),
+                        "recorded_sha256": rec_sha256,
+                        "current_sha256": cur_sha256,
+                    },
+                )
+            )
+        else:
+            msg = f"Entrypoint script '{resolved_script}' content differs from the recorded SHA-256 digest."
+            details = {
+                "resolved_path": str(resolved_script),
+                "recorded_sha256": rec_sha256,
+                "current_sha256": cur_sha256,
+            }
+            checks.append(
+                _make_preflight_check(
+                    "entrypoint_script",
+                    "source",
+                    "mismatch",
+                    "observed",
+                    "material",
+                    WARN,
+                    msg,
+                    details=details,
+                )
+            )
+            findings.append(
+                _make_finding(
+                    WARN,
+                    "preflight_script_hash_mismatch",
+                    msg,
+                    "Inspect script differences or check out the recorded source revision before re-running.",
+                    category="source",
+                    evidence_status="observed",
+                    impact="material",
+                    comparison="mismatch",
+                    details=details,
+                )
+            )
+    else:
+        if rec_size is not None and st.st_size != rec_size:
+            msg = (
+                f"Entrypoint script '{resolved_script}' size differs: recorded "
+                f"{rec_size} bytes, current {st.st_size} bytes."
+            )
+            details = {
+                "resolved_path": str(resolved_script),
+                "recorded_size": rec_size,
+                "current_size": st.st_size,
+            }
+            checks.append(
+                _make_preflight_check(
+                    "entrypoint_script",
+                    "source",
+                    "mismatch",
+                    "observed",
+                    "material",
+                    WARN,
+                    msg,
+                    details=details,
+                )
+            )
+            findings.append(
+                _make_finding(
+                    WARN,
+                    "preflight_script_size_mismatch",
+                    msg,
+                    "Inspect script modifications before re-running.",
+                    category="source",
+                    evidence_status="observed",
+                    impact="material",
+                    comparison="mismatch",
+                    details=details,
+                )
+            )
+        else:
+            reason = (
+                "check_hashes=False was requested"
+                if not check_hashes and rec_sha256
+                else "no SHA-256 hash was recorded"
+            )
+            checks.append(
+                _make_preflight_check(
+                    "entrypoint_script",
+                    "source",
+                    "unknown",
+                    "not_checked",
+                    "informational",
+                    INFO,
+                    f"Entrypoint script '{resolved_script}' exists locally, but content hash was not checked ({reason}).",
+                    details={
+                        "resolved_path": str(resolved_script),
+                        "recorded_size": rec_size,
+                        "current_size": st.st_size,
+                        "check_hashes": check_hashes,
+                    },
+                )
+            )
+
+    return checks, findings
+
+
+def _extract_input_digest(rec: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+    """Return ``(algorithm, hex_value)`` from a recorded input file dict, or ``(None, None)``."""
+    raw_sha256 = rec.get("sha256")
+    if isinstance(raw_sha256, str) and raw_sha256.strip():
+        return ("sha256", raw_sha256.strip())
+
+    digest_obj = rec.get("digest")
+    if isinstance(digest_obj, dict):
+        alg = digest_obj.get("algorithm")
+        val = digest_obj.get("value")
+        if isinstance(alg, str) and alg.strip() and isinstance(val, str) and val.strip():
+            return (alg.strip().lower(), val.strip())
+
+    caller_digest = rec.get("caller_digest")
+    if isinstance(caller_digest, dict):
+        alg = caller_digest.get("algorithm")
+        val = caller_digest.get("value")
+        if isinstance(alg, str) and alg.strip() and isinstance(val, str) and val.strip():
+            return (alg.strip().lower(), val.strip())
+
+    raw_md5 = rec.get("md5")
+    if isinstance(raw_md5, str) and raw_md5.strip():
+        return ("md5", raw_md5.strip())
+
+    return (None, None)
+
+
+def _resolve_input_local_path(
+    rec: Dict[str, Any],
+    base_dir: Path,
+) -> Tuple[Optional[Path], str]:
+    """Resolve a recorded input path locally from ``realpath``, ``real_path``, or ``path``."""
+    raw_realpath = rec.get("realpath") if isinstance(rec.get("realpath"), str) else ""
+    raw_real_path = rec.get("real_path") if isinstance(rec.get("real_path"), str) else ""
+    raw_path = rec.get("path") if isinstance(rec.get("path"), str) else ""
+
+    raw_realpath = raw_realpath.strip()
+    raw_real_path = raw_real_path.strip()
+    raw_path = raw_path.strip()
+
+    display = raw_path or raw_realpath or raw_real_path
+    primary_raw = raw_realpath or raw_real_path or raw_path
+    if not primary_raw:
+        return None, ""
+
+    primary = Path(primary_raw)
+    if not primary.is_absolute():
+        primary = base_dir / primary
+
+    if not primary.exists() and raw_path:
+        rel_candidate = Path(raw_path)
+        if not rel_candidate.is_absolute():
+            alt = base_dir / rel_candidate
+            if alt.exists():
+                return alt, display
+
+    return primary, display
+
+
+def _preflight_inputs(
+    manifest_dict: Dict[str, Any],
+    *,
+    cwd: Optional[Union[str, os.PathLike]],
+    check_hashes: bool,
+    max_hash_bytes: int,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Compare accessible recorded input files against local files read-only."""
+    checks: List[Dict[str, Any]] = []
+    findings: List[Dict[str, Any]] = []
+
+    data_files = manifest_dict.get("data_files")
+    df_dict = data_files if isinstance(data_files, dict) else {}
+    df_inputs = df_dict.get("inputs") if isinstance(df_dict.get("inputs"), list) else []
+    df_mixed = df_dict.get("mixed") if isinstance(df_dict.get("mixed"), list) else []
+
+    inv_sec = manifest_dict.get("invocation")
+    inv_dict = inv_sec if isinstance(inv_sec, dict) else {}
+    inv_inputs = inv_dict.get("inputs") if isinstance(inv_dict.get("inputs"), list) else []
+
+    base_dir = Path(cwd) if cwd is not None else Path.cwd()
+
+    # Collect and deduplicate by normalized path, preferring richer observed
+    # data_files records with digests over argv-inferred invocation.inputs records.
+    deduped: Dict[str, Tuple[Tuple[int, int], Dict[str, Any], Path, str, str]] = {}
+    order_keys: List[str] = []
+
+    raw_sources: List[Tuple[str, List[Any]]] = [
+        ("data_files", df_inputs + df_mixed),
+        ("invocation", inv_inputs),
+    ]
+    for origin, rec_list in raw_sources:
+        for rec in rec_list:
+            if not isinstance(rec, dict):
+                continue
+            resolved_path, display = _resolve_input_local_path(rec, base_dir)
+            if resolved_path is None:
+                continue
+
+            is_asserted = _record_is_asserted(rec)
+            alg, digest_val = _extract_input_digest(rec)
+            if origin == "data_files":
+                basis = "asserted" if is_asserted else "observed"
+                src_rank = 2
+            else:
+                basis = "asserted" if is_asserted else "inferred"
+                src_rank = 1
+
+            digest_rank = (
+                2 if (digest_val and not is_asserted) else (1 if digest_val else 0)
+            )
+            rank = (src_rank, digest_rank)
+
+            try:
+                norm_key = (
+                    os.path.normcase(os.path.realpath(str(resolved_path)))
+                    if resolved_path.exists()
+                    else os.path.normcase(os.path.normpath(str(resolved_path)))
+                )
+            except OSError:
+                norm_key = os.path.normcase(os.path.normpath(str(resolved_path)))
+
+            if norm_key not in deduped:
+                deduped[norm_key] = (rank, rec, resolved_path, display, basis)
+                order_keys.append(norm_key)
+            elif rank > deduped[norm_key][0]:
+                deduped[norm_key] = (rank, rec, resolved_path, display, basis)
+
+    if not order_keys:
+        checks.append(
+            _make_preflight_check(
+                "inputs",
+                "inputs_outputs",
+                "not_checked",
+                "not_checked",
+                "informational",
+                INFO,
+                "No input file records were present in the manifest; local inputs were not checked.",
+            )
+        )
+        return checks, findings
+
+    for norm_key in order_keys:
+        _, rec, resolved_path, display, basis = deduped[norm_key]
+        check_name = f"input:{display}"
+
+        if rec.get("entry_type") == "unsupported_remote_uri":
+            checks.append(
+                _make_preflight_check(
+                    check_name,
+                    "inputs_outputs",
+                    "not_checked",
+                    "not_checked",
+                    "informational",
+                    INFO,
+                    f"Input '{display}' is a remote URI; preflight is strictly offline and does not fetch remote data.",
+                    details={"path": display, "evidence_basis": basis},
+                )
+            )
+            continue
+
+        try:
+            st = os.stat(resolved_path)
+        except OSError:
+            st = None
+
+        if st is None:
+            msg = f"Recorded input '{display}' ({resolved_path}) is missing or inaccessible locally."
+            details = {
+                "path": display,
+                "resolved_path": str(resolved_path),
+                "evidence_basis": basis,
+            }
+            checks.append(
+                _make_preflight_check(
+                    check_name,
+                    "inputs_outputs",
+                    "mismatch",
+                    "unavailable",
+                    "material",
+                    WARN,
+                    msg,
+                    details=details,
+                )
+            )
+            findings.append(
+                _make_finding(
+                    WARN,
+                    "preflight_input_missing",
+                    msg,
+                    f"Ensure input '{display}' is present and readable at '{resolved_path}' before re-running.",
+                    category="inputs_outputs",
+                    evidence_status="unavailable",
+                    impact="material",
+                    comparison="mismatch",
+                    details=details,
+                )
+            )
+            continue
+
+        # Recorded directory (e.g. invocation.inputs with is_dir=True or data_files directory).
+        if rec.get("is_dir") is True or rec.get("entry_type") == "directory":
+            if stat.S_ISDIR(st.st_mode):
+                checks.append(
+                    _make_preflight_check(
+                        check_name,
+                        "inputs_outputs",
+                        "unknown",
+                        "not_checked",
+                        "informational",
+                        INFO,
+                        f"Recorded input directory '{display}' exists locally, but directory contents are not hashed.",
+                        details={
+                            "path": display,
+                            "resolved_path": str(resolved_path),
+                            "is_dir": True,
+                            "evidence_basis": basis,
+                        },
+                    )
+                )
+            else:
+                msg = f"Recorded input '{display}' was a directory, but '{resolved_path}' is no longer a directory."
+                details = {
+                    "path": display,
+                    "resolved_path": str(resolved_path),
+                    "expected_is_dir": True,
+                    "evidence_basis": basis,
+                }
+                checks.append(
+                    _make_preflight_check(
+                        check_name,
+                        "inputs_outputs",
+                        "mismatch",
+                        "unavailable",
+                        "material",
+                        WARN,
+                        msg,
+                        details=details,
+                    )
+                )
+                findings.append(
+                    _make_finding(
+                        WARN,
+                        "preflight_input_type_mismatch",
+                        msg,
+                        f"Verify that '{resolved_path}' points to the expected input directory.",
+                        category="inputs_outputs",
+                        evidence_status="unavailable",
+                        impact="material",
+                        comparison="mismatch",
+                        details=details,
+                    )
+                )
+            continue
+
+        # Guard against non-regular files (directories, FIFOs, sockets, device nodes).
+        if not stat.S_ISREG(st.st_mode):
+            checks.append(
+                _make_preflight_check(
+                    check_name,
+                    "inputs_outputs",
+                    "not_checked",
+                    "not_checked",
+                    "informational",
+                    INFO,
+                    f"Input '{display}' ({resolved_path}) is not a regular file; skipped read-only hashing to avoid blocking.",
+                    details={
+                        "path": display,
+                        "resolved_path": str(resolved_path),
+                        "evidence_basis": basis,
+                    },
+                )
+            )
+            continue
+
+        alg, expected_digest = _extract_input_digest(rec)
+        raw_size_bytes = rec.get("size_bytes")
+        raw_size = rec.get("size")
+        if isinstance(raw_size_bytes, int) and not isinstance(raw_size_bytes, bool):
+            rec_size: Optional[int] = raw_size_bytes
+        elif isinstance(raw_size, int) and not isinstance(raw_size, bool):
+            rec_size = raw_size
+        else:
+            rec_size = None
+
+        if alg and expected_digest and check_hashes:
+            if st.st_size > max_hash_bytes:
+                checks.append(
+                    _make_preflight_check(
+                        check_name,
+                        "inputs_outputs",
+                        "not_checked",
+                        "not_checked",
+                        "informational",
+                        INFO,
+                        f"Input '{display}' ({st.st_size} bytes) exceeds max_hash_bytes ({max_hash_bytes} bytes); content hash was not checked.",
+                        details={
+                            "path": display,
+                            "resolved_path": str(resolved_path),
+                            "size_bytes": st.st_size,
+                            "max_hash_bytes": max_hash_bytes,
+                            "evidence_basis": basis,
+                        },
+                    )
+                )
+                continue
+
+            if alg not in _SUPPORTED_PREFLIGHT_HASH_ALGS:
+                checks.append(
+                    _make_preflight_check(
+                        check_name,
+                        "inputs_outputs",
+                        "not_checked",
+                        "not_checked",
+                        "informational",
+                        INFO,
+                        f"Input '{display}' uses unsupported digest algorithm '{alg}'; content hash was not checked.",
+                        details={
+                            "path": display,
+                            "resolved_path": str(resolved_path),
+                            "algorithm": alg,
+                            "evidence_basis": basis,
+                        },
+                    )
+                )
+                continue
+
+            try:
+                actual_digest = _stream_file_digest(resolved_path, alg)
+            except OSError as exc:
+                msg = f"Input '{display}' ({resolved_path}) could not be read for {alg} hashing ({type(exc).__name__})."
+                details = {
+                    "path": display,
+                    "resolved_path": str(resolved_path),
+                    "error": type(exc).__name__,
+                    "evidence_basis": basis,
+                }
+                checks.append(
+                    _make_preflight_check(
+                        check_name,
+                        "inputs_outputs",
+                        "mismatch",
+                        "unavailable",
+                        "material",
+                        WARN,
+                        msg,
+                        details=details,
+                    )
+                )
+                findings.append(
+                    _make_finding(
+                        WARN,
+                        "preflight_input_missing",
+                        msg,
+                        f"Ensure input '{display}' is readable before re-running.",
+                        category="inputs_outputs",
+                        evidence_status="unavailable",
+                        impact="material",
+                        comparison="mismatch",
+                        details=details,
+                    )
+                )
+                continue
+
+            ev_status = "asserted" if basis == "asserted" else "observed"
+            basis_note = (
+                " (verified against caller-asserted digest)"
+                if basis == "asserted"
+                else ""
+            )
+            details = {
+                "path": display,
+                "resolved_path": str(resolved_path),
+                "algorithm": alg,
+                "recorded_digest": expected_digest,
+                "current_digest": actual_digest,
+                "evidence_basis": basis,
+            }
+            if actual_digest.lower() == expected_digest.lower():
+                checks.append(
+                    _make_preflight_check(
+                        check_name,
+                        "inputs_outputs",
+                        "match",
+                        ev_status,
+                        "informational",
+                        INFO,
+                        f"Input '{display}' matches recorded {alg} digest{basis_note}.",
+                        details=details,
+                    )
+                )
+            else:
+                msg = f"Input '{display}' content differs from recorded {alg} digest{basis_note}."
+                checks.append(
+                    _make_preflight_check(
+                        check_name,
+                        "inputs_outputs",
+                        "mismatch",
+                        ev_status,
+                        "material",
+                        WARN,
+                        msg,
+                        details=details,
+                    )
+                )
+                findings.append(
+                    _make_finding(
+                        WARN,
+                        "preflight_input_hash_mismatch",
+                        msg,
+                        f"Verify that input '{display}' contains the expected dataset version before re-running.",
+                        category="inputs_outputs",
+                        evidence_status=ev_status,
+                        impact="material",
+                        comparison="mismatch",
+                        details=details,
+                    )
+                )
+        else:
+            if rec_size is not None and st.st_size != rec_size:
+                msg = (
+                    f"Input '{display}' size differs: recorded {rec_size} bytes, "
+                    f"current {st.st_size} bytes."
+                )
+                details = {
+                    "path": display,
+                    "resolved_path": str(resolved_path),
+                    "recorded_size": rec_size,
+                    "current_size": st.st_size,
+                    "evidence_basis": basis,
+                }
+                checks.append(
+                    _make_preflight_check(
+                        check_name,
+                        "inputs_outputs",
+                        "mismatch",
+                        "observed",
+                        "material",
+                        WARN,
+                        msg,
+                        details=details,
+                    )
+                )
+                findings.append(
+                    _make_finding(
+                        WARN,
+                        "preflight_input_size_mismatch",
+                        msg,
+                        f"Verify that input '{display}' matches the recorded file before re-running.",
+                        category="inputs_outputs",
+                        evidence_status="observed",
+                        impact="material",
+                        comparison="mismatch",
+                        details=details,
+                    )
+                )
+            elif not check_hashes and alg and expected_digest:
+                checks.append(
+                    _make_preflight_check(
+                        check_name,
+                        "inputs_outputs",
+                        "not_checked",
+                        "not_checked",
+                        "informational",
+                        INFO,
+                        f"Input '{display}' exists locally, but content hashing was disabled (`check_hashes=False`); content identity was not verified.",
+                        details={
+                            "path": display,
+                            "resolved_path": str(resolved_path),
+                            "recorded_size": rec_size,
+                            "current_size": st.st_size,
+                            "check_hashes": False,
+                            "evidence_basis": basis,
+                        },
+                    )
+                )
+            else:
+                checks.append(
+                    _make_preflight_check(
+                        check_name,
+                        "inputs_outputs",
+                        "unknown",
+                        "not_checked",
+                        "informational",
+                        INFO,
+                        f"Input '{display}' exists locally (stat-only; no content digest was recorded), so content identity was not verified.",
+                        details={
+                            "path": display,
+                            "resolved_path": str(resolved_path),
+                            "recorded_size": rec_size,
+                            "current_size": st.st_size,
+                            "evidence_basis": basis,
+                        },
+                    )
+                )
+
+    return checks, findings
+
+
+def _preflight_invocation(
+    manifest_dict: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Check recorded working directory presence and command redaction status."""
+    checks: List[Dict[str, Any]] = []
+    findings: List[Dict[str, Any]] = []
+
+    inv_sec = manifest_dict.get("invocation")
+    inv_dict = inv_sec if isinstance(inv_sec, dict) else {}
+
+    wd = (
+        inv_dict.get("working_directory")
+        if isinstance(inv_dict.get("working_directory"), dict)
+        else {}
+    )
+    wd_path = (
+        wd.get("path").strip()
+        if isinstance(wd.get("path"), str) and wd.get("path").strip()
+        else None
+    )
+    if not wd_path:
+        checks.append(
+            _make_preflight_check(
+                "working_directory",
+                "invocation",
+                "not_checked",
+                "not_checked",
+                "informational",
+                INFO,
+                "No working directory path was recorded in the manifest.",
+            )
+        )
+    else:
+        try:
+            wd_exists = Path(wd_path).is_dir()
+        except OSError:
+            wd_exists = False
+        if wd_exists:
+            checks.append(
+                _make_preflight_check(
+                    "working_directory",
+                    "invocation",
+                    "match",
+                    "observed",
+                    "informational",
+                    INFO,
+                    f"Recorded working directory '{wd_path}' exists locally.",
+                    details={"recorded_working_directory": wd_path},
+                )
+            )
+        else:
+            msg = f"Recorded working directory '{wd_path}' does not exist locally (relocated or different host path)."
+            details = {"recorded_working_directory": wd_path}
+            checks.append(
+                _make_preflight_check(
+                    "working_directory",
+                    "invocation",
+                    "portability_diff",
+                    "observed",
+                    "portability",
+                    INFO,
+                    msg,
+                    details=details,
+                )
+            )
+            findings.append(
+                _make_finding(
+                    INFO,
+                    "preflight_working_directory_missing",
+                    msg,
+                    "Run from your local project directory and adjust any hardcoded paths in the recorded command.",
+                    category="invocation",
+                    evidence_status="observed",
+                    impact="portability",
+                    comparison="portability_diff",
+                    details=details,
+                )
+            )
+
+    argv = inv_dict.get("argv") if isinstance(inv_dict.get("argv"), list) else None
+    rerun_cmd = (
+        inv_dict.get("rerun_command")
+        if isinstance(inv_dict.get("rerun_command"), str) and inv_dict.get("rerun_command").strip()
+        else None
+    )
+    if not argv and not rerun_cmd:
+        checks.append(
+            _make_preflight_check(
+                "rerun_command",
+                "invocation",
+                "unknown",
+                "unavailable",
+                "informational",
+                INFO,
+                "No rerun_command or argv was recorded in the manifest.",
+            )
+        )
+    else:
+        argv_redacted = bool(
+            argv and any(isinstance(arg, str) and "[REDACTED]" in arg for arg in argv)
+        )
+        rerun_redacted = bool(rerun_cmd and "[REDACTED]" in rerun_cmd)
+        if argv_redacted or rerun_redacted:
+            msg = (
+                "Recorded rerun_command or argv contains [REDACTED] placeholders and "
+                "cannot be executed verbatim without supplying redacted values."
+            )
+            details = {
+                "argv_redacted": argv_redacted,
+                "rerun_command_redacted": rerun_redacted,
+            }
+            checks.append(
+                _make_preflight_check(
+                    "rerun_command",
+                    "invocation",
+                    "mismatch",
+                    "observed",
+                    "material",
+                    WARN,
+                    msg,
+                    details=details,
+                )
+            )
+            findings.append(
+                _make_finding(
+                    WARN,
+                    "preflight_rerun_command_redacted",
+                    msg,
+                    "Supply the redacted argument values manually before executing the recorded command.",
+                    category="invocation",
+                    evidence_status="observed",
+                    impact="material",
+                    comparison="mismatch",
+                    details=details,
+                )
+            )
+        else:
+            checks.append(
+                _make_preflight_check(
+                    "rerun_command",
+                    "invocation",
+                    "match",
+                    "observed",
+                    "informational",
+                    INFO,
+                    "Recorded command contains no [REDACTED] placeholders.",
+                )
+            )
+
+    return checks, findings
+
+
+def _summarize_preflight_status(counts: Dict[str, int]) -> str:
+    """Derive overall preflight comparison status from check outcome counts."""
+    if counts.get("mismatch", 0) > 0:
+        return "mismatch"
+    if counts.get("unknown", 0) > 0:
+        return "unknown"
+    if counts.get("portability_diff", 0) > 0:
+        return "portability_diff"
+    if counts.get("match", 0) > 0:
+        return "match"
+    return "not_checked"
+
+
+def compare_with_current_environment(
+    manifest: Any,
+    *,
+    manifest_path: Optional[str] = None,
+    cwd: Optional[Union[str, os.PathLike]] = None,
+    check_hashes: bool = True,
+    max_hash_bytes: int = DEFAULT_MAX_HASH_BYTES,
+    git_timeout: float = DEFAULT_GIT_TIMEOUT,
+) -> Dict[str, Any]:
+    """Compare supported recorded manifest evidence against the current local environment.
+
+    Strictly read-only, offline, and never raises. Never executes recorded commands,
+    installs packages, fetches remote data, or mutates disk state, environment
+    variables, or random seeds.
+    """
+    _ = manifest_path
+    manifest_dict = manifest if isinstance(manifest, dict) else {}
+    try:
+        effective_max_hash = int(max_hash_bytes)
+        if effective_max_hash < 0:
+            effective_max_hash = 0
+    except (TypeError, ValueError):
+        effective_max_hash = DEFAULT_MAX_HASH_BYTES
+
+    checks: List[Dict[str, Any]] = []
+    findings: List[Dict[str, Any]] = []
+
+    probes = (
+        ("runtime", lambda: _preflight_runtime(manifest_dict)),
+        ("dependencies", lambda: _preflight_packages(manifest_dict)),
+        (
+            "source",
+            lambda: _preflight_source(
+                manifest_dict,
+                cwd=cwd,
+                check_hashes=bool(check_hashes),
+                max_hash_bytes=effective_max_hash,
+                git_timeout=git_timeout,
+            ),
+        ),
+        (
+            "inputs_outputs",
+            lambda: _preflight_inputs(
+                manifest_dict,
+                cwd=cwd,
+                check_hashes=bool(check_hashes),
+                max_hash_bytes=effective_max_hash,
+            ),
+        ),
+        ("invocation", lambda: _preflight_invocation(manifest_dict)),
+    )
+
+    for cat_name, probe in probes:
+        try:
+            probe_checks, probe_findings = probe()
+            checks.extend(probe_checks)
+            findings.extend(probe_findings)
+        except Exception as exc:
+            checks.append(
+                _make_preflight_check(
+                    f"{cat_name}_probe",
+                    cat_name,
+                    "unknown",
+                    "unavailable",
+                    "informational",
+                    INFO,
+                    f"Preflight probe for '{cat_name}' could not complete ({type(exc).__name__}).",
+                    details={"error": type(exc).__name__},
+                )
+            )
+
+    counts = {
+        outcome: sum(1 for c in checks if c.get("comparison") == outcome)
+        for outcome in COMPARISON_OUTCOMES
+    }
+    overall_status = _summarize_preflight_status(counts)
+
+    return {
+        "requested": True,
+        "status": overall_status,
+        "counts": counts,
+        "checks": checks,
+        "findings": findings,
+    }
 
 
 def assess_manifest_reproducibility(
@@ -1954,15 +4428,160 @@ def assess_run(
     hydration_report: Optional[Union[HydrationReport, Dict[str, Any]]] = None,
     current_hostname: Optional[str] = None,
     stale_parent_seconds: Optional[float] = DEFAULT_STALE_PARENT_SECONDS,
+    preflight: bool = False,
+    cwd: Optional[Union[str, os.PathLike]] = None,
+    check_hashes: bool = True,
+    max_hash_bytes: int = DEFAULT_MAX_HASH_BYTES,
+    git_timeout: float = DEFAULT_GIT_TIMEOUT,
 ) -> Dict[str, Any]:
-    """Shared assessment facade delegating to ``assess_manifest_reproducibility``."""
-    return assess_manifest_reproducibility(
+    """Shared reproducibility assessment facade with optional read-only offline preflight."""
+    assessment = assess_manifest_reproducibility(
         manifest,
         manifest_path=manifest_path,
         hydration_report=hydration_report,
         current_hostname=current_hostname,
         stale_parent_seconds=stale_parent_seconds,
     )
+    if not preflight:
+        return assessment
+
+    preflight_result = compare_with_current_environment(
+        manifest,
+        manifest_path=manifest_path,
+        cwd=cwd,
+        check_hashes=check_hashes,
+        max_hash_bytes=max_hash_bytes,
+        git_timeout=git_timeout,
+    )
+
+    assessment["mode"] = "preflight"
+    assessment["preflight"] = {
+        "requested": True,
+        "status": preflight_result["status"],
+        "counts": preflight_result["counts"],
+        "checks": preflight_result["checks"],
+    }
+
+    existing_codes = {f.get("code") for f in assessment["findings"]}
+    for pf in preflight_result["findings"]:
+        code = pf.get("code")
+        # Avoid duplicating or contradicting recorded findings already emitted in base analysis.
+        if code == "preflight_rerun_command_redacted" and "rerun_command_redacted" in existing_codes:
+            continue
+        if code == "preflight_hostname_diff" and "different_host" in existing_codes:
+            continue
+        assessment["findings"].append(pf)
+
+    # Recompute affected category summaries and statuses (mismatch overrides gaps/uncertain/adequate).
+    preflight_checks = preflight_result["checks"]
+    for cat in assessment["categories"]:
+        cat_name = cat["name"]
+        cat_findings = [f for f in assessment["findings"] if f.get("category") == cat_name]
+        cat_checks = [c for c in preflight_checks if c.get("category") == cat_name]
+
+        cat["finding_codes"] = [f["code"] for f in cat_findings]
+        cat["warn_count"] = sum(1 for f in cat_findings if f.get("severity") == WARN)
+        cat["info_count"] = sum(1 for f in cat_findings if f.get("severity") == INFO)
+
+        has_mismatch = any(
+            f.get("comparison") == "mismatch" for f in cat_findings
+        ) or any(c.get("comparison") == "mismatch" for c in cat_checks)
+        has_material_warn = any(
+            f.get("severity") == WARN and f.get("impact") == "material"
+            for f in cat_findings
+        ) or any(
+            c.get("severity") == WARN and c.get("impact") == "material"
+            for c in cat_checks
+        )
+        has_unknown_check = any(c.get("comparison") == "unknown" for c in cat_checks)
+
+        prev_status = cat.get("status")
+        if has_mismatch:
+            cat["status"] = "mismatch"
+            mismatch_count = sum(
+                1 for c in cat_checks if c.get("comparison") == "mismatch"
+            )
+            if mismatch_count > 0:
+                cat["summary"] = (
+                    f"Preflight found {mismatch_count} material mismatch(es) in "
+                    f"{cat['label'].lower()}."
+                )
+        elif prev_status == "gaps" or has_material_warn:
+            cat["status"] = "gaps"
+        elif prev_status == "adequate" and has_unknown_check:
+            cat["status"] = "uncertain"
+
+    next_action, next_actions = _prioritize_next_actions(
+        assessment["findings"],
+        default_action=_DEFAULT_PREFLIGHT_NEXT_ACTION,
+    )
+    assessment["next_action"] = next_action
+    assessment["next_actions"] = next_actions
+    assessment["summary"] = _build_summary(
+        assessment["categories"],
+        assessment["findings"],
+        preflight=assessment["preflight"],
+    )
+    assessment["disclaimer"] = NON_GUARANTEE_DISCLAIMER
+    return assessment
+
+
+def should_fail_strict(assessment: Any, *, fail_on: str = "warn") -> bool:
+    """Evaluate strict exit criteria against a reproducibility assessment dict.
+
+    Supported ``fail_on`` values:
+    - ``"warn"``: True if any finding has ``severity == "warn"``.
+    - ``"mismatch"``: True if any finding has ``comparison == "mismatch"`` or
+      ``(impact == "material" and severity == "warn")``, or any preflight check
+      has ``comparison == "mismatch"``.
+    - ``"unknown"``: True if ``fail_on="mismatch"`` is True, or any preflight
+      check has ``comparison in ("unknown", "not_checked")``, or (when
+      ``preflight.requested`` is False) any category has
+      ``status in ("uncertain", "not_checked")``.
+    """
+    if fail_on not in FAIL_ON_MODES:
+        raise ValueError(
+            f"Unsupported fail_on value: {fail_on!r}; expected one of {', '.join(FAIL_ON_MODES)}."
+        )
+    if not isinstance(assessment, dict):
+        return False
+
+    findings = [
+        f for f in (assessment.get("findings") or []) if isinstance(f, dict)
+    ]
+    preflight = assessment.get("preflight")
+    preflight_dict = preflight if isinstance(preflight, dict) else {}
+    preflight_requested = preflight_dict.get("requested") is True
+    checks = [
+        c for c in (preflight_dict.get("checks") or []) if isinstance(c, dict)
+    ]
+    categories = [
+        c for c in (assessment.get("categories") or []) if isinstance(c, dict)
+    ]
+
+    if fail_on == "warn":
+        return any(f.get("severity") == WARN for f in findings)
+
+    mismatch_triggered = (
+        any(
+            f.get("comparison") == "mismatch"
+            or (f.get("impact") == "material" and f.get("severity") == WARN)
+            for f in findings
+        )
+        or any(c.get("comparison") == "mismatch" for c in checks)
+    )
+    if fail_on == "mismatch":
+        return mismatch_triggered
+
+    # fail_on == "unknown"
+    if mismatch_triggered:
+        return True
+    if any(c.get("comparison") in ("unknown", "not_checked") for c in checks):
+        return True
+    if not preflight_requested:
+        if any(c.get("status") in ("uncertain", "not_checked") for c in categories):
+            return True
+    return False
 
 
 def _colorize(text: str, ansi_code: str, use_color: bool) -> str:
@@ -1970,6 +4589,15 @@ def _colorize(text: str, ansi_code: str, use_color: bool) -> str:
     if not use_color or not ansi_code or ansi_code == "2":
         return text
     return f"\033[{ansi_code}m{text}\033[0m"
+
+
+_PREFLIGHT_OUTCOME_LABELS: Dict[str, Tuple[str, str]] = {
+    "match": ("MATCH      ", "32"),
+    "mismatch": ("MISMATCH   ", "31"),
+    "portability_diff": ("PORTABILITY", "36"),
+    "unknown": ("UNKNOWN    ", "33"),
+    "not_checked": ("NOT_CHECKED", "36"),
+}
 
 
 def format_reproducibility_summary(assessment: Dict[str, Any]) -> str:
@@ -1994,6 +4622,19 @@ def format_reproducibility_summary(assessment: Dict[str, Any]) -> str:
             lines.append(
                 f"Categories: all {len(categories)} evidence categories adequate."
             )
+
+    preflight = assessment.get("preflight")
+    if isinstance(preflight, dict) and preflight.get("requested") is True:
+        counts = preflight.get("counts") if isinstance(preflight.get("counts"), dict) else {}
+        pf_status = str(preflight.get("status") or "unknown").upper()
+        lines.append(
+            f"Preflight [{pf_status}]: "
+            f"{int(counts.get('match', 0))} match, "
+            f"{int(counts.get('mismatch', 0))} mismatch, "
+            f"{int(counts.get('portability_diff', 0))} portability_diff, "
+            f"{int(counts.get('unknown', 0))} unknown, "
+            f"{int(counts.get('not_checked', 0))} not_checked."
+        )
 
     parent_meta = assessment.get("parent_metadata")
     if isinstance(parent_meta, dict) and parent_meta.get("inherited_sections"):
@@ -2047,6 +4688,25 @@ def format_reproducibility_detail(
             lines.append(
                 f"  {badge} {cat_label:<20} (evidence: {ev_status}) - {cat_summary}"
             )
+
+    preflight = assessment.get("preflight")
+    if isinstance(preflight, dict) and preflight.get("requested") is True:
+        pf_checks = preflight.get("checks") or []
+        if isinstance(pf_checks, list) and pf_checks:
+            lines.append("")
+            lines.append("Preflight checks:")
+            for chk in pf_checks:
+                if not isinstance(chk, dict):
+                    continue
+                comp = str(chk.get("comparison", "unknown"))
+                label_txt, ansi = _PREFLIGHT_OUTCOME_LABELS.get(
+                    comp, (comp.upper(), "33")
+                )
+                badge = _colorize(f"[{label_txt:<11}]", ansi, color_active)
+                chk_name = str(chk.get("name") or "check")
+                ev = str(chk.get("evidence_status") or "unknown")
+                msg = str(chk.get("message") or "")
+                lines.append(f"  {badge} {chk_name} ({ev}): {msg}")
 
     findings = assessment.get("findings") or []
     if isinstance(findings, list) and findings:

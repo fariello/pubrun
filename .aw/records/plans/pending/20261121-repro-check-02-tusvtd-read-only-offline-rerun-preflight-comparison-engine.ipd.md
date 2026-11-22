@@ -60,31 +60,31 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Shared package normalization and read-only lookup
 
-- [ ] E-01 Add `normalize_package_name` and `get_installed_distribution_versions` in `src/pubrun/capture/packages.py` without changing `get_packages()` runtime behavior.
+- [x] E-01 Add `normalize_package_name` and `get_installed_distribution_versions` in `src/pubrun/capture/packages.py` without changing `get_packages()` runtime behavior.
   - Depends on: none
   - Expected outcome: `src/pubrun/capture/packages.py` provides Python Enhancement Proposal (PEP) 503 name normalization (`normalize_package_name`) and a read-only `get_installed_distribution_versions(use_cache=True)` lookup over `importlib.metadata.distributions()`. The lookup returns `{normalized_name: {"name": ..., "version": ..., "editable": ...}}` (preserving `"location"` and cached-index backing if sibling plan `uil22c` has already landed), enforces first-wins `sys.path` precedence, skips distributions with missing or corrupt metadata safely, detects PEP 610 editable installs without exposing raw `direct_url.json` URLs, and never imports any user package.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Read-only offline preflight comparison engine
 
-- [ ] E-02 Implement `compare_with_current_environment` in `src/pubrun/report/reproducibility.py` covering Python and platform, package versions, source state, accessible input identity, working directory, and command redaction.
+- [x] E-02 Implement `compare_with_current_environment` in `src/pubrun/report/reproducibility.py` covering Python and platform, package versions, source state, accessible input identity, working directory, and command redaction.
   - Depends on: E-01
   - Expected outcome: `src/pubrun/report/reproducibility.py::compare_with_current_environment(manifest, *, manifest_path=None, cwd=None, check_hashes=True, max_hash_bytes=104857600, git_timeout=5.0)` runs strictly read-only and offline, never raises, and compares only supported recorded evidence. It classifies every check with explicit `comparison` (`match`, `mismatch`, `portability_diff`, `unknown`, `not_checked`), `evidence_status`, and `impact` (`material`, `portability`, `incidental`, `informational`). It strips inherited `GIT_*` variables on read-only Git probes under one shared monotonic timeout budget, guards file hashing with `stat.S_ISREG` so directories and named pipes never hang, and never executes recorded commands, installs packages, accesses the network, or mutates disk state.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Integrate preflight into shared `assess_run` facade
 
-- [ ] E-03 Wire `preflight=True` into `assess_run` in `src/pubrun/report/reproducibility.py` and re-export it cleanly through `src/pubrun/report/checks.py` alongside `should_fail_strict`.
+- [x] E-03 Wire `preflight=True` into `assess_run` in `src/pubrun/report/reproducibility.py` and re-export it cleanly through `src/pubrun/report/checks.py` alongside `should_fail_strict`.
   - Depends on: E-02
   - Expected outcome: `src/pubrun/report/reproducibility.py::assess_run` preserves `stale_parent_seconds` from prerequisite plan `0b8i7x`, merges preflight checks and non-duplicate findings into the shared categories, `findings`, `summary`, `next_action`, `next_actions`, and `preflight` summary block when `preflight=True` (`mode="preflight"`), and stays consistent with `src/pubrun/report/checks.py::manifest_findings` when `preflight=False`. `should_fail_strict(assessment, *, fail_on="warn")` evaluates `warn`, `mismatch`, and `unknown` deterministically (raising `ValueError` on invalid `fail_on` values), and `src/pubrun/report/checks.py` re-exports both `assess_run` and `should_fail_strict`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Behavioral preflight and side-effect safety tests
 
-- [ ] E-04 Add behavioral unit tests in `tests/test_reproducibility_preflight.py` covering all comparison dimensions, classification boundaries, cross-API consistency, and read-only, offline, and no-replay guarantees.
+- [x] E-04 Add behavioral unit tests in `tests/test_reproducibility_preflight.py` covering all comparison dimensions, classification boundaries, cross-API consistency, and read-only, offline, and no-replay guarantees.
   - Depends on: E-03
   - Expected outcome: `tests/test_reproducibility_preflight.py` passes via `pytest` for matching environments, Python major.minor vs patch and operating system (OS)/hostname portability differences (including redacted hostname dicts), package version match/mismatch/missing/PEP 503 normalization/PEP 610 editable caveats/null metadata, Git commit/dirty/unavailable/timeout/`GIT_DIR`-isolation and script hash/size/missing/non-script checks, accessible input verified hash match vs content mismatch vs missing vs directory vs non-regular file vs stat-only unverified vs `check_hashes=False` vs over-cap `not_checked` vs asserted digest basis, redacted command non-executability without duplicate warnings, `manifest_findings` vs `assess_run(preflight=False)` consistency, `should_fail_strict` modes and invalid `fail_on` rejection, and strict no-network/no-replay/read-only guarantees.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -211,25 +211,25 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste `pytest tests/test_reproducibility_preflight.py -k package -v` and `pytest tests/test_capture_engines.py -v` output showing exit code 0, proving `normalize_package_name` and `get_installed_distribution_versions` handle PEP 503 variants (`-`, `_`, `.`, mixed case), PEP 610 editable flags, null/corrupt metadata, and first-wins `sys.path` precedence without importing target modules and without regressing `get_packages()`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Sibling plan `uil22c` already landed `normalize_package_name` and `_get_distribution_index`-backed `get_installed_distribution_versions(use_cache=True)` in `src/pubrun/capture/packages.py`; preserved untouched as specified. `pytest tests/test_reproducibility_preflight.py -k package -v --no-cov` exited 0 (`3 passed, 10 deselected in 0.40s`: `test_package_normalize_pep503_variants`, `test_package_lookup_precedence_editable_null_and_no_import`, `test_package_comparison_match_mismatch_missing_unknown_and_caveats`). `pytest tests/test_capture_engines.py -v --no-cov` exited 0 (`33 passed in 0.28s`). `python3 -m pytest tests/test_package_resolution.py -q --no-cov` exited 0 (`18 passed in 9.20s`).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Paste `pytest tests/test_reproducibility_preflight.py -v` output showing exit code 0 with passing behavioral tests for Python/platform material vs portability differences (including `environment_kind()` dict unwrapping and redacted hostname dicts), package match/mismatch/missing, clean/dirty/unavailable/timeout/`GIT_DIR`-isolated Git and script hash/size/missing/non-script checks, accessible input hash match/mismatch/missing/directory/non-regular/stat-only/`check_hashes=False`/over-cap/asserted-digest checks, and redacted rerun command warning.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `pytest tests/test_reproducibility_preflight.py -v --no-cov` exited 0 (`13 passed in 0.88s`, covering matching environment, Python/platform material vs portability diffs with `environment_kind()` dict unwrapping and redacted hostname dicts, PEP 503 package match/mismatch/missing/unknown/editable/imported-only caveats, clean/dirty/unavailable/timeout/`GIT_DIR`-isolated/repo_root-fallback Git checks, script hash/size/missing/over-cap/non-script checks, accessible inputs including `data_files.inputs`/`mixed`/`invocation.inputs` deduplication, directory/FIFO non-regular safety, stat-only, `check_hashes=False`, over-cap, asserted digest match and mismatch, working directory, redacted command, and malformed manifest resilience).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Paste `pytest tests/test_reproducibility_preflight.py tests/test_reproducibility_assessment.py tests/test_checks_commands.py -v` output showing exit code 0, verifying `pubrun.report.checks.assess_run(..., preflight=True)` merges preflight outcomes without duplicating recorded findings, `assess_run(..., preflight=False)` stays consistent with `manifest_findings()` and preserves `stale_parent_seconds`, and `should_fail_strict` behaves accurately for `warn`, `mismatch`, `unknown`, and invalid `fail_on` values.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `pytest tests/test_reproducibility_preflight.py tests/test_reproducibility_assessment.py tests/test_checks_commands.py -v --no-cov` exited 0 (`63 passed in 4.48s`, confirming `pubrun.report.checks.assess_run` and `pubrun.report.checks.should_fail_strict` re-exports, zero duplicate `rerun_command_redacted` or `different_host` findings under `preflight=True`, exact `manifest_findings()` parity and `stale_parent_seconds` passthrough under `preflight=False`, and deterministic `should_fail_strict` behavior for `warn`, `mismatch`, `unknown`, and `ValueError` on invalid `fail_on`).
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Paste actual test output from `pytest tests/test_reproducibility_preflight.py -k "offline or readonly or no_replay" -v` (exit code 0) proving no network call, no file mutation, and no execution of recorded commands occurs during preflight, plus `python -c "import pubrun, sys; assert 'pubrun.report.checks' not in sys.modules and 'pubrun.report.reproducibility' not in sys.modules; print('ISOLATED')"` printing `ISOLATED` (exit code 0).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `pytest tests/test_reproducibility_preflight.py -k "offline or readonly or no_replay" -v --no-cov` exited 0 (`1 passed, 12 deselected in 0.28s`: `TestPreflightSafetyInvariants::test_preflight_offline_readonly_no_replay_invariants` confirmed zero network calls, zero non-readonly subprocess calls, zero file or env mutations, and sentinel script never executed). `python -c "import pubrun, sys; assert 'pubrun.report.checks' not in sys.modules and 'pubrun.report.reproducibility' not in sys.modules; print('ISOLATED')"` exited 0 printing `ISOLATED`.
+  - Result: pass
 
 ## Approval and execution gate
 

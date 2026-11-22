@@ -22,6 +22,7 @@ from typing import Dict, Any, List, Optional
 from pubrun.report.reproducibility import (
     assess_manifest_reproducibility,
     assess_run,
+    should_fail_strict,
 )
 
 # Severity levels (textual, authoritative — color is optional reinforcement only).
