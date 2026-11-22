@@ -26,6 +26,7 @@
   "non_secret_consent": {},
   "delivery_mode": "tracked",
   "records_backend": "repository",
+  "ci_checkup_workflow": "ci.yml",
   "cutovers": {
     "spec_id6": "2026-11-22",
     "dependency_schema": "2026-11-22",
