@@ -34,6 +34,29 @@ output_dir = ""
 # call pubrun.start() or use @audit_run to begin tracking.
 auto_start = true
 
+# Explicit artifact durability policy, separate from atomic visibility.
+# All policies write manifest.json and config.resolved.json through a unique
+# temporary file and os.replace() so concurrent readers never see partial JSON.
+# Values:
+#   "fsync"    - (default) Flush and call file os.fsync() before os.replace()
+#                on every startup, refresh, and finalized artifact write.
+#                Preserves file crash durability without synchronizing the
+#                parent directory. Platform limits: uses POSIX fsync(2) on
+#                Linux and macOS (does not call macOS F_FULLFSYNC), and
+#                FlushFileBuffers on Windows (files only, no directory sync).
+#   "finalize" - Skip os.fsync() on intermediate startup and refresh snapshots
+#                (atomic visibility still holds); apply file os.fsync() on
+#                finalized artifacts in write_artifacts(), including an
+#                in-place os.fsync() of an unchanged startup config snapshot.
+#   "atomic"   - Atomic temporary file + flush() + os.replace() without
+#                os.fsync(); preserves atomic visibility for concurrent readers
+#                while delegating disk flush timing to the operating system.
+#   "strict"   - File os.fsync() plus best-effort POSIX parent-directory
+#                os.fsync() after os.replace(). Falls back safely when
+#                directory sync is unsupported (Windows or virtual/network
+#                filesystems); macOS still uses POSIX fsync(2), not F_FULLFSYNC.
+artifact_durability = "fsync"
+
 # Path to a parent meta.json for HPC parent-child hydration.
 # Set via PUBRUN_META_REF env var or pubrun.start(meta_ref="path.json").
 # When set, `pubrun report` and `pubrun methods` hydrate from the parent.
@@ -220,6 +243,10 @@ check_dirty = true
 # silently dropping git metadata.
 timeout = 5
 
+# Total wall-clock budget (seconds) across all git subprocess calls in a single
+# capture. Bounds worst-case startup latency when multiple git commands run slow.
+total_timeout = 5
+
 
 [capture.inputs]
 # -----------------------------------------------------------------------------
@@ -252,6 +279,10 @@ depth = "basic"
 # wedged GPU driver) so it cannot orphan the background hardware thread or leave
 # the manifest's hardware section stuck as non-terminal "pending".
 timeout = 10
+
+# Total wall-clock budget (seconds) across all hardware-inspection subprocess
+# calls in a single capture. Bounds worst-case background hardware work.
+total_timeout = 10
 
 # Advanced flags for ML reproducibility. These require slow system calls
 # (NVML queries, /proc reads) and are opt-in even when depth is "deep".

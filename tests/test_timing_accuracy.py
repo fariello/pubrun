@@ -278,6 +278,9 @@ def test_writer_delay_isolated_from_workload_and_single_manifest_write(monkeypat
     run._hardware_thread.join(timeout=2.0)
 
     clock.advance(0.02)
+    # Modify config in memory so finalization writes config.resolved.json (unchanged
+    # config snapshots are skipped during finalization).
+    run.config["events"]["flush_interval_events"] = 42
     in_finalization = True
     run.stop(outcome="completed")
 
@@ -319,6 +322,8 @@ def test_short_run_startup_overhead_separated_and_disjoint_sum(monkeypatch):
     run._hardware_thread.join(timeout=2.0)
 
     clock.advance(0.001)
+    # Modify config in memory so finalization exercises pre-manifest config write delay.
+    run.config["events"]["flush_interval_events"] = 42
     add_finalize_delay = True
     run.stop(outcome="completed")
 
@@ -363,13 +368,14 @@ def test_startup_manifest_and_async_hardware_snapshot_stay_partial_and_unfrozen(
 
     real_write_startup = writer_mod.ArtifactWriter.write_startup_manifest
 
-    def spy_startup(self):
+    def spy_startup(self, *args, **kwargs):
         # Ensure hw_start was captured at 600.0 before advancing clock for initial startup write.
         if not startup_snapshots:
             hw_entered.wait(timeout=2.0)
             clock.advance(0.10)
-        real_write_startup(self)
+        res = real_write_startup(self, *args, **kwargs)
         startup_snapshots.append(_read_manifest(self.run.run_dir)["timing"])
+        return res
 
     monkeypatch.setattr(writer_mod.ArtifactWriter, "write_startup_manifest", spy_startup)
 

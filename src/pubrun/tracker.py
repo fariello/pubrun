@@ -410,6 +410,88 @@ class Run:
         except Exception:
             pass
 
+    def _collect_hardware_section(self) -> None:
+        """Collect hardware metadata inside an isolated failure guard."""
+        from pubrun import _run_lock
+        from pubrun.capture.redaction import format_safe_error_detail
+
+        try:
+            hw_res = get_hardware(self.config)
+            with _run_lock:
+                if not self._hardware_write_closed:
+                    self.hardware_data = hw_res
+                    self._check_section_failed("hardware", hw_res)
+        except Exception as exc:
+            detail = format_safe_error_detail(exc, self.config)
+            should_warn = False
+            with _run_lock:
+                if not self._hardware_write_closed:
+                    self.hardware_data = {
+                        "capture_state": {"status": "failed", "detail": detail}
+                    }
+                    should_warn = self._store_capture_error_detail(
+                        "hardware", "bootstrap", detail, exc_type=type(exc).__name__
+                    )
+            if should_warn:
+                self._emit_capture_warning("hardware", "bootstrap", detail)
+
+    def _collect_host_and_filesystem(self) -> None:
+        """Collect host and filesystem metadata in separate failure-isolated guards.
+
+        Note: on macOS ``get_filesystem()`` runs a bounded 2-second ``mount``
+        subprocess; on Linux and Windows it is non-blocking.
+        """
+        from pubrun import _run_lock
+        from pubrun.capture.redaction import format_safe_error_detail
+
+        try:
+            host_res = get_host(self.config)
+            with _run_lock:
+                if not self._hardware_write_closed:
+                    self.host_data = host_res
+                    self._check_section_failed("host", host_res)
+        except Exception as exc:
+            detail = format_safe_error_detail(exc, self.config)
+            should_warn = False
+            with _run_lock:
+                if not self._hardware_write_closed:
+                    self.host_data = {
+                        "capture_state": {"status": "failed", "detail": detail}
+                    }
+                    should_warn = self._store_capture_error_detail(
+                        "host", "bootstrap", detail, exc_type=type(exc).__name__
+                    )
+            if should_warn:
+                self._emit_capture_warning("host", "bootstrap", detail)
+
+        try:
+            from pubrun.capture.filesystem import get_filesystem
+            import tempfile as _tf
+
+            paths = {
+                "output_dir": str(getattr(self, "output_base_dir", "") or ""),
+                "run_dir": str(getattr(self, "run_dir", "") or ""),
+                "tmpdir": _tf.gettempdir(),
+            }
+            fs_res = get_filesystem(self.config, {k: v for k, v in paths.items() if v})
+            with _run_lock:
+                if not self._hardware_write_closed:
+                    self.filesystem_data = fs_res
+                    self._check_section_failed("filesystem", fs_res)
+        except Exception as exc:
+            detail = format_safe_error_detail(exc, self.config)
+            should_warn = False
+            with _run_lock:
+                if not self._hardware_write_closed:
+                    self.filesystem_data = {
+                        "capture_state": {"status": "failed", "detail": detail}
+                    }
+                    should_warn = self._store_capture_error_detail(
+                        "filesystem", "bootstrap", detail, exc_type=type(exc).__name__
+                    )
+            if should_warn:
+                self._emit_capture_warning("filesystem", "bootstrap", detail)
+
     def _bootstrap_engines(self) -> None:
         """Initialize all capture engines with per-engine failure isolation.
 
@@ -476,122 +558,66 @@ class Run:
             detail = self._record_capture_error("environment", "bootstrap", exc)
             self.environment_data = {"capture_state": {"status": "failed", "detail": detail}}
 
-        # 4. Hardware, Host, and Filesystem tracking -- deferred to a background thread (PERF-02).
-        # Each of get_hardware(), get_host(), and get_filesystem() runs in its own
-        # independent try/except block so a failure in one never skips or overwrites
-        # the others.
+        # 4. Hardware, Host, and Filesystem tracking.
+        # When capture.hardware.depth == "off", collect all three synchronously in
+        # separate guards without spawning pubrun-hw or triggering a second startup
+        # manifest write. Otherwise defer to a daemon thread with coalesced refresh.
+        hw_depth = self.config.get("capture", {}).get("hardware", {}).get("depth", "basic")
         self.hardware_data = {"capture_state": {"status": "pending"}}
         self.host_data = {"capture_state": {"status": "pending"}}
         self.filesystem_data = {"capture_state": {"status": "pending"}}
         self._hardware_future_done = _threading.Event()
 
-        def _collect_hardware():
-            from pubrun import _run_lock
-            from pubrun.capture.redaction import format_safe_error_detail
-
-            hw_start = time.perf_counter()
+        if hw_depth == "off":
             try:
-                # 4a. Hardware
-                try:
-                    hw_res = get_hardware(self.config)
-                    with _run_lock:
-                        if not self._hardware_write_closed:
-                            self.hardware_data = hw_res
-                            self._check_section_failed("hardware", hw_res)
-                except Exception as exc:
-                    detail = format_safe_error_detail(exc, self.config)
-                    should_warn = False
-                    with _run_lock:
-                        if not self._hardware_write_closed:
-                            self.hardware_data = {
-                                "capture_state": {"status": "failed", "detail": detail}
-                            }
-                            should_warn = self._store_capture_error_detail(
-                                "hardware", "bootstrap", detail, exc_type=type(exc).__name__
-                            )
-                    if should_warn:
-                        self._emit_capture_warning("hardware", "bootstrap", detail)
-
-                # 4b. Host
-                try:
-                    host_res = get_host(self.config)
-                    with _run_lock:
-                        if not self._hardware_write_closed:
-                            self.host_data = host_res
-                            self._check_section_failed("host", host_res)
-                except Exception as exc:
-                    detail = format_safe_error_detail(exc, self.config)
-                    should_warn = False
-                    with _run_lock:
-                        if not self._hardware_write_closed:
-                            self.host_data = {
-                                "capture_state": {"status": "failed", "detail": detail}
-                            }
-                            should_warn = self._store_capture_error_detail(
-                                "host", "bootstrap", detail, exc_type=type(exc).__name__
-                            )
-                    if should_warn:
-                        self._emit_capture_warning("host", "bootstrap", detail)
-
-                # 4c. Filesystem classification (NON-BLOCKING by design)
-                try:
-                    from pubrun.capture.filesystem import get_filesystem
-                    import tempfile as _tf
-                    paths = {
-                        "output_dir": str(getattr(self, "output_base_dir", "") or ""),
-                        "run_dir": str(getattr(self, "run_dir", "") or ""),
-                        "tmpdir": _tf.gettempdir(),
-                    }
-                    fs_res = get_filesystem(self.config, {k: v for k, v in paths.items() if v})
-                    with _run_lock:
-                        if not self._hardware_write_closed:
-                            self.filesystem_data = fs_res
-                            self._check_section_failed("filesystem", fs_res)
-                except Exception as exc:
-                    detail = format_safe_error_detail(exc, self.config)
-                    should_warn = False
-                    with _run_lock:
-                        if not self._hardware_write_closed:
-                            self.filesystem_data = {
-                                "capture_state": {"status": "failed", "detail": detail}
-                            }
-                            should_warn = self._store_capture_error_detail(
-                                "filesystem", "bootstrap", detail, exc_type=type(exc).__name__
-                            )
-                    if should_warn:
-                        self._emit_capture_warning("filesystem", "bootstrap", detail)
+                self._collect_hardware_section()
+                self._collect_host_and_filesystem()
             finally:
-                self._background_hardware_seconds = max(0.0, time.perf_counter() - hw_start)
+                self._background_hardware_seconds = 0.0
+                self._hardware_thread = None
                 self._hardware_future_done.set()
+        else:
+            def _collect_hardware():
+                from pubrun import _run_lock
 
-            # BUG-06 / RACE FIX: Re-write startup manifest only if the run is still
-            # active and not finalized, guarded under _run_lock to prevent clobbering
-            # a finalized manifest.
+                hw_start = time.perf_counter()
+                try:
+                    self._collect_hardware_section()
+                    self._collect_host_and_filesystem()
+                finally:
+                    self._background_hardware_seconds = max(0.0, time.perf_counter() - hw_start)
+                    self._hardware_future_done.set()
+
+                # Coalesced refresh: skip when the initial startup write already
+                # included completed hardware data or when the run is inactive or
+                # finalized. Always acquire _run_lock before _write_lock.
+                try:
+                    with _run_lock:
+                        writer = getattr(self, "writer", None)
+                        if (
+                            writer is not None
+                            and self.is_active
+                            and not self._finalized
+                            and not getattr(writer, "_startup_included_hardware", False)
+                        ):
+                            writer.write_startup_manifest(is_refresh=True)
+                except Exception:
+                    pass  # Best-effort
+
+            self._hardware_thread = _threading.Thread(
+                target=_collect_hardware, daemon=True, name="pubrun-hw"
+            )
             try:
-                with _run_lock:
-                    if (
-                        getattr(self, "writer", None)
-                        and self.is_active
-                        and not self._finalized
-                    ):
-                        self.writer.write_startup_manifest()
-            except Exception:
-                pass  # Best-effort
-
-        self._hardware_thread = _threading.Thread(
-            target=_collect_hardware, daemon=True, name="pubrun-hw"
-        )
-        try:
-            self._hardware_thread.start()
-        except Exception as exc:
-            detail = self._record_capture_error("hardware", "bootstrap", exc)
-            self._record_capture_error("host", "bootstrap", exc, warn=False)
-            self._record_capture_error("filesystem", "bootstrap", exc, warn=False)
-            self.hardware_data = {"capture_state": {"status": "failed", "detail": detail}}
-            self.host_data = {"capture_state": {"status": "failed", "detail": detail}}
-            self.filesystem_data = {"capture_state": {"status": "failed", "detail": detail}}
-            self._hardware_thread = None
-            self._hardware_future_done.set()
+                self._hardware_thread.start()
+            except Exception as exc:
+                detail = self._record_capture_error("hardware", "bootstrap", exc)
+                self._record_capture_error("host", "bootstrap", exc, warn=False)
+                self._record_capture_error("filesystem", "bootstrap", exc, warn=False)
+                self.hardware_data = {"capture_state": {"status": "failed", "detail": detail}}
+                self.host_data = {"capture_state": {"status": "failed", "detail": detail}}
+                self.filesystem_data = {"capture_state": {"status": "failed", "detail": detail}}
+                self._hardware_thread = None
+                self._hardware_future_done.set()
 
         # Determine if global hooks and patches are permitted by the import mode.
         _patch_subprocesses = True
@@ -845,6 +871,10 @@ class Run:
                     self._record_capture_error("subprocesses", "runtime", exc)
 
         self.config = merged
+        writer = getattr(self, "writer", None)
+        if writer is not None and self.is_active and not self._finalized:
+            if hasattr(writer, "sync_config_if_changed"):
+                writer.sync_config_if_changed()
 
     def _rollback_owned_hooks(self, *, stage: str = "rollback") -> None:
         """Tear down every hook, worker, handle, and lock file owned by this run.

@@ -293,8 +293,149 @@ class TestGit:
             }
 
     def test_no_crash_outside_git_repo(self, tmp_path, monkeypatch):
-        """Simulate running outside a git repo."""
+        """Simulate running outside a git repo and verify single git subprocess spawn."""
+        import subprocess
         monkeypatch.chdir(tmp_path)
+        calls = []
+        real_run = subprocess.run
+
+        def spy_run(args, *a, **kw):
+            calls.append(list(args))
+            return real_run(args, *a, **kw)
+
+        monkeypatch.setattr(subprocess, "run", spy_run)
         result = get_git({})
-        # Should not crash; returns suppressed or empty
-        assert "capture_state" in result
+        assert result["capture_state"]["status"] == "unavailable"
+        assert len(calls) == 1
+
+    def test_combined_rev_parse_reduces_spawns_on_real_repo(self, tmp_path, monkeypatch):
+        """Normal git repository uses combined rev-parse (3 spawns total, 2 without dirty check)."""
+        import subprocess
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+        (repo / "hello.txt").write_text("hi\n", encoding="utf-8")
+        subprocess.run(["git", "add", "hello.txt"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        monkeypatch.chdir(repo)
+
+        calls = []
+        real_run = subprocess.run
+
+        def spy_run(args, *a, **kw):
+            calls.append(list(args))
+            return real_run(args, *a, **kw)
+
+        monkeypatch.setattr(subprocess, "run", spy_run)
+        result = get_git({"capture": {"git": {"enabled": True, "check_dirty": True}}})
+        assert result["capture_state"]["status"] == "complete"
+        assert len(result["commit"]) == 40
+        assert result["dirty"] is False
+        assert len(calls) == 3
+        assert calls[0] == ["git", "rev-parse", "--show-toplevel", "HEAD", "--abbrev-ref", "HEAD"]
+
+        calls.clear()
+        result_no_dirty = get_git({"capture": {"git": {"enabled": True, "check_dirty": False}}})
+        assert result_no_dirty["capture_state"]["status"] == "complete"
+        assert result_no_dirty["dirty"] is None
+        assert len(calls) == 2
+
+    def test_unborn_head_empty_repo_handled_cleanly(self, tmp_path, monkeypatch):
+        """Empty git repo with unborn HEAD returns repo_root, null commit/branch, complete state."""
+        import subprocess
+        repo = tmp_path / "empty_repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        monkeypatch.chdir(repo)
+
+        result = get_git({"capture": {"git": {"enabled": True}}})
+        assert result["capture_state"]["status"] == "complete"
+        assert result["repo_root"] is not None
+        assert result["commit"] is None
+        assert result["branch"] is None
+
+    def test_git_total_timeout_zero_skips_spawns_and_reports_timeout(self, monkeypatch):
+        """total_timeout=0 exhausts budget before launching any git subprocess."""
+        import subprocess
+        calls = []
+
+        def spy_run(args, *a, **kw):
+            calls.append(args)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", spy_run)
+        result = get_git({"capture": {"git": {"enabled": True, "timeout": 5, "total_timeout": 0}}})
+        assert result["capture_state"]["status"] == "timeout"
+        assert calls == []
+
+    def test_git_post_root_timeout_reports_partial_and_skips_remaining(self, monkeypatch):
+        """When status --porcelain times out and exhausts total_timeout, report partial and skip remote."""
+        import subprocess
+        import pubrun.capture.git as git_mod
+
+        now = [100.0]
+        calls = []
+
+        def fake_monotonic():
+            return now[0]
+
+        def fake_run(args, **kwargs):
+            calls.append(list(args))
+            if "rev-parse" in args:
+                now[0] += 0.2
+                return MagicMock(
+                    returncode=0,
+                    stdout="/repo/root\n" + ("a" * 40) + "\nmain\n",
+                    stderr="",
+                )
+            if "status" in args:
+                now[0] += 1.0
+                raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout", 1.0))
+            return MagicMock(returncode=0, stdout="https://example.com/repo.git\n", stderr="")
+
+        monkeypatch.setattr(git_mod.time, "monotonic", fake_monotonic)
+        monkeypatch.setattr(git_mod.subprocess, "run", fake_run)
+
+        result = get_git(
+            {"capture": {"git": {"enabled": True, "timeout": 5, "total_timeout": 1.0}}}
+        )
+        assert result["capture_state"]["status"] == "partial"
+        assert result["repo_root"] == "/repo/root"
+        assert result["commit"] == "a" * 40
+        assert result["branch"] == "main"
+        assert result["dirty"] is None
+        # remote get-url origin was skipped because budget was exhausted after status timeout
+        assert len(calls) == 2
+
+    def test_git_invalid_timeout_values_fall_back_safely(self, monkeypatch):
+        """Non-finite, negative, or boolean timeout configs fall back safely without crashing."""
+        import pubrun.capture.git as git_mod
+
+        seen_timeouts = []
+
+        def fake_run(args, **kwargs):
+            seen_timeouts.append(kwargs.get("timeout"))
+            return MagicMock(
+                returncode=0,
+                stdout="/repo\n" + ("b" * 40) + "\nmain\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(git_mod.subprocess, "run", fake_run)
+        result = get_git(
+            {
+                "capture": {
+                    "git": {
+                        "enabled": True,
+                        "timeout": float("nan"),
+                        "total_timeout": float("inf"),
+                        "check_dirty": False,
+                    }
+                }
+            }
+        )
+        assert result["capture_state"]["status"] == "complete"
+        assert seen_timeouts
+        assert all(0 < t <= 5.0 for t in seen_timeouts)

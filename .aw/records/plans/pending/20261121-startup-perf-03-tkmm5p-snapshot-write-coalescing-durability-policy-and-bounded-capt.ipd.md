@@ -79,32 +79,32 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Configuration defaults, writer coalescing, and durability policy
 
-- [ ] E-01 Add explicit durability policy (`[core].artifact_durability = "fsync"`) and total capture budget keys (`[capture.git].total_timeout = 5`, `[capture.hardware].total_timeout = 10`) to `src/pubrun/resources/default.toml`.
+- [x] E-01 Add explicit durability policy (`[core].artifact_durability = "fsync"`) and total capture budget keys (`[capture.git].total_timeout = 5`, `[capture.hardware].total_timeout = 10`) to `src/pubrun/resources/default.toml`.
   - Depends on: none
   - Expected outcome: `src/pubrun/resources/default.toml` declares `[core].artifact_durability = "fsync"` with comments documenting all four valid options (`"fsync"`, `"finalize"`, `"atomic"`, `"strict"`) and platform limits (Linux `fsync(2)`, macOS `fsync(2)` versus `F_FULLFSYNC`, Windows `FlushFileBuffers` without directory sync). It also declares `[capture.git].total_timeout = 5` and `[capture.hardware].total_timeout = 10`, and parses cleanly via `src/pubrun/config.py::load_default_config`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Refactor `src/pubrun/writer.py` to separate atomic visibility from explicit durability policy, enforce deadlock-free lock ordering, track config content digests and applied durability rank, and skip redundant `config.resolved.json` and finalized `manifest.json` rewrites.
+- [x] E-02 Refactor `src/pubrun/writer.py` to separate atomic visibility from explicit durability policy, enforce deadlock-free lock ordering, track config content digests and applied durability rank, and skip redundant `config.resolved.json` and finalized `manifest.json` rewrites.
   - Depends on: E-01
   - Expected outcome: `src/pubrun/writer.py::_atomic_json_write` always uses a unique temporary filename and `os.replace()` for atomic visibility, calls file `os.fsync()` when `durability` is `"fsync"` or `"strict"`, and calls best-effort Portable Operating System Interface (POSIX) parent-directory `os.fsync()` (opened with `O_CLOEXEC`) only for `"strict"`. `src/pubrun/writer.py::ArtifactWriter` uses a reentrant `_write_lock`, calls `self.run._finalize_state()` before acquiring `_write_lock` in `write_artifacts()` (enforcing `_run_lock` before `_write_lock`), tracks `(target_path, sha256_digest, durability_rank)` using Secure Hash Algorithm 256-bit (SHA-256) digests over canonical sorted JSON, writes `config.resolved.json` at startup, skips unchanged config rewrites during hardware refresh and finalization, upgrades an unchanged `"atomic"` startup file to `"fsync"` in place at finalization under `"finalize"` mode, captures `_hardware_future_done.is_set()` before `to_manifest_dict()` so `_startup_included_hardware` is never set prematurely, guards against redundant finalized rewrites via `_artifacts_written`, preserves compatibility with sibling plans `e1fwy2` (monotonic timing) and `ed0yds` (capture failure isolation), and never crashes the host script.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Update `src/pubrun/tracker.py` to coalesce startup and background hardware snapshot writes, skip spawning the background hardware thread when `capture.hardware.depth == "off"`, preserve finalized-state protection under `_run_lock`, and persist updated `config.resolved.json` when `_merge_and_migrate()` changes effective configuration.
+- [x] E-03 Update `src/pubrun/tracker.py` to coalesce startup and background hardware snapshot writes, skip spawning the background hardware thread when `capture.hardware.depth == "off"`, preserve finalized-state protection under `_run_lock`, and persist updated `config.resolved.json` when `_merge_and_migrate()` changes effective configuration.
   - Depends on: E-02
   - Expected outcome: When `capture.hardware.depth == "off"`, `src/pubrun/tracker.py::Run._bootstrap_engines` collects suppressed hardware, `get_host()`, and `get_filesystem()` synchronously inside three separate `try/except` guards without spawning `pubrun-hw` or triggering a second startup manifest write. When hardware capture runs asynchronously, the background thread isolates `get_hardware()`, `get_host()`, and `get_filesystem()` in separate `try/except` guards, skips its refresh write if the initial startup write already included completed hardware data or if the run is inactive or finalized, and refreshes `manifest.json` only (skipping unchanged `config.resolved.json`) otherwise. `src/pubrun/tracker.py::Run._merge_and_migrate` calls `self.writer.sync_config_if_changed()` when the run is active and not finalized so in-place overrides and migrated `run_dir` updates persist immediately.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Bounded total capture work and behavioral tests
 
-- [ ] E-04 Update `src/pubrun/capture/git.py` and `src/pubrun/capture/hardware.py` to enforce total monotonic capture budgets (`total_timeout`) across all subprocess calls and combine redundant Git `rev-parse` subprocess spawns while keeping source-state capture synchronous.
+- [x] E-04 Update `src/pubrun/capture/git.py` and `src/pubrun/capture/hardware.py` to enforce total monotonic capture budgets (`total_timeout`) across all subprocess calls and combine redundant Git `rev-parse` subprocess spawns while keeping source-state capture synchronous.
   - Depends on: E-01
   - Expected outcome: `src/pubrun/capture/git.py::get_git` combines `--show-toplevel`, `HEAD`, and `--abbrev-ref HEAD` into one `git rev-parse` subprocess call, returns `"unavailable"` in one call outside a Git repository (no double spawn), falls back safely for unborn-HEAD empty repositories and single-line mocks, enforces a shared monotonic deadline from `[capture.git].total_timeout` (defaulting to `timeout`, validating finite numeric values) across all Git calls, and reports `capture_state.status` `"timeout"` (when `repo_root` times out or budget expires before `repo_root`) or `"partial"` (when any post-`repo_root` call times out or is skipped by budget exhaustion). `src/pubrun/capture/hardware.py::get_hardware` enforces a shared monotonic deadline and timeout flag from `[capture.hardware].total_timeout` across CPU, RAM, and GPU subprocess probes (catching `subprocess.TimeoutExpired` explicitly so hung probes never silently report `"complete"`) and reports `"timeout"` when zero probed fields succeeded or `"partial"` when at least one probed field succeeded before timeout or budget exhaustion.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Update `tests/test_writer.py` and `tests/test_capture_engines.py` and create `tests/test_startup_overhead_writes.py` to verify write coalescing, mid-run reconfiguration, crash evidence, concurrent readers and writers, deadlock-free hardware-refresh vs finalization races, durability policies, bounded Git and hardware capture budgets, and double-stop idempotency.
+- [x] E-05 Update `tests/test_writer.py` and `tests/test_capture_engines.py` and create `tests/test_startup_overhead_writes.py` to verify write coalescing, mid-run reconfiguration, crash evidence, concurrent readers and writers, deadlock-free hardware-refresh vs finalization races, durability policies, bounded Git and hardware capture budgets, and double-stop idempotency.
   - Depends on: E-03, E-04
   - Expected outcome: All targeted behavioral test suites (`pytest tests/test_startup_overhead_writes.py tests/test_writer.py tests/test_config.py tests/test_tracker.py tests/test_capture_engines.py tests/test_hardware.py tests/test_edge_cases.py tests/test_manifest_schema.py -v` and `pytest tests/test_quality.py -k TestDoubleStop -v`) pass with exit code 0.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -273,30 +273,30 @@ Deferred to child plan `ckc3vl` (post-change overhead comparison, documentation 
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Diff of `src/pubrun/resources/default.toml` showing `[core].artifact_durability = "fsync"` (with platform durability comments), `[capture.git].total_timeout = 5`, and `[capture.hardware].total_timeout = 10`, plus pasted `pytest tests/test_config.py -v` output (exit code 0).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff src/pubrun/resources/default.toml` (+31 lines): added `[core].artifact_durability = "fsync"` documenting `"fsync"`, `"finalize"`, `"atomic"`, `"strict"` and Linux `fsync(2)` / macOS `fsync(2)` vs `F_FULLFSYNC` / Windows `FlushFileBuffers` limits, `[capture.git].total_timeout = 5`, and `[capture.hardware].total_timeout = 10`. Ran `python3 -m pytest tests/test_config.py -v --no-cov`: `35 passed in 0.13s` (exit code 0), and `test_default_config_declares_durability_and_capture_budgets` confirmed parsed defaults via `load_default_config()`.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Diff of `src/pubrun/writer.py` showing separate atomic visibility (`unique tmp + os.replace`), four durability policies (`fsync`, `finalize` with in-place `r+b` `fsync` upgrade for unchanged config, `atomic`, `strict` with `O_CLOEXEC` best-effort POSIX directory sync), single warning + `"fsync"` fallback on invalid policy, reentrant `_write_lock` acquired only AFTER `self.run._finalize_state()`, canonical SHA-256 config digest + durability-rank tracking, `hw_was_done` latched before `to_manifest_dict()`, `_artifacts_written` double-finalization guard, and preserved compatibility with `e1fwy2` and `ed0yds`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff src/pubrun/writer.py` (+376/-... lines): implemented `_VALID_DURABILITY_POLICIES`, `_DURABILITY_RANK`, `_resolve_durability()` (single warning per distinct invalid value + `"fsync"` fallback), `_fsync_directory()` (POSIX `O_DIRECTORY | O_CLOEXEC` with `OSError` debug fallback), `_fsync_existing_file()` (`r+b` in-place `os.fsync`), `_atomic_json_write()` (unique tmp + `os.replace` always enforced), `_serialize_config_and_digest()` (canonical `sort_keys=True` SHA-256), `ArtifactWriter._write_lock = threading.RLock()`, `_write_config_if_needed()` with in-place upgrade and `OSError` fallback, `sync_config_if_changed()`, `write_startup_manifest(is_refresh=...)` latching `hw_was_done` before `to_manifest_dict()`, and `write_artifacts()` invoking `self.run._finalize_state()` outside `_write_lock` while preserving `_mark_finalization_end()`, `writer_overhead_seconds`, `last_error`, `unregister_atexit()`, and `bool` return contracts.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Diff of `src/pubrun/tracker.py` showing synchronous `get_hardware`/`get_host`/`get_filesystem` collection in three separate `try/except` guards when `hardware.depth == "off"`, independent background `try/except` guards, coalesced hardware refresh under `_run_lock` preserving `_finalized` safety, and `sync_config_if_changed()` invoked in `_merge_and_migrate()`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff src/pubrun/tracker.py`: extracted `_collect_hardware_section()` and `_collect_host_and_filesystem()` with three independent `try/except` guards; when `capture.hardware.depth == "off"`, `_bootstrap_engines()` runs them synchronously with `_hardware_thread = None` and `_hardware_future_done.set()`; otherwise `pubrun-hw` acquires `_run_lock` and calls `writer.write_startup_manifest(is_refresh=True)` only when `writer is not None and self.is_active and not self._finalized and not getattr(writer, "_startup_included_hardware", False)`; `_merge_and_migrate()` invokes `writer.sync_config_if_changed()` after `self.config = merged` while active and unfinalized.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Diff of `src/pubrun/capture/git.py` and `src/pubrun/capture/hardware.py` showing combined `git rev-parse --show-toplevel HEAD --abbrev-ref HEAD` (with single-call non-repo return and unborn-repo/single-line-mock fallback), validated finite numeric `total_timeout` deadlines, explicit `subprocess.TimeoutExpired` tracking in `hardware.py`, and honest `"partial"` / `"timeout"` `capture_state` reporting.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff src/pubrun/capture/git.py src/pubrun/capture/hardware.py`: `get_git()` combines `--show-toplevel`, `HEAD`, and `--abbrev-ref HEAD` into one `git rev-parse` spawn, returns `"unavailable"` in 1 call outside a repo, falls back safely on unborn-HEAD empty repos and single-line mocks, validates finite `timeout`/`total_timeout`, enforces a shared monotonic deadline across all spawns, and reports `"timeout"` or `"partial"`; `get_hardware()` uses `_CaptureBudget` with finite `timeout`/`total_timeout`, catches `subprocess.TimeoutExpired` before `except Exception` in CPU/RAM/GPU probes, skips probes once budget expires, and reports `"timeout"` (zero probed fields succeeded) or `"partial"` (at least one probed field succeeded).
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted `pytest tests/test_startup_overhead_writes.py tests/test_writer.py tests/test_config.py tests/test_tracker.py tests/test_capture_engines.py tests/test_hardware.py tests/test_edge_cases.py tests/test_manifest_schema.py -v` and `pytest tests/test_quality.py -k TestDoubleStop -v` output showing exit code 0 and zero failures across all behavioral scenarios (including durability policies, `"finalize"` in-place config sync, concurrent refresh-vs-finalize deadlock stress test, single-spawn non-repo Git capture, and hardware timeout states).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_startup_overhead_writes.py tests/test_writer.py tests/test_config.py tests/test_tracker.py tests/test_capture_engines.py tests/test_hardware.py tests/test_edge_cases.py tests/test_manifest_schema.py -v --no-cov`: `168 passed in 10.99s` (exit code 0). `python3 -m pytest tests/test_quality.py -k TestDoubleStop -v --no-cov`: `2 passed, 39 deselected in 0.52s` (exit code 0). `python3 -m pytest tests/test_timing_accuracy.py tests/test_capture_isolation.py -v --no-cov`: `50 passed in 18.70s` (exit code 0). `python3 -m pytest tests/test_startup_benchmark.py -v --no-cov`: `15 passed in 38.47s` (exit code 0). Full suite `aw suite` (6 xdist workers): `1247 passed, 1 failed in 151.75s` where the sole failure is pre-existing xdist-only issue `12rcu8` in `tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches`; `python3 -m pytest tests/test_liveness.py -v --no-cov` passed `27 passed in 0.11s` (1248/1248 total).
+  - Result: pass
 
 ## Approval and execution gate
 
