@@ -5,8 +5,9 @@
 - Concern: Dependency-free external-file example, reproducible stat-versus-hash latency and bytes-read benchmarks, documentation and specification reconciliation, and whole-Set validation
 - Scope: Add `examples/12_external_file_provenance.py`, update `benchmarks/workloads/file_read.py`, `benchmarks/scenarios.py`, and `benchmarks/aggregate.py`, synchronize `docs/api.md`, `docs/configuration.md`, `docs/manifest.md`, `docs/functional_spec.md`, and `docs/performance.md`, and run whole-Set validation across the repository.
 - Scope-Paths: examples/12_external_file_provenance.py, benchmarks/workloads/file_read.py, benchmarks/scenarios.py, benchmarks/aggregate.py, docs/api.md, docs/configuration.md, docs/manifest.md, docs/functional_spec.md, docs/performance.md
+- Scope-Exceeded: .aw/records/backlog/open/20261122-cp1jvn-01-cp1jvn-examples-minimal-research-workflow-analysis-py-wri.backlog.md (Defect-report carrier required by the driver contract: aw backlog new filed this item for the untracked outputs/ directory that examples/minimal-research-workflow/analysis.py leaves in the repo root w...)
 - Item-Dependencies: executed:98j0a3, executed:hm32d9
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Add dependency-free example, stat-vs-hash latency/bytes benchmarks, doc reconciliation, and full suite validation
@@ -18,12 +19,12 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: 4gpguy
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw agy run model=claude-opus-5-5-medium): aw agy run self-finalize: 4gpguy verified (set file-prov, attempt 2). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261122-cp1jvn-01-cp1jvn-examples-minimal-research-workflow-analysis-py-wri.backlog.md: Defect-report carrier required by the driver contract: aw backlog new filed this item for the untracked outputs/ directory that examples/minimal-research-workflow/analysis.py leaves in the repo root when V-05 runs examples/verify_all.py. Recording-only; no plan work lives in it.]
 - 2026-11-22 executed in lane run-20261122T143534Z-3922406 (agent): E-01..E-05 performed, V-01..V-05 pass; finalization left to runner.
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
