@@ -122,16 +122,16 @@ This orchestrator plan runs no tests directly. Whole-Set validation (`pytest tes
 ### OQ-01: Approval of proposed public API and manifest field names
 
 - Blocking: no
-- Status: open
+- Status: resolved
 - Owner: none
-- Resolution or deferral rationale: Backlog item `x6alw4` notes that names for new API and configuration fields are proposals, not yet approved contracts. This Set proposes `pubrun.register_file()`, `pubrun.register_input()`, `pubrun.register_output()`, configuration keys `[capture.file_io].max_total_hash_bytes`, `[capture.file_io].max_total_hash_seconds`, and `[capture.file_io].hash_algorithm`, and manifest fields `data_files.mixed`, `data_files.hashing_summary`, `hash_status`, `evidence_source`, `evidence_strength`, `observation_time`, `digest`, and `caller_digest`. Human approval of this plan Set confirms those contracts before any code is executed.
+- Resolution or deferral rationale: Backlog item `x6alw4` notes that names for new API and configuration fields are proposals, not yet approved contracts. This Set proposes `pubrun.register_file()`, `pubrun.register_input()`, `pubrun.register_output()`, configuration keys `[capture.file_io].max_total_hash_bytes`, `[capture.file_io].max_total_hash_seconds`, and `[capture.file_io].hash_algorithm`, and manifest fields `data_files.mixed`, `data_files.hashing_summary`, `hash_status`, `evidence_source`, `evidence_strength`, `observation_time`, `digest`, and `caller_digest`. Human approval of this plan Set confirms those contracts before any code is executed. RESOLVED 2026-11-21 by the user via /askme: Approved the proposed public API names (`register_file`, `register_input`, `register_output`), configuration keys (`[capture.file_io].max_total_hash_bytes`, `max_total_hash_seconds`, `hash_algorithm`), and manifest field names (`data_files.mixed`, `data_files.hashing_summary`, `hash_status`, `evidence_source`, `evidence_strength`, `observation_time`, `digest`, `caller_digest`). No reason was given.
 
 ### OQ-02: Coordination with pending sibling Set `repro-check` (`0b8i7x`)
 
 - Blocking: no
-- Status: open
+- Status: resolved
 - Owner: none
-- Resolution or deferral rationale: Pending sibling plan `0b8i7x` (from backlog item `q3bll1`) checks `data_files` entries defensively for `evidence_source == "asserted"` and `hash_status`. This Set adopts those exact field names so both Sets compose cleanly in either execution order without creating a cross-Set execution dependency.
+- Resolution or deferral rationale: Pending sibling plan `0b8i7x` (from backlog item `q3bll1`) checks `data_files` entries defensively for `evidence_source == "asserted"` and `hash_status`. This Set adopts those exact field names so both Sets compose cleanly in either execution order without creating a cross-Set execution dependency. RESOLVED 2026-11-21 by the user via /askme: Confirmed adopting `evidence_source` and `hash_status` (settled with OQ-01) so `file-prov` and `repro-check` (`0b8i7x`) compose in either execution order without a cross-Set dependency. No reason was given.
 
 ## Validation and cross-check (verify before reporting the Set complete)
 

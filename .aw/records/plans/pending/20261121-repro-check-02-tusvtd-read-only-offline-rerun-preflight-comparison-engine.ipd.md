@@ -168,9 +168,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 ### OQ-01: Default file-hashing size cap during preflight
 
 - Blocking: no
-- Status: open
+- Status: resolved
 - Owner: none
-- Resolution or deferral rationale: Defaulting `max_hash_bytes` to 100 MiB (`104_857_600` bytes, overridable by callers and tests) bounds preflight latency on large scientific datasets while still hashing typical inputs; files above the cap are explicitly reported as `not_checked` with the reason rather than skipped silently.
+- Resolution or deferral rationale: Defaulting `max_hash_bytes` to 100 MiB (`104_857_600` bytes, overridable by callers and tests) bounds preflight latency on large scientific datasets while still hashing typical inputs; files above the cap are explicitly reported as `not_checked` with the reason rather than skipped silently. RESOLVED 2026-11-21 by the user via /askme: Default preflight `max_hash_bytes` to 100 MiB (`104_857_600` bytes), overridable by callers and tests, reporting larger files as `not_checked`. No reason was given.
 
 ## Validation and cross-check (verify before reporting done)
 

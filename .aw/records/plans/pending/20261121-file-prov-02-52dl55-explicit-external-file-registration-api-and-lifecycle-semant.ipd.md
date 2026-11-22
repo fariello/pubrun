@@ -147,9 +147,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 ### OQ-01: Default `verify_digest` behavior when a caller supplies `digest`
 
 - Blocking: no
-- Status: open
+- Status: resolved
 - Owner: none
-- Resolution or deferral rationale: Defaulting `verify_digest=False` when a caller supplies `digest` avoids re-reading large datasets whose checksum the caller already obtained from a catalog or upstream tool, while keeping the record strictly honest (`evidence_source="asserted"`, `evidence_strength="asserted_content"`, `hash_status="asserted"`, `sha256=None`). Callers who want independent verification opt in explicitly with `verify_digest=True`.
+- Resolution or deferral rationale: Defaulting `verify_digest=False` when a caller supplies `digest` avoids re-reading large datasets whose checksum the caller already obtained from a catalog or upstream tool, while keeping the record strictly honest (`evidence_source="asserted"`, `evidence_strength="asserted_content"`, `hash_status="asserted"`, `sha256=None`). Callers who want independent verification opt in explicitly with `verify_digest=True`. RESOLVED 2026-11-21 by the user via /askme: Default `verify_digest=False` when a caller supplies `digest` (recording caller-asserted evidence unless `verify_digest=True` is passed). No reason was given.
 
 ## Validation and cross-check (verify before reporting done)
 

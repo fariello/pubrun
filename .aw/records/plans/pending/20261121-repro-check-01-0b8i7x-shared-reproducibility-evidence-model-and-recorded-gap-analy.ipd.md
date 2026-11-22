@@ -150,9 +150,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 ### OQ-01: Severity of `git_dirty_unrecorded` on existing `pubrun inspect --strict` callers
 
 - Blocking: no
-- Status: open
+- Status: resolved
 - Owner: none
-- Resolution or deferral rationale: Existing tests in `tests/test_checks_commands.py` build fake manifests with `git: {"capture_state": {"status": "complete"}}` (no `dirty` key) or clean runs, so flagging `git.dirty is True` as `warn` with `impact="material"` preserves all existing tests while surfacing genuine dirty-source gaps under `--strict`.
+- Resolution or deferral rationale: Existing tests in `tests/test_checks_commands.py` build fake manifests with `git: {"capture_state": {"status": "complete"}}` (no `dirty` key) or clean runs, so flagging `git.dirty is True` as `warn` with `impact="material"` preserves all existing tests while surfacing genuine dirty-source gaps under `--strict`. RESOLVED 2026-11-21 by the user via /askme: Report `git_dirty_unrecorded` as severity `warn` with `impact="material"` so `pubrun inspect --strict` exits non-zero on dirty runs. No reason was given.
 
 ## Validation and cross-check (verify before reporting done)
 

@@ -147,9 +147,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 ### OQ-01: `--fail-on` flag behavior when passed without `--strict`
 
 - Blocking: no
-- Status: open
+- Status: resolved
 - Owner: none
-- Resolution or deferral rationale: Passing `--fail-on <level>` expresses an explicit non-zero exit criterion, so treating `--fail-on` as activating strict exit checking (without forcing users to type both `--strict --fail-on mismatch`) avoids silent no-op flags while keeping `--strict` alone mapped to `warn` for backwards compatibility.
+- Resolution or deferral rationale: Passing `--fail-on <level>` expresses an explicit non-zero exit criterion, so treating `--fail-on` as activating strict exit checking (without forcing users to type both `--strict --fail-on mismatch`) avoids silent no-op flags while keeping `--strict` alone mapped to `warn` for backwards compatibility. RESOLVED 2026-11-21 by the user via /askme: Treat `--fail-on <level>` as implicitly activating strict exit checking, while keeping `--strict` alone mapped to `warn` for backward compatibility. No reason was given.
 
 ## Validation and cross-check (verify before reporting done)
 

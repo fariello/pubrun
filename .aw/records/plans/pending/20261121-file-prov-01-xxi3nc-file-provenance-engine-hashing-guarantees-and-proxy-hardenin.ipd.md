@@ -190,9 +190,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 ### OQ-01: Default value for `[capture.file_io].max_total_hash_bytes` and `max_total_hash_seconds`
 
 - Blocking: no
-- Status: open
+- Status: resolved
 - Owner: none
-- Resolution or deferral rationale: Existing `[capture.file_io].max_hash_bytes` defaults to `0` (unlimited) and `[capture.file_io].level` defaults to `"stat"` (hashing disabled unless explicitly enabled). Keeping `max_total_hash_bytes = 0` and `max_total_hash_seconds = 0.0` as defaults preserves exact backward compatibility for existing callers who explicitly set `level = "hash"`, while allowing batch workloads to set explicit byte and wall-time limits in `.pubrun.toml` or `pubrun.start(...)`.
+- Resolution or deferral rationale: Existing `[capture.file_io].max_hash_bytes` defaults to `0` (unlimited) and `[capture.file_io].level` defaults to `"stat"` (hashing disabled unless explicitly enabled). Keeping `max_total_hash_bytes = 0` and `max_total_hash_seconds = 0.0` as defaults preserves exact backward compatibility for existing callers who explicitly set `level = "hash"`, while allowing batch workloads to set explicit byte and wall-time limits in `.pubrun.toml` or `pubrun.start(...)`. RESOLVED 2026-11-21 by the user via /askme: Default both `[capture.file_io].max_total_hash_bytes` to `0` (unlimited) and `[capture.file_io].max_total_hash_seconds` to `0.0` (unlimited). No reason was given.
 
 ## Validation and cross-check (verify before reporting done)
 

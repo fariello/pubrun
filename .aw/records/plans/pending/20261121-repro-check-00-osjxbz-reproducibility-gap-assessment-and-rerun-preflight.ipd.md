@@ -115,9 +115,9 @@ This orchestrator plan runs no tests directly. Whole-Set end-to-end validation, 
 ### OQ-01: Future coordination with sibling backlog items `w4hxkh`, `x6alw4`, and `6hp1zu`
 
 - Blocking: no
-- Status: open
+- Status: resolved
 - Owner: none
-- Resolution or deferral rationale: Backlog item `q3bll1` states that reproducibility assessment must ship using existing manifest fields without blocking on sibling improvements (`w4hxkh` for dependency capture, `x6alw4` for external file registration and hashing guarantees, `6hp1zu` for timing accuracy). Child plans `0b8i7x` and `tusvtd` read existing manifest fields first and inspect optional richer fields defensively if present.
+- Resolution or deferral rationale: Backlog item `q3bll1` states that reproducibility assessment must ship using existing manifest fields without blocking on sibling improvements (`w4hxkh` for dependency capture, `x6alw4` for external file registration and hashing guarantees, `6hp1zu` for timing accuracy). Child plans `0b8i7x` and `tusvtd` read existing manifest fields first and inspect optional richer fields defensively if present. RESOLVED 2026-11-21 by evidence via /askme: Confirmed per backlog item `q3bll1` and the user's `vtkkn1` OQ-01 approval (`evidence_source`, `hash_status`) that `repro-check` ships without cross-Set blocking and inspects optional richer fields defensively.
 
 ## Validation and cross-check (verify before reporting the Set complete)
 

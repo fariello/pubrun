@@ -121,9 +121,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 ### OQ-01: Multi-OS and multi-Python CI matrix execution
 
 - Blocking: no
-- Status: open
+- Status: resolved
 - Owner: none
-- Resolution or deferral rationale: Per `q3bll1` shared validation requirements, CLI and platform-dependent changes require the repository's supported OS/Python CI matrix (`.github/workflows/ci.yml`: Linux, Windows, macOS across Python 3.8 through 3.14) before completion. Local validation runs on the current Linux Python version; full matrix verification occurs when pushed to GitHub Actions CI.
+- Resolution or deferral rationale: Per `q3bll1` shared validation requirements, CLI and platform-dependent changes require the repository's supported OS/Python CI matrix (`.github/workflows/ci.yml`: Linux, Windows, macOS across Python 3.8 through 3.14) before completion. Local validation runs on the current Linux Python version; full matrix verification occurs when pushed to GitHub Actions CI. RESOLVED 2026-11-21 by evidence via /askme: Confirmed per `AGENTS.md` matrix-validation discipline, backlog item `q3bll1`, and `.github/workflows/ci.yml` (21-job Linux/Windows/macOS x Python 3.8-3.14 matrix) that local validation runs on Linux and full matrix validation runs on GitHub Actions CI on push.
 
 ## Validation and cross-check (verify before reporting done)
 
