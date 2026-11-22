@@ -143,16 +143,7 @@ class EventStream:
             buf = self._buffer
             self._buffer = []
             if f is not None:
-                try:
-                    if buf:
-                        f.writelines(buf)
-                    f.flush()
-                except Exception:
-                    pass
-                try:
-                    f.close()
-                except Exception:
-                    pass
+                _flush_and_close(f, buf)
 
     def migrate_directory(self, new_dir: Path) -> None:
         """Close the current stream file, update the path to the new directory,
@@ -162,16 +153,7 @@ class EventStream:
             buf = self._buffer
             self._buffer = []
             if f is not None:
-                try:
-                    if buf:
-                        f.writelines(buf)
-                    f.flush()
-                except Exception:
-                    pass
-                try:
-                    f.close()
-                except Exception:
-                    pass
+                _flush_and_close(f, buf)
             self.stream_path = new_dir / "events.jsonl"
             try:
                 self._file = open(self.stream_path, "a", encoding="utf-8")
@@ -183,3 +165,23 @@ class EventStream:
                 self._last_error = detail
                 logger.debug("pubrun failed to open migrated event stream: %s", detail)
                 self._file = None
+
+
+def _flush_and_close(f: Any, buf: List[str]) -> None:
+    """Write any buffered lines and flush ``f``, then always close it.
+
+    The close runs in ``finally`` so the descriptor is released even when the
+    flush raises ``OSError`` or a ``BaseException`` such as ``KeyboardInterrupt``.
+    """
+    try:
+        try:
+            if buf:
+                f.writelines(buf)
+            f.flush()
+        except Exception:
+            pass
+    finally:
+        try:
+            f.close()
+        except Exception:
+            pass

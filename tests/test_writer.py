@@ -32,7 +32,9 @@ def test_atomic_json_write_failure_cleanup(tmp_path):
     target = tmp_path / "test_fail.json"
 
     class Unserializable:
-        pass
+        # The writer falls back to str() for unknown types, so make str() fail too.
+        def __str__(self):
+            raise TypeError("cannot stringify")
 
     data = {"key": Unserializable()}
 
