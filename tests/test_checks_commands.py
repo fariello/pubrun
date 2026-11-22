@@ -1103,3 +1103,41 @@ class TestInspectReproducibilityAndPreflightCLI:
         assert direct_manifest["summary"] in tui_summary
         assert direct_manifest["next_action"] in tui_summary
         assert NON_GUARANTEE_DISCLAIMER in tui_summary
+
+    def test_inspect_reconciled_caller_digest_mismatch_updates_category_status_and_summary(self, tmp_path):
+        import socket
+
+        cur_host = socket.gethostname()
+        run_dir = tmp_path / "runs" / "pubrun-caller-mismatch"
+        manifest = self._clean_manifest(
+            tmp_path,
+            hostname=cur_host,
+            extra={
+                "data_files": {
+                    "inputs": [
+                        {
+                            "path": str(tmp_path / "input.csv"),
+                            "sha256": "a" * 64,
+                            "caller_digest": {
+                                "algorithm": "sha256",
+                                "value": "b" * 64,
+                                "verified": False,
+                            },
+                        }
+                    ],
+                    "outputs": [],
+                    "mixed": [],
+                }
+            },
+        )
+        self._write_manifest(run_dir, manifest)
+
+        res = run_pubrun("inspect", str(run_dir), "--json", "--fail-on", "mismatch", env={"NO_COLOR": "1"})
+        assert res.returncode == 1
+        data = json.loads(res.stdout)
+        io_cat = next(c for c in data["categories"] if c["name"] == "inputs_outputs")
+        assert io_cat["status"] == "gaps"
+        assert io_cat["warn_count"] == 1
+        assert "file_provenance_hash_failed" in io_cat["finding_codes"]
+        assert "inputs_outputs" in data["summary"]
+        assert "data_files" in data["next_action"]

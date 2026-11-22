@@ -148,7 +148,9 @@ class ActionsPanel(Vertical):
         rerun_cmd = "-"
         if run_info.manifest:
             self.raw_manifest = run_info.manifest
-            rerun_cmd = run_info.manifest.get("invocation", {}).get("rerun_command") or "-"
+            inv = run_info.manifest.get("invocation")
+            raw_cmd = inv.get("rerun_command") if isinstance(inv, dict) else None
+            rerun_cmd = raw_cmd if isinstance(raw_cmd, str) and raw_cmd else "-"
         elif run_info.lock_data:
             # Reconstruct rerun if locked
             argv = run_info.lock_data.get("argv", [])

@@ -351,6 +351,7 @@ def _reconcile_cli_file_provenance(manifest: dict, assessment: dict) -> dict:
 
     assessment["findings"] = normalized
     categories = assessment.get("categories")
+    io_status_changed = False
     if isinstance(categories, list):
         for cat in categories:
             if isinstance(cat, dict) and cat.get("name") == "inputs_outputs":
@@ -358,7 +359,39 @@ def _reconcile_cli_file_provenance(manifest: dict, assessment: dict) -> dict:
                 cat["finding_codes"] = [f.get("code") for f in cat_findings if f.get("code")]
                 cat["warn_count"] = sum(1 for f in cat_findings if f.get("severity") == "warn")
                 cat["info_count"] = sum(1 for f in cat_findings if f.get("severity") == "info")
+                if cat["warn_count"] > 0 and cat.get("status") not in ("mismatch", "gaps"):
+                    cat["status"] = "gaps"
+                    cat["summary"] = (
+                        "One or more tracked files had hashing failures or concurrent modifications."
+                    )
+                    io_status_changed = True
+                elif cat["warn_count"] == 0 and cat["info_count"] > 0 and cat.get("status") == "adequate":
+                    cat["status"] = "uncertain"
+                    io_status_changed = True
                 break
+
+    if io_status_changed or len(normalized) != len(orig_findings):
+        from pubrun.report.reproducibility import (
+            _DEFAULT_NEXT_ACTION,
+            _DEFAULT_PREFLIGHT_NEXT_ACTION,
+            _build_summary,
+            _prioritize_next_actions,
+        )
+
+        pf = assessment.get("preflight")
+        is_pf = isinstance(pf, dict) and pf.get("requested") is True
+        next_action, next_actions = _prioritize_next_actions(
+            normalized,
+            default_action=_DEFAULT_PREFLIGHT_NEXT_ACTION if is_pf else _DEFAULT_NEXT_ACTION,
+        )
+        assessment["next_action"] = next_action
+        assessment["next_actions"] = next_actions
+        if isinstance(categories, list):
+            assessment["summary"] = _build_summary(
+                categories,
+                normalized,
+                preflight=pf if is_pf else None,
+            )
     return assessment
 
 
