@@ -95,13 +95,6 @@ class ArtifactWriter:
                 config_err_detail = format_safe_error_detail(
                     cfg_err, getattr(self.run, "config", None)
                 )
-                self.last_error = config_err_detail
-                if not self._write_failure_warned:
-                    self._write_failure_warned = True
-                    logger.warning(
-                        "pubrun: failed to write config.resolved.json: %s",
-                        config_err_detail,
-                    )
 
             # 2. Refresh t3 right before freezing finalized timing in manifest.json.
             if hasattr(self.run, "_mark_finalization_end"):
@@ -114,6 +107,14 @@ class ArtifactWriter:
             self._artifacts_written = True
             if config_err_detail is None:
                 self.last_error = None
+            else:
+                self.last_error = config_err_detail
+                if not self._write_failure_warned:
+                    self._write_failure_warned = True
+                    logger.warning(
+                        "pubrun: failed to write config.resolved.json: %s",
+                        config_err_detail,
+                    )
 
             # 4. Write methods.md or methods.tex (non-fatal).
             try:

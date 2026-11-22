@@ -555,6 +555,7 @@ def test_mid_run_output_loss_bounds_writer_warnings_and_still_restores_hooks(
         if "failed to write" in r.message
     ]
     assert len(writer_warnings) == 1
+    assert "failed to write execution artifacts" in writer_warnings[0].message
     assert fake_token not in writer_warnings[0].message
 
 
