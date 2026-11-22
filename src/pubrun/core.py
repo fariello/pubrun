@@ -177,7 +177,8 @@ def diff(run_dir_a: str, run_dir_b: str, ignores: Optional[list] = None) -> dict
         run_dir_a: Path to the baseline run directory.
         run_dir_b: Path to the comparison run directory.
         ignores: Manifest keys to exclude from comparison.
-            Defaults to the ``[diff].ignore`` config list.
+            Defaults to the ``[diff].ignore_standard`` config list (or a
+            legacy ``[diff].ignore`` list when ``ignore_standard`` is absent).
 
     Returns:
         Dict with ``added``, ``removed``, ``modified``, and ``same`` keys.
@@ -205,17 +206,59 @@ def diff(run_dir_a: str, run_dir_b: str, ignores: Optional[list] = None) -> dict
     manifest_b = _load(run_dir_b)
 
     if ignores is None:
-        ignores = resolve_config().get("diff", {}).get("ignore", [])
+        diff_conf = resolve_config().get("diff", {})
+        if "ignore_standard" in diff_conf:
+            ignores = diff_conf.get("ignore_standard") or []
+        else:
+            ignores = diff_conf.get("ignore", [])
 
     return compare_manifests(manifest_a, manifest_b, ignores)
+
+
+def _classify_exit_outcome(exc: Optional[BaseException]) -> str:
+    """Map an exception leaving a tracked scope to a run outcome.
+
+    ``None`` and ``SystemExit`` with code ``None`` or ``0`` are ``"completed"``;
+    ``KeyboardInterrupt`` is ``"interrupted"``; anything else is ``"failed"``.
+    ``SystemExit(True)`` exits with status 1, so it is ``"failed"``.
+    """
+    if exc is None:
+        return "completed"
+    if isinstance(exc, KeyboardInterrupt):
+        return "interrupted"
+    if isinstance(exc, SystemExit):
+        code = exc.code
+        if code is None or (isinstance(code, int) and code == 0):
+            return "completed"
+        return "failed"
+    return "failed"
+
+
+def _stop_for_exit(run_tracker: Any, exc: Optional[BaseException]) -> None:
+    """Stop ``run_tracker`` with the outcome implied by ``exc``.
+
+    A ``SystemExit`` leaving the scope also records its exit code on the
+    run's signal capture so the manifest reports the code the process used.
+    """
+    if isinstance(exc, SystemExit):
+        sig_cap = getattr(run_tracker, "signal_capture", None)
+        if sig_cap is not None and getattr(sig_cap, "_active", False):
+            try:
+                from pubrun.capture.signals import _exit_details
+                code, detail = _exit_details(exc, getattr(sig_cap, "_config", None))
+                sig_cap._set_exit(code, detail, "SystemExit")
+            except Exception:
+                pass
+    run_tracker.stop(outcome=_classify_exit_outcome(exc))
 
 
 def audit_run(func: Optional[Callable] = None, **kwargs: Any) -> Callable:
     """Decorator that wraps a function in a pubrun tracking session.
 
     Starts a run before the function executes and stops it afterward.
-    If the function raises, the outcome is set to ``"failed"`` and the
-    exception is re-raised.
+    If the function raises, the outcome is set to ``"failed"`` (or
+    ``"interrupted"`` for ``KeyboardInterrupt``, ``"completed"`` for
+    ``SystemExit`` with code 0 or ``None``) and the exception is re-raised.
 
     Args:
         func: The function to wrap (supplied automatically by Python).
@@ -236,11 +279,11 @@ def audit_run(func: Optional[Callable] = None, **kwargs: Any) -> Callable:
         run_tracker = start(**kwargs)
         try:
             result = func(*args, **func_kwargs)
-            run_tracker.stop(outcome="completed")
-            return result
-        except Exception:
-            run_tracker.stop(outcome="failed")
+        except BaseException as exc:
+            _stop_for_exit(run_tracker, exc)
             raise
+        _stop_for_exit(run_tracker, None)
+        return result
 
     return wrapped
 
@@ -265,10 +308,12 @@ class tracked_run:
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         if self.run_tracker:
-            if exc_type is not None:
-                self.run_tracker.stop(outcome="failed")
-            else:
-                self.run_tracker.stop(outcome="completed")
+            if exc_type is not None and exc_val is None:
+                try:
+                    exc_val = exc_type()
+                except Exception:
+                    exc_val = Exception()
+            _stop_for_exit(self.run_tracker, exc_val if exc_type is not None else None)
 
 
 class paused:
@@ -343,11 +388,15 @@ class phase:
     """
     def __init__(self, name: str) -> None:
         self.name = name
-        self.run_tracker = get_current_run()
+        self.run_tracker: Optional[Run] = None
         self._profiler = None
+        self._started_yappi = False
         self._start_mono: Optional[float] = None
 
     def __enter__(self) -> "phase":
+        # Bind at entry, not construction, so a phase object created before
+        # start() (or reused across runs) logs to the run active when it runs.
+        self.run_tracker = get_current_run()
         if self.run_tracker and getattr(self.run_tracker, "event_stream", None):
             self.run_tracker.event_stream.emit("phase_start", name=self.name)
         else:
@@ -389,36 +438,50 @@ class phase:
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         end_mono = time.perf_counter()
-        # Stop profiler and dump stats
-        if self._profiler and self.run_tracker and self.run_tracker.is_active:
+        prof_name = f"profile-{_safe_phase_filename(self.name)}.prof"
+        if self._profiler == "yappi" and self._started_yappi:
+            # Always stop yappi and release the class-wide latch, even when the
+            # run stopped inside the phase, so later phases can profile again.
+            yappi_mod: Any = None
             try:
-                if self._profiler == "yappi" and self._started_yappi:
-                    import yappi  # type: ignore[import-not-found]
-                    yappi.stop()
-                    phase._yappi_active = False
-                    prof_path = self.run_tracker.run_dir / f"profile-{self.name}.prof"
-                    stats = yappi.get_func_stats()
+                import yappi as yappi_mod  # type: ignore[import-not-found]
+                yappi_mod.stop()
+            except Exception as prof_err:
+                logging.getLogger("pubrun").debug(f"pubrun: yappi stop failed: {prof_err}")
+            finally:
+                phase._yappi_active = False
+                self._started_yappi = False
+            try:
+                if yappi_mod is not None and self.run_tracker and self.run_tracker.is_active:
+                    prof_path = self.run_tracker.run_dir / prof_name
+                    stats = yappi_mod.get_func_stats()
                     stats.save(str(prof_path), type="pstat")
-                    yappi.clear_stats()
-                elif self._profiler != "yappi":
-                    # cProfile.Profile instance
-                    self._profiler.disable()
-                    prof_path = self.run_tracker.run_dir / f"profile-{self.name}.prof"
-                    self._profiler.dump_stats(str(prof_path))
-                    # Remove from active list
-                    if hasattr(self.run_tracker, "_active_profilers"):
-                        try:
-                            self.run_tracker._active_profilers.remove(self._profiler)
-                        except ValueError:
-                            pass
-                # Emit event so profile is discoverable
-                if getattr(self.run_tracker, "event_stream", None):
-                    self.run_tracker.event_stream.emit(
-                        "profile_saved", name=self.name,
-                        payload={"path": f"profile-{self.name}.prof"}
-                    )
+                    self._emit_profile_saved(prof_name)
             except Exception as prof_err:
                 logging.getLogger("pubrun").debug(f"pubrun: profiling save failed: {prof_err}")
+            finally:
+                try:
+                    if yappi_mod is not None:
+                        yappi_mod.clear_stats()
+                except Exception:
+                    pass
+            self._profiler = None
+        elif self._profiler and self._profiler != "yappi":
+            try:
+                # cProfile.Profile instance
+                self._profiler.disable()
+                if self.run_tracker and self.run_tracker.is_active:
+                    prof_path = self.run_tracker.run_dir / prof_name
+                    self._profiler.dump_stats(str(prof_path))
+                    self._emit_profile_saved(prof_name)
+            except Exception as prof_err:
+                logging.getLogger("pubrun").debug(f"pubrun: profiling save failed: {prof_err}")
+            finally:
+                if self.run_tracker is not None and hasattr(self.run_tracker, "_active_profilers"):
+                    try:
+                        self.run_tracker._active_profilers.remove(self._profiler)
+                    except ValueError:
+                        pass
             self._profiler = None
 
         if self.run_tracker and getattr(self.run_tracker, "event_stream", None):
@@ -436,8 +499,71 @@ class phase:
                 payload=end_payload if end_payload else None,
             )
 
+    def _emit_profile_saved(self, prof_name: str) -> None:
+        """Emit a ``profile_saved`` event so the saved profile is discoverable."""
+        if getattr(self.run_tracker, "event_stream", None):
+            self.run_tracker.event_stream.emit(
+                "profile_saved", name=self.name, payload={"path": prof_name}
+            )
+
+
+def _safe_phase_filename(name: Any) -> str:
+    """Reduce a phase name to a single safe filename component.
+
+    Every character outside ``[A-Za-z0-9_-]`` becomes ``_``, which removes path
+    separators, drive colons, and dots (so ``..`` cannot survive). A name with
+    no usable characters falls back to ``"phase"``.
+    """
+    import re
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(name))
+    if not safe.strip("_"):
+        return "phase"
+    return safe
+
 
 # -- Boot sequence ------------------------------------------------------------
+
+_PUBRUN_CLI_SCRIPTS = ("pubrun", "pubrun.exe", "pbr", "pbr.exe")
+
+
+def _is_pubrun_module_name(name: Any) -> bool:
+    return isinstance(name, str) and (name == "pubrun" or name.startswith("pubrun."))
+
+
+def _is_pubrun_cli_invocation() -> bool:
+    """Return True when this process is pubrun's own command-line interface.
+
+    Covers the console scripts, an already-imported ``pubrun.__main__``, a
+    ``__main__`` module whose spec names pubrun, and ``python -m pubrun``
+    while runpy is still importing the package (``sys.argv[0]`` is ``"-m"``
+    and ``pubrun.__main__`` has not loaded yet). ``python -m <user_pkg>`` is
+    not a pubrun invocation, so user packages still auto-start.
+    """
+    try:
+        sys0 = os.path.basename(sys.argv[0]) if sys.argv else ""
+    except Exception:
+        sys0 = ""
+    if sys0 in _PUBRUN_CLI_SCRIPTS:
+        return True
+    if "pubrun.__main__" in sys.modules:
+        return True
+    main_mod = sys.modules.get("__main__")
+    spec = getattr(main_mod, "__spec__", None)
+    if spec is not None and getattr(spec, "name", None) in ("pubrun", "pubrun.__main__"):
+        return True
+    if sys0 == "-m":
+        try:
+            frame: Any = sys._getframe(1)
+        except Exception:
+            frame = None
+        while frame is not None:
+            # Match on the module name: runpy may be frozen ("<frozen runpy>").
+            if frame.f_globals.get("__name__") == "runpy":
+                if _is_pubrun_module_name(frame.f_locals.get("mod_name")):
+                    return True
+            frame = frame.f_back
+    return False
+
 
 def _execute_boot_sequence(selected_by: str = "pubrun") -> None:
     """Resolve import mode, register selection, and auto-start if configured.
@@ -474,8 +600,7 @@ def _execute_boot_sequence(selected_by: str = "pubrun") -> None:
         mark_core_loaded()
 
     if _should_auto and not get_current_run():
-        sys0 = os.path.basename(sys.argv[0]) if sys.argv else ""
-        if sys0 in ("pubrun", "pubrun.exe", "pbr", "pbr.exe", "__main__.py", "-m") or "pubrun.__main__" in sys.modules:
+        if _is_pubrun_cli_invocation():
             return
 
         try:
@@ -553,10 +678,34 @@ def artifact(filename: str, content: Any) -> None:
         logging.getLogger("pubrun").warning(f"pubrun: failed to write artifact '{filename}': {e}")
 
 
+def _should_log_pubrun_print(run: Any, target: Any) -> bool:
+    """Return True when a ``pubrun.print`` call should be appended to ``stdout.log``.
+
+    Skips output sent to a stream other than stdout, output made inside
+    ``pubrun.paused()``, and output that the run's own console tee on
+    ``sys.stdout`` already records (logging it here too would duplicate it).
+    """
+    if target is not None and target is not sys.stdout:
+        return False
+    try:
+        from pubrun.capture.console import _tee_paused
+        if _tee_paused():
+            return False
+    except Exception:
+        pass
+    interceptor = getattr(run, "console_interceptor", None)
+    tee = getattr(interceptor, "stdout_tee", None)
+    if tee is not None and sys.stdout is tee and getattr(tee, "log_file", None) is not None:
+        return False
+    return True
+
+
 def print(*args: Any, **kwargs: Any) -> None:
     """Drop-in print replacement that logs to stdout.log in the active run directory.
 
-    Respects all standard print arguments (sep, end, file, flush).
+    Respects all standard print arguments (sep, end, file, flush). Output sent
+    to another stream with ``file=``, output inside ``pubrun.paused()``, and
+    output already recorded by active console capture is not logged again.
     """
     # 1. Capture the printed string. Builtin print() accepts sep=None/end=None
     # as "use the default", so normalize before joining to avoid an
@@ -577,7 +726,7 @@ def print(*args: Any, **kwargs: Any) -> None:
     builtins.print(*args, **kwargs)
 
     run = get_current_run()
-    if run and run.is_active:
+    if run and run.is_active and _should_log_pubrun_print(run, kwargs.get("file")):
         try:
             log_path = run.run_dir / "stdout.log"
             timestamped = run.config.get("console", {}).get("capture_mode", "off") in {"standard", "deep"}
@@ -874,15 +1023,42 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def _manual_argv(cmd: Any, current_run: Any) -> list:
+    """Split ``cmd`` like the SubprocessSpy does and redact secret arguments."""
+    from pubrun.capture.subprocesses import SubprocessSpy
+    argv = SubprocessSpy._safe_shlex_split(cmd)
+    try:
+        from pubrun.capture.redaction import redact_argv
+        return redact_argv(argv, getattr(current_run, "config", None))
+    except Exception:
+        # Never store unredacted arguments when redaction itself fails.
+        return ["[REDACTED]" for _ in argv]
+
+
+def _manual_error_detail(exc: BaseException, current_run: Any) -> str:
+    """Return a single-line, redacted description of a subprocess failure.
+
+    ``CalledProcessError`` and ``TimeoutExpired`` embed the raw command in
+    their message, so a copy carrying the redacted argv is formatted instead.
+    """
+    import copy as _copy
+    from pubrun.capture.redaction import format_safe_error_detail
+    config = getattr(current_run, "config", None)
+    target: BaseException = exc
+    if isinstance(exc, _subprocess.SubprocessError) and getattr(exc, "cmd", None) is not None:
+        try:
+            target = _copy.copy(exc)
+            target.cmd = _manual_argv(exc.cmd, current_run)  # type: ignore[attr-defined]
+        except Exception:
+            return type(exc).__name__
+    return format_safe_error_detail(target, config)
+
+
 class _PubrunSubprocessNamespace:
     """Explicit subprocess execution tracking wrappers."""
     @staticmethod
     def run(*args: Any, **kwargs: Any) -> _subprocess.CompletedProcess:
         cmd = args[0] if args else kwargs.get("args")
-        if isinstance(cmd, (list, tuple)):
-            cmd_args = [str(c) for c in cmd]
-        else:
-            cmd_args = [str(cmd)]
 
         started_at = time.time()
         start_mono = time.perf_counter()
@@ -897,12 +1073,12 @@ class _PubrunSubprocessNamespace:
             # host semantics are untouched. (IPD 20260705 EC-25.)
             ended_at = time.time()
             elapsed = max(0.0, time.perf_counter() - start_mono)
-            err_detail = f"{type(exc).__name__}: {exc}"
             current_run = get_current_run()
             if current_run and current_run.is_active:
+                err_detail = _manual_error_detail(exc, current_run)
                 _append_manual_subprocess_record(current_run, {
-                    "argv": cmd_args,
-                    "exit_code": None,
+                    "argv": _manual_argv(cmd, current_run),
+                    "exit_code": getattr(exc, "returncode", None),
                     "started_at_utc": started_at,
                     "ended_at_utc": ended_at,
                     "elapsed_seconds": elapsed,
@@ -919,7 +1095,7 @@ class _PubrunSubprocessNamespace:
         current_run = get_current_run()
         if current_run and current_run.is_active:
             record = {
-                "argv": cmd_args,
+                "argv": _manual_argv(cmd, current_run),
                 "exit_code": res.returncode,
                 "started_at_utc": started_at,
                 "ended_at_utc": ended_at,
@@ -948,16 +1124,12 @@ class _PubrunSubprocessNamespace:
             except Exception as exc:
                 ended_at = time.time()
                 elapsed = max(0.0, time.perf_counter() - self._pubrun_start_mono)
-                err_detail = f"{type(exc).__name__}: {exc}"
                 current_run = get_current_run()
                 if current_run and current_run.is_active:
-                    if isinstance(self._pubrun_cmd, (list, tuple)):
-                        cmd_args = [str(c) for c in self._pubrun_cmd]
-                    else:
-                        cmd_args = [str(self._pubrun_cmd)]
+                    err_detail = _manual_error_detail(exc, current_run)
                     _append_manual_subprocess_record(current_run, {
-                        "argv": cmd_args,
-                        "exit_code": None,
+                        "argv": _manual_argv(self._pubrun_cmd, current_run),
+                        "exit_code": getattr(exc, "returncode", None),
                         "started_at_utc": self._pubrun_started_at,
                         "ended_at_utc": ended_at,
                         "elapsed_seconds": elapsed,
@@ -986,12 +1158,8 @@ class _PubrunSubprocessNamespace:
             start_mono = getattr(self, "_pubrun_start_mono", None)
             current_run = get_current_run()
             if current_run and current_run.is_active:
-                if isinstance(self._pubrun_cmd, (list, tuple)):
-                    cmd_args = [str(c) for c in self._pubrun_cmd]
-                else:
-                    cmd_args = [str(self._pubrun_cmd)]
                 record: Dict[str, Any] = {
-                    "argv": cmd_args,
+                    "argv": _manual_argv(self._pubrun_cmd, current_run),
                     "exit_code": self.returncode,
                     "started_at_utc": self._pubrun_started_at,
                     "ended_at_utc": ended_at,
@@ -1036,12 +1204,12 @@ def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
     except Exception as exc:
         ended_at = time.time()
         elapsed = max(0.0, time.perf_counter() - start_mono)
-        err_detail = f"{type(exc).__name__}: {exc}"
         current_run = get_current_run()
         if current_run and current_run.is_active:
+            err_detail = _manual_error_detail(exc, current_run)
             _append_manual_subprocess_record(current_run, {
-                "argv": [cmd],
-                "exit_code": None,
+                "argv": _manual_argv(cmd, current_run),
+                "exit_code": getattr(exc, "returncode", None),
                 "started_at_utc": started_at,
                 "ended_at_utc": ended_at,
                 "elapsed_seconds": elapsed,
@@ -1074,7 +1242,7 @@ def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
             current_run = get_current_run()
             if current_run and current_run.is_active:
                 record = {
-                    "argv": [cmd],
+                    "argv": _manual_argv(cmd, current_run),
                     "exit_code": rc,
                     "started_at_utc": started_at,
                     "ended_at_utc": ended_at,
@@ -1090,6 +1258,18 @@ def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
 
         def __getattr__(self, name: str) -> Any:
             return getattr(self._pipe_obj, name)
+
+        # Dunder lookups bypass __getattr__, so iteration must be explicit.
+        def __iter__(self) -> "_PopenPipeProxy":
+            return self
+
+        def __next__(self) -> Any:
+            # os.popen's _wrap_close defines __iter__ but not __next__.
+            it = self.__dict__.get("_line_iter")
+            if it is None:
+                it = iter(self._pipe_obj)
+                self._line_iter = it
+            return next(it)
 
         def __enter__(self) -> "_PopenPipeProxy":
             return self

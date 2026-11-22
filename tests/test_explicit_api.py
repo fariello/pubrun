@@ -263,7 +263,7 @@ def test_explicit_subprocess_run_monotonic_and_schema(tmp_path, monkeypatch):
     assert nz_rec["duration_clock"] == "monotonic"
     assert nz_rec["capture_state"] == {"status": "failed"}
 
-    assert err_rec["exit_code"] is None
+    assert err_rec["exit_code"] == 3
     assert err_rec["pid"] is None
     assert err_rec["ended_at_utc"] < err_rec["started_at_utc"]
     assert err_rec["elapsed_seconds"] == pytest.approx(0.11, abs=1e-9)

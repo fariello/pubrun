@@ -103,7 +103,7 @@ def _atomic_json_write(
             if pre_serialized is not None:
                 f.write(pre_serialized)
             else:
-                json.dump(data, f, indent=2)
+                json.dump(data, f, indent=2, default=str)
             f.flush()
             if durability in ("fsync", "strict"):
                 os.fsync(f.fileno())
@@ -149,7 +149,7 @@ def _invoke_atomic_json_write(
 
 def _serialize_config_and_digest(config: Any) -> Tuple[str, str]:
     """Serialize config deterministically with sorted keys and return (payload, sha256)."""
-    payload = json.dumps(config, indent=2, sort_keys=True)
+    payload = json.dumps(config, indent=2, sort_keys=True, default=str)
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return payload, digest
 
@@ -368,11 +368,24 @@ class ArtifactWriter:
                     manifest_path, manifest_data, durability=durability
                 )
 
-                self._write_config_if_needed(out_dir, stage=stage)
+                # Isolated so a config.resolved.json failure never demotes a run
+                # whose manifest.json was already written into ghost mode.
+                config_err_detail: Optional[str] = None
+                try:
+                    self._write_config_if_needed(out_dir, stage=stage)
+                except Exception as cfg_err:
+                    from pubrun.capture.redaction import format_safe_error_detail
+                    config_err_detail = format_safe_error_detail(
+                        cfg_err, getattr(self.run, "config", None)
+                    )
+                    logger.debug(
+                        "pubrun failed to write startup config.resolved.json: %s",
+                        config_err_detail,
+                    )
 
                 if hw_was_done:
                     self._startup_included_hardware = True
-                self.last_error = None
+                self.last_error = config_err_detail
                 return True
         except Exception as e:
             from pubrun.capture.redaction import format_safe_error_detail

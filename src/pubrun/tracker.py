@@ -79,6 +79,27 @@ def get_current_run() -> Optional["Run"]:
     return _active_run
 
 
+# Top-level ``start()`` keyword shortcuts that belong under ``[core]``; mirrors
+# the flattening in ``pubrun.config._resolve_layers``.
+_CORE_SHORTCUTS = frozenset({"profile", "output_dir", "auto_start", "meta_ref"})
+
+
+def _normalize_overrides(overrides: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Return a deep copy of API overrides with core shortcuts folded under ``core``.
+
+    The caller's dict (and any nested dict inside it) is never mutated.
+    """
+    normalized = copy.deepcopy(dict(overrides or {}))
+    flat_core = {k: normalized.pop(k) for k in list(normalized) if k in _CORE_SHORTCUTS}
+    if flat_core:
+        core = normalized.get("core")
+        if not isinstance(core, dict):
+            core = {}
+        core.update(flat_core)
+        normalized["core"] = core
+    return normalized
+
+
 class Run:
     """Core tracking object. Gathers capture data and produces manifest output."""
     def __init__(self, overrides: Optional[Dict[str, Any]] = None) -> None:
@@ -112,8 +133,15 @@ class Run:
         self._manifest_timing_frozen: bool = False
         self._frozen_timing_dict: Optional[Dict[str, Any]] = None
 
+        # Accumulated API overrides; start() on an already-active run merges into
+        # these so earlier overrides survive a later re-resolve (BUG-10).
+        self._api_overrides: Dict[str, Any] = {}
         try:
-            self.config = resolve_config(overrides)
+            self._api_overrides = _normalize_overrides(overrides)
+        except Exception:
+            self._api_overrides = {}
+        try:
+            self.config = resolve_config(self._api_overrides or overrides)
         except Exception as config_err:
             from pubrun.capture.redaction import format_safe_error_detail
             detail = format_safe_error_detail(config_err, None)
@@ -188,6 +216,7 @@ class Run:
         # Establish the unique run directory name
         base_dir_str = self.config.get("core", {}).get("output_dir", "")
         base_dir = Path(base_dir_str) if base_dir_str else Path.cwd() / "runs"
+        self.output_base_dir: Path = base_dir
 
         # Format timezone for human-readable directory names
         dt = datetime.fromtimestamp(self.started_at_utc, tz=timezone.utc)
@@ -797,7 +826,12 @@ class Run:
             return
 
         try:
-            merged = resolve_config(overrides)
+            from pubrun.config import _deep_merge
+            accumulated = _deep_merge(
+                getattr(self, "_api_overrides", None) or {},
+                _normalize_overrides(overrides),
+            )
+            merged = resolve_config(accumulated)
         except Exception as exc:
             from pubrun.capture.redaction import format_safe_error_detail
             detail = format_safe_error_detail(exc, getattr(self, "config", None))
@@ -850,6 +884,7 @@ class Run:
                     shutil.move(str(self.run_dir), str(new_dir))
                     old_dir_str = str(self.run_dir)
                     self.run_dir = new_dir
+                    self.output_base_dir = new_base
                 except Exception as e:
                     from pubrun.capture.redaction import format_safe_error_detail
                     logging.getLogger("pubrun").warning(
@@ -912,6 +947,7 @@ class Run:
                     self._spying_subprocesses = False
                     self._record_capture_error("subprocesses", "runtime", exc)
 
+        self._api_overrides = accumulated
         self.config = merged
         writer = getattr(self, "writer", None)
         if writer is not None and self.is_active and not self._finalized:
@@ -1106,7 +1142,9 @@ class Run:
                 else:
                     self._outcome = "failed"
             else:
-                self._outcome = "completed"
+                # At atexit sys.exc_info() is empty, so consult what the
+                # excepthook and sys.exit wrappers recorded (BUG-03).
+                self._outcome = self._outcome_from_signal_capture()
 
         # Pre-teardown step 2: Upgrade nominally completed runs if interrupted by signal.
         if self._outcome == "completed" and self.signal_capture:
@@ -1150,6 +1188,33 @@ class Run:
         # Stamp initial pre-manifest finalization end anchor t3 so direct callers
         # of _finalize_state() have complete finalization timing before freezing.
         self._mark_finalization_end()
+
+    def _outcome_from_signal_capture(self) -> str:
+        """Classify the run outcome from the recorded exit code and exception.
+
+        ``KeyboardInterrupt`` maps to ``"interrupted"``; a non-zero exit code or
+        any other recorded unhandled exception maps to ``"failed"``; otherwise
+        (no record, or exit code 0) the run ``"completed"``.
+        """
+        sig_cap = getattr(self, "signal_capture", None)
+        if sig_cap is None:
+            return "completed"
+        try:
+            records = sig_cap.get_records()
+            exc_type_name = None
+            if hasattr(sig_cap, "exit_exception_type"):
+                exc_type_name = sig_cap.exit_exception_type()
+        except Exception as exc:
+            self._record_capture_error("signals", "finalization", exc)
+            return "completed"
+        if exc_type_name == "KeyboardInterrupt":
+            return "interrupted"
+        code = records.get("exit_code")
+        if isinstance(code, int) and code != 0:
+            return "failed"
+        if exc_type_name not in (None, "SystemExit"):
+            return "failed"
+        return "completed"
 
     def _refresh_packages_at_finalization(self) -> None:
         """Refresh and merge startup/finalization package snapshots safely."""
@@ -1316,16 +1381,19 @@ class Run:
         Decrements the reference count. Artifacts are written only when the
         count reaches zero.
         """
-        if not getattr(self, "_finalized", False) and self._outcome not in ("failed", "ghost"):
-            self._outcome = outcome
-
+        global _active_run
         from pubrun import _run_lock
         with _run_lock:
+            if not getattr(self, "_finalized", False) and self._outcome not in ("failed", "ghost"):
+                self._outcome = outcome
             self.ref_count = getattr(self, "ref_count", 1) - 1
             if self.ref_count > 0:
                 return  # Still referenced by an outer wrapper.
+            # Unpublish before finalizing so a concurrent start() never hands
+            # out (and ref-counts) a run that is already tearing down (BUG-10).
+            if _active_run is self:
+                _active_run = None
 
-        global _active_run
         writer = getattr(self, "writer", None)
         try:
             self._finalize_state()

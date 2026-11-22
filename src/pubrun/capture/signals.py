@@ -43,13 +43,24 @@ for _sig_name in ("SIGTERM", "SIGHUP"):
         _LETHAL_SIGNALS.add(_sig)
 
 
+# Re-entrancy latch for _finalize_active_run(). Signal handlers run on the main
+# thread between bytecodes, so a second lethal signal can arrive while the first
+# one is still writing artifacts; the nested call must return immediately.
+_finalizing_active_run = False
+
+
 def _finalize_active_run() -> None:
     """Best-effort finalization of the active run before process death.
 
     Called when a lethal signal (SIGTERM, SIGHUP) is about to kill the
     process via SIG_DFL re-delivery.  Imports tracker lazily to avoid
-    circular imports.
+    circular imports.  A nested call made while a finalization is already in
+    progress returns without writing.
     """
+    global _finalizing_active_run
+    if _finalizing_active_run:
+        return
+    _finalizing_active_run = True
     try:
         from pubrun.tracker import get_current_run
         run = get_current_run()
@@ -57,6 +68,8 @@ def _finalize_active_run() -> None:
             run.writer.write_artifacts()
     except Exception:
         pass  # Best-effort: never crash during signal handling
+    finally:
+        _finalizing_active_run = False
 
 
 class SignalExitCapture:
@@ -66,15 +79,21 @@ class SignalExitCapture:
       - Record the signal number + timestamp in an internal list.
       - Forward to the previously-installed handler (user's or default).
 
-    Also wraps ``sys.excepthook`` to capture SystemExit codes.
+    Also wraps ``sys.excepthook`` to capture unhandled exceptions and
+    ``sys.exit`` to capture explicit exit codes (CPython never passes
+    ``SystemExit`` to ``sys.excepthook``).
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
-        self._lock = threading.Lock()
+        # Re-entrant: signal handlers run on the main thread and can interrupt
+        # code that already holds this lock (for example get_records() inside
+        # a manifest write), so a non-reentrant lock could deadlock forever.
+        self._lock = threading.RLock()
         self._config: Optional[Dict[str, Any]] = config
         self._signals_received: List[Dict[str, Any]] = []
         self._exit_code: Optional[int] = None
         self._exit_exception: Optional[str] = None
+        self._exit_exception_type: Optional[str] = None
         self._installed = False
         self._active = False
         self._signals_unavailable = False
@@ -83,6 +102,8 @@ class SignalExitCapture:
         self._installed_handlers: Dict[int, Callable] = {}
         self._previous_excepthook: Optional[Callable] = None
         self._installed_excepthook: Optional[Callable] = None
+        self._previous_sys_exit: Optional[Callable] = None
+        self._installed_sys_exit: Optional[Callable] = None
 
     # ------------------------------------------------------------------
     # Public interface
@@ -102,6 +123,7 @@ class SignalExitCapture:
         try:
             self._install_signal_handlers()
             self._install_excepthook()
+            self._install_sys_exit()
         except Exception as e:
             from pubrun.capture.redaction import format_safe_error_detail
             self._active = False
@@ -113,6 +135,10 @@ class SignalExitCapture:
                 pass
             try:
                 self._restore_excepthook()
+            except Exception:
+                pass
+            try:
+                self._restore_sys_exit()
             except Exception:
                 pass
             raise
@@ -130,6 +156,10 @@ class SignalExitCapture:
             pass
         try:
             self._restore_excepthook()
+        except Exception:
+            pass
+        try:
+            self._restore_sys_exit()
         except Exception:
             pass
 
@@ -156,10 +186,29 @@ class SignalExitCapture:
             }
 
     def record_exit_code(self, code: Optional[int]) -> None:
-        """Explicitly record the process exit code (called at finalization)."""
+        """Explicitly record the process exit code (called at finalization).
+
+        Keeps the first recorded value, so a finalization-time default never
+        overwrites a code captured from ``sys.exit`` or an unhandled exception.
+        """
         with self._lock:
             if self._exit_code is None:
                 self._exit_code = code
+
+    def exit_exception_type(self) -> Optional[str]:
+        """Return the class name of the exception that ended the process, if recorded."""
+        return self._exit_exception_type
+
+    def _set_exit(self, code: int, exc_str: Optional[str], exc_type_name: Optional[str]) -> None:
+        """Record a definitive exit, overwriting any earlier value.
+
+        Lock-free on purpose: this runs from the ``sys.exit`` wrapper, which a
+        user signal handler may call while the main thread holds ``_lock``.
+        Single attribute assignments are atomic under the GIL.
+        """
+        self._exit_code = code
+        self._exit_exception = exc_str
+        self._exit_exception_type = exc_type_name
 
     # ------------------------------------------------------------------
     # Signal handler installation
@@ -225,13 +274,15 @@ class SignalExitCapture:
                 return
 
             # Record the signal
+            # Lock-free: list.append is atomic under the GIL, and taking
+            # self._lock here could deadlock if the interrupted main-thread code
+            # already holds it.
             sig_name = _signal_name(sig)
-            with self._lock:
-                self._signals_received.append({
-                    "signal": sig,
-                    "signal_name": sig_name,
-                    "timestamp_utc": time.time(),
-                })
+            self._signals_received.append({
+                "signal": sig,
+                "signal_name": sig_name,
+                "timestamp_utc": time.time(),
+            })
 
             # Chain to the previous handler.
             # The previous handler can be:
@@ -282,27 +333,16 @@ class SignalExitCapture:
 
             from pubrun.capture.redaction import format_safe_error_detail
 
-            # Record exit information
+            # Record exit information. An unhandled exception is the definitive
+            # end of the process, so it overwrites any earlier recorded value.
             if exc_type is SystemExit and isinstance(exc_value, SystemExit):
-                code = exc_value.code
-                if isinstance(code, int):
-                    _self.record_exit_code(code)
-                    exit_exc_str = f"SystemExit({code!r})"
-                elif code is None:
-                    _self.record_exit_code(0)
-                    exit_exc_str = f"SystemExit({code!r})"
-                else:
-                    # SystemExit can be passed a string message; exit code is 1
-                    _self.record_exit_code(1)
-                    exit_exc_str = format_safe_error_detail(exc_value, _self._config)
-                with _self._lock:
-                    _self._exit_exception = exit_exc_str
+                code, exit_exc_str = _exit_details(exc_value, _self._config)
+                _self._set_exit(code, exit_exc_str, "SystemExit")
             else:
                 # Unhandled exception -- process will exit with code 1
-                _self.record_exit_code(1)
                 exit_exc_str = format_safe_error_detail(exc_value, _self._config)
-                with _self._lock:
-                    _self._exit_exception = exit_exc_str
+                type_name = getattr(exc_type, "__name__", None) or type(exc_value).__name__
+                _self._set_exit(1, exit_exc_str, type_name)
 
             # Chain to previous excepthook (which prints the traceback, etc.)
             if prev_hook is not None:
@@ -333,10 +373,66 @@ class SignalExitCapture:
         self._previous_excepthook = None
         self._installed_excepthook = None
 
+    # ------------------------------------------------------------------
+    # sys.exit wrapper (captures explicit exit codes)
+    # ------------------------------------------------------------------
+
+    def _install_sys_exit(self) -> None:
+        """Wrap ``sys.exit`` to record the requested exit code before delegating.
+
+        CPython handles an uncaught ``SystemExit`` without calling
+        ``sys.excepthook``, and ``sys.exc_info()`` is empty by the time atexit
+        handlers run, so this wrapper is the only place the code is visible.
+        Only calls on the main thread are recorded, because ``sys.exit()`` on a
+        worker thread ends that thread, not the process.  A later call
+        overwrites an earlier one.
+        """
+        prev_exit = sys.exit
+        self._previous_sys_exit = prev_exit
+        _self = self
+
+        def _sys_exit(*args: Any) -> Any:
+            if _self._active and threading.current_thread() is threading.main_thread():
+                try:
+                    status = args[0] if args else None
+                    code, exit_exc_str = _exit_details(SystemExit(status), _self._config)
+                    _self._set_exit(code, exit_exc_str, "SystemExit")
+                except Exception:
+                    pass  # Recording must never change how the process exits.
+            return prev_exit(*args)
+
+        sys.exit = _sys_exit
+        self._installed_sys_exit = _sys_exit
+
+    def _restore_sys_exit(self) -> None:
+        """Restore the previous ``sys.exit``, but only if ours is still installed."""
+        installed = getattr(self, "_installed_sys_exit", None)
+        previous = getattr(self, "_previous_sys_exit", None)
+        if previous is not None and installed is not None and sys.exit is installed:
+            sys.exit = previous
+        self._previous_sys_exit = None
+        self._installed_sys_exit = None
+
 
 # --------------------------------------------------------------------------
 # Utility
 # --------------------------------------------------------------------------
+
+def _exit_details(exc: SystemExit, config: Optional[Dict[str, Any]]) -> Tuple[int, str]:
+    """Map a ``SystemExit`` to the process exit code and a safe description.
+
+    ``None`` exits 0, an integer (including ``bool``) exits with that value,
+    and any other object is printed by CPython and exits 1; its text is
+    redacted because it may carry arbitrary user data.
+    """
+    code = exc.code
+    if code is None:
+        return 0, "SystemExit(None)"
+    if isinstance(code, int):
+        return int(code), f"SystemExit({int(code)!r})"
+    from pubrun.capture.redaction import format_safe_error_detail
+    return 1, format_safe_error_detail(exc, config)
+
 
 def _signal_name(signum: int) -> str:
     """Resolve a signal number to its symbolic name (e.g. 2 -> 'SIGINT')."""
