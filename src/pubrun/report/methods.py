@@ -1,6 +1,9 @@
 import math
 from typing import Dict, Any, List, Optional
+from pubrun.capture.packages import normalize_package_name
 from pubrun.report.templates import MARKDOWN_TEMPLATE, LATEX_TEMPLATE, HIGHLIGHT_PACKAGES
+
+_NORMALIZED_HIGHLIGHTS = {normalize_package_name(n) for n in HIGHLIGHT_PACKAGES}
 
 
 def _as_dict(val: Any) -> Dict[str, Any]:
@@ -42,6 +45,7 @@ def bytes_to_gb(bytes_val: Any) -> float:
 def extract_highlighted_packages(manifest: Dict[str, Any]) -> List[str]:
     """Return formatted strings for notable packages found in the manifest."""
     found: List[str] = []
+    seen: set = set()
     if not isinstance(manifest, dict):
         return found
     records = _as_dict(manifest.get("packages")).get("records")
@@ -51,13 +55,14 @@ def extract_highlighted_packages(manifest: Dict[str, Any]) -> List[str]:
         if not isinstance(record, dict):
             continue
         raw_name = record.get("name")
-        if not isinstance(raw_name, str) or not raw_name:
+        if not isinstance(raw_name, str) or not raw_name.strip():
             continue
-        name = raw_name.lower()
-        if name in HIGHLIGHT_PACKAGES:
+        norm_name = normalize_package_name(raw_name.strip())
+        if norm_name in _NORMALIZED_HIGHLIGHTS and norm_name not in seen:
+            seen.add(norm_name)
             raw_version = record.get("version")
             version = str(raw_version) if raw_version not in (None, "") else "unknown"
-            found.append(f"{name} (v{version})")
+            found.append(f"{norm_name} (v{version})")
     return found
 
 

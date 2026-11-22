@@ -42,14 +42,36 @@ _EXTRA_MARKER_RE = re.compile(
 
 _MISSING = object()
 
-# Allowed keys in schemas/manifest.schema.json until child plan ijipnx extends it.
-_SCHEMA_PACKAGE_RECORD_KEYS = (
+_VALID_STAGES = frozenset({"startup", "final", "single"})
+_VALID_OBSERVED_AT = frozenset({"startup", "final", "startup_and_final"})
+_NON_TRANSITIVE_UNRESOLVED_REASONS = frozenset(
+    {
+        "ambiguous",
+        "unmapped_site_package",
+        "missing_metadata",
+        "metadata_error",
+    }
+)
+_TRANSITIVE_UNRESOLVED_REASONS = frozenset(
+    {
+        "missing_transitive_dependency",
+        "unparseable_marker",
+    }
+)
+_PACKAGE_RECORD_KEYS = (
     "name",
     "version",
     "location",
     "editable",
     "source",
     "required_by",
+    "import_names",
+    "observed_at",
+)
+_FINAL_NO_HOOK_COVERAGE_NOTE = (
+    "Package capture ran at startup and finalization without a global import hook; "
+    "modules imported after startup and removed from sys.modules before finalization "
+    "cannot be observed."
 )
 
 
@@ -1308,11 +1330,120 @@ def _resolve_transitive_closure(
     return transitive_records, unresolved
 
 
-def resolve_packages_snapshot(config: Dict[str, Any]) -> Dict[str, Any]:
+def _combine_observed_at(a: Optional[str], b: Optional[str]) -> Optional[str]:
+    """Combine two ``observed_at`` stage tags into ``startup``, ``final``, or ``startup_and_final``."""
+    vals = {v for v in (a, b) if v in _VALID_OBSERVED_AT}
+    if "startup_and_final" in vals or ("startup" in vals and "final" in vals):
+        return "startup_and_final"
+    if "startup" in vals:
+        return "startup"
+    if "final" in vals:
+        return "final"
+    return None
+
+
+def _copy_package_record(rec: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a schema-clean defensive copy of a package record dict."""
+    cleaned: Dict[str, Any] = {}
+    for key in _PACKAGE_RECORD_KEYS:
+        if key not in rec:
+            continue
+        val = rec[key]
+        if isinstance(val, list):
+            cleaned[key] = list(val)
+        else:
+            cleaned[key] = val
+    if "version" not in cleaned:
+        cleaned["version"] = None
+    return cleaned
+
+
+def _normalize_unresolved_entry(
+    entry: Dict[str, Any],
+    *,
+    default_observed_at: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return a schema-valid defensive copy of an ``unresolved`` record."""
+    if not isinstance(entry, dict):
+        return None
+    raw_mod = entry.get("module")
+    mod = raw_mod.strip() if isinstance(raw_mod, str) and raw_mod.strip() else "<unknown>"
+    raw_reason = entry.get("reason")
+    if not isinstance(raw_reason, str) or raw_reason not in (
+        _NON_TRANSITIVE_UNRESOLVED_REASONS | _TRANSITIVE_UNRESOLVED_REASONS
+    ):
+        return None
+    raw_cands = entry.get("candidates")
+    candidates = sorted(
+        {str(c) for c in raw_cands if isinstance(c, str) and c}
+        if isinstance(raw_cands, (list, tuple, set))
+        else ()
+    )
+    raw_obs = entry.get("observed_at")
+    if raw_obs in _VALID_OBSERVED_AT:
+        observed_at: Optional[str] = raw_obs
+    else:
+        observed_at = default_observed_at if default_observed_at in _VALID_OBSERVED_AT else None
+    raw_detail = entry.get("detail")
+    detail = raw_detail if isinstance(raw_detail, str) else (
+        None if raw_detail is None else str(raw_detail)
+    )
+    return {
+        "module": mod,
+        "reason": raw_reason,
+        "candidates": candidates,
+        "observed_at": observed_at,
+        "detail": detail,
+    }
+
+
+def _dedupe_strings(items: List[str]) -> List[str]:
+    """Deduplicate non-empty strings while preserving first-seen order."""
+    out: List[str] = []
+    seen: Set[str] = set()
+    for item in items:
+        if isinstance(item, str) and item and item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def _build_capture_state(
+    status: str,
+    *,
+    detail: Optional[str] = None,
+    warnings: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Construct a schema-valid ``capture_state`` dict omitting empty ``detail``."""
+    state: Dict[str, Any] = {"status": status}
+    if isinstance(detail, str) and detail:
+        state["detail"] = detail
+    deduped = _dedupe_strings(warnings or [])
+    if deduped:
+        state["warnings"] = deduped
+    return state
+
+
+def _coverage_notes_for(mode: str, stage: str) -> List[str]:
+    """Return factual coverage-boundary notes for ``(mode, stage)``."""
+    if stage == "final" and mode in ("imported-only", "imported-transitive"):
+        return [_FINAL_NO_HOOK_COVERAGE_NOTE]
+    return []
+
+
+def resolve_packages_snapshot(
+    config: Dict[str, Any],
+    *,
+    stage: str = "single",
+    include_transitive: bool = True,
+) -> Dict[str, Any]:
     """Resolve packages according to ``config`` and return the full structured snapshot.
 
-    The returned dict includes ``records`` (with per-record ``import_names`` for
-    imported distributions), ``unresolved``, ``local_modules``, and ``capture_state``.
+    The returned dict conforms to ``schemas/manifest.schema.json`` and includes
+    ``mode``, ``snapshot_stage``, ``records`` (with per-record ``import_names`` and
+    ``observed_at``), ``unresolved``, ``local_modules``, ``coverage_notes``, and
+    ``capture_state``. When ``mode == "off"``, returns
+    ``{"capture_state": {"status": "suppressed"}}`` with ``"mode"`` omitted.
     """
     cfg = (config.get("capture") or {}).get("packages") or {}
     mode = cfg.get("mode", "imported-only")
@@ -1320,8 +1451,11 @@ def resolve_packages_snapshot(config: Dict[str, Any]) -> Dict[str, Any]:
     if mode == "off":
         return {"capture_state": {"status": "suppressed"}}
 
+    eff_stage = stage if stage in _VALID_STAGES else "single"
+    obs_stage: Optional[str] = eff_stage if eff_stage in ("startup", "final") else None
+
     records: List[Dict[str, Any]] = []
-    unresolved: List[Dict[str, Any]] = []
+    raw_unresolved: List[Dict[str, Any]] = []
     local_modules: List[str] = []
     warnings: List[str] = []
     status = "complete"
@@ -1331,13 +1465,21 @@ def resolve_packages_snapshot(config: Dict[str, Any]) -> Dict[str, Any]:
         index = _get_distribution_index(use_cache=True)
 
         if mode in ("imported-only", "imported-transitive"):
-            records, unresolved, local_modules = _resolve_imported_modules(index)
-            if mode == "imported-transitive":
+            imported_records, raw_unresolved, local_modules = _resolve_imported_modules(index)
+            for rec in imported_records:
+                rec["observed_at"] = obs_stage
+                if rec.get("import_names") is None:
+                    rec["import_names"] = []
+            records = imported_records
+            if mode == "imported-transitive" and include_transitive:
                 transitive_records, transitive_unresolved = _resolve_transitive_closure(
-                    records, index
+                    imported_records, index
                 )
-                records = records + transitive_records
-                unresolved.extend(transitive_unresolved)
+                for rec in transitive_records:
+                    rec["import_names"] = None
+                    rec["observed_at"] = None
+                records = imported_records + transitive_records
+                raw_unresolved.extend(transitive_unresolved)
         elif mode == "top-level-installed":
             required_by_others: Set[str] = set()
             for info in index.by_normalized_name.values():
@@ -1353,52 +1495,363 @@ def resolve_packages_snapshot(config: Dict[str, Any]) -> Dict[str, Any]:
 
             for norm_name, info in index.by_normalized_name.items():
                 if norm_name not in required_by_others:
-                    records.append(_record_from_dist_info(info))
-            unresolved.extend(dict(err) for err in index.metadata_errors)
+                    rec = _record_from_dist_info(info)
+                    rec["import_names"] = None
+                    rec["observed_at"] = None
+                    records.append(rec)
+            raw_unresolved.extend(dict(err) for err in index.metadata_errors)
         else:
             # full-environment (or unrecognized mode treated as full-environment)
             for info in index.by_normalized_name.values():
-                records.append(_record_from_dist_info(info))
-            unresolved.extend(dict(err) for err in index.metadata_errors)
-
-        if unresolved:
-            status = "partial"
-            unresolved.sort(
-                key=lambda item: (
-                    (item.get("module") or "").lower(),
-                    (item.get("reason") or "").lower(),
-                )
-            )
-            seen_warnings: Set[str] = set()
-            for entry in unresolved:
-                msg = _format_unresolved_warning(entry)
-                if msg not in seen_warnings:
-                    seen_warnings.add(msg)
-                    warnings.append(msg)
+                rec = _record_from_dist_info(info)
+                rec["import_names"] = None
+                rec["observed_at"] = None
+                records.append(rec)
+            raw_unresolved.extend(dict(err) for err in index.metadata_errors)
     except Exception as exc:
         status = "partial"
         detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
         warnings.append(f"Package capture error: {detail}")
 
-    capture_state: Dict[str, Any] = {"status": status}
-    if detail:
-        capture_state["detail"] = detail
-    if warnings:
-        capture_state["warnings"] = warnings
+    unresolved: List[Dict[str, Any]] = []
+    for entry in raw_unresolved:
+        cleaned_entry = _normalize_unresolved_entry(entry, default_observed_at=obs_stage)
+        if cleaned_entry is not None:
+            unresolved.append(cleaned_entry)
 
+    if unresolved:
+        status = "partial"
+        unresolved.sort(
+            key=lambda item: (
+                item["module"].lower(),
+                item["reason"].lower(),
+                (item.get("detail") or "").lower(),
+            )
+        )
+        for entry in unresolved:
+            warnings.append(_format_unresolved_warning(entry))
+
+    cleaned_records: List[Dict[str, Any]] = []
+    for rec in records:
+        name = rec.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        cleaned_records.append(_copy_package_record(rec))
     # Null-guard the sort key as defense in depth (IPD 20260705 EC-08).
-    sorted_records = sorted(records, key=lambda x: (x.get("name") or "").lower())
+    sorted_records = sorted(cleaned_records, key=lambda x: (x.get("name") or "").lower())
 
     return {
         "mode": mode,
+        "snapshot_stage": eff_stage,
         "records": sorted_records,
         "unresolved": unresolved,
-        "local_modules": local_modules,
-        "capture_state": capture_state,
+        "local_modules": sorted({m for m in local_modules if isinstance(m, str) and m}),
+        "coverage_notes": _coverage_notes_for(mode, eff_stage),
+        "capture_state": _build_capture_state(status, detail=detail, warnings=warnings),
     }
 
 
-def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
+def merge_package_snapshots(
+    startup_data: Optional[Dict[str, Any]],
+    final_data: Optional[Dict[str, Any]],
+    config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Merge startup and finalization package snapshots without mutating either input.
+
+    Retains startup-only imported distributions (for example, modules deleted from
+    ``sys.modules`` before finalization) with ``observed_at = "startup"``, marks
+    late imports ``observed_at = "final"``, merges persistent modules as
+    ``observed_at = "startup_and_final"`` with unioned ``import_names``, and
+    recomputes recursive transitive closure once over the merged imported set when
+    effective mode is ``imported-transitive``.
+    """
+    effective_mode: Optional[str] = None
+    if isinstance(config, dict):
+        cfg_pkg = (config.get("capture") or {}).get("packages")
+        if isinstance(cfg_pkg, dict) and cfg_pkg.get("mode") is not None:
+            effective_mode = cfg_pkg.get("mode")
+    if effective_mode is None and isinstance(final_data, dict):
+        effective_mode = final_data.get("mode")
+    if effective_mode is None:
+        effective_mode = "imported-only"
+
+    if effective_mode == "off":
+        return {"capture_state": {"status": "suppressed"}}
+
+    startup = startup_data if isinstance(startup_data, dict) else {}
+    final = final_data if isinstance(final_data, dict) else {}
+
+    startup_cs = startup.get("capture_state") if isinstance(startup.get("capture_state"), dict) else {}
+    final_cs = final.get("capture_state") if isinstance(final.get("capture_state"), dict) else {}
+    startup_status = startup_cs.get("status")
+    final_status = final_cs.get("status")
+
+    startup_usable = bool(startup) and startup_status != "suppressed"
+    startup_warnings = (
+        [str(w) for w in (startup_cs.get("warnings") or ()) if isinstance(w, str) and w]
+        if startup_usable
+        else []
+    )
+    final_warnings = [
+        str(w) for w in (final_cs.get("warnings") or ()) if isinstance(w, str) and w
+    ]
+
+    if effective_mode in ("imported-only", "imported-transitive"):
+        startup_imported: Dict[str, Dict[str, Any]] = {}
+        if startup_usable:
+            for rec in startup.get("records") or ():
+                if not isinstance(rec, dict) or rec.get("source") != "imported":
+                    continue
+                name = rec.get("name")
+                if not isinstance(name, str) or not name:
+                    continue
+                norm = normalize_package_name(name)
+                startup_imported[norm] = rec
+
+        final_imported: Dict[str, Dict[str, Any]] = {}
+        for rec in final.get("records") or ():
+            if not isinstance(rec, dict) or rec.get("source") != "imported":
+                continue
+            name = rec.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            norm = normalize_package_name(name)
+            final_imported[norm] = rec
+
+        merged_imported: List[Dict[str, Any]] = []
+        version_warnings: List[str] = []
+        version_changed = False
+
+        for norm_key in sorted(set(startup_imported.keys()) | set(final_imported.keys())):
+            s_rec = startup_imported.get(norm_key)
+            f_rec = final_imported.get(norm_key)
+            if s_rec is not None and f_rec is None:
+                rec_copy = _copy_package_record(s_rec)
+                rec_copy["source"] = "imported"
+                rec_copy["observed_at"] = "startup"
+                merged_imported.append(rec_copy)
+            elif s_rec is None and f_rec is not None:
+                rec_copy = _copy_package_record(f_rec)
+                rec_copy["source"] = "imported"
+                rec_copy["observed_at"] = "final"
+                merged_imported.append(rec_copy)
+            elif s_rec is not None and f_rec is not None:
+                rec_copy = _copy_package_record(f_rec)
+                rec_copy["source"] = "imported"
+                rec_copy["observed_at"] = "startup_and_final"
+                s_names = s_rec.get("import_names")
+                f_names = f_rec.get("import_names")
+                if s_names is None and f_names is None:
+                    rec_copy["import_names"] = None
+                else:
+                    combined_names: Set[str] = set()
+                    for seq in (s_names, f_names):
+                        if isinstance(seq, list):
+                            combined_names.update(n for n in seq if isinstance(n, str) and n)
+                    rec_copy["import_names"] = sorted(combined_names)
+                s_ver = s_rec.get("version")
+                f_ver = f_rec.get("version")
+                if s_ver != f_ver:
+                    version_changed = True
+                    version_warnings.append(
+                        f"Package '{rec_copy['name']}' version changed during run: "
+                        f"{s_ver or 'unknown'} -> {f_ver or 'unknown'}"
+                    )
+                merged_imported.append(rec_copy)
+
+        # Merge non-transitive unresolved entries by (module, reason), discarding
+        # prior transitive unresolved entries so fresh closure avoids duplicates.
+        non_trans_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        discarded_transitive_warnings: Set[str] = set()
+
+        def _ingest_unresolved(raw_list: Any, default_obs: str) -> None:
+            if not isinstance(raw_list, list):
+                return
+            for raw_entry in raw_list:
+                cleaned = _normalize_unresolved_entry(
+                    raw_entry, default_observed_at=default_obs
+                )
+                if cleaned is None:
+                    continue
+                if cleaned["reason"] in _TRANSITIVE_UNRESOLVED_REASONS:
+                    discarded_transitive_warnings.add(_format_unresolved_warning(cleaned))
+                    continue
+                key = (cleaned["module"], cleaned["reason"])
+                existing = non_trans_by_key.get(key)
+                if existing is None:
+                    non_trans_by_key[key] = cleaned
+                else:
+                    existing["candidates"] = sorted(
+                        set(existing["candidates"]) | set(cleaned["candidates"])
+                    )
+                    existing["observed_at"] = _combine_observed_at(
+                        existing.get("observed_at"), cleaned.get("observed_at")
+                    )
+                    if cleaned.get("detail"):
+                        existing["detail"] = cleaned["detail"]
+
+        if startup_usable:
+            _ingest_unresolved(startup.get("unresolved"), "startup")
+        _ingest_unresolved(final.get("unresolved"), "final")
+
+        all_records: List[Dict[str, Any]] = list(merged_imported)
+        all_unresolved: List[Dict[str, Any]] = list(non_trans_by_key.values())
+        transitive_error_detail: Optional[str] = None
+        transitive_error_warnings: List[str] = []
+
+        if effective_mode == "imported-transitive":
+            try:
+                index = _get_distribution_index(use_cache=True)
+                trans_records, trans_unresolved = _resolve_transitive_closure(
+                    merged_imported, index
+                )
+                for rec in trans_records:
+                    rec_copy = _copy_package_record(rec)
+                    rec_copy["import_names"] = None
+                    rec_copy["observed_at"] = None
+                    all_records.append(rec_copy)
+                for entry in trans_unresolved:
+                    cleaned = _normalize_unresolved_entry(entry, default_observed_at="final")
+                    if cleaned is not None:
+                        cleaned["observed_at"] = "final"
+                        all_unresolved.append(cleaned)
+            except Exception as exc:
+                transitive_error_detail = (
+                    f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+                )
+                transitive_error_warnings.append(
+                    f"Package transitive resolution error: {transitive_error_detail}"
+                )
+
+        all_records.sort(key=lambda x: (x.get("name") or "").lower())
+        all_unresolved.sort(
+            key=lambda item: (
+                item["module"].lower(),
+                item["reason"].lower(),
+                (item.get("detail") or "").lower(),
+            )
+        )
+
+        local_set: Set[str] = set()
+        if startup_usable:
+            for mod in startup.get("local_modules") or ():
+                if isinstance(mod, str) and mod:
+                    local_set.add(mod)
+        for mod in final.get("local_modules") or ():
+            if isinstance(mod, str) and mod:
+                local_set.add(mod)
+
+        combined_warnings: List[str] = []
+        for w in startup_warnings + final_warnings:
+            if w not in discarded_transitive_warnings:
+                combined_warnings.append(w)
+        for entry in all_unresolved:
+            combined_warnings.append(_format_unresolved_warning(entry))
+        combined_warnings.extend(version_warnings)
+        combined_warnings.extend(transitive_error_warnings)
+
+        details: List[str] = []
+        for cand_detail in (
+            startup_cs.get("detail") if startup_usable else None,
+            final_cs.get("detail"),
+            transitive_error_detail,
+        ):
+            if isinstance(cand_detail, str) and cand_detail and cand_detail not in details:
+                details.append(cand_detail)
+        merged_detail = "; ".join(details) if details else None
+
+        is_partial = (
+            bool(all_unresolved)
+            or (startup_usable and startup_status in ("partial", "failed"))
+            or (final_status in ("partial", "failed"))
+            or version_changed
+            or bool(transitive_error_detail)
+        )
+        merged_status = "partial" if is_partial else "complete"
+
+        return {
+            "mode": effective_mode,
+            "snapshot_stage": "final",
+            "records": all_records,
+            "unresolved": all_unresolved,
+            "local_modules": sorted(local_set),
+            "coverage_notes": _coverage_notes_for(effective_mode, "final"),
+            "capture_state": _build_capture_state(
+                merged_status, detail=merged_detail, warnings=combined_warnings
+            ),
+        }
+
+    # Non-import modes: top-level-installed and full-environment.
+    non_import_records: List[Dict[str, Any]] = []
+    for rec in final.get("records") or ():
+        if not isinstance(rec, dict):
+            continue
+        name = rec.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        rec_copy = _copy_package_record(rec)
+        if rec_copy.get("source") != "imported":
+            rec_copy["import_names"] = None
+            rec_copy["observed_at"] = None
+        non_import_records.append(rec_copy)
+    non_import_records.sort(key=lambda x: (x.get("name") or "").lower())
+
+    non_import_unresolved: List[Dict[str, Any]] = []
+    for entry in final.get("unresolved") or ():
+        cleaned = _normalize_unresolved_entry(entry, default_observed_at="final")
+        if cleaned is not None:
+            non_import_unresolved.append(cleaned)
+    non_import_unresolved.sort(
+        key=lambda item: (
+            item["module"].lower(),
+            item["reason"].lower(),
+            (item.get("detail") or "").lower(),
+        )
+    )
+
+    non_import_warnings = list(startup_warnings) + list(final_warnings)
+    for entry in non_import_unresolved:
+        non_import_warnings.append(_format_unresolved_warning(entry))
+
+    non_import_details: List[str] = []
+    for cand_detail in (
+        startup_cs.get("detail") if startup_usable else None,
+        final_cs.get("detail"),
+    ):
+        if isinstance(cand_detail, str) and cand_detail and cand_detail not in non_import_details:
+            non_import_details.append(cand_detail)
+    non_import_detail = "; ".join(non_import_details) if non_import_details else None
+
+    non_import_partial = (
+        bool(non_import_unresolved)
+        or (startup_usable and (startup_status in ("partial", "failed") or bool(startup_warnings)))
+        or (final_status in ("partial", "failed"))
+    )
+    non_import_status = "partial" if non_import_partial else "complete"
+
+    return {
+        "mode": effective_mode,
+        "snapshot_stage": "final",
+        "records": non_import_records,
+        "unresolved": non_import_unresolved,
+        "local_modules": sorted(
+            {m for m in (final.get("local_modules") or ()) if isinstance(m, str) and m}
+        ),
+        "coverage_notes": _dedupe_strings(
+            [str(n) for n in (final.get("coverage_notes") or ()) if isinstance(n, str) and n]
+        ),
+        "capture_state": _build_capture_state(
+            non_import_status, detail=non_import_detail, warnings=non_import_warnings
+        ),
+    }
+
+
+def get_packages(
+    config: Dict[str, Any],
+    *,
+    stage: str = "single",
+    include_transitive: bool = True,
+) -> Dict[str, Any]:
     """Capture installed Python packages via ``importlib.metadata``.
 
     Modes:
@@ -1407,40 +1860,15 @@ def get_packages(config: Dict[str, Any]) -> Dict[str, Any]:
     - ``top-level-installed``: Installed distributions not required by other distributions.
     - ``full-environment``: Every distribution in the environment.
 
-    Emits only keys and non-null types accepted by the current
-    ``schemas/manifest.schema.json`` until child plan ``ijipnx`` extends the schema.
-
     Args:
         config: Resolved pubrun configuration.
+        stage: Lifecycle stage tag (``"startup"``, ``"final"``, or ``"single"``).
+        include_transitive: When ``False`` in ``imported-transitive`` mode,
+            resolve imported distributions only so ``merge_package_snapshots`` can
+            compute the recursive transitive closure once over the merged set.
     """
-    snapshot = resolve_packages_snapshot(config)
-    if snapshot.get("capture_state", {}).get("status") == "suppressed":
-        return snapshot
-
-    schema_records: List[Dict[str, Any]] = []
-    for rec in snapshot.get("records") or []:
-        name = rec.get("name")
-        if not isinstance(name, str) or not name:
-            continue
-        cleaned: Dict[str, Any] = {}
-        for key in _SCHEMA_PACKAGE_RECORD_KEYS:
-            if key in rec:
-                cleaned[key] = rec[key]
-        if "version" not in cleaned:
-            cleaned["version"] = None
-        schema_records.append(cleaned)
-
-    raw_state = snapshot.get("capture_state") or {"status": "partial"}
-    capture_state: Dict[str, Any] = {"status": raw_state.get("status", "partial")}
-    raw_detail = raw_state.get("detail")
-    if isinstance(raw_detail, str) and raw_detail:
-        capture_state["detail"] = raw_detail
-    raw_warnings = raw_state.get("warnings")
-    if isinstance(raw_warnings, list) and raw_warnings:
-        capture_state["warnings"] = [str(w) for w in raw_warnings]
-
-    return {
-        "mode": snapshot["mode"],
-        "records": sorted(schema_records, key=lambda x: (x.get("name") or "").lower()),
-        "capture_state": capture_state,
-    }
+    return resolve_packages_snapshot(
+        config,
+        stage=stage,
+        include_transitive=include_transitive,
+    )

@@ -96,34 +96,34 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Additive manifest schema and snapshot merge logic
 
-- [ ] E-01 Extend `schemas/manifest.schema.json` additively under `$defs.package_record` and `$defs.packages_section` (plus new `$defs.unresolved_package_record`) without modifying any existing `required` arrays.
+- [x] E-01 Extend `schemas/manifest.schema.json` additively under `$defs.package_record` and `$defs.packages_section` (plus new `$defs.unresolved_package_record`) without modifying any existing `required` arrays.
   - Depends on: none
   - Expected outcome: `$defs.package_record` adds optional `import_names` (`array` of strings or `null`) and `observed_at` (`enum: ["startup", "final", "startup_and_final", null]`). `$defs.packages_section` adds optional `snapshot_stage` (`enum: ["startup", "final", "single", null]`), `unresolved` (`array` of `$defs.unresolved_package_record`), `local_modules` (`array` of strings), and `coverage_notes` (`array` of strings). `$defs.unresolved_package_record` enforces `additionalProperties: false` and `required: ["module", "reason"]`. `schemas/manifest.schema.json` passes `jsonschema` meta-schema validation, accepts legacy v1.0 manifests and new manifests, and rejects invalid enum values or unknown properties.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Add stage-aware `get_packages(config, *, stage="single")` (removing the temporary schema-compatibility field strip from prerequisite child plans `uil22c` and `fdqkrz`) and `merge_package_snapshots(startup_data, final_data, config=None)` in `src/pubrun/capture/packages.py`.
+- [x] E-02 Add stage-aware `get_packages(config, *, stage="single")` (removing the temporary schema-compatibility field strip from prerequisite child plans `uil22c` and `fdqkrz`) and `merge_package_snapshots(startup_data, final_data, config=None)` in `src/pubrun/capture/packages.py`.
   - Depends on: E-01
   - Expected outcome: `resolve_packages_snapshot(config, *, stage="single", include_transitive=True)` and `get_packages(config, *, stage="single")` emit the additive schema-valid fields cleanly (`snapshot_stage`, `import_names`, `observed_at`, `unresolved`, `local_modules`, `coverage_notes`) while honoring existing schema invariants (`mode == "off"` returns `{"capture_state": {"status": "suppressed"}}` with `"mode"` omitted; `capture_state` omits `"detail"` when absent). `merge_package_snapshots()` does not mutate its inputs, handles `mode == "off"`, suppressed or missing startup snapshots, and mid-run mode switches cleanly, retains startup-only removed modules with `observed_at = "startup"`, marks late imports `observed_at = "final"`, merges persistent modules as `observed_at = "startup_and_final"` with unioned `import_names`, recomputes recursive transitive closure once over the merged imported set in `imported-transitive` mode without duplicating transitive `unresolved` entries, and attaches factual `coverage_notes`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Tracker lifecycle wiring and downstream consumer updates
 
-- [ ] E-03 Wire startup package snapshotting (`stage="startup"`) in `src/pubrun/tracker.py::Run._bootstrap_engines` and finalization refresh plus merge (`stage="final"`) in `src/pubrun/tracker.py::Run._finalize_state`, preserving crash safety, `mode = "off"`, mid-run `_merge_and_migrate()` config changes, and compatibility with sibling pending Sets.
+- [x] E-03 Wire startup package snapshotting (`stage="startup"`) in `src/pubrun/tracker.py::Run._bootstrap_engines` and finalization refresh plus merge (`stage="final"`) in `src/pubrun/tracker.py::Run._finalize_state`, preserving crash safety, `mode = "off"`, mid-run `_merge_and_migrate()` config changes, and compatibility with sibling pending Sets.
   - Depends on: E-02
   - Expected outcome: `Run.__init__` initializes `self._startup_packages_data = {}` before `mkdir()` so every ghost-mode and normal path defines the attribute. `Run._bootstrap_engines` captures the startup snapshot (`stage="startup"`, installing no global import hook) while preserving per-engine bootstrap isolation if `cap-isolation` (`ed0yds`) is present. `Run._finalize_state` refreshes packages against current `sys.modules` and merges with `self._startup_packages_data` after latching `_finalized` (and after `t2` / before `_mark_finalization_end()` if `timing-acc` `e1fwy2` is present) inside a protective `try/except`: a failure copies `self._startup_packages_data` without mutating it, degrades `packages.capture_state` to schema-valid `"partial"` (or `"failed"` if startup itself had failed) with a non-empty string `detail` and warning, calls `_record_capture_error` if present, and never crashes finalization or host exit.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Update `src/pubrun/report/methods.py`, `src/pubrun/report/diagnostics.py`, and `src/pubrun/tui/widgets/details.py` to use Python Enhancement Proposal (PEP) 503 normalized highlight matching, guard `None` versions and names everywhere, and surface unresolved package diagnostics cleanly.
+- [x] E-04 Update `src/pubrun/report/methods.py`, `src/pubrun/report/diagnostics.py`, and `src/pubrun/tui/widgets/details.py` to use Python Enhancement Proposal (PEP) 503 normalized highlight matching, guard `None` versions and names everywhere, and surface unresolved package diagnostics cleanly.
   - Depends on: E-03
   - Expected outcome: `src/pubrun/report/methods.py::extract_highlighted_packages` normalizes candidate names via `normalize_package_name`, guards `name is None` and `version is None`, and avoids duplicate highlighted entries. `src/pubrun/report/diagnostics.py::print_report` guards `p.get("name") or "<unknown>"` and `p.get("version") or "unknown"` in both `section == "packages"` and `depth == "deep"` `[ Packages ]` blocks via a shared helper, prints an `Unresolved:` summary block under `[ Packages ]` and appends ` (N unresolved)` to the standard/deep `Packages` summary line only when `packages.unresolved` is non-empty, leaving existing output unchanged when `unresolved` is empty. `src/pubrun/tui/widgets/details.py::RunDetailsView.update_packages_pane` guards `pkg.get("name") or ""` and `pkg.get("version") or ""` through a pure filter/row helper testable even when `textual` is not installed.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Lifecycle and schema conformance tests
 
-- [ ] E-05 Create `tests/test_package_lifecycle.py` and extend `tests/test_manifest_schema.py` to verify late imports, startup truthfulness, removed startup modules, mid-run mode switches, `methods.md` late-import reflection, finalization error resilience, diagnostics/TUI null-version safety, and positive plus negative schema conformance.
+- [x] E-05 Create `tests/test_package_lifecycle.py` and extend `tests/test_manifest_schema.py` to verify late imports, startup truthfulness, removed startup modules, mid-run mode switches, `methods.md` late-import reflection, finalization error resilience, diagnostics/TUI null-version safety, and positive plus negative schema conformance.
   - Depends on: E-04
   - Expected outcome: `pytest tests/test_package_lifecycle.py tests/test_manifest_schema.py tests/test_package_resolution.py tests/test_package_transitive.py tests/test_capture_engines.py tests/test_edge_cases.py tests/test_new_features.py tests/test_tracker.py tests/test_reports.py tests/test_show_sections.py tests/test_methods_multi.py tests/test_tui.py tests/test_quality.py -v` exits 0 with all tests passing and deterministic non-skipped coverage for every new behavior.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -262,30 +262,30 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste `pytest tests/test_manifest_schema.py -v` output showing exit code 0, confirming the updated `schemas/manifest.schema.json` passes `check_schema`, validates startup, final, partial, `imported-transitive`, and legacy v1.0 manifests, and rejects invalid `snapshot_stage`, `observed_at`, `unresolved[].reason`, and unknown keys.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_manifest_schema.py -v --no-cov` exited 0 (`39 passed in 9.26s`). Passed `test_schema_is_valid_draft`, `test_startup_manifest_conforms_to_schema`, `test_full_manifest_conforms_to_schema`, `test_manifest_variants_conform_to_schema[packages-transitive]`, `test_packages_extended_fields_and_legacy_v1_conform`, and all 6 negative cases in `test_packages_schema_rejects_invalid_enums_and_unknown_keys` (`invalid-snapshot-stage`, `invalid-observed-at`, `invalid-unresolved-reason`, `unknown-section-key`, `unknown-record-key`, `unknown-unresolved-key`).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Paste `pytest tests/test_package_lifecycle.py -k "merge or removed or stage or transitive or mode_switch" -v` output showing exit code 0 (with non-zero collected tests), proving `get_packages()` emits the extended schema fields cleanly, `merge_package_snapshots()` does not mutate inputs, retains startup-only removed modules, tags `observed_at` accurately, handles mid-run mode switches and suppressed startup snapshots, deduplicates non-transitive `unresolved` entries, and recomputes transitive closure once over the merged imported set.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_package_lifecycle.py -k "merge or removed or stage or transitive or mode_switch" -v --no-cov` exited 0 (`4 passed, 8 deselected in 4.37s`): `test_stage_get_packages_emits_extended_schema_fields PASSED`, `test_merge_retains_removed_startup_module_and_no_input_mutation PASSED`, `test_merge_transitive_closure_once_and_unresolved_dedup PASSED`, `test_mode_switch_mid_run_and_suppressed_startup_merge PASSED`.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Paste `pytest tests/test_package_lifecycle.py -k "late_import or startup_truthful or no_import_hook or finalization_error or mode_off" -v` output showing exit code 0 (with non-zero collected tests), proving a script running `import pubrun` before importing a synthetic distribution records it in the final manifest while keeping the startup snapshot truthful, installing no global import hook, and surviving finalization metadata errors with schema-valid degraded `capture_state`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_package_lifecycle.py -k "late_import or startup_truthful or no_import_hook or finalization_error or mode_off" -v --no-cov` exited 0 (`5 passed, 7 deselected in 3.29s`): `test_one_import_late_import_and_methods_highlight_subprocess PASSED`, `test_startup_truthful_before_stop_and_final_after_stop PASSED`, `test_no_import_hook_and_transient_unload_coverage_note PASSED`, `test_finalization_error_resilience_preserves_startup_snapshot PASSED`, `test_mode_off_stays_suppressed_at_startup_and_finalization PASSED`.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Paste `pytest tests/test_reports.py tests/test_show_sections.py tests/test_methods_multi.py tests/test_tui.py tests/test_package_lifecycle.py -k "methods or diagnostics or show or tui or null_version" -v` output showing exit code 0 (with non-zero collected tests), confirming PEP 503 highlight matching in `methods.py`, null-version and `unresolved` rendering in both `section == "packages"` and `depth == "deep"` of `diagnostics.py`, and non-skipped TUI null-version filter safety.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_reports.py tests/test_show_sections.py tests/test_methods_multi.py tests/test_tui.py tests/test_package_lifecycle.py -k "methods or diagnostics or show or tui or null_version" -v --no-cov` exited 0 (`41 passed, 53 deselected in 4.56s`), including `test_one_import_late_import_and_methods_highlight_subprocess PASSED`, `test_methods_pep503_highlight_matching_and_null_version PASSED`, `test_diagnostics_show_null_version_and_unresolved_rendering PASSED`, and `test_tui_null_version_filter_rows_and_pilot PASSED`.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Paste complete `pytest tests/test_package_lifecycle.py tests/test_manifest_schema.py tests/test_package_resolution.py tests/test_package_transitive.py tests/test_capture_engines.py tests/test_edge_cases.py tests/test_new_features.py tests/test_tracker.py tests/test_reports.py tests/test_show_sections.py tests/test_methods_multi.py tests/test_tui.py tests/test_quality.py -v` runner output showing exit code 0.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_package_lifecycle.py tests/test_manifest_schema.py tests/test_package_resolution.py tests/test_package_transitive.py tests/test_capture_engines.py tests/test_edge_cases.py tests/test_new_features.py tests/test_tracker.py tests/test_reports.py tests/test_show_sections.py tests/test_methods_multi.py tests/test_tui.py tests/test_quality.py -v --no-cov` exited 0 (`298 passed in 34.74s`; 0 failed, 0 skipped). Full `aw suite` also ran (`1286 passed, 1 failed in 132.10s`, where the sole failure is the pre-existing xdist-only `TestIsSameProcess.test_expected_script_matches` tracked by open backlog item `12rcu8`; passing standalone in `0.03s`).
+  - Result: pass
 
 ## Approval and execution gate
 

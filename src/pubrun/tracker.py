@@ -1,3 +1,5 @@
+import copy
+import inspect
 import json
 import logging
 import os
@@ -22,11 +24,47 @@ from pubrun.events import EventStream
 from pubrun.capture.resources import ResourceWatcher
 from pubrun.capture.process import get_process_info
 from pubrun.capture.python_runtime import get_python_runtime
-from pubrun.capture.packages import get_packages
+from pubrun.capture.packages import get_packages, merge_package_snapshots
 from pubrun.capture.environment import get_environment
 from pubrun.capture.git import get_git
 from pubrun.capture.host import get_host
 from pubrun.capture.signals import SignalExitCapture
+
+
+_REAL_GET_PACKAGES = get_packages
+
+
+def _call_get_packages(
+    config: Dict[str, Any],
+    *,
+    stage: str,
+    include_transitive: bool = True,
+) -> Dict[str, Any]:
+    """Invoke ``get_packages`` while tolerating test mocks with narrower signatures."""
+    fn = get_packages
+    if fn is _REAL_GET_PACKAGES:
+        if include_transitive:
+            return fn(config, stage=stage)
+        return fn(config, stage=stage, include_transitive=False)
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        try:
+            if include_transitive:
+                return fn(config, stage=stage)
+            return fn(config, stage=stage, include_transitive=False)
+        except TypeError:
+            try:
+                return fn(config, stage=stage)
+            except TypeError:
+                return fn(config)
+    has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+    call_kwargs: Dict[str, Any] = {}
+    if has_var_kw or "stage" in params:
+        call_kwargs["stage"] = stage
+    if not include_transitive and (has_var_kw or "include_transitive" in params):
+        call_kwargs["include_transitive"] = False
+    return fn(config, **call_kwargs)
 
 
 # Maximum number of structured capture-error records retained per Run manifest.
@@ -126,6 +164,7 @@ class Run:
         self.process_data: Dict[str, Any] = {}
         self.python_data: Dict[str, Any] = {}
         self.packages_data: Dict[str, Any] = {}
+        self._startup_packages_data: Dict[str, Any] = {}
         self.environment_data: Dict[str, Any] = {}
         self.hardware_data: Dict[str, Any] = {}
         self.host_data: Dict[str, Any] = {}
@@ -545,11 +584,14 @@ class Run:
             self.python_data = {"capture_state": {"status": "failed", "detail": detail}}
 
         try:
-            self.packages_data = get_packages(self.config)
+            self._startup_packages_data = _call_get_packages(self.config, stage="startup")
+            self.packages_data = self._startup_packages_data
             self._check_section_failed("packages", self.packages_data)
         except Exception as exc:
             detail = self._record_capture_error("packages", "bootstrap", exc)
-            self.packages_data = {"capture_state": {"status": "failed", "detail": detail}}
+            failed_pkg = {"capture_state": {"status": "failed", "detail": detail}}
+            self._startup_packages_data = failed_pkg
+            self.packages_data = failed_pkg
 
         try:
             self.environment_data = get_environment(self.config)
@@ -1101,9 +1143,88 @@ class Run:
         # Execute every teardown step independently.
         self._rollback_owned_hooks(stage="finalization")
 
+        # Refresh and merge packages against current sys.modules after workload end
+        # t2 is latched so late imports are captured without inflating workload time.
+        self._refresh_packages_at_finalization()
+
         # Stamp initial pre-manifest finalization end anchor t3 so direct callers
         # of _finalize_state() have complete finalization timing before freezing.
         self._mark_finalization_end()
+
+    def _refresh_packages_at_finalization(self) -> None:
+        """Refresh and merge startup/finalization package snapshots safely."""
+        try:
+            pkg_mode = (
+                (self.config.get("capture") or {})
+                .get("packages", {})
+                .get("mode", "imported-only")
+            )
+            if pkg_mode == "off":
+                self.packages_data = {"capture_state": {"status": "suppressed"}}
+                return
+            final_pkg = _call_get_packages(
+                self.config,
+                stage="final",
+                include_transitive=(pkg_mode != "imported-transitive"),
+            )
+            self.packages_data = merge_package_snapshots(
+                getattr(self, "_startup_packages_data", None),
+                final_pkg,
+                config=self.config,
+            )
+            self._check_section_failed("packages", self.packages_data)
+        except Exception as pkg_err:
+            if hasattr(self, "_record_capture_error"):
+                detail = self._record_capture_error("packages", "finalization", pkg_err)
+            else:
+                from pubrun.capture.redaction import format_safe_error_detail
+                detail = format_safe_error_detail(pkg_err, getattr(self, "config", None))
+                logging.getLogger("pubrun").warning(
+                    "pubrun: packages capture failed (finalization): %s", detail
+                )
+
+            raw_startup = getattr(self, "_startup_packages_data", None)
+            degraded: Dict[str, Any] = {}
+            startup_cs: Dict[str, Any] = {}
+            if isinstance(raw_startup, dict) and raw_startup:
+                for key in ("mode", "snapshot_stage"):
+                    if key in raw_startup:
+                        degraded[key] = raw_startup[key]
+                for list_key in ("records", "unresolved", "local_modules", "coverage_notes"):
+                    val = raw_startup.get(list_key)
+                    if isinstance(val, list):
+                        degraded[list_key] = copy.deepcopy(val)
+                raw_cs = raw_startup.get("capture_state")
+                if isinstance(raw_cs, dict):
+                    startup_cs = raw_cs
+
+            startup_status = startup_cs.get("status")
+            final_status = "failed" if startup_status == "failed" else "partial"
+
+            warnings: list = []
+            seen_w: set = set()
+            for w in startup_cs.get("warnings") or ():
+                w_str = str(w)
+                if w_str and w_str not in seen_w:
+                    seen_w.add(w_str)
+                    warnings.append(w_str)
+            safe_detail = (
+                detail
+                if isinstance(detail, str) and detail
+                else "Package finalization refresh failed"
+            )
+            fin_warn = f"Finalization package refresh failed: {safe_detail}"
+            if fin_warn not in seen_w:
+                warnings.append(fin_warn)
+
+            cs: Dict[str, Any] = {
+                "status": final_status,
+                "detail": safe_detail,
+            }
+            if warnings:
+                cs["warnings"] = warnings
+            degraded["capture_state"] = cs
+            self.packages_data = degraded
 
     def _mark_finalization_end(self) -> None:
         """Record or refresh pre-manifest finalization anchor t3 until timing is frozen."""

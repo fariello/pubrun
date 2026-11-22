@@ -595,7 +595,7 @@ def test_transitive_missing_applicable_dependency_marks_partial(tmp_path, monkey
     assert not any(u["module"] == "synth-false-missing" for u in snap["unresolved"])
     assert not any(u["module"] == "synth-extra-missing" for u in snap["unresolved"])
 
-    # get_packages() surfaces partial status + warning and remains schema-valid.
+    # get_packages() surfaces partial status, warning, and structured unresolved entries.
     pkg_out = pkgs.get_packages(
         {"capture": {"packages": {"mode": "imported-transitive"}}}
     )
@@ -604,7 +604,11 @@ def test_transitive_missing_applicable_dependency_marks_partial(tmp_path, monkey
         "synth-missing-dep" in w and "missing_transitive_dependency" in w
         for w in pkg_out["capture_state"].get("warnings", [])
     )
-    assert "unresolved" not in pkg_out
+    assert any(
+        u["module"] == "synth-missing-dep"
+        and u["reason"] == "missing_transitive_dependency"
+        for u in pkg_out["unresolved"]
+    )
 
 
 def test_transitive_unparseable_marker_and_requirement_mark_partial(

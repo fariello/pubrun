@@ -7,15 +7,70 @@ import json
 import time
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
-from textual.app import ComposeResult
-from textual.containers import Vertical, Horizontal, ScrollableContainer
-from textual.widgets import Static, Label, DataTable, TabbedContent, TabPane, Input
-from rich.text import Text
-from rich.table import Table
+try:
+    from textual.app import ComposeResult
+    from textual.containers import Vertical, Horizontal, ScrollableContainer
+    from textual.widgets import Static, Label, DataTable, TabbedContent, TabPane, Input
+    from rich.text import Text
+    from rich.table import Table
+except ImportError:
+    ComposeResult = Any  # type: ignore[assignment,misc]
+    Vertical = object  # type: ignore[assignment,misc]
+    Horizontal = object  # type: ignore[assignment,misc]
+    ScrollableContainer = object  # type: ignore[assignment,misc]
+    Static = object  # type: ignore[assignment,misc]
+    Label = object  # type: ignore[assignment,misc]
+    DataTable = object  # type: ignore[assignment,misc]
+    TabbedContent = object  # type: ignore[assignment,misc]
+    TabPane = object  # type: ignore[assignment,misc]
+    Input = object  # type: ignore[assignment,misc]
+    Text = Any  # type: ignore[assignment,misc]
+    Table = Any  # type: ignore[assignment,misc]
 
 from pubrun.status import RunInfo, STATUS_RUNNING, _format_bytes, _format_elapsed, _format_timestamp
+
+
+def _filter_package_rows(
+    records: Any,
+    filter_text: str = "",
+) -> List[Tuple[str, str, str]]:
+    """Filter manifest package records into ``(name, version, location_label)`` rows.
+
+    Pure helper with no ``textual`` dependency so null-version filtering is
+    directly testable even when optional TUI packages are not installed.
+    """
+    if not isinstance(records, list):
+        return []
+    needle = (filter_text or "").lower()
+    rows: List[Tuple[str, str, str]] = []
+    for pkg in records:
+        if not isinstance(pkg, dict):
+            continue
+        raw_name = pkg.get("name")
+        name = raw_name if isinstance(raw_name, str) else ("" if raw_name is None else str(raw_name))
+        raw_version = pkg.get("version")
+        version = (
+            raw_version
+            if isinstance(raw_version, str)
+            else ("" if raw_version is None else str(raw_version))
+        )
+        raw_location = pkg.get("location")
+        location = (
+            raw_location
+            if isinstance(raw_location, str)
+            else ("" if raw_location is None else str(raw_location))
+        )
+        editable = pkg.get("editable")
+        editable_str = "Editable" if editable else "Installed"
+
+        if needle and needle not in name.lower() and needle not in version.lower():
+            continue
+
+        loc_str = f"{editable_str} ({location})" if location else editable_str
+        rows.append((name, version, loc_str))
+    return rows
 
 class RunDetailsView(Vertical):
     """Component to display all metadata groups for a single selected run."""
@@ -156,24 +211,13 @@ class RunDetailsView(Vertical):
         if not self.run_info or not self.run_info.manifest:
             return
 
-        packages_sec = self.run_info.manifest.get("packages", {})
-        records = packages_sec.get("records", [])
+        packages_sec = self.run_info.manifest.get("packages") or {}
+        records = packages_sec.get("records") or []
 
-        filter_text = filter_text.lower()
-        row_idx = 0
-        for pkg in records:
-            name = pkg.get("name", "")
-            version = pkg.get("version", "")
-            location = pkg.get("location") or ""
-            editable = pkg.get("editable")
-            editable_str = "Editable" if editable else "Installed"
-
-            if filter_text and filter_text not in name.lower() and filter_text not in version.lower():
-                continue
-
-            loc_str = f"{editable_str} ({location})" if location else editable_str
+        for row_idx, (name, version, loc_str) in enumerate(
+            _filter_package_rows(records, filter_text)
+        ):
             table.add_row(name, version, loc_str, key=str(row_idx))
-            row_idx += 1
 
     def update_subprocesses_pane(self) -> None:
         """Repopulate the child subprocess execution table."""
@@ -189,12 +233,12 @@ class RunDetailsView(Vertical):
             argv = sub.get("argv", [])
             cmd = " ".join(argv)
             start_time = _format_timestamp(sub.get("started_at_utc"))
-            
+
             # Elapsed
             start_val = sub.get("started_at_utc")
             end_val = sub.get("ended_at_utc")
             elapsed = _format_elapsed(end_val - start_val) if (start_val and end_val) else "-"
-            
+
             exit_code = str(sub.get("exit_code")) if sub.get("exit_code") is not None else "Running"
 
             table.add_row(cmd, start_time, elapsed, exit_code, key=str(row_idx))

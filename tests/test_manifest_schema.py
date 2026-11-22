@@ -554,3 +554,216 @@ def test_timing_and_subprocess_schema_constraints():
             },
             subproc_schema,
         )
+
+
+def _packages_subschema(schema):
+    """Extract a standalone schema for `$defs.packages_section`."""
+    defs = schema.get("$defs", schema.get("definitions", {}))
+    assert "packages_section" in defs, "packages_section missing from schema $defs"
+    sub = dict(defs["packages_section"])
+    sub["$defs"] = defs
+    return sub
+
+
+def test_packages_extended_fields_and_legacy_v1_conform():
+    """$defs.packages_section accepts startup, finalized, imported-transitive, partial,
+    and legacy v1.0 package shapes while keeping existing required fields unchanged."""
+    schema = _schema()
+    pkg_schema = _packages_subschema(schema)
+
+    # Legacy v1.0 manifest section without any of the new additive fields.
+    jsonschema.validate(
+        {
+            "mode": "imported-only",
+            "records": [
+                {"name": "numpy", "version": "1.26.4", "location": "/site", "editable": False, "source": "imported"},
+                {"name": "bare-pkg", "version": None},
+            ],
+            "capture_state": {"status": "complete"},
+        },
+        pkg_schema,
+    )
+
+    # Startup snapshot with observed_at="startup" and snapshot_stage="startup".
+    jsonschema.validate(
+        {
+            "mode": "imported-only",
+            "snapshot_stage": "startup",
+            "records": [
+                {
+                    "name": "pubrun",
+                    "version": "1.0.0",
+                    "location": "/src",
+                    "editable": True,
+                    "source": "imported",
+                    "import_names": ["pubrun"],
+                    "observed_at": "startup",
+                }
+            ],
+            "unresolved": [],
+            "local_modules": ["helper"],
+            "coverage_notes": [],
+            "capture_state": {"status": "complete"},
+        },
+        pkg_schema,
+    )
+
+    # Finalized imported-transitive snapshot with all additive fields and partial state.
+    jsonschema.validate(
+        {
+            "mode": "imported-transitive",
+            "snapshot_stage": "final",
+            "records": [
+                {
+                    "name": "scikit-learn",
+                    "version": "1.5.0",
+                    "location": "/site",
+                    "editable": False,
+                    "source": "imported",
+                    "import_names": ["sklearn"],
+                    "observed_at": "final",
+                },
+                {
+                    "name": "numpy",
+                    "version": "1.26.4",
+                    "location": "/site",
+                    "editable": False,
+                    "source": "imported",
+                    "import_names": ["numpy"],
+                    "observed_at": "startup_and_final",
+                },
+                {
+                    "name": "scipy",
+                    "version": "1.13.0",
+                    "location": "/site",
+                    "editable": False,
+                    "source": "transitive",
+                    "required_by": ["scikit-learn"],
+                    "import_names": None,
+                    "observed_at": None,
+                },
+            ],
+            "unresolved": [
+                {
+                    "module": "ambig_mod",
+                    "reason": "ambiguous",
+                    "candidates": ["pkg-a", "pkg-b"],
+                    "observed_at": "startup_and_final",
+                    "detail": "matches multiple distributions",
+                },
+                {
+                    "module": "missing-dep",
+                    "reason": "missing_transitive_dependency",
+                    "candidates": [],
+                    "observed_at": "final",
+                    "detail": "required by scikit-learn",
+                },
+            ],
+            "local_modules": ["train_utils"],
+            "coverage_notes": [
+                "Package capture ran at startup and finalization without a global import hook."
+            ],
+            "capture_state": {
+                "status": "partial",
+                "detail": "some modules unresolved",
+                "warnings": ["missing-dep (missing_transitive_dependency): required by scikit-learn"],
+            },
+        },
+        pkg_schema,
+    )
+
+    # Suppressed mode omits "mode" cleanly.
+    jsonschema.validate({"capture_state": {"status": "suppressed"}}, pkg_schema)
+
+
+@pytest.mark.parametrize(
+    "bad_section",
+    [
+        pytest.param(
+            {
+                "mode": "imported-only",
+                "snapshot_stage": "midrun",
+                "records": [],
+                "capture_state": {"status": "complete"},
+            },
+            id="invalid-snapshot-stage",
+        ),
+        pytest.param(
+            {
+                "mode": "imported-only",
+                "snapshot_stage": "final",
+                "records": [
+                    {
+                        "name": "numpy",
+                        "version": "1.0.0",
+                        "observed_at": "middle",
+                    }
+                ],
+                "capture_state": {"status": "complete"},
+            },
+            id="invalid-observed-at",
+        ),
+        pytest.param(
+            {
+                "mode": "imported-only",
+                "snapshot_stage": "final",
+                "records": [],
+                "unresolved": [
+                    {
+                        "module": "foo",
+                        "reason": "invented_reason",
+                    }
+                ],
+                "capture_state": {"status": "partial"},
+            },
+            id="invalid-unresolved-reason",
+        ),
+        pytest.param(
+            {
+                "mode": "imported-only",
+                "snapshot_stage": "final",
+                "records": [],
+                "unexpected_section_key": True,
+                "capture_state": {"status": "complete"},
+            },
+            id="unknown-section-key",
+        ),
+        pytest.param(
+            {
+                "mode": "imported-only",
+                "snapshot_stage": "final",
+                "records": [
+                    {
+                        "name": "numpy",
+                        "version": "1.0.0",
+                        "unexpected_record_key": 123,
+                    }
+                ],
+                "capture_state": {"status": "complete"},
+            },
+            id="unknown-record-key",
+        ),
+        pytest.param(
+            {
+                "mode": "imported-only",
+                "snapshot_stage": "final",
+                "records": [],
+                "unresolved": [
+                    {
+                        "module": "foo",
+                        "reason": "ambiguous",
+                        "unexpected_unresolved_key": "nope",
+                    }
+                ],
+                "capture_state": {"status": "partial"},
+            },
+            id="unknown-unresolved-key",
+        ),
+    ],
+)
+def test_packages_schema_rejects_invalid_enums_and_unknown_keys(bad_section):
+    """Negative conformance checks: invalid enums and unknown extra keys must fail."""
+    schema = _schema()
+    pkg_schema = _packages_subschema(schema)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(bad_section, pkg_schema)

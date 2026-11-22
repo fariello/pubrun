@@ -950,6 +950,56 @@
                 }
             }
         },
+        "unresolved_package_record": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "module",
+                "reason"
+            ],
+            "properties": {
+                "module": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "reason": {
+                    "type": "string",
+                    "enum": [
+                        "ambiguous",
+                        "unmapped_site_package",
+                        "missing_metadata",
+                        "metadata_error",
+                        "missing_transitive_dependency",
+                        "unparseable_marker"
+                    ]
+                },
+                "candidates": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": []
+                },
+                "observed_at": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "startup",
+                        "final",
+                        "startup_and_final",
+                        null
+                    ]
+                },
+                "detail": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            }
+        },
         "package_record": {
             "type": "object",
             "additionalProperties": false,
@@ -994,6 +1044,29 @@
                         "type": "string"
                     },
                     "description": "In imported-transitive mode, the imported packages that require this (transitive) dependency."
+                },
+                "import_names": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Sorted list of observed import names mapped to this distribution when source is imported."
+                },
+                "observed_at": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "startup",
+                        "final",
+                        "startup_and_final",
+                        null
+                    ],
+                    "description": "Lifecycle stage(s) at which an imported distribution was observed."
                 }
             }
         },
@@ -1017,12 +1090,49 @@
                         null
                     ]
                 },
+                "snapshot_stage": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "enum": [
+                        "startup",
+                        "final",
+                        "single",
+                        null
+                    ],
+                    "description": "Capture stage for this package snapshot: startup, final (merged), or single (standalone)."
+                },
                 "records": {
                     "type": "array",
                     "items": {
                         "$ref": "#/$defs/package_record"
                     },
                     "default": []
+                },
+                "unresolved": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/unresolved_package_record"
+                    },
+                    "default": [],
+                    "description": "Modules or dependencies that could not be mapped cleanly to a unique installed distribution."
+                },
+                "local_modules": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [],
+                    "description": "Sorted list of loaded local-only top-level module names outside site-packages."
+                },
+                "coverage_notes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [],
+                    "description": "Factual notes describing capture coverage boundaries for this snapshot."
                 },
                 "capture_state": {
                     "$ref": "#/$defs/capture_state"

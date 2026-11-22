@@ -227,6 +227,74 @@ def _supports_unicode(stream) -> bool:
     except UnicodeEncodeError:
         return False
 
+
+def _print_packages_block(
+    manifest: Dict[str, Any],
+    use_color: bool,
+    *,
+    leading_newline: bool = False,
+) -> None:
+    """Render the ``[ Packages ]`` block and any ``unresolved`` summary cleanly."""
+    pkg_sec = _as_dict(manifest.get("packages"))
+    pkgs = _as_dict_list(pkg_sec.get("records"))
+    unresolved = _as_dict_list(pkg_sec.get("unresolved"))
+    pkg_status = _section_status(manifest, "packages")
+
+    blue = Colors.BLUE if use_color else ""
+    green = Colors.GREEN if use_color else ""
+    yellow = Colors.YELLOW if use_color else ""
+    rst = Colors.RESET if use_color else ""
+
+    prefix = "\n" if leading_newline else ""
+    print(f"{prefix}{blue}[ Packages ]{rst}")
+    if pkg_status == "failed":
+        detail = _bound_text(_section_detail(manifest, "packages"))
+        if detail:
+            print(f"  {yellow}(capture failed: {detail}){rst}")
+        else:
+            print(f"  {yellow}(capture failed){rst}")
+    elif not pkgs:
+        print("  (None captured)")
+
+    for i, p in enumerate(pkgs):
+        raw_name = p.get("name")
+        name = raw_name if isinstance(raw_name, str) and raw_name else "<unknown>"
+        raw_ver = p.get("version")
+        ver = str(raw_ver) if raw_ver not in (None, "") else "unknown"
+        pkg_str = f"{name}=={ver}"
+        display_len = len(pkg_str)
+        if use_color:
+            pkg_str = f"{green}{name}{rst}=={ver}"
+        print(pkg_str.ljust(30 + (len(pkg_str) - display_len)), end="")
+        if (i + 1) % 3 == 0:
+            print()
+    if len(pkgs) % 3 != 0:
+        print()
+
+    if unresolved:
+        print(f"  {yellow}Unresolved ({len(unresolved)}):{rst}")
+        for entry in unresolved:
+            raw_mod = entry.get("module")
+            mod = raw_mod if isinstance(raw_mod, str) and raw_mod else "<unknown>"
+            raw_reason = entry.get("reason")
+            reason = raw_reason if isinstance(raw_reason, str) and raw_reason else "unresolved"
+            raw_cands = entry.get("candidates")
+            cands = (
+                [str(c) for c in raw_cands if isinstance(c, str) and c]
+                if isinstance(raw_cands, list)
+                else []
+            )
+            if cands:
+                preview = ", ".join(cands[:5])
+                more = f" (+{len(cands) - 5} more)" if len(cands) > 5 else ""
+                print(f"    - {mod}: {reason} ({len(cands)} candidates: {preview}{more})")
+            else:
+                detail = _bound_text(entry.get("detail"))
+                if detail:
+                    print(f"    - {mod}: {reason} ({detail})")
+                else:
+                    print(f"    - {mod}: {reason}")
+
 def print_report(manifest_path: str, depth: str = "standard", section: Optional[str] = None,
                  utc: bool = False) -> None:
     """Print a human-readable diagnostic summary of a recorded run.
@@ -308,36 +376,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         return
 
     if section == "packages":
-        pkg_sec = _as_dict(manifest.get("packages"))
-        pkgs = _as_dict_list(pkg_sec.get("records"))
-        pkg_status = _section_status(manifest, "packages")
-        use_color = _has_color()
-        blue = Colors.BLUE if use_color else ""
-        green = Colors.GREEN if use_color else ""
-        yellow = Colors.YELLOW if use_color else ""
-        rst = Colors.RESET if use_color else ""
-
-        print(f"{blue}[ Packages ]{rst}")
-        if pkg_status == "failed":
-            detail = _bound_text(_section_detail(manifest, "packages"))
-            if detail:
-                print(f"  {yellow}(capture failed: {detail}){rst}")
-            else:
-                print(f"  {yellow}(capture failed){rst}")
-        elif not pkgs:
-            print("  (None captured)")
-        for i, p in enumerate(pkgs):
-            name = p.get("name")
-            ver = p.get("version", "unknown")
-            pkg_str = f"{name}=={ver}"
-            display_len = len(pkg_str)
-            if use_color:
-                pkg_str = f"{green}{name}{rst}=={ver}"
-            print(pkg_str.ljust(30 + (len(pkg_str) - display_len)), end="")
-            if (i + 1) % 3 == 0:
-                print()
-        if len(pkgs) % 3 != 0:
-            print()
+        _print_packages_block(manifest, _has_color(), leading_newline=False)
         return
 
     use_color = _has_color()
@@ -586,10 +625,12 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         else:
             print(f"{cyan}Git Commit{rst}  : Not found or un-tracked")
 
+    pkg_unresolved = _as_dict_list(_as_dict(manifest.get("packages")).get("unresolved"))
     if pkg_status == "failed":
         print(f"{cyan}Packages{rst}    : {yellow}capture failed{rst}")
     else:
-        print(f"{cyan}Packages{rst}    : {len(pkgs)} recorded")
+        unresolved_suffix = f" ({len(pkg_unresolved)} unresolved)" if pkg_unresolved else ""
+        print(f"{cyan}Packages{rst}    : {len(pkgs)} recorded{unresolved_suffix}")
 
     if env_status == "failed":
         print(f"{cyan}Env Vars{rst}    : {yellow}capture failed{rst}")
@@ -639,28 +680,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         else:
             print(f"  {green}{name}{rst}={val_obj}")
 
-    print(f"\n{blue}[ Packages ]{rst}")
-    if pkg_status == "failed":
-        detail = _bound_text(_section_detail(manifest, "packages"))
-        if detail:
-            print(f"  {yellow}(capture failed: {detail}){rst}")
-        else:
-            print(f"  {yellow}(capture failed){rst}")
-    elif not pkgs:
-        print("  (None captured)")
-
-    for i, p in enumerate(pkgs):
-        name = p.get("name")
-        ver = p.get("version", "unknown")
-        pkg_str = f"{name}=={ver}"
-        display_len = len(pkg_str)
-        if use_color:
-            pkg_str = f"{green}{name}{rst}=={ver}"
-        print(pkg_str.ljust(30 + (len(pkg_str) - display_len)), end="")
-        if (i + 1) % 3 == 0:
-            print()
-    if len(pkgs) % 3 != 0:
-        print()
+    _print_packages_block(manifest, use_color, leading_newline=True)
 
     subprocs = _as_dict_list(manifest.get("subprocesses"))
     print(f"\n{blue}[ Subprocesses ]{rst} ({len(subprocs)} executed)")
