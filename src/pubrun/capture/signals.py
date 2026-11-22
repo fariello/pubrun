@@ -69,43 +69,90 @@ class SignalExitCapture:
     Also wraps ``sys.excepthook`` to capture SystemExit codes.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         self._lock = threading.Lock()
+        self._config: Optional[Dict[str, Any]] = config
         self._signals_received: List[Dict[str, Any]] = []
         self._exit_code: Optional[int] = None
         self._exit_exception: Optional[str] = None
         self._installed = False
+        self._active = False
+        self._signals_unavailable = False
+        self._install_error: Optional[str] = None
         self._previous_handlers: Dict[int, Any] = {}
+        self._installed_handlers: Dict[int, Callable] = {}
         self._previous_excepthook: Optional[Callable] = None
+        self._installed_excepthook: Optional[Callable] = None
 
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
 
     def install(self) -> None:
-        """Install signal shims and excepthook wrapper.  Safe to call multiple times."""
+        """Install signal shims and excepthook wrapper transactionally.
+
+        Safe to call multiple times. On an unexpected setup error, rolls back
+        any already-registered signal handlers or excepthook and re-raises.
+        """
         if self._installed:
             return
+        self._install_error = None
+        self._signals_unavailable = False
+        self._active = True
+        try:
+            self._install_signal_handlers()
+            self._install_excepthook()
+        except Exception as e:
+            from pubrun.capture.redaction import format_safe_error_detail
+            self._active = False
+            self._installed = False
+            self._install_error = format_safe_error_detail(e, self._config)
+            try:
+                self._restore_signal_handlers()
+            except Exception:
+                pass
+            try:
+                self._restore_excepthook()
+            except Exception:
+                pass
+            raise
         self._installed = True
-        self._install_signal_handlers()
-        self._install_excepthook()
 
     def uninstall(self) -> None:
-        """Restore all original handlers.  Called during finalization."""
+        """Deactivate wrappers and restore still-owned handlers independently."""
         if not self._installed:
             return
+        self._active = False
         self._installed = False
-        self._restore_signal_handlers()
-        self._restore_excepthook()
+        try:
+            self._restore_signal_handlers()
+        except Exception:
+            pass
+        try:
+            self._restore_excepthook()
+        except Exception:
+            pass
 
     def get_records(self) -> Dict[str, Any]:
         """Return the captured signal/exit data for manifest inclusion."""
         with self._lock:
+            if self._install_error:
+                capture_state: Dict[str, Any] = {
+                    "status": "failed",
+                    "detail": self._install_error,
+                }
+            elif self._signals_unavailable:
+                capture_state = {
+                    "status": "partial",
+                    "detail": "signal handlers unavailable off main thread",
+                }
+            else:
+                capture_state = {"status": "complete"}
             return {
                 "signals_received": list(self._signals_received),
                 "exit_code": self._exit_code,
                 "exit_exception": self._exit_exception,
-                "capture_state": {"status": "complete"},
+                "capture_state": capture_state,
             }
 
     def record_exit_code(self, code: Optional[int]) -> None:
@@ -129,9 +176,11 @@ class SignalExitCapture:
 
             try:
                 previous = signal.getsignal(signum)
-                signal.signal(signum, self._make_handler(signum, previous))
-                # Only record the previous handler if signal.signal() succeeded.
+                shim = self._make_handler(signum, previous)
+                signal.signal(signum, shim)
+                # Only record the previous handler and shim if signal.signal() succeeded.
                 self._previous_handlers[signum] = previous
+                self._installed_handlers[signum] = shim
                 skipped_all = False
             except (OSError, ValueError):
                 # Cannot set handler (e.g. not main thread, or signal not
@@ -141,24 +190,40 @@ class SignalExitCapture:
         # If ALL signals were skipped (typically because we're not on the main
         # thread), emit a single warning so users know why signal data is missing.
         if skipped_all and not self._previous_handlers:
+            self._signals_unavailable = True
             logging.getLogger("pubrun").warning(
                 "pubrun: signal capture unavailable (not running on the main thread). "
                 "Signal and exit-code data will not be recorded for this run."
             )
 
     def _restore_signal_handlers(self) -> None:
-        """Put back the original handlers we displaced."""
-        for signum, handler in self._previous_handlers.items():
+        """Put back original handlers we displaced, only when still ours."""
+        for signum, previous in list(self._previous_handlers.items()):
             try:
-                signal.signal(signum, handler)
-            except (OSError, ValueError):
+                installed_shim = self._installed_handlers.get(signum)
+                if installed_shim is not None and signal.getsignal(signum) is installed_shim:
+                    signal.signal(signum, previous)
+            except Exception:
                 pass
         self._previous_handlers.clear()
+        self._installed_handlers.clear()
 
     def _make_handler(self, signum: int, previous_handler: Any) -> Callable:
         """Create a shim handler that records the signal, then chains."""
 
         def _handler(sig: int, frame: Any) -> Any:
+            if not self._active:
+                # Passive passthrough after uninstall: no recording, no
+                # _finalize_active_run(), and never reinstall _handler on SIG_DFL.
+                if previous_handler is signal.SIG_DFL:
+                    signal.signal(sig, signal.SIG_DFL)
+                    os.kill(os.getpid(), sig)
+                elif previous_handler is signal.SIG_IGN:
+                    pass
+                elif callable(previous_handler):
+                    previous_handler(sig, frame)
+                return
+
             # Record the signal
             sig_name = _signal_name(sig)
             with self._lock:
@@ -185,9 +250,9 @@ class SignalExitCapture:
                 signal.signal(sig, signal.SIG_DFL)
                 os.kill(os.getpid(), sig)
                 # If we survive (e.g., SIGINT raised KeyboardInterrupt which was
-                # caught by user code), re-install our shim so subsequent signals
-                # are still recorded.
-                signal.signal(sig, _handler)
+                # caught by user code), re-install our shim only while active.
+                if self._active:
+                    signal.signal(sig, _handler)
             elif previous_handler is signal.SIG_IGN:
                 # The previous disposition was to ignore.  Respect that.
                 pass
@@ -204,32 +269,44 @@ class SignalExitCapture:
 
     def _install_excepthook(self) -> None:
         """Wrap sys.excepthook to capture SystemExit and unhandled exceptions."""
-        self._previous_excepthook = sys.excepthook
+        prev_hook = sys.excepthook
+        self._previous_excepthook = prev_hook
         _self = self  # closure reference
         self._installed_excepthook = None  # set after we build the wrapper
 
         def _excepthook(exc_type: type, exc_value: BaseException, exc_tb: Any) -> None:
+            if not _self._active:
+                if prev_hook is not None:
+                    prev_hook(exc_type, exc_value, exc_tb)
+                return
+
+            from pubrun.capture.redaction import format_safe_error_detail
+
             # Record exit information
             if exc_type is SystemExit and isinstance(exc_value, SystemExit):
                 code = exc_value.code
                 if isinstance(code, int):
                     _self.record_exit_code(code)
+                    exit_exc_str = f"SystemExit({code!r})"
                 elif code is None:
                     _self.record_exit_code(0)
+                    exit_exc_str = f"SystemExit({code!r})"
                 else:
                     # SystemExit can be passed a string message; exit code is 1
                     _self.record_exit_code(1)
+                    exit_exc_str = format_safe_error_detail(exc_value, _self._config)
                 with _self._lock:
-                    _self._exit_exception = f"SystemExit({code!r})"
+                    _self._exit_exception = exit_exc_str
             else:
                 # Unhandled exception -- process will exit with code 1
                 _self.record_exit_code(1)
+                exit_exc_str = format_safe_error_detail(exc_value, _self._config)
                 with _self._lock:
-                    _self._exit_exception = f"{exc_type.__name__}: {exc_value}"
+                    _self._exit_exception = exit_exc_str
 
             # Chain to previous excepthook (which prints the traceback, etc.)
-            if _self._previous_excepthook is not None:
-                _self._previous_excepthook(exc_type, exc_value, exc_tb)
+            if prev_hook is not None:
+                prev_hook(exc_type, exc_value, exc_tb)
 
             # Flush stdout and stderr to ensure log files receive the traceback
             try:

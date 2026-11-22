@@ -63,33 +63,281 @@ class SubprocessSpy:
     _truncated = False
     _lock = threading.Lock()
     _config: Optional[Dict[str, Any]] = None
+    _owner: Optional[object] = None
+    _active_state: Optional[Dict[str, Any]] = None
+    _installed_popen_init: Optional[Any] = None
+    _installed_popen_wait: Optional[Any] = None
+    _installed_os_system: Optional[Any] = None
 
     @classmethod
-    def install(cls, max_records: int = 5000, config: Optional[Dict[str, Any]] = None) -> None:
-        """Install monkey-patches on subprocess.Popen and os.system.
+    def install(
+        cls,
+        max_records: int = 5000,
+        config: Optional[Dict[str, Any]] = None,
+        owner: Optional[object] = None,
+    ) -> bool:
+        """Install monkey-patches on subprocess.Popen and os.system transactionally.
+
+        Captures the live pre-existing targets at install time, chains to them, and
+        rolls back any already-patched target if a later patch raises.
 
         Args:
             max_records: Stop recording after this many entries (memory safety).
-            config: Resolved config, used for argv redaction.
+            config: Resolved config, used for argv and error-detail redaction.
+            owner: Optional ownership token that guards subsequent uninstall calls.
+
+        Returns:
+            True if this call installed the spy; False if already installed.
         """
-        if not cls._installed:
+        with cls._lock:
+            if cls._installed:
+                return False
+
+            prev_popen_init = subprocess.Popen.__init__
+            prev_popen_wait = subprocess.Popen.wait
+            prev_os_system = os.system
+
+            state: Dict[str, Any] = {
+                "active": True,
+                "config": config,
+                "prev_popen_init": prev_popen_init,
+                "prev_popen_wait": prev_popen_wait,
+                "prev_os_system": prev_os_system,
+            }
+
+            def _patched_popen_init(
+                self: Any, args: Any, *sys_args: Any, **kwargs: Any
+            ) -> None:
+                if not state["active"] or _spy_bypassed():
+                    return prev_popen_init(self, args, *sys_args, **kwargs)
+
+                with cls._lock:
+                    if not state["active"]:
+                        should_record = False
+                    elif len(cls._records) >= cls._max_records:
+                        cls._truncated = True
+                        should_record = False
+                    else:
+                        should_record = True
+
+                if not should_record:
+                    return prev_popen_init(self, args, *sys_args, **kwargs)
+
+                start_time = time.time()
+                argv_list = cls._safe_shlex_split(args)
+
+                from pubrun.capture.redaction import (
+                    format_safe_error_detail,
+                    redact_argv,
+                )
+                try:
+                    argv_list = redact_argv(argv_list, state["config"])
+                except Exception:
+                    argv_list = []
+
+                kwargs_cwd = kwargs.get("cwd", None)
+                cwd_str = str(kwargs_cwd) if kwargs_cwd else None
+
+                try:
+                    prev_popen_init(self, args, *sys_args, **kwargs)
+                except Exception as e:
+                    detail = format_safe_error_detail(e, state["config"])
+                    with cls._lock:
+                        if state["active"]:
+                            cls._records.append({
+                                "argv": argv_list,
+                                "started_at_utc": start_time,
+                                "cwd": cwd_str,
+                                "capture_state": {"status": "failed", "detail": detail},
+                            })
+                    raise
+
+                rec: Dict[str, Any] = {
+                    "argv": argv_list,
+                    "started_at_utc": start_time,
+                    "cwd": cwd_str,
+                    "exit_code": None,
+                    "capture_state": {"status": "partial"},
+                }
+                with cls._lock:
+                    if state["active"]:
+                        self._pubrun_state = state
+                        self._pubrun_rec = rec
+                        self._pubrun_idx = len(cls._records)
+                        cls._records.append(rec)
+
+            def _patched_popen_wait(self: Any, *args: Any, **kwargs: Any) -> int:
+                exit_code = prev_popen_wait(self, *args, **kwargs)
+                if not state["active"]:
+                    return exit_code
+                try:
+                    with cls._lock:
+                        if (
+                            state["active"]
+                            and getattr(self, "_pubrun_state", None) is state
+                        ):
+                            rec = getattr(self, "_pubrun_rec", None)
+                            if rec is not None and rec.get("exit_code") is None:
+                                rec["exit_code"] = exit_code
+                                rec["ended_at_utc"] = time.time()
+                                rec["capture_state"]["status"] = (
+                                    "complete" if exit_code == 0 else "failed"
+                                )
+                except Exception as e:
+                    logger.debug(
+                        f"pubrun failed to finalize subprocess record wait hook: {e}"
+                    )
+                return exit_code
+
+            def _patched_os_system(command: str) -> int:
+                if not state["active"] or _spy_bypassed():
+                    return prev_os_system(command)
+
+                with cls._lock:
+                    if not state["active"]:
+                        should_record = False
+                    elif len(cls._records) >= cls._max_records:
+                        cls._truncated = True
+                        should_record = False
+                    else:
+                        should_record = True
+
+                if not should_record:
+                    return prev_os_system(command)
+
+                start_time = time.time()
+                argv_list = cls._safe_shlex_split(command)
+
+                from pubrun.capture.redaction import (
+                    format_safe_error_detail,
+                    redact_argv,
+                )
+                try:
+                    argv_list = redact_argv(argv_list, state["config"])
+                except Exception:
+                    argv_list = []
+
+                rec: Dict[str, Any] = {
+                    "argv": argv_list,
+                    "started_at_utc": start_time,
+                    "cwd": None,
+                    "exit_code": None,
+                    "capture_state": {"status": "partial"},
+                }
+                with cls._lock:
+                    if state["active"]:
+                        cls._records.append(rec)
+
+                try:
+                    exit_code = prev_os_system(command)
+                except Exception as e:
+                    detail = format_safe_error_detail(e, state["config"])
+                    with cls._lock:
+                        if state["active"]:
+                            rec["capture_state"] = {
+                                "status": "failed",
+                                "detail": detail,
+                            }
+                    raise
+
+                with cls._lock:
+                    if state["active"]:
+                        rec["exit_code"] = exit_code
+                        rec["ended_at_utc"] = time.time()
+                        rec["capture_state"]["status"] = (
+                            "complete" if exit_code == 0 else "failed"
+                        )
+
+                return exit_code
+
             cls._max_records = max_records
             cls._records = []
             cls._truncated = False
             cls._config = config
-            subprocess.Popen.__init__ = cls._patched_popen_init
-            subprocess.Popen.wait = cls._patched_popen_wait
-            os.system = cls._patched_os_system
+
+            patched: List[tuple] = []
+            targets = [
+                (subprocess.Popen, "__init__", _patched_popen_init, prev_popen_init),
+                (subprocess.Popen, "wait", _patched_popen_wait, prev_popen_wait),
+                (os, "system", _patched_os_system, prev_os_system),
+            ]
+            try:
+                for target_obj, attr_name, wrapper, previous in targets:
+                    setattr(target_obj, attr_name, wrapper)
+                    patched.append((target_obj, attr_name, wrapper, previous))
+            except Exception:
+                state["active"] = False
+                for target_obj, attr_name, wrapper, previous in reversed(patched):
+                    try:
+                        if getattr(target_obj, attr_name, None) is wrapper:
+                            setattr(target_obj, attr_name, previous)
+                    except Exception:
+                        pass
+                cls._installed = False
+                cls._owner = None
+                cls._active_state = None
+                cls._installed_popen_init = None
+                cls._installed_popen_wait = None
+                cls._installed_os_system = None
+                raise
+
+            cls._active_state = state
+            cls._installed_popen_init = _patched_popen_init
+            cls._installed_popen_wait = _patched_popen_wait
+            cls._installed_os_system = _patched_os_system
+            cls._owner = owner
             cls._installed = True
+            return True
 
     @classmethod
-    def uninstall(cls) -> None:
-        """Revert monkey-patches to their original implementations."""
-        if cls._installed:
-            subprocess.Popen.__init__ = _original_popen_init
-            subprocess.Popen.wait = _original_popen_wait
-            os.system = _original_os_system
+    def uninstall(cls, owner: Optional[object] = None) -> None:
+        """Deactivate recording and restore still-owned targets independently."""
+        with cls._lock:
+            if not cls._installed:
+                return
+            if owner is not None and cls._owner is not None and owner is not cls._owner:
+                return
+
+            state = cls._active_state
+            if state is not None:
+                state["active"] = False
+                restores = [
+                    (
+                        subprocess.Popen,
+                        "__init__",
+                        cls._installed_popen_init,
+                        state["prev_popen_init"],
+                    ),
+                    (
+                        subprocess.Popen,
+                        "wait",
+                        cls._installed_popen_wait,
+                        state["prev_popen_wait"],
+                    ),
+                    (
+                        os,
+                        "system",
+                        cls._installed_os_system,
+                        state["prev_os_system"],
+                    ),
+                ]
+                for target_obj, attr_name, installed_wrapper, previous in restores:
+                    try:
+                        if (
+                            installed_wrapper is not None
+                            and getattr(target_obj, attr_name, None)
+                            is installed_wrapper
+                        ):
+                            setattr(target_obj, attr_name, previous)
+                    except Exception:
+                        pass
+
             cls._installed = False
+            cls._owner = None
+            cls._active_state = None
+            cls._installed_popen_init = None
+            cls._installed_popen_wait = None
+            cls._installed_os_system = None
             # BUG-09: Clear records on uninstall to prevent cross-run leakage.
             cls._records = []
             cls._truncated = False
@@ -107,7 +355,6 @@ class SubprocessSpy:
     def resume() -> None:
         """Pausable contract: resume subprocess recording on the calling thread."""
         resume_spy()
-
 
     @classmethod
     def finalize_all(cls) -> None:
@@ -133,115 +380,3 @@ class SubprocessSpy:
             return [str(a) for a in args]
         else:
             return [str(args)]
-
-    @staticmethod
-    def _patched_popen_init(self: Any, args: Any, *sys_args: Any, **kwargs: Any) -> None:
-        if _spy_bypassed():
-            return _original_popen_init(self, args, *sys_args, **kwargs)
-
-        with SubprocessSpy._lock:
-            if len(SubprocessSpy._records) >= SubprocessSpy._max_records:
-                SubprocessSpy._truncated = True
-                should_record = False
-            else:
-                should_record = True
-
-        if not should_record:
-            return _original_popen_init(self, args, *sys_args, **kwargs)
-
-
-        start_time = time.time()
-        argv_list = SubprocessSpy._safe_shlex_split(args)
-
-        # Redact sensitive values in argv before storing
-        from pubrun.capture.redaction import redact_argv
-        argv_list = redact_argv(argv_list, SubprocessSpy._config)
-
-        kwargs_cwd = kwargs.get("cwd", None)
-        cwd_str = str(kwargs_cwd) if kwargs_cwd else None
-
-        try:
-            _original_popen_init(self, args, *sys_args, **kwargs)
-        except Exception as e:
-            with SubprocessSpy._lock:
-                SubprocessSpy._records.append({
-                    "argv": argv_list,
-                    "started_at_utc": start_time,
-                    "cwd": cwd_str,
-                    "capture_state": {"status": "failed", "detail": str(e)}
-                })
-            raise
-
-        # Atomically assign index and append under the same lock
-        with SubprocessSpy._lock:
-            self._pubrun_idx = len(SubprocessSpy._records)
-            SubprocessSpy._records.append({
-                "argv": argv_list,
-                "started_at_utc": start_time,
-                "cwd": cwd_str,
-                "exit_code": None,
-                "capture_state": {"status": "partial"}
-            })
-
-    @staticmethod
-    def _patched_popen_wait(self: Any, *args: Any, **kwargs: Any) -> int:
-        exit_code = _original_popen_wait(self, *args, **kwargs)
-        try:
-            idx = getattr(self, "_pubrun_idx", None)
-            with SubprocessSpy._lock:
-                if idx is not None and idx < len(SubprocessSpy._records):
-                    rec = SubprocessSpy._records[idx]
-                    if rec.get("exit_code") is None:
-                        rec["exit_code"] = exit_code
-                        rec["ended_at_utc"] = time.time()
-                        rec["capture_state"]["status"] = "complete" if exit_code == 0 else "failed"
-        except Exception as e:
-            logger.debug(f"pubrun failed to finalize subprocess record wait hook: {e}")
-        return exit_code
-
-    @staticmethod
-    def _patched_os_system(command: str) -> int:
-        if _spy_bypassed():
-            return _original_os_system(command)
-
-        with SubprocessSpy._lock:
-            if len(SubprocessSpy._records) >= SubprocessSpy._max_records:
-                SubprocessSpy._truncated = True
-                should_record = False
-            else:
-                should_record = True
-
-        if not should_record:
-            return _original_os_system(command)
-
-
-        start_time = time.time()
-        argv_list = SubprocessSpy._safe_shlex_split(command)
-
-        # Redact sensitive values in argv before storing
-        from pubrun.capture.redaction import redact_argv
-        argv_list = redact_argv(argv_list, SubprocessSpy._config)
-
-        with SubprocessSpy._lock:
-            idx = len(SubprocessSpy._records)
-            SubprocessSpy._records.append({
-                "argv": argv_list,
-                "started_at_utc": start_time,
-                "cwd": None,
-                "exit_code": None,
-                "capture_state": {"status": "partial"}
-            })
-
-        try:
-            exit_code = _original_os_system(command)
-        except Exception as e:
-            with SubprocessSpy._lock:
-                SubprocessSpy._records[idx]["capture_state"] = {"status": "failed", "detail": str(e)}
-            raise
-
-        with SubprocessSpy._lock:
-            SubprocessSpy._records[idx]["exit_code"] = exit_code
-            SubprocessSpy._records[idx]["ended_at_utc"] = time.time()
-            SubprocessSpy._records[idx]["capture_state"]["status"] = "complete" if exit_code == 0 else "failed"
-
-        return exit_code

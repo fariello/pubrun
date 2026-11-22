@@ -239,6 +239,9 @@ class ResourceWatcher(threading.Thread):
             self._clk_tck = 0
         self._sys_plat = sys.platform
         self._consecutive_failures = 0
+        self._aborted_due_to_failures = False
+        self._successful_samples = 0
+        self._stopped = False
 
         # System-wide dynamic metrics (available RAM, load average, node iowait).
         # We track the "worst" observed point (min available RAM, max load) plus the
@@ -415,11 +418,30 @@ class ResourceWatcher(threading.Thread):
             logger.debug(f"pubrun failed system-metrics sample: {e}")
 
     def _update_metrics(self) -> None:
-        rss = self._poll_rss()
-        cpu_pct = self._poll_cpu()
-        tree_rss = self._poll_tree_rss() if self._scope == "tree" else 0
-        tree_cpu = self._poll_tree_cpu() if self._scope == "tree" else 0.0
-        self._sample_system_metrics()
+        try:
+            rss = self._poll_rss()
+        except Exception as e:
+            logger.debug(f"pubrun failed RSS poll: {e}")
+            rss = -1
+        try:
+            cpu_pct = self._poll_cpu()
+        except Exception as e:
+            logger.debug(f"pubrun failed CPU poll: {e}")
+            cpu_pct = 0.0
+        try:
+            tree_rss = self._poll_tree_rss() if self._scope == "tree" else 0
+        except Exception as e:
+            logger.debug(f"pubrun failed tree RSS poll: {e}")
+            tree_rss = 0
+        try:
+            tree_cpu = self._poll_tree_cpu() if self._scope == "tree" else 0.0
+        except Exception as e:
+            logger.debug(f"pubrun failed tree CPU poll: {e}")
+            tree_cpu = 0.0
+        try:
+            self._sample_system_metrics()
+        except Exception as e:
+            logger.debug(f"pubrun failed system-metrics sample: {e}")
 
         # rss == -1 means the poll was UNREADABLE (error/timeout); rss >= 0 is a
         # successful reading (0 being a legitimate value). Only unreadable polls
@@ -433,13 +455,15 @@ class ResourceWatcher(threading.Thread):
         with self._lock:
             if readable:
                 self._consecutive_failures = 0
+                self._successful_samples += 1
                 if rss_bytes > self.peak_rss_bytes:
                     self.peak_rss_bytes = rss_bytes
                 updated = True
             else:
                 self._consecutive_failures += 1
                 if self._consecutive_failures >= self.max_failures:
-                    self._stop_event.set() # Soft-abort the daemon purely for safety; OS hook is broken.
+                    self._aborted_due_to_failures = True
+                    self._stop_event.set()  # Soft-abort the daemon purely for safety; OS hook is broken.
 
             if cpu_pct > self.peak_cpu_percent:
                 self.peak_cpu_percent = cpu_pct
@@ -455,30 +479,55 @@ class ResourceWatcher(threading.Thread):
             payload["tree_rss_bytes"] = tree_rss
         if self._scope == "tree" and tree_cpu > 0:
             payload["tree_cpu_percent"] = tree_cpu
-        if updated or cpu_pct > 0:
-            if getattr(self.run_tracker, "event_stream", None):
-                self.run_tracker.event_stream.emit("resource_sample", payload=payload)
+        if (updated or cpu_pct > 0) and not self._stop_event.is_set():
+            event_stream = getattr(self.run_tracker, "event_stream", None)
+            if event_stream is not None:
+                try:
+                    event_stream.emit("resource_sample", payload=payload)
+                except Exception as e:
+                    logger.debug(f"pubrun failed to emit resource_sample event: {e}")
 
     def stop(self) -> None:
-        """Signal the polling thread to stop, wait for it, and take one final measurement."""
+        """Signal the polling thread to stop, wait for it, and take one final measurement.
+
+        Idempotent: safe to call multiple times or on an unstarted thread.
+        """
         self._stop_event.set()
-        # Wait for the daemon thread to finish its current cycle.
-        # Cap at 5s to prevent long hangs if OS polling is stuck.
-        self.join(timeout=min(self.interval + 1, 5))
-        # Only take final measurement if the thread actually stopped (P2-E7).
-        # If it's still alive (stuck in I/O), skip to avoid concurrent field access.
-        if not self.is_alive():
-            self._update_metrics()
-            end_rss = self._poll_rss()
-            end_tree_rss = self._poll_tree_rss() if self._scope == "tree" else 0
-            with self._lock:
-                self.end_rss_bytes = end_rss
-                if self.end_rss_bytes > self.peak_rss_bytes:
-                    self.peak_rss_bytes = self.end_rss_bytes
-                if end_tree_rss > 0:
-                    self.end_tree_rss_bytes = end_tree_rss
-                    if end_tree_rss > self.peak_tree_rss_bytes:
-                        self.peak_tree_rss_bytes = end_tree_rss
+        with self._lock:
+            if self._stopped:
+                return
+            self._stopped = True
+
+        was_started = self.ident is not None
+        if was_started:
+            # Wait for the daemon thread to finish its current cycle.
+            # Cap at 5s to prevent long hangs if OS polling is stuck.
+            try:
+                self.join(timeout=min(self.interval + 1, 5))
+            except RuntimeError:
+                pass
+
+        with self._lock:
+            aborted = self._aborted_due_to_failures
+
+        # Only take final measurement if the thread was started, actually stopped (P2-E7),
+        # and did not self-abort due to consecutive poll failures.
+        if was_started and not self.is_alive() and not aborted:
+            try:
+                self._update_metrics()
+                end_rss = self._poll_rss()
+                end_tree_rss = self._poll_tree_rss() if self._scope == "tree" else 0
+                with self._lock:
+                    if end_rss >= 0:
+                        self.end_rss_bytes = end_rss
+                        if self.end_rss_bytes > self.peak_rss_bytes:
+                            self.peak_rss_bytes = self.end_rss_bytes
+                    if end_tree_rss > 0:
+                        self.end_tree_rss_bytes = end_tree_rss
+                        if end_tree_rss > self.peak_tree_rss_bytes:
+                            self.peak_tree_rss_bytes = end_tree_rss
+            except Exception as e:
+                logger.debug(f"pubrun failed final resource measurement on stop: {e}")
 
     def to_manifest_dict(self) -> Dict[str, Any]:
         """Build the ``resources`` manifest section dict."""
@@ -489,12 +538,29 @@ class ResourceWatcher(threading.Thread):
             peak_tree = self.peak_tree_rss_bytes
             end_tree = self.end_tree_rss_bytes
             peak_tree_cpu = self.peak_tree_cpu_percent
+            aborted = self._aborted_due_to_failures
+            successful_samples = self._successful_samples
+
+        if aborted:
+            if successful_samples > 0:
+                capture_state: Dict[str, Any] = {
+                    "status": "partial",
+                    "detail": "resource polling stopped after consecutive failures",
+                }
+            else:
+                capture_state = {
+                    "status": "failed",
+                    "detail": "resource polling failed on every sample",
+                }
+        else:
+            capture_state = {"status": "complete"}
+
         result: Dict[str, Any] = {
             "scope": self._scope,
             "peak_rss_bytes": peak_rss if peak_rss > 0 else None,
             "end_rss_bytes": end_rss if end_rss > 0 else None,
             "peak_cpu_percent": peak_cpu if peak_cpu > 0 else None,
-            "capture_state": {"status": "complete"}
+            "capture_state": capture_state,
         }
         if self._scope == "tree":
             result["peak_tree_rss_bytes"] = peak_tree if peak_tree > 0 else None

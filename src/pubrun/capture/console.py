@@ -97,6 +97,26 @@ class TqdmSafeTee:
         self.timestamped = timestamped
         self.line_count = 0
         self._current_buffer = ""
+        self._log_write_failed = False
+        self._in_error_log = False
+
+    def _handle_log_error(self, exc: BaseException) -> None:
+        """Detach a failing log handle once and emit at most one bounded debug message."""
+        was_failed = self._log_write_failed
+        self._log_write_failed = True
+        self.log_file = None
+        if not was_failed and not self._in_error_log:
+            self._in_error_log = True
+            try:
+                from pubrun.capture.redaction import format_safe_error_detail
+                logger.debug(
+                    "pubrun tee log write failed: %s",
+                    format_safe_error_detail(exc),
+                )
+            except Exception:
+                pass
+            finally:
+                self._in_error_log = False
 
     def write(self, data: str) -> int:
         """Write data to the original stream and the log file.
@@ -104,6 +124,9 @@ class TqdmSafeTee:
         Carriage returns (``\r``) trigger a buffer squash to prevent
         progress bar redraws from bloating the log file.
         """
+        if self._in_error_log:
+            return len(data)
+
         # 1. Passthrough exactly what was originally sent to the user's console
         try:
             ret = self.original_stream.write(data)
@@ -119,7 +142,8 @@ class TqdmSafeTee:
             ret = len(data)
 
         # If logging is disabled or file is closed, simply return what was written
-        if not self.log_file or self.log_file.closed:
+        log_file = self.log_file
+        if not log_file or getattr(log_file, "closed", False):
             return ret
 
         # Paused on this thread? Output already passed through above; skip
@@ -151,36 +175,42 @@ class TqdmSafeTee:
                     if j < len(lines) - 1:
                         full_line = self._current_buffer + line
                         if ts:
-                            self.log_file.write(ts + full_line + '\n')
+                            log_file.write(ts + full_line + '\n')
                         else:
-                            self.log_file.write(full_line + '\n')
+                            log_file.write(full_line + '\n')
                         self.line_count += 1
                         self._current_buffer = ""
                     else:
                         self._current_buffer += line
         except Exception as e:
-            logger.debug(f"pubrun tee internal error: {e}")
+            self._handle_log_error(e)
 
         return ret
 
     def flush(self) -> None:
         """Flush both the original stream and the log file."""
+        if self._in_error_log:
+            return
         try:
             self.original_stream.flush()
-        except BrokenPipeError:
-            pass  # Downstream reader closed; SIGPIPE will be recorded
-        if self.log_file and not self.log_file.closed:
-            # Dump whatever is left in the buffer on a flush
-            if self._current_buffer:
-                if self.timestamped:
-                    from datetime import datetime, timezone
-                    ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
-                    self.log_file.write(ts + self._current_buffer + '\n')
-                else:
-                    self.log_file.write(self._current_buffer + '\n')
-                self.line_count += 1
-                self._current_buffer = ""
-            self.log_file.flush()
+        except (BrokenPipeError, OSError, ValueError):
+            pass  # Downstream reader closed or original stream closed/broken
+        log_file = self.log_file
+        if log_file and not getattr(log_file, "closed", False):
+            try:
+                # Dump whatever is left in the buffer on a flush
+                if self._current_buffer:
+                    if self.timestamped:
+                        from datetime import datetime, timezone
+                        ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
+                        log_file.write(ts + self._current_buffer + '\n')
+                    else:
+                        log_file.write(self._current_buffer + '\n')
+                    self.line_count += 1
+                    self._current_buffer = ""
+                log_file.flush()
+            except Exception as e:
+                self._handle_log_error(e)
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the original stream (e.g. isatty, encoding)."""
@@ -190,15 +220,22 @@ class TqdmSafeTee:
 
 class ConsoleInterceptor:
     """Manages tee-style interception of stdout/stderr into log files."""
-    def __init__(self, run_dir: Path, mode: str) -> None:
+    def __init__(
+        self,
+        run_dir: Path,
+        mode: str,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Initialize the interceptor.
 
         Args:
             run_dir: Directory where log files will be written.
             mode: Capture mode (``"off"``, ``"basic"``, ``"standard"``, ``"deep"``).
+            config: Optional resolved pubrun config for error-detail redaction.
         """
         self.run_dir = run_dir
         self.mode = mode
+        self._config: Optional[Dict[str, Any]] = config
         self.stdout_log = None
         self.stderr_log = None
         self.stdout_tee = None
@@ -208,13 +245,123 @@ class ConsoleInterceptor:
         self.original_stdout = sys.stdout
         self.original_stderr = sys.stderr
 
-    def start(self) -> None:
-        """Replace sys.stdout and sys.stderr with tee proxies.
+        self._started = False
+        self._failed_detail: Optional[str] = None
+        self._faulthandler_owned = False
+        self._faulthandler_was_enabled = False
+        self._cached_result: Optional[Dict[str, Any]] = None
 
-        Silently reverts to original streams if setup fails.
+    def _cleanup_resources(self) -> tuple:
+        """Run every teardown step independently and return (lines_out, lines_err, out_failed, err_failed)."""
+        lines_out = 0
+        lines_err = 0
+        out_failed = False
+        err_failed = False
+
+        # 1. Revert stdout only if it still points to our tee.
+        try:
+            if self.stdout_tee is not None and sys.stdout is self.stdout_tee:
+                sys.stdout = self.original_stdout
+        except Exception:
+            pass
+
+        # 2. Revert stderr only if it still points to our tee.
+        try:
+            if self.stderr_tee is not None and sys.stderr is self.stderr_tee:
+                sys.stderr = self.original_stderr
+        except Exception:
+            pass
+
+        # 3. Flush stdout_tee, record metrics, and detach log_file.
+        if self.stdout_tee is not None:
+            try:
+                self.stdout_tee.flush()
+            except Exception:
+                out_failed = True
+            finally:
+                try:
+                    lines_out = self.stdout_tee.line_count
+                except Exception:
+                    pass
+                try:
+                    out_failed = out_failed or bool(
+                        getattr(self.stdout_tee, "_log_write_failed", False)
+                    )
+                except Exception:
+                    pass
+                try:
+                    self.stdout_tee.log_file = None
+                except Exception:
+                    pass
+
+        # 4. Flush stderr_tee, record metrics, and detach log_file.
+        if self.stderr_tee is not None:
+            try:
+                self.stderr_tee.flush()
+            except Exception:
+                err_failed = True
+            finally:
+                try:
+                    lines_err = self.stderr_tee.line_count
+                except Exception:
+                    pass
+                try:
+                    err_failed = err_failed or bool(
+                        getattr(self.stderr_tee, "_log_write_failed", False)
+                    )
+                except Exception:
+                    pass
+                try:
+                    self.stderr_tee.log_file = None
+                except Exception:
+                    pass
+
+        # 5. Disable faulthandler BEFORE closing stderr_log, only when we enabled it.
+        if self._faulthandler_owned:
+            try:
+                import faulthandler
+                faulthandler.disable()
+            except Exception:
+                pass
+            finally:
+                self._faulthandler_owned = False
+
+        # 6. Close stdout_log independently.
+        if self.stdout_log is not None:
+            try:
+                self.stdout_log.close()
+            except Exception:
+                pass
+            finally:
+                self.stdout_log = None
+
+        # 7. Close stderr_log independently.
+        if self.stderr_log is not None:
+            try:
+                self.stderr_log.close()
+            except Exception:
+                pass
+            finally:
+                self.stderr_log = None
+
+        return lines_out, lines_err, out_failed, err_failed
+
+    def start(self) -> bool:
+        """Replace sys.stdout and sys.stderr with tee proxies transactionally.
+
+        Returns True on success (including mode=="off"). On any setup error,
+        rolls back opened handles, streams, and owned faulthandler state, records
+        a bounded redacted failure detail, and returns False.
         """
         if self.mode == "off":
-            return
+            return True
+
+        self._cached_result = None
+        self._failed_detail = None
+        self._faulthandler_owned = False
+        self._faulthandler_was_enabled = False
+        self.original_stdout = sys.stdout
+        self.original_stderr = sys.stderr
 
         try:
             self.stdout_log = open(self.run_dir / "stdout.log", "w", encoding="utf-8")
@@ -222,67 +369,103 @@ class ConsoleInterceptor:
 
             timestamped = self.mode in {"standard", "deep"}
 
-            self.stdout_tee = TqdmSafeTee(sys.stdout, self.stdout_log, timestamped)
+            self.stdout_tee = TqdmSafeTee(self.original_stdout, self.stdout_log, timestamped)
             sys.stdout = self.stdout_tee
 
-            self.stderr_tee = TqdmSafeTee(sys.stderr, self.stderr_log, timestamped)
+            self.stderr_tee = TqdmSafeTee(self.original_stderr, self.stderr_log, timestamped)
             sys.stderr = self.stderr_tee
 
             import faulthandler
             try:
-                faulthandler.enable(file=self.stderr_log)
+                self._faulthandler_was_enabled = bool(faulthandler.is_enabled())
             except Exception:
-                pass
-        except Exception as e:
-            logger.debug(f"pubrun failed to intercept console: {e}")
-            self.stop() # rollback
+                self._faulthandler_was_enabled = False
+            if not self._faulthandler_was_enabled:
+                try:
+                    faulthandler.enable(file=self.stderr_log)
+                    self._faulthandler_owned = True
+                except Exception:
+                    self._faulthandler_owned = False
 
+            self._started = True
+            return True
+        except Exception as e:
+            from pubrun.capture.redaction import format_safe_error_detail
+            self._failed_detail = format_safe_error_detail(e, self._config)
+            logger.debug("pubrun failed to intercept console: %s", self._failed_detail)
+            self._cleanup_resources()
+            self._started = False
+            return False
 
     def stop(self) -> Dict[str, Any]:
-        """Restore original streams, close log files, and return capture metrics."""
-        # 1. Revert streams only if they still point to our tees.
-        # If a third-party library wrapped over our tee after start(), leave
-        # the streams alone to avoid breaking that library's wrapper.
-        if sys.stdout is self.stdout_tee:
-            sys.stdout = self.original_stdout
-        if sys.stderr is self.stderr_tee:
-            sys.stderr = self.original_stderr
+        """Restore original streams, close log files, and return capture metrics.
 
-        lines_out = 0
-        lines_err = 0
+        Idempotent: repeated calls return a copy of the cached final result.
+        """
+        import copy
 
-        if self.stdout_tee:
-            self.stdout_tee.flush()
-            lines_out = self.stdout_tee.line_count
-        if self.stderr_tee:
-            self.stderr_tee.flush()
-            lines_err = self.stderr_tee.line_count
+        if self._cached_result is not None:
+            return copy.deepcopy(self._cached_result)
 
-        if self.stdout_log:
-            self.stdout_log.close()
-            self.stdout_log = None
-        if self.stderr_log:
-            import faulthandler
-            try:
-                faulthandler.disable()
-            except Exception:
-                pass
-            self.stderr_log.close()
-            self.stderr_log = None
+        lines_out, lines_err, out_failed, err_failed = self._cleanup_resources()
+        self._started = False
 
-        return {
-            "capture_mode": self.mode,
-            "stdout": {
-                "captured": self.mode != "off",
-                "path": "stdout.log" if self.mode != "off" else None,
-                "lines_captured": lines_out if self.mode != "off" else None
-            },
-            "stderr": {
-                "captured": self.mode != "off",
-                "path": "stderr.log" if self.mode != "off" else None,
-                "lines_captured": lines_err if self.mode != "off" else None
-            },
-            # Dummy for combined, our phase 3 simply implements split
-            "combined": {"captured": False, "path": None, "lines_captured": None},
-            "capture_state": {"status": "complete"}
-        }
+        if self._failed_detail is not None:
+            result: Dict[str, Any] = {
+                "capture_mode": self.mode,
+                "stdout": {
+                    "captured": False,
+                    "path": None,
+                    "lines_captured": None,
+                },
+                "stderr": {
+                    "captured": False,
+                    "path": None,
+                    "lines_captured": None,
+                },
+                "combined": {"captured": False, "path": None, "lines_captured": None},
+                "capture_state": {"status": "failed", "detail": self._failed_detail},
+            }
+        elif self.mode == "off":
+            result = {
+                "capture_mode": self.mode,
+                "stdout": {
+                    "captured": False,
+                    "path": None,
+                    "lines_captured": None,
+                },
+                "stderr": {
+                    "captured": False,
+                    "path": None,
+                    "lines_captured": None,
+                },
+                "combined": {"captured": False, "path": None, "lines_captured": None},
+                "capture_state": {"status": "complete"},
+            }
+        else:
+            if out_failed or err_failed:
+                capture_state: Dict[str, Any] = {
+                    "status": "partial",
+                    "detail": "console log write failed during execution",
+                }
+            else:
+                capture_state = {"status": "complete"}
+            result = {
+                "capture_mode": self.mode,
+                "stdout": {
+                    "captured": True,
+                    "path": "stdout.log",
+                    "lines_captured": lines_out,
+                },
+                "stderr": {
+                    "captured": True,
+                    "path": "stderr.log",
+                    "lines_captured": lines_err,
+                },
+                # Dummy for combined, our phase 3 simply implements split
+                "combined": {"captured": False, "path": None, "lines_captured": None},
+                "capture_state": capture_state,
+            }
+
+        self._cached_result = result
+        return copy.deepcopy(result)
