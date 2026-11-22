@@ -5,9 +5,11 @@ lazily when file provenance is requested (e.g. via ``pubrun.open()``).
 """
 import builtins
 import hashlib
+import json
 import logging
 import math
 import os
+import re
 import stat
 import threading
 import time
@@ -821,11 +823,151 @@ def hash_file_checked(
         )
 
 
+VALID_ROLES: Tuple[str, ...] = ("input", "output", "input_output")
+VALID_REGISTRATION_SOURCES: Tuple[str, ...] = (
+    "pubrun.open",
+    "register_file",
+    "register_input",
+    "register_output",
+)
+
+# RFC 3986 URI scheme of length 2..16 followed by "://" (explicitly excludes
+# single-letter Windows drive paths such as "C:\\..." or "C:/...").
+_REMOTE_URI_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]{1,15}://")
+
+
+def _is_remote_uri(path_str: str) -> bool:
+    """Return True when ``path_str`` begins with a remote URI scheme (2..16 chars)."""
+    return bool(_REMOTE_URI_RE.match(path_str))
+
+
+def _validate_registration_args(
+    path: Any,
+    role: Any,
+    level: Any,
+    digest: Any,
+    digest_algorithm: Any,
+    verify_digest: Any,
+    metadata: Any,
+    *,
+    label: Any = None,
+    registration_source: Optional[str] = None,
+) -> Tuple[str, str, Optional[str], Optional[str], str, bool, Optional[Dict[str, Any]]]:
+    """Validate programmer-error arguments for explicit external file registration.
+
+    Raises ``TypeError`` or ``ValueError`` deterministically before inspecting
+    run state or the filesystem.
+    """
+    raw_path = os.fspath(path)
+    if isinstance(raw_path, bytes):
+        path_str = os.fsdecode(raw_path)
+    elif isinstance(raw_path, str):
+        path_str = raw_path
+    else:
+        raise TypeError("path must be a string or os.PathLike")
+    if not path_str or not path_str.strip():
+        raise ValueError("path must be a non-empty string or os.PathLike")
+
+    if not isinstance(role, str) or role not in VALID_ROLES:
+        raise ValueError(
+            f"invalid role {role!r}; expected one of {', '.join(VALID_ROLES)}"
+        )
+
+    if label is not None and not isinstance(label, str):
+        raise TypeError("label must be a string or None")
+
+    if level is not None:
+        if not isinstance(level, str) or level not in FILE_IO_LEVELS:
+            raise ValueError(
+                f"invalid level {level!r}; expected one of {', '.join(FILE_IO_LEVELS)}"
+            )
+
+    digest_val: Optional[str] = None
+    if digest is not None:
+        if not isinstance(digest, str) or not digest.strip():
+            raise ValueError("digest must be a non-empty string when provided")
+        digest_val = digest.strip()
+
+    if not isinstance(digest_algorithm, str) or not digest_algorithm.strip():
+        raise ValueError("digest_algorithm must be a non-empty string")
+    alg = digest_algorithm.strip().lower()
+
+    verify_flag = bool(verify_digest)
+    if verify_flag and digest_val is None:
+        raise ValueError("verify_digest=True requires a non-empty digest")
+
+    metadata_copy: Optional[Dict[str, Any]] = None
+    if metadata is not None:
+        if not isinstance(metadata, dict):
+            raise ValueError("metadata must be a dict or None")
+        metadata_copy = json.loads(json.dumps(metadata, allow_nan=False))
+
+    if registration_source is not None and registration_source not in VALID_REGISTRATION_SOURCES:
+        raise ValueError(
+            f"invalid registration_source {registration_source!r}; "
+            f"expected one of {', '.join(VALID_REGISTRATION_SOURCES)}"
+        )
+
+    return path_str, role, level, digest_val, alg, verify_flag, metadata_copy
+
+
+class _PendingRegistration:
+    """Internal pending-output descriptor kept outside the manifest record dict."""
+
+    __slots__ = (
+        "record_ref",
+        "path_str",
+        "normalized_path",
+        "effective_level",
+        "digest_val",
+        "alg",
+        "verify_digest",
+        "role",
+        "label",
+        "registration_source",
+    )
+
+    def __init__(
+        self,
+        *,
+        record_ref: Dict[str, Any],
+        path_str: str,
+        normalized_path: str,
+        effective_level: str,
+        digest_val: Optional[str],
+        alg: str,
+        verify_digest: bool,
+        role: str,
+        label: Optional[str],
+        registration_source: str,
+    ) -> None:
+        self.record_ref = record_ref
+        self.path_str = path_str
+        self.normalized_path = normalized_path
+        self.effective_level = effective_level
+        self.digest_val = digest_val
+        self.alg = alg
+        self.verify_digest = verify_digest
+        self.role = role
+        self.label = label
+        self.registration_source = registration_source
+
+
 def _record_dedup_key(record: Dict[str, Any]) -> Tuple[Any, ...]:
     digest = record.get("digest")
     digest_key = (
         (digest.get("algorithm"), digest.get("value"))
         if isinstance(digest, dict)
+        else None
+    )
+    caller_digest = record.get("caller_digest")
+    caller_digest_key = (
+        (
+            caller_digest.get("algorithm"),
+            caller_digest.get("value"),
+            caller_digest.get("verified"),
+        )
+        if isinstance(caller_digest, dict)
         else None
     )
     inode = record.get("inode")
@@ -843,6 +985,7 @@ def _record_dedup_key(record: Dict[str, Any]) -> Tuple[Any, ...]:
         identity_key,
         record.get("hash_status"),
         digest_key,
+        caller_digest_key,
     )
 
 
@@ -852,6 +995,53 @@ def _bucket_for_role(role: Optional[str]) -> str:
     if role == "input_output":
         return "mixed"
     return "inputs"
+
+
+def _event_type_for_role(role: Optional[str]) -> str:
+    if role == "output":
+        return "output_artifact"
+    if role == "input_output":
+        return "mixed_dataset"
+    return "input_dataset"
+
+
+def _ensure_data_files_buckets(run_instance: Any) -> Dict[str, Any]:
+    """Return ``run_instance.data_files`` ensuring inputs/outputs/mixed lists exist."""
+    data_files = getattr(run_instance, "data_files", None)
+    if not isinstance(data_files, dict):
+        data_files = {"inputs": [], "outputs": [], "mixed": []}
+        try:
+            run_instance.data_files = data_files
+        except Exception:
+            pass
+    for key in ("inputs", "outputs", "mixed"):
+        if key not in data_files or not isinstance(data_files[key], list):
+            data_files[key] = []
+    return data_files
+
+
+def _emit_file_event(run_instance: Any, record: Dict[str, Any]) -> None:
+    """Emit a file provenance event safely (no-op on closed stream or Ghost Mode)."""
+    stream = getattr(run_instance, "event_stream", None)
+    if stream is None:
+        return
+    if hasattr(stream, "_file") and getattr(stream, "_file", None) is None:
+        return
+    try:
+        path_val = record.get("path") or ""
+        name = record.get("label") or Path(path_val).name or path_val
+        payload: Dict[str, Any] = {
+            "path": path_val,
+            "role": record.get("role"),
+            "sha256": record.get("sha256"),
+            "hash_status": record.get("hash_status"),
+            "evidence_strength": record.get("evidence_strength"),
+        }
+        if record.get("label") is not None:
+            payload["label"] = record["label"]
+        stream.emit(_event_type_for_role(record.get("role")), name=str(name), payload=payload)
+    except Exception:
+        pass
 
 
 def append_or_deduplicate_record(
@@ -870,14 +1060,7 @@ def append_or_deduplicate_record(
     new_key = _record_dedup_key(record)
 
     with lock:
-        data_files = getattr(run_instance, "data_files", None)
-        if not isinstance(data_files, dict):
-            data_files = {"inputs": [], "outputs": [], "mixed": []}
-            run_instance.data_files = data_files
-        for key in ("inputs", "outputs", "mixed"):
-            if key not in data_files or not isinstance(data_files[key], list):
-                data_files[key] = []
-
+        data_files = _ensure_data_files_buckets(run_instance)
         bucket = data_files[bucket_name]
         for existing in bucket:
             if isinstance(existing, dict) and _record_dedup_key(existing) == new_key:
@@ -888,19 +1071,858 @@ def append_or_deduplicate_record(
                     existing["accessed_at_utc"] = record["accessed_at_utc"]
                 if record.get("modified_at_utc") is not None:
                     existing["modified_at_utc"] = record["modified_at_utc"]
+                if record.get("metadata") is not None:
+                    if isinstance(existing.get("metadata"), dict) and isinstance(
+                        record["metadata"], dict
+                    ):
+                        merged_meta = dict(existing["metadata"])
+                        merged_meta.update(record["metadata"])
+                        existing["metadata"] = merged_meta
+                    else:
+                        existing["metadata"] = record["metadata"]
                 return existing
 
         bucket.append(record)
         return record
 
 
+def _record_matches_identity(record: Dict[str, Any], identity: FileIdentity) -> bool:
+    """Return True when ``record`` holds metadata matching ``identity``."""
+    rec_size = record.get("size_bytes")
+    rec_mtime_ns = record.get("mtime_ns")
+    if rec_size is None or rec_mtime_ns is None:
+        return False
+    if int(rec_size) != identity.size_bytes or int(rec_mtime_ns) != identity.mtime_ns:
+        return False
+    rec_inode = record.get("inode")
+    rec_device = record.get("device")
+    if rec_inode and identity.inode != 0:
+        if int(rec_inode) != identity.inode or int(rec_device or 0) != identity.device:
+            return False
+    return True
+
+
+def _find_unchanged_completed_record(
+    run_instance: Any,
+    *,
+    path: str,
+    normalized_path: str,
+    role: str,
+    label: Optional[str],
+    identity: FileIdentity,
+    target_alg: str,
+    now: float,
+    metadata_copy: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Deduplicate an unchanged already-hashed file without re-reading disk bytes."""
+    lock = getattr(run_instance, "_data_files_lock", _fallback_data_files_lock)
+    bucket_name = _bucket_for_role(role)
+    with lock:
+        pending_list = getattr(run_instance, "_pending_file_registrations", None)
+        if pending_list:
+            for item in pending_list:
+                if (
+                    item.normalized_path == normalized_path
+                    and item.role == role
+                    and item.label == label
+                ):
+                    return None
+        data_files = getattr(run_instance, "data_files", None)
+        if not isinstance(data_files, dict):
+            return None
+        bucket = data_files.get(bucket_name)
+        if not isinstance(bucket, list):
+            return None
+        for existing in bucket:
+            if not isinstance(existing, dict):
+                continue
+            if (
+                existing.get("path") == path
+                and existing.get("role") == role
+                and existing.get("label") == label
+                and existing.get("hash_status") == "completed"
+                and existing.get("hash_algorithm") == target_alg
+                and existing.get("evidence_source") == "observed"
+                and existing.get("evidence_strength") == "verified_content"
+                and existing.get("caller_digest") is None
+                and _record_matches_identity(existing, identity)
+            ):
+                existing["registration_count"] = int(existing.get("registration_count", 1)) + 1
+                existing["last_observed_at_utc"] = now
+                if role in ("input", "input_output"):
+                    existing["accessed_at_utc"] = now
+                if role in ("output", "input_output"):
+                    existing["modified_at_utc"] = now
+                if metadata_copy is not None:
+                    if isinstance(existing.get("metadata"), dict):
+                        merged_meta = dict(existing["metadata"])
+                        merged_meta.update(metadata_copy)
+                        existing["metadata"] = merged_meta
+                    else:
+                        existing["metadata"] = metadata_copy
+                return existing
+    return None
+
+
+def _upgrade_pending_or_append(
+    run_instance: Any,
+    record: Dict[str, Any],
+    *,
+    normalized_path: str,
+    role: str,
+    label: Optional[str],
+    metadata_copy: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Upgrade a matching pending output record in place, or append/deduplicate."""
+    lock = getattr(run_instance, "_data_files_lock", _fallback_data_files_lock)
+    with lock:
+        pending_list = getattr(run_instance, "_pending_file_registrations", None)
+        if pending_list:
+            for idx, item in enumerate(pending_list):
+                if (
+                    item.normalized_path == normalized_path
+                    and item.role == role
+                    and item.label == label
+                ):
+                    pending_list.pop(idx)
+                    existing_rec = item.record_ref
+                    prev_count = int(existing_rec.get("registration_count", 1))
+                    prev_reg_at = existing_rec.get("registered_at_utc")
+                    prev_meta = existing_rec.get("metadata")
+                    existing_rec.clear()
+                    existing_rec.update(record)
+                    existing_rec["registered_before_creation"] = True
+                    existing_rec["registration_count"] = prev_count + 1
+                    if prev_reg_at is not None:
+                        existing_rec["registered_at_utc"] = prev_reg_at
+                    if isinstance(prev_meta, dict):
+                        if metadata_copy is not None:
+                            merged_meta = dict(prev_meta)
+                            merged_meta.update(metadata_copy)
+                            existing_rec["metadata"] = merged_meta
+                        else:
+                            existing_rec["metadata"] = prev_meta
+                    return existing_rec
+    return append_or_deduplicate_record(run_instance, record)
+
+
+def _populate_non_file_digest_fields(
+    record: Dict[str, Any],
+    *,
+    entry_type: str,
+    effective_level: str,
+    digest_val: Optional[str],
+    alg: str,
+    verify_digest: bool,
+    obs_time: str,
+    is_finalization: bool,
+    broken_symlink: bool = False,
+) -> None:
+    """Populate hash and evidence fields for missing, directory, or special targets."""
+    record["entry_type"] = entry_type
+    record["sha256"] = None
+
+    if entry_type == "missing":
+        if broken_symlink:
+            reason = "broken symlink"
+        elif is_finalization:
+            reason = "file did not exist at run finalization"
+        else:
+            reason = "missing"
+    else:
+        reason = entry_type
+
+    if digest_val is not None and not verify_digest:
+        record["hash_status"] = "asserted"
+        record["hash_algorithm"] = alg
+        record["caller_digest"] = {"algorithm": alg, "value": digest_val, "verified": None}
+        record["digest"] = {"algorithm": alg, "value": digest_val}
+        record["observation_time"] = "caller_supplied"
+        record["evidence_source"] = "asserted"
+        record["evidence_strength"] = "asserted_content"
+        record["hash_status_detail"] = (
+            f"{reason}; caller digest asserted without local verification"
+        )
+    elif digest_val is not None and verify_digest:
+        record["hash_status"] = "unavailable"
+        record["hash_algorithm"] = alg
+        record["caller_digest"] = {"algorithm": alg, "value": digest_val, "verified": None}
+        record["digest"] = {"algorithm": alg, "value": digest_val}
+        record["observation_time"] = "not_observed"
+        record["evidence_source"] = "asserted"
+        record["evidence_strength"] = "asserted_content"
+        record["hash_status_detail"] = f"cannot verify caller digest: target is {reason}"
+    else:
+        record["hash_status"] = "unavailable"
+        record["hash_algorithm"] = None
+        record["digest"] = None
+        if entry_type == "missing":
+            record["observation_time"] = "at_finalization" if is_finalization else "not_observed"
+            record["evidence_source"] = "none"
+            record["evidence_strength"] = "unavailable"
+            record["hash_status_detail"] = (
+                reason if reason != "missing" else "file does not exist"
+            )
+        else:
+            record["observation_time"] = obs_time
+            record["evidence_source"] = "observed"
+            record["evidence_strength"] = (
+                "metadata_only" if effective_level != "name" else "path_only"
+            )
+            record["hash_status_detail"] = f"cannot hash {entry_type}"
+
+
+def _populate_stat_metadata(record: Dict[str, Any], identity: FileIdentity) -> None:
+    record["size_bytes"] = identity.size_bytes
+    record["mtime"] = identity.mtime
+    record["ctime"] = identity.ctime
+    record["mtime_ns"] = identity.mtime_ns
+    record["inode"] = identity.inode
+    record["device"] = identity.device
+
+
+def _inspect_local_target(
+    run_instance: Any,
+    record: Dict[str, Any],
+    *,
+    path_str: str,
+    normalized_path: str,
+    effective_level: str,
+    digest_val: Optional[str],
+    alg: str,
+    verify_digest: bool,
+    role: str,
+    label: Optional[str],
+    obs_time: str,
+    is_finalization: bool,
+    now: float,
+    metadata_copy: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Inspect a local filesystem target outside ``_data_files_lock``.
+
+    Populates ``record`` in place. Returns an existing deduplicated record if
+    an unchanged already-hashed observation matched without re-hashing, else
+    ``None`` (meaning the caller should store ``record``).
+    """
+    if effective_level == "name" and not verify_digest:
+        record["path"] = path_str
+        record["sha256"] = None
+        if digest_val is not None:
+            record["hash_status"] = "asserted"
+            record["hash_status_detail"] = None
+            record["hash_algorithm"] = alg
+            record["caller_digest"] = {"algorithm": alg, "value": digest_val, "verified": None}
+            record["digest"] = {"algorithm": alg, "value": digest_val}
+            record["observation_time"] = "caller_supplied"
+            record["evidence_source"] = "asserted"
+            record["evidence_strength"] = "asserted_content"
+        else:
+            record["hash_status"] = "disabled"
+            record["hash_status_detail"] = "level is 'name'"
+            record["hash_algorithm"] = None
+            record["digest"] = None
+            record["observation_time"] = obs_time
+            record["evidence_source"] = "observed"
+            record["evidence_strength"] = "path_only"
+        return None
+
+    record["path"] = path_str if effective_level == "name" else normalized_path
+
+    is_symlink = False
+    symlink_target: Optional[str] = None
+
+    try:
+        lst = os.lstat(path_str)
+        is_symlink = stat.S_ISLNK(lst.st_mode)
+        if is_symlink:
+            try:
+                symlink_target = os.readlink(path_str)
+            except OSError:
+                symlink_target = None
+    except FileNotFoundError:
+        _populate_non_file_digest_fields(
+            record,
+            entry_type="missing",
+            effective_level=effective_level,
+            digest_val=digest_val,
+            alg=alg,
+            verify_digest=verify_digest,
+            obs_time=obs_time,
+            is_finalization=is_finalization,
+            broken_symlink=False,
+        )
+        return None
+    except OSError as exc:
+        if effective_level == "hash" or verify_digest:
+            get_or_create_budget_tracker(run_instance).record_outcome("failed")
+        record["hash_status"] = "failed"
+        record["hash_status_detail"] = f"{type(exc).__name__}: {exc}"[:300]
+        record["hash_algorithm"] = alg if digest_val is not None else None
+        if digest_val is not None:
+            record["caller_digest"] = {"algorithm": alg, "value": digest_val, "verified": None}
+        record["digest"] = None
+        record["sha256"] = None
+        record["observation_time"] = obs_time
+        record["evidence_source"] = "none"
+        record["evidence_strength"] = "unavailable"
+        return None
+
+    try:
+        st = os.stat(path_str)
+    except FileNotFoundError:
+        if is_symlink:
+            record["is_symlink"] = True
+            record["symlink_target"] = symlink_target
+        _populate_non_file_digest_fields(
+            record,
+            entry_type="missing",
+            effective_level=effective_level,
+            digest_val=digest_val,
+            alg=alg,
+            verify_digest=verify_digest,
+            obs_time=obs_time,
+            is_finalization=is_finalization,
+            broken_symlink=is_symlink,
+        )
+        return None
+    except OSError as exc:
+        if is_symlink:
+            record["is_symlink"] = True
+            record["symlink_target"] = symlink_target
+        if effective_level == "hash" or verify_digest:
+            get_or_create_budget_tracker(run_instance).record_outcome("failed")
+        record["hash_status"] = "failed"
+        record["hash_status_detail"] = f"{type(exc).__name__}: {exc}"[:300]
+        record["hash_algorithm"] = alg if digest_val is not None else None
+        if digest_val is not None:
+            record["caller_digest"] = {"algorithm": alg, "value": digest_val, "verified": None}
+        record["digest"] = None
+        record["sha256"] = None
+        record["observation_time"] = obs_time
+        record["evidence_source"] = "none"
+        record["evidence_strength"] = "unavailable"
+        return None
+
+    st_identity = FileIdentity.from_stat_result(st)
+    if stat.S_ISDIR(st.st_mode):
+        entry_type = "directory"
+    elif stat.S_ISREG(st.st_mode):
+        entry_type = "file"
+    else:
+        entry_type = "special"
+
+    record["entry_type"] = entry_type
+    if effective_level != "name":
+        _populate_stat_metadata(record, st_identity)
+        if is_symlink:
+            record["is_symlink"] = True
+            record["symlink_target"] = symlink_target
+
+    if effective_level in ("realpath", "hash"):
+        try:
+            record["realpath"] = os.path.realpath(path_str)
+        except OSError:
+            record["realpath"] = None
+        record["is_symlink"] = is_symlink
+        if is_symlink:
+            record["symlink_target"] = symlink_target
+
+    if entry_type != "file":
+        _populate_non_file_digest_fields(
+            record,
+            entry_type=entry_type,
+            effective_level=effective_level,
+            digest_val=digest_val,
+            alg=alg,
+            verify_digest=verify_digest,
+            obs_time=obs_time,
+            is_finalization=is_finalization,
+            broken_symlink=False,
+        )
+        return None
+
+    # Regular file digest policy
+    if digest_val is not None and not verify_digest:
+        record["caller_digest"] = {"algorithm": alg, "value": digest_val, "verified": None}
+        record["digest"] = {"algorithm": alg, "value": digest_val}
+        record["hash_algorithm"] = alg
+        record["sha256"] = None
+        record["hash_status"] = "asserted"
+        record["hash_status_detail"] = None
+        record["observation_time"] = "caller_supplied"
+        record["evidence_source"] = "asserted"
+        record["evidence_strength"] = "asserted_content"
+        return None
+
+    if digest_val is not None and verify_digest:
+        if alg not in SUPPORTED_HASH_ALGORITHMS:
+            record["hash_status"] = "unavailable"
+            record["hash_status_detail"] = f"unsupported digest algorithm '{alg}'"
+            record["hash_algorithm"] = alg
+            record["caller_digest"] = {"algorithm": alg, "value": digest_val, "verified": None}
+            record["digest"] = {"algorithm": alg, "value": digest_val}
+            record["sha256"] = None
+            record["observation_time"] = "not_observed"
+            record["evidence_source"] = "asserted"
+            record["evidence_strength"] = "asserted_content"
+            return None
+
+        budget = get_or_create_budget_tracker(run_instance)
+        res = hash_file_checked(
+            path_str,
+            algorithm=alg,
+            budget=budget,
+            expected_identity=st_identity,
+        )
+        if res.get("hash_stats") is not None:
+            record["hash_stats"] = res["hash_stats"]
+        if res.get("identity") is not None and effective_level != "name":
+            _populate_stat_metadata(record, res["identity"])
+
+        if res["hash_status"] == "completed" and isinstance(res.get("digest"), dict):
+            computed = res["digest"]["value"]
+            if computed.lower() == digest_val.lower():
+                record["hash_status"] = "completed"
+                record["hash_status_detail"] = None
+                record["hash_algorithm"] = alg
+                record["caller_digest"] = {
+                    "algorithm": alg,
+                    "value": digest_val,
+                    "verified": True,
+                }
+                record["digest"] = {"algorithm": alg, "value": computed}
+                record["sha256"] = computed if alg == "sha256" else None
+                record["evidence_source"] = "observed"
+                record["evidence_strength"] = "verified_content"
+                record["observation_time"] = obs_time
+            else:
+                record["hash_status"] = "failed"
+                record["hash_status_detail"] = "caller_digest_mismatch"
+                record["hash_algorithm"] = alg
+                record["caller_digest"] = {
+                    "algorithm": alg,
+                    "value": digest_val,
+                    "verified": False,
+                }
+                record["digest"] = None
+                record["sha256"] = None
+                record["evidence_source"] = "observed"
+                record["evidence_strength"] = "changed_unverified"
+                record["observation_time"] = obs_time
+        else:
+            record["hash_status"] = res["hash_status"]
+            record["hash_status_detail"] = res["hash_status_detail"]
+            record["hash_algorithm"] = alg
+            record["caller_digest"] = {"algorithm": alg, "value": digest_val, "verified": None}
+            record["digest"] = None
+            record["sha256"] = None
+            record["change_detected"] = bool(res.get("change_detected", False))
+            if res.get("change_details") is not None:
+                record["change_details"] = res["change_details"]
+            record["evidence_source"] = res["evidence_source"]
+            record["evidence_strength"] = res["evidence_strength"]
+            record["observation_time"] = obs_time
+        return None
+
+    # No caller digest
+    if effective_level == "hash":
+        budget = get_or_create_budget_tracker(run_instance)
+        target_alg = budget.hash_algorithm
+        if not is_finalization:
+            deduped = _find_unchanged_completed_record(
+                run_instance,
+                path=record["path"],
+                normalized_path=normalized_path,
+                role=role,
+                label=label,
+                identity=st_identity,
+                target_alg=target_alg,
+                now=now,
+                metadata_copy=metadata_copy,
+            )
+            if deduped is not None:
+                return deduped
+
+        res = hash_file_checked(
+            path_str,
+            algorithm=target_alg,
+            budget=budget,
+            expected_identity=st_identity,
+        )
+        record["hash_status"] = res["hash_status"]
+        record["hash_status_detail"] = res["hash_status_detail"]
+        record["hash_algorithm"] = res["hash_algorithm"]
+        record["digest"] = res["digest"]
+        record["sha256"] = res["sha256"]
+        record["change_detected"] = bool(res.get("change_detected", False))
+        if res.get("change_details") is not None:
+            record["change_details"] = res["change_details"]
+        record["evidence_source"] = res["evidence_source"]
+        record["evidence_strength"] = res["evidence_strength"]
+        record["observation_time"] = obs_time
+        if res.get("hash_stats") is not None:
+            record["hash_stats"] = res["hash_stats"]
+        if res.get("entry_type") is not None:
+            record["entry_type"] = res["entry_type"]
+        if res.get("identity") is not None:
+            _populate_stat_metadata(record, res["identity"])
+        return None
+
+    # No caller digest and effective_level in ("stat", "realpath")
+    record["hash_status"] = "disabled"
+    record["hash_status_detail"] = f"level is '{effective_level}'"
+    record["hash_algorithm"] = None
+    record["digest"] = None
+    record["sha256"] = None
+    record["observation_time"] = obs_time
+    record["evidence_source"] = "observed"
+    record["evidence_strength"] = "metadata_only"
+    return None
+
+
+def register_file_provenance(
+    run_instance: Any,
+    path: Union[str, os.PathLike],
+    *,
+    role: str = "input",
+    label: Optional[str] = None,
+    digest: Optional[str] = None,
+    digest_algorithm: str = DEFAULT_HASH_ALGORITHM,
+    level: Optional[str] = None,
+    verify_digest: bool = False,
+    defer: bool = False,
+    metadata: Optional[Dict[str, Any]] = None,
+    registration_source: str = "register_file",
+) -> Optional[Dict[str, Any]]:
+    """Explicitly register an external local input, output, or mixed-role path.
+
+    Programmer-error arguments raise ``TypeError`` or ``ValueError`` before
+    inspecting run state or the filesystem. Unexpected operating system errors
+    are captured cleanly into schema-valid records without raising into host
+    code.
+    """
+    (
+        path_str,
+        role_val,
+        explicit_level,
+        digest_val,
+        alg,
+        verify_flag,
+        metadata_copy,
+    ) = _validate_registration_args(
+        path,
+        role,
+        level,
+        digest,
+        digest_algorithm,
+        verify_digest,
+        metadata,
+        label=label,
+        registration_source=registration_source,
+    )
+
+    try:
+        cfg = resolve_file_io_config(run_instance)
+        effective_level = explicit_level if explicit_level is not None else cfg["level"]
+        if effective_level == "none":
+            return None
+
+        now = time.time()
+        record: Dict[str, Any] = {
+            "path": path_str,
+            "role": role_val,
+            "label": label,
+            "registration_source": registration_source,
+            "registration_count": 1,
+            "registered_before_creation": False,
+            "change_detected": False,
+            "registered_at_utc": now,
+            "last_observed_at_utc": now,
+        }
+        if role_val == "input":
+            record["accessed_at_utc"] = now
+        elif role_val == "output":
+            record["modified_at_utc"] = now
+        else:
+            record["accessed_at_utc"] = now
+            record["modified_at_utc"] = now
+
+        if metadata_copy is not None:
+            record["metadata"] = metadata_copy
+
+        # 1. Remote URI branch: never touch network or local filesystem.
+        if _is_remote_uri(path_str):
+            record["entry_type"] = "unsupported_remote_uri"
+            record["path"] = path_str
+            record["sha256"] = None
+            if digest_val is not None and not verify_flag:
+                record["hash_status"] = "asserted"
+                record["hash_algorithm"] = alg
+                record["caller_digest"] = {
+                    "algorithm": alg,
+                    "value": digest_val,
+                    "verified": None,
+                }
+                record["digest"] = {"algorithm": alg, "value": digest_val}
+                record["observation_time"] = "caller_supplied"
+                record["evidence_source"] = "asserted"
+                record["evidence_strength"] = "asserted_content"
+                record["hash_status_detail"] = (
+                    "remote object-store URIs are out of scope; "
+                    "caller digest asserted without local verification"
+                )
+            elif digest_val is not None and verify_flag:
+                record["hash_status"] = "unavailable"
+                record["hash_algorithm"] = alg
+                record["caller_digest"] = {
+                    "algorithm": alg,
+                    "value": digest_val,
+                    "verified": None,
+                }
+                record["digest"] = {"algorithm": alg, "value": digest_val}
+                record["observation_time"] = "not_observed"
+                record["evidence_source"] = "asserted"
+                record["evidence_strength"] = "asserted_content"
+                record["hash_status_detail"] = (
+                    "remote object-store URIs are out of scope; "
+                    "caller digest not verified"
+                )
+            else:
+                record["hash_status"] = "unavailable"
+                record["hash_algorithm"] = None
+                record["digest"] = None
+                record["observation_time"] = "not_observed"
+                record["evidence_source"] = "none"
+                record["evidence_strength"] = "unavailable"
+                record["hash_status_detail"] = "remote object-store URIs are out of scope"
+
+            stored = append_or_deduplicate_record(run_instance, record)
+            _emit_file_event(run_instance, stored)
+            return stored
+
+        normalized_path = os.path.normpath(os.path.abspath(path_str))
+
+        # 2. Pending-output branch (defer=True or output missing before creation).
+        is_pending = False
+        if role_val in ("output", "input_output"):
+            if defer:
+                is_pending = True
+            elif effective_level != "name":
+                try:
+                    os.lstat(path_str)
+                except FileNotFoundError:
+                    is_pending = True
+                except OSError:
+                    # PermissionError or other OS error -> handle in local inspection.
+                    is_pending = False
+
+        if is_pending:
+            lock = getattr(run_instance, "_data_files_lock", _fallback_data_files_lock)
+            bucket_name = _bucket_for_role(role_val)
+            with lock:
+                pending_list = getattr(run_instance, "_pending_file_registrations", None)
+                if not isinstance(pending_list, list):
+                    pending_list = []
+                    try:
+                        run_instance._pending_file_registrations = pending_list
+                    except Exception:
+                        pass
+
+                for item in pending_list:
+                    if (
+                        item.normalized_path == normalized_path
+                        and item.role == role_val
+                        and item.label == label
+                    ):
+                        rec = item.record_ref
+                        rec["registration_count"] = int(rec.get("registration_count", 1)) + 1
+                        rec["last_observed_at_utc"] = now
+                        rec["modified_at_utc"] = now
+                        if role_val == "input_output":
+                            rec["accessed_at_utc"] = now
+                        if explicit_level is not None:
+                            item.effective_level = explicit_level
+                        if metadata_copy is not None:
+                            if isinstance(rec.get("metadata"), dict):
+                                merged_meta = dict(rec["metadata"])
+                                merged_meta.update(metadata_copy)
+                                rec["metadata"] = merged_meta
+                            else:
+                                rec["metadata"] = metadata_copy
+                        if digest_val is not None:
+                            item.digest_val = digest_val
+                            item.alg = alg
+                            item.verify_digest = verify_flag
+                            rec["hash_algorithm"] = alg
+                            rec["caller_digest"] = {
+                                "algorithm": alg,
+                                "value": digest_val,
+                                "verified": None,
+                            }
+                            rec["digest"] = {"algorithm": alg, "value": digest_val}
+                            rec["evidence_source"] = "asserted"
+                            rec["evidence_strength"] = "asserted_content"
+                        return rec
+
+                record["path"] = path_str if effective_level == "name" else normalized_path
+                record["hash_status"] = "pending"
+                record["hash_status_detail"] = (
+                    "registered before creation; awaiting file creation or run finalization"
+                )
+                record["registered_before_creation"] = True
+                record["observation_time"] = "not_observed"
+                record["sha256"] = None
+                if digest_val is not None:
+                    record["hash_algorithm"] = alg
+                    record["caller_digest"] = {
+                        "algorithm": alg,
+                        "value": digest_val,
+                        "verified": None,
+                    }
+                    record["digest"] = {"algorithm": alg, "value": digest_val}
+                    record["evidence_source"] = "asserted"
+                    record["evidence_strength"] = "asserted_content"
+                else:
+                    record["hash_algorithm"] = None
+                    record["digest"] = None
+                    record["evidence_source"] = "none"
+                    record["evidence_strength"] = "unavailable"
+
+                data_files = _ensure_data_files_buckets(run_instance)
+                data_files[bucket_name].append(record)
+                pending_list.append(
+                    _PendingRegistration(
+                        record_ref=record,
+                        path_str=path_str,
+                        normalized_path=normalized_path,
+                        effective_level=effective_level,
+                        digest_val=digest_val,
+                        alg=alg,
+                        verify_digest=verify_flag,
+                        role=role_val,
+                        label=label,
+                        registration_source=registration_source,
+                    )
+                )
+            _emit_file_event(run_instance, record)
+            return record
+
+        # 3. Local inspection (level="name" fast path or stat/realpath/hash inspection)
+        #    performed completely outside _data_files_lock.
+        deduped = _inspect_local_target(
+            run_instance,
+            record,
+            path_str=path_str,
+            normalized_path=normalized_path,
+            effective_level=effective_level,
+            digest_val=digest_val,
+            alg=alg,
+            verify_digest=verify_flag,
+            role=role_val,
+            label=label,
+            obs_time="at_registration",
+            is_finalization=False,
+            now=now,
+            metadata_copy=metadata_copy,
+        )
+        if deduped is not None:
+            _emit_file_event(run_instance, deduped)
+            return deduped
+
+        stored = _upgrade_pending_or_append(
+            run_instance,
+            record,
+            normalized_path=normalized_path,
+            role=role_val,
+            label=label,
+            metadata_copy=metadata_copy,
+        )
+        _emit_file_event(run_instance, stored)
+        return stored
+    except Exception as exc:
+        logger.warning(
+            "pubrun: failed to register file provenance for '%s': %s",
+            path_str,
+            exc,
+        )
+        return None
+
+
 def finalize_pending_registrations(run_instance: Any) -> None:
     """Finalize deferred external file registrations during run shutdown.
 
-    Baseline no-op hook invoked by ``Run._finalize_state()`` when pending
-    registrations exist; extended by child plan ``52dl55``.
+    Pops all remaining pending entries under ``_data_files_lock``, performs all
+    disk inspection and hashing outside the lock, and updates each referenced
+    manifest record in place. Safe in Ghost Mode and with closed event streams.
     """
-    return None
+    lock = getattr(run_instance, "_data_files_lock", _fallback_data_files_lock)
+    with lock:
+        pending_list = getattr(run_instance, "_pending_file_registrations", None)
+        if not isinstance(pending_list, list) or not pending_list:
+            return
+        items = list(pending_list)
+        pending_list.clear()
+
+    for item in items:
+        try:
+            now = time.time()
+            updated: Dict[str, Any] = {
+                "path": item.path_str,
+                "role": item.role,
+                "label": item.label,
+                "registration_source": item.registration_source,
+                "registration_count": 1,
+                "registered_before_creation": True,
+                "change_detected": False,
+                "registered_at_utc": now,
+                "last_observed_at_utc": now,
+            }
+            if item.role == "output":
+                updated["modified_at_utc"] = now
+            elif item.role == "input_output":
+                updated["accessed_at_utc"] = now
+                updated["modified_at_utc"] = now
+            else:
+                updated["accessed_at_utc"] = now
+
+            _inspect_local_target(
+                run_instance,
+                updated,
+                path_str=item.path_str,
+                normalized_path=item.normalized_path,
+                effective_level=item.effective_level,
+                digest_val=item.digest_val,
+                alg=item.alg,
+                verify_digest=item.verify_digest,
+                role=item.role,
+                label=item.label,
+                obs_time="at_finalization",
+                is_finalization=True,
+                now=now,
+                metadata_copy=None,
+            )
+
+            with lock:
+                existing_rec = item.record_ref
+                prev_count = int(existing_rec.get("registration_count", 1))
+                prev_reg_at = existing_rec.get("registered_at_utc")
+                prev_meta = existing_rec.get("metadata")
+                existing_rec.clear()
+                existing_rec.update(updated)
+                existing_rec["registered_before_creation"] = True
+                existing_rec["registration_count"] = prev_count
+                if prev_reg_at is not None:
+                    existing_rec["registered_at_utc"] = prev_reg_at
+                if prev_meta is not None:
+                    existing_rec["metadata"] = prev_meta
+
+            _emit_file_event(run_instance, item.record_ref)
+        except Exception as exc:
+            logger.warning(
+                "pubrun: failed to finalize pending registration for '%s': %s",
+                getattr(item, "path_str", "<unknown>"),
+                exc,
+            )
 
 
 class ProvenanceFileProxy:

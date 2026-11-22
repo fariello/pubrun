@@ -596,6 +596,7 @@ def print(*args: Any, **kwargs: Any) -> None:
 # open fd is ~free even on NFS, but realpath walks every path component (costly on NFS), so
 # realpath sits ABOVE stat.
 _FILE_IO_LEVELS = ("none", "name", "stat", "realpath", "hash")
+_VALID_FILE_ROLES = ("input", "output", "input_output")
 
 
 def _file_io_level(run_instance: Any) -> str:
@@ -606,6 +607,222 @@ def _file_io_level(run_instance: Any) -> str:
         return level if level in _FILE_IO_LEVELS else "stat"
     except Exception:
         return "stat"
+
+
+def _validate_file_registration_args(
+    path: Any,
+    role: Any,
+    level: Any,
+    digest: Any,
+    digest_algorithm: Any,
+    verify_digest: Any,
+    metadata: Any,
+    *,
+    label: Any = None,
+) -> None:
+    """Validate programmer-error arguments early without importing file_io."""
+    import json
+
+    raw_path = os.fspath(path)
+    if isinstance(raw_path, bytes):
+        path_str = os.fsdecode(raw_path)
+    elif isinstance(raw_path, str):
+        path_str = raw_path
+    else:
+        raise TypeError("path must be a string or os.PathLike")
+    if not path_str or not path_str.strip():
+        raise ValueError("path must be a non-empty string or os.PathLike")
+
+    if not isinstance(role, str) or role not in _VALID_FILE_ROLES:
+        raise ValueError(
+            f"invalid role {role!r}; expected one of {', '.join(_VALID_FILE_ROLES)}"
+        )
+
+    if label is not None and not isinstance(label, str):
+        raise TypeError("label must be a string or None")
+
+    if level is not None:
+        if not isinstance(level, str) or level not in _FILE_IO_LEVELS:
+            raise ValueError(
+                f"invalid level {level!r}; expected one of {', '.join(_FILE_IO_LEVELS)}"
+            )
+
+    digest_val: Optional[str] = None
+    if digest is not None:
+        if not isinstance(digest, str) or not digest.strip():
+            raise ValueError("digest must be a non-empty string when provided")
+        digest_val = digest.strip()
+
+    if not isinstance(digest_algorithm, str) or not digest_algorithm.strip():
+        raise ValueError("digest_algorithm must be a non-empty string")
+
+    if bool(verify_digest) and digest_val is None:
+        raise ValueError("verify_digest=True requires a non-empty digest")
+
+    if metadata is not None:
+        if not isinstance(metadata, dict):
+            raise ValueError("metadata must be a dict or None")
+        json.dumps(metadata, allow_nan=False)
+
+
+def register_file(
+    path: Any,
+    role: str = "input",
+    *,
+    label: Optional[str] = None,
+    digest: Optional[str] = None,
+    digest_algorithm: str = "sha256",
+    level: Optional[str] = None,
+    verify_digest: bool = False,
+    defer: bool = False,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Register an external input, output, or mixed-role file path with the active run.
+
+    Designed for workflows using external I/O libraries (such as pandas, PyArrow,
+    NumPy, or C extensions) without replacing their readers or writers. Does not
+    patch ``builtins.open``.
+
+    Args:
+        path: Local file path (``str`` or ``os.PathLike``). Remote URIs are
+            recorded honestly as out-of-scope without network access.
+        role: File role (``"input"``, ``"output"``, or ``"input_output"``).
+        label: Optional logical label (for example ``"training_data"``).
+        digest: Optional caller-supplied digest value. Recorded as asserted
+            evidence unless ``verify_digest=True`` is requested.
+        digest_algorithm: Digest algorithm name (default ``"sha256"``).
+        level: Optional per-call override for ``[capture.file_io].level``.
+        verify_digest: If True, verify ``digest`` against on-disk bytes.
+        defer: If True on an output or mixed role, defer inspection until
+            a post-creation registration call or run finalization.
+        metadata: Optional JSON-serializable dict of extra file metadata.
+
+    Returns:
+        The recorded provenance dict, or ``None`` when no run is active or
+        the effective detail level is ``"none"``.
+    """
+    _validate_file_registration_args(
+        path,
+        role,
+        level,
+        digest,
+        digest_algorithm,
+        verify_digest,
+        metadata,
+        label=label,
+    )
+    run = get_current_run()
+    if not run or not run.is_active:
+        _handle_inactive("pubrun.register_file()")
+        return None
+    from pubrun.capture.file_io import register_file_provenance
+
+    return register_file_provenance(
+        run,
+        path,
+        role=role,
+        label=label,
+        digest=digest,
+        digest_algorithm=digest_algorithm,
+        level=level,
+        verify_digest=verify_digest,
+        defer=defer,
+        metadata=metadata,
+        registration_source="register_file",
+    )
+
+
+def register_input(
+    path: Any,
+    *,
+    label: Optional[str] = None,
+    digest: Optional[str] = None,
+    digest_algorithm: str = "sha256",
+    level: Optional[str] = None,
+    verify_digest: bool = False,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Register an external input dataset path with the active run.
+
+    Convenience wrapper around ``register_file(path, role="input", ...)``.
+    """
+    _validate_file_registration_args(
+        path,
+        "input",
+        level,
+        digest,
+        digest_algorithm,
+        verify_digest,
+        metadata,
+        label=label,
+    )
+    run = get_current_run()
+    if not run or not run.is_active:
+        _handle_inactive("pubrun.register_input()")
+        return None
+    from pubrun.capture.file_io import register_file_provenance
+
+    return register_file_provenance(
+        run,
+        path,
+        role="input",
+        label=label,
+        digest=digest,
+        digest_algorithm=digest_algorithm,
+        level=level,
+        verify_digest=verify_digest,
+        defer=False,
+        metadata=metadata,
+        registration_source="register_input",
+    )
+
+
+def register_output(
+    path: Any,
+    *,
+    label: Optional[str] = None,
+    digest: Optional[str] = None,
+    digest_algorithm: str = "sha256",
+    level: Optional[str] = None,
+    verify_digest: bool = False,
+    defer: bool = False,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Register an external output file path with the active run.
+
+    Supports both pre-creation registration (automatic when missing or explicit
+    via ``defer=True``) and post-creation registration. Convenience wrapper
+    around ``register_file(path, role="output", ...)``.
+    """
+    _validate_file_registration_args(
+        path,
+        "output",
+        level,
+        digest,
+        digest_algorithm,
+        verify_digest,
+        metadata,
+        label=label,
+    )
+    run = get_current_run()
+    if not run or not run.is_active:
+        _handle_inactive("pubrun.register_output()")
+        return None
+    from pubrun.capture.file_io import register_file_provenance
+
+    return register_file_provenance(
+        run,
+        path,
+        role="output",
+        label=label,
+        digest=digest,
+        digest_algorithm=digest_algorithm,
+        level=level,
+        verify_digest=verify_digest,
+        defer=defer,
+        metadata=metadata,
+        registration_source="register_output",
+    )
 
 
 def open(file: Any, mode: str = "r", **kwargs: Any) -> Any:

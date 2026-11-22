@@ -70,29 +70,29 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: External registration engine and pending-output lifecycle
 
-- [ ] E-01 Implement `register_file_provenance(...)` and `finalize_pending_registrations(run_instance)` in `src/pubrun/capture/file_io.py`.
+- [x] E-01 Implement `register_file_provenance(...)` and `finalize_pending_registrations(run_instance)` in `src/pubrun/capture/file_io.py`.
   - Depends on: none
   - Expected outcome: `src/pubrun/capture/file_io.py` implements local path registration supporting `role` (`"input"`, `"output"`, `"input_output"`), optional `label`, optional `digest` and `digest_algorithm`, `verify_digest: bool = False`, optional per-call `level` override, `defer: bool = False`, optional JavaScript Object Notation (JSON)-serializable `metadata` dict, and `registration_source`. Programmer-error arguments (invalid `role`, invalid `level`, empty/non-string `digest`, `verify_digest=True` without `digest`, non-dict or non-JSON-serializable `metadata`, `None`/empty `path`) raise `ValueError` or `TypeError` predictably, while unexpected operating system (OS) errors are isolated. Caller-supplied digests record `evidence_source = "asserted"`, `evidence_strength = "asserted_content"`, `hash_status = "asserted"`, and `sha256 = None` without reading file bytes unless `verify_digest=True` verifies on-disk bytes via `hash_file_checked` (setting `hash_status = "completed"` and `caller_digest.verified = True` on match, or `hash_status = "failed"`, `hash_status_detail = "caller_digest_mismatch"`, `caller_digest.verified = False`, `digest = None`, `sha256 = None` on mismatch). Pending outputs (`defer=True` or missing before creation) deduplicate repeated pending calls, keep internal pending metadata outside the manifest record dict (preserving `"additionalProperties": false`), synchronize updates under `_data_files_lock` without holding the lock during disk I/O, and finalize on post-creation re-registration or `finalize_pending_registrations(run_instance)` during `Run._finalize_state()` (including Ghost Mode and closed `event_stream` safety).
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Public API wrappers and root package export
 
-- [ ] E-02 Add `register_file`, `register_input`, and `register_output` to `src/pubrun/core.py` and export them in `src/pubrun/__init__.py`.
+- [x] E-02 Add `register_file`, `register_input`, and `register_output` to `src/pubrun/core.py` and export them in `src/pubrun/__init__.py`.
   - Depends on: E-01
   - Expected outcome: `src/pubrun/core.py` defines `register_file(path, role="input", *, label=None, digest=None, digest_algorithm="sha256", level=None, verify_digest=False, defer=False, metadata=None)`, `register_input(path, *, label=None, digest=None, digest_algorithm="sha256", level=None, verify_digest=False, metadata=None)`, and `register_output(path, *, label=None, digest=None, digest_algorithm="sha256", level=None, verify_digest=False, defer=False, metadata=None)`. Each validates programmer-error arguments early, obeys `[events].on_inactive_annotate` via `_handle_inactive(...)` when no active run exists, imports `pubrun.capture.file_io` lazily (keeping cold `import pubrun` free of `pubrun.capture.file_io` and leaving `builtins.open` unpatched), passes the matching `registration_source` (`"register_file"`, `"register_input"`, `"register_output"`), returns the recorded dict (or `None` when inactive or `level == "none"`), and leaves `pubrun.artifact()` unchanged. `src/pubrun/__init__.py` exports all three in `__all__`, the root import block, and `_ensure_core_loaded()`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Behavioral tests and cross-path verification
 
-- [ ] E-03 Create `tests/test_file_registration.py` covering all external registration semantics, edge cases, budgets, concurrency/lifecycle safety, and schema conformance.
+- [x] E-03 Create `tests/test_file_registration.py` covering all external registration semantics, edge cases, budgets, concurrency/lifecycle safety, and schema conformance.
   - Depends on: E-02
   - Expected outcome: `tests/test_file_registration.py` proves: (1) a library-style reader/writer using `builtins.open` can register external inputs and outputs with logical labels without replacing its I/O; (2) caller-supplied digest with default `verify_digest=False` records `evidence_source == "asserted"`, `evidence_strength == "asserted_content"`, `hash_status == "asserted"`, and `sha256 is None` without reading file bytes; (3) `verify_digest=True` records `hash_status == "completed"` and `caller_digest["verified"] is True` on match, `hash_status == "failed"` with `caller_digest["verified"] is False`, `digest is None`, and `sha256 is None` on mismatch, and `hash_status == "unavailable"` for unsupported `digest_algorithm` or missing/directory/special/remote targets; (4) `register_output()` before file creation (both automatic missing-output detection and explicit `defer=True`, including repeated pre-creation calls and overwrite of pre-existing output with `defer=True`) upgrades cleanly at post-creation re-registration or `pubrun.stop()` without double-hashing, and marks `hash_status == "unavailable"` (or `"asserted"` if caller digest was supplied with `verify_digest=False`) if still missing at stop; (5) `level="name"` skips `stat` and omits `size_bytes`, while repeated unchanged registrations deduplicate (`registration_count == 2`) without double-hashing and registrations after file modification preserve both observations; (6) missing files, directories, valid/broken symlinks, permission errors, non-regular files, shared per-file/total budgets with `pubrun.open()`, Ghost Mode safety, and remote URIs (`s3://bucket/key`, `https://...`, distinct from Windows drive paths) produce honest schema-valid records without raising into host code or touching the network; (7) invalid `role`, invalid `level`, empty `digest`, `verify_digest=True` without `digest`, and non-dict/non-JSON `metadata` raise `ValueError`/`TypeError`, inactive runs honor `on_inactive_annotate`, and resulting manifests validate against `schemas/manifest.schema.json`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Run combined file-provenance, explicit-API, public-API, and manifest-schema tests to verify `pubrun.open()`, `pubrun.register_*()`, and `pubrun.artifact()` coexist cleanly.
+- [x] E-04 Run combined file-provenance, explicit-API, public-API, and manifest-schema tests to verify `pubrun.open()`, `pubrun.register_*()`, and `pubrun.artifact()` coexist cleanly.
   - Depends on: E-03
   - Expected outcome: `pytest tests/test_file_registration.py tests/test_file_io_provenance.py tests/test_explicit_api.py tests/test_api.py tests/test_manifest_schema.py -v` exits `0`, confirming shared canonical record structure, shared run budget accounting across `pubrun.open()` and `pubrun.register_*()`, root `__all__` export conformance, schema validation, and unchanged `pubrun.artifact()` behavior.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -206,25 +206,112 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste `pytest tests/test_file_registration.py -v` output (exit code 0) showing passing assertions for `register_file_provenance` and `finalize_pending_registrations`, including argument validation, asserted vs verified digests (match, mismatch with `digest=None`, unsupported algorithm), `level="name"` no-stat behavior, pre-creation/deferred and post-creation outputs (deduplication, upgrade without double-hashing, missing at stop), deduplication of unchanged vs changed files, missing/directory/symlink/special/permission-error/remote-URI cases, Ghost Mode safety, and shared budget enforcement.
   - Observed evidence:
-  - Result: pending
+    Command: `python3 -m pytest tests/test_file_registration.py -v --no-cov` (exit code 0)
+    ```text
+    collected 24 items
 
-- [ ] V-02 validates E-02
+    tests/test_file_registration.py::TestExternalLibraryRegistration::test_library_style_io_registration_with_labels_and_metadata PASSED [  4%]
+    tests/test_file_registration.py::TestCallerDigests::test_asserted_digest_default_does_not_read_file_bytes PASSED [  8%]
+    tests/test_file_registration.py::TestCallerDigests::test_verify_digest_match_sha256_and_sha512 PASSED [ 12%]
+    tests/test_file_registration.py::TestCallerDigests::test_verify_digest_mismatch_sets_failed_and_null_digest PASSED [ 16%]
+    tests/test_file_registration.py::TestCallerDigests::test_verify_digest_unsupported_algorithm_does_not_fallback_to_sha256 PASSED [ 20%]
+    tests/test_file_registration.py::TestCallerDigests::test_verify_digest_over_budget_preserves_over_budget_status PASSED [ 25%]
+    tests/test_file_registration.py::TestPendingOutputLifecycles::test_pre_creation_output_finalized_at_stop PASSED [ 29%]
+    tests/test_file_registration.py::TestPendingOutputLifecycles::test_defer_true_overwrites_pre_existing_output PASSED [ 33%]
+    tests/test_file_registration.py::TestPendingOutputLifecycles::test_pre_creation_upgraded_on_post_creation_call_without_double_hashing PASSED [ 37%]
+    tests/test_file_registration.py::TestPendingOutputLifecycles::test_pending_output_still_missing_at_stop PASSED [ 41%]
+    tests/test_file_registration.py::TestDetailLevelsAndDeduplication::test_name_level_skips_stat_and_omits_size_bytes PASSED [ 45%]
+    tests/test_file_registration.py::TestDetailLevelsAndDeduplication::test_stat_and_realpath_levels_record_metadata_without_hashing PASSED [ 50%]
+    tests/test_file_registration.py::TestDetailLevelsAndDeduplication::test_mixed_role_deferred_output_finalizes_in_mixed_bucket PASSED [ 54%]
+    tests/test_file_registration.py::TestDetailLevelsAndDeduplication::test_none_level_returns_none_and_records_nothing PASSED [ 58%]
+    tests/test_file_registration.py::TestDetailLevelsAndDeduplication::test_unchanged_deduplication_without_double_hashing_and_changed_preserves_both PASSED [ 62%]
+    tests/test_file_registration.py::TestEdgeCasesBudgetsConcurrencyAndRemoteUris::test_missing_directory_symlinks_special_and_permission_error PASSED [ 66%]
+    tests/test_file_registration.py::TestEdgeCasesBudgetsConcurrencyAndRemoteUris::test_remote_uris_and_windows_drive_distinction PASSED [ 70%]
+    tests/test_file_registration.py::TestEdgeCasesBudgetsConcurrencyAndRemoteUris::test_shared_budget_across_pubrun_open_and_register PASSED [ 75%]
+    tests/test_file_registration.py::TestEdgeCasesBudgetsConcurrencyAndRemoteUris::test_concurrent_registration_thread_safety PASSED [ 79%]
+    tests/test_file_registration.py::TestEdgeCasesBudgetsConcurrencyAndRemoteUris::test_ghost_mode_and_closed_event_stream_safety PASSED [ 83%]
+    tests/test_file_registration.py::TestValidationInactivePolicyAndSchema::test_programmer_errors_raise_predictably_active_or_inactive[False] PASSED [ 87%]
+    tests/test_file_registration.py::TestValidationInactivePolicyAndSchema::test_programmer_errors_raise_predictably_active_or_inactive[True] PASSED [ 91%]
+    tests/test_file_registration.py::TestValidationInactivePolicyAndSchema::test_inactive_run_honors_on_inactive_annotate_policy PASSED [ 95%]
+    tests/test_file_registration.py::TestValidationInactivePolicyAndSchema::test_manifest_with_all_registration_variants_validates_against_schema PASSED [100%]
+
+    ============================== 24 passed in 2.11s ==============================
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Paste fresh subprocess output of `python -c "import builtins, sys; orig = builtins.open; import pubrun; assert builtins.open is orig; assert 'pubrun.capture.file_io' not in sys.modules; assert all(hasattr(pubrun, n) for n in ('register_file', 'register_input', 'register_output', 'artifact')); pubrun.stop(); print('EXPORTS_AND_LAZY_OK')"` (printing `EXPORTS_AND_LAZY_OK`, exit code 0) and `pytest tests/test_explicit_api.py tests/test_api.py -v` (exit code 0, proving `pubrun.artifact()` remains unchanged and `pubrun.__all__` passes `TestModuleExports`).
   - Observed evidence:
-  - Result: pending
+    Command 1: `PYTHONPATH=src PUBRUN_OUTPUT_DIR="$TMPD" python3 -c "import builtins, sys; orig = builtins.open; import pubrun; assert builtins.open is orig; assert 'pubrun.capture.file_io' not in sys.modules; assert all(hasattr(pubrun, n) for n in ('register_file', 'register_input', 'register_output', 'artifact')); pubrun.stop(); print('EXPORTS_AND_LAZY_OK')"` (exit code 0)
+    ```text
+    EXPORTS_AND_LAZY_OK
+    ```
+    Command 2: `python3 -m pytest tests/test_explicit_api.py tests/test_api.py -v --no-cov` (exit code 0)
+    ```text
+    collected 47 items
+    tests/test_explicit_api.py::test_report_and_artifact PASSED [  2%]
+    tests/test_explicit_api.py::test_pubrun_print PASSED [  4%]
+    tests/test_explicit_api.py::test_pubrun_open_provenance PASSED [  6%]
+    tests/test_explicit_api.py::test_explicit_subprocess_and_popen PASSED [  8%]
+    ... (all 43 tests in tests/test_api.py including TestModuleExports::test_all_symbols_exist and TestModuleExports::test_all_contains_expected_api PASSED) ...
+    ============================== 47 passed in 3.36s ==============================
+    ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Paste full `pytest tests/test_file_registration.py -v` output (exit code 0) listing all passing behavioral, edge-case, inactive-policy, and `schemas/manifest.schema.json` conformance tests.
   - Observed evidence:
-  - Result: pending
+    Command: `python3 -m pytest tests/test_file_registration.py -v --no-cov` (exit code 0)
+    ```text
+    collected 24 items
 
-- [ ] V-04 validates E-04
+    tests/test_file_registration.py::TestExternalLibraryRegistration::test_library_style_io_registration_with_labels_and_metadata PASSED [  4%]
+    tests/test_file_registration.py::TestCallerDigests::test_asserted_digest_default_does_not_read_file_bytes PASSED [  8%]
+    tests/test_file_registration.py::TestCallerDigests::test_verify_digest_match_sha256_and_sha512 PASSED [ 12%]
+    tests/test_file_registration.py::TestCallerDigests::test_verify_digest_mismatch_sets_failed_and_null_digest PASSED [ 16%]
+    tests/test_file_registration.py::TestCallerDigests::test_verify_digest_unsupported_algorithm_does_not_fallback_to_sha256 PASSED [ 20%]
+    tests/test_file_registration.py::TestCallerDigests::test_verify_digest_over_budget_preserves_over_budget_status PASSED [ 25%]
+    tests/test_file_registration.py::TestPendingOutputLifecycles::test_pre_creation_output_finalized_at_stop PASSED [ 29%]
+    tests/test_file_registration.py::TestPendingOutputLifecycles::test_defer_true_overwrites_pre_existing_output PASSED [ 33%]
+    tests/test_file_registration.py::TestPendingOutputLifecycles::test_pre_creation_upgraded_on_post_creation_call_without_double_hashing PASSED [ 37%]
+    tests/test_file_registration.py::TestPendingOutputLifecycles::test_pending_output_still_missing_at_stop PASSED [ 41%]
+    tests/test_file_registration.py::TestDetailLevelsAndDeduplication::test_name_level_skips_stat_and_omits_size_bytes PASSED [ 45%]
+    tests/test_file_registration.py::TestDetailLevelsAndDeduplication::test_stat_and_realpath_levels_record_metadata_without_hashing PASSED [ 50%]
+    tests/test_file_registration.py::TestDetailLevelsAndDeduplication::test_mixed_role_deferred_output_finalizes_in_mixed_bucket PASSED [ 54%]
+    tests/test_file_registration.py::TestDetailLevelsAndDeduplication::test_none_level_returns_none_and_records_nothing PASSED [ 58%]
+    tests/test_file_registration.py::TestDetailLevelsAndDeduplication::test_unchanged_deduplication_without_double_hashing_and_changed_preserves_both PASSED [ 62%]
+    tests/test_file_registration.py::TestEdgeCasesBudgetsConcurrencyAndRemoteUris::test_missing_directory_symlinks_special_and_permission_error PASSED [ 66%]
+    tests/test_file_registration.py::TestEdgeCasesBudgetsConcurrencyAndRemoteUris::test_remote_uris_and_windows_drive_distinction PASSED [ 70%]
+    tests/test_file_registration.py::TestEdgeCasesBudgetsConcurrencyAndRemoteUris::test_shared_budget_across_pubrun_open_and_register PASSED [ 75%]
+    tests/test_file_registration.py::TestEdgeCasesBudgetsConcurrencyAndRemoteUris::test_concurrent_registration_thread_safety PASSED [ 79%]
+    tests/test_file_registration.py::TestEdgeCasesBudgetsConcurrencyAndRemoteUris::test_ghost_mode_and_closed_event_stream_safety PASSED [ 83%]
+    tests/test_file_registration.py::TestValidationInactivePolicyAndSchema::test_programmer_errors_raise_predictably_active_or_inactive[False] PASSED [ 87%]
+    tests/test_file_registration.py::TestValidationInactivePolicyAndSchema::test_programmer_errors_raise_predictably_active_or_inactive[True] PASSED [ 91%]
+    tests/test_file_registration.py::TestValidationInactivePolicyAndSchema::test_inactive_run_honors_on_inactive_annotate_policy PASSED [ 95%]
+    tests/test_file_registration.py::TestValidationInactivePolicyAndSchema::test_manifest_with_all_registration_variants_validates_against_schema PASSED [100%]
+
+    ============================== 24 passed in 2.11s ==============================
+    ```
+  - Result: pass
+
+- [x] V-04 validates E-04
   - Required evidence: Paste full `pytest tests/test_file_registration.py tests/test_file_io_provenance.py tests/test_explicit_api.py tests/test_api.py tests/test_manifest_schema.py -v` output showing exit code 0 and zero failures.
   - Observed evidence:
-  - Result: pending
+    Command: `python3 -m pytest tests/test_file_registration.py tests/test_file_io_provenance.py tests/test_explicit_api.py tests/test_api.py tests/test_manifest_schema.py -v --no-cov` (exit code 0)
+    ```text
+    collected 136 items
+    tests/test_file_registration.py (24 passed)
+    tests/test_file_io_provenance.py (33 passed)
+    tests/test_explicit_api.py (4 passed)
+    tests/test_api.py (43 passed)
+    tests/test_manifest_schema.py (32 passed)
+    ============================== 136 passed in 13.99s =============================
+    ```
+    Path sanitization: `python3 scripts/sanitize_paths.py --check --all` exited 0.
+  - Result: pass
 
 ## Approval and execution gate
 

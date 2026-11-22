@@ -100,6 +100,9 @@ __all__ = [
     "artifact",
     "print",
     "open",
+    "register_file",
+    "register_input",
+    "register_output",
     "subprocess",
     "popen",
     "__version__",
@@ -127,6 +130,9 @@ if not _is_mode_import():
         artifact,
         print,
         open,
+        register_file,
+        register_input,
+        register_output,
         subprocess,
         popen,
         _run_lock,
@@ -149,7 +155,9 @@ else:
                 from pubrun.core import (
                     start, stop, annotate, phase, paused, diff,
                     audit_run, tracked_run, get_current_run,
-                    report, artifact, print, open, subprocess, popen,
+                    report, artifact, print, open,
+                    register_file, register_input, register_output,
+                    subprocess, popen,
                     _run_lock,
                 )
                 _pkg.start = start
@@ -170,6 +178,9 @@ else:
                 _pkg.artifact = artifact
                 _pkg.print = print
                 _pkg.open = open
+                _pkg.register_file = register_file
+                _pkg.register_input = register_input
+                _pkg.register_output = register_output
                 _pkg.subprocess = subprocess
                 _pkg.popen = popen
                 _pkg._run_lock = _run_lock
