@@ -257,3 +257,138 @@ class TestPrintNormalization:
         pubrun_print("a", "b", sep=None, end=None)
         out = capsys.readouterr().out
         assert "a" in out and "b" in out
+
+
+class TestDegradedPartialManifestConsumers:
+    """Heavily degraded partial manifests render cleanly across status, diagnostics, checks, and methods."""
+
+    def test_degraded_manifest_with_nulls_and_failed_sections_across_all_consumers(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from pubrun.report.checks import manifest_findings
+        from pubrun.report.diagnostics import print_report
+        from pubrun.report.methods import generate_report, generate_report_multi
+        from pubrun.status import scan_runs
+
+        monkeypatch.setenv("NO_COLOR", "1")
+        degraded = {
+            "run": None,
+            "timing": {"started_at_utc": "not-a-timestamp", "elapsed_seconds": "bad"},
+            "status": None,
+            "invocation": {
+                "script": None,
+                "argv": ["train.py", 1, None, {"k": "v"}],
+                "capture_state": {"status": "failed", "detail": "argv fallback"},
+            },
+            "signals": {
+                "exit_code": 0,
+                "signals_received": ["not-a-dict", 13, {"signal": 15, "signal_name": None}],
+                "capture_state": {"status": "failed", "detail": "signal hook failed"},
+            },
+            "host": {
+                "hostname": {"representation": "redacted"},
+                "os_name": None,
+                "os_version": None,
+                "capture_state": {"status": "failed", "detail": "host probe failed"},
+            },
+            "hardware": {
+                "cpu": None,
+                "memory_total_bytes": "not-bytes",
+                "capture_state": {"status": "failed", "detail": "hardware probe failed"},
+            },
+            "python": {
+                "executable": None,
+                "version": "   ",
+                "implementation": None,
+                "capture_state": {"status": "failed", "detail": "python probe failed"},
+            },
+            "git": {
+                "commit": 12345,
+                "remote_url": None,
+                "capture_state": {"status": "failed", "detail": "git probe failed"},
+            },
+            "packages": {
+                "records": ["not-a-dict", {"name": None, "version": None}],
+                "capture_state": {"status": "failed", "detail": "packages probe failed"},
+            },
+            "environment": {
+                "variables": [None, {"name": "MY_KEY", "value": {"representation": None}}],
+                "capture_state": {"status": "failed", "detail": "env probe failed"},
+            },
+            "config": {"notices": [None, "plain-notice", {"code": "c1", "message": "notice msg"}]},
+            "subprocesses": [
+                "not-a-dict",
+                {"argv": ["echo", 42], "exit_code": 0, "started_at_utc": "bad", "ended_at_utc": 2.0},
+            ],
+            "errors": {
+                "records": [
+                    "not-a-dict",
+                    {"kind": "capture-error", "section": None, "message": None, "type": "OSError"},
+                    {"kind": "capture-error", "section": "events", "message": "disk full"},
+                ],
+                "capture_state": {"status": "partial", "detail": "3 additional capture error(s) omitted"},
+            },
+        }
+        runs_dir = tmp_path / "runs"
+        run_dir = _write_run(
+            runs_dir,
+            "pubrun-degraded-20260101T000000Z-777-degr0001",
+            manifest=degraded,
+        )
+        manifest_path = run_dir / "manifest.json"
+
+        # 1. status.scan_runs()
+        scanned = scan_runs(str(runs_dir))
+        assert len(scanned) == 1
+
+        # 2. diagnostics.print_report() across depths and section extracts
+        for depth in ("basic", "standard", "deep"):
+            print_report(str(manifest_path), depth=depth)
+            out = capsys.readouterr().out
+            assert "\033" not in out
+            assert "[WARN ]" in out
+            assert "unknown" in out
+
+        for sec in ("env", "packages"):
+            print_report(str(manifest_path), section=sec)
+            sec_out = capsys.readouterr().out
+            assert "\033" not in sec_out
+            assert "capture failed" in sec_out
+
+        # Also verify out-of-range numeric timestamp does not raise OverflowError.
+        overflow_manifest = dict(degraded)
+        overflow_manifest["timing"] = {"started_at_utc": 1e30, "elapsed_seconds": float("nan")}
+        overflow_path = tmp_path / "overflow_manifest.json"
+        overflow_path.write_text(json.dumps(overflow_manifest, allow_nan=True), encoding="utf-8")
+        print_report(str(overflow_path), depth="basic")
+        assert "Started     : unknown" in capsys.readouterr().out
+
+        # 3. checks.manifest_findings()
+        findings = manifest_findings(degraded, current_hostname="other-host")
+        codes = {f["code"] for f in findings}
+        assert "packages_capture_failed" in codes
+        assert "git_capture_failed" in codes
+        assert "capture_error_events" in codes
+        assert "capture_error_general" in codes
+        assert "errors_capture_partial" in codes
+
+        # 4. methods.generate_report() and generate_report_multi()
+        md = generate_report(degraded, "markdown")
+        tex = generate_report(degraded, "latex")
+        assert "Package provenance was unavailable because package capture failed." in md
+        assert "Package provenance was unavailable because package capture failed." in tex
+        assert "Standard library dependencies" not in md
+
+        healthy = {
+            "host": {"os_name": "Linux"},
+            "hardware": {"cpu": {"model": "Intel"}, "memory_total_bytes": 1024 ** 3},
+            "python": {"version": "3.11.4", "implementation": "cpython"},
+            "git": {"commit": "abcdef123456"},
+            "packages": {"records": [{"name": "numpy", "version": "1.26.0"}]},
+        }
+        multi_md = generate_report_multi([healthy, degraded], "markdown")
+        multi_tex = generate_report_multi([healthy, degraded], "latex")
+        assert "(package capture failed)" in multi_md
+        assert "(package capture failed)" in multi_tex
+        assert "partial provenance across 1 of 2 runs" in multi_md
+        assert "% Note: partial provenance across 1 of 2 runs;" in multi_tex

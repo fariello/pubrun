@@ -15,9 +15,10 @@ There is a test pinning that ``import pubrun`` does not import ``pubrun.report.c
 Nothing here mutates the environment or any run. Report-only.
 """
 import os
+import re
 import sys
 import shutil
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set, Tuple
 
 from pubrun.report.reproducibility import (
     assess_manifest_reproducibility,
@@ -297,12 +298,59 @@ def _hpc_login_node_findings() -> List[Dict[str, Any]]:
 
 # ------------------------------------------------------------------- manifest completeness
 
+_TRACKED_CAPTURE_SECTIONS: Tuple[str, ...] = (
+    "invocation",
+    "process",
+    "host",
+    "python",
+    "packages",
+    "environment",
+    "git",
+    "hardware",
+    "filesystem",
+    "resources",
+    "console",
+    "signals",
+    "capture",
+)
+
+_MAX_DETAIL_LEN = 160
+
+
 def _capture_state_status(section: Any) -> Optional[str]:
     if isinstance(section, dict):
         cs = section.get("capture_state")
         if isinstance(cs, dict):
-            return cs.get("status")
+            status = cs.get("status")
+            return status if isinstance(status, str) else None
     return None
+
+
+def _capture_state_detail(section: Any) -> Optional[str]:
+    if isinstance(section, dict):
+        cs = section.get("capture_state")
+        if isinstance(cs, dict):
+            detail = cs.get("detail")
+            return detail if isinstance(detail, str) else None
+    return None
+
+
+def _bound_detail(text: Any, max_len: int = _MAX_DETAIL_LEN) -> str:
+    if not isinstance(text, str):
+        return ""
+    cleaned = " ".join(text.split())
+    if not cleaned:
+        return ""
+    if len(cleaned) <= max_len:
+        return cleaned
+    return cleaned[: max(0, max_len - 3)].rstrip() + "..."
+
+
+def _normalize_error_section(raw: Any) -> str:
+    if not isinstance(raw, str):
+        return "general"
+    normalized = re.sub(r"[^a-z0-9_]+", "_", raw.strip().lower()).strip("_")
+    return normalized or "general"
 
 
 def manifest_findings(manifest: Dict[str, Any],
@@ -310,14 +358,121 @@ def manifest_findings(manifest: Dict[str, Any],
     """Capture-completeness + recorded-signal findings for a completed run's manifest.
 
     Delegates to the shared reproducibility assessment engine so CLI, TUI, and
-    machine-readable outputs use one canonical findings model. Never raises.
+    machine-readable outputs use one canonical findings model, and enriches failed
+    capture sections plus deduplicated ``errors.records`` ``capture-error`` entries
+    without duplicating findings. Never raises.
     """
     try:
         assessment = assess_manifest_reproducibility(
             manifest,
             current_hostname=current_hostname,
         )
-        return list(assessment.get("findings", []))
+        findings: List[Dict[str, Any]] = [
+            dict(f) for f in assessment.get("findings", []) if isinstance(f, dict)
+        ]
+        if not isinstance(manifest, dict):
+            return findings
+
+        failed_sections: Set[str] = set()
+        for sec_name in _TRACKED_CAPTURE_SECTIONS:
+            sec = manifest.get(sec_name)
+            if _capture_state_status(sec) != "failed":
+                continue
+            failed_sections.add(sec_name)
+            detail = _bound_detail(_capture_state_detail(sec))
+            suffix = f" ({detail})" if detail else ""
+            target_code = f"{sec_name}_capture_failed"
+            legacy_codes = {target_code}
+            if sec_name in ("git", "packages"):
+                legacy_codes.add(f"{sec_name}_failed")
+            msg = f"Section '{sec_name}' capture failed{suffix}."
+            sugg = (
+                f"Inspect `errors.records` in manifest.json and diagnostic logs "
+                f"for `{sec_name}` capture failures."
+            )
+            matched_idx: Optional[int] = None
+            for idx, item in enumerate(findings):
+                if item.get("code") in legacy_codes:
+                    matched_idx = idx
+                    break
+            if matched_idx is not None:
+                updated = dict(findings[matched_idx])
+                updated["severity"] = WARN
+                updated["code"] = target_code
+                updated["message"] = msg
+                updated["suggestion"] = sugg
+                findings[matched_idx] = updated
+            else:
+                findings.append(_finding(WARN, target_code, msg, sugg))
+
+        errors_sec = manifest.get("errors")
+        if isinstance(errors_sec, dict):
+            raw_records = errors_sec.get("records")
+            records = raw_records if isinstance(raw_records, list) else []
+            cap_errors = [
+                rec
+                for rec in records
+                if isinstance(rec, dict) and rec.get("kind") == "capture-error"
+            ]
+            if cap_errors:
+                # Replace the generic aggregate finding with per-section deduplicated
+                # findings for sections not already reported as failed above.
+                findings = [
+                    f for f in findings if f.get("code") != "capture_errors_recorded"
+                ]
+                grouped: Dict[str, Tuple[str, int]] = {}
+                for rec in cap_errors:
+                    sec_key = _normalize_error_section(rec.get("section"))
+                    if sec_key in failed_sections:
+                        continue
+                    raw_msg = rec.get("message")
+                    if not isinstance(raw_msg, str) or not raw_msg.strip():
+                        raw_msg = rec.get("type")
+                    bounded = _bound_detail(raw_msg) or "capture error"
+                    if sec_key in grouped:
+                        first_msg, count = grouped[sec_key]
+                        grouped[sec_key] = (first_msg, count + 1)
+                    else:
+                        grouped[sec_key] = (bounded, 1)
+
+                existing_codes = {f.get("code") for f in findings}
+                for sec_key, (first_msg, count) in grouped.items():
+                    code = f"capture_error_{sec_key}"
+                    if code in existing_codes:
+                        continue
+                    count_suffix = f" (+{count - 1} more)" if count > 1 else ""
+                    msg = f"Capture error recorded for '{sec_key}': {first_msg}{count_suffix}."
+                    sugg = (
+                        "Inspect `errors.records` in manifest.json and diagnostic logs "
+                        "for capture failure details."
+                    )
+                    findings.append(_finding(WARN, code, msg, sugg))
+                    existing_codes.add(code)
+
+            if _capture_state_status(errors_sec) == "partial":
+                err_detail = _bound_detail(_capture_state_detail(errors_sec))
+                if err_detail:
+                    trunc_msg = f"Capture errors list was truncated ({err_detail})."
+                    trunc_sugg = (
+                        "Inspect diagnostic logs for additional omitted capture errors."
+                    )
+                    matched_idx = None
+                    for idx, item in enumerate(findings):
+                        if item.get("code") == "errors_capture_partial":
+                            matched_idx = idx
+                            break
+                    if matched_idx is not None:
+                        updated = dict(findings[matched_idx])
+                        updated["severity"] = WARN
+                        updated["message"] = trunc_msg
+                        updated["suggestion"] = trunc_sugg
+                        findings[matched_idx] = updated
+                    else:
+                        findings.append(
+                            _finding(WARN, "errors_capture_partial", trunc_msg, trunc_sugg)
+                        )
+
+        return findings
     except Exception:
         # Completeness assessment must never crash inspect.
         return []

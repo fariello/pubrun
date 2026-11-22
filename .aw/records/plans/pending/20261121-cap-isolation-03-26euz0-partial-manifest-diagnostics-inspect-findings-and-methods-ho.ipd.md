@@ -63,32 +63,32 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Consumer safety and honesty updates
 
-- [ ] E-01 Update `src/pubrun/report/diagnostics.py::print_report` to guard null, missing, or non-dict section fields and display recorded `errors.records` plus degraded capture states clearly.
+- [x] E-01 Update `src/pubrun/report/diagnostics.py::print_report` to guard null, missing, or non-dict section fields and display recorded `errors.records` plus degraded capture states clearly.
   - Depends on: none
   - Expected outcome: `src/pubrun/report/diagnostics.py::print_report` renders partial and degraded manifests across `basic`, `standard`, `deep`, and `section="env"`/`"packages"` extracts without raising `AttributeError`, `TypeError`, `IndexError`, or `OverflowError`. It prints a bounded `[WARN ]` block summarizing failed capture sections, `errors.records` entries (capped cleanly with overflow and `errors.capture_state` truncation detail), displays `capture failed` on failed sections instead of misleading empty counts, and emits zero ANSI escapes under `NO_COLOR`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update `src/pubrun/report/checks.py::manifest_findings` to emit `WARN` findings for every section with `capture_state.status == "failed"` and deduplicated `WARN` findings for `capture-error` records in `errors.records`.
+- [x] E-02 Update `src/pubrun/report/checks.py::manifest_findings` to emit `WARN` findings for every section with `capture_state.status == "failed"` and deduplicated `WARN` findings for `capture-error` records in `errors.records`.
   - Depends on: none
   - Expected outcome: `src/pubrun/report/checks.py::manifest_findings` distinguishes `"suppressed"` (configured off) from `"failed"` (attempted and failed), emits a structured `WARN` finding with bounded `detail` for each failed section and deduplicated per-section `WARN` findings for additional `capture-error` records not already covered by a failed section (plus truncation notice if `errors.capture_state.status == "partial"`), remains exception-safe and command-line interface (CLI)-only (never imported by `pubrun/__init__.py`), and preserves compatibility if sibling plan `0b8i7x` (shared reproducibility evidence model) has already landed.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Update `src/pubrun/report/methods.py::generate_report`, `generate_report_multi`, and `extract_highlighted_packages` to guard null or malformed fields safely and disclose failed sections across single-run and multi-run exports instead of claiming complete capture.
+- [x] E-03 Update `src/pubrun/report/methods.py::generate_report`, `generate_report_multi`, and `extract_highlighted_packages` to guard null or malformed fields safely and disclose failed sections across single-run and multi-run exports instead of claiming complete capture.
   - Depends on: none
   - Expected outcome: `generate_report()`, `generate_report_multi()`, `extract_highlighted_packages()`, and all `_VARIANCE_FIELDS` extractors never crash when section dicts or fields (`host.os_name`, `hardware.cpu`, `hardware.memory_total_bytes`, `python.version`, `python.implementation`, `git.commit`, `git.remote_url`, `packages.records`, `record.name`) are missing, `None`, or non-dict. When `packages.capture_state.status == "failed"`, single-run methods state that package capture failed and multi-run `_packages_of()` returns `"(package capture failed)"` rather than claiming standard-library-only dependencies. Single-run and multi-run exports append a concise Markdown or LaTeX disclosure (with underscores escaped in LaTeX) whenever any manifest in scope has failed sections, while healthy complete manifests remain byte-identical.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Consumer behavioral tests
 
-- [ ] E-04 Add partial-manifest and `errors.records` behavioral tests in `tests/test_reports.py` and `tests/test_checks_commands.py`.
+- [x] E-04 Add partial-manifest and `errors.records` behavioral tests in `tests/test_reports.py` and `tests/test_checks_commands.py`.
   - Depends on: E-01, E-02, E-03
   - Expected outcome: `tests/test_reports.py` verifies `print_report()` (basic, standard, deep, `section="env"`/`"packages"`, with and without `NO_COLOR`) and `generate_report()` / `generate_report_multi()` (Markdown and LaTeX, including failures in `manifests[0]` and `manifests[1:]`, failed `packages`, `hardware`, `host`, `python`, and populated/truncated `errors.records`) on real partial manifests produced under engine fault injection, while confirming healthy complete manifests remain unchanged. `tests/test_checks_commands.py` verifies `manifest_findings()` emits `WARN` findings for failed sections and deduplicated `capture-error` records while remaining distinct from `"suppressed"` and preserving `test_import_pubrun_does_not_import_checks`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Add degraded-manifest tolerance regression tests in `tests/test_edge_cases.py` and run the targeted consumer test suite.
+- [x] E-05 Add degraded-manifest tolerance regression tests in `tests/test_edge_cases.py` and run the targeted consumer test suite.
   - Depends on: E-04
   - Expected outcome: `tests/test_edge_cases.py` verifies partial manifests with failed sections, null/non-dict fields, non-string `argv`, non-dict `signals_received`, and invalid timestamps render cleanly across `status.scan_runs()`, `diagnostics.print_report()`, `checks.manifest_findings()`, and `methods.generate_report()` / `generate_report_multi()`. `pytest tests/test_reports.py tests/test_methods_multi.py tests/test_show_sections.py tests/test_example_minimal_research_workflow.py tests/test_checks_commands.py tests/test_edge_cases.py tests/test_status.py -v` exits 0 with all tests passing.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -184,30 +184,53 @@ Deferred to child plan `zp2yyu` (isolation overhead measurement, documentation r
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Diff of `src/pubrun/report/diagnostics.py` showing null/non-dict section access guards across full report and `env`/`packages` section extracts, bounded `[WARN ]` rendering of failed sections and `errors.records` (with overflow and truncation detail), `NO_COLOR` compliance, and honest section labels when `capture_state.status == "failed"`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff src/pubrun/report/diagnostics.py` (+281/-71 lines): adds `_is_finite_number`, `_as_dict`, `_as_dict_list`, `_section_status`, `_section_detail`, `_bound_text` (160-char single-line cap), `_unwrap_value`, `_format_report_timestamp`, and finite-safe `bytes_to_gb`; guards all section/field access across `section="env"`, `section="packages"`, `Basic Information`, `Standard Information`, and `Deep Information`; renders `(capture failed: <detail>)` on failed `env`/`packages` extracts and `capture failed` on failed `Python`, `Host`/`hardware`, `Git Commit`, `Packages`, and `Env Vars` lines; prints bounded `[WARN ]` block for failed sections, up to 10 `capture-error` records with `... (+N more capture error(s))` overflow and `errors.capture_state.detail` truncation notice; uses empty color strings under `NO_COLOR`.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Diff of `src/pubrun/report/checks.py` showing `WARN` findings emitted for failed sections and deduplicated per-section `capture-error` records in `manifest_findings()` while remaining distinct from `suppressed`, exception-safe, CLI-only, and compatible with `0b8i7x`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff src/pubrun/report/checks.py` (+163/-5 lines): preserves delegation to `assess_manifest_reproducibility()` (sibling plan `0b8i7x`, verified by `python3 -m pytest tests/test_reproducibility_assessment.py tests/test_reproducibility_preflight.py -q --no-cov` -> `32 passed in 1.30s`, exit 0); emits `WARN` `{section}_capture_failed` with bounded detail (160-char single-line cap) across all 13 `_TRACKED_CAPTURE_SECTIONS` (normalizing `git_failed`/`packages_failed` in place without duplicates and staying distinct from `*_off` suppressed codes); deduplicates additional `errors.records` `kind == "capture-error"` entries per normalized section into `WARN` `capture_error_{section}` (replacing generic `capture_errors_recorded` and skipping already-failed sections); surfaces bounded `errors_capture_partial` truncation detail; remains exception-safe (`try/except`) and CLI-only.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Diff of `src/pubrun/report/methods.py` showing null/type-safe extraction in `extract_highlighted_packages`, `generate_report`, `generate_report_multi`, and `_VARIANCE_FIELDS`, honest failed-packages wording in both single and multi-run paths, and partial-provenance disclosure across all runs in Markdown and LaTeX (with escaped underscores) while preserving byte-identical complete-manifest output.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff src/pubrun/report/methods.py` (+145/-36 lines): adds `_as_dict`, `_section_status`, `_failed_sections`, and finite-safe `bytes_to_gb`; guards all field accesses in `extract_highlighted_packages()`, `generate_report()`, `generate_report_multi()`, and all seven `_VARIANCE_FIELDS` extractors; emits `"Package provenance was unavailable because package capture failed."` / `"(package capture failed)"` on failed `packages` and `"Package capture was disabled by configuration."` / `"(package capture disabled)"` on suppressed `packages`; appends Markdown (`*Note: partial provenance...*`) and LaTeX (`% Note: partial provenance...` with `\_`-escaped section names) disclosures for failed sections across single runs and multi-run `manifests[1:]`; preserves byte-identical output on healthy complete manifests.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest tests/test_reports.py tests/test_checks_commands.py -v` output (exit code 0) showing new partial-manifest, multi-run failure, `NO_COLOR`, and deduplicated `capture-error` tests passing alongside `test_import_pubrun_does_not_import_checks`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Command `python3 -m pytest tests/test_reports.py tests/test_checks_commands.py -v` exited with code 0:
+    ```text
+    collected 86 items
+    tests/test_reports.py::TestPartialManifestDiagnosticsAndMethods::test_print_report_real_partial_manifest_all_depths_sections_and_no_color PASSED [ 58%]
+    tests/test_reports.py::TestPartialManifestDiagnosticsAndMethods::test_print_report_caps_errors_records_and_surfaces_truncation PASSED [ 59%]
+    tests/test_reports.py::TestPartialManifestDiagnosticsAndMethods::test_methods_single_and_multi_honest_on_real_failed_engines PASSED [ 60%]
+    tests/test_checks_commands.py::test_import_pubrun_does_not_import_checks PASSED [ 61%]
+    tests/test_checks_commands.py::TestManifestFindings::test_failed_sections_emit_warn_distinct_from_suppressed PASSED [ 81%]
+    tests/test_checks_commands.py::TestManifestFindings::test_capture_error_records_deduplicated_and_truncation_surfaced PASSED [ 82%]
+    tests/test_checks_commands.py::TestManifestFindings::test_real_fault_injected_manifest_propagates_redacted_detail PASSED [ 83%]
+    ============================== 86 passed in 6.44s ==============================
+    ```
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted `pytest tests/test_reports.py tests/test_methods_multi.py tests/test_show_sections.py tests/test_example_minimal_research_workflow.py tests/test_checks_commands.py tests/test_edge_cases.py tests/test_status.py -v` output showing exit code 0 and zero failures.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Command `python3 -m pytest tests/test_reports.py tests/test_methods_multi.py tests/test_show_sections.py tests/test_example_minimal_research_workflow.py tests/test_checks_commands.py tests/test_edge_cases.py tests/test_status.py -v` exited with code 0:
+    ```text
+    collected 190 items
+    tests/test_reports.py::TestPartialManifestDiagnosticsAndMethods::test_print_report_real_partial_manifest_all_depths_sections_and_no_color PASSED [ 26%]
+    tests/test_reports.py::TestPartialManifestDiagnosticsAndMethods::test_print_report_caps_errors_records_and_surfaces_truncation PASSED [ 26%]
+    tests/test_reports.py::TestPartialManifestDiagnosticsAndMethods::test_methods_single_and_multi_honest_on_real_failed_engines PASSED [ 27%]
+    tests/test_checks_commands.py::test_import_pubrun_does_not_import_checks PASSED [ 40%]
+    tests/test_checks_commands.py::TestManifestFindings::test_failed_sections_emit_warn_distinct_from_suppressed PASSED [ 49%]
+    tests/test_checks_commands.py::TestManifestFindings::test_capture_error_records_deduplicated_and_truncation_surfaced PASSED [ 50%]
+    tests/test_checks_commands.py::TestManifestFindings::test_real_fault_injected_manifest_propagates_redacted_detail PASSED [ 50%]
+    tests/test_edge_cases.py::TestDegradedPartialManifestConsumers::test_degraded_manifest_with_nulls_and_failed_sections_across_all_consumers PASSED [ 67%]
+    ======================= 188 passed, 2 skipped in 13.04s ========================
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 

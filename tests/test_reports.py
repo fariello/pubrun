@@ -503,3 +503,214 @@ class TestResourceMonitoring:
         output = capsys.readouterr().out
         assert "RESOURCE MONITORING" in output
         assert "CPU Utilization History" in output
+
+
+class TestPartialManifestDiagnosticsAndMethods:
+    """Behavioral tests for partial manifests across print_report and methods exports (IPD 26euz0)."""
+
+    def _run_with_failed_engines(self, tmp_path, monkeypatch, fail_engines):
+        """Execute a real pubrun Run with fault injection into the requested engines."""
+        import pubrun.tracker as tracker_mod
+        from pubrun import get_current_run, start
+
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+        tracker_mod._active_run = None
+
+        def _boom(engine_name):
+            def _raise(*args, **kwargs):
+                raise RuntimeError(f"{engine_name} probe failed --token=sk-secret999999")
+            return _raise
+
+        engine_targets = {
+            "packages": "get_packages",
+            "environment": "get_environment",
+            "git": "get_git",
+            "hardware": "get_hardware",
+            "host": "get_host",
+            "python": "get_python_runtime",
+        }
+        for eng in fail_engines:
+            monkeypatch.setattr(tracker_mod, engine_targets[eng], _boom(eng))
+
+        run = start(
+            console={"capture_mode": "off"},
+            events={"enabled": False},
+            capture={
+                "subprocesses": {"enabled": False},
+                "resources": {"depth": "off"},
+                "signals": {"enabled": False},
+            },
+        )
+        if getattr(run, "_hardware_future_done", None) is not None:
+            run._hardware_future_done.wait(timeout=3.0)
+        run_dir = run.run_dir
+        run.stop()
+        assert get_current_run() is None
+        manifest_path = run_dir / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return manifest_path, manifest
+
+    def test_print_report_real_partial_manifest_all_depths_sections_and_no_color(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from pubrun.report.diagnostics import print_report
+
+        manifest_path, manifest = self._run_with_failed_engines(
+            tmp_path, monkeypatch, ["packages", "environment", "git", "hardware", "host", "python"]
+        )
+        assert manifest["packages"]["capture_state"]["status"] == "failed"
+        assert manifest["environment"]["capture_state"]["status"] == "failed"
+
+        # NO_COLOR enabled: zero ANSI escape codes across all depths and section extracts.
+        monkeypatch.setenv("NO_COLOR", "1")
+        for depth in ("basic", "standard", "deep"):
+            print_report(str(manifest_path), depth=depth)
+            out = capsys.readouterr().out
+            assert "\033" not in out
+            assert "[WARN ]" in out
+            assert "Capture failed for section(s):" in out
+            assert "Capture errors recorded" in out
+            assert "sk-secret999999" not in out
+            if depth in ("standard", "deep"):
+                assert "capture failed" in out
+                assert "0 recorded" not in out
+                assert "0 captured" not in out
+                assert "Not found or un-tracked" not in out
+
+        print_report(str(manifest_path), section="env")
+        env_out = capsys.readouterr().out
+        assert "\033" not in env_out
+        assert "capture failed" in env_out
+        assert "(None captured)" not in env_out
+
+        print_report(str(manifest_path), section="packages")
+        pkg_out = capsys.readouterr().out
+        assert "\033" not in pkg_out
+        assert "capture failed" in pkg_out
+        assert "(None captured)" not in pkg_out
+
+        # With color enabled (NO_COLOR unset), still renders cleanly with warnings.
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        print_report(str(manifest_path), depth="standard")
+        colored_out = capsys.readouterr().out
+        assert "[WARN ]" in colored_out
+        assert "capture failed" in colored_out
+
+    def test_print_report_caps_errors_records_and_surfaces_truncation(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from pubrun.report.diagnostics import print_report
+
+        monkeypatch.setenv("NO_COLOR", "1")
+        records = [
+            {
+                "kind": "capture-error",
+                "type": "RuntimeError",
+                "section": f"sec_{i}",
+                "stage": "bootstrap",
+                "message": f"error number {i} " + ("x" * 220),
+                "traceback": None,
+            }
+            for i in range(14)
+        ]
+        manifest = {
+            "run": {"run_id": "trunc01"},
+            "timing": {"started_at_utc": 1780250000.0, "elapsed_seconds": 5.0},
+            "status": {"outcome": "completed"},
+            "invocation": {"script": {"basename": "train.py"}, "argv": ["train.py"]},
+            "errors": {
+                "records": records,
+                "capture_state": {
+                    "status": "partial",
+                    "detail": "36 additional capture error(s) omitted",
+                },
+            },
+        }
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        print_report(str(manifest_path), depth="basic")
+        out = capsys.readouterr().out
+        assert "\033" not in out
+        assert "Capture errors recorded (14):" in out
+        assert "sec_0/bootstrap" in out
+        assert "sec_9/bootstrap" in out
+        assert "sec_10/bootstrap" not in out
+        assert "... (+4 more capture error(s))" in out
+        assert "36 additional capture error(s) omitted" in out
+        # Long single-record messages are bounded with ellipsis.
+        assert "..." in out
+
+    def test_methods_single_and_multi_honest_on_real_failed_engines(
+        self, tmp_path, monkeypatch
+    ):
+        from pubrun.report.methods import generate_report_multi
+
+        _, partial_manifest = self._run_with_failed_engines(
+            tmp_path, monkeypatch, ["packages", "hardware", "host", "python"]
+        )
+        # Single-run Markdown
+        md = generate_report(partial_manifest, "markdown")
+        assert "Standard library dependencies were utilized." not in md
+        assert "Package provenance was unavailable because package capture failed." in md
+        assert "partial provenance; capture failed for:" in md
+        for sec in ("hardware", "host", "packages", "python"):
+            assert sec in md
+
+        # Single-run LaTeX with underscored failed section name
+        partial_with_underscore = dict(partial_manifest)
+        partial_with_underscore["data_files"] = {
+            "capture_state": {"status": "failed", "detail": "io probe failed"}
+        }
+        tex = generate_report(partial_with_underscore, "latex")
+        assert "Standard library dependencies were utilized." not in tex
+        assert "Package provenance was unavailable because package capture failed." in tex
+        assert "% Note: partial provenance; capture failed for:" in tex
+        assert "data\\_files" in tex
+
+        # Suppressed packages wording
+        suppressed_manifest = {
+            "host": {"os_name": "Linux"},
+            "hardware": {"cpu": {"model": "Intel"}, "memory_total_bytes": 1024 ** 3},
+            "python": {"version": "3.11.0", "implementation": "cpython"},
+            "git": {"commit": "abcdef123456"},
+            "packages": {"records": [], "capture_state": {"status": "suppressed"}},
+        }
+        md_supp = generate_report(suppressed_manifest, "markdown")
+        assert "Package capture was disabled by configuration." in md_supp
+        assert "Standard library dependencies" not in md_supp
+        assert "partial provenance" not in md_supp
+
+        # Multi-run: healthy manifests[0], failed manifests[1]
+        healthy = {
+            "run": {"library_version": "1.3.1", "library_commit": "0123456789abcdef"},
+            "host": {"os_name": "Linux", "capture_state": {"status": "complete"}},
+            "hardware": {
+                "cpu": {"model": "Intel Core i7"},
+                "memory_total_bytes": 16 * 1024 ** 3,
+                "capture_state": {"status": "complete"},
+            },
+            "python": {"version": "3.11.4 final", "implementation": "cpython", "capture_state": {"status": "complete"}},
+            "git": {"commit": "abcdef1234567890", "capture_state": {"status": "complete"}},
+            "packages": {
+                "records": [{"name": "numpy", "version": "1.26.0"}],
+                "capture_state": {"status": "complete"},
+            },
+        }
+        multi_md = generate_report_multi([healthy, partial_manifest], "markdown")
+        assert "(package capture failed)" in multi_md
+        assert "(standard library only)" not in multi_md
+        assert "partial provenance across 1 of 2 runs" in multi_md
+        assert "packages" in multi_md
+
+        multi_tex = generate_report_multi([healthy, partial_with_underscore], "latex")
+        assert "(package capture failed)" in multi_tex
+        assert "(standard library only)" not in multi_tex
+        assert "% Note: partial provenance across 1 of 2 runs;" in multi_tex
+        assert "data\\_files" in multi_tex
+
+        # Healthy complete manifests remain unchanged (no partial provenance disclosure)
+        healthy_single = generate_report(healthy, "markdown")
+        assert "partial provenance" not in healthy_single
+        healthy_multi = generate_report_multi([healthy, healthy], "markdown")
+        assert "partial provenance" not in healthy_multi

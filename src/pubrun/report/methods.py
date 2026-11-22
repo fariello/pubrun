@@ -2,20 +2,64 @@ import math
 from typing import Dict, Any, List, Optional
 from pubrun.report.templates import MARKDOWN_TEMPLATE, LATEX_TEMPLATE, HIGHLIGHT_PACKAGES
 
-def bytes_to_gb(bytes_val: int) -> float:
-    if not bytes_val: return 0.0
-    return round(bytes_val / (1024 ** 3), 1)
+
+def _as_dict(val: Any) -> Dict[str, Any]:
+    return val if isinstance(val, dict) else {}
+
+
+def _section_status(manifest: Any, name: str) -> Optional[str]:
+    if not isinstance(manifest, dict):
+        return None
+    sec = manifest.get(name)
+    if not isinstance(sec, dict):
+        return None
+    cs = sec.get("capture_state")
+    if not isinstance(cs, dict):
+        return None
+    status = cs.get("status")
+    return status if isinstance(status, str) else None
+
+
+def _failed_sections(manifest: Any) -> List[str]:
+    if not isinstance(manifest, dict):
+        return []
+    failed = [
+        sec_name
+        for sec_name, sec_val in manifest.items()
+        if isinstance(sec_val, dict) and _section_status(manifest, sec_name) == "failed"
+    ]
+    return sorted(failed)
+
+
+def bytes_to_gb(bytes_val: Any) -> float:
+    if isinstance(bytes_val, bool) or not isinstance(bytes_val, (int, float)):
+        return 0.0
+    if not math.isfinite(bytes_val) or not bytes_val:
+        return 0.0
+    return round(float(bytes_val) / (1024 ** 3), 1)
+
 
 def extract_highlighted_packages(manifest: Dict[str, Any]) -> List[str]:
     """Return formatted strings for notable packages found in the manifest."""
-    found = []
-    records = manifest.get("packages", {}).get("records", [])
+    found: List[str] = []
+    if not isinstance(manifest, dict):
+        return found
+    records = _as_dict(manifest.get("packages")).get("records")
+    if not isinstance(records, list):
+        return found
     for record in records:
-        name = record.get("name", "").lower()
+        if not isinstance(record, dict):
+            continue
+        raw_name = record.get("name")
+        if not isinstance(raw_name, str) or not raw_name:
+            continue
+        name = raw_name.lower()
         if name in HIGHLIGHT_PACKAGES:
-            version = record.get("version", "unknown")
+            raw_version = record.get("version")
+            version = str(raw_version) if raw_version not in (None, "") else "unknown"
             found.append(f"{name} (v{version})")
     return found
+
 
 def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> str:
     """Generate a publication-ready 'Computational Methods' paragraph.
@@ -24,44 +68,71 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
         manifest: Hydrated manifest dictionary.
         format_type: Output format (``"markdown"`` or ``"latex"``).
     """
+    m = _as_dict(manifest)
+
     # Hardware
     # OS name — use the host capture data, not the Windows-only OS env var
-    host = manifest.get("host", {})
-    os_name = host.get("os_name", "an unknown OS")
+    host = _as_dict(m.get("host"))
+    raw_os = host.get("os_name")
+    os_name = raw_os if isinstance(raw_os, str) and raw_os else "an unknown OS"
     if format_type == "latex":
         os_name = os_name.replace("_", "\\_")
-    hw = manifest.get("hardware", {})
-    cpu_model = hw.get("cpu", {}).get("model", "unknown CPU")
+    hw = _as_dict(m.get("hardware"))
+    raw_cpu = _as_dict(hw.get("cpu")).get("model")
+    cpu_model = raw_cpu if isinstance(raw_cpu, str) and raw_cpu else "unknown CPU"
     ram_gb = bytes_to_gb(hw.get("memory_total_bytes", 0))
 
     # Python
-    py = manifest.get("python", {})
-    python_version = py.get("version", "unknown").split(" ")[0]
-    python_impl = py.get("implementation", "unknown")
+    py = _as_dict(m.get("python"))
+    raw_py_ver = py.get("version")
+    py_parts = raw_py_ver.split() if isinstance(raw_py_ver, str) else []
+    python_version = py_parts[0] if py_parts else "unknown"
+    raw_py_impl = py.get("implementation")
+    python_impl = raw_py_impl if isinstance(raw_py_impl, str) and raw_py_impl else "unknown"
 
     # Git
-    git = manifest.get("git", {})
-    git_commit = git.get("commit", "unknown")
-    if not git_commit: git_commit = "unavailable"
+    git = _as_dict(m.get("git"))
+    if "commit" not in git:
+        git_commit = "unknown"
+    else:
+        raw_commit = git.get("commit")
+        git_commit = raw_commit if isinstance(raw_commit, str) and raw_commit else "unavailable"
 
-    remote = git.get("remote_url", {}).get("value")
+    remote_obj = git.get("remote_url")
+    if isinstance(remote_obj, dict):
+        raw_remote = remote_obj.get("value")
+        remote = raw_remote if isinstance(raw_remote, str) and raw_remote else None
+    elif isinstance(remote_obj, str) and remote_obj:
+        remote = remote_obj
+    else:
+        remote = None
     git_repo_text = f" (origin: {remote})" if remote else ""
     if format_type == "latex":
         git_repo_text = git_repo_text.replace("_", "\\_")
 
     # Packages
-    packages = extract_highlighted_packages(manifest)
-    if packages:
-        packages_text = f"Key dependencies tracked include {', '.join(packages)}."
+    packages_status = _section_status(m, "packages")
+    if packages_status == "failed":
+        packages_text = "Package provenance was unavailable because package capture failed."
+    elif packages_status == "suppressed":
+        packages_text = "Package capture was disabled by configuration."
     else:
-        packages_text = "Standard library dependencies were utilized."
+        packages = extract_highlighted_packages(m)
+        if packages:
+            packages_text = f"Key dependencies tracked include {', '.join(packages)}."
+        else:
+            packages_text = "Standard library dependencies were utilized."
 
     # pubrun version/commit — the tool that produced this record. Recorded in the
     # manifest as run.library_version / run.library_commit. Naming the exact
     # version (and commit) is important for reproducibility of the provenance.
-    run_meta = manifest.get("run", {})
-    pubrun_version = run_meta.get("library_version")
-    pubrun_commit = run_meta.get("library_commit") or ""
+    run_meta = _as_dict(m.get("run"))
+    raw_pubrun_version = run_meta.get("library_version")
+    pubrun_version = (
+        str(raw_pubrun_version) if raw_pubrun_version not in (None, "") else None
+    )
+    raw_pubrun_commit = run_meta.get("library_commit")
+    pubrun_commit = raw_pubrun_commit if isinstance(raw_pubrun_commit, str) else ""
     if pubrun_version and pubrun_commit:
         pubrun_version_text = f"pubrun v{pubrun_version} (commit {pubrun_commit[:8]})"
     elif pubrun_version:
@@ -71,7 +142,7 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
 
     template = LATEX_TEMPLATE if format_type == "latex" else MARKDOWN_TEMPLATE
 
-    return template.format(
+    rendered = template.format(
         os_name=os_name,
         cpu_model=cpu_model,
         ram_gb=ram_gb,
@@ -83,36 +154,57 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
         pubrun_version_text=pubrun_version_text
     ).strip()
 
+    failed = _failed_sections(m)
+    if failed:
+        if format_type == "latex":
+            escaped = ", ".join(sec.replace("_", "\\_") for sec in failed)
+            rendered = f"{rendered}\n\n% Note: partial provenance; capture failed for: {escaped}."
+        else:
+            rendered = f"{rendered}\n\n*Note: partial provenance; capture failed for: {', '.join(failed)}.*"
+
+    return rendered
+
 
 # Methods-relevant fields compared across a run set (label -> extractor). Order
 # is the display order for the variance note; extractors return a display string.
 def _os_of(m: Dict[str, Any]) -> str:
-    return m.get("host", {}).get("os_name") or "unknown OS"
+    val = _as_dict(_as_dict(m).get("host")).get("os_name")
+    return val if isinstance(val, str) and val else "unknown OS"
 
 
 def _cpu_of(m: Dict[str, Any]) -> str:
-    return m.get("hardware", {}).get("cpu", {}).get("model") or "unknown CPU"
+    val = _as_dict(_as_dict(_as_dict(m).get("hardware")).get("cpu")).get("model")
+    return val if isinstance(val, str) and val else "unknown CPU"
 
 
 def _ram_of(m: Dict[str, Any]) -> str:
-    return f"{bytes_to_gb(m.get('hardware', {}).get('memory_total_bytes', 0))} GB"
+    return f"{bytes_to_gb(_as_dict(_as_dict(m).get('hardware')).get('memory_total_bytes', 0))} GB"
 
 
 def _py_of(m: Dict[str, Any]) -> str:
-    return (m.get("python", {}).get("version") or "unknown").split(" ")[0]
+    raw = _as_dict(_as_dict(m).get("python")).get("version")
+    parts = raw.split() if isinstance(raw, str) else []
+    return parts[0] if parts else "unknown"
 
 
 def _commit_of(m: Dict[str, Any]) -> str:
-    c = m.get("git", {}).get("commit") or ""
-    return c[:8] if len(c) >= 8 else (c or "unavailable")
+    c = _as_dict(_as_dict(m).get("git")).get("commit")
+    if not isinstance(c, str) or not c:
+        return "unavailable"
+    return c[:8] if len(c) >= 8 else c
 
 
 def _pubrun_of(m: Dict[str, Any]) -> str:
-    v = m.get("run", {}).get("library_version")
-    return f"v{v}" if v else "version unknown"
+    v = _as_dict(_as_dict(m).get("run")).get("library_version")
+    return f"v{v}" if v not in (None, "") else "version unknown"
 
 
 def _packages_of(m: Dict[str, Any]) -> str:
+    status = _section_status(m, "packages")
+    if status == "failed":
+        return "(package capture failed)"
+    if status == "suppressed":
+        return "(package capture disabled)"
     pkgs = extract_highlighted_packages(m)
     return ", ".join(sorted(pkgs)) if pkgs else "(standard library only)"
 
@@ -166,6 +258,11 @@ def generate_report_multi(manifests: List[Dict[str, Any]], format_type: str = "m
         if len(values) > 1:
             varying.append((label, values))
 
+    per_run_failed = [_failed_sections(m) for m in manifests]
+    rest_has_failures = any(per_run_failed[1:])
+    all_failed_sections = sorted({sec for secs in per_run_failed for sec in secs})
+    affected_runs = sum(1 for secs in per_run_failed if secs)
+
     if format_type == "latex":
         parts = [base, "", f"% {count_note}"]
         if varying:
@@ -173,6 +270,12 @@ def generate_report_multi(manifests: List[Dict[str, Any]], format_type: str = "m
             for label, values in varying:
                 joined = "; ".join(v.replace("_", "\\_") for v in values)
                 parts.append(f"%   {label}: {joined}")
+        if rest_has_failures and all_failed_sections:
+            escaped = ", ".join(sec.replace("_", "\\_") for sec in all_failed_sections)
+            parts.append(
+                f"% Note: partial provenance across {affected_runs} of {n} runs; "
+                f"capture failed for: {escaped}."
+            )
         return "\n".join(parts).strip()
 
     # markdown
@@ -182,4 +285,10 @@ def generate_report_multi(manifests: List[Dict[str, Any]], format_type: str = "m
         parts.append("**Environment variation across the aggregated runs:**")
         for label, values in varying:
             parts.append(f"- {label}: {', '.join(values)}")
+    if rest_has_failures and all_failed_sections:
+        parts.append("")
+        parts.append(
+            f"*Note: partial provenance across {affected_runs} of {n} runs; "
+            f"capture failed for: {', '.join(all_failed_sections)}.*"
+        )
     return "\n".join(parts).strip()

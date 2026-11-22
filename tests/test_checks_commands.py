@@ -185,6 +185,125 @@ class TestManifestFindings:
         assert checks.manifest_findings({}, current_hostname=None) == checks.manifest_findings({}, None)
         checks.manifest_findings({"resources": "notadict", "host": 5}, current_hostname="x")
 
+    def test_failed_sections_emit_warn_distinct_from_suppressed(self):
+        m = _fake_manifest(
+            git={"capture_state": {"status": "failed", "detail": "git binary crashed\nsecond line"}},
+            hardware={"capture_state": {"status": "failed", "detail": "lscpu failed " + ("a" * 240)}},
+            packages={"capture_state": {"status": "failed", "detail": "metadata broken"}},
+            resources={"capture_state": {"status": "failed", "detail": "sampler error"}},
+            console={"capture_state": {"status": "failed", "detail": "tee error"}},
+        )
+        findings = checks.manifest_findings(m, current_hostname="compute-042")
+        by_code = {f["code"]: f for f in findings}
+
+        for sec in ("git", "hardware", "packages", "resources", "console"):
+            code = f"{sec}_capture_failed"
+            assert code in by_code, f"missing {code} in {list(by_code)}"
+            assert by_code[code]["severity"] == checks.WARN
+            assert f"{sec}_off" not in by_code
+            assert "errors.records" in (by_code[code].get("suggestion") or "")
+
+        # No duplicate legacy git_failed/packages_failed codes alongside *_capture_failed.
+        assert "git_failed" not in by_code
+        assert "packages_failed" not in by_code
+
+        # Detail is single-line and bounded.
+        assert "\n" not in by_code["git_capture_failed"]["message"]
+        assert "..." in by_code["hardware_capture_failed"]["message"]
+        assert len(by_code["hardware_capture_failed"]["message"]) < 240
+
+        # Suppressed stays distinct from failed.
+        m_supp = _fake_manifest(
+            resources={"capture_state": {"status": "suppressed"}},
+            git={"capture_state": {"status": "suppressed"}},
+            packages={"capture_state": {"status": "suppressed"}},
+        )
+        supp_codes = {f["code"] for f in checks.manifest_findings(m_supp, current_hostname="compute-042")}
+        assert "resources_off" in supp_codes
+        assert "git_off" in supp_codes
+        assert "packages_off" in supp_codes
+        assert "resources_capture_failed" not in supp_codes
+        assert "git_capture_failed" not in supp_codes
+        assert "packages_capture_failed" not in supp_codes
+
+    def test_capture_error_records_deduplicated_and_truncation_surfaced(self):
+        m = _fake_manifest(
+            git={"capture_state": {"status": "failed", "detail": "git failed"}},
+            errors={
+                "records": [
+                    {"kind": "capture-error", "section": "git", "message": "duplicate of failed git section"},
+                    {"kind": "capture-error", "section": "subprocesses", "message": "popen hook error 1"},
+                    {"kind": "capture-error", "section": "subprocesses", "message": "popen hook error 2"},
+                    {"kind": "capture-error", "section": "events", "message": "events write failed"},
+                    {"kind": "capture-error", "section": "writer", "message": "manifest temp write failed"},
+                    {"kind": "capture-error", "section": None, "message": "unattributed failure"},
+                    {"kind": "warning", "section": "other", "message": "not a capture-error"},
+                ],
+                "capture_state": {
+                    "status": "partial",
+                    "detail": "12 additional capture error(s) omitted",
+                },
+            },
+        )
+        findings = checks.manifest_findings(m, current_hostname="compute-042")
+        codes = [f["code"] for f in findings]
+
+        # Already-failed git section is not duplicated as capture_error_git or capture_errors_recorded.
+        assert codes.count("git_capture_failed") == 1
+        assert "capture_error_git" not in codes
+        assert "capture_errors_recorded" not in codes
+
+        # Additional capture-error sections are deduplicated per section with WARN severity.
+        assert codes.count("capture_error_subprocesses") == 1
+        assert codes.count("capture_error_events") == 1
+        assert codes.count("capture_error_writer") == 1
+        assert codes.count("capture_error_general") == 1
+        assert "capture_error_other" not in codes
+
+        by_code = {f["code"]: f for f in findings}
+        sub_f = by_code["capture_error_subprocesses"]
+        assert sub_f["severity"] == checks.WARN
+        assert "popen hook error 1" in sub_f["message"]
+        assert "(+1 more)" in sub_f["message"]
+
+        assert by_code["capture_error_events"]["severity"] == checks.WARN
+        assert by_code["capture_error_writer"]["severity"] == checks.WARN
+        assert by_code["capture_error_general"]["severity"] == checks.WARN
+
+        # Truncation detail from errors.capture_state is surfaced once without spam.
+        assert codes.count("errors_capture_partial") == 1
+        assert "12 additional capture error(s) omitted" in by_code["errors_capture_partial"]["message"]
+
+    def test_real_fault_injected_manifest_propagates_redacted_detail(self, tmp_path, monkeypatch):
+        import pubrun.tracker as tracker_mod
+        from pubrun import start
+
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+        tracker_mod._active_run = None
+        secret = "sk-inspect-secret-12345"
+        monkeypatch.setattr(
+            tracker_mod,
+            "get_git",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError(f"git crash --api-key={secret}")),
+        )
+        run = start(
+            console={"capture_mode": "off"},
+            events={"enabled": False},
+            capture={"subprocesses": {"enabled": False}, "resources": {"depth": "off"}, "signals": {"enabled": False}},
+        )
+        if getattr(run, "_hardware_future_done", None) is not None:
+            run._hardware_future_done.wait(timeout=3.0)
+        run_dir = run.run_dir
+        run.stop()
+
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        findings = checks.manifest_findings(manifest)
+        git_f = next((f for f in findings if f["code"] == "git_capture_failed"), None)
+        assert git_f is not None
+        assert git_f["severity"] == checks.WARN
+        assert secret not in git_f["message"]
+        assert "REDACTED" in git_f["message"]
+
 
 class TestLiveFindings:
     def test_live_findings_returns_list(self):

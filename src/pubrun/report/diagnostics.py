@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
-from typing import Optional, Dict, Any
+import math
+from typing import Optional, Dict, Any, List
 import os
 import sys
 from pathlib import Path
@@ -13,9 +14,99 @@ from pubrun.report.utils import hydrate_manifest
 # duplicated as a literal in three places).
 SHOW_SECTIONS = ("logs", "env", "packages")
 
-def bytes_to_gb(bytes_val: int) -> float:
-    if not bytes_val: return 0.0
-    return round(bytes_val / (1024 ** 3), 1)
+_MAX_DIAGNOSTIC_DETAIL_LEN = 160
+_MAX_DISPLAYED_CAPTURE_ERRORS = 10
+
+
+def _is_finite_number(val: Any) -> bool:
+    return (
+        isinstance(val, (int, float))
+        and not isinstance(val, bool)
+        and math.isfinite(val)
+    )
+
+
+def _as_dict(val: Any) -> Dict[str, Any]:
+    return val if isinstance(val, dict) else {}
+
+
+def _as_dict_list(val: Any) -> List[Dict[str, Any]]:
+    if not isinstance(val, list):
+        return []
+    return [item for item in val if isinstance(item, dict)]
+
+
+def _section_status(manifest: Any, name: str) -> Optional[str]:
+    if not isinstance(manifest, dict):
+        return None
+    sec = manifest.get(name)
+    if not isinstance(sec, dict):
+        return None
+    cs = sec.get("capture_state")
+    if not isinstance(cs, dict):
+        return None
+    status = cs.get("status")
+    return status if isinstance(status, str) else None
+
+
+def _section_detail(manifest: Any, name: str) -> Optional[str]:
+    if not isinstance(manifest, dict):
+        return None
+    sec = manifest.get(name)
+    if not isinstance(sec, dict):
+        return None
+    cs = sec.get("capture_state")
+    if not isinstance(cs, dict):
+        return None
+    detail = cs.get("detail")
+    return detail if isinstance(detail, str) else None
+
+
+def _bound_text(text: Any, max_len: int = _MAX_DIAGNOSTIC_DETAIL_LEN) -> str:
+    if not isinstance(text, str):
+        return ""
+    cleaned = " ".join(text.split())
+    if not cleaned:
+        return ""
+    if len(cleaned) <= max_len:
+        return cleaned
+    return cleaned[: max(0, max_len - 3)].rstrip() + "..."
+
+
+def _unwrap_value(val: Any, default: str = "unknown") -> str:
+    if isinstance(val, str):
+        return val if val else default
+    if isinstance(val, dict):
+        rep = val.get("representation")
+        if rep == "plain" or (rep is None and "value" in val):
+            inner = val.get("value")
+            if isinstance(inner, str):
+                return inner if inner else default
+            return str(inner) if inner is not None else default
+        if isinstance(rep, str) and rep:
+            return f"<{rep.upper()}>"
+        return default
+    if val is None:
+        return default
+    return str(val)
+
+
+def _format_report_timestamp(ts: Any, utc: bool = False) -> str:
+    if not _is_finite_number(ts) or not ts:
+        return "unknown"
+    try:
+        sdt = datetime.fromtimestamp(float(ts), tz=timezone.utc)
+        if not utc:
+            sdt = sdt.astimezone()
+        return sdt.strftime("%Y-%m-%d %H:%M:%S")
+    except (OverflowError, OSError, ValueError, TypeError):
+        return "unknown"
+
+
+def bytes_to_gb(bytes_val: Any) -> float:
+    if not _is_finite_number(bytes_val) or not bytes_val:
+        return 0.0
+    return round(float(bytes_val) / (1024 ** 3), 1)
 
 class Colors:
     BLUE = '\033[94m'
@@ -157,7 +248,11 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         sys.exit(1)
 
     # Hydrate!
+    if not isinstance(manifest, dict):
+        manifest = {}
     manifest, warnings = hydrate_manifest(manifest_path, manifest)
+    if not isinstance(manifest, dict):
+        manifest = {}
 
     if section == "logs":
         run_dir = Path(manifest_path).parent
@@ -180,7 +275,9 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         return
 
     if section == "env":
-        envs = manifest.get("environment", {}).get("variables", [])
+        env_sec = _as_dict(manifest.get("environment"))
+        envs = _as_dict_list(env_sec.get("variables"))
+        env_status = _section_status(manifest, "environment")
         use_color = _has_color()
         blue = Colors.BLUE if use_color else ""
         green = Colors.GREEN if use_color else ""
@@ -188,33 +285,50 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         rst = Colors.RESET if use_color else ""
 
         print(f"{blue}[ Environment Variables ]{rst}")
-        if not envs:
+        if env_status == "failed":
+            detail = _bound_text(_section_detail(manifest, "environment"))
+            if detail:
+                print(f"  {yellow}(capture failed: {detail}){rst}")
+            else:
+                print(f"  {yellow}(capture failed){rst}")
+        elif not envs:
             print("  (None captured)")
         for var in envs:
             name = var.get("name")
             val_obj = var.get("value", {})
             if isinstance(val_obj, dict) and "representation" in val_obj:
-                if val_obj["representation"] == "plain":
+                rep = val_obj.get("representation")
+                if rep == "plain":
                     print(f"  {green}{name}{rst}={val_obj.get('value', '')}")
                 else:
-                    print(f"  {green}{name}{rst}={yellow}<{val_obj['representation'].upper()}>{rst}")
+                    rep_label = str(rep).upper() if rep not in (None, "") else "REDACTED"
+                    print(f"  {green}{name}{rst}={yellow}<{rep_label}>{rst}")
             else:
                 print(f"  {green}{name}{rst}={val_obj}")
         return
 
     if section == "packages":
-        pkgs = manifest.get("packages", {}).get("records", [])
+        pkg_sec = _as_dict(manifest.get("packages"))
+        pkgs = _as_dict_list(pkg_sec.get("records"))
+        pkg_status = _section_status(manifest, "packages")
         use_color = _has_color()
         blue = Colors.BLUE if use_color else ""
         green = Colors.GREEN if use_color else ""
+        yellow = Colors.YELLOW if use_color else ""
         rst = Colors.RESET if use_color else ""
 
         print(f"{blue}[ Packages ]{rst}")
-        if not pkgs:
+        if pkg_status == "failed":
+            detail = _bound_text(_section_detail(manifest, "packages"))
+            if detail:
+                print(f"  {yellow}(capture failed: {detail}){rst}")
+            else:
+                print(f"  {yellow}(capture failed){rst}")
+        elif not pkgs:
             print("  (None captured)")
         for i, p in enumerate(pkgs):
-            name = p.get('name')
-            ver = p.get('version', 'unknown')
+            name = p.get("name")
+            ver = p.get("version", "unknown")
             pkg_str = f"{name}=={ver}"
             display_len = len(pkg_str)
             if use_color:
@@ -262,26 +376,78 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         print(f"\n{yellow}[WARN ]{rst} {w}")
 
     # Non-disruptive config notices recorded at run time (e.g. deprecated core.profile).
-    for notice in manifest.get("config", {}).get("notices", []) or []:
-        msg = notice.get("message", notice.get("code", "config notice"))
-        print(f"\n{yellow}[WARN ]{rst} {msg}")
+    cfg_notices = _as_dict(manifest.get("config")).get("notices")
+    if isinstance(cfg_notices, list):
+        for notice in cfg_notices:
+            if isinstance(notice, dict):
+                msg = notice.get("message", notice.get("code", "config notice"))
+            elif notice:
+                msg = str(notice)
+            else:
+                continue
+            print(f"\n{yellow}[WARN ]{rst} {msg}")
+
+    # Surface failed capture sections and recorded capture errors at every depth.
+    failed_sections = sorted(
+        (sec_name, _bound_text(_section_detail(manifest, sec_name)))
+        for sec_name, sec_val in manifest.items()
+        if isinstance(sec_val, dict) and _section_status(manifest, sec_name) == "failed"
+    )
+    errors_sec = _as_dict(manifest.get("errors"))
+    error_records = _as_dict_list(errors_sec.get("records"))
+    cap_errors = [rec for rec in error_records if rec.get("kind") == "capture-error"]
+    errors_partial = _section_status(manifest, "errors") == "partial"
+
+    if failed_sections or cap_errors or errors_partial:
+        if failed_sections:
+            sec_parts = [
+                f"{sec} ({detail})" if detail else sec
+                for sec, detail in failed_sections
+            ]
+            print(f"\n{yellow}[WARN ]{rst} Capture failed for section(s): {', '.join(sec_parts)}")
+        if cap_errors:
+            lead = "\n" if not failed_sections else ""
+            print(f"{lead}{yellow}[WARN ]{rst} Capture errors recorded ({len(cap_errors)}):")
+            for rec in cap_errors[:_MAX_DISPLAYED_CAPTURE_ERRORS]:
+                raw_sec = rec.get("section")
+                sec_label = raw_sec.strip() if isinstance(raw_sec, str) and raw_sec.strip() else "general"
+                raw_stage = rec.get("stage")
+                stage_label = f"/{raw_stage.strip()}" if isinstance(raw_stage, str) and raw_stage.strip() else ""
+                raw_msg = rec.get("message")
+                if not isinstance(raw_msg, str) or not raw_msg.strip():
+                    raw_msg = rec.get("type")
+                msg = _bound_text(raw_msg) or "capture error"
+                print(f"  - {sec_label}{stage_label}: {msg}")
+            if len(cap_errors) > _MAX_DISPLAYED_CAPTURE_ERRORS:
+                overflow = len(cap_errors) - _MAX_DISPLAYED_CAPTURE_ERRORS
+                print(f"  ... (+{overflow} more capture error(s))")
+        if errors_partial:
+            lead = "\n" if not failed_sections and not cap_errors else ""
+            err_detail = _bound_text(_section_detail(manifest, "errors"))
+            if err_detail:
+                print(f"{lead}{yellow}[WARN ]{rst} Capture errors truncated: {err_detail}")
+            else:
+                print(f"{lead}{yellow}[WARN ]{rst} Capture errors truncated.")
 
     print(f"\n{blue}{bold}--- Basic Information ---{rst}")
-    run = manifest.get("run", {})
-    timing = manifest.get("timing", {})
-    status = manifest.get("status", {})
-    python = manifest.get("python", {})
-    inv = manifest.get("invocation", {})
+    run = _as_dict(manifest.get("run"))
+    timing = _as_dict(manifest.get("timing"))
+    status = _as_dict(manifest.get("status"))
+    python = _as_dict(manifest.get("python"))
+    inv = _as_dict(manifest.get("invocation"))
 
-    script_name = inv.get("script", {}).get("basename", "<interactive or module>")
+    script_info = _as_dict(inv.get("script"))
+    raw_basename = script_info.get("basename")
+    script_name = raw_basename if isinstance(raw_basename, str) and raw_basename else "<interactive or module>"
 
-    signals_data = manifest.get("signals", {})
+    signals_data = _as_dict(manifest.get("signals"))
     exit_code = signals_data.get("exit_code")
     exit_exception = signals_data.get("exit_exception")
-    signals_received = signals_data.get("signals_received", [])
+    signals_received = _as_dict_list(signals_data.get("signals_received"))
 
     # Colorize outcome
-    outcome = status.get('outcome', 'unknown')
+    raw_outcome = status.get("outcome")
+    outcome = str(raw_outcome) if raw_outcome not in (None, "") else "unknown"
     out_color = ""
     if use_color:
         if outcome == "completed":
@@ -307,21 +473,17 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     if exit_exception:
         print(f"{cyan}Exception{rst}   : {red}{exit_exception}{rst}")
     if signals_received:
-        sig_names = [s.get("signal_name", f"SIG{s.get('signal')}") for s in signals_received]
+        sig_names = [
+            str(s.get("signal_name") or f"SIG{s.get('signal')}")
+            for s in signals_received
+        ]
         print(f"{cyan}Signals{rst}     : {yellow}{', '.join(sig_names)}{rst}")
 
-    start_ts = timing.get('started_at_utc')
-    if start_ts:
-        _sdt = datetime.fromtimestamp(start_ts, tz=timezone.utc)
-        if not utc:
-            _sdt = _sdt.astimezone()
-        start_str = _sdt.strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        start_str = "unknown"
+    start_str = _format_report_timestamp(timing.get("started_at_utc"), utc=utc)
     print(f"{cyan}Started{rst}     : {start_str}")
     elapsed_val = timing.get("elapsed_seconds")
-    if elapsed_val is not None:
-        elapsed_str = _format_elapsed(elapsed_val)
+    if _is_finite_number(elapsed_val):
+        elapsed_str = _format_elapsed(float(elapsed_val))
         print(f"{cyan}Elapsed{rst}     : {elapsed_str}")
 
     # Read Events if available
@@ -329,7 +491,6 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     if events_path.exists():
         print(f"\n{blue}{bold}--- Event Timeline ---{rst}")
         try:
-            from collections import deque
             with open(events_path, "r", encoding="utf-8") as ef:
                 # Show ALL events when <= 20; otherwise the OLDEST 10 + NEWEST 10 with a
                 # truncation marker between them.
@@ -368,38 +529,72 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         return
 
     # --- STANDARD ---
-    host = manifest.get("host", {})
-    hw = manifest.get("hardware", {})
-    git = manifest.get("git", {})
-    pkgs = manifest.get("packages", {}).get("records", [])
-    envs = manifest.get("environment", {}).get("variables", [])
+    host = _as_dict(manifest.get("host"))
+    hw = _as_dict(manifest.get("hardware"))
+    git = _as_dict(manifest.get("git"))
+    pkgs = _as_dict_list(_as_dict(manifest.get("packages")).get("records"))
+    envs = _as_dict_list(_as_dict(manifest.get("environment")).get("variables"))
 
-    cpu_model = hw.get("cpu", {}).get("model", "unknown")
+    python_status = _section_status(manifest, "python")
+    host_status = _section_status(manifest, "host")
+    hw_status = _section_status(manifest, "hardware")
+    git_status = _section_status(manifest, "git")
+    pkg_status = _section_status(manifest, "packages")
+    env_status = _section_status(manifest, "environment")
+
+    cpu_model = _as_dict(hw.get("cpu")).get("model") or "unknown"
     ram_gb = bytes_to_gb(hw.get("memory_total_bytes", 0))
 
+    raw_argv = inv.get("argv")
+    if isinstance(raw_argv, list):
+        argv_str = " ".join(str(a) for a in raw_argv)
+    elif isinstance(raw_argv, str):
+        argv_str = raw_argv
+    else:
+        argv_str = ""
+
     print(f"\n{blue}{bold}--- Standard Information ---{rst}")
-    print(f"{cyan}Arguments{rst}   : {' '.join(inv.get('argv', []))}")
+    print(f"{cyan}Arguments{rst}   : {argv_str}")
 
     # Safely extract python version
-    py_ver = python.get("version", "")
-    if py_ver:
-        v_tag = py_ver.split()[0]
+    if python_status == "failed":
+        print(f"{cyan}Python{rst}      : {yellow}capture failed{rst}")
     else:
-        v_tag = "unknown"
-    print(f"{cyan}Python{rst}      : {python.get('executable')} (v{v_tag})")
+        py_ver = python.get("version")
+        py_parts = py_ver.split() if isinstance(py_ver, str) else []
+        v_tag = py_parts[0] if py_parts else "unknown"
+        print(f"{cyan}Python{rst}      : {python.get('executable')} (v{v_tag})")
 
-    hostname = host.get("hostname", "unknown")
-    print(f"{cyan}Host{rst}        : {hostname} - {host.get('os_name')} {host.get('os_version')} ({cpu_model}, {ram_gb} GB RAM)")
-
-    commit = git.get("commit")
-    if commit:
-        remote = git.get("remote_url", {}).get("value", "unknown origin")
-        print(f"{cyan}Git Commit{rst}  : {commit[:8]} ({remote})")
+    hw_summary = (
+        "hardware: capture failed"
+        if hw_status == "failed"
+        else f"{cpu_model}, {ram_gb} GB RAM"
+    )
+    if host_status == "failed":
+        print(f"{cyan}Host{rst}        : {yellow}capture failed{rst} ({hw_summary})")
     else:
-        print(f"{cyan}Git Commit{rst}  : Not found or un-tracked")
+        hostname = _unwrap_value(host.get("hostname"), default="unknown")
+        print(f"{cyan}Host{rst}        : {hostname} - {host.get('os_name')} {host.get('os_version')} ({hw_summary})")
 
-    print(f"{cyan}Packages{rst}    : {len(pkgs)} recorded")
-    print(f"{cyan}Env Vars{rst}    : {len(envs)} captured")
+    if git_status == "failed":
+        print(f"{cyan}Git Commit{rst}  : {yellow}capture failed{rst}")
+    else:
+        commit = git.get("commit")
+        if isinstance(commit, str) and commit:
+            remote = _unwrap_value(git.get("remote_url"), default="unknown origin")
+            print(f"{cyan}Git Commit{rst}  : {commit[:8]} ({remote})")
+        else:
+            print(f"{cyan}Git Commit{rst}  : Not found or un-tracked")
+
+    if pkg_status == "failed":
+        print(f"{cyan}Packages{rst}    : {yellow}capture failed{rst}")
+    else:
+        print(f"{cyan}Packages{rst}    : {len(pkgs)} recorded")
+
+    if env_status == "failed":
+        print(f"{cyan}Env Vars{rst}    : {yellow}capture failed{rst}")
+    else:
+        print(f"{cyan}Env Vars{rst}    : {len(envs)} captured")
 
     if depth == "standard":
         print()
@@ -413,35 +608,50 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     if cfg_path.exists():
         try:
             with open(cfg_path, "r", encoding="utf-8") as cf:
-                cfg = json.load(cf)
+                cfg = _as_dict(json.load(cf))
             print(f"\n{blue}[ Overridden Configurations ]{rst}")
-            print(f"  {cyan}Profile{rst}: {cfg.get('core', {}).get('profile')}")
-            print(f"  {cyan}Inputs Mode{rst}: {cfg.get('capture', {}).get('inputs', {}).get('enabled')}")
-            print(f"  {cyan}Packages Mode{rst}: {cfg.get('capture', {}).get('packages', {}).get('mode')}")
+            print(f"  {cyan}Profile{rst}: {_as_dict(cfg.get('core')).get('profile')}")
+            cfg_cap = _as_dict(cfg.get("capture"))
+            print(f"  {cyan}Inputs Mode{rst}: {_as_dict(cfg_cap.get('inputs')).get('enabled')}")
+            print(f"  {cyan}Packages Mode{rst}: {_as_dict(cfg_cap.get('packages')).get('mode')}")
         except Exception:
             pass
 
     print(f"\n{blue}[ Environment Variables ]{rst}")
-    if not envs:
+    if env_status == "failed":
+        detail = _bound_text(_section_detail(manifest, "environment"))
+        if detail:
+            print(f"  {yellow}(capture failed: {detail}){rst}")
+        else:
+            print(f"  {yellow}(capture failed){rst}")
+    elif not envs:
         print("  (None captured)")
     for var in envs:
         name = var.get("name")
         val_obj = var.get("value", {})
         if isinstance(val_obj, dict) and "representation" in val_obj:
-            if val_obj["representation"] == "plain":
+            rep = val_obj.get("representation")
+            if rep == "plain":
                 print(f"  {green}{name}{rst}={val_obj.get('value', '')}")
             else:
-                print(f"  {green}{name}{rst}={yellow}<{val_obj['representation'].upper()}>{rst}")
+                rep_label = str(rep).upper() if rep not in (None, "") else "REDACTED"
+                print(f"  {green}{name}{rst}={yellow}<{rep_label}>{rst}")
         else:
             print(f"  {green}{name}{rst}={val_obj}")
 
     print(f"\n{blue}[ Packages ]{rst}")
-    if not pkgs:
+    if pkg_status == "failed":
+        detail = _bound_text(_section_detail(manifest, "packages"))
+        if detail:
+            print(f"  {yellow}(capture failed: {detail}){rst}")
+        else:
+            print(f"  {yellow}(capture failed){rst}")
+    elif not pkgs:
         print("  (None captured)")
 
     for i, p in enumerate(pkgs):
-        name = p.get('name')
-        ver = p.get('version', 'unknown')
+        name = p.get("name")
+        ver = p.get("version", "unknown")
         pkg_str = f"{name}=={ver}"
         display_len = len(pkg_str)
         if use_color:
@@ -452,7 +662,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     if len(pkgs) % 3 != 0:
         print()
 
-    subprocs = manifest.get("subprocesses", [])
+    subprocs = _as_dict_list(manifest.get("subprocesses"))
     print(f"\n{blue}[ Subprocesses ]{rst} ({len(subprocs)} executed)")
     for sp in subprocs:
         cmd = sp.get("argv", [])
@@ -463,8 +673,8 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         rc = sp.get("exit_code")
         started = sp.get("started_at_utc")
         ended = sp.get("ended_at_utc")
-        if started and ended:
-            elapsed = round(ended - started, 3)
+        if _is_finite_number(started) and _is_finite_number(ended):
+            elapsed = round(float(ended) - float(started), 3)
             print(f"  [{green if rc == 0 else red}{rc}{rst}] {cmd_str} ({elapsed}s)")
         else:
             print(f"  [{green if rc == 0 else red}{rc}{rst}] {cmd_str}")
