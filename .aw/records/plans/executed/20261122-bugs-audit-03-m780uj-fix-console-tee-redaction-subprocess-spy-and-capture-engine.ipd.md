@@ -5,8 +5,9 @@
 - Concern: Bugs and correctness (console log integrity, secret redaction safety, subprocess wait-status decoding, filesystem mount detection, and resource/liveness/hardware capture).
 - Scope: `src/pubrun/capture/console.py`, `src/pubrun/capture/redaction.py`, `src/pubrun/capture/subprocesses.py`, `src/pubrun/capture/filesystem.py`, `src/pubrun/capture/resources.py`, `src/pubrun/capture/liveness.py`, `src/pubrun/capture/hardware.py`, and regression tests in `tests/test_capture_engine_bugs.py`.
 - Scope-Paths: src/pubrun/capture/console.py, src/pubrun/capture/redaction.py, src/pubrun/capture/subprocesses.py, src/pubrun/capture/filesystem.py, src/pubrun/capture/resources.py, src/pubrun/capture/liveness.py, src/pubrun/capture/hardware.py, tests/test_capture_engine_bugs.py
+- Scope-Exceeded: .aw/records/backlog/open/20261122-bugs-audit-01-86p7x3-subprocessspy-records-no-exit-for-a-popen-child-re.backlog.md (Defect-report backlog item 86p7x3 the runner contract requires for a finding made during execution: Popen children reaped only by subprocess internals still record no exit out of this plan's scope to ...)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix CRLF log erasure, boolean-flag redaction leak, wait-status decoding, mount precedence, thread-child resources, liveness, and GPU capture bugs
@@ -18,12 +19,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: m780uj
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): aw oc run self-finalize: m780uj verified (set bugs-audit, attempt 2). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261122-bugs-audit-01-86p7x3-subprocessspy-records-no-exit-for-a-popen-child-re.backlog.md: Defect-report backlog item (86p7x3) the runner contract requires for a finding made during execution: Popen children reaped only by subprocess internals still record no exit; out of this plan's scope to fix, so filed rather than fixed]
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-22 to-review (Antigravity): authored fix steps, citations, and falsifiable validation criteria.
