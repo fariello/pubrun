@@ -2,11 +2,13 @@
 
 - Date: 2026-11-21
 - Kind: child
-- Concern: Specification/documentation reconciliation, understandable timing examples, timing-instrumentation cost benchmarking, and whole-Set verification.
+- Concern: Specification and documentation reconciliation, understandable timing examples, timing-instrumentation cost benchmarking, and whole-Set verification.
 - Scope: Reconcile `docs/manifest.md`, `docs/architecture.md`, `docs/functional_spec.md`, `docs/api.md`, and `docs/performance.md`; update `examples/05_execution_phases.py`, `examples/minimal-research-workflow/manifest_excerpt.json`, and `examples/minimal-research-workflow/README.md`; measure timing instrumentation overhead locally and execute whole-Set regression checks.
 - Scope-Paths: docs/manifest.md, docs/architecture.md, docs/functional_spec.md, docs/api.md, docs/performance.md, examples/05_execution_phases.py, examples/minimal-research-workflow/manifest_excerpt.json, examples/minimal-research-workflow/README.md
 - Item-Dependencies: executed:e1fwy2, executed:8co0wy, executed:vrr1fv
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: complex
 - Short-Description: Sync specs, docs, and examples, benchmark timing instrumentation cost, and run whole-Set verification
 - Work-Kind: bug
 - Priority: high
@@ -22,22 +24,32 @@
 
 ## Workflow history
 
+- 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-22 draft (agent): created.
 - 2026-11-22 to-review (agent): authored review-ready child plan from backlog item `6hp1zu`.
 
 ## Goal
 
-Reconcile all repository specifications, reference docs, and examples with the monotonic timing and overhead-separation contracts introduced by `e1fwy2`, `8co0wy`, and `vrr1fv`, measure and record the timing instrumentation cost itself under documented experimental conditions, and run whole-Set verification across the full test suite, examples, and path sanitizer.
+Reconcile all repository specifications, reference docs, and examples with the monotonic timing and overhead-separation contracts introduced by prerequisite child plans `e1fwy2` (manifest timing schema and tracker monotonic lifecycle), `8co0wy` (monotonic phase, subprocess, and resource timing), and `vrr1fv` (reports, status, diff, and TUI timing semantics). Measure and record the timing instrumentation cost itself under documented local conditions without publishing or leaving unredacted files. Run whole-Set verification across the full test suite, all examples, and the path sanitizer.
 
 ### Documentation, benchmark, and verification pipeline
 
-The text in `## Proposed changes (ordered, validatable)` is normative. This diagram summarizes the work performed in this plan after `e1fwy2`, `8co0wy`, and `vrr1fv` are executed.
+The text in `## Proposed changes (ordered, validatable)` is normative. These diagrams summarize the execution sequence and artifact relationships in this plan after `e1fwy2`, `8co0wy`, and `vrr1fv` reach `executed`.
 
 ```mermaid
 flowchart LR
-    A["Sync schema & architecture docs (manifest.md, architecture.md, functional_spec.md)"] --> B["Sync API & example explanations (api.md, 05_execution_phases.py, minimal-research-workflow)"]
-    B --> C["Benchmark timing instrumentation cost (cold/warm passes, dispersion) and update performance.md"]
-    C --> D["Run whole-Set checks (pytest tests/ -v, examples/verify_all.py, sanitize_paths.py)"]
+    A["Sync schema & spec docs (manifest.md, architecture.md, functional_spec.md)"] --> B["Sync API & examples (api.md, 05_execution_phases.py, minimal-research-workflow)"]
+    B --> C["Run local non-publishing harness + isolated microbenchmark; update performance.md"]
+    C --> D["Run whole-Set checks (pytest tests/, examples/verify_all.py, sanitize_paths.py)"]
+```
+
+```mermaid
+erDiagram
+    PREREQ_E1FWY2 ||--o{ SPEC_DOCS : "defines timing schema and lifecycle"
+    PREREQ_8CO0WY ||--o{ SPEC_DOCS : "defines phase and subprocess durations"
+    PREREQ_VRR1FV ||--o{ SPEC_DOCS : "defines consumer and diff semantics"
+    SPEC_DOCS ||--|| EXAMPLES_AND_BENCH : "illustrated and measured by"
+    EXAMPLES_AND_BENCH ||--|| WHOLE_SET_CHECKS : "validated by"
 ```
 
 ## Detailed Implementation Checklist (TODO)
@@ -46,95 +58,105 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Specification and documentation reconciliation
 
-- [ ] E-01 Update `docs/manifest.md`, `docs/architecture.md`, and `docs/functional_spec.md` to document monotonic durations, non-overlapping versus overlapping intervals, tracked-interval scope (including late imports), `subprocess_record` durations, `phase_end` duration payloads, and legacy v1.0 compatibility.
+- [ ] E-01 Update `docs/manifest.md`, `docs/architecture.md`, and `docs/functional_spec.md` to document monotonic durations, disjoint versus overlapping intervals, tracked-interval scope (including late imports), `subprocess_record` durations, `phase_end` duration payloads, crashed-run estimates, and legacy v1.0 compatibility.
   - Depends on: none
-  - Expected outcome: All three docs remove stale statements claiming `elapsed_seconds = ended_at_utc - started_at_utc`, document every additive `timing` and `subprocesses` field accurately against `schemas/manifest.schema.json`, distinguish POSIX UTC chronology from monotonic durations, explain that overlapping background hardware capture must not be summed with `workload_seconds`, explain that `finalization_overhead_seconds` excludes the final atomic write of `manifest.json`, and follow the repository prose rule (no em or en dashes in user-facing docs).
+  - Expected outcome: All three docs remove stale statements claiming `elapsed_seconds = ended_at_utc - started_at_utc` or "trivial elapsed-time arithmetic" via wall-clock subtraction. Every additive `timing` and `subprocesses` field matches `schemas/manifest.schema.json`. Docs distinguish Portable Operating System Interface (POSIX) Coordinated Universal Time (UTC) chronology from monotonic durations (never persisted as raw counter values), explain that overlapping background hardware capture must not be summed with `workload_seconds`, explain that `finalization_overhead_seconds` excludes the final atomic write of `manifest.json`, document legacy v1.0 and crashed-estimate classification (`vrr1fv`), preserve any additive `startup-perf` (`ckc3vl`) sections if already present, and introduce zero em dashes (U+2014) or en dashes (U+2013) in added or edited lines.
   - Execution state: pending
 
-- [ ] E-02 Update `docs/api.md` to document `start()`, `stop()`, `phase()`, `tracked_run`, `audit_run`, `pubrun.subprocess.*`, and `pubrun.popen` timing behavior and late-import tracked-interval semantics.
+- [ ] E-02 Update `docs/api.md` to document `start()`, `stop()`, `phase()`, `tracked_run()`, `audit_run()`, `diff()`, `pubrun.subprocess.*`, and `pubrun.popen()` timing behavior and late-import tracked-interval semantics.
   - Depends on: E-01
-  - Expected outcome: `docs/api.md` explains what each timing interval measures, states clearly that importing `pubrun` midway through a script measures the tracked interval rather than full process lifetime, documents `phase_end` monotonic duration payloads (excluding profiler dump I/O), and contains no em or en dashes.
+  - Expected outcome: `docs/api.md` explains what each timing interval measures, states clearly that importing `pubrun` midway through a script measures the tracked interval rather than full process lifetime, documents `phase()` monotonic `phase_end` duration payloads (excluding profiler setup and dump I/O), documents explicit subprocess wrapper monotonic durations and `capture_state`, documents legacy-versus-monotonic semantic notes in `pubrun.diff()`, and introduces zero em dashes (U+2014) or en dashes (U+2013) in added or edited lines.
   - Execution state: pending
 
 ### Task group 2: Examples, instrumentation benchmark, and whole-Set verification
 
 - [ ] E-03 Update `examples/05_execution_phases.py`, `examples/minimal-research-workflow/manifest_excerpt.json`, and `examples/minimal-research-workflow/README.md` with accurate timing fields and a plain-language explanation of what is measured.
   - Depends on: E-02
-  - Expected outcome: `examples/05_execution_phases.py` verifies that each `phase_end` event includes nonnegative monotonic `elapsed_seconds` and `duration_clock == "monotonic"`; `examples/minimal-research-workflow/manifest_excerpt.json` reflects the additive `timing` fields (with redacted/synthetic timestamps); `examples/minimal-research-workflow/README.md` explains what `workload_seconds`, `startup_overhead_seconds`, `finalization_overhead_seconds`, and `elapsed_seconds` measure and notes that late imports record the tracked interval rather than full application lifetime; no em or en dashes appear in user-facing prose.
+  - Expected outcome: `examples/05_execution_phases.py` verifies that each `phase_end` event carries a nonnegative numeric `elapsed_seconds` (not `bool`) and `duration_clock == "monotonic"`, verifies the finalized `manifest.json` carries monotonic tracked-workload timing metadata, prints a concise explanation of what was measured while preserving `[PASS] PASS: 05_execution_phases.py`, and exits 0. `examples/minimal-research-workflow/manifest_excerpt.json` remains valid JSON, adds the additive `timing` fields with internally consistent redacted/synthetic values, and its `"timing"` object validates against the `$defs.timing` subschema of `schemas/manifest.schema.json`. `examples/minimal-research-workflow/README.md` adds a concise plain-language section explaining tracked workload versus capture overhead, non-additive background hardware capture, and late-import scope, introducing zero em dashes (U+2014) or en dashes (U+2013) in added or edited lines.
   - Execution state: pending
 
-- [ ] E-04 Benchmark the timing instrumentation cost locally and document the measurement methodology and findings in `docs/performance.md` without committing unredacted host-identifying result artifacts or publishing external submissions.
+- [ ] E-04 Benchmark the timing instrumentation cost locally using non-publishing commands and document the scoped methodology and measurements in `docs/performance.md` without committing unredacted host-identifying artifacts.
   - Depends on: E-03
-  - Expected outcome: Run a reproducible local measurement using `benchmarks/harness.py` (with `--passes 3 --iterations 30` or equivalent warm/cold multi-pass run, plus an isolated microbenchmark comparing `time.perf_counter()` bookkeeping cost inside `Run`, `phase()`, and subprocess capture against baseline without timing bookkeeping), record environment (OS, Python version, CPU model/count, filesystem type), git revision, workload, baseline, repetitions, cold versus warm pass distinction, median, and dispersion (standard deviation and interquartile range (IQR)) in this plan's `V-04` evidence and in `docs/performance.md` (making no unmeasured speedup claims and leaving `benchmarks/results/` clean of unredacted files).
+  - Expected outcome: Execute local non-publishing measurements without modifying `src/pubrun/`: (1) `python3 benchmarks/harness.py --passes 3 --iterations 30 --redacted-out /tmp/pubrun-timing-harness.redacted.json` (recording pass 1 cold vs pass 3 warm medians and dispersion, then deleting `/tmp/pubrun-timing-harness.redacted.json` so `benchmarks/results/` stays clean); and (2) an ephemeral in-memory Python microbenchmark (`N >= 30` repetitions across 3 passes: pass 1 cold vs pass 3 warm) measuring raw `time.perf_counter()` bookkeeping overhead versus an empty-loop baseline, active `pubrun.phase()` loop versus inactive no-op baseline, and `Run` `start()`/`stop()` breakdown (`startup_overhead_seconds`, `workload_seconds`, `finalization_overhead_seconds`, `writer_overhead_seconds`). Record environment (Operating System (OS), Python version, Central Processing Unit (CPU) model and logical cores, filesystem `fstype` and `is_network` via `src/pubrun/capture/filesystem.py::get_filesystem` with zero personal paths or hostnames), git commit SHA, workload, baseline, repetitions, cold versus warm passes, median, standard deviation (stdev), and Interquartile Range (IQR) in `V-04` and in a dedicated environment-scoped subsection of `docs/performance.md` (preserving `docs/performance.md#Representative results` intact, preserving any `startup-perf` (`ckc3vl`) subsection if present, making no unmeasured speedup claims, and introducing zero em or en dashes in added or edited lines).
   - Execution state: pending
 
-- [ ] E-05 Run whole-Set regression verification across the full test suite, all examples, and the path-sanitizer check, and record the remaining multi-OS/Python CI matrix gate.
+- [ ] E-05 Run whole-Set regression verification across the full test suite, all examples, and the path-sanitizer check, and record the remaining multi-OS and multi-Python Continuous Integration (CI) matrix gate.
   - Depends on: E-04
-  - Expected outcome: `pytest tests/ -v`, `python examples/verify_all.py`, and `python3 scripts/sanitize_paths.py --check --all` all exit 0 with full actual runner output pasted into `V-05`; note that `.github/workflows/ci.yml` (Ubuntu/Windows/macOS across Python 3.8 through 3.14) must pass in GitHub Actions before release closure.
+  - Expected outcome: `pytest tests/ -v`, `python3 examples/verify_all.py`, and `python3 scripts/sanitize_paths.py --check --all` all exit 0 with actual runner output pasted into `V-05`, `git status -s` shows no stray temporary or unredacted benchmark files, and `V-05` explicitly records that `.github/workflows/ci.yml` (Ubuntu, Windows, and macOS across Python 3.8 through 3.14) must pass in GitHub Actions before release closure.
   - Execution state: pending
 
 ## Project conventions discovered (Step 0)
 
-- `docs/manifest.md`, `docs/architecture.md`, and `docs/functional_spec.md` currently document `elapsed_seconds` as `ended_at_utc - started_at_utc`, which conflicts with monotonic duration semantics after `e1fwy2`.
-- `examples/verify_all.py` executes every numbered script (`examples/00_*.py` through `examples/11_*.py`) plus `examples/minimal-research-workflow/analysis.py` and expects exit code 0 for all scripts.
+- `docs/manifest.md## timing`, `docs/architecture.md### Timestamp Format`, `docs/architecture.md## 9. Observed vs Derived vs Inferred`, and `docs/functional_spec.md### 4.1 Timestamp Format` currently state `elapsed_seconds = ended_at_utc - started_at_utc` or "trivial elapsed-time arithmetic" from wall-clock timestamps, which conflicts with monotonic duration semantics after prerequisite `e1fwy2`.
+- `docs/functional_spec.md### 7.1 Implemented Event Types`, `docs/functional_spec.md### 15.2 Recorded Fields`, and `docs/functional_spec.md### 19.2 Finalization Lifecycle` do not yet document `phase_end` monotonic durations, `subprocess_record` `elapsed_seconds`/`duration_clock`/`capture_state`, or the `t2` pre-teardown workload boundary and `config.resolved.json`-before-`manifest.json` write order.
+- `examples/verify_all.py` executes every numbered script (`examples/00_*.py` through `examples/11_*.py`) plus `examples/minimal-research-workflow/analysis.py`, expects exit code 0, and highlights stdout lines containing `"PASS"` or `"TESTING"`; `tests/test_example_minimal_research_workflow.py` smoke-tests `examples/minimal-research-workflow/analysis.py`.
+- `examples/minimal-research-workflow/manifest_excerpt.json` is an intentionally shortened redacted excerpt that omits `capture_state` on several sections (`run`, `invocation`, `capture`, `status`, `git`, `host`, `python`, `signals`), so JSON Schema validation must target the `$defs.timing` subschema of `schemas/manifest.schema.json` alongside full-file JSON parsing.
 - `scripts/sanitize_paths.py --check --all` is enforced in `.github/workflows/secret-scan.yml` to block machine-local absolute home paths or hostnames from entering tracked files.
-- `benchmarks/harness.py` writes unredacted and redacted JSON outputs to `benchmarks/results/` (gitignored except committed sample files); benchmark runs must NEVER publish to GitHub Gists, open issues, or submit scheduler jobs without explicit authorization.
-- `AGENTS.md` prohibits em dashes and en dashes in user-facing prose (`docs/`, `README.md`, examples).
+- `benchmarks/harness.py` writes a redacted JSON file under `benchmarks/results/` by default unless `--redacted-out <temp_path>` is passed (and writes an unredacted copy only when `--unredacted` or `--out` is passed); benchmark runs must never publish to GitHub Gists, open issues, or submit High-Performance Computing (HPC) scheduler jobs without explicit authorization.
+- Sibling Set `startup-perf` (child `ckc3vl`, post-change overhead comparison and documentation sync) also edits `docs/manifest.md`, `docs/architecture.md`, `docs/functional_spec.md`, and `docs/performance.md`; edits here must remain additive to distinct subsections so either execution order composes cleanly.
+- `AGENTS.md` prohibits em dashes (U+2014) and en dashes (U+2013) in newly authored or edited user-facing prose (`docs/`, `README.md`, examples).
 
 ## Findings
 
-- **F-01 (Stale timing specifications):** `docs/manifest.md`, `docs/architecture.md`, and `docs/functional_spec.md` explicitly state `elapsed_seconds = ended_at_utc - started_at_utc` and describe `timing` as having only `started_at_utc`, `ended_at_utc`, and `elapsed_seconds`.
-- **F-02 (Missing late-import and overlap explanations in docs and examples):** Neither `docs/api.md`, `docs/manifest.md`, nor `examples/minimal-research-workflow/README.md` explains that importing `pubrun` late measures only the tracked interval or that background hardware capture overlaps with workload execution.
+- **F-01 (Stale timing specifications):** `docs/manifest.md## timing`, `docs/architecture.md### Timestamp Format`, `docs/architecture.md## 9. Observed vs Derived vs Inferred`, and `docs/functional_spec.md### 4.1 Timestamp Format` explicitly state `elapsed_seconds = ended_at_utc - started_at_utc` and describe `timing` as having only `started_at_utc`, `ended_at_utc`, and `elapsed_seconds`.
+- **F-02 (Missing late-import, overlap, subprocess, and diff semantics in docs and examples):** Neither `docs/api.md`, `docs/manifest.md`, `docs/functional_spec.md`, nor `examples/minimal-research-workflow/README.md` explains that importing `pubrun` late measures only the tracked interval, that background hardware capture overlaps with workload execution, that `phase_end` and `subprocesses` carry monotonic durations, or how legacy v1.0 manifests are labeled in reports and diffs.
 - **F-03 (Unmeasured instrumentation cost):** `docs/performance.md` does not yet explain how `pubrun` separates its own startup and finalization overhead from workload timing or report measured timing-instrumentation cost with cold/warm passes and dispersion.
 
 ## Proposed changes (ordered, validatable)
 
 1. **`docs/manifest.md`:**
-   - Replace the `## timing` table and notes to document `started_at_utc`, `workload_started_at_utc`, `ended_at_utc`, `finalized_at_utc`, `elapsed_seconds`, `workload_seconds`, `startup_overhead_seconds`, `finalization_overhead_seconds`, `session_seconds`, `hardware_wait_seconds`, `background_hardware_seconds`, `duration_clock`, `elapsed_basis`, `interval_scope`, and `capture_state`.
-   - Document clearly which intervals are disjoint (`startup_overhead_seconds`, `workload_seconds`, `finalization_overhead_seconds`), which overlap (`background_hardware_seconds` overlaps workload; `hardware_wait_seconds` is a sub-interval of `finalization_overhead_seconds`), that `finalization_overhead_seconds` excludes the final atomic write of `manifest.json`, and how legacy v1.0 manifests (lacking `duration_clock`/`elapsed_basis`) are interpreted and labeled.
-   - Update the `## subprocesses` table to document optional `elapsed_seconds`, `duration_clock`, `pid`, and `error`.
+   - Replace `docs/manifest.md## timing` (table and `[!NOTE]` block) to document `started_at_utc`, `workload_started_at_utc`, `ended_at_utc`, `finalized_at_utc`, `elapsed_seconds`, `workload_seconds`, `startup_overhead_seconds`, `finalization_overhead_seconds`, `session_seconds`, `hardware_wait_seconds`, `background_hardware_seconds`, `duration_clock`, `elapsed_basis`, `interval_scope`, and `capture_state`.
+   - Document clearly which intervals are disjoint (`startup_overhead_seconds`, `workload_seconds`, `finalization_overhead_seconds`), which overlap (`background_hardware_seconds` overlaps workload; `hardware_wait_seconds` is a sub-interval of `finalization_overhead_seconds`), that `finalization_overhead_seconds` excludes the final atomic write of `manifest.json`, that raw monotonic counter values are never serialized, how legacy v1.0 manifests (lacking `duration_clock` and `elapsed_basis`) are classified and labeled, and how crashed-run closeouts record `duration_clock: "wall_clock_estimated"` and `elapsed_basis: "crashed_estimate"`.
+   - Update `docs/manifest.md## subprocesses` to document optional `elapsed_seconds`, `duration_clock`, `pid`, and `error`.
 2. **`docs/architecture.md` and `docs/functional_spec.md`:**
-   - Reconcile timestamp and duration sections (`Timestamp Format`, `Observed vs Derived vs Inferred`, `Events`, `Subprocess Spy`, `Finalization Lifecycle`): UTC epoch floats remain the format for absolute chronology; monotonic clocks (`time.perf_counter()`) produce nonnegative durations; raw monotonic counter readings are never serialized; `phase_end` carries `elapsed_seconds` and `duration_clock`.
+   - Reconcile `docs/architecture.md## 3. Run Lifecycle`, `docs/architecture.md### Timestamp Format`, and `docs/architecture.md## 9. Observed vs Derived vs Inferred`, plus `docs/functional_spec.md### 4.1 Timestamp Format`, `docs/functional_spec.md### 7.1 Implemented Event Types`, `docs/functional_spec.md### 15.2 Recorded Fields`, and `docs/functional_spec.md### 19.2 Finalization Lifecycle`: UTC epoch floats remain the format for absolute chronology; monotonic clocks (`time.perf_counter()`) produce nonnegative durations; raw monotonic counter readings are never serialized; `phase_end` carries `elapsed_seconds` and `duration_clock: "monotonic"` (excluding profiler setup and dump I/O); `t2` marks workload end before blocking hardware wait; and `config.resolved.json` is written before `manifest.json` freezes finalized timing.
+   - Preserve any additive sections written by sibling plan `ckc3vl` (Set `startup-perf`) if already present on disk.
 3. **`docs/api.md`:**
-   - Document `start()`, `stop()`, `phase()`, `tracked_run`, `audit_run`, `pubrun.subprocess.*`, and `pubrun.popen` timing guarantees, including late-import tracked-interval scope and `phase()` profiler-dump exclusion.
+   - Update `docs/api.md### pubrun.start(**overrides)`, `### pubrun.stop()`, `### pubrun.phase(name)`, `## 5. Lifecycle Wrappers` (`tracked_run()`, `audit_run()`), `### pubrun.diff(...)`, `### pubrun.subprocess.run(*args, **kwargs) / pubrun.subprocess.Popen(...)`, and `### pubrun.popen(cmd, mode="r", bufsize=-1)` to document monotonic timing guarantees, late-import tracked-interval scope, `phase()` profiler setup/dump exclusion, explicit subprocess monotonic durations and `capture_state`, and legacy-versus-monotonic diff notes when `timing` is included.
 4. **`examples/05_execution_phases.py`, `examples/minimal-research-workflow/manifest_excerpt.json`, and `examples/minimal-research-workflow/README.md`:**
-   - Extend `examples/05_execution_phases.py` to assert `phase_end` records carry nonnegative `elapsed_seconds` and `duration_clock == "monotonic"`, and print a short explanation of what was measured.
-   - Update `examples/minimal-research-workflow/manifest_excerpt.json` to include the new additive `timing` fields (`workload_started_at_utc`, `finalized_at_utc`, `workload_seconds`, `startup_overhead_seconds`, `finalization_overhead_seconds`, `session_seconds`, `hardware_wait_seconds`, `background_hardware_seconds`, `duration_clock`, `elapsed_basis`, `interval_scope`, `capture_state`) with consistent synthetic values.
-   - Add a concise "What timing metrics measure" section to `examples/minimal-research-workflow/README.md` explaining tracked workload versus capture overhead, non-additive background capture, and late-import scope.
-5. **`docs/performance.md` and local instrumentation benchmark:**
-   - Measure the timing instrumentation overhead locally (using `benchmarks/harness.py` for end-to-end startup/feature scenarios plus a focused repeatable timing-bookkeeping microbenchmark comparing tracked `Run`/`phase()`/`SubprocessSpy` with `perf_counter()` instrumentation against baseline), capturing: environment (OS, Python version, CPU model/logical cores, filesystem type (with no personal paths or hostnames), git commit SHA, workload, baseline, repetitions (`N >= 30`), cold versus warm pass comparison (pass 1 vs warmest pass), median, and dispersion (stdev and IQR).
-   - Add a concise section in `docs/performance.md` explaining how manifest timing separates workload time from capture overhead and summarizing the measured timing-instrumentation overhead honestly (explicitly scoped to the measured environment and revision, with no unmeasured speedup claims).
-   - Remove any temporary unredacted benchmark files created outside gitignored paths so `git status` contains only declared Scope-Paths.
-6. **Whole-Set verification:**
-   - Run `pytest tests/ -v`, `python examples/verify_all.py`, and `python3 scripts/sanitize_paths.py --check --all`, pasting complete actual outputs and exit codes into `V-05`.
-   - Confirm no em dashes (`—`) or en dashes (`–`) were introduced into the modified user-facing docs or examples.
+   - Extend `examples/05_execution_phases.py` to assert that each `phase_end` record carries numeric (non-`bool`), nonnegative `elapsed_seconds` and `duration_clock == "monotonic"`, assert that `manifest.json` carries monotonic tracked-workload timing metadata, and print a short explanation of what was measured while keeping `[PASS] PASS: 05_execution_phases.py` intact.
+   - Update `examples/minimal-research-workflow/manifest_excerpt.json` to include the additive `timing` fields (`workload_started_at_utc`, `finalized_at_utc`, `workload_seconds`, `startup_overhead_seconds`, `finalization_overhead_seconds`, `session_seconds`, `hardware_wait_seconds`, `background_hardware_seconds`, `duration_clock`, `elapsed_basis`, `interval_scope`, `capture_state`) with internally consistent synthetic values that validate against `$defs.timing` in `schemas/manifest.schema.json`.
+   - Add a concise "What timing metrics measure" section to `examples/minimal-research-workflow/README.md` explaining tracked workload versus capture overhead, non-additive overlapping background capture, and late-import tracked-interval scope.
+5. **`docs/performance.md` and local non-publishing instrumentation benchmark:**
+   - Without editing `src/pubrun/`, run:
+     - `python3 benchmarks/harness.py --passes 3 --iterations 30 --redacted-out /tmp/pubrun-timing-harness.redacted.json` (and delete `/tmp/pubrun-timing-harness.redacted.json` immediately after reading its summary); and
+     - An ephemeral in-memory Python microbenchmark (`N >= 30` repetitions across 3 passes: pass 1 cold vs pass 3 warm) measuring (a) raw `time.perf_counter()` bookkeeping call cost versus empty-loop baseline, (b) active `pubrun.phase()` loop versus inactive no-op baseline, and (c) `Run` `start()`/`stop()` timing breakdown (`startup_overhead_seconds`, `workload_seconds`, `finalization_overhead_seconds`, `writer_overhead_seconds`).
+   - Capture environment (OS, Python version, CPU model/logical cores, filesystem `fstype`/`is_network` via `get_filesystem` with no personal paths or hostnames), git commit SHA, workload, baseline, repetitions (`N >= 30`), cold versus warm pass comparison (pass 1 vs pass 3), median, stdev, and IQR.
+   - Add a dedicated, environment-scoped subsection (`### Timing instrumentation and overhead separation`) in `docs/performance.md` without modifying `docs/performance.md#Representative results` or clobbering any `ckc3vl` subsection, summarizing the measured results honestly with zero unmeasured speedup claims.
+6. **Whole-Set verification and prose hygiene:**
+   - Run `pytest tests/ -v`, `python3 examples/verify_all.py`, and `python3 scripts/sanitize_paths.py --check --all`, pasting actual runner outputs and exit codes into `V-05`.
+   - Verify via a Python check over added lines (`git diff`) that zero em dashes (U+2014) or en dashes (U+2013) were introduced in any modified doc or example file, and verify `git status -s` contains only declared Scope-Paths.
 
 ## Deferred / out of scope (with reason)
 
-- Running the GitHub Actions cross-OS/Python matrix (`ubuntu-latest`, `ubuntu-24.04`, `windows-latest`, `macos-latest` across Python 3.8 through 3.14 in `.github/workflows/ci.yml`) requires GitHub Actions runners after PR/push; local execution covers the host OS/Python and records the CI matrix requirement explicitly.
-- Publishing benchmark results to GitHub Issues/Gists or running HPC scheduler scripts (`benchmarks/submit_bench*.sh`) is prohibited without explicit authorization.
-- Optimizing startup cost (`_resolve_commit()` and config write coalescing) belongs to backlog item `t1xqpw`.
+- Running the GitHub Actions cross-OS/Python matrix (`ubuntu-latest`, `ubuntu-24.04`, `windows-latest`, `macos-latest` across Python 3.8 through 3.14 in `.github/workflows/ci.yml`) requires GitHub Actions runners after PR or push; local execution covers the host OS/Python and records the CI matrix gate explicitly.
+  - Carrier-Declined: executed automatically by GitHub Actions CI (.github/workflows/ci.yml) on pull request or push; unavailable in a single local Linux worktree.
+- Publishing benchmark results to GitHub Issues/Gists or running HPC scheduler scripts (`benchmarks/submit_bench*.sh`) is prohibited without explicit maintainer authorization.
+  - Carrier-Declined: explicitly prohibited without explicit maintainer authorization.
+- Optimizing startup cost (`_resolve_commit()` and config write coalescing) belongs to sibling backlog item `t1xqpw` (Set `startup-perf`, orchestrator `9ppa0r`).
+  - Carrier: 9ppa0r
 
 ## Scope check
 
 - Over-scope: none. Touches only the five docs files and three example files (8 Scope-Paths, 5 E-items).
-- Under-scope: none. Covers documentation sync, example updates, instrumentation benchmarking, and whole-Set verification required by `6hp1zu` and orchestrator `nr63qr`.
+- Under-scope: none. Covers documentation sync, example updates, instrumentation benchmarking, em/en-dash verification, and whole-Set verification required by backlog item `6hp1zu` and orchestrator `nr63qr`.
 
 ## Required tests / validation
 
-Run inside the repository root and capture actual runner output and exit code:
+Run inside the repository root and capture actual runner output and exit codes:
 
 ```bash
+python3 benchmarks/harness.py --passes 3 --iterations 30 --redacted-out /tmp/pubrun-timing-harness.redacted.json && rm -f /tmp/pubrun-timing-harness.redacted.json
 pytest tests/ -v
-python examples/verify_all.py
+python3 examples/verify_all.py
 python3 scripts/sanitize_paths.py --check --all
 ```
 
-Also run the local timing-instrumentation benchmark (non-publishing, local stdout/temp output only) and paste the measured summary table (environment, revision, workload, baseline, repetitions, cold/warm passes, median, stdev, IQR) into `V-04`.
+Also run the ephemeral in-memory timing-instrumentation microbenchmark (non-publishing, stdout only, zero `src/pubrun/` edits) and paste the measured summary table (environment, git revision, workload, baseline, repetitions, pass 1 cold vs pass 3 warm, median, stdev, and IQR) into `V-04`.
 
 ## Spec / documentation sync
 
-This plan IS the specification, documentation, and example synchronization plan for Set `timing-acc`.
+This plan is the specification, documentation, and example synchronization plan for Set `timing-acc`.
 
 ## Open questions
 
@@ -142,35 +164,35 @@ This plan IS the specification, documentation, and example synchronization plan 
 
 - Blocking: no
 - Status: resolved
-- Owner: maintainer (confirmed upon plan approval)
-- Resolution or deferral rationale: `docs/performance.md` notes that representative cross-machine numbers live in the aggregated table only after multi-machine collection, while single-machine measurements must be labeled with their exact environment, revision, workload, baseline, repetitions, cold/warm passes, and dispersion. Record the local timing-instrumentation measurement both in `V-04` of this plan and in a clearly scoped, environment-labeled subsection of `docs/performance.md` without overwriting the multi-machine placeholder table or committing host-identifying files.
+- Owner: plan author (binding upon plan approval)
+- Resolution or deferral rationale: `docs/performance.md#Representative results` keeps its cross-machine table as a placeholder until multi-machine collection occurs, while single-machine measurements must be labeled with their exact environment, revision, workload, baseline, repetitions, cold/warm passes, and dispersion. Record the local timing-instrumentation measurement both in `V-04` of this plan and in a clearly scoped, environment-labeled subsection of `docs/performance.md` without overwriting `docs/performance.md#Representative results` or committing host-identifying files. Human approval of this plan confirms this placement before execution.
 
 ## Validation and cross-check (verify before reporting done)
 
-Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
+Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
 - [ ] V-01 validates E-01
-  - Required evidence: Diff of `docs/manifest.md`, `docs/architecture.md`, and `docs/functional_spec.md` showing reconciled monotonic timing semantics, disjoint vs overlapping interval definitions, legacy compatibility rules, no stale `ended_at_utc - started_at_utc` claims, and zero introduced em/en dashes.
+  - Required evidence: Diff of `docs/manifest.md`, `docs/architecture.md`, and `docs/functional_spec.md` showing reconciled monotonic timing semantics, disjoint versus overlapping interval definitions, legacy and crashed-estimate classification rules, no stale `ended_at_utc - started_at_utc` claims, and pasted output of a Python check over added lines of `git diff -- docs/manifest.md docs/architecture.md docs/functional_spec.md` confirming zero em dashes (U+2014) or en dashes (U+2013).
   - Observed evidence:
   - Result: pending
 
 - [ ] V-02 validates E-02
-  - Required evidence: Diff of `docs/api.md` showing documented timing behavior for `start()`, `stop()`, `phase()`, `tracked_run`, `audit_run`, `pubrun.subprocess.*`, and `pubrun.popen`, late-import tracked-interval scope, and zero introduced em/en dashes.
+  - Required evidence: Diff of `docs/api.md` showing documented timing behavior for `start()`, `stop()`, `phase()`, `tracked_run()`, `audit_run()`, `diff()`, `pubrun.subprocess.*`, and `pubrun.popen()`, late-import tracked-interval scope, and pasted output of a Python check over added lines of `git diff -- docs/api.md` confirming zero em dashes (U+2014) or en dashes (U+2013).
   - Observed evidence:
   - Result: pending
 
 - [ ] V-03 validates E-03
-  - Required evidence: Diff of `examples/05_execution_phases.py`, `examples/minimal-research-workflow/manifest_excerpt.json`, and `examples/minimal-research-workflow/README.md`, plus pasted `python examples/05_execution_phases.py` output (exit code 0) and schema/JSON parse check on `manifest_excerpt.json`.
+  - Required evidence: Diff of `examples/05_execution_phases.py`, `examples/minimal-research-workflow/manifest_excerpt.json`, and `examples/minimal-research-workflow/README.md`, pasted `python3 examples/05_execution_phases.py` output (exit code 0), pasted Python check confirming `manifest_excerpt.json` parses as valid JSON and its `"timing"` object validates against `$defs.timing` of `schemas/manifest.schema.json`, and pasted check confirming zero em/en dashes added to `examples/minimal-research-workflow/README.md`.
   - Observed evidence:
   - Result: pending
 
 - [ ] V-04 validates E-04
-  - Required evidence: Pasted local benchmark runner output showing environment, git revision, workload, baseline, repetitions, cold vs warm pass results, median, stdev, and IQR for timing instrumentation overhead, plus diff of `docs/performance.md` recording the scoped measurements without committing unredacted benchmark files or invoking external publication.
+  - Required evidence: Pasted local non-publishing `benchmarks/harness.py` summary (with temp `--redacted-out` deleted afterward) and ephemeral timing-instrumentation microbenchmark output showing environment (without personal paths or hostnames), git revision, workload, baseline, repetitions (`N >= 30`), pass 1 cold versus pass 3 warm results, median, stdev, and IQR, plus diff of `docs/performance.md` preserving `#Representative results`, zero added em/en dashes, and `git status -s` confirming no stray or unredacted benchmark files remain.
   - Observed evidence:
   - Result: pending
 
 - [ ] V-05 validates E-05
-  - Required evidence: Pasted runner output and exit code 0 for `pytest tests/ -v`, `python examples/verify_all.py`, and `python3 scripts/sanitize_paths.py --check --all`, plus explicit note of the GitHub Actions OS/Python CI matrix gate required before release closure.
+  - Required evidence: Pasted actual runner output and exit code 0 for `pytest tests/ -v`, `python3 examples/verify_all.py`, and `python3 scripts/sanitize_paths.py --check --all`, `git status -s` confirming no stray benchmark files, plus an explicit note recording the GitHub Actions `.github/workflows/ci.yml` OS/Python CI matrix gate required before release closure.
   - Observed evidence:
   - Result: pending
 
@@ -180,8 +202,8 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 - Cohesion rationale: not required
 
 Execution contract:
-1. All open questions (OQ-01) are resolved; do not execute until prerequisites `e1fwy2`, `8co0wy`, and `vrr1fv` are `executed` and a human approves this plan (`- Status: approved`).
-2. Scope fence: edit only `docs/manifest.md`, `docs/architecture.md`, `docs/functional_spec.md`, `docs/api.md`, `docs/performance.md`, `examples/05_execution_phases.py`, `examples/minimal-research-workflow/manifest_excerpt.json`, and `examples/minimal-research-workflow/README.md`. Do not expand scope; if additional files seem required, STOP and report.
-3. Honesty rule: paste actual runner output and exit codes for `pytest`, `examples/verify_all.py`, `scripts/sanitize_paths.py`, and the local timing benchmark into each `V-*` `Observed evidence:` field; never claim results you did not measure or run.
-4. Commit discipline: commit only the files listed in `- Scope-Paths:` using `aw commit 3tvesf -- <paths>`; never use `git add -A`, `git add .`, or `git commit -a`; never push without explicit human instruction.
-5. Lifecycle move on completion: after `aw ipd lint --phase pre-transition` passes, move this plan from `.aw/records/plans/pending/` to `.aw/records/plans/executed/`, set `- Status: executed`, append a dated `## Workflow history` line, and commit the lifecycle move path-scoped.
+1. Open questions: all open questions (`OQ-01`) are resolved for review; do not execute until prerequisites `e1fwy2` (manifest timing schema and tracker monotonic lifecycle), `8co0wy` (monotonic phase, subprocess, and resource timing), and `vrr1fv` (reports, status, diff, and TUI timing semantics) are `executed` and a human approves this plan (`- Status: approved`).
+2. Scope declaration: expected modified files are `- Scope-Paths:` (`docs/manifest.md`, `docs/architecture.md`, `docs/functional_spec.md`, `docs/api.md`, `docs/performance.md`, `examples/05_execution_phases.py`, `examples/minimal-research-workflow/manifest_excerpt.json`, `examples/minimal-research-workflow/README.md`). If execution genuinely requires editing an out-of-scope file, justify it with `--scope-reason` at finalization; if a declared file requires no edit, acknowledge it with `--scope-ack`. Stop only for a genuinely unsafe condition such as an unresolvable concurrent-edit conflict or missing prerequisite behavior.
+3. Honesty rule (HARD MUST): paste actual runner output and exit codes for `pytest`, `examples/verify_all.py`, `scripts/sanitize_paths.py`, `benchmarks/harness.py`, and the local timing microbenchmark into each `V-*` `Observed evidence:` field; never claim results you did not measure or run.
+4. Commit and push discipline: commit only the files changed for this plan using `aw commit 3tvesf -- <paths>`; never use `git add -A`, `git add .`, or `git commit -a`; never push or publish benchmark results without explicit human instruction.
+5. Lifecycle transition on completion: this plan must reach `.aw/records/plans/executed/` with `- Status: executed` through `aw ipd finalize` once all `E-*` items are `performed` and all `V-*` items are `pass`. In a runner-managed lane with `self_finalize=True`, leave lifecycle finalization to the runner's post-turn finalize step; in standalone execution, run `aw ipd finalize 3tvesf` directly. Never hand-roll a raw `git mv` to `.aw/records/plans/executed/`.
