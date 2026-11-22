@@ -3,6 +3,7 @@
 Uses only the Python standard library and supports Python 3.8 through 3.14.
 This module never imports target modules to identify them.
 """
+from collections import deque
 from dataclasses import dataclass, field
 import csv
 import importlib.machinery
@@ -19,15 +20,16 @@ import sysconfig
 import threading
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
+from pubrun.capture._markers import (
+    default_marker_environment,
+    evaluate_marker,
+    parse_requirement,
+)
+
 # Keep references to the unmodified stdlib lookup functions so we can detect
 # monkeypatched test providers without triggering redundant site-packages scans.
 _ORIG_DISTRIBUTION = importlib.metadata.distribution
 _ORIG_VERSION = importlib.metadata.version
-
-
-# Regex to extract the package name from a PEP 508 requirement string.
-# Handles: "numpy>=1.21", "pytz", "foo[extra]>=1.0", "bar ; python_version<'3.9'"
-_REQ_NAME_RE = re.compile(r"^([A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?)")
 
 # PEP 503 normalization pattern collapsing runs of '-', '_', and '.' to '-'.
 _PEP503_RE = re.compile(r"[-_.]+")
@@ -95,8 +97,8 @@ def normalize_package_name(name: str) -> str:
 
 def _parse_req_name(req_str: str) -> str:
     """Extract the package name from a PEP 508 requirement string."""
-    match = _REQ_NAME_RE.match(req_str.strip())
-    return match.group(1) if match else ""
+    parsed = parse_requirement(req_str)
+    return parsed.name if parsed is not None else ""
 
 
 def _safe_getattr(obj: Any, attr: str, default: Any = None) -> Any:
@@ -1077,83 +1079,233 @@ def _resolve_imported_modules(
     return records, unresolved, sorted(local_modules)
 
 
-def _append_transitive_records(
+def _read_dist_requires(
+    parent_key: str,
+    parent_name: str,
+    index: _DistributionIndex,
+) -> Tuple[str, ...]:
+    """Read declared ``Requires-Dist`` strings from ``index`` or direct metadata fallback."""
+    info = index.by_normalized_name.get(parent_key)
+    if info is not None:
+        return info.requires
+    try:
+        dist = importlib.metadata.distribution(parent_name)
+        raw_reqs = getattr(dist, "requires", None)
+        if raw_reqs:
+            return tuple(r for r in raw_reqs if isinstance(r, str))
+    except Exception:
+        pass
+    return ()
+
+
+def _resolve_transitive_target(
+    dep_name: str,
+    dep_norm: str,
+    index: _DistributionIndex,
+) -> Optional[Tuple[str, str, Dict[str, Any]]]:
+    """Resolve a transitive target distribution from ``index`` or direct metadata fallback.
+
+    Returns ``(normalized_name, canonical_name, record_dict)`` or ``None`` when
+    the target distribution is not installed.
+    """
+    dep_info = index.by_normalized_name.get(dep_norm)
+    if dep_info is not None:
+        return (
+            dep_info.normalized_name,
+            dep_info.name,
+            _record_from_dist_info(dep_info, source="transitive", required_by=[]),
+        )
+
+    try:
+        dist = importlib.metadata.distribution(dep_name)
+    except importlib.metadata.PackageNotFoundError:
+        try:
+            dep_version = importlib.metadata.version(dep_name)
+        except Exception:
+            return None
+        version_str = (
+            dep_version
+            if dep_version is None or isinstance(dep_version, str)
+            else str(dep_version)
+        )
+        return (
+            dep_norm,
+            dep_name,
+            {
+                "name": dep_name,
+                "version": version_str,
+                "location": None,
+                "editable": None,
+                "source": "transitive",
+                "required_by": [],
+            },
+        )
+    except Exception:
+        return None
+
+    target_name = dep_name
+    has_metadata_attr = hasattr(type(dist), "metadata") or "metadata" in getattr(
+        dist, "__dict__", {}
+    )
+    if has_metadata_attr:
+        try:
+            raw_name = _read_metadata_name(dist.metadata)
+            if raw_name and raw_name.strip():
+                target_name = raw_name.strip()
+        except Exception:
+            pass
+
+    version = _safe_getattr(dist, "version", _MISSING)
+    if version is _MISSING:
+        try:
+            version = importlib.metadata.version(dep_name)
+        except Exception:
+            version = None
+    if version is not None and not isinstance(version, str):
+        version = str(version)
+
+    location = _get_dist_location(dist)
+    read_text = getattr(dist, "read_text", None)
+    editable: Optional[bool] = _is_editable_dist(dist) if callable(read_text) else None
+    target_key = normalize_package_name(target_name)
+
+    return (
+        target_key,
+        target_name,
+        {
+            "name": target_name,
+            "version": version,
+            "location": location,
+            "editable": editable,
+            "source": "transitive",
+            "required_by": [],
+        },
+    )
+
+
+def _resolve_transitive_closure(
     imported_records: List[Dict[str, Any]],
     index: _DistributionIndex,
-) -> List[Dict[str, Any]]:
-    """Append direct declared dependencies for ``imported-transitive`` mode.
+    *,
+    env: Optional[Dict[str, str]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Compute a recursive, cycle-safe, PEP 508 marker-aware transitive closure.
 
-    Full recursive, marker-aware transitive resolution is implemented in child
-    plan ``fdqkrz``.
+    Expands each ``(normalized_name, active_extra)`` state at most once, starting
+    from each resolved imported distribution with ``active_extra=""``. Skips
+    requirements whose environment markers evaluate to ``False`` (including
+    unrequested optional extras), propagates parent-requested extras (such as
+    ``dep[fast]``), and records missing applicable dependencies or unparseable
+    markers as structured ``unresolved`` entries.
     """
-    records = list(imported_records)
-    seen: Set[str] = {normalize_package_name(r["name"]) for r in records if r.get("name")}
-    required_by: Dict[str, List[str]] = {}
+    marker_env = default_marker_environment() if env is None else env
 
-    for rec in list(imported_records):
-        pkg_name = rec.get("name")
-        if not pkg_name:
+    imported_keys: Set[str] = set()
+    queue: deque = deque()
+    queued_states: Set[Tuple[str, str]] = set()
+    expanded_states: Set[Tuple[str, str]] = set()
+    transitive_by_key: Dict[str, Dict[str, Any]] = {}
+    required_by: Dict[str, Set[str]] = {}
+    unresolved: List[Dict[str, Any]] = []
+    unresolved_seen: Set[Tuple[str, str, str]] = set()
+
+    def _enqueue(norm_key: str, canonical_name: str, extra: str) -> None:
+        state = (norm_key, extra)
+        if state not in expanded_states and state not in queued_states:
+            queued_states.add(state)
+            queue.append((norm_key, canonical_name, extra))
+
+    def _record_unresolved(module: str, reason: str, detail: Optional[str]) -> None:
+        dedup_key = (module, reason, detail or "")
+        if dedup_key not in unresolved_seen:
+            unresolved_seen.add(dedup_key)
+            unresolved.append(
+                {
+                    "module": module,
+                    "reason": reason,
+                    "candidates": [],
+                    "detail": detail,
+                }
+            )
+
+    for rec in imported_records:
+        name = rec.get("name")
+        if not isinstance(name, str) or not name:
             continue
-        pkg_norm = normalize_package_name(pkg_name)
-        info = index.by_normalized_name.get(pkg_norm)
-        requires: Optional[Tuple[str, ...]] = info.requires if info is not None else None
-        if requires is None:
-            try:
-                dist = importlib.metadata.distribution(pkg_name)
-                raw_reqs = getattr(dist, "requires", None)
-                requires = (
-                    tuple(r for r in raw_reqs if isinstance(r, str))
-                    if raw_reqs
-                    else ()
-                )
-            except Exception:
-                requires = ()
+        norm_key = normalize_package_name(name)
+        imported_keys.add(norm_key)
+        _enqueue(norm_key, name, "")
 
+    while queue:
+        parent_key, parent_name, active_extra = queue.popleft()
+        state = (parent_key, active_extra)
+        if state in expanded_states:
+            continue
+        expanded_states.add(state)
+
+        requires = _read_dist_requires(parent_key, parent_name, index)
         for req_str in requires:
-            dep_name = _parse_req_name(req_str)
-            if not dep_name:
-                continue
-            dep_norm = normalize_package_name(dep_name)
-            required_by.setdefault(dep_norm, [])
-            if pkg_name not in required_by[dep_norm]:
-                required_by[dep_norm].append(pkg_name)
-            if dep_norm in seen:
+            if not isinstance(req_str, str) or not req_str.strip():
                 continue
 
-            dep_info = index.by_normalized_name.get(dep_norm)
-            if dep_info is not None:
-                seen.add(dep_norm)
-                records.append(
-                    _record_from_dist_info(
-                        dep_info,
-                        source="transitive",
-                        required_by=required_by[dep_norm],
-                    )
+            parsed = parse_requirement(req_str)
+            if parsed is None:
+                _record_unresolved(
+                    req_str.strip()[:80],
+                    "unparseable_marker",
+                    "unparseable requirement string",
                 )
-            else:
-                try:
-                    dep_version = importlib.metadata.version(dep_name)
-                    seen.add(dep_norm)
-                    records.append(
-                        {
-                            "name": dep_name,
-                            "version": dep_version,
-                            "location": None,
-                            "editable": None,
-                            "source": "transitive",
-                            "required_by": required_by[dep_norm],
-                        }
+                continue
+
+            if parsed.marker is not None:
+                eval_res = evaluate_marker(
+                    parsed.marker,
+                    active_extra=active_extra,
+                    env=marker_env,
+                )
+                if eval_res.matched is False:
+                    continue
+                if eval_res.matched is None:
+                    _record_unresolved(
+                        parsed.name,
+                        "unparseable_marker",
+                        eval_res.error or "unparseable environment marker",
                     )
-                except importlib.metadata.PackageNotFoundError:
                     continue
 
-    for rec in records:
-        if rec.get("source") == "transitive" and rec.get("name"):
-            dep_norm = normalize_package_name(rec["name"])
-            if dep_norm in required_by:
-                rec["required_by"] = required_by[dep_norm]
+            resolved = _resolve_transitive_target(
+                parsed.name,
+                parsed.normalized_name,
+                index,
+            )
+            if resolved is None:
+                _record_unresolved(
+                    parsed.name,
+                    "missing_transitive_dependency",
+                    f"required by {parent_name}",
+                )
+                continue
 
-    return records
+            target_key, target_name, target_rec = resolved
+            if target_key != parent_key:
+                required_by.setdefault(target_key, set()).add(parent_name)
+
+            if target_key not in imported_keys and target_key not in transitive_by_key:
+                transitive_by_key[target_key] = target_rec
+
+            # Always traverse base requirements alongside any requested extras.
+            _enqueue(target_key, target_name, "")
+            for extra in parsed.extras:
+                _enqueue(target_key, target_name, extra)
+
+    for key, rec in transitive_by_key.items():
+        rec["required_by"] = sorted(required_by.get(key, set()))
+
+    transitive_records = sorted(
+        transitive_by_key.values(),
+        key=lambda item: (item.get("name") or "").lower(),
+    )
+    return transitive_records, unresolved
 
 
 def resolve_packages_snapshot(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -1181,7 +1333,11 @@ def resolve_packages_snapshot(config: Dict[str, Any]) -> Dict[str, Any]:
         if mode in ("imported-only", "imported-transitive"):
             records, unresolved, local_modules = _resolve_imported_modules(index)
             if mode == "imported-transitive":
-                records = _append_transitive_records(records, index)
+                transitive_records, transitive_unresolved = _resolve_transitive_closure(
+                    records, index
+                )
+                records = records + transitive_records
+                unresolved.extend(transitive_unresolved)
         elif mode == "top-level-installed":
             required_by_others: Set[str] = set()
             for info in index.by_normalized_name.values():

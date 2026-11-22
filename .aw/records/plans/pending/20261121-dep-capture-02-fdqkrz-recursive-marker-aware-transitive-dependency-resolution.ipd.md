@@ -70,29 +70,29 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Standard-library PEP 508 requirement and marker evaluator
 
-- [ ] E-01 Create `src/pubrun/capture/_markers.py` implementing a pure Python standard-library PEP 508 requirement parser and marker evaluator with PEP 440 version comparison and explicit tri-state evaluation (`True`, `False`, or unknown/unparseable error reason).
+- [x] E-01 Create `src/pubrun/capture/_markers.py` implementing a pure Python standard-library PEP 508 requirement parser and marker evaluator with PEP 440 version comparison and explicit tri-state evaluation (`True`, `False`, or unknown/unparseable error reason).
   - Depends on: none
   - Expected outcome: `src/pubrun/capture/_markers.py` parses requirement name, PEP 503 normalized requested extras (`foo[bar, baz]`), direct Uniform Resource Locator (URL) requirements, and optional semicolon marker clauses. It evaluates all standard PEP 508 environment variables (plus PEP 508 legacy dotted aliases such as `os.name` and `sys.platform`) with proper `and`/`or`/parentheses precedence, PEP 440 version comparison (including trailing-zero equivalence, `.*` prefix wildcards on `==`/`!=`, `~=` compatible release, and strict string `===` and `in`/`not in`), and PEP 503 normalized `extra` comparisons. It returns an explicit `MarkerEvalResult(matched: Optional[bool], error: Optional[str])` so unsupported or malformed syntax is never guessed, uses zero third-party packages, and supports Python 3.8 through 3.14.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Recursive, cycle-safe, extra-honest transitive closure
 
-- [ ] E-02 Refactor `imported-transitive` in `src/pubrun/capture/packages.py` to compute the recursive, cycle-safe closure over the cached distribution index using `src/pubrun/capture/_markers.py`, propagating parent-requested extras, skipping unrequested optional extras, and degrading to `partial` on missing applicable transitive dependencies or unparseable markers.
+- [x] E-02 Refactor `imported-transitive` in `src/pubrun/capture/packages.py` to compute the recursive, cycle-safe closure over the cached distribution index using `src/pubrun/capture/_markers.py`, propagating parent-requested extras, skipping unrequested optional extras, and degrading to `partial` on missing applicable transitive dependencies or unparseable markers.
   - Depends on: E-01
   - Expected outcome: `imported-transitive` resolves multi-hop chains (`A -> B -> C`) recursively and terminates cleanly on direct and indirect cycles (`A -> B -> A`, `A -> A`). It expands each `(normalized_name, active_extra)` state at most once (always enqueueing both base `""` and each requested extra), skips false environment markers and unrequested `extra == ...` requirements even when installed, and follows `extra == "fast"` when a parent requires `dep[fast]`. Directly imported distributions stay `source = "imported"`, transitive records carry sorted canonical `required_by` lists, and fallback lookup checks both `importlib.metadata.distribution()` and `importlib.metadata.version()` (preserving `tests/test_new_features.py::TestImportedTransitiveMode`). Missing applicable transitive dependencies and unparseable requirements or markers degrade to `partial` with `unresolved` entries matching child plan `ijipnx`'s schema shape, `_parse_req_name` is preserved, and `imported-only` remains the default mode.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Transitive behavioral tests and regression reconciliation
 
-- [ ] E-03 Create `tests/test_package_transitive.py` with deterministic local `.dist-info` fixtures testing multi-hop chains, cycles, true and false environment markers, PEP 440 version edge cases (`.*`, `~=`, `3.9 < 3.10`), unrequested optional extras, parent-requested extras, missing applicable transitive dependencies, unparseable markers, PEP 503 name variants, and the no-import invariant.
+- [x] E-03 Create `tests/test_package_transitive.py` with deterministic local `.dist-info` fixtures testing multi-hop chains, cycles, true and false environment markers, PEP 440 version edge cases (`.*`, `~=`, `3.9 < 3.10`), unrequested optional extras, parent-requested extras, missing applicable transitive dependencies, unparseable markers, PEP 503 name variants, and the no-import invariant.
   - Depends on: E-02
   - Expected outcome: `tests/test_package_transitive.py` passes via `pytest` with zero external package dependencies, proving every transitive closure and marker-evaluator contract case and verifying `imported-only` remains the default mode.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Reconcile `tests/test_new_features.py::TestImportedTransitiveMode` if needed and run the combined package capture test suite.
+- [x] E-04 Reconcile `tests/test_new_features.py::TestImportedTransitiveMode` if needed and run the combined package capture test suite.
   - Depends on: E-03
   - Expected outcome: `pytest tests/test_package_transitive.py tests/test_package_resolution.py tests/test_new_features.py tests/test_capture_engines.py tests/test_edge_cases.py tests/test_manifest_schema.py -v` passes with exit code 0.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -206,25 +206,87 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition) (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste `pytest tests/test_package_transitive.py -k "marker or parse" -v` output showing exit code 0 (with non-zero collected tests), proving `src/pubrun/capture/_markers.py` parses PEP 508 requirements (including direct URLs and extras) and evaluates environment markers, PEP 440 comparisons (`.*`, `~=`, numeric ordering), legacy aliases, normalized extras, and unknown/malformed markers using only the Python standard library.
   - Observed evidence:
-  - Result: pending
+    Command: `python3 -m pytest tests/test_package_transitive.py -k "marker or parse" -v --no-cov` (exit code 0)
+    ```text
+    collected 13 items / 5 deselected / 8 selected
 
-- [ ] V-02 validates E-02
+    tests/test_package_transitive.py::test_parse_requirement_names_extras_direct_urls_and_malformed PASSED [ 12%]
+    tests/test_package_transitive.py::test_marker_environment_defaults_and_legacy_aliases PASSED [ 25%]
+    tests/test_package_transitive.py::test_marker_pep440_version_comparisons_wildcards_and_compatible_release PASSED [ 37%]
+    tests/test_package_transitive.py::test_marker_boolean_precedence_and_extra_normalization PASSED [ 50%]
+    tests/test_package_transitive.py::test_marker_unparseable_and_unknown_syntax_never_raises PASSED [ 62%]
+    tests/test_package_transitive.py::test_marker_evaluator_works_without_packaging_installed PASSED [ 75%]
+    tests/test_package_transitive.py::test_transitive_environment_markers_true_and_false PASSED [ 87%]
+    tests/test_package_transitive.py::test_transitive_unparseable_marker_and_requirement_mark_partial PASSED [100%]
+    ======================= 8 passed, 5 deselected in 1.00s ========================
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Paste `pytest tests/test_package_transitive.py -k "chain or cycle or extra or missing or unparseable or no_import" -v` output showing exit code 0 (with non-zero collected tests), proving recursive closure, cycle safety, extra honesty (both base and requested-extra expansion), missing-dependency and unknown-marker `partial` degradation with `ijipnx`-compatible `unresolved` entries, and no-import behavior.
   - Observed evidence:
-  - Result: pending
+    Command: `python3 -m pytest tests/test_package_transitive.py -k "chain or cycle or extra or missing or unparseable or no_import" -v --no-cov` (exit code 0)
+    ```text
+    collected 13 items / 4 deselected / 9 selected
 
-- [ ] V-03 validates E-03
+    tests/test_package_transitive.py::test_parse_requirement_names_extras_direct_urls_and_malformed PASSED [ 11%]
+    tests/test_package_transitive.py::test_marker_boolean_precedence_and_extra_normalization PASSED [ 22%]
+    tests/test_package_transitive.py::test_marker_unparseable_and_unknown_syntax_never_raises PASSED [ 33%]
+    tests/test_package_transitive.py::test_transitive_multi_hop_chain_and_pep503_normalization PASSED [ 44%]
+    tests/test_package_transitive.py::test_transitive_direct_and_indirect_cycles_terminate_cleanly PASSED [ 55%]
+    tests/test_package_transitive.py::test_transitive_extra_honesty_and_parent_requested_extra_propagation PASSED [ 66%]
+    tests/test_package_transitive.py::test_transitive_missing_applicable_dependency_marks_partial PASSED [ 77%]
+    tests/test_package_transitive.py::test_transitive_unparseable_marker_and_requirement_mark_partial PASSED [ 88%]
+    tests/test_package_transitive.py::test_transitive_no_import_invariant_and_default_mode PASSED [100%]
+    ======================= 9 passed, 4 deselected in 2.30s ========================
+    ```
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: Paste full `pytest tests/test_package_transitive.py -v` runner output showing exit code 0 with all deterministic fixture tests passing and confirming `imported-only` remains the default mode.
   - Observed evidence:
-  - Result: pending
+    Command: `python3 -m pytest tests/test_package_transitive.py -v --no-cov` (exit code 0)
+    ```text
+    collected 13 items
 
-- [ ] V-04 validates E-04
+    tests/test_package_transitive.py::test_parse_requirement_names_extras_direct_urls_and_malformed PASSED [  7%]
+    tests/test_package_transitive.py::test_marker_environment_defaults_and_legacy_aliases PASSED [ 15%]
+    tests/test_package_transitive.py::test_marker_pep440_version_comparisons_wildcards_and_compatible_release PASSED [ 23%]
+    tests/test_package_transitive.py::test_marker_boolean_precedence_and_extra_normalization PASSED [ 30%]
+    tests/test_package_transitive.py::test_marker_unparseable_and_unknown_syntax_never_raises PASSED [ 38%]
+    tests/test_package_transitive.py::test_marker_evaluator_works_without_packaging_installed PASSED [ 46%]
+    tests/test_package_transitive.py::test_transitive_multi_hop_chain_and_pep503_normalization PASSED [ 53%]
+    tests/test_package_transitive.py::test_transitive_direct_and_indirect_cycles_terminate_cleanly PASSED [ 61%]
+    tests/test_package_transitive.py::test_transitive_environment_markers_true_and_false PASSED [ 69%]
+    tests/test_package_transitive.py::test_transitive_extra_honesty_and_parent_requested_extra_propagation PASSED [ 76%]
+    tests/test_package_transitive.py::test_transitive_missing_applicable_dependency_marks_partial PASSED [ 84%]
+    tests/test_package_transitive.py::test_transitive_unparseable_marker_and_requirement_mark_partial PASSED [ 92%]
+    tests/test_package_transitive.py::test_transitive_no_import_invariant_and_default_mode PASSED [100%]
+    ============================== 13 passed in 2.83s ==============================
+    ```
+  - Result: pass
+
+- [x] V-04 validates E-04
   - Required evidence: Paste full `pytest tests/test_package_transitive.py tests/test_package_resolution.py tests/test_new_features.py tests/test_capture_engines.py tests/test_edge_cases.py tests/test_manifest_schema.py -v` runner output showing exit code 0.
   - Observed evidence:
-  - Result: pending
+    Command: `python3 -m pytest tests/test_package_transitive.py tests/test_package_resolution.py tests/test_new_features.py tests/test_capture_engines.py tests/test_edge_cases.py tests/test_manifest_schema.py -v --no-cov` (exit code 0; 130 passed, 0 skipped, 0 failed; `tests/test_new_features.py` passed unchanged without edits)
+    ```text
+    collected 130 items
+
+    tests/test_package_transitive.py (13 tests) PASSED [  0%.. 10%]
+    tests/test_package_resolution.py (18 tests) PASSED [ 10%.. 23%]
+    tests/test_new_features.py::TestImportedTransitiveMode::test_transitive_deps_discovered PASSED [ 24%]
+    tests/test_new_features.py::TestImportedTransitiveMode::test_pep508_parser_edge_cases PASSED [ 25%]
+    tests/test_new_features.py (remaining 15 tests) PASSED [ 26%.. 36%]
+    tests/test_capture_engines.py (33 tests) PASSED [ 37%.. 62%]
+    tests/test_edge_cases.py (17 tests) PASSED [ 63%.. 75%]
+    tests/test_manifest_schema.py (32 tests) PASSED [ 76%..100%]
+    ============================= 130 passed in 20.48s =============================
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 
