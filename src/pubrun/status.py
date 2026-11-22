@@ -5,6 +5,7 @@ Scans the configured output directory for run directories, classifies each
 as completed/running/crashed, and renders tables or detailed views.
 """
 import json
+import math
 import os
 import shutil
 import sys
@@ -340,7 +341,13 @@ class RunInfo:
             # Process
             process = data.get("process", {})
             self.pid = _as_int(process.get("pid"))
-            self.hostname = data.get("host", {}).get("hostname")
+            # host.hostname is ``string | null`` per the schema; older crash
+            # closeouts wrote a ``{"representation": ..., "value": ...}`` dict.
+            host = data.get("host", {})
+            hostname_val = host.get("hostname") if isinstance(host, dict) else None
+            if isinstance(hostname_val, dict):
+                hostname_val = hostname_val.get("value")
+            self.hostname = hostname_val if isinstance(hostname_val, str) and hostname_val else None
 
             # Status mapping
             if self.outcome == "failed":
@@ -450,7 +457,9 @@ class RunInfo:
         parts = self.run_dir.name.split("-")
         # Minimum expected: pubrun-script-timestamp-pid-runid
         if len(parts) >= 5 and parts[0] == "pubrun":
-            self.script = parts[1]
+            # The script name may itself contain hyphens; the last three parts
+            # are always timestamp, pid, and run_id.
+            self.script = "-".join(parts[1:-3])
             self.run_id = parts[-1]
             try:
                 pid = int(parts[-2])
@@ -459,6 +468,48 @@ class RunInfo:
                 self.pid = pid if pid > 0 else None
             except (ValueError, OverflowError):
                 pass
+
+
+_AGE_UNIT_DAYS = {
+    "d": 1.0,
+    "h": 1.0 / 24.0,
+    "m": 1.0 / 1440.0,
+    "s": 1.0 / 86400.0,
+}
+
+
+def _parse_older_than_days(older_than: Any) -> float:
+    """Parse an age string ('7d', '24h', '30m', '90s', or bare days) into days.
+
+    Raises ValueError for non-strings, empty strings, unknown units, malformed
+    numbers, negative values, NaN, and infinity.
+    """
+    if not isinstance(older_than, str):
+        raise ValueError(
+            f"Invalid --older-than value {older_than!r}: expected a string such as '7d', '24h', '30m', '90s', or '3'."
+        )
+    val = older_than.strip().lower()
+    if not val:
+        raise ValueError(
+            "Invalid --older-than value '': expected an age such as '7d', '24h', '30m', '90s', or '3'."
+        )
+    factor = 1.0
+    number = val
+    if val[-1] in _AGE_UNIT_DAYS:
+        factor = _AGE_UNIT_DAYS[val[-1]]
+        number = val[:-1].strip()
+    try:
+        amount = float(number)
+    except ValueError:
+        raise ValueError(
+            f"Invalid --older-than value {older_than!r}: use a number with an optional unit "
+            f"d (days), h (hours), m (minutes), or s (seconds)."
+        ) from None
+    if not math.isfinite(amount):
+        raise ValueError(f"Invalid --older-than value {older_than!r}: age must be a finite number.")
+    if amount < 0:
+        raise ValueError(f"Invalid --older-than value {older_than!r}: age must not be negative.")
+    return amount * factor
 
 
 def filter_runs(
@@ -518,30 +569,19 @@ def filter_runs(
                 (r.run_id and q in r.run_id.lower())
             )]
 
-    # 3. Filter by age (older_than)
-    if older_than:
-        val = older_than.strip().lower()
-        older_than_days = None
-        try:
-            if val.endswith("d"):
-                older_than_days = float(val[:-1])
-            elif val.endswith("h"):
-                older_than_days = float(val[:-1]) / 24.0
-            else:
-                older_than_days = float(val)
-        except ValueError:
-            pass
-
-        if older_than_days is not None:
-            now = time.time()
-            filtered = []
-            for r in runs:
-                if r.started_at_utc is None:
-                    continue
-                age_days = (now - r.started_at_utc) / 86400.0
-                if age_days >= older_than_days:
-                    filtered.append(r)
-            runs = filtered
+    # 3. Filter by age (older_than). An invalid value raises rather than
+    # silently disabling the filter, which would widen cleanup to every run.
+    if older_than is not None:
+        older_than_days = _parse_older_than_days(older_than)
+        now = time.time()
+        filtered = []
+        for r in runs:
+            if r.started_at_utc is None:
+                continue
+            age_days = (now - r.started_at_utc) / 86400.0
+            if age_days >= older_than_days:
+                filtered.append(r)
+        runs = filtered
 
     # 4. Filter by exit code
     if exit_code is not None:
@@ -552,6 +592,26 @@ def filter_runs(
         runs = runs[:limit]
 
     return runs
+
+
+def _crash_invocation_argv(lock_data: Dict[str, Any]) -> List[str]:
+    """Rebuild a full ``invocation.argv`` (script first) from lock file data.
+
+    The lock's ``argv`` holds ``sys.argv[1:]`` while ``sys_argv`` holds the full
+    ``sys.argv``. Older lock files lack ``sys_argv``, so the script name is
+    prepended to ``argv`` unless ``argv`` already starts with it.
+    """
+    sys_argv = lock_data.get("sys_argv")
+    if isinstance(sys_argv, list) and sys_argv:
+        return [str(a) for a in sys_argv]
+    raw_argv = lock_data.get("argv")
+    argv = [str(a) for a in raw_argv] if isinstance(raw_argv, list) else []
+    script = lock_data.get("script")
+    if isinstance(script, str) and script:
+        if argv and (argv[0] == script or Path(argv[0]).stem == script):
+            return argv
+        return [script] + argv
+    return argv
 
 
 def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) -> None:
@@ -574,6 +634,8 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
 
     if not manifest:
         # Compile what we can into a fallback manifest
+        lock_hostname = lock_data.get("hostname")
+        fallback_hostname = lock_hostname if isinstance(lock_hostname, str) and lock_hostname else None
         manifest = {
             "schema_version": "1.0",
             "manifest_type": "pubrun-manifest",
@@ -604,20 +666,14 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
                 "capture_state": {"status": "partial"},
             },
             "host": {
-                "hostname": {
-                    "representation": "plain",
-                    "value": lock_data.get("hostname"),
-                } if lock_data.get("hostname") else {
-                    "representation": "unavailable",
-                    "value": None,
-                },
+                "hostname": fallback_hostname,
                 "capture_state": {"status": "partial"},
             },
             "invocation": {
                 "script": {
                     "basename": Path(str(lock_data.get("script"))).name if isinstance(lock_data.get("script"), str) else None,
                 } if isinstance(lock_data.get("script"), str) else {},
-                "argv": lock_data.get("argv", []),
+                "argv": _crash_invocation_argv(lock_data),
                 "capture_state": {"status": "partial"},
             },
             "git": {
@@ -1006,7 +1062,9 @@ def render_short_list(runs: List[RunInfo], all_runs: Optional[List[RunInfo]] = N
         script = _truncate(script_with_args, script_max - 2)
         commit = (r.git_commit or "-")[:7]
         started = _format_timestamp(r.started_at_utc)
-        status = _status_marker(r.status)
+        # Pad from the visible status text so ANSI escapes (absent under
+        # NO_COLOR) never shift the following columns.
+        status = _status_marker(r.status) + " " * max(1, 12 - len(r.status))
         exit_code = str(r.exit_code) if r.exit_code is not None else "-"
         elapsed = _format_elapsed(r.elapsed)
 
@@ -1016,7 +1074,7 @@ def render_short_list(runs: List[RunInfo], all_runs: Optional[List[RunInfo]] = N
             f"{script:<{script_max}}"
             f"{commit:<9}"
             f"{started:<18}"
-            f"{status:<21}"  # extra width for ANSI escape codes
+            f"{status}"
             f"{exit_code:<6}"
             f"{elapsed:<8}"
         )
@@ -1239,9 +1297,18 @@ def _parse_selection(response: str, candidates: List[Any]) -> List[Any]:
     """Parse a selection string like '1-3,5,7-9' into a list of items.
 
     Supports individual numbers, comma-separated numbers, and ranges.
-    Invalid indices are silently skipped.
+    Invalid indices are silently skipped, and each candidate is selected at
+    most once (first-seen order is preserved).
     """
     selected: List[Any] = []
+    seen: set = set()
+    n = len(candidates)
+
+    def _add(idx: int) -> None:
+        if 0 <= idx < n and idx not in seen:
+            seen.add(idx)
+            selected.append(candidates[idx])
+
     parts = [p.strip() for p in response.replace(" ", "").split(",")]
     for part in parts:
         if "-" in part and not part.startswith("-"):
@@ -1250,19 +1317,18 @@ def _parse_selection(response: str, candidates: List[Any]) -> List[Any]:
                 start_s, end_s = part.split("-", 1)
                 start_i = int(start_s) - 1
                 end_i = int(end_s) - 1
-                for idx in range(start_i, end_i + 1):
-                    if 0 <= idx < len(candidates):
-                        selected.append(candidates[idx])
-            except (ValueError, IndexError):
+            except ValueError:
                 continue
+            # Clamp before iterating so a huge range cannot hang.
+            for idx in range(max(0, start_i), min(n - 1, end_i) + 1):
+                _add(idx)
         else:
             # Single number
             try:
                 idx = int(part) - 1
-                if 0 <= idx < len(candidates):
-                    selected.append(candidates[idx])
-            except (ValueError, IndexError):
+            except ValueError:
                 continue
+            _add(idx)
     return selected
 
 
@@ -1299,21 +1365,43 @@ def clean_runs(
     all_runs = scan_runs(output_dir)
     now = time.time()
 
-    # 1. Resolve status filter (must never include STATUS_RUNNING)
+    # 1. Resolve status filter (must never include STATUS_RUNNING). An explicit
+    # filter that normalizes to nothing deletes nothing: passing an empty filter
+    # on to filter_runs would disable status filtering and match every run.
     if status_filter is not None:
-        if isinstance(status_filter, list):
-            status_filter_list = [s.strip().lower() for s in status_filter]
+        if isinstance(status_filter, str):
+            raw_tokens: List[Any] = status_filter.split(",")
         else:
-            status_filter_list = [s.strip().lower() for s in str(status_filter).split(",")]
-        status_filter_list = [s for s in status_filter_list if s != STATUS_RUNNING]
+            try:
+                raw_tokens = list(status_filter)
+            except TypeError:
+                raw_tokens = [status_filter]
+        status_filter_list = []
+        for token in raw_tokens:
+            for piece in str(token).split(","):
+                s = piece.strip().lower()
+                if s and s != STATUS_RUNNING and s not in status_filter_list:
+                    status_filter_list.append(s)
+        if not status_filter_list:
+            print("No deletable statuses selected (running runs are never deleted). Nothing to clean.")
+            return 0
     else:
         status_filter_list = [STATUS_COMPLETED, STATUS_FAILED, STATUS_INTERRUPTED, STATUS_BROKEN_PIPE, STATUS_CRASHED, STATUS_GHOST]
 
     status_filter_str = ",".join(status_filter_list)
 
-    # 2. Resolve older_than / older_than_days
+    # 2. Resolve older_than / older_than_days (invalid values raise ValueError)
+    if older_than_days is not None:
+        if isinstance(older_than_days, bool) or not isinstance(older_than_days, (int, float)):
+            raise ValueError(
+                f"Invalid older_than_days value {older_than_days!r}: expected a non-negative number of days."
+            )
+        if not math.isfinite(older_than_days):
+            raise ValueError(f"Invalid older_than_days value {older_than_days!r}: age must be a finite number.")
+        if older_than_days < 0:
+            raise ValueError(f"Invalid older_than_days value {older_than_days!r}: age must not be negative.")
     if older_than is None and older_than_days is not None:
-        older_than = f"{older_than_days}d"
+        older_than = f"{float(older_than_days)!r}d"
 
     # 3. Apply standard filter_runs
     candidates = filter_runs(
@@ -1326,6 +1414,8 @@ def clean_runs(
         not_filter_str=not_filter_str,
         not_status_filter=not_status_filter,
     )
+    # Defense in depth: a running run is never eligible, whatever the filters.
+    candidates = [r for r in candidates if r.status != STATUS_RUNNING]
 
     if not candidates:
         print("No runs match the cleanup criteria.")
