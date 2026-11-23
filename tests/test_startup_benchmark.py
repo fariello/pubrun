@@ -419,3 +419,113 @@ class TestBreakdownEndToEnd:
         # No `runs/` directory or stray artifacts created in caller_cwd, and `tmp/` is empty again.
         assert [p.name for p in caller_cwd.iterdir()] == ["tmp"]
         assert list(rel_workdir.iterdir()) == []
+
+
+def _strip_markers(text: str) -> str:
+    return text.replace("<redacted>", "")
+
+
+class TestBreakdownScrubBoundaries:
+    """A short username must not corrupt `<redacted>` markers, the schema, or fixed metadata."""
+
+    @staticmethod
+    def _patch_identity(monkeypatch, mod, user: str) -> None:
+        monkeypatch.setattr(mod.getpass, "getuser", lambda: user)
+        monkeypatch.setattr(mod.platform, "node", lambda: "box")
+        for key in ("USER", "USERNAME", "LOGNAME"):
+            monkeypatch.setenv(key, user)
+        monkeypatch.setenv("HOME", "/nonexistent-home-for-test")
+        monkeypatch.setenv("USERPROFILE", "/nonexistent-home-for-test")
+
+    @pytest.mark.parametrize("user", ["ed", "pub", "run", "startup", "benchmark"])
+    def test_redact_breakdown_keeps_markers_schema_and_metadata(self, monkeypatch, user):
+        mod = _load_module("_test_sb_boundary_" + user, "benchmarks/startup_breakdown.py")
+        self._patch_identity(monkeypatch, mod, user)
+        raw = {
+            "schema": mod.SCHEMA_VERSION,
+            "environment": {
+                "hostname": "box",
+                "os": {"release": f"6.8.0-{user}"},
+                "note": f"started by {user} in /data/{user}/work; marked as edited",
+                "pubrun_version": "1.0.0",
+            },
+            "scenarios": {
+                "import-minimal-installed-nested": {
+                    "workload": "noop.py",
+                    "layout": "installed-nested",
+                    "passes": [{"pass": 1, "label": "cold"}],
+                },
+            },
+        }
+        red = mod.redact_breakdown(raw)
+
+        assert red["schema"] == mod.SCHEMA_VERSION
+        scn = red["scenarios"]["import-minimal-installed-nested"]
+        assert scn["workload"] == "noop.py"
+        assert scn["layout"] == "installed-nested"
+        assert scn["passes"][0]["label"] == "cold"
+        assert red["environment"]["hostname"] == "<redacted>"
+        assert red["environment"]["os"]["release"] == "6.8.0-<redacted>"
+        assert red["environment"]["note"] == (
+            "started by <redacted> in /data/<redacted>/work; marked as edited"
+        )
+        leftover = _strip_markers(json.dumps(red))
+        assert "<" not in leftover and ">" not in leftover
+
+        assert mod.validate_redacted_output(red) == (True, [])
+
+    def test_scrub_text_keeps_existing_marker_and_redacts_standalone_user(self, monkeypatch):
+        mod = _load_module("_test_sb_boundary_text_ed", "benchmarks/startup_breakdown.py")
+        self._patch_identity(monkeypatch, mod, "ed")
+        out = mod.scrub_text("host <redacted> run by ed, edited")
+        assert out == "host <redacted> run by <redacted>, edited"
+
+    def test_scrub_text_keeps_schema_line(self, monkeypatch):
+        mod = _load_module("_test_sb_boundary_text_startup", "benchmarks/startup_breakdown.py")
+        self._patch_identity(monkeypatch, mod, "startup")
+        line = "- Schema: `pubrun-startup-breakdown/1`"
+        assert mod.scrub_text(line) == line
+
+    def test_validate_refuses_standalone_username(self, monkeypatch):
+        mod = _load_module("_test_sb_boundary_val_pub", "benchmarks/startup_breakdown.py")
+        self._patch_identity(monkeypatch, mod, "pub")
+        ok, reasons = mod.validate_redacted_output(
+            {"schema": mod.SCHEMA_VERSION, "environment": {"note": "owner pub"}}
+        )
+        assert ok is False
+        assert "identifying substring remains in JSON payload" in reasons
+
+    @pytest.mark.parametrize("user", ["pub", "ed"])
+    def test_cli_with_short_username_emits_intact_output(self, tmp_path, user):
+        out_json = tmp_path / f"breakdown-{user}.json"
+        env = dict(os.environ)
+        for key in ("LOGNAME", "USER", "USERNAME"):
+            env[key] = user
+        proc = subprocess.run(
+            [
+                PYTHON,
+                str(_BREAKDOWN_SCRIPT),
+                "--iterations",
+                "1",
+                "--passes",
+                "1",
+                "--warmup",
+                "0",
+                "--out",
+                str(out_json),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=180,
+        )
+        assert proc.returncode == 0, proc.stderr
+        text = out_json.read_text(encoding="utf-8")
+        data = json.loads(text)
+        assert data["schema"] == "pubrun-startup-breakdown/1"
+        layouts = {scn["layout"] for scn in data["scenarios"].values()}
+        assert layouts == {"checkout", "installed", "installed-nested", "none"}
+        assert "import-minimal-installed-nested" in proc.stdout
+        for blob in (text, proc.stdout):
+            leftover = _strip_markers(blob)
+            assert "<" not in leftover and ">" not in leftover

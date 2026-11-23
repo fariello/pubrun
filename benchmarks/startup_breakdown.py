@@ -20,6 +20,7 @@ import json
 import math
 import os
 import platform
+import re
 import shutil
 import statistics
 import subprocess
@@ -65,6 +66,20 @@ _REDACT_KEYS = {
     "workdir",
 }
 _REDACT_LIST_KEYS = {"sys_path", "source_files"}
+
+# Keys whose string values this script generates from fixed vocabulary. The substring scrub
+# and the self-check skip them so a short username (e.g. `pub` or `startup`) can never corrupt
+# a contract value such as `schema: "pubrun-startup-breakdown/1"`. `release` is deliberately
+# absent: platform.release() is a host-controlled string that can embed a user or host name.
+_SCRUB_SKIP_KEYS = frozenset({
+    "schema", "generated_utc", "generated_local", "category", "layout", "workload",
+    "durability_policy", "kind", "label", "baseline_scenario", "auto_scenario",
+    "phased_scenario", "git_commit", "pubrun_version", "python_version", "system",
+    "platform", "architecture", "fstype", "status",
+})
+
+# Literals the scrub never rewrites: existing markers and the schema string.
+_PROTECTED_RE = re.compile("(" + re.escape(_REDACTED) + "|" + re.escape(SCHEMA_VERSION) + ")")
 
 # Standard manifest["timing"] keys that carry wall timestamps rather than
 # additive phase/overhead breakdown metrics.
@@ -302,18 +317,82 @@ def _redact_keys_recursive(obj: Any) -> Any:
     return obj
 
 
+def _is_path_needle(needle: str) -> bool:
+    return "/" in needle or "\\" in needle
+
+
+def _needle_pattern(needle: str) -> re.Pattern[str]:
+    if _is_path_needle(needle):
+        return re.compile(re.escape(needle))
+    return re.compile(r"(?<![A-Za-z0-9_])" + re.escape(needle) + r"(?![A-Za-z0-9_])")
+
+
+def _scrub_segment(text: str, needles: Sequence[str]) -> str:
+    """Scrub one segment that contains no protected literal. Each needle's matches become
+    `<redacted>`; the text between matches is scrubbed with the remaining needles only, so a
+    marker produced here is never rescanned (a username like `ed` cannot corrupt it)."""
+    if not needles or not text:
+        return text
+    needle, rest = needles[0], needles[1:]
+    pieces = _needle_pattern(needle).split(text)
+    return _REDACTED.join(_scrub_segment(p, rest) for p in pieces)
+
+
+def _split_protected(s: str) -> List[str]:
+    """Split on the protected literals, keeping them at the odd indexes of the result."""
+    return _PROTECTED_RE.split(s)
+
+
+def _scrub_string(s: str, needles: Sequence[str]) -> str:
+    parts = _split_protected(s)
+    return "".join(
+        part if idx % 2 else _scrub_segment(part, needles) for idx, part in enumerate(parts)
+    )
+
+
 def _scrub_substrings(obj: Any, needles: Sequence[str]) -> Any:
+    ordered = sorted({n for n in needles if n}, key=len, reverse=True)
+
+    def _walk(o: Any) -> Any:
+        if isinstance(o, dict):
+            return {
+                k: (v if k in _SCRUB_SKIP_KEYS and isinstance(v, str) else _walk(v))
+                for k, v in o.items()
+            }
+        if isinstance(o, list):
+            return [_walk(x) for x in o]
+        if isinstance(o, str):
+            return _scrub_string(o, ordered)
+        return o
+
+    return _walk(obj)
+
+
+def _needles_found(text: str, needles: Sequence[str]) -> bool:
+    """True when any needle matches outside the protected literals of `text`."""
+    segments = _split_protected(text)[::2]
+    for needle in needles:
+        pattern = _needle_pattern(needle)
+        if any(pattern.search(seg) for seg in segments):
+            return True
+    return False
+
+
+def _json_needle_leak(obj: Any, needles: Sequence[str], path_needles: Sequence[str]) -> bool:
     if isinstance(obj, dict):
-        return {k: _scrub_substrings(v, needles) for k, v in obj.items()}
+        for k, v in obj.items():
+            if isinstance(k, str) and _needles_found(k, path_needles):
+                return True
+            if k in _SCRUB_SKIP_KEYS and isinstance(v, str):
+                continue
+            if _json_needle_leak(v, needles, path_needles):
+                return True
+        return False
     if isinstance(obj, list):
-        return [_scrub_substrings(x, needles) for x in obj]
+        return any(_json_needle_leak(x, needles, path_needles) for x in obj)
     if isinstance(obj, str):
-        s = obj
-        for needle in needles:
-            if needle and needle in s:
-                s = s.replace(needle, _REDACTED)
-        return s
-    return obj
+        return _needles_found(obj, needles)
+    return False
 
 
 def redact_breakdown(
@@ -329,11 +408,7 @@ def redact_breakdown(
 
 def scrub_text(text: str, extra_needles: Sequence[str] = ()) -> str:
     """Scrub identifying needles from rendered Markdown text."""
-    s = text
-    for needle in _collect_redaction_needles(extra_needles):
-        if needle and needle in s:
-            s = s.replace(needle, _REDACTED)
-    return s
+    return _scrub_string(text, _collect_redaction_needles(extra_needles))
 
 
 def validate_redacted_output(
@@ -344,28 +419,21 @@ def validate_redacted_output(
     """Run share_safety.check_share_safe plus strict needle checks on JSON and Markdown."""
     ok, reasons = _share_safety.check_share_safe(result)
     issues = list(reasons)
-    blob = json.dumps(result)
-    needles = _collect_redaction_needles(extra_needles)
-
-    # Check path/host/user needles (skip very short usernames that could be common substrings
-    # in keys like 'os', while always checking full paths and hostnames >= 3 chars).
-    for needle in needles:
-        is_path = ("/" in needle) or ("\\" in needle)
-        if not is_path and len(needle) < 3:
-            continue
-        if needle in blob:
-            issues.append("identifying substring remains in JSON payload")
-            break
+    # Check path/host/user needles (skip very short bare needles such as a two-letter username,
+    # while always checking full paths and hostnames >= 3 chars). Bare needles match only at
+    # identifier boundaries, outside protected literals, and never in dict keys (every key is
+    # generated from fixed vocabulary), mirroring the scrub.
+    needles = [
+        n for n in _collect_redaction_needles(extra_needles) if _is_path_needle(n) or len(n) >= 3
+    ]
+    path_needles = [n for n in needles if _is_path_needle(n)]
+    if _json_needle_leak(result, needles, path_needles):
+        issues.append("identifying substring remains in JSON payload")
     if markdown_text:
         if _share_safety._HOME_PATH_RE.search(markdown_text):
             issues.append("an absolute home or user-profile path is present in Markdown output")
-        for needle in needles:
-            is_path = ("/" in needle) or ("\\" in needle)
-            if not is_path and len(needle) < 3:
-                continue
-            if needle in markdown_text:
-                issues.append("identifying substring remains in Markdown output")
-                break
+        if _needles_found(markdown_text, needles):
+            issues.append("identifying substring remains in Markdown output")
     return (len(issues) == 0, issues)
 
 

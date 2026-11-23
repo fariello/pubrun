@@ -60,27 +60,27 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Boundary-safe scrub in `benchmarks/startup_breakdown.py`
 
-- [ ] E-01 Port the boundary-safe, marker-preserving scrub into `benchmarks/startup_breakdown.py` and use it in `_scrub_substrings` and `scrub_text`.
+- [x] E-01 Port the boundary-safe, marker-preserving scrub into `benchmarks/startup_breakdown.py` and use it in `_scrub_substrings` and `scrub_text`.
   - Depends on: none
   - Expected outcome: `benchmarks/startup_breakdown.py` defines private helpers equivalent to `benchmarks/harness.py::_is_path_needle`, `_scrub_segment`, and `_scrub_string`. A needle that contains `/` or `\` is replaced literally. Any other needle is replaced only at identifier boundaries. Text between matches is scrubbed with the remaining needles only, so a marker produced by one needle is never rescanned. The script defines a module-level `_SCRUB_SKIP_KEYS` frozenset with exactly these keys, whose string values the script generates from fixed vocabulary: `schema`, `generated_utc`, `generated_local`, `category`, `layout`, `workload`, `durability_policy`, `kind`, `label`, `baseline_scenario`, `auto_scenario`, `phased_scenario`, `git_commit`, `pubrun_version`, `python_version`, `system`, `platform`, `architecture`, `fstype`, `status` (20 keys). `environment.os.release` is deliberately NOT a skip key: `platform.release()` is a host-controlled free-form string (a custom kernel build can embed a user or host name), so it stays scrubbed with the boundary rule; the worst case is over-redaction of a non-contract value. `_scrub_substrings` leaves a string value under a key in `_SCRUB_SKIP_KEYS` unchanged. Both `_scrub_substrings` (for every other string value) and `scrub_text` treat `<redacted>` and `SCHEMA_VERSION` as protected literals: they split the text on them, scrub only the text between them with the ported helpers, and rejoin with the same literals. `_collect_redaction_needles` and the key-based masking in `_redact_keys_recursive` are unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Make `benchmarks/startup_breakdown.py::validate_redacted_output` use the same boundary rule and skip keys as the scrub.
+- [x] E-02 Make `benchmarks/startup_breakdown.py::validate_redacted_output` use the same boundary rule and skip keys as the scrub.
   - Depends on: E-01
   - Expected outcome: `validate_redacted_output` still calls `share_safety.check_share_safe` and still skips a bare needle shorter than 3 characters, exactly as today. For the JSON check, it no longer searches `json.dumps(result)` with unanchored `in`. Instead it walks the result. It checks every string value whose key is not in `_SCRUB_SKIP_KEYS` with the matcher from E-01 (literal for a path needle, identifier boundary for a bare needle), applied only to the text between protected literals: it splits the value on `<redacted>` and `SCHEMA_VERSION` exactly as the scrub does and checks each remaining segment, so a marker the scrub produced is never itself reported (for example, a bare needle `redacted` would otherwise match inside every `<redacted>` marker, because `<` and `>` are boundaries). It checks every dict key for path needles only. For the Markdown check, it removes the protected literals (`<redacted>` and `SCHEMA_VERSION`) from the text, then applies the same matcher. The `_HOME_PATH_RE` check on Markdown is unchanged. The issue strings `identifying substring remains in JSON payload` and `identifying substring remains in Markdown output` are unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Regression tests and full-suite verification
 
-- [ ] E-03 Add a `TestBreakdownScrubBoundaries` class to `tests/test_startup_benchmark.py` with behavioral regression tests for E-01 and E-02.
+- [x] E-03 Add a `TestBreakdownScrubBoundaries` class to `tests/test_startup_benchmark.py` with behavioral regression tests for E-01 and E-02.
   - Depends on: E-01, E-02
   - Expected outcome: The class loads the script with the file's existing `_load_module` helper and contains these tests. (1) A test parametrized over usernames `ed`, `pub`, `run`, `startup`, and `benchmark`. It uses `monkeypatch` to set `getpass.getuser`, `platform.node` (to `box`), and the `USER`, `USERNAME`, and `LOGNAME` environment variables, and sets `HOME` to `/nonexistent-home-for-test`. It calls `redact_breakdown` on a result whose `schema` is `SCHEMA_VERSION`, whose `environment.hostname` is `box`, which has a scenario with `workload` `noop.py`, `layout` `installed-nested`, and a pass `label` `cold`, whose `environment.os.release` is `f"6.8.0-{user}"`, and which has `environment.note` set to `f"started by {user} in /data/{user}/work; marked as edited"`. It asserts that `schema`, `workload`, `layout`, and `label` are unchanged, that `hostname` is `<redacted>`, that `release` equals `"6.8.0-<redacted>"`, that `note` equals `"started by <redacted> in /data/<redacted>/work; marked as edited"`, that removing every `<redacted>` from `json.dumps` of the result leaves no `<` or `>` character, and that `validate_redacted_output` returns `(True, [])`. (2) A test that `scrub_text` with username `ed` keeps a pre-existing `<redacted>` marker intact and turns a standalone `ed` into `<redacted>`. (3) A test that `scrub_text` with username `startup` keeps a Markdown line ``- Schema: `pubrun-startup-breakdown/1` `` unchanged. (4) A test that `validate_redacted_output` with username `pub` returns `ok == False` for a result whose non-skipped value is `"owner pub"`. (5) A command-line interface (CLI) test parametrized over `pub` and `ed`. It runs `benchmarks/startup_breakdown.py --iterations 1 --passes 1 --warmup 0 --out <tmp>.json` in a subprocess whose environment sets `LOGNAME`, `USER`, and `USERNAME` to the username. It passes `timeout=180` (the file's convention for CLI runs). It asserts exit code 0, asserts that the JSON `schema` equals `SCHEMA_VERSION`, asserts that the set of scenario `layout` values in the JSON equals `{"checkout", "installed", "installed-nested", "none"}`, asserts that stdout contains `import-minimal-installed-nested`, and asserts that no `<` or `>` character remains in the JSON file text or in stdout after every `<redacted>` is removed. The `layout` and scenario-name assertions are what make the `ed` case fail on the current code: a 2026-11-23 review run of the unfixed script with `USER=ed` exited 0 with an intact schema, but wrote layouts `install<redacted>` and `install<redacted>-nest<redacted>`, which leave no angle bracket once `<redacted>` is removed. (The Markdown summary emits no other angle brackets: 2026-11-23 review runs of the unfixed script with the default user and with `USER=ed`, and of a prototype of this design with `USER=pub`, `ed`, and `run`, printed summaries with zero `<` or `>` outside `<redacted>`.) No test reads production source code.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Run the new tests, the existing startup-breakdown tests, the `BUG-20` harness tests, and the full test suite.
+- [x] E-04 Run the new tests, the existing startup-breakdown tests, the `BUG-20` harness tests, and the full test suite.
   - Depends on: E-03
   - Expected outcome: `python3 -m pytest tests/test_startup_benchmark.py -v`, `python3 -m pytest tests/test_benchmark_intake_bugs.py -v`, and `python3 -m pytest -q` each finish with zero failures. Running `LOGNAME=pub USER=pub USERNAME=pub python3 benchmarks/startup_breakdown.py --iterations 1 --passes 1 --warmup 0 --out /tmp/opencode/ggaok0-pub.json` exits 0, where it exits 1 before this plan. The executor records that the `.github/workflows/ci.yml` matrix (Ubuntu, Windows, macOS; Python 3.8 through 3.14) runs these tests and remains the gate before release: on Windows `getpass.getuser` reads `LOGNAME`, `USER`, `LNAME`, then `USERNAME`, and `os.path.expanduser` reads `USERPROFILE` rather than `HOME`, so local Linux green does not prove the Windows cases.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -147,25 +147,189 @@ N/A. `benchmarks/README.md` ("Redaction and share-safety") says the script scrub
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `python3 -m pytest tests/test_startup_benchmark.py -v -o addopts=""` output with zero failures, plus the test source lines (re-derived at execution time) that pin each E-01 behavior by calling `redact_breakdown` or `scrub_text` and asserting on the returned value: (a) for each of the usernames `ed`, `pub`, `run`, `startup`, and `benchmark`, `schema`, `workload`, `layout`, and `label` come back unchanged, `release` and the `note` come back with only the standalone and path-embedded username replaced, and no `<` or `>` survives outside `<redacted>`; (b) `scrub_text` keeps a pre-existing `<redacted>` marker intact and still redacts a standalone `ed`; (c) `scrub_text` keeps the `- Schema:` line intact for username `startup`; (d) the pre-existing home/host/user/workdir/repo redaction test still passes. Also paste the `git diff -- benchmarks/startup_breakdown.py` hunks that show `_SCRUB_SKIP_KEYS` with the 20 keys listed in E-01 (and no `release`) and the rewritten `_scrub_substrings` and `scrub_text`. Test names in E-03 are pointers, not the bar.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_startup_benchmark.py -v -o addopts=""   (lane worktree, base 1720c62, with this change)
+    collecting ... collected 25 items
+    ...::TestBreakdownScrubBoundaries::test_redact_breakdown_keeps_markers_schema_and_metadata[ed] PASSED
+    ...::TestBreakdownScrubBoundaries::test_redact_breakdown_keeps_markers_schema_and_metadata[pub] PASSED
+    ...::TestBreakdownScrubBoundaries::test_redact_breakdown_keeps_markers_schema_and_metadata[run] PASSED
+    ...::TestBreakdownScrubBoundaries::test_redact_breakdown_keeps_markers_schema_and_metadata[startup] PASSED
+    ...::TestBreakdownScrubBoundaries::test_redact_breakdown_keeps_markers_schema_and_metadata[benchmark] PASSED
+    ...::TestBreakdownScrubBoundaries::test_scrub_text_keeps_existing_marker_and_redacts_standalone_user PASSED
+    ...::TestBreakdownScrubBoundaries::test_scrub_text_keeps_schema_line PASSED
+    ...::TestBreakdownScrubBoundaries::test_validate_refuses_standalone_username PASSED
+    ...::TestBreakdownScrubBoundaries::test_cli_with_short_username_emits_intact_output[pub] PASSED
+    ...::TestBreakdownScrubBoundaries::test_cli_with_short_username_emits_intact_output[ed] PASSED
+    ...::TestBreakdownStatisticsAndRedaction::test_redact_breakdown_scrubs_home_host_user_workdir_and_repo PASSED
+    ...::TestBreakdownStatisticsAndRedaction::test_validate_redacted_output_rejects_leaked_home_path PASSED
+    (13 further pre-existing tests PASSED)
+    ============================== 25 passed in 54.17s ==============================
+    (re-run after the final edit: "25 passed in 59.08s")
+    ```
+    Test lines pinning E-01 (`tests/test_startup_benchmark.py`):
+    ```python
+    @pytest.mark.parametrize("user", ["ed", "pub", "run", "startup", "benchmark"])
+    def test_redact_breakdown_keeps_markers_schema_and_metadata(self, monkeypatch, user):
+        ...
+        red = mod.redact_breakdown(raw)
+        assert red["schema"] == mod.SCHEMA_VERSION                      # (a)
+        assert scn["workload"] == "noop.py"
+        assert scn["layout"] == "installed-nested"
+        assert scn["passes"][0]["label"] == "cold"
+        assert red["environment"]["hostname"] == "<redacted>"
+        assert red["environment"]["os"]["release"] == "6.8.0-<redacted>"
+        assert red["environment"]["note"] == (
+            "started by <redacted> in /data/<redacted>/work; marked as edited"
+        )
+        leftover = _strip_markers(json.dumps(red))
+        assert "<" not in leftover and ">" not in leftover
+    def test_scrub_text_keeps_existing_marker_and_redacts_standalone_user(...):   # (b), user "ed"
+        out = mod.scrub_text("host <redacted> run by ed, edited")
+        assert out == "host <redacted> run by <redacted>, edited"
+    def test_scrub_text_keeps_schema_line(...):                                  # (c), user "startup"
+        line = "- Schema: `pubrun-startup-breakdown/1`"
+        assert mod.scrub_text(line) == line
+    ```
+    (d) `test_redact_breakdown_scrubs_home_host_user_workdir_and_repo` PASSED above.
+    Falsifiability: with the script restored to `HEAD` (unfixed) and the new tests kept, `-k ScrubBoundaries` gave "8 failed, 2 passed" (`[benchmark]` and the refuse-standalone test pass on both, as expected); fixed script restored afterwards.
+    `git diff -- benchmarks/startup_breakdown.py` hunks:
+    ```diff
+    +_SCRUB_SKIP_KEYS = frozenset({
+    +    "schema", "generated_utc", "generated_local", "category", "layout", "workload",
+    +    "durability_policy", "kind", "label", "baseline_scenario", "auto_scenario",
+    +    "phased_scenario", "git_commit", "pubrun_version", "python_version", "system",
+    +    "platform", "architecture", "fstype", "status",
+    +})
+    +_PROTECTED_RE = re.compile("(" + re.escape(_REDACTED) + "|" + re.escape(SCHEMA_VERSION) + ")")
+    +def _is_path_needle(needle: str) -> bool:
+    +    return "/" in needle or "\\" in needle
+    +def _needle_pattern(needle: str) -> re.Pattern[str]:
+    +    if _is_path_needle(needle):
+    +        return re.compile(re.escape(needle))
+    +    return re.compile(r"(?<![A-Za-z0-9_])" + re.escape(needle) + r"(?![A-Za-z0-9_])")
+    +def _scrub_segment(text: str, needles: Sequence[str]) -> str:
+    +    needle, rest = needles[0], needles[1:]
+    +    pieces = _needle_pattern(needle).split(text)
+    +    return _REDACTED.join(_scrub_segment(p, rest) for p in pieces)
+    +def _scrub_string(s: str, needles: Sequence[str]) -> str:
+    +    parts = _split_protected(s)
+    +    return "".join(
+    +        part if idx % 2 else _scrub_segment(part, needles) for idx, part in enumerate(parts)
+    +    )
+     def _scrub_substrings(obj: Any, needles: Sequence[str]) -> Any:
+    -    if isinstance(obj, dict):
+    -        return {k: _scrub_substrings(v, needles) for k, v in obj.items()}
+    -        ...
+    -                s = s.replace(needle, _REDACTED)
+    +    ordered = sorted({n for n in needles if n}, key=len, reverse=True)
+    +    def _walk(o: Any) -> Any:
+    +        if isinstance(o, dict):
+    +            return {
+    +                k: (v if k in _SCRUB_SKIP_KEYS and isinstance(v, str) else _walk(v))
+    +                for k, v in o.items()
+    +            }
+    +        ...
+    +            return _scrub_string(o, ordered)
+     def scrub_text(text: str, extra_needles: Sequence[str] = ()) -> str:
+    -    s = text
+    -    for needle in _collect_redaction_needles(extra_needles):
+    -        if needle and needle in s:
+    -            s = s.replace(needle, _REDACTED)
+    -    return s
+    +    return _scrub_string(text, _collect_redaction_needles(extra_needles))
+    ```
+    The skip set has the 20 listed keys and no `release`. `_collect_redaction_needles` and `_redact_keys_recursive` are unchanged.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: From the same pasted run, the test source lines (re-derived at execution time) that pin each E-02 behavior by calling `validate_redacted_output` and asserting on its return value: (a) it returns `(True, [])` for the redacted result of every username case in V-01 (the self-check accepts correct output, including the `pubrun_version` key for `pub`); (b) it returns `ok == False` for a non-skipped value `"owner pub"` with username `pub` (it still refuses a standalone username); (c) it still refuses a leaked home path (the pre-existing test). Test names are pointers, not the bar.
   - Observed evidence:
-  - Result: pending
+    From the same 25-passed run pasted in V-01. Test lines pinning E-02:
+    ```python
+    # (a) inside the 5-username parametrized test (ed, pub, run, startup, benchmark), all PASSED:
+        assert mod.validate_redacted_output(red) == (True, [])
+    # (b)
+    def test_validate_refuses_standalone_username(self, monkeypatch):   # user "pub"
+        ok, reasons = mod.validate_redacted_output(
+            {"schema": mod.SCHEMA_VERSION, "environment": {"note": "owner pub"}}
+        )
+        assert ok is False
+        assert "identifying substring remains in JSON payload" in reasons
+    # (c) pre-existing, PASSED:
+    def test_validate_redacted_output_rejects_leaked_home_path(self):
+        ...
+        ok, reasons = mod.validate_redacted_output(unsafe)
+        assert not ok
+    ```
+    The `[pub]` case's `raw` includes `"pubrun_version": "1.0.0"` under `environment`, so the `pubrun_version` key is present and the self-check still returns `(True, [])`.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `python3 -m pytest tests/test_startup_benchmark.py -v -o addopts="" -k ScrubBoundaries` output with zero failures and at least one selected test, plus the CLI test source lines (re-derived at execution time) showing a `subprocess.run` of `benchmarks/startup_breakdown.py` with `LOGNAME`, `USER`, and `USERNAME` set to `pub` and to `ed`, asserting exit code 0, `schema == SCHEMA_VERSION`, the four `layout` values, `import-minimal-installed-nested` in stdout, and no `<` or `>` outside `<redacted>`. Reachability: the subprocess runs `benchmarks/startup_breakdown.py::main`, which calls `run_breakdown` (and through it `redact_breakdown`, `scrub_text`, and `validate_redacted_output`), then `scrub_text` and `validate_redacted_output` again before writing. Test names are pointers, not the bar.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_startup_benchmark.py -v -o addopts="" -k ScrubBoundaries
+    ...::test_redact_breakdown_keeps_markers_schema_and_metadata[pub] PASSED [ 10%]
+    ...::test_redact_breakdown_keeps_markers_schema_and_metadata[run] PASSED [ 20%]
+    ...::test_scrub_text_keeps_existing_marker_and_redacts_standalone_user PASSED [ 30%]
+    ...::test_cli_with_short_username_emits_intact_output[pub] PASSED [ 40%]
+    ...::test_validate_refuses_standalone_username PASSED [ 50%]
+    ...::test_cli_with_short_username_emits_intact_output[ed] PASSED [ 60%]
+    ...::test_redact_breakdown_keeps_markers_schema_and_metadata[benchmark] PASSED [ 70%]
+    ...::test_redact_breakdown_keeps_markers_schema_and_metadata[ed] PASSED [ 80%]
+    ...::test_scrub_text_keeps_schema_line PASSED [ 90%]
+    ...::test_redact_breakdown_keeps_markers_schema_and_metadata[startup] PASSED [100%]
+    ====================== 10 passed, 15 deselected in 14.14s ======================
+    ```
+    CLI test lines:
+    ```python
+    @pytest.mark.parametrize("user", ["pub", "ed"])
+    def test_cli_with_short_username_emits_intact_output(self, tmp_path, user):
+        env = dict(os.environ)
+        for key in ("LOGNAME", "USER", "USERNAME"):
+            env[key] = user
+        proc = subprocess.run(
+            [PYTHON, str(_BREAKDOWN_SCRIPT), "--iterations", "1", "--passes", "1",
+             "--warmup", "0", "--out", str(out_json)],
+            capture_output=True, text=True, env=env, timeout=180,
+        )
+        assert proc.returncode == 0, proc.stderr
+        data = json.loads(text)
+        assert data["schema"] == "pubrun-startup-breakdown/1"
+        layouts = {scn["layout"] for scn in data["scenarios"].values()}
+        assert layouts == {"checkout", "installed", "installed-nested", "none"}
+        assert "import-minimal-installed-nested" in proc.stdout
+        for blob in (text, proc.stdout):
+            leftover = _strip_markers(blob)
+            assert "<" not in leftover and ">" not in leftover
+    ```
+    On the unfixed script both CLI cases FAILED (the `[pub]` case with `error: share-safety check failed on redacted output: identifying substring remains in JSON payload`). Reachability: the subprocess runs `benchmarks/startup_breakdown.py::main` -> `run_breakdown` (`redact_breakdown`, `scrub_text`, `validate_redacted_output`) -> `scrub_text` and `validate_redacted_output` again before writing.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted output of `python3 -m pytest tests/test_benchmark_intake_bugs.py -v` with zero failures; pasted output of the `LOGNAME=pub USER=pub USERNAME=pub python3 benchmarks/startup_breakdown.py --iterations 1 --passes 1 --warmup 0 --out /tmp/opencode/ggaok0-pub.json` run followed by `echo exit=$?` showing `exit=0`, and of `python3 -c "import json; print(json.load(open('/tmp/opencode/ggaok0-pub.json'))['schema'])"` showing `pubrun-startup-breakdown/1`; the pasted `python3 -m pytest -q` summary line with zero failures; and one line recording that the `.github/workflows/ci.yml` matrix (Ubuntu, Windows, macOS; Python 3.8 through 3.14) has not yet run these tests locally and remains the gate before release (or, if a CI run on the pushed commit exists, its run URL and conclusion).
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_benchmark_intake_bugs.py -v -o addopts=""
+    ...::TestScrubBoundaries::test_short_username_does_not_corrupt_markers_or_schema[benchmark] PASSED [ 94%]
+    ...::TestScrubBoundaries::test_pre_redacted_value_is_not_rescanned PASSED [ 95%]
+    ...::TestShareSafetyNone::test_non_none_unredacted_value_still_rejected PASSED [100%]
+    ============================== 72 passed in 1.08s ==============================
+    $ LOGNAME=pub USER=pub USERNAME=pub python3 benchmarks/startup_breakdown.py --iterations 1 --passes 1 --warmup 0 --out /tmp/opencode/ggaok0-pub.json > /tmp/opencode/ggaok0-pub.md; echo exit=$?
+    exit=0
+    $ python3 -c "import json; print(json.load(open('/tmp/opencode/ggaok0-pub.json'))['schema'])"
+    pubrun-startup-breakdown/1
+    $ python3 -m pytest -q -p no:randomly     (serial, pyproject addopts with coverage)
+    1831 passed, 2 skipped in 528.48s (0:08:48)
+    $ aw suite     (parallel xdist workers)
+    FAILED tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches
+    ================== 1 failed, 1832 passed in 141.24s (0:02:21) ==================
+    ```
+    The one `aw suite` failure is pre-existing and unrelated: it reproduces at the starting commit 1720c62 in a clean detached worktree (`python3 -m pytest tests/test_liveness.py -n 4` -> "1 failed, 26 passed"), passes serially (3/3), and is already tracked by backlog `ivpkar` (graduated, carried by plan `vv4vdd`). CI: the `.github/workflows/ci.yml` matrix (Ubuntu, Windows, macOS; Python 3.8 through 3.14) has not yet run these tests; nothing was pushed, and that matrix remains the gate before release (on Windows `getpass.getuser` reads `LOGNAME`, `USER`, `LNAME`, then `USERNAME`, and `expanduser` reads `USERPROFILE`, which the unit tests also set).
+  - Result: pass
 
 ## Approval and execution gate
 
