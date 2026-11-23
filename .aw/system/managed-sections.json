@@ -784,7 +784,7 @@
       "host": "",
       "kind": "file",
       "logical_id": "",
-      "sha256": "e8023ce397a7dc9a5f1fc8a01e875a43f617c3a9274b977d121af4f1065c16ca"
+      "sha256": "1314653aff0a0e131dea0da91eaeb400eee05585f02de95e47b3892c9fe12b12"
     },
     ".aw/system/workflows/README.md": {
       "host": "",
@@ -1210,7 +1210,7 @@
       "host": "",
       "kind": "file",
       "logical_id": "",
-      "sha256": "0603c4d287b6ca517b677ac55d4a847c110be49581ea538cea5ae611c7d4ab2e"
+      "sha256": "3f4a9c2b51ec54a1f1b57b87697f3bbec06c4a9a146c8980e5a720eff7ebbe21"
     },
     ".aw/system/workflows/ipd-lifecycle/README.md": {
       "host": "",
@@ -2209,7 +2209,7 @@
       "sha256": "46970f75c6d377d7b6280eb07f05ff97f4a6ab3a305120fb5e433b1ad3469078"
     }
   },
-  "installed_version": "1.3.0rc2.dev13561+gb660cc6a0",
+  "installed_version": "1.3.0rc2.dev13812+gd48d1ef66",
   "installer": "agent-workflows",
   "managed_sections": {},
   "schema_version": 2
