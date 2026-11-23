@@ -1,5 +1,5 @@
 - Id: w4hxkh
-- Status: graduated
+- Status: done
 - Graduated-To: dep-capture
 - Blocks-Release: next
 - Set: pubrun-improve
@@ -11,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-23 done (aw backlog): closed by aw oc run: IPD 6s7k9e executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261121-dep-capture-00-6s7k9e-dependency-capture-accuracy-late-import-refresh-and-transiti.ipd.md); evidence .aw/records/plans/executed/20261121-dep-capture-00-6s7k9e-dependency-capture-accuracy-late-import-refresh-and-transiti.ipd.md
 - 2026-11-22 graduated (aw backlog): graduated by run run-20261122T010822Z-2359880: 6s7k9e, fdqkrz, iflqsl, ijipnx, uil22c
 - 2026-11-22 same-status (aw set): Gate next release per check.live-bug-ungated
 - 2026-11-21 created (aw backlog): Maintainer requested detailed backlog capture; implementation remains future work.
