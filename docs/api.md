@@ -87,6 +87,11 @@ pubrun.start(output_dir="./runs")               # Equivalent to core={"output_di
 pubrun.start(core={"profile": "deep"})          # Explicit nested form also works
 ```
 
+**Timing:** `start()` creates the `Run`, which records `started_at_utc` and begins timing `pubrun`'s own startup capture. When startup capture and the startup manifest write finish, the run records `workload_started_at_utc`; the gap is reported as `timing.startup_overhead_seconds`. Everything your code does from that point until `stop()` is the tracked workload (`timing.workload_seconds`). Durations are measured with the monotonic clock `time.perf_counter()`, so they stay correct if the system clock changes during the run.
+
+> [!IMPORTANT]
+> `pubrun` measures the **tracked interval**, not the whole process lifetime. If you import `pubrun` (auto mode) or call `start()` partway through a script, any work done before that point, including interpreter startup and earlier imports, is not included in any `timing` duration. Each manifest records this as `timing.interval_scope = "tracked_interval"`.
+
 Flat shortcuts: `profile`, `output_dir`, `auto_start`, `meta_ref`. All other overrides use nested dicts matching the TOML structure (e.g., `console={"capture_mode": "off"}`).
 
 > [!NOTE]
@@ -111,6 +116,21 @@ The run outcome is determined automatically:
 
 ```python
 pubrun.stop()
+```
+
+**Timing:** when the reference count reaches zero, `stop()` first marks the end of the tracked workload (`timing.ended_at_utc`) and only then waits (up to 2 s) for background hardware capture, tears down capture engines, refreshes package data, and writes `config.resolved.json`. That finalization work is reported separately as `timing.finalization_overhead_seconds` (with the hardware wait also shown on its own as `timing.hardware_wait_seconds`), so it never inflates `timing.workload_seconds`. The final atomic `manifest.json` write happens after the timing section is frozen, so it is not included in any persisted duration. `timing.elapsed_seconds` equals `timing.workload_seconds` (`timing.elapsed_basis = "workload"`). A nested `stop()` that only decrements the reference count does not end the workload.
+
+```python
+import json, pubrun
+
+run = pubrun.start()
+do_work()
+pubrun.stop()
+
+timing = json.load(open(run.run_dir / "manifest.json"))["timing"]
+print(timing["workload_seconds"])          # your code only
+print(timing["startup_overhead_seconds"])  # pubrun startup capture
+print(timing["finalization_overhead_seconds"])  # pubrun finalization, before manifest.json
 ```
 
 ### `pubrun.get_current_run() → Run | None`
@@ -165,7 +185,14 @@ with pubrun.phase("gradient_descent"):
     optimizer.step()
 ```
 
-This emits `phase_start` and `phase_end` events with timing metadata. If an exception occurs inside the phase, the `phase_end` event records the error type.
+This emits `phase_start` and `phase_end` events with timing metadata. The `phase_end` payload carries `elapsed_seconds`, the nonnegative duration of the `with` body measured with the monotonic clock, and `duration_clock: "monotonic"`. When phase profiling is enabled (`[capture.profiling].enabled`), the profiler's setup and the writing of its `.prof` file are excluded from `elapsed_seconds`, so the value reflects only your code. If an exception occurs inside the phase, the `phase_end` payload also records the error type (`error`).
+
+```json
+{"timestamp_utc": 1780250544.21, "type": "phase_end", "name": "gradient_descent",
+ "payload": {"elapsed_seconds": 0.0123, "duration_clock": "monotonic"}}
+```
+
+Phase durations are measured inside the tracked workload; they are not subtracted from or added to `timing.workload_seconds`.
 
 Phase calls are safe to use even without an active run — they become silent no-ops.
 
@@ -235,6 +262,8 @@ def entrypoint():
 > [!NOTE]
 > Both `tracked_run()` and `audit_run()` accept the same override parameters as `start()`. If no overrides are passed, they fall back to the resolved configuration from `.pubrun.toml` and defaults.
 
+**Timing:** both wrappers follow the same timing rules as `start()` and `stop()`. The tracked workload covers the body of the `with` block or the decorated function call (from the end of startup capture to the moment the block or call exits, including when it raises). Startup and finalization capture are reported separately as `timing.startup_overhead_seconds` and `timing.finalization_overhead_seconds`. When a wrapper is nested inside an already active run, it shares that run and its exit does not end the outer workload.
+
 ---
 
 ## 6. Semantic Diffing
@@ -250,6 +279,15 @@ result = pubrun.diff("./runs/pubrun-A", "./runs/pubrun-B",
                      ignores=["timing", "run", "capture"])
 for key, detail in result["modified"].items():
     print(f"Changed: {key}")
+```
+
+**Timing comparisons:** `timing` is ignored by default (it differs on every run). When you compare it (pass an `ignores` list that does not exclude `timing`), `diff()` normalizes legacy manifests so the definition change is visible: a manifest that has `timing.elapsed_seconds` but no `duration_clock` or `elapsed_basis` is reported with `timing.duration_clock = "wall_clock"` and `timing.elapsed_basis = "wall_clock_legacy"`. If `timing.elapsed_seconds` differs and the two runs measured it differently, the modified entry carries a `note` such as `"timing definition changed (wall_clock_legacy/wall_clock -> workload/monotonic)"`, because a legacy wall-clock value includes `pubrun`'s capture overhead and a monotonic workload value does not.
+
+```python
+result = pubrun.diff("./runs/old-run", "./runs/new-run", ignores=[])
+change = result["modified"].get("timing.elapsed_seconds")
+if change and "note" in change:
+    print(change["note"])
 ```
 
 ---
@@ -428,9 +466,11 @@ import pubrun
 result = pubrun.subprocess.run(["python", "preprocess.py", "--input", "data.csv"])
 ```
 
+**Timing and status:** each wrapper appends one record to `subprocesses` with UTC `started_at_utc` / `ended_at_utc` for chronology and `elapsed_seconds` measured with the monotonic clock (`duration_clock: "monotonic"`). For `run()`, the duration covers the whole call. For `Popen`, it runs from construction until the first `wait()`, `communicate()`, or `poll()` that sees the process finished, and the record includes `pid`. `capture_state.status` is `"complete"` for exit code 0 and `"failed"` otherwise. If the launch itself raises (for example, the executable is missing), the wrapper records `exit_code` (if any), a redacted `error`, and `capture_state = {"status": "failed", "detail": ...}`, then re-raises the original exception unchanged. Records are kept only while a run is active.
+
 ### `pubrun.popen(cmd, mode="r", bufsize=-1)`
 
-Drop-in replacement for `os.popen()` with provenance tracking.
+Drop-in replacement for `os.popen()` with provenance tracking. The record is written when the returned pipe is closed: `elapsed_seconds` (monotonic) covers launch to `close()`, `exit_code` is decoded from the close status, and `capture_state.status` is `"complete"` for exit code 0 and `"failed"` otherwise. A failed launch is recorded the same way as for `pubrun.subprocess.run()` before the exception is re-raised.
 
 ### Third-Party Hook Ownership Rules
 

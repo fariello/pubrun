@@ -163,9 +163,23 @@ Rationale:
 
 - Sub-second precision via IEEE 754 without truncation.
 - Timezone-agnostic: eliminates locale-dependent formatting and parsing.
-- Trivial elapsed-time arithmetic (`ended_at - started_at`).
 - Native compatibility with `time.time()`, `os.stat().st_mtime`, etc.
 - Compact and deterministic serialization.
+
+Timestamps establish absolute chronology only. Durations MUST NOT be computed by subtracting timestamps, because the system clock can jump during a run.
+
+### 4.1.1 Duration Format
+
+- Every persisted duration (`timing.*_seconds`, `phase_end` payload `elapsed_seconds`, and subprocess record `elapsed_seconds`) MUST be a nonnegative float in seconds computed from the difference of two monotonic `time.perf_counter()` readings, and MUST be labeled `duration_clock: "monotonic"`.
+- Raw monotonic counter readings MUST NOT be serialized.
+- Run durations are split into three disjoint, consecutive intervals: `startup_overhead_seconds` (`started_at_utc` to `workload_started_at_utc`), `workload_seconds` (`workload_started_at_utc` to `ended_at_utc`), and `finalization_overhead_seconds` (`ended_at_utc` to `finalized_at_utc`), which sum to `session_seconds`. `elapsed_seconds` equals `workload_seconds` with `elapsed_basis: "workload"`.
+- `background_hardware_seconds` overlaps `workload_seconds` and `hardware_wait_seconds` is contained in `finalization_overhead_seconds`; neither may be summed with the disjoint intervals.
+- `finalization_overhead_seconds` excludes the final atomic write of `manifest.json`.
+- `interval_scope` is `"tracked_interval"`: durations cover only the interval from `Run` construction to finalization, so a late `import pubrun` or `start()` does not measure the whole process lifetime.
+- Legacy v1.0 manifests whose `timing` has `elapsed_seconds` but neither `duration_clock` nor `elapsed_basis` MUST remain readable and MUST be labeled as legacy wall-clock timing (`wall_clock` / `wall_clock_legacy`) by consumers. Crashed-run closeouts record `duration_clock: "wall_clock_estimated"`, `elapsed_basis: "crashed_estimate"`, and `capture_state.status: "partial"`.
+- Ghost-mode runs record `workload_seconds`, `elapsed_seconds`, `duration_clock`, and `elapsed_basis` as `null` with `capture_state.status: "partial"`.
+
+See [Manifest Reference](manifest.md#timing) for the full field table.
 
 ### 4.2 Optional Artifacts
 
@@ -248,7 +262,7 @@ Optional JSONL event stream written to `events.jsonl`.
 ### 7.1 Implemented Event Types
 
 - `phase_start` — Emitted when entering a `pubrun.phase()` context.
-- `phase_end` — Emitted when exiting a `pubrun.phase()` context. Includes error type in payload if an exception occurred.
+- `phase_end`: Emitted when exiting a `pubrun.phase()` context. The payload includes `elapsed_seconds` (nonnegative monotonic duration of the phase body, excluding optional profiler setup and profile dump I/O) and `duration_clock: "monotonic"`, plus `error` (the exception type name) if an exception occurred.
 - `annotation` — Emitted by `pubrun.annotate()`.
 
 ### 7.2 Event Record Format
@@ -605,7 +619,7 @@ Replay is **advisory, not guaranteed**. Environment differences between the orig
 | `stop()` | Returns `None` | Finalizes the active run. Decrements `ref_count`; only writes artifacts when count reaches zero. Safe to call with no active run. |
 | `get_current_run()` | Returns `Run \| None` | Returns the active singleton tracker, or `None`. |
 | `annotate(message, **kwargs)` | Returns `None` | Emits an `annotation` event. Behavior with no active run is configurable: `ignore` (default), `warn`, or `error`. |
-| `phase(name)` | Context manager | Emits `phase_start`/`phase_end` events with timing. Records error type in payload if an exception occurs. |
+| `phase(name)` | Context manager | Emits `phase_start`/`phase_end` events; `phase_end` carries a monotonic `elapsed_seconds` and `duration_clock: "monotonic"`. Records error type in payload if an exception occurs. |
 | `paused()` | Context manager | Suspends *recording* (console tee + subprocess spy) on the calling thread for the block — output still prints, subprocesses still run, but are not recorded. Thread-local, ref-counted/nestable, resumes on exception. Does not pause `annotate()`/`phase()` or resource sampling. |
 | `tracked_run(**overrides)` | Context manager | Wraps `start()`/`stop()`. Sets outcome to `"failed"` on exception. |
 | `audit_run(**overrides)` | Decorator | Wraps a function in `start()`/`stop()`. Preserves return value. Sets outcome to `"failed"` on exception, then re-raises. |
@@ -649,7 +663,7 @@ produced elsewhere (see 14.1).
 
 ### 15.2 Recorded Fields
 
-Each subprocess record includes: `argv`, `started_at_utc`, `ended_at_utc`, `cwd`, `exit_code`.
+Each subprocess record includes: `argv`, `started_at_utc`, `ended_at_utc`, `cwd`, `exit_code`, and `capture_state`. Once the process is observed to finish (or the launch fails, or finalization closes an unwaited record), the record also carries `elapsed_seconds` (nonnegative monotonic duration) and `duration_clock: "monotonic"`. Monotonic start readings are held in an internal map keyed by record identity and are never serialized. The explicit wrappers (`pubrun.subprocess.run`, `pubrun.subprocess.Popen`, `pubrun.popen`) record the same timing fields plus `pid`, and on a failed launch record `error` and `capture_state: {"status": "failed", "detail": ...}` before re-raising.
 
 ### 15.3 Memory Safety
 
@@ -780,11 +794,11 @@ When `write_artifacts()` fails to write `manifest.json`, it records a bounded re
 
 1. `stop()` preserves sticky `"failed"` and `"ghost"` outcomes, decrements `ref_count`, and when `ref_count` reaches zero calls `_finalize_state()` and `write_artifacts()` inside `try ... finally:`. The `finally` block always unregisters `atexit` (when a writer exists) and clears `_active_run` if it still points to this run.
 2. `_finalize_state()` is **idempotent** (guarded by `_finalized` under `_run_lock`). It:
-   - Latches `_finalized = True` and records `ended_at_utc` under `_run_lock`.
+   - Latches `_finalized = True` and records the workload-end anchor `t2` (`ended_at_utc` plus an in-memory monotonic reading) under `_run_lock`, before waiting for background hardware, so teardown latency never inflates `workload_seconds`.
    - Runs every pre-teardown step independently in its own `try/except` guard: waiting up to `2.0`s for background hardware completion (then closing `_hardware_write_closed = True` under `_run_lock`), checking `signal_capture.get_records()` for interruption signals (`SIGINT`, `SIGTERM`, `SIGHUP`), and recording the process exit code.
    - Runs every teardown step independently via `_rollback_owned_hooks(stage="finalization")` so a first or second cleanup failure never blocks remaining steps: (a) `SubprocessSpy.finalize_all()`, record snapshot, and `SubprocessSpy.uninstall(owner=...)` in separate guards; (b) `ConsoleInterceptor.stop()` (marking `console` `"failed"` instead of `"pending"` if teardown raises); (c) `ResourceWatcher.stop()` and `to_manifest_dict()` in separate guards; (d) pending deferred file registrations; (e) `EventStream.close()`; (f) disabling active profilers individually; (g) `SignalExitCapture.get_records()` and `uninstall()` in separate guards; (h) removing `.pubrun.lock`.
    - Refreshes and merges finalization package snapshots safely without losing startup package data if refresh fails.
-3. `write_artifacts()` calls `_finalize_state()` before acquiring reentrant `_write_lock` (preserving `_run_lock` before `_write_lock` lock ordering to prevent deadlock with `pubrun-hw`), checks `_artifacts_written` for idempotency, persists or durability-upgrades `config.resolved.json` if needed, writes final `manifest.json` once atomically, sets `_artifacts_written = True`, and writes `methods.{md,tex}` non-fatally.
+3. `write_artifacts()` calls `_finalize_state()` before acquiring reentrant `_write_lock` (preserving `_run_lock` before `_write_lock` lock ordering to prevent deadlock with `pubrun-hw`), checks `_artifacts_written` for idempotency, persists or durability-upgrades `config.resolved.json` if needed, records the finalization-end anchor `t3` (`finalized_at_utc`), builds the manifest (which freezes the finalized `timing` section on first build so it is never recomputed), writes final `manifest.json` once atomically, sets `_artifacts_written = True`, and writes `methods.{md,tex}` non-fatally.
 4. The `atexit` handler calls `write_artifacts()` as a safety net (unregistered after normal `stop()`; if invoked after finalization, `_artifacts_written` returns `True` immediately without rewriting finalized artifacts).
 5. During active execution, if `EventStream.emit()` encounters a disk write or flush error, it closes and detaches `self._file = None` and clears its buffer under `self._lock` (preventing repeated failing writes) and emits at most one bounded redacted warning outside `self._lock` per failure episode.
 

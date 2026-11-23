@@ -6,8 +6,22 @@
   },
   "timing": {
     "started_at_utc": 1780250544.068,
-    "ended_at_utc": 1780250544.412,
-    "elapsed_seconds": 0.344
+    "workload_started_at_utc": 1780250544.420,
+    "ended_at_utc": 1780250544.764,
+    "finalized_at_utc": 1780250544.785,
+    "elapsed_seconds": 0.344,
+    "workload_seconds": 0.344,
+    "startup_overhead_seconds": 0.352,
+    "finalization_overhead_seconds": 0.021,
+    "session_seconds": 0.717,
+    "hardware_wait_seconds": 0.0,
+    "background_hardware_seconds": 0.031,
+    "duration_clock": "monotonic",
+    "elapsed_basis": "workload",
+    "interval_scope": "tracked_interval",
+    "capture_state": {
+      "status": "complete"
+    }
   },
   "invocation": {
     "argv": [
