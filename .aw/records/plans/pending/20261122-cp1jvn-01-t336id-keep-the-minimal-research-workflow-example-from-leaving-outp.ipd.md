@@ -6,7 +6,9 @@
 - Scope: `examples/minimal-research-workflow/analysis.py` (output directory resolution and a new `--output-dir` option), `tests/test_example_minimal_research_workflow.py` (behavior tests for the new resolution), `examples/minimal-research-workflow/README.md` (where outputs go), and one `### Fixed` entry in `CHANGELOG.md`.
 - Scope-Paths: examples/minimal-research-workflow/analysis.py, tests/test_example_minimal_research_workflow.py, examples/minimal-research-workflow/README.md, CHANGELOG.md
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: standard
 - Work-Kind: bug
 - Priority: low
 - From-Backlog: cp1jvn
@@ -21,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-23 to-review (aw set): authored from backlog cp1jvn: fix, tests, docs, validation
 - 2026-11-23 draft (Claude Opus 5.5): created.
 
@@ -35,7 +38,7 @@ flowchart TD
     START["analysis.py main()"] --> ARGS["parse_args(): read --output-dir"]
     ARGS --> GIVEN{"--output-dir given?"}
     GIVEN -- "yes" --> USE["output_dir = Path(--output-dir)"]
-    GIVEN -- "no" --> DEF["output_dir = directory of analysis.py / 'outputs'"]
+    GIVEN -- "no" --> DEF["output_dir = DEFAULT_OUTPUT_DIR (outputs/ next to analysis.py)"]
     USE --> MK["output_dir.mkdir(parents=True, exist_ok=True)"]
     DEF --> MK
     MK --> WRITE["write_outputs(): write synthetic_data.csv and summary.json into output_dir"]
@@ -57,19 +60,19 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - [ ] E-02 Rewrite `tests/test_example_minimal_research_workflow.py` so it tests the new resolution through subprocess runs and writes nothing into the repository tree.
   - Depends on: E-01
-  - Expected outcome: The file contains three behavior tests. (1) `test_minimal_research_workflow_runs`: runs the repository copy of `analysis.py` with `cwd=tmp_path` and `--output-dir <tmp_path>/out`, asserts exit code 0, `"Synthetic analysis complete."` in stdout, `<tmp_path>/out/summary.json` and `<tmp_path>/out/synthetic_data.csv` exist, `<tmp_path>/outputs` does not exist, and the existing `runs/pubrun-analysis-*` manifest and `config.resolved.json` assertions still hold. (2) `test_default_output_dir_is_next_to_script`: copies `analysis.py` into `<tmp_path>/example/`, runs the copy with `cwd=<tmp_path>/caller`, asserts `<tmp_path>/example/outputs/summary.json` exists and `<tmp_path>/caller/outputs` does not exist. (3) `test_output_dir_is_created_when_missing`: passes a nested, not-yet-existing `--output-dir` such as `<tmp_path>/a/b/c`, asserts exit code 0 and that `summary.json` there parses as JSON with an `"n"` key equal to the requested `--n`. No test reads source text with `inspect`, `ast`, or a regular expression.
+  - Expected outcome: The file contains three behavior tests. (1) `test_minimal_research_workflow_runs`: runs the repository copy of `analysis.py` with `cwd=tmp_path` and `--output-dir <tmp_path>/out`, asserts exit code 0, `"Synthetic analysis complete."` in stdout, `<tmp_path>/out/summary.json` and `<tmp_path>/out/synthetic_data.csv` exist, `<tmp_path>/outputs` does not exist, and the existing `runs/pubrun-analysis-*` manifest and `config.resolved.json` assertions still hold. (2) `test_default_output_dir_is_next_to_script`: copies `analysis.py` into `<tmp_path>/example/`, creates `<tmp_path>/caller/`, runs the copy with `cwd=<tmp_path>/caller`, asserts exit code 0, `<tmp_path>/example/outputs/summary.json` exists and `<tmp_path>/caller/outputs` does not exist. (3) `test_output_dir_is_created_when_missing`: passes a nested, not-yet-existing `--output-dir` such as `<tmp_path>/a/b/c`, asserts exit code 0 and that `summary.json` there parses as JSON with an `"n"` key equal to the requested `--n`. No test reads source text with `inspect`, `ast`, or a regular expression.
   - Execution state: pending
 
 ### Task group 3: Documentation
 
 - [ ] E-03 Update `examples/minimal-research-workflow/README.md` to state where outputs are written and how to change it.
   - Depends on: E-01
-  - Expected outcome: The paragraph that currently reads "The script also writes ordinary analysis outputs under:" followed by an `outputs/` code block says that the outputs go to `outputs/` inside `examples/minimal-research-workflow/`, wherever the script is run from, and that `--output-dir <path>` writes them elsewhere. The `runs/` paragraph is unchanged. Added lines contain no em dash (`U+2014`) or en dash (`U+2013`).
+  - Expected outcome: The paragraph that currently reads "The script also writes ordinary analysis outputs under:" followed by an `outputs/` code block says that the outputs go to `outputs/` inside `examples/minimal-research-workflow/`, wherever the script is run from, and that `--output-dir <path>` writes them elsewhere. It also says that a relative `--output-dir` is resolved against the current working directory. The `runs/` paragraph is unchanged. Added lines contain no em dash (`U+2014`) or en dash (`U+2013`).
   - Execution state: pending
 
-- [ ] E-04 Add one entry under `## [Unreleased]` / `### Fixed` in `CHANGELOG.md` describing the fix.
+- [ ] E-04 Add one entry to the first `### Fixed` heading under `## [Unreleased]` in `CHANGELOG.md` describing the fix.
   - Depends on: E-01
-  - Expected outcome: The new entry states that `examples/minimal-research-workflow/analysis.py` now writes its outputs next to the script (or to `--output-dir`) instead of the current working directory, so `examples/verify_all.py` no longer leaves an untracked `outputs/` directory. Added lines contain no em dash (`U+2014`) or en dash (`U+2013`).
+  - Expected outcome: `## [Unreleased]` contains several `### Fixed` headings; the new entry goes under the first one, as a bullet with a bold title like the bullets around it. The new entry states that `examples/minimal-research-workflow/analysis.py` now writes its outputs next to the script (or to `--output-dir`) instead of the current working directory, so `examples/verify_all.py` no longer leaves an untracked `outputs/` directory. Added lines contain no em dash (`U+2014`) or en dash (`U+2013`).
   - Execution state: pending
 
 ## Project conventions discovered (Step 0)
@@ -107,19 +110,20 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Carrier-Declined: deliberate design decision recorded in `OQ-01`; no follow-up needed.
 - The `runs/` directory that `pubrun` writes into the working directory is unchanged. It is `pubrun`'s documented default output location, and `.gitignore` ignores every `runs/` directory.
   - Carrier-Declined: intended `pubrun` behavior, already git-ignored; no follow-up needed.
-- Backlog item `wghq9s` describes the same root cause from the `verify_all.py` side, with the repository root as the working directory. This plan does not edit or close it. After this plan executes, the maintainer decides whether it is resolved.
-  - Carrier: wghq9s
-- Backlog item `g2434y` describes the same root cause with `examples/` as the working directory. This plan does not edit or close it. After this plan executes, the maintainer decides whether it is resolved.
-  - Carrier: g2434y
+- Backlog item `wghq9s` describes the same root cause from the `verify_all.py` side, with the repository root as the working directory. It was already closed as `done` on 2026-11-23 as a duplicate of `cp1jvn`, naming this plan as the carrier. This plan does not edit it. V-01 checks its symptom directly.
+  - Carrier-Declined: already closed `done` as a duplicate of `cp1jvn`; V-01 part (a) to (c) checks the repository-root symptom.
+- Backlog item `g2434y` describes the same root cause with `examples/` as the working directory. It was already closed as `done` on 2026-11-23 as a duplicate of `cp1jvn`, naming this plan as the carrier. This plan does not edit it. V-01 checks its symptom directly.
+  - Carrier-Declined: already closed `done` as a duplicate of `cp1jvn`; V-01 part (e) checks the `examples/` symptom.
 
 ## Scope check
 
 - Over-scope: none. Only the four `- Scope-Paths:` files change.
-- Under-scope: none. F-01, F-02, and F-03 are covered by E-01 and E-02. The repository-root symptom named in backlog item `cp1jvn` is checked directly by V-01.
+- Under-scope: none. F-01, F-02, and F-03 are covered by E-01 and E-02. The repository-root symptom named in backlog items `cp1jvn` and `wghq9s` and the `examples/` symptom named in backlog item `g2434y` are checked directly by V-01.
 
 ## Required tests / validation
 
 - Run `python3 examples/verify_all.py` from the repository root of the execution worktree. Then run `git status --porcelain --untracked-files=all` and `test -e outputs; echo $?`, and paste the output (V-01).
+- Run `(cd examples && python3 verify_all.py --no-clear)` from the repository root. Then run `test -e examples/outputs; echo $?` and `git status --porcelain --untracked-files=all`, and paste the output (V-01).
 - Run `pytest tests/test_example_minimal_research_workflow.py -v -o addopts=""` and paste the output (V-02).
 - Run the full suite with `pytest tests/ -q` and paste the summary (V-02).
 - Run a Python check over the added lines of `git diff -- examples/minimal-research-workflow/README.md CHANGELOG.md` that counts `U+2014` and `U+2013` characters, and paste the output (V-03, V-04).
@@ -143,15 +147,15 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ## Validation and cross-check (verify before reporting done)
 
-Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
+Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
 - [ ] V-01 validates E-01
-  - Required evidence: Pasted output, from the repository root of the execution worktree, of (a) `python3 examples/verify_all.py` ending in `[SUCCESS] All examples passed.` with exit code 0, (b) `test -e outputs; echo $?` printing `1`, (c) `git status --porcelain --untracked-files=all` containing no line with an `outputs/` path, and (d) `ls examples/minimal-research-workflow/outputs` listing `summary.json` and `synthetic_data.csv`. The observed run is produced by `examples/verify_all.py::main` invoking `analysis.py::main`, whose output path E-01 changes. Also paste `git diff -- examples/minimal-research-workflow/analysis.py` showing `Path("outputs")` removed, `--output-dir` added, and the fixed `./outputs/` message replaced.
+  - Required evidence: Pasted output, from the repository root of the execution worktree, of (a) `python3 examples/verify_all.py` ending in `[SUCCESS] All examples passed.` with exit code 0, (b) `test -e outputs; echo $?` printing `1`, (c) `git status --porcelain --untracked-files=all` containing no line with an `outputs/` path, (d) `ls examples/minimal-research-workflow/outputs` listing `summary.json` and `synthetic_data.csv`, and (e) after `(cd examples && python3 verify_all.py --no-clear)` exits 0, `test -e examples/outputs; echo $?` printing `1` and `git status --porcelain --untracked-files=all` still containing no line with an `outputs/` path. The observed run is produced by `examples/verify_all.py::main` invoking `analysis.py::main`, whose output path E-01 changes. Also paste `git diff -- examples/minimal-research-workflow/analysis.py` showing `Path("outputs")` removed, `--output-dir` added, and the fixed `./outputs/` message replaced.
   - Observed evidence:
   - Result: pending
 
 - [ ] V-02 validates E-02
-  - Required evidence: Pasted `pytest tests/test_example_minimal_research_workflow.py -v -o addopts=""` output showing `test_minimal_research_workflow_runs`, `test_default_output_dir_is_next_to_script`, and `test_output_dir_is_created_when_missing` each `PASSED`. Pasted `git status --porcelain --untracked-files=all` after that run, showing no new path under `examples/minimal-research-workflow/`. Pasted final summary line of `pytest tests/ -q` showing zero failures.
+  - Required evidence: Pasted `pytest tests/test_example_minimal_research_workflow.py -v -o addopts=""` output with zero failures, plus the test source lines (re-derived at execution time) that pin each behavior: (a) with `--output-dir` given, the outputs land in that directory and no `outputs/` appears in the working directory; (b) with no `--output-dir`, the outputs land in `outputs/` next to the script copy and not in the separate working directory; (c) a nested, missing `--output-dir` is created and its `summary.json` parses with `"n"` equal to the requested `--n`. Each behavior must be pinned by a subprocess run asserting exit code and files on disk. The test names in E-02 are pointers, not the bar. Pasted `git status --porcelain --untracked-files=all` after that run, showing no new path under `examples/minimal-research-workflow/`. Pasted final summary line of `pytest tests/ -q` showing zero failures.
   - Observed evidence:
   - Result: pending
 
@@ -161,7 +165,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
   - Result: pending
 
 - [ ] V-04 validates E-04
-  - Required evidence: Pasted `git diff -- CHANGELOG.md` showing exactly one new bullet under `## [Unreleased]` / `### Fixed` that names `examples/minimal-research-workflow/analysis.py` and `--output-dir`, and pasted output of a Python check over the added lines of that diff reporting `0` characters `U+2014` and `0` characters `U+2013`.
+  - Required evidence: Pasted `git diff -- CHANGELOG.md` showing exactly one new bullet under the first `### Fixed` heading of `## [Unreleased]` that names `examples/minimal-research-workflow/analysis.py` and `--output-dir`, and pasted output of a Python check over the added lines of that diff reporting `0` characters `U+2014` and `0` characters `U+2013`.
   - Observed evidence:
   - Result: pending
 
