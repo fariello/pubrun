@@ -6,7 +6,9 @@
 - Scope: Rewrite `TestIsSameProcess.test_expected_script_matches` in `tests/test_liveness.py` so that it checks `pubrun.capture.liveness.is_same_process(..., expected_script=...)` against a short-lived child process that runs a known script, instead of against the current pytest process. Confirm, without editing `tests/test_tui.py`, that the two `TestTuiReproducibilityAndActions` tests named by backlog item `ivpkar` pass in the test order that exposed the `PubrunTUIApp` mock leak. Confirm that the full parallel suite (`aw suite`) passes. No production code changes.
 - Scope-Paths: tests/test_liveness.py
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: simple
 - Work-Kind: bug
 - Priority: medium
 - From-Backlog: ivpkar
@@ -21,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-23 draft (agent): created.
 - 2026-11-23 to-review (agent): authored from backlog item `ivpkar`; both failures reproduced in the lane worktree before authoring (see Findings).
 
@@ -36,7 +39,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - [ ] E-01 In `tests/test_liveness.py`, replace the body of `TestIsSameProcess.test_expected_script_matches` with the child-process version described in "Proposed changes" (P-01). Keep the test name, its class, and its docstring purpose ("If expected_script matches the actual process command line, it matches."). Before editing, check whether the test body already uses a child process (see Finding F-07); if it does, record that fact in V-01 and make no edit.
   - Depends on: none
-  - Expected outcome: The test starts a child Python process that runs a script file named `liveness_probe_script.py` in the pytest `tmp_path` directory, waits until the child prints a ready line, asserts `is_same_process(child.pid, time.time(), expected_script="liveness_probe_script.py") is True`, and always stops the child in a `finally` block. The test no longer passes `"pytest"` or `os.getpid()` to `is_same_process` or to the platform command-line check.
+  - Expected outcome: The test starts a child Python process that runs a script file named `liveness_probe_script.py` in the pytest `tmp_path` directory, waits until the child prints a ready line, asserts `is_same_process(child.pid, time.time() - 172800, expected_script="liveness_probe_script.py") is True` (an expected start time two days in the past, beyond the default 24-hour tolerance, so the assertion can only pass through the confirmed script match and not through the start-time fallback), and always stops the child in a `finally` block. The test no longer passes `"pytest"` or `os.getpid()` to `is_same_process` or to the platform command-line check.
   - Execution state: pending
 
 ### Task group 2: Confirm the TUI tests and the full parallel suite
@@ -82,7 +85,7 @@ flowchart TD
 | F-04 | A child process gives the test a known command line on every platform: `[sys.executable, "<tmp_path>/liveness_probe_script.py"]`. The basename `liveness_probe_script.py` is not in `_GENERIC_SCRIPT_TOKENS` and is longer than 3 characters, so `_script_is_generic` returns `False` and the token match is conclusive. | `pubrun.capture.liveness._script_is_generic`, `_GENERIC_SCRIPT_TOKENS`, `_script_name_forms`. |
 | F-05 | A ready-line handshake removes a startup race. The child prints one line after the interpreter starts; the test reads that line before it checks the PID. By then the interpreter has replaced the forked process image, so `/proc/<pid>/cmdline` (Linux) and `ps` output (macOS) already show the script path. | Design reasoning; no repository evidence is needed. |
 | F-06 | The TUI failures named by the backlog item are already fixed on HEAD. Commit `25dd11b` ("test(tui): restore sys.modules['pubrun.tui.app'] after test_tui_cli_parser_and_run", committed after `a3546cd`) wraps the injected `mock.Mock` module in `mock.patch.dict(sys.modules, ...)`, so the real `pubrun.tui.app` module returns after the test. Before that fix, the leaked mock made later `PubrunTUIApp` tests in the same process import a `MagicMock`. | Running the `a3546cd` copy of `tests/test_tui.py` in one process with `-p no:xdist` printed `3 failed, 7 passed, 1 deselected`, failing `TestTuiResourceView::test_resource_view_populates_and_degrades` and both `TestTuiReproducibilityAndActions` tests. The HEAD copy with the same command printed `10 passed, 1 deselected`. `aw suite --no-cache` on HEAD reported no `tests/test_tui.py` failure. Open backlog item `pgcmea` describes the same leak. |
-| F-07 | Overlapping work exists outside this tree. Backlog items `sd7kvt` and `12rcu8` describe the same liveness failure. Plan `4h2qwz` (authored from `12rcu8`) proposes the same child-process rewrite, but it exists only on branch `aw/lane/12rcu8`, not on HEAD or `main`, and that branch moved `12rcu8` back to `open`. Whether `4h2qwz` will land is unknown. This plan therefore does not depend on it, and E-01 checks the test body before editing. | `git log 7163edf..aw/lane/12rcu8` shows commits `3fd18c2`, `9df0fc0`, and `4e0ad9d`; `.aw/records/backlog/open/` contains `sd7kvt`, `12rcu8`, and `pgcmea`. |
+| F-07 | Overlapping records are already reconciled onto this plan (re-checked 2026-11-23 at review). Backlog items `sd7kvt` and `12rcu8` describe the same liveness failure; both are `done` with the history line "Duplicate of ivpkar (carried by plan vv4vdd)". Their plans `4h2qwz` (salvaged from branch `aw/lane/12rcu8` in commit `276615f`) and `ig2etn` are in `.aw/records/plans/superseded/`, each with "Superseded by vv4vdd (ivpkar)". Backlog item `pgcmea` (the TUI leak) is `graduated` to its own pending plan `whacr3`, which owns `tests/test_tui.py` and adds a regression guard. This plan is the single carrier of the liveness fix. E-01 still checks the test body before editing, in case another change lands first. | `.aw/records/backlog/done/20261122-12rcu8-01-12rcu8-*.backlog.md`, `.aw/records/backlog/done/20261122-sd7kvt-01-sd7kvt-*.backlog.md`, `.aw/records/plans/superseded/20261122-12rcu8-01-4h2qwz-*.ipd.md`, `.aw/records/plans/superseded/20261122-sd7kvt-01-ig2etn-*.ipd.md`, `.aw/records/plans/pending/20261122-pgcmea-01-whacr3-*.ipd.md`. |
 
 ## Proposed changes (ordered, validatable)
 
@@ -94,7 +97,7 @@ P-01 (performed by E-01). Rewrite `TestIsSameProcess.test_expected_script_matche
 4. In a `try` block:
    - Read one line from `child.stdout` and assert that it equals `"ready"` after stripping.
    - Compute `functional` with the existing `_PLATFORM` branch, but pass `child.pid` and `"liveness_probe_script.py"` instead of `os.getpid()` and `"pytest"`. If `functional` is `False`, call `pytest.skip("Command-line checking is not functional on this platform")`.
-   - Assert `is_same_process(child.pid, time.time(), expected_script="liveness_probe_script.py") is True`.
+   - Assert `is_same_process(child.pid, time.time() - 172800, expected_script="liveness_probe_script.py") is True`. The expected start time is two days in the past, beyond the default `tolerance` of 86400 seconds. With `time.time()` the assertion would also pass if the command-line check returned `None` (inconclusive), because `is_same_process` then falls back to comparing start times and a child started a moment ago is within tolerance. With the past start time, only a confirmed script match (`True` from the platform check) makes `is_same_process` return `True`. The existing `test_wrong_start_time_does_not_match` uses the same `- 172800` offset.
 5. In the `finally` block: close `child.stdin`, call `child.wait(timeout=10)`, and, if that wait raises `subprocess.TimeoutExpired`, call `child.kill()` followed by `child.wait()`. Close `child.stdout`.
 
 The functional check in step 4 keeps the meaning "the platform reader returned a definite answer (`True` or `False`)", that is, `is not None`. With a child that runs the probe script, a working reader returns `True`, so the check no longer confuses "the reader works" with "the token was found".
@@ -117,8 +120,8 @@ P-03 (performed by E-03). Run the liveness test and the full suite:
   - Carrier-Declined: both tests pass under pytest-xdist today because they assert a mismatch, so no defect remains to carry.
 - No change to `src/pubrun/capture/liveness.py`. Finding F-03 shows its behavior is correct.
   - Carrier-Declined: the production behavior is correct (Finding F-03), so no production change is owed.
-- No edit to `tests/test_tui.py`. Commit `25dd11b` already fixed the leak (Finding F-06); this plan only confirms the fix in E-02. Closing open backlog item `pgcmea`, which describes the same leak, is a backlog lifecycle act for the maintainer and is not part of this plan.
-  - Carrier-Declined: the code fix already exists on HEAD, so no further test change is owed; pgcmea remains its own backlog item.
+- No edit to `tests/test_tui.py`. Commit `25dd11b` already fixed the leak (Finding F-06); this plan only confirms the fix in E-02. Backlog item `pgcmea`, which describes the same leak, is already graduated to plan `whacr3`, which owns `tests/test_tui.py` (confirmation plus a regression guard).
+  - Carrier: whacr3
 - Validation on the full CI matrix (3 operating systems and Python 3.8 to 3.14, per the `AGENTS.md` matrix-validation section) needs a push, and this plan's executor must not push without a human request. The rewritten test keeps the `pytest.skip` path for platforms whose command-line reader returns `None`, so a platform without a working reader skips instead of failing.
   - Carrier-Declined: a push is a human act; the CI matrix runs when the maintainer pushes the integrated change.
 
@@ -148,19 +151,19 @@ N/A. The change affects one test and no user-visible behavior, configuration key
 - Owner: none
 - Resolution or deferral rationale: No. Commit `25dd11b` already restores `sys.modules["pubrun.tui.app"]` with `mock.patch.dict`, and the HEAD copy of `tests/test_tui.py` passes in the order that failed on `a3546cd` (Finding F-06). E-02 confirms this; if E-02 finds a failure, its executor files a new backlog item instead of widening this plan.
 
-### OQ-02: Does plan `4h2qwz` on branch `aw/lane/12rcu8` make this plan redundant?
+### OQ-02: Does plan `4h2qwz` make this plan redundant?
 
 - Blocking: no
 - Status: resolved
 - Owner: none
-- Resolution or deferral rationale: Not on this tree. `4h2qwz` is absent from HEAD and `main`, and its branch moved `12rcu8` back to `open` (Finding F-07). If `4h2qwz` lands first, E-01 finds the child-process body already present, records that in V-01, and makes no edit; E-02 and E-03 still run, because they also cover the TUI tests and the full suite.
+- Resolution or deferral rationale: No. `4h2qwz` is superseded by this plan, and its backlog item `12rcu8` is `done` as a duplicate carried by this plan (Finding F-07). If another change lands the same rewrite first, E-01 finds the child-process body already present, records that in V-01, and makes no edit; E-02 and E-03 still run, because they also cover the TUI tests and the full suite.
 
 ## Validation and cross-check (verify before reporting done)
 
-Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
+Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
 - [ ] V-01 validates E-01
-  - Required evidence: Paste `git diff -- tests/test_liveness.py`. The diff must show that `test_expected_script_matches` starts a child with `subprocess.Popen` running `liveness_probe_script.py` from `tmp_path`, reads a `ready` line before checking, passes `child.pid` to both the functional check and `is_same_process(..., expected_script="liveness_probe_script.py")`, and stops the child in a `finally` block. The diff must not contain `expected_script="pytest"` inside `test_expected_script_matches`, and must change no other test function. If E-01 found the child-process body already present (Finding F-07), paste the current body of `test_expected_script_matches` and the commit that introduced it (`git log -1 --format='%h %s' -S liveness_probe_script -- tests/test_liveness.py`) instead of a diff.
+  - Required evidence: Paste `git diff -- tests/test_liveness.py`. The diff must show that `test_expected_script_matches` starts a child with `subprocess.Popen` running `liveness_probe_script.py` from `tmp_path`, reads a `ready` line before checking, passes `child.pid` to both the functional check and `is_same_process(child.pid, time.time() - 172800, expected_script="liveness_probe_script.py")` (an expected start time outside the 24-hour tolerance), and stops the child in a `finally` block. The diff must not contain `expected_script="pytest"` inside `test_expected_script_matches`, and must change no other test function. If E-01 found the child-process body already present (Finding F-07), paste the current body of `test_expected_script_matches` and the commit that introduced it (`git log -1 --format='%h %s' -S liveness_probe_script -- tests/test_liveness.py`) instead of a diff.
   - Observed evidence:
   - Result: pending
 - [ ] V-02 validates E-02
@@ -168,7 +171,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
   - Observed evidence:
   - Result: pending
 - [ ] V-03 validates E-03
-  - Required evidence: Paste the tail of each P-03 run, including the result line: (1) `python3 -m pytest tests/test_liveness.py -v -p no:xdist` shows `test_expected_script_matches PASSED` and exits 0; (2) `python3 -m pytest tests/test_liveness.py -v -n 2` shows `test_expected_script_matches PASSED` and exits 0; (3) `aw suite --no-cache` exits 0 and its result line reports no failed tests. A `SKIPPED` result for the target test on this Linux host fails this item, because it means the child-process check did not run.
+  - Required evidence: Paste the tail of each P-03 run, including the result line: (1) `python3 -m pytest tests/test_liveness.py -v -p no:xdist` shows `test_expected_script_matches PASSED` and exits 0; (2) `python3 -m pytest tests/test_liveness.py -v -n 2` shows `test_expected_script_matches PASSED` and exits 0; (3) `aw suite --no-cache` exits 0 and its result line reports no failed tests. A `SKIPPED` result for the target test on this Linux host fails this item, because it means the child-process check did not run. Reachability: the test itself (created by E-01) starts the child and calls `pubrun.capture.liveness.is_same_process`, which calls `_check_command_linux` on Linux. Also record one line stating that the `.github/workflows/ci.yml` matrix (Ubuntu, Windows, macOS; Python 3.8 through 3.14) has not run the change locally and remains the gate once the maintainer pushes.
   - Observed evidence:
   - Result: pending
 
@@ -177,4 +180,9 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 - Size assessment: standard
 - Cohesion rationale: not required
 
-A human must approve this plan before execution. The executor changes only `tests/test_liveness.py`, commits through `aw commit <this plan> -- tests/test_liveness.py`, and does not push. After every `E-*` item is `performed` and every `V-*` item is `pass` with pasted evidence, the executor runs `aw ipd lint --phase pre-transition` on this plan. Only when it conforms does the executor perform the lifecycle move of this plan to `.aw/records/plans/executed/`, as defined in `.aw/system/workflows/ipd-lifecycle/ipd-lifecycle.md`.
+Execution contract:
+1. Precondition: wait for human approval (`- Status: approved`) with no unresolved `Blocking: yes` open question before you change code. OQ-01 and OQ-02 are resolved and non-blocking.
+2. Scope declaration: the only expected modified file is the `- Scope-Paths:` entry `tests/test_liveness.py`. If execution requires an out-of-scope file, justify it with `--scope-reason` at finalization. If the declared file needs no edit (E-01 finds the rewrite already present), acknowledge it with `--scope-ack`.
+3. Validation honesty: run each required validation command and paste its actual output into the matching `V-*` `Observed evidence:` field. Do not mark a `V-*` item `pass` without output captured from that run.
+4. Commit discipline: commit only the paths you changed with `aw commit vv4vdd -- tests/test_liveness.py`. Do not use `git add -A` or raw `git commit`. Do not push without an explicit human instruction.
+5. Lifecycle transition: after every `E-*` item is `performed` and every `V-*` item is `pass`, `aw ipd lint --phase pre-transition` must conform. Finalize with `aw ipd finalize vv4vdd`, never with a hand-written `git mv` to `.aw/records/plans/executed/`. Inside a runner lane (`aw oc run` or `aw agy run`), the runner finalizes after the turn. Outside a runner, the executor runs `aw ipd finalize vv4vdd`.
