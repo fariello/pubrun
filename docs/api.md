@@ -486,6 +486,71 @@ When global hooks are permitted by the active import mode and enabled in configu
 
 ---
 
+## 9. Post-hoc Reproducibility Diagnostics
+
+These helpers back `pubrun inspect`, `pubrun rerun --preflight`, `pubrun show`, and the TUI.
+They read a finished run's manifest; they do not track anything. They live in the
+`pubrun.report` subpackage, which `import pubrun` never loads, so using them adds nothing to
+your tracked script's startup. Import them explicitly:
+
+```python
+import json
+from pubrun.report.utils import hydrate_manifest_with_report
+from pubrun.report.checks import assess_run, should_fail_strict
+
+path = "runs/pubrun-XYZ/manifest.json"
+with open(path, encoding="utf-8") as fh:
+    manifest = json.load(fh)
+
+hydrated, warnings, hydration = hydrate_manifest_with_report(path, manifest)
+assessment = assess_run(hydrated, manifest_path=path, hydration_report=hydration, preflight=True)
+print(assessment["summary"])
+print(assessment["next_action"])
+if should_fail_strict(assessment, fail_on="mismatch"):
+    raise SystemExit(1)
+```
+
+### `pubrun.report.utils.hydrate_manifest_with_report(manifest_path, manifest) → (hydrated, warnings, report)`
+
+Fills sections the child did not capture from the parent snapshot named in `meta_ref`, as
+described in [Manifest: Meta Snapshot](manifest.md#meta-snapshot). It returns a new dict and
+does not modify `manifest` or any file. `warnings` is a list of human-readable strings.
+`report` is a `HydrationReport` with `status` (`none`, `hydrated`, `missing`,
+`blocked_by_policy`, `invalid_extension`, `invalid_json`, `invalid_type`, or `failed`),
+`inherited_sections`, `direct_sections`, `age_seconds`, `script_modified_after_parent`,
+`identity_mismatches`, and a `to_dict()` method.
+
+### `pubrun.report.checks.assess_run(manifest, *, manifest_path=None, hydration_report=None, current_hostname=None, preflight=False, cwd=None, check_hashes=True, ...) → dict`
+
+Returns the ten-key assessment documented for
+[`pubrun inspect --json`](cli.md#inspect--post-hoc-run-diagnosis): seven evidence categories,
+findings with evidence statuses, prioritized next actions, the parent snapshot report, and the
+non-guarantee `disclaimer`. Pass the `hydration_report` from `hydrate_manifest_with_report` so
+inherited sections are classified as `inherited`. Pass `current_hostname` to enable the
+different-host finding.
+
+With `preflight=True`, it also compares recorded evidence with the current machine. That
+comparison is read-only and offline: it reads files (for digests, inputs up to 100 MiB by
+default) and runs local `git` queries relative to `cwd`, but it never runs the recorded
+command, installs or fetches anything, or changes files, environment variables, or random
+seeds. `check_hashes=False` skips file digests. The function never raises on malformed input;
+it reports what it could not evaluate.
+
+The CLI additionally merges canonical `file_provenance_*` finding codes into the
+`inputs_outputs` category, so `pubrun inspect --json` can list file-provenance findings that a
+direct `assess_run()` call does not.
+
+### `pubrun.report.checks.should_fail_strict(assessment, *, fail_on="warn") → bool`
+
+Applies the `--strict` / `--fail-on` thresholds (`"warn"`, `"mismatch"`, or `"unknown"`, as
+described in [CLI: inspect](cli.md#inspect--post-hoc-run-diagnosis)) to an assessment. Any
+other `fail_on` value raises `ValueError`.
+
+> A clean assessment is not a guarantee: recorded provenance and an absence of findings support
+> reproduction analysis, but they do not guarantee equivalent scientific or bitwise results.
+
+---
+
 ## API Summary
 
 | Function | Purpose | Safe without active run? |
@@ -507,6 +572,9 @@ When global hooks are permitted by the active import mode and enabled in configu
 | `tracked_run(**kw)` | Context manager lifecycle | N/A (creates run) |
 | `audit_run(**kw)` | Decorator lifecycle | N/A (creates run) |
 | `diff(a, b, ignores)` | Compare two runs | N/A (reads files) |
+| `report.checks.assess_run(manifest, ...)` | Post-hoc reproducibility assessment (optional offline preflight) | N/A (reads a manifest) |
+| `report.checks.should_fail_strict(a, fail_on)` | Apply `--strict` / `--fail-on` thresholds | N/A (pure function) |
+| `report.utils.hydrate_manifest_with_report(path, m)` | In-memory `meta_ref` parent hydration with a report | N/A (reads files) |
 
 ---
 
