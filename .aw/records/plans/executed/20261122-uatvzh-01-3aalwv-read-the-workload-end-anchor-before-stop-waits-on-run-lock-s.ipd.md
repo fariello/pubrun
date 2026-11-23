@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/tracker.py` (`Run.__init__`, `Run.stop`, `Run._finalize_state`), a behavioral regression test in `tests/test_timing_accuracy.py`, the `t2` descriptions in `docs/architecture.md` and `docs/functional_spec.md`, and a `### Fixed` entry in `CHANGELOG.md`.
 - Scope-Paths: src/pubrun/tracker.py, tests/test_timing_accuracy.py, docs/architecture.md, docs/functional_spec.md, CHANGELOG.md
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Take t2 before acquiring _run_lock in Run.stop() and Run._finalize_state() so a coalesced hardware refresh write is counted as finalization overhead, not workload
@@ -19,12 +19,12 @@
 - Highest E allocated: 05
 - Author: OpenCode agent
 - Id: 3aalwv
-- Approval: 2026-11-23, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): aw oc run self-finalize: 3aalwv verified (set uatvzh, attempt 1).
 - 2026-11-23 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-23 to-review (aw set): authored from backlog uatvzh: reproduction on 276236b, fix trial in a scratch copy, fake-clock regression test shown to fail on the base and pass with the fix
