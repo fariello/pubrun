@@ -6,7 +6,7 @@
 - Scope: A session-scoped autouse fixture in `tests/conftest.py` that prepends the repository `src` directory to `os.environ["PYTHONPATH"]` for the test session, plus a new behavioral regression test module `tests/test_subprocess_pythonpath.py`.
 - Scope-Paths: tests/conftest.py, tests/test_subprocess_pythonpath.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Work-Kind: bug
@@ -18,12 +18,12 @@
 - Highest E allocated: 04
 - Author: OpenCode agent
 - Id: 4cy3ft
-- Approval: 2026-11-23, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): aw oc run self-finalize: 4cy3ft verified (set zdkdyg, attempt 1).
 - 2026-11-23 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-23 to-review (OpenCode agent): authored from backlog zdkdyg: reproduction with a subprocess import probe, session fixture design, behavioral regression test.
