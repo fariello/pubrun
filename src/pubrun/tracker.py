@@ -10,7 +10,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from pubrun.config import resolve_config
 from pubrun.writer import ArtifactWriter
@@ -127,6 +127,7 @@ class Run:
         self._workload_end_mono: Optional[float] = None
         self.finalized_at_utc: Optional[float] = None
         self._finalize_end_mono: Optional[float] = None
+        self._stop_anchor: Optional[Tuple[float, float]] = None
         self._hardware_wait_seconds: Optional[float] = None
         self._background_hardware_seconds: Optional[float] = None
         self.writer_overhead_seconds: Optional[float] = None
@@ -1101,18 +1102,25 @@ class Run:
         Every pre-teardown and teardown step runs independently so an error in
         one step never blocks subsequent cleanup or manifest writing.
         """
-        # Set the finalized latch and capture workload-end anchor t2 under _run_lock
-        # before waiting on deferred hardware collection so teardown latency never
-        # inflates workload_seconds and the async hardware thread cannot overwrite
-        # a finalized manifest (IPD 20260721-1425-01).
+        # Read workload-end anchor t2 before acquiring _run_lock (a background
+        # hardware refresh may hold it across a durable manifest write), then set
+        # the finalized latch under _run_lock before waiting on deferred hardware
+        # collection so teardown latency never inflates workload_seconds and the
+        # async hardware thread cannot overwrite a finalized manifest
+        # (IPD 20260721-1425-01, IPD 3aalwv).
         from pubrun.core import _run_lock
+        end_mono = time.perf_counter()
+        end_utc = time.time()
         with _run_lock:
             if self._finalized:
                 return
             self._finalized = True
             if self.is_active:
-                self._workload_end_mono = time.perf_counter()
-                self.ended_at_utc = time.time()
+                stop_anchor = getattr(self, "_stop_anchor", None)
+                if stop_anchor is not None:
+                    end_mono, end_utc = stop_anchor
+                self._workload_end_mono = end_mono
+                self.ended_at_utc = end_utc
                 self.is_active = False
 
         # Pre-teardown step 1: Wait for deferred hardware collection (capped at 2s),
@@ -1383,12 +1391,18 @@ class Run:
         """
         global _active_run
         from pubrun.core import _run_lock
+        # Read t2 before waiting on _run_lock: the pubrun-hw refresh holds it
+        # across a durable manifest write, which is pubrun overhead, not workload.
+        stop_mono = time.perf_counter()
+        stop_utc = time.time()
         with _run_lock:
             if not getattr(self, "_finalized", False) and self._outcome not in ("failed", "ghost"):
                 self._outcome = outcome
             self.ref_count = getattr(self, "ref_count", 1) - 1
             if self.ref_count > 0:
                 return  # Still referenced by an outer wrapper.
+            if getattr(self, "_stop_anchor", None) is None:
+                self._stop_anchor = (stop_mono, stop_utc)
             # Unpublish before finalizing so a concurrent start() never hands
             # out (and ref-counts) a run that is already tearing down (BUG-10).
             if _active_run is self:

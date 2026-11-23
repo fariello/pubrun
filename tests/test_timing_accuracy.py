@@ -691,3 +691,92 @@ def test_no_raw_monotonic_counter_values_leaked_in_manifest(monkeypatch):
 
     _walk(manifest)
     assert manifest["timing"]["workload_seconds"] == pytest.approx(0.05, abs=1e-9)
+
+
+def _stall_refresh_write(monkeypatch, clock: FakeClock, stall_seconds: float):
+    """Stall the coalesced hardware refresh write, advancing the fake clock by the stall."""
+    refresh_entered = threading.Event()
+    release_refresh = threading.Event()
+    original = writer_mod.ArtifactWriter.write_startup_manifest
+
+    def stalled(self, *args, is_refresh: bool = False, **kwargs):
+        if is_refresh:
+            refresh_entered.set()
+            release_refresh.wait(timeout=5.0)
+            clock.advance(stall_seconds)
+        return original(self, *args, is_refresh=is_refresh, **kwargs)
+
+    monkeypatch.setattr(writer_mod.ArtifactWriter, "write_startup_manifest", stalled)
+    return refresh_entered, release_refresh
+
+
+def _start_with_pending_hardware(monkeypatch):
+    """Start a run whose hardware capture completes only after start() returns."""
+    release_hw = threading.Event()
+
+    def pending_hw(config):
+        release_hw.wait(timeout=5.0)
+        return {"capture_state": {"status": "complete"}}
+
+    monkeypatch.setattr(tracker_mod, "get_hardware", pending_hw)
+    monkeypatch.setattr(
+        tracker_mod,
+        "get_host",
+        lambda config: {"capture_state": {"status": "complete"}},
+    )
+    import pubrun.capture.filesystem as fs_mod
+
+    monkeypatch.setattr(
+        fs_mod,
+        "get_filesystem",
+        lambda config, paths: {"capture_state": {"status": "complete"}},
+    )
+
+    try:
+        run = start()
+    finally:
+        release_hw.set()
+    return run
+
+
+@pytest.mark.parametrize("entry", ["run_stop", "write_artifacts"])
+def test_stalled_hardware_refresh_write_isolated_from_workload(monkeypatch, entry):
+    clock = _install_fake_clock(monkeypatch, wall=1_750_000_000.0, mono=1100.0)
+    refresh_entered, release_refresh = _stall_refresh_write(monkeypatch, clock, 0.40)
+
+    run = None
+    try:
+        run = _start_with_pending_hardware(monkeypatch)
+        assert refresh_entered.wait(timeout=5.0)
+
+        clock.advance(0.02)
+        if entry == "run_stop":
+            target = lambda: run.stop(outcome="completed")  # noqa: E731
+        else:
+            target = run.writer.write_artifacts
+        finisher = threading.Thread(target=target, name="test-finisher")
+        finisher.start()
+
+        # The finishing call must be blocked behind the refresh holding _run_lock.
+        finisher.join(timeout=0.2)
+        assert finisher.is_alive()
+
+        release_refresh.set()
+        finisher.join(timeout=5.0)
+        assert not finisher.is_alive()
+        run._hardware_thread.join(timeout=5.0)
+
+        timing = _read_manifest(run.run_dir)["timing"]
+        assert timing["workload_seconds"] == pytest.approx(0.02, abs=1e-9)
+        assert timing["elapsed_seconds"] == pytest.approx(0.02, abs=1e-9)
+        assert timing["finalization_overhead_seconds"] == pytest.approx(0.40, abs=1e-9)
+        assert timing["session_seconds"] == pytest.approx(
+            timing["startup_overhead_seconds"]
+            + timing["workload_seconds"]
+            + timing["finalization_overhead_seconds"],
+            abs=1e-9,
+        )
+    finally:
+        release_refresh.set()
+        if run is not None and getattr(run, "_hardware_thread", None):
+            run._hardware_thread.join(timeout=5.0)

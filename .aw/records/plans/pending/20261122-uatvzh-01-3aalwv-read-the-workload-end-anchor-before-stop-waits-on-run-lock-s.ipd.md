@@ -66,38 +66,38 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Fix the anchor
 
-- [ ] E-01 In `src/pubrun/tracker.py`, read the `t2` clocks before `Run.stop()` and `Run._finalize_state()` acquire `_run_lock`, and store the reading that `Run.stop()` took.
+- [x] E-01 In `src/pubrun/tracker.py`, read the `t2` clocks before `Run.stop()` and `Run._finalize_state()` acquire `_run_lock`, and store the reading that `Run.stop()` took.
   - Depends on: none
   - Expected outcome: Four changes, and no others. (1) The `typing` import at the top of the file adds `Tuple` (`from typing import Any, Dict, Optional, Tuple`). (2) `Run.__init__` initializes `self._stop_anchor: Optional[Tuple[float, float]] = None` next to the other timing anchors (after `self._finalize_end_mono`). (3) `Run.stop()` reads `stop_mono = time.perf_counter()` and `stop_utc = time.time()` immediately before its first `with _run_lock:` block. Inside that block, after the `if self.ref_count > 0: return` check, it sets `self._stop_anchor = (stop_mono, stop_utc)` only when `self._stop_anchor` is `None`. A nested `stop()` that only decrements `ref_count` therefore records nothing, and a repeated `stop()` keeps the first reading. A two-line comment above the reads states that the `pubrun-hw` refresh holds `_run_lock` across a durable manifest write. (4) `Run._finalize_state()` reads `end_mono = time.perf_counter()` and `end_utc = time.time()` immediately before its first `with _run_lock:` block. Inside that block, in the existing `if self.is_active:` branch, it replaces `end_mono` and `end_utc` with `self._stop_anchor` when that attribute is not `None`, assigns them to `self._workload_end_mono` and `self.ended_at_utc`, and sets `self.is_active = False` as before. The comment above that block changes from "under _run_lock" to say that `t2` is read before `_run_lock` is acquired and the latch is set under it. The latch (`self._finalized = True`), the early return when already finalized, the hardware wait, and the `_run_lock` before `_write_lock` order are unchanged. The existing `_run_lock` import line in each method is left as it is (plan `updt75` in Set `tmngjn` may change it to `from pubrun.core import _run_lock`; this plan does not depend on which form is present). Insert the new reads between that import line and the `with _run_lock:` line, whichever import form is present; if the worktree merge reports a conflict on those lines against `updt75`, keep `updt75`'s import line and this plan's reads.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Regression test
 
-- [ ] E-02 Add a parametrized regression test to `tests/test_timing_accuracy.py` that stalls the coalesced refresh write and asserts that `workload_seconds` stays equal to the simulated workload.
+- [x] E-02 Add a parametrized regression test to `tests/test_timing_accuracy.py` that stalls the coalesced refresh write and asserts that `workload_seconds` stays equal to the simulated workload.
   - Depends on: E-01
   - Expected outcome: The file gains two helpers and one test, all using the file's existing `FakeClock`, `_install_fake_clock`, and `_read_manifest`. (1) `_stall_refresh_write(monkeypatch, clock, stall_seconds)` replaces `writer_mod.ArtifactWriter.write_startup_manifest` with a wrapper that, only when `is_refresh` is true, sets a `refresh_entered` event, waits up to 5 s on a `release_refresh` event, advances the fake clock by `stall_seconds`, and then calls the original method. It returns both events. (2) `_start_with_pending_hardware(monkeypatch)` stubs `tracker_mod.get_hardware` to block on an event until after `start()` returns, stubs `tracker_mod.get_host` and `pubrun.capture.filesystem.get_filesystem` to return `{"capture_state": {"status": "complete"}}`, calls `start()`, releases the hardware stub, and returns the run. Because hardware is still pending when the startup manifest is written, the refresh always runs. (3) `test_stalled_hardware_refresh_write_isolated_from_workload` is parametrized over `entry` in `["run_stop", "write_artifacts"]`. It installs the fake clock, stalls the refresh by 0.40 s, starts the run, waits for `refresh_entered`, advances the clock by 0.02 s, and calls `run.stop(outcome="completed")` (for `run_stop`) or `run.writer.write_artifacts()` (for `write_artifacts`, the `atexit` and signal path) on a separate thread. It asserts that this thread has not finished 0.2 s later, which proves the call is blocked behind the refresh. It then sets `release_refresh`, joins the thread and `run._hardware_thread`, and asserts from the written manifest that `workload_seconds` and `elapsed_seconds` equal `0.02`, `finalization_overhead_seconds` equals `0.40` (each with `pytest.approx(..., abs=1e-9)`), and `session_seconds` equals the sum of the three disjoint intervals. A `finally` block sets `release_refresh` and joins `run._hardware_thread` so a failure cannot leave a thread waiting. No test reads production source code, counts calls, or inspects private lock state.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Documentation
 
-- [ ] E-03 Update the `t2` descriptions in `docs/architecture.md` and `docs/functional_spec.md`.
+- [x] E-03 Update the `t2` descriptions in `docs/architecture.md` and `docs/functional_spec.md`.
   - Depends on: E-01
   - Expected outcome: In `docs/architecture.md`, section "Timing anchors", the `t2` bullet states that `stop()` (or `_finalize_state()` when it is reached without `stop()`, as from the `atexit` safety net) reads `t2` before acquiring `_run_lock`, and that `_finalize_state()` then latches `_finalized` under `_run_lock` before waiting for background hardware capture. It keeps the sentence "`t2 - t1` is `workload_seconds`, the observed tracked workload." In `docs/functional_spec.md`, section "19.2 Finalization Lifecycle", item 2, the first sub-bullet states the same order: `t2` (`ended_at_utc` plus an in-memory monotonic reading) is read before `_run_lock` is acquired, so neither waiting for `_run_lock` (for example behind a background hardware manifest refresh) nor teardown latency inflates `workload_seconds`; `_finalized = True` is still latched under `_run_lock`. No other line in either file changes.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Changelog
 
-- [ ] E-04 Add a `### Fixed` entry to the `## [Unreleased]` section of `CHANGELOG.md`.
+- [x] E-04 Add a `### Fixed` entry to the `## [Unreleased]` section of `CHANGELOG.md`.
   - Depends on: E-01
   - Expected outcome: The `### Fixed` list under `## [Unreleased]` gains an entry with a bold one-line title followed by two to four sentences. The entry states that a `stop()` call made while the background hardware capture was rewriting `manifest.json` could add that write (tens to hundreds of milliseconds with the default fsynced durability on a slow disk) to `workload_seconds`, that the time is now reported in `finalization_overhead_seconds`, and that a regression test covers both `stop()` and the `atexit` write path. The added lines contain no em or en dash, because `CHANGELOG.md` is user-facing.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 5: Verification
 
-- [ ] E-05 Run the new test, the neighboring timing and lifecycle suites, the reproduction script, the example, and the full test suite.
+- [x] E-05 Run the new test, the neighboring timing and lifecycle suites, the reproduction script, the example, and the full test suite.
   - Depends on: E-02, E-03, E-04
   - Expected outcome: `python3 -m pytest tests/test_timing_accuracy.py -v --no-cov` passes every case, including both `test_stalled_hardware_refresh_write_isolated_from_workload` cases. `python3 -m pytest tests/test_timing_accuracy.py tests/test_startup_overhead_writes.py tests/test_capture_isolation.py tests/test_core_lifecycle_bugs.py tests/test_tracker.py tests/test_writer.py tests/test_status.py -q --no-cov` and `python3 -m pytest -q` finish with zero failures, or with only failures that also occur on the unchanged base commit and that `V-05` names. The reproduction script from `## Findings`, run with its run directory on the repository disk, prints a `workload excess ms` median below 1 ms. Eight runs of `PYTHONPATH=src python3 examples/05_execution_phases.py`, started from the repository root so that their run directories land in the gitignored `runs/` directory on the repository disk, print a tracked workload below 40 ms each. Afterwards, delete only the run directories these eight runs created.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -210,30 +210,52 @@ Choice of fix: the backlog item suggests two possible fixes. This plan reads `t2
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: The pasted `git diff -- src/pubrun/tracker.py`, showing only the `Tuple` import, the `_stop_anchor` initialization in `Run.__init__`, the pre-lock reads and anchor assignment in `Run.stop`, and the pre-lock reads and anchor use in `Run._finalize_state`, with the `_finalized` latch, the early return, and the hardware wait unchanged.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff -- src/pubrun/tracker.py` (lane, 2026-11-23): four hunks only. (1) `-from typing import Any, Dict, Optional` / `+from typing import Any, Dict, Optional, Tuple`. (2) `+        self._stop_anchor: Optional[Tuple[float, float]] = None` after `_finalize_end_mono`. (3) `Run._finalize_state`: `+        end_mono = time.perf_counter()` / `+        end_utc = time.time()` between `from pubrun.core import _run_lock` and `with _run_lock:`; inside `if self.is_active:` `+                stop_anchor = getattr(self, "_stop_anchor", None)` / `+                if stop_anchor is not None:` / `+                    end_mono, end_utc = stop_anchor` / `+                self._workload_end_mono = end_mono` / `+                self.ended_at_utc = end_utc`; comment rewritten to say t2 is read before `_run_lock` and the latch is set under it. `if self._finalized: return`, `self._finalized = True`, `self.is_active = False`, and the hardware wait block are unchanged context lines. (4) `Run.stop`: comment plus `+        stop_mono = time.perf_counter()` / `+        stop_utc = time.time()` before `with _run_lock:`; after `return  # Still referenced by an outer wrapper.` `+            if getattr(self, "_stop_anchor", None) is None:` / `+                self._stop_anchor = (stop_mono, stop_utc)`.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `python3 -m pytest tests/test_timing_accuracy.py -v --no-cov` output listing `test_stalled_hardware_refresh_write_isolated_from_workload[run_stop]` and `test_stalled_hardware_refresh_write_isolated_from_workload[write_artifacts]` as PASSED with no failed case. Also the pasted output of the `-k stalled` run in the temporary pre-fix worktree described under `## Required tests / validation`, showing both cases FAILED on the `workload_seconds` assertion (about `0.42 == 0.02`), plus the pasted `git worktree list` after removal. The test reaches the changed code through `Run.stop` and `ArtifactWriter.write_artifacts`, which call `Run._finalize_state`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_timing_accuracy.py -v --no-cov`:
+    tests/test_timing_accuracy.py::test_stalled_hardware_refresh_write_isolated_from_workload[run_stop] PASSED [ 94%]
+    tests/test_timing_accuracy.py::test_stalled_hardware_refresh_write_isolated_from_workload[write_artifacts] PASSED [100%]
+    ============================== 17 passed in 2.50s ==============================
+  Pre-fix worktree (`git worktree add /tmp/opencode/3aalwv-prefix HEAD`, new test file copied in, `-k stalled -v --no-cov`):
+    tests/test_timing_accuracy.py::test_stalled_hardware_refresh_write_isolated_from_workload[run_stop] FAILED [ 50%]
+    tests/test_timing_accuracy.py::test_stalled_hardware_refresh_write_isolated_from_workload[write_artifacts] FAILED [100%]
+    E           assert 0.42000000000007276 == 0.02 ± 1.0e-09
+    E           assert 0.42000000000007276 == 0.02 ± 1.0e-09
+    ======================= 2 failed, 15 deselected in 0.80s =======================
+  After `git worktree remove --force /tmp/opencode/3aalwv-prefix`: `git worktree list | grep -c 3aalwv-prefix` printed `0`.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: The pasted `git diff -- docs/architecture.md docs/functional_spec.md`, showing only the `t2` bullet in "Timing anchors" and the first sub-bullet of item 2 in "19.2 Finalization Lifecycle" changed, each stating that `t2` is read before `_run_lock` is acquired.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff -- docs/architecture.md docs/functional_spec.md`: one changed line in each. architecture.md "Timing anchors" `t2` bullet now reads: "`stop()` (or `_finalize_state()` when it is reached without `stop()`, as from the `atexit` safety net) reads `t2` before acquiring `_run_lock`, so waiting behind a background hardware manifest refresh is not counted as workload. `_finalize_state()` then latches `_finalized` under `_run_lock` before waiting for background hardware capture. `t2 - t1` is `workload_seconds`, the observed tracked workload." functional_spec.md 19.2 item 2 first sub-bullet now reads: "Uses the workload-end anchor `t2` (`ended_at_utc` plus an in-memory monotonic reading) read before `_run_lock` is acquired (by `stop()` when it is called, otherwise by `_finalize_state()` itself), so neither waiting for `_run_lock` (for example behind a background hardware manifest refresh) nor teardown latency inflates `workload_seconds`. `_finalized = True` is still latched under `_run_lock`, before waiting for background hardware."
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: The pasted `git diff -- CHANGELOG.md` hunk, showing the entry under `## [Unreleased]` / `### Fixed` with the facts E-04 lists, and the pasted dash count `0`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff -- CHANGELOG.md`: under `## [Unreleased]` / `### Fixed`, first entry added: "**`workload_seconds` no longer includes a background manifest refresh write.** A `stop()` call made while the background hardware capture was rewriting `manifest.json` waited for that write and counted it as workload; with the default fsynced durability on a slow disk this added tens to hundreds of milliseconds. The end of the workload is now recorded before that wait, so the time is reported in `finalization_overhead_seconds` instead. A regression test covers both `stop()` and the `atexit` write path." Dash count over added lines in CHANGELOG.md and docs/: `0`.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted summary lines of the neighboring-suite command and of `python3 -m pytest -q`, each with zero failures; any failure must also be shown to occur on the base commit, with its pasted base-commit output. The pasted two lines of the reproduction script with a `workload excess ms` median below 1 ms, and the eight pasted "tracked workload" lines from `examples/05_execution_phases.py` run from the repository root, each below 40 ms. Both programs call `pubrun.start()` and `Run.stop()`, which reach the `Run.stop` and `Run._finalize_state` code that E-01 changes.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Neighboring suites (`python3 -m pytest tests/test_timing_accuracy.py tests/test_startup_overhead_writes.py tests/test_capture_isolation.py tests/test_core_lifecycle_bugs.py tests/test_tracker.py tests/test_writer.py tests/test_status.py -q --no-cov`): `214 passed, 2 skipped in 32.14s`. Full suite (`aw suite`, which runs pytest with coverage): `======================= 1872 passed in 142.73s (0:02:22) =======================`. Reproduction script, run directory on the repository disk (inside the lane worktree, removed afterwards):
+    workload excess ms: median=0.11 max=0.18
+    finalization overhead ms: median=41.36 max=1255.97
+  Eight runs of `PYTHONPATH=src python3 examples/05_execution_phases.py` from the lane root:
+    tracked workload (start() returned to stop() called): 20.9 ms
+    tracked workload (start() returned to stop() called): 21.0 ms
+    tracked workload (start() returned to stop() called): 20.9 ms
+    tracked workload (start() returned to stop() called): 20.7 ms
+    tracked workload (start() returned to stop() called): 21.3 ms
+    tracked workload (start() returned to stop() called): 20.7 ms
+    tracked workload (start() returned to stop() called): 21.4 ms
+    tracked workload (start() returned to stop() called): 21.2 ms
+  The eight new `runs/pubrun-05_execution_phases-20261123T1607*` directories were deleted; `runs/` went back to its 4 earlier entries.
+  - Result: pass
 
 ## Approval and execution gate
 

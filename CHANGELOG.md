@@ -103,6 +103,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **`workload_seconds` no longer includes a background manifest refresh write.** A `stop()` call made
+  while the background hardware capture was rewriting `manifest.json` waited for that write and counted
+  it as workload; with the default fsynced durability on a slow disk this added tens to hundreds of
+  milliseconds. The end of the workload is now recorded before that wait, so the time is reported in
+  `finalization_overhead_seconds` instead. A regression test covers both `stop()` and the `atexit`
+  write path.
 - **Hardware, host, and filesystem capture no longer fails under `import pubrun.auto`, `pubrun.full`,
   `pubrun.nopatch`, or `pubrun.noconsole`.** These imports could print
   `Exception in thread pubrun-hw: ... ImportError: cannot import name '_run_lock'` and leave the
