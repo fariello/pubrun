@@ -61,38 +61,38 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Reproduce the defect
 
-- [ ] E-01 Before changing any code, run the reproduction command in `## Required tests / validation` on the unchanged tree and record its output.
+- [x] E-01 Before changing any code, run the reproduction command in `## Required tests / validation` on the unchanged tree and record its output.
   - Depends on: none
   - Expected outcome: The command prints `deep exit=0 policy=warn` and `user exit=0 policy=warn`, which shows that `on_conflict = "error"` in `./.config/pubrun/config.toml` and in the user config file is ignored. When this plan was authored (commit `296feab`, CPython 3.14.6), the command printed exactly those two lines.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Multi-file key reader in `src/pubrun/_config_boot.py`
 
-- [ ] E-02 Add a private function `_read_boot_toml_key(section, key, valid)` to `src/pubrun/_config_boot.py` that returns the first acceptable value of `[section].key` across `_boot_config_paths()`.
+- [x] E-02 Add a private function `_read_boot_toml_key(section, key, valid)` to `src/pubrun/_config_boot.py` that returns the first acceptable value of `[section].key` across `_boot_config_paths()`.
   - Depends on: E-01
   - Expected outcome: The function iterates `_boot_config_paths()` in order, parses each file at most once with `_load_toml_file`, and extracts the value with `_extract_toml_key`. `valid` is a required collection of lowercase strings; the function has no "accept any value" mode, because no caller needs one. It returns the first value whose `.strip().lower()` is in `valid`, already normalized to that lowercase form, and skips other values. Because of `.strip()`, a value with surrounding spaces such as `" error "` is now accepted, as `resolve_import_mode` already accepts `[imports].mode`. It returns `None` when no file supplies an acceptable value. It never raises: a missing file, an unreadable file, a malformed file, or a non-dict section falls through, as `_load_toml_file` and `_extract_toml_key` already guarantee. The module docstring's resolution-order list gains one sentence stating that `[imports].on_conflict` is read from the same files in the same order by this function. `_read_local_toml_key`, `_load_local_toml`, and `resolve_import_mode` keep their current behavior, so the existing test `tests/test_commit_identity.py::TestConfigBootSingleRead::test_read_local_toml_key_preserved_for_bootstrap_conflict_policy` still passes unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Switch the conflict policy in `src/pubrun/_bootstrap.py`
 
-- [ ] E-03 Make `_bootstrap._resolve_conflict_policy` read the config value through `_read_boot_toml_key("imports", "on_conflict", valid=("ignore", "warn", "error"))` instead of `_read_local_toml_key("imports", "on_conflict")`.
+- [x] E-03 Make `_bootstrap._resolve_conflict_policy` read the config value through `_read_boot_toml_key("imports", "on_conflict", valid=("ignore", "warn", "error"))` instead of `_read_local_toml_key("imports", "on_conflict")`.
   - Depends on: E-02
   - Expected outcome: The environment variable `PUBRUN_IMPORT_CONFLICT` is still checked first and still wins. The config lookup is the multi-file reader, so the flow in `## Goal` holds. The default stays `"warn"`. The result is still cached in the module global `_conflict_policy`, and `reset_state()` still clears it. The import of the reader stays lazy (inside the function), as it is today, so module import cost does not change. The messages of `PubrunImportModeConflictWarning` and `PubrunImportModeConflictError` do not change.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Behavioral tests
 
-- [ ] E-04 Add a `TestBootConflictPolicyDiscovery` class to `tests/test_config_capture_modes.py` that proves the policy is read from each file and in the documented precedence.
+- [x] E-04 Add a `TestBootConflictPolicyDiscovery` class to `tests/test_config_capture_modes.py` that proves the policy is read from each file and in the documented precedence.
   - Depends on: E-03
   - Expected outcome: Every test uses the existing `isolated_home` fixture and `_write` helper in that file, deletes `PUBRUN_IMPORT_CONFLICT` with `monkeypatch.delenv(..., raising=False)`, calls `pubrun._bootstrap.reset_state()` before it acts, and triggers a conflict through the public bootstrap calls `select_mode("auto", "pubrun", "default")` followed by `select_mode("minimal", "pubrun.minimal", "explicit")`. The class contains these tests. (1) Project deep file: `on_conflict = "error"` in `tmp_path / ".config" / "pubrun" / "config.toml"` makes the second `select_mode` raise `PubrunImportModeConflictError`. (2) User file: with `_non_windows(monkeypatch)`, `on_conflict = "error"` in `isolated_home / ".config" / "pubrun" / "config.toml"` makes it raise. (3) User file under `XDG_CONFIG_HOME`: with `_non_windows(monkeypatch)` and `XDG_CONFIG_HOME` set to a temporary directory containing `pubrun/config.toml` with `"error"`, it raises. (4) Windows user file: with `sys.platform` patched to `"win32"` and `APPDATA` set to a temporary directory containing `pubrun/config.toml` with `"error"`, it raises. (5) Precedence: `./.pubrun.toml` with `"ignore"` and the deep file with `"error"` produce no `PubrunImportModeConflictWarning` and no exception (checked with `warnings.catch_warnings(record=True)` and `simplefilter("always")`). The test then deletes `.pubrun.toml`, calls `reset_state()`, repeats both `select_mode` calls, and asserts that the second call raises. (6) Fall-through: `./.pubrun.toml` with `on_conflict = "bogus"` and the deep file with `"error"` raise. (7) Malformed higher file: a `./.pubrun.toml` that is not valid TOML and the deep file with `"error"` raise. (8) Environment wins: `PUBRUN_IMPORT_CONFLICT=ignore` with the deep file set to `"error"` produces no `PubrunImportModeConflictWarning` and no exception. (9) Default: with no config file, the conflict emits exactly one `PubrunImportModeConflictWarning`. (10) End to end in a subprocess: with the deep file set to `"error"`, `PUBRUN_AUTO_START=false`, `PUBRUN_IMPORT_CONFLICT` and `PUBRUN_IMPORT_MODE` removed, `HOME`/`XDG_CONFIG_HOME` pointing at the isolated home, and this repository's `src` directory (`Path(__file__).resolve().parents[1] / "src"`) prepended to `PYTHONPATH`, running `[sys.executable, "-c", "import pubrun, pubrun.minimal"]` with `cwd=tmp_path` and a timeout exits nonzero and its stderr contains `PubrunImportModeConflictError`. The `PYTHONPATH` prefix is required because pytest's `pythonpath = ["src"]` setting does not reach a child process: without it, the child imports whatever `pubrun` is installed (for example, an editable install of a different checkout), not the code under test. `tests/test_capture_isolation.py::_worktree_env` uses the same prefix. No test reads production source code, counts calls, or measures time.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 5: Verification and documentation
 
-- [ ] E-05 Run the targeted and full test suites and the reproduction command on the changed tree, then update `docs/configuration.md` and `CHANGELOG.md`.
+- [x] E-05 Run the targeted and full test suites and the reproduction command on the changed tree, then update `docs/configuration.md` and `CHANGELOG.md`.
   - Depends on: E-04
   - Expected outcome: `python3 -m pytest tests/test_config_capture_modes.py tests/test_import_modes.py tests/test_commit_identity.py -v --no-cov` and `python3 -m pytest -q` each finish with zero failures. The reproduction command prints `deep exit=1 policy=error` and `user exit=1 policy=error`. In `docs/configuration.md`, the paragraph under `## Configuration Discovery` that begins "The import mode chosen at `import pubrun` time" gains one sentence stating that `[imports].on_conflict` is read from the same files in the same order, that the first file with a valid value decides, and that `PUBRUN_IMPORT_CONFLICT` overrides all files. In `CHANGELOG.md`, the first `### Fixed` list under `## [Unreleased]` gains one bullet stating that `[imports].on_conflict` set in `./.config/pubrun/config.toml` or in the user config file is no longer ignored. The added lines in both files contain no em dash or en dash.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -168,30 +168,74 @@ REPO="$PWD"; R=/tmp/opencode/ql671s-repro; rm -rf "$R"; mkdir -p "$R/proj/.confi
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: The pasted reproduction output showing `deep exit=0 policy=warn` and `user exit=0 policy=warn`, with the pasted `git rev-parse --short HEAD`, and an empty `git diff --stat -- src/` captured at the same time, which shows the reproduction ran before any code change. The command reaches `_bootstrap.select_mode` through the `import pubrun.minimal` conflict and `_bootstrap._resolve_conflict_policy` through the direct call.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Run in lane worktree before any edit. `git rev-parse --short HEAD` -> `5e4ae3e`; `git diff --stat -- src/` -> (empty). Reproduction output:
+    ```
+    deep exit=0 policy=warn
+    user exit=0 policy=warn
+    ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: The pasted `git diff -- src/pubrun/_config_boot.py` showing `_read_boot_toml_key` iterating `_boot_config_paths()` with `_load_toml_file` and `_extract_toml_key`, the required `valid` filter with `.strip().lower()` normalization, the `None` return, the module docstring sentence, and no change to `_read_local_toml_key`, `_load_local_toml`, or `resolve_import_mode`. The pasted targeted pytest output, re-derived at execution time, showing passing tests that pin two unchanged behaviors: `_read_local_toml_key` still reads `[imports].on_conflict` from `./.pubrun.toml` (pointer, not a bar: `tests/test_commit_identity.py::TestConfigBootSingleRead`), and `resolve_import_mode` still searches the three files with the same precedence and fall-through (pointer: `tests/test_config_capture_modes.py::TestBootDiscovery`).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Commit `4572ffe`. `git diff -- src/pubrun/_config_boot.py` adds `Collection` to the typing import, a module-docstring sentence ("The import-conflict policy ``[imports].on_conflict`` is read from the same config files in the same order by ``_read_boot_toml_key``."), and:
+    ```
+    def _read_boot_toml_key(section: str, key: str, valid: Collection[str]) -> Optional[str]:
+        for toml_path in _boot_config_paths():
+            value = _extract_toml_key(_load_toml_file(toml_path), section, key)
+            if value is None:
+                continue
+            normalized = value.strip().lower()
+            if normalized in valid:
+                return normalized
+        return None
+    ```
+    No hunk touches `_read_local_toml_key`, `_load_local_toml`, or `resolve_import_mode`. Targeted run (`python3 -m pytest tests/test_config_capture_modes.py tests/test_import_modes.py tests/test_commit_identity.py -v --no-cov`): `TestConfigBootSingleRead::test_read_local_toml_key_preserved_for_bootstrap_conflict_policy PASSED`; all 15 `TestBootDiscovery` tests (including `test_precedence_pubrun_toml_over_deep_over_user`, `test_invalid_mode_in_higher_file_falls_through`, `test_malformed_higher_file_is_skipped`) PASSED; summary `182 passed in 45.54s`.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: The pasted `git diff -- src/pubrun/_bootstrap.py` showing `_resolve_conflict_policy` calling `_read_boot_toml_key("imports", "on_conflict", valid=("ignore", "warn", "error"))` after the unchanged `PUBRUN_IMPORT_CONFLICT` check, with the `"warn"` default and the `_conflict_policy` cache unchanged. The pasted targeted pytest output, re-derived at execution time, showing that the existing conflict-detection tests still pass, which pins the unchanged environment-variable policy, default warning, and same-mode no-conflict behavior (pointer, not a bar: `tests/test_import_modes.py::TestConflictDetection`).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff -- src/pubrun/_bootstrap.py`:
+    ```
+    -    from pubrun._config_boot import _read_local_toml_key
+    -    config_policy = _read_local_toml_key("imports", "on_conflict")
+    -    if config_policy and config_policy.lower() in ("ignore", "warn", "error"):
+    -        _conflict_policy = config_policy.lower()
+    +    from pubrun._config_boot import _read_boot_toml_key
+    +    config_policy = _read_boot_toml_key(
+    +        "imports", "on_conflict", valid=("ignore", "warn", "error")
+    +    )
+    +    if config_policy is not None:
+    +        _conflict_policy = config_policy
+    ```
+    The env check above and the `_conflict_policy = "warn"` default below are unchanged; import remains inside the function. Targeted run: `TestConflictDetection::test_same_mode_no_conflict`, `test_different_mode_warns_by_default`, `test_different_mode_errors_when_configured`, `test_different_mode_silent_when_ignore`, `test_first_mode_wins`, `test_conflict_records_core_loaded_state`, `test_max_requests_limit` all PASSED (182 passed).
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: The pasted targeted pytest `-v` output, re-derived at execution time, with each of the ten behaviors in E-04 mapped to the passing test that pins it (test names are pointers, not the bar): project deep file raises, user file raises, `XDG_CONFIG_HOME` user file raises, Windows `APPDATA` user file raises, `./.pubrun.toml` `"ignore"` beats the deep file `"error"` and the deep file decides once `./.pubrun.toml` is removed, an invalid higher value falls through, a malformed higher file falls through, `PUBRUN_IMPORT_CONFLICT` beats every file, the default emits one `PubrunImportModeConflictWarning`, and a child process with the deep file set to `"error"` exits nonzero with `PubrunImportModeConflictError` in stderr. The pasted test source for behavior (10) showing that the child's `PYTHONPATH` starts with this repository's `src` directory. Tests (1) to (9) reach `_resolve_conflict_policy` through the public `select_mode` call; test (10) reaches it through a real `import pubrun.minimal` in a child process.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Targeted `-v` run, `TestBootConflictPolicyDiscovery` (all PASSED): (1) `test_project_deep_config_is_read`; (2) `test_user_global_config_is_read`; (3) `test_xdg_config_home_is_honored`; (4) `test_appdata_on_windows_is_honored`; (5) `test_precedence_pubrun_toml_over_deep` (ignore silent, then raises after unlink); (6) `test_invalid_value_in_higher_file_falls_through`; (7) `test_malformed_higher_file_is_skipped`; (8) `test_env_beats_all_files`; (9) `test_no_files_warns_once`; (10) `test_child_process_import_conflict_raises`. Test (10) source excerpt:
+    ```
+    _REPO_SRC = str(Path(__file__).resolve().parents[1] / "src")
+    ...
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{_REPO_SRC}{os.pathsep}{existing}" if existing else _REPO_SRC
+    res = subprocess.run([sys.executable, "-c", "import pubrun, pubrun.minimal"], cwd=str(tmp_path), env=env, capture_output=True, text=True, timeout=60)
+    assert res.returncode != 0
+    assert "PubrunImportModeConflictError" in res.stderr
+    ```
+    The class's autouse fixture deletes `PUBRUN_IMPORT_CONFLICT`; each helper calls `_bootstrap.reset_state()` before `select_mode("auto", "pubrun", "default")` then `select_mode("minimal", "pubrun.minimal", "explicit")`.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: The pasted `python3 -m pytest -q` summary line with zero failures. The pasted post-change reproduction output showing `deep exit=1 policy=error` and `user exit=1 policy=error`. The pasted `git diff -- docs/configuration.md CHANGELOG.md` showing the new `on_conflict` sentence under `## Configuration Discovery` and the new `### Fixed` bullet under `## [Unreleased]`, and the pasted dash-check output `0`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Full suite via `aw suite` (runs pytest with coverage): `======================= 1849 passed in 151.62s (0:02:31) =======================`. Post-change reproduction:
+    ```
+    deep exit=1 policy=error
+    user exit=1 policy=error
+    ```
+    `git diff -- docs/configuration.md CHANGELOG.md`: `docs/configuration.md` line 23 gains "The import-conflict policy `[imports].on_conflict` is read from the same files in the same order; the first file with a valid value (`ignore`, `warn`, or `error`) decides, and `PUBRUN_IMPORT_CONFLICT` overrides all files."; `CHANGELOG.md` first `### Fixed` under `## [Unreleased]` gains the bullet "**`[imports].on_conflict` set in `./.config/pubrun/config.toml` or in the user config file is no longer ignored.** ...". Dash check output: `0`.
+  - Result: pass
 
 ## Approval and execution gate
 
