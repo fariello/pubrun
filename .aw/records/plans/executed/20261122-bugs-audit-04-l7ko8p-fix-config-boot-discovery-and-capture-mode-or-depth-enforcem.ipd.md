@@ -5,8 +5,9 @@
 - Concern: Bugs and correctness (configuration discovery parity at boot, non-mutating config resolution, environment allowlist mode, and per-collector `depth = "off"` enforcement).
 - Scope: `src/pubrun/_config_boot.py`, `src/pubrun/config.py`, `src/pubrun/capture/environment.py`, `src/pubrun/capture/git.py`, `src/pubrun/capture/host.py`, `src/pubrun/capture/process.py`, `src/pubrun/capture/python_runtime.py`, `src/pubrun/resources/default.toml`, `docs/configuration.md`, and regression tests in `tests/test_config_capture_modes.py`.
 - Scope-Paths: src/pubrun/_config_boot.py, src/pubrun/config.py, src/pubrun/capture/environment.py, src/pubrun/capture/git.py, src/pubrun/capture/host.py, src/pubrun/capture/process.py, src/pubrun/capture/python_runtime.py, src/pubrun/resources/default.toml, docs/configuration.md, tests/test_config_capture_modes.py
+- Scope-Exceeded: .aw/records/backlog/open/20261122-2rhs16-01-2rhs16-docs-functional-spec-md-3-2-single-read-bullet-3-3.backlog.md (defect carrier filed by aw backlog new for a doc gap this plan exposed docs/functional_spec.md and docs/architecture.md still describe the old single-file boot read the runner contract requires filing...); .aw/records/backlog/open/20261122-ql671s-01-ql671s-bootstrap-import-conflict-policy-reads-imports-on.backlog.md (defect carrier filed by aw backlog new for an adjacent bug this plan exposed _bootstrap reads [imports].on_conflict only from ./.pubrun.toml the runner contract requires filing each defect found, and ...)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Honor environment allowlist mode, per-collector depth=off, XDG/global boot config files, and non-mutating config resolution
@@ -18,12 +19,12 @@
 - Highest E allocated: 04
 - Author: Antigravity
 - Id: l7ko8p
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): aw oc run self-finalize: l7ko8p verified (set bugs-audit, attempt 2). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261122-2rhs16-01-2rhs16-docs-functional-spec-md-3-2-single-read-bullet-3-3.backlog.md: defect carrier filed by aw backlog new for a doc gap this plan exposed (docs/functional_spec.md and docs/architecture.md still describe the old single-file boot read); the runner contract requires filing each defect found, and those docs are outside Scope-Paths; out-of-scope .aw/records/backlog/open/20261122-ql671s-01-ql671s-bootstrap-import-conflict-policy-reads-imports-on.backlog.md: defect carrier filed by aw backlog new for an adjacent bug this plan exposed (_bootstrap reads [imports].on_conflict only from ./.pubrun.toml); the runner contract requires filing each defect found, and src/pubrun/_bootstrap.py is outside Scope-Paths]
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001 (resolved via OQ-01), PR-002, PR-003, PR-004, PR-005
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): REVIEWED - OPEN QUESTIONS; PR-001, PR-002, PR-003, PR-004, PR-005
@@ -54,29 +55,29 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Config discovery and resolution parity
 
-- [ ] E-01 Fix `src/pubrun/config.py` (`get_global_config_dir` and `_resolve_layers`) and `src/pubrun/_config_boot.py` (`resolve_import_mode`), and add `BUG-40` and `BUG-63` regression tests in `tests/test_config_capture_modes.py`.
+- [x] E-01 Fix `src/pubrun/config.py` (`get_global_config_dir` and `_resolve_layers`) and `src/pubrun/_config_boot.py` (`resolve_import_mode`), and add `BUG-40` and `BUG-63` regression tests in `tests/test_config_capture_modes.py`.
   - Depends on: none
   - Expected outcome: In `src/pubrun/config.py::get_global_config_dir`, empty or whitespace-only `XDG_CONFIG_HOME` (Cross-Desktop Group (XDG) base directory) and Windows `APPDATA` fall back to `~/.config/pubrun` instead of relative `./pubrun`. In `src/pubrun/config.py::_resolve_layers`, `overrides = copy.deepcopy(overrides)` ensures neither `resolve_config(overrides)` nor `resolve_config_with_provenance(overrides)` mutates nested caller dicts such as `overrides["core"]`. In `src/pubrun/_config_boot.py::resolve_import_mode`, `PUBRUN_AUTO_START` and `[core].auto_start` accept `"1"`, `"true"`, `"yes"`, `"on"` (auto) and `"0"`, `"false"`, `"no"`, `"off"` (noauto) case-insensitively, and boot config lookup walks `./.pubrun.toml`, `./.config/pubrun/config.toml`, and the user global `config.toml` (honoring non-empty `XDG_CONFIG_HOME` / `APPDATA`) in highest-to-lowest precedence order, stopping as soon as a file supplies a valid `[imports].mode` or `[core].auto_start`. Tests in `tests/test_config_capture_modes.py` isolate `HOME`/`XDG_CONFIG_HOME`/`APPDATA` with `monkeypatch` and verify all cases.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Environment allowlist mode and `depth = "off"` enforcement
 
-- [ ] E-02 Fix `src/pubrun/capture/environment.py::get_environment` to honor `[capture.environment].depth = "off"` and `[capture.environment].mode = "allowlist"` with `[capture.environment].allowlist = []`, document the key in `src/pubrun/resources/default.toml` and `docs/configuration.md`, and add `BUG-39` environment regression tests in `tests/test_config_capture_modes.py`.
+- [x] E-02 Fix `src/pubrun/capture/environment.py::get_environment` to honor `[capture.environment].depth = "off"` and `[capture.environment].mode = "allowlist"` with `[capture.environment].allowlist = []`, document the key in `src/pubrun/resources/default.toml` and `docs/configuration.md`, and add `BUG-39` environment regression tests in `tests/test_config_capture_modes.py`.
   - Depends on: none
   - Expected outcome: Setting `[capture.environment].depth = "off"` returns `{"capture_state": {"status": "suppressed"}}` (matching `mode == "off"` and `schemas/manifest.schema.json` `$defs.environment_section`) without reading `os.environ`. Setting `[capture.environment].mode = "allowlist"` reads `cfg.get("allowlist")`, filters `raw_env` using exact names and shell-style globs via `fnmatch.fnmatchcase` (ignoring non-string or empty entries), fails closed to `variables = []` when `allowlist` is empty, omitted, or not a sequence (`list`/`tuple`/`set`), and still runs `redact_env_vars` on matched entries so sensitive variables matching a glob (for example `SLURM_API_TOKEN` matching `SLURM_*`) remain redacted. `src/pubrun/resources/default.toml` (`[capture.environment]`) defines `allowlist = []`, and `docs/configuration.md` (`### [capture.environment]`) documents `allowlist` (type `list`, default `[]`, exact/`fnmatch.fnmatchcase` globs, fail-closed empty default, redaction still applied, using zero em or en dashes in newly added user-facing prose). Tests in `tests/test_config_capture_modes.py` verify `depth = "off"`, fail-closed empty/omitted/non-list allowlist, exact and case-sensitive glob matching, secret redaction on matched variables, and `resolve_config()["capture"]["environment"]["allowlist"] == []`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Fix `src/pubrun/capture/git.py::get_git`, `src/pubrun/capture/host.py::get_host`, `src/pubrun/capture/process.py::get_process_info`, and `src/pubrun/capture/python_runtime.py::get_python_runtime` to honor `[capture.<section>].depth = "off"`, and add `BUG-39` collector regression tests in `tests/test_config_capture_modes.py`.
+- [x] E-03 Fix `src/pubrun/capture/git.py::get_git`, `src/pubrun/capture/host.py::get_host`, `src/pubrun/capture/process.py::get_process_info`, and `src/pubrun/capture/python_runtime.py::get_python_runtime` to honor `[capture.<section>].depth = "off"`, and add `BUG-39` collector regression tests in `tests/test_config_capture_modes.py`.
   - Depends on: none
   - Expected outcome: Each of the four collectors checks its `[capture.<section>].depth` (and `enabled is False` where applicable) at entry and returns a schema-compliant suppressed payload `{"capture_state": {"status": "suppressed"}}` (or with `"detail"` matching `host.py`) without invoking subprocesses (`git`) or collecting host, process, or Python runtime metadata when `depth == "off"`. Tests in `tests/test_config_capture_modes.py` verify all four collectors including zero `subprocess.run` calls in `get_git`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Full-suite regression verification
 
-- [ ] E-04 Run `tests/test_config_capture_modes.py` and the full `pytest` suite to confirm zero regressions across config, import-mode, and capture-engine tests.
+- [x] E-04 Run `tests/test_config_capture_modes.py` and the full `pytest` suite to confirm zero regressions across config, import-mode, and capture-engine tests.
   - Depends on: E-01, E-02, E-03
   - Expected outcome: `pytest tests/test_config_capture_modes.py -v` passes every regression test for `BUG-39`, `BUG-40`, and `BUG-63`, and full `pytest -q` passes with zero failures across the repository.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -139,25 +140,48 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest tests/test_config_capture_modes.py -v` output confirming `XDG_CONFIG_HOME=""` and whitespace fall back under `~/.config/pubrun`, `resolve_config(overrides)` and `resolve_config_with_provenance(overrides)` leave nested caller dicts unmodified, and `_config_boot.resolve_import_mode()` honors `./.pubrun.toml` > `./.config/pubrun/config.toml` > user `config.toml` and `PUBRUN_AUTO_START` values `0`/`1`/`no`/`yes`/`off`/`on`.
   - Observed evidence:
-  - Result: pending
+    - `python3 -m pytest tests/test_config_capture_modes.py -v --no-cov` (lane worktree, Linux, 2026-11-22): `============================== 66 passed in 1.17s ==============================`; the 44 BUG-40/BUG-63 tests in `TestGlobalConfigDir`, `TestOverridesNotMutated`, and `TestBootDiscovery` all PASSED, including:
+      - `TestGlobalConfigDir::test_empty_xdg_falls_back_to_home_config[]`, `[   ]`, `[\t]` PASSED (absolute path under the isolated `HOME/.config/pubrun`); `test_empty_appdata_on_windows_falls_back[]`, `[  ]` PASSED; `test_nonempty_xdg_is_honored` PASSED.
+      - `TestOverridesNotMutated::test_resolve_config_does_not_mutate_caller` PASSED, `test_resolve_config_with_provenance_does_not_mutate_caller` PASSED, `test_repeated_resolution_is_stable` PASSED (nested `overrides["core"]` equals its deep-copied snapshot after resolve).
+      - `TestBootDiscovery::test_precedence_pubrun_toml_over_deep_over_user` PASSED (`noconsole` from `./.pubrun.toml`, then `nopatch` from `./.config/pubrun/config.toml`, then `minimal` from user `config.toml` as higher files are removed); `test_user_global_config_is_read`, `test_user_global_auto_start_is_read`, `test_xdg_config_home_is_honored`, `test_empty_xdg_config_home_falls_back_to_home`, `test_appdata_on_windows_is_honored`, `test_project_deep_config_is_read`, `test_higher_file_auto_start_beats_lower_file_mode`, `test_invalid_mode_in_higher_file_falls_through`, `test_malformed_higher_file_is_skipped` PASSED.
+      - `test_auto_start_env_values[1-auto]`, `[true-auto]`, `[yes-auto]`, `[on-auto]`, `[YES-auto]`, `[On-auto]`, `[ TRUE -auto]`, `[0-noauto]`, `[false-noauto]`, `[no-noauto]`, `[off-noauto]`, `[NO-noauto]`, `[Off-noauto]` PASSED; `test_core_auto_start_file_values` 8 cases PASSED.
+    - As a falsifiability check, with the eight pre-change source files restored from `HEAD` and the new test module kept, the same command reported `44 failed, 22 passed in 1.91s`; the new code was then restored.
+    - Existing boot tests still pass, `python3 -m pytest tests/test_import_modes.py tests/test_commit_identity.py tests/test_config.py tests/test_capture_engines.py tests/test_capture_isolation.py tests/test_env_capture.py tests/test_redaction.py tests/test_show_config.py -q --no-cov`, gave `296 passed in 66.82s (0:01:06)` (includes `TestConfigBootSingleRead::test_resolve_import_mode_opens_pubrun_toml_once_on_core_fallthrough`, which keeps the at-most-once parse of `./.pubrun.toml`).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest tests/test_config_capture_modes.py -v` output confirming `get_environment` returns `{"capture_state": {"status": "suppressed"}}` when `depth = "off"`, fails closed to `variables == []` when `mode = "allowlist"` with empty, omitted, or non-sequence `allowlist`, filters strictly by exact name and case-sensitive `fnmatch.fnmatchcase` globs while still redacting matched sensitive keys, and `resolve_config()["capture"]["environment"]["allowlist"] == []`; plus pasted `git diff -- src/pubrun/resources/default.toml docs/configuration.md` confirming `allowlist = []` documentation with zero newly added em/en dashes in `docs/configuration.md`.
   - Observed evidence:
-  - Result: pending
+    - `python3 -m pytest tests/test_config_capture_modes.py -v --no-cov`: `66 passed in 1.17s`; the 13 `TestEnvironmentCapture` tests PASSED: `test_default_config_defines_empty_allowlist` (`resolve_config()["capture"]["environment"]["allowlist"] == []`), `test_depth_off_suppresses_without_reading_environ` (module `os` replaced by an object whose `environ` raises; result `{"capture_state": {"status": "suppressed"}}`), `test_allowlist_fails_closed` for `[]`, omitted, `"PATH"`, `42`, `{"PATH": 1}`, `[None, 5, ""]` (`variables == []`), `test_allowlist_exact_and_glob`, `test_allowlist_glob_is_case_sensitive`, `test_allowlist_tuple_and_set_accepted`, `test_allowlist_matched_secrets_still_redacted` (`SLURM_API_TOKEN` matched by `SLURM_*` has `representation == "redacted"`, `SLURM_JOB_ID` stays plain), `test_filtered_mode_ignores_allowlist`.
+    - `git diff -- src/pubrun/resources/default.toml` adds under `[capture.environment]`:
+      ```
+      +# Variable names captured when mode = "allowlist". Each entry is an exact
+      +# name or a case-sensitive shell-style glob (fnmatch), e.g. ["PATH", "SLURM_*"].
+      +# An empty list captures no variables (fail closed). Secret redaction from
+      +# [redaction] still applies to matched variables. Ignored in other modes.
+      +allowlist = []
+      ```
+    - `git diff -- docs/configuration.md` adds the `### [capture.environment]` row ``| `allowlist` | list | `[]` | Variable names captured when `mode = "allowlist"`. Each entry is an exact name or a case-sensitive shell-style glob matched with `fnmatch.fnmatchcase` ... An empty or missing list captures no variables. Secret redaction from `[redaction]` still applies ... |`` and a `depth = "off"` sentence on the environment, process, host, python, and git rows; it also updates the `PUBRUN_AUTO_START` row and the discovery section for E-01.
+    - The dash check over added lines of both diffs, `git diff -- src/pubrun/resources/default.toml docs/configuration.md | grep '^+' | python3 -c "...count('\u2014')+count('\u2013')"`, printed `added em/en dashes: 0`.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `pytest tests/test_config_capture_modes.py -v` output confirming `get_git`, `get_host`, `get_process_info`, and `get_python_runtime` each return `capture_state.status == "suppressed"` (and `get_git` invokes zero subprocesses) when configured with `depth = "off"`.
   - Observed evidence:
-  - Result: pending
+    - `python3 -m pytest tests/test_config_capture_modes.py -v --no-cov`: `66 passed in 1.17s`; `TestCollectorDepthOff` PASSED: `test_git_depth_off_runs_no_subprocess` (patched `subprocess.run` recorded `calls == []`, status `suppressed`), `test_host_depth_off` (patched `platform.node` raises if called; result keys `{"capture_state"}`, status `suppressed`), `test_process_depth_off` (patched `getpass.getuser` raises if called; `{"capture_state": {"status": "suppressed"}}`), `test_python_depth_off` (`{"capture_state": {"status": "suppressed"}}`), `test_default_depth_still_collects` for host, process, python, environment (status `complete`), and `test_suppressed_payloads_validate_against_schema` (each suppressed payload validates against `git_section`, `host`, `process`, `python_runtime`, `environment_section` in `schemas/manifest.schema.json` via `jsonschema`).
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted full `pytest -q` output showing `tests/test_config_capture_modes.py` and the full repository test suite pass with zero failures.
   - Observed evidence:
-  - Result: pending
+    - The targeted run `python3 -m pytest tests/test_config_capture_modes.py -v --no-cov` gave `66 passed in 1.17s`.
+    - The full serial suite (the plan's `pytest -q`), `python3 -m pytest -q --no-cov -p no:randomly` in the lane worktree, gave `1689 passed, 2 skipped in 530.85s (0:08:50)`.
+    - Attempt 2 (recovery lane `aw/lane/l7ko8p_attempt2`, based on main `57a5489`, with attempt 1's files brought forward unchanged): `python3 -m pytest tests/test_config_capture_modes.py -v --no-cov` gave `66 passed in 2.12s`; `aw suite` gave `FAILED tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches` and `1 failed, 1700 passed in 173.44s (0:02:53)`; that test alone gave `1 passed, 26 deselected in 0.14s` and alone under `-n 2` gave `1 failed in 1.78s`, so it fails only under xdist workers, independent of this plan (`git diff --name-only HEAD -- tests/test_liveness.py src/pubrun/capture/liveness.py` is empty).
+    - The full parallel suite, `aw suite`, gave `FAILED tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches` and `1 failed, 1690 passed in 158.52s (0:02:38)`. That test passes when run alone (`1 passed, 26 deselected in 0.26s`) and in the serial run above. It is a known failure under pytest-xdist workers, already filed as backlog `sd7kvt` and `12rcu8`: an xdist worker's command line contains no `pytest`. This plan's files do not touch it.
+  - Result: pass
 
 ## Approval and execution gate
 

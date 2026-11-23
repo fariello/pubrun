@@ -14,7 +14,9 @@ def get_host(config: Dict[str, Any]) -> Dict[str, Any]:
     host_config = config.get("capture", {}).get("host", {})
     if host_config.get("enabled", True) is False:
         return {"capture_state": {"status": "suppressed", "detail": "Host profile explicitly disabled."}}
-        
+    if host_config.get("depth") == "off":
+        return {"capture_state": {"status": "suppressed", "detail": "Host capture disabled (depth = \"off\")."}}
+
     try:
         data = {
             "os_name": platform.system(),

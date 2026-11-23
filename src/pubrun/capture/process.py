@@ -11,17 +11,20 @@ def get_process_info(config: Dict[str, Any]) -> Dict[str, Any]:
     Args:
         config: Resolved pubrun configuration.
     """
-    
+    cfg = config.get("capture", {}).get("process", {})
+    if cfg.get("enabled", True) is False or cfg.get("depth") == "off":
+        return {"capture_state": {"status": "suppressed"}}
+
     # 1. Safely extract the username, falling back gracefully
     try:
         username = getpass.getuser()
     except Exception:
         username = "unknown"
-        
+
     # 2. Extract UID/GID if supported by the OS (Unix/Linux/macOS)
     uid = getattr(os, 'getuid', lambda: None)()
     gid = getattr(os, 'getgid', lambda: None)()
-    
+
     # 3. Construct and return the schema-compliant payload
     return {
         "pid": os.getpid(),

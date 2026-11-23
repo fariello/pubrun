@@ -46,7 +46,7 @@ def get_git(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     cfg = config.get("capture", {}).get("git", {})
 
-    if not cfg.get("enabled", True):
+    if not cfg.get("enabled", True) or cfg.get("depth") == "off":
         return {"capture_state": {"status": "suppressed"}}
 
     per_cmd_timeout = _parse_positive_timeout(cfg.get("timeout", 5.0), 5.0)

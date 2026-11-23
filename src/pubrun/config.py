@@ -64,12 +64,16 @@ def get_global_config_dir() -> Path:
 
     - Windows: ``%APPDATA%/pubrun``
     - Linux/Mac: ``$XDG_CONFIG_HOME/pubrun`` or ``~/.config/pubrun``
+
+    Empty or whitespace-only ``APPDATA`` / ``XDG_CONFIG_HOME`` values are
+    treated as unset, so they never resolve to a relative ``./pubrun``.
     """
     if sys.platform == "win32":
-        appdata = os.environ.get("APPDATA")
+        appdata = os.environ.get("APPDATA", "").strip()
         if appdata:
             return Path(appdata) / "pubrun"
-    config_dir = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+    xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    config_dir = xdg if xdg else os.path.expanduser("~/.config")
     return Path(config_dir) / "pubrun"
 
 
@@ -165,7 +169,8 @@ def _resolve_layers(overrides: Optional[Dict[str, Any]] = None):
     if overrides:
         # Convenience flattening: allow start(profile="deep", output_dir="./x")
         # as shorthand for start(core={"profile": "deep", "output_dir": "./x"}).
-        overrides = dict(overrides)
+        # Deep copy so neither this flattening nor later merges mutate the caller's dicts.
+        overrides = copy.deepcopy(overrides)
         _CORE_SHORTCUTS = {"profile", "output_dir", "auto_start", "meta_ref"}
         flat_core = {k: overrides.pop(k) for k in list(overrides) if k in _CORE_SHORTCUTS}
         if flat_core:

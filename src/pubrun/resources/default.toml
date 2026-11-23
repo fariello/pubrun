@@ -191,11 +191,17 @@ argv_enabled = true
 [capture.environment]
 # How system environment variables are recorded.
 # Values:
-#   "allowlist" - Only explicitly permitted variables.
+#   "allowlist" - Only variables named in `allowlist` below.
 #   "filtered"  - All variables, with secret redaction applied.
 #   "full"      - Raw dump without filtering (unsafe).
 mode = "filtered"
 depth = "standard"
+
+# Variable names captured when mode = "allowlist". Each entry is an exact
+# name or a case-sensitive shell-style glob (fnmatch), e.g. ["PATH", "SLURM_*"].
+# An empty list captures no variables (fail closed). Secret redaction from
+# [redaction] still applies to matched variables. Ignored in other modes.
+allowlist = []
 
 [capture.packages]
 # How Python dependency versions are tracked. All modes read installed

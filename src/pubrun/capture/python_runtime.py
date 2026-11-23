@@ -54,6 +54,9 @@ def get_python_runtime(config: Dict[str, Any]) -> Dict[str, Any]:
     Args:
         config: Resolved pubrun configuration.
     """
+    cfg = config.get("capture", {}).get("python", {})
+    if cfg.get("enabled", True) is False or cfg.get("depth") == "off":
+        return {"capture_state": {"status": "suppressed"}}
 
     # Determine virual_env presence by checking if prefix differs from base_prefix
     # or if the older standard 'real_prefix' exists.
