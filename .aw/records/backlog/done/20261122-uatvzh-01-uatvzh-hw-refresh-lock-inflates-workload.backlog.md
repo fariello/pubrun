@@ -1,5 +1,5 @@
 - Id: uatvzh
-- Status: graduated
+- Status: done
 - Graduated-To: uatvzh
 - Set: uatvzh
 - Work-Kind: bug
@@ -11,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-23 done (aw backlog): closed by aw oc run: IPD 3aalwv executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261122-uatvzh-01-3aalwv-read-the-workload-end-anchor-before-stop-waits-on-run-lock-s.ipd.md); evidence .aw/records/plans/executed/20261122-uatvzh-01-3aalwv-read-the-workload-end-anchor-before-stop-waits-on-run-lock-s.ipd.md
 - 2026-11-23 graduated (aw backlog): graduated by run run-20261123T005542Z-1001883: 3aalwv
 - 2026-11-22 created (aw backlog): Coalesced hardware refresh holds _run_lock across an fsynced manifest write, so stop() during it inflates workload_seconds
 
