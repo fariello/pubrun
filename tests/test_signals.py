@@ -470,3 +470,29 @@ except KeyboardInterrupt:
         assert manifest["status"]["outcome"] == "interrupted", "Outcome should be interrupted"
         assert len(manifest["signals"]["signals_received"]) >= 1
         assert manifest["signals"]["signals_received"][0]["signal_name"] == "SIGTERM"
+
+
+class TestGetRecordsDoesNotBlock:
+    """get_records() must not wait on the capture lock.
+
+    A background manifest refresh calls get_records() while holding
+    pubrun.core._run_lock. If the main thread holds the capture lock and a
+    lethal signal makes it finalize (which needs _run_lock), a blocking
+    get_records() deadlocks the process.
+    """
+
+    def test_get_records_from_other_thread_while_lock_held(self):
+        cap = SignalExitCapture()
+        cap.record_exit_code(3)
+        result = {}
+
+        def reader():
+            result["records"] = cap.get_records()
+
+        with cap._lock:
+            t = threading.Thread(target=reader, daemon=True)
+            t.start()
+            t.join(timeout=5)
+            assert not t.is_alive(), "get_records() blocked on the held capture lock"
+        assert result["records"]["exit_code"] == 3
+        assert result["records"]["capture_state"]["status"] == "complete"
