@@ -1,5 +1,5 @@
 - Id: q3bll1
-- Status: graduated
+- Status: done
 - Graduated-To: repro-check
 - Set: pubrun-improve
 - Work-Kind: feature
@@ -10,6 +10,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-23 done (aw backlog): closed by aw oc run: IPD osjxbz executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261121-repro-check-00-osjxbz-reproducibility-gap-assessment-and-rerun-preflight.ipd.md, .aw/records/plans/executed/20261121-repro-check-04-sdg31l-documentation-sync-subpackage-guard-and-whole-set-validation.ipd.md); evidence .aw/records/plans/executed/20261121-repro-check-00-osjxbz-reproducibility-gap-assessment-and-rerun-preflight.ipd.md
 - 2026-11-22 graduated (aw set): Graduated to repro-check IPD Set (salvaged from lane q3bll1)
 - 2026-11-21 created (aw backlog): Maintainer requested detailed backlog capture; implementation remains future work.
 
