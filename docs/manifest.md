@@ -623,6 +623,34 @@ While a run is active, a `.pubrun.lock` JSON file exists in the run directory. I
 
 The `pubrun meta` command generates a similar JSON structure, but with `manifest_type` set to `"pubrun-meta-snapshot"` instead of `"pubrun-manifest"`. Meta snapshots contain only environment-level data (hardware, python, packages, git, environment, host) and do not include run-specific fields (timing, invocation, status, etc.).
 
+### Inheritance from a parent snapshot (`meta_ref`)
+
+A child manifest's top-level `meta_ref` names a parent snapshot, resolved relative to the
+child's run directory. Report commands (`pubrun inspect`, `pubrun show`, `pubrun methods`, the
+TUI) apply the parent at **report time**:
+
+- **No change on disk:** hydration builds an in-memory copy. `manifest.json` is never
+  rewritten, so the recorded file always shows what the child itself captured.
+- **What is filled:** the hydrable sections `hardware`, `process`, `python`, `packages`,
+  `environment`, and `git`, and only when the child section is missing or its capture status is
+  `suppressed`, `off`, `unavailable`, `unknown`, or `partial`. A section the child captured
+  directly is never replaced.
+- **`is_hydrated`:** each filled section is a copy of the parent section with
+  `"is_hydrated": true` added. The key appears only in the hydrated view, never in a written
+  manifest.
+- **Evidence status:** the reproducibility assessment classifies filled sections as
+  `inherited`, distinct from `observed` data the child recorded directly.
+- **Snapshot checks:** the assessment reports a parent that is missing, blocked by the
+  `[report].allow_external_meta_ref` / `[report].meta_ref_allowed_dirs` policy, not a `.json`
+  file, malformed, or not a `"pubrun-meta-snapshot"`. It also reports a parent whose
+  `timing.started_at_utc` is more than one day before the child run or later than it, and a
+  parent whose `host.hostname`, `host.os_name`, `python.version`, or `git.commit` differs from
+  the child's directly observed value.
+- **Script modification time:** when `invocation.script.mtime` is later than the parent
+  snapshot, the assessment flags script drift. The reverse does not hold: an unchanged script
+  modification time does not prove the child ran with the parent's dependencies, because
+  packages can change without the script changing.
+
 ---
 
 [README](../README.md) | [Architecture](architecture.md) | [Functional Spec](functional_spec.md) | [API](api.md) | [CLI](cli.md) | [Configuration](configuration.md) | [Manifest](manifest.md) | [Performance](performance.md) | [Research Use](research-use.md) | [HPC](hpc.md) | [Changelog](../CHANGELOG.md)

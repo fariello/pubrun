@@ -142,19 +142,34 @@ See [Research Use & HPC](hpc.md) for guidance on diagnosing slow runs on cluster
 
 ### `inspect` — Post-hoc Run Diagnosis
 
-Report-only diagnosis of a **completed run's** manifest. Surfaces the recorded
-I/O/RAM/load/filesystem signals, and — importantly — a **capture-completeness assessment**:
-what provenance was *not* captured (e.g. process-scope only, no subprocess/file-I/O record),
-why that limits insight, and how to capture more next time (with honest performance
-trade-offs). Prints a glaring banner when the inspecting host differs from where the run
-executed (e.g. HPC head node vs compute node), because live re-checks then reflect the
+Report-only reproducibility assessment of a **completed run's** manifest. `inspect` reads
+the recorded manifest, first fills in sections from a parent snapshot when the manifest
+names one in `meta_ref` (see **Parent snapshots** below), and then
+sorts the recorded evidence into seven categories:
+
+| Category | What it looks at |
+|---|---|
+| Source | Git commit, dirty state, and whether a dirty tree was recorded without its changes. |
+| Runtime | Python version and implementation, host, and operating system. |
+| Dependencies | Package capture mode, capture status, and recorded package versions. |
+| Inputs & Outputs | Files recorded through `pubrun.open()` or the `register_*` APIs, and how strongly each was verified. |
+| Capture Completeness | Run outcome, per-section capture status, resource scope, console, subprocess tracking, and seeds. |
+| Parent Metadata | Whether the `meta_ref` parent snapshot was found, allowed, recent, and consistent with the child run. |
+| Invocation | Script identity, working directory, and whether the rerun command was redacted. |
+
+Each category gets a status (`adequate`, `gaps`, `mismatch`, `uncertain`, or `not_checked`).
+There is no numerical reproducibility score. `inspect` also lists findings, a prioritized
+**next step**, and the recorded signals from the run (filesystem type, memory, load). It
+prints a glaring banner when the inspecting host differs from where the run executed (for
+example an HPC login node versus a compute node), because live re-checks then reflect the
 wrong machine.
 
-Output is **terse by default** (a one-line summary + a nudge); use `--show-suggestions`
-for the full per-item detail, or `--json` for the complete structured findings.
+Output is **terse by default** (a summary, the categories that need attention, the next
+step, and the non-guarantee note); use `--show-suggestions` for per-category, per-check,
+and per-finding detail, or `--json` for the complete structured assessment.
 
 ```bash
-pubrun inspect [RUN_DIR] [--show-suggestions|-v] [--json] [--strict] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE]
+pubrun inspect [RUN_DIR] [--show-suggestions|-v] [--preflight] [--json] [--strict] [--fail-on {warn,mismatch,unknown}] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE]
 ```
 
 **Options:**
@@ -162,10 +177,75 @@ pubrun inspect [RUN_DIR] [--show-suggestions|-v] [--json] [--strict] [-f QUERY] 
 | Flag | Description |
 |---|---|
 | `RUN_DIR` | Run directory to inspect. Defaults to the most recent matching run. |
-| `--show-suggestions`, `-v` | Expand into per-item findings + how to capture more (with perf caveats). |
-| `--json` | Emit the full findings as JSON. |
-| `--strict` | Exit non-zero if any warning fired. |
+| `--show-suggestions`, `-v` | Show per-category status, preflight checks, and per-finding detail with next steps. |
+| `--preflight` | Also compare supported recorded requirements against the current machine (read-only and offline; see below). |
+| `--json` | Emit the full structured reproducibility assessment as JSON (top-level `findings` is preserved). |
+| `--strict` | Exit `1` when the strict threshold triggers. The threshold is `warn` unless `--fail-on` is given. |
+| `--fail-on {warn,mismatch,unknown}` | Set the strict threshold. Passing `--fail-on` turns on strict exit checking by itself (no `--strict` needed) and works with or without `--preflight`. |
 | `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code` | Standard run selectors (which single run to inspect). |
+
+**Evidence statuses:** every category, finding, and preflight check says where its evidence
+came from:
+
+| Status | Meaning |
+|---|---|
+| `observed` | pubrun measured it directly on the run (or, during preflight, on this machine). |
+| `inferred` | Derived indirectly, for example a command reconstructed from `.pubrun.lock` or an input guessed from `argv`. |
+| `asserted` | Supplied by the caller (for example a digest passed to `register_input()`) and not verified by pubrun. |
+| `inherited` | Copied from a parent `meta_ref` snapshot rather than observed on the child run. |
+| `unavailable` | pubrun tried to obtain it and could not (capture failed, a file is missing, a snapshot was blocked). |
+| `not_checked` | Not evaluated, for example capture was off or a file was recorded by path or size only. |
+
+`unavailable` and `not_checked` are never reported as a match: unknown is not the same as
+verified.
+
+**Preflight (`--preflight`):** compares what the run recorded with the machine you are on now.
+It checks Python version and implementation, platform, recorded package versions, source
+state (Git commit, dirty tree, script digest), accessible input files (existence, size, and
+digest when one was recorded), the working directory, and command redaction. Each check is
+`match`, `mismatch`, `portability_diff` (an expected difference such as a different hostname
+or a newer Python patch release), `unknown`, or `not_checked`. Preflight is read-only and
+offline: it never runs the recorded command, never installs or fetches anything, never
+contacts the network, and never changes files, environment variables, or random seeds. It
+only reads files and runs local `git` queries.
+
+**Strict thresholds (`--strict` / `--fail-on`):** without either flag, `inspect` exits `0`
+after a successful assessment, whatever it found.
+
+| Threshold | Exits `1` when |
+|---|---|
+| `warn` (default for `--strict`) | Any finding has severity `warn`, including portability differences such as a different host. |
+| `mismatch` | Any finding or preflight check is a `mismatch`, or any `warn` finding has `material` impact. Portability-only warnings pass. |
+| `unknown` | Anything `mismatch` catches, plus any preflight check that is `unknown` or `not_checked`. Without `--preflight`, also any category that is `uncertain` or `not_checked`. |
+
+**JSON output (`--json`):** a single object with these ten top-level keys:
+
+| Key | Contents |
+|---|---|
+| `schema_version` | Assessment format version (currently `"1.0"`). |
+| `mode` | `"manifest"`, or `"preflight"` when `--preflight` was given. |
+| `summary` | One-sentence overall summary. |
+| `next_action` | The single highest-value next step. |
+| `next_actions` | All suggested next steps, highest priority first. |
+| `disclaimer` | The non-guarantee note (always present). |
+| `categories` | Seven objects with `name`, `label`, `status`, `evidence_status`, `summary`, `finding_codes`, `warn_count`, and `info_count`. |
+| `findings` | Objects with `severity`, `code`, `message`, `suggestion`, `category`, `evidence_status`, `impact` (`material`, `portability`, `incidental`, or `informational`), `comparison`, and `details`. |
+| `parent_metadata` | The parent snapshot report: `meta_ref`, `resolved_path`, `status`, `inherited_sections`, `direct_sections`, `parent_started_at_utc`, `child_started_at_utc`, `age_seconds`, `script_modified_after_parent`, `identity_mismatches`, and `warnings`. |
+| `preflight` | `requested`, `status`, `counts` per outcome, and `checks`. When `--preflight` is not given, `requested` is `false` and `status` is `"not_checked"`. |
+
+> **Not a guarantee:** recorded provenance and an absence of findings support reproduction
+> analysis, but they do not guarantee equivalent scientific or bitwise results, especially for
+> legacy or sparse manifests. Every output form says so.
+
+**Parent snapshots (`meta_ref`):** when the manifest names a parent `meta.json`, `inspect`
+fills sections the child did not capture (hardware, process, python, packages, environment,
+git) from the parent, in memory only; `manifest.json` is never modified. Inherited sections
+are reported as `inherited`, not `observed`. The Parent Metadata category reports whether the
+snapshot was missing, blocked by the `[report]` path policy, invalid, older than one day,
+newer than the child run, or inconsistent with what the child observed directly (for example
+hostname or Python version). A script modified after the parent snapshot is flagged, but an
+unchanged script modification time does not prove the dependencies matched. See
+[HPC](hpc.md#diagnosing-a-finished-run) and [Manifest](manifest.md#meta-snapshot).
 
 > **Honesty note:** pubrun does not patch `open()` or subprocess globally, so file-I/O and
 > subprocess provenance are recorded only when the script uses `pubrun.open()`, explicit
@@ -183,6 +263,9 @@ pubrun inspect [RUN_DIR] [--show-suggestions|-v] [--json] [--strict] [-f QUERY] 
 pubrun inspect                          # diagnose the most recent run
 pubrun inspect runs/pubrun-XYZ -v       # full detail for a specific run
 pubrun inspect -f train.py --json       # latest run matching "train.py", as JSON
+pubrun inspect runs/pubrun-XYZ --preflight                    # compare against this machine
+pubrun inspect runs/pubrun-XYZ --preflight --fail-on mismatch # CI or job gate: exit 1 on material mismatch
+pubrun inspect runs/pubrun-XYZ --preflight --json | jq '.preflight.status'
 ```
 
 ---
@@ -474,6 +557,14 @@ pubrun show [RUN_DIR ...] [--basic|--standard|--deep] [--utc]
 | `--standard` | Hardware, Git, Python, dependency summary, and `Data Files` evidence-category counts when tracked files exist (default) |
 | `--deep` | Full environment variables, complete package list, subprocesses, and `[ Data Files ]` per-file listing with evidence badges (`[verified]`, `[asserted]`, `[metadata-only]`, `[path-only]`, `[over-budget]`, `[pending]`, `[changed]`, `[unavailable]`, `[failed]`), abbreviated digests, and anomaly details |
 
+**Reproducibility summary:** `--standard` and `--deep` reports include a short
+`--- Reproducibility ---` block from the same assessment `pubrun inspect` uses: the summary, the
+evidence categories that need attention, sections inherited from a `meta_ref` parent snapshot
+(with a note that an unchanged script modification time does not prove matching
+dependencies), the next step, and the non-guarantee note. `show` never runs a preflight
+comparison; the block points to `pubrun inspect --preflight` for that. The block is omitted
+from `--basic` and from section extracts (`logs`, `env`, `packages`).
+
 #### `show config` — inspect resolved configuration
 
 `show` also renders the resolved pubrun **configuration** for three distinct contexts, so you
@@ -510,13 +601,56 @@ A run whose id genuinely starts with one of these words must be selected by its 
 Extracts the exact shell command needed to re-execute a recorded run.
 
 ```bash
-pubrun rerun [RUN_DIR]
+pubrun rerun [RUN_DIR] [--preflight [--strict] [--fail-on {warn,mismatch,unknown}] [--json]]
 ```
 
 Prints the `rerun_command` from the manifest to stdout. Internal log messages go to stderr, so this is safe for piping:
 
 ```bash
 pubrun rerun ./runs/pubrun-A | bash
+```
+
+pubrun never runs the recorded command itself. It only prints it.
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `RUN_DIR` | Run to read. Defaults to the most recent matching run (standard run selectors also apply). |
+| `--preflight` | Before printing the command, run the same read-only, offline preflight comparison as `pubrun inspect --preflight`. Diagnostics go to stderr. |
+| `--strict` | Requires `--preflight`. If the strict threshold triggers, exit `1` and print nothing to stdout. The threshold is `warn` unless `--fail-on` is given. |
+| `--fail-on {warn,mismatch,unknown}` | Requires `--preflight`. Set the strict threshold; implies `--strict`. Thresholds are the same as for [`inspect`](#inspect--post-hoc-run-diagnosis). |
+| `--json` | Requires `--preflight`. Print one JSON object to stdout instead of the bare command. |
+
+**Behavior:**
+
+- **Default (no flags):** unchanged. stdout contains only the command, so `pubrun rerun | bash`
+  keeps working.
+- **Invalid combinations:** `--strict`, `--fail-on`, or `--json` without `--preflight` prints an
+  error to stderr, prints nothing to stdout, and exits `2`.
+- **`--preflight`:** the reproducibility summary, and an advisory when the command contains
+  `[REDACTED]` placeholders, go to stderr. stdout still contains only the command, so piping
+  still works. A redacted command is not directly executable: supply the redacted argument
+  values yourself before running it.
+- **`--preflight --strict` (or `--fail-on`):** when the threshold triggers, the command exits
+  `1` with empty stdout, so `pubrun rerun --preflight --strict | bash` runs nothing.
+- **`--preflight --json`:** stdout is an object with three keys: `rerun_command` (the printed
+  command), `executable_as_printed` (`false` when the command contains `[REDACTED]`), and
+  `assessment` (the same ten-key object `pubrun inspect --preflight --json` prints). With
+  `--strict` or `--fail-on`, the JSON is still printed and the exit code is `1` when the
+  threshold triggers.
+- **Running or crashed runs:** a run without `manifest.json` falls back to the command
+  reconstructed from `.pubrun.lock`, with a warning on stderr. Under `--preflight`, that command
+  is reported as `inferred` and the comparison is `unknown`, because preflight needs a finalized
+  manifest; `--json` reports `preflight.status = "unknown"`, and `--strict` or `--fail-on` exits
+  `1`.
+
+**Examples:**
+
+```bash
+pubrun rerun runs/pubrun-XYZ --preflight                          # summary on stderr, command on stdout
+pubrun rerun runs/pubrun-XYZ --preflight --fail-on mismatch | bash # run only if no material mismatch
+pubrun rerun runs/pubrun-XYZ --preflight --json                    # structured result
 ```
 
 ---
@@ -700,6 +834,13 @@ CPU and memory (main process, and the process tree when captured) plus a compact
 each over the run's lifecycle — the same per-sample data `pubrun res` uses. Press `r` to jump
 to it. Runs with no resource samples (very short runs, or capture off) show a clear message.
 
+**Reproducibility view:** Run Details includes a `REPRODUCIBILITY & EVIDENCE` section with the
+same summary `pubrun show` prints (categories needing attention, inherited parent sections,
+next step, and the non-guarantee note). Browsing runs never starts a live preflight
+comparison; use `pubrun inspect --preflight` for that. A run that is still in progress shows a
+note instead. When a run's rerun command contains `[REDACTED]` placeholders, the Actions tab
+shows a separate advisory below the command; the command you copy stays exactly as recorded.
+
 **Example:**
 ```bash
 pubrun ui
@@ -768,7 +909,8 @@ pubrun --run-tests
 | Code | Meaning |
 |---|---|
 | `0` | Success |
-| `1` | Error (missing manifest, invalid path, config already exists, etc.) |
+| `1` | Error (missing manifest, invalid path, config already exists, etc.), or a triggered `--strict` / `--fail-on` threshold |
+| `2` | Invalid command-line arguments or an unsupported flag combination, for example `pubrun rerun --strict` without `--preflight` |
 
 ---
 

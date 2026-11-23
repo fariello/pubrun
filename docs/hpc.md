@@ -59,6 +59,57 @@ On HPC you typically **run on a compute node** but **inspect from the head/login
 `pubrun inspect` prints a glaring banner when the host you are inspecting from differs from
 the host the run executed on, because any live re-checks would reflect the wrong machine.
 
+### Preflight on a cluster
+
+`pubrun inspect --preflight` compares the recorded run with the machine you are on now,
+read-only and offline (see [CLI: inspect](cli.md#inspect--post-hoc-run-diagnosis)). Run it on
+the node type where you plan to rerun, for example inside an interactive allocation on a
+compute node, rather than on the login node:
+
+```bash
+pubrun inspect <run> --preflight -v                 # per-check detail
+pubrun inspect <run> --preflight --fail-on mismatch # job pre-check: exit 1 on material mismatch
+pubrun rerun <run> --preflight --fail-on mismatch | bash
+```
+
+Preflight separates expected cluster differences from ones that can change results:
+
+- **Portability differences** (`portability_diff`), such as a different hostname, a newer
+  Python patch release, or a different OS release string, are reported but do not fail
+  `--fail-on mismatch`.
+- **Material mismatches** (`mismatch`), such as a different Python minor version or
+  implementation, a missing package or different package version, a different Git commit or
+  script digest, or a missing or content-changed input file, fail `--fail-on mismatch`.
+- **Unknowns** (`unknown` or `not_checked`), such as an input recorded only by path and size,
+  a Git query that timed out on a slow filesystem, or a section that was not captured, fail
+  only `--fail-on unknown`. pubrun never reports an unknown as a match.
+
+The plain `--strict` threshold (`warn`) also fails on portability warnings such as the
+different-host banner, so prefer `--fail-on mismatch` for cross-node checks.
+
+### Parent snapshots (`meta_ref`)
+
+In the parent and child workflow, a login-node job writes `pubrun meta --out meta.json` and
+array tasks set `PUBRUN_META_REF=meta.json` and switch off heavy capture. At report time,
+`inspect`, `show`, and the TUI fill the child's missing sections (hardware, process, python,
+packages, environment, git) from the parent snapshot, in memory only. They report those
+sections as `inherited`, which is weaker evidence than what the child observed itself.
+
+The Parent Metadata category checks the snapshot before trusting it:
+
+- **Availability and policy:** a missing, moved, non-`.json`, malformed, or wrong-type
+  snapshot, or one outside the directories allowed by `[report].allow_external_meta_ref` and
+  `[report].meta_ref_allowed_dirs`, is reported as unavailable. pubrun does not invent the
+  missing sections.
+- **Age:** a snapshot taken more than one day before the child run is flagged as stale, and a
+  snapshot dated after the child run started is flagged as post-dated.
+- **Identity:** a snapshot whose hostname, OS name, Python version, or Git commit disagrees
+  with what the child observed directly is flagged as an identity mismatch.
+- **Script drift:** a script modified after the snapshot is flagged. An unchanged script
+  modification time does not prove the dependencies matched, because packages can change
+  without the script changing. Regenerate the snapshot, or capture packages on the child,
+  when dependency evidence matters.
+
 ### Capture-completeness
 
 `inspect` also tells you which provenance features were **not** enabled, so your next run

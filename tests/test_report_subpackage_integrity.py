@@ -18,7 +18,10 @@ import sys
 import pytest
 
 # The public capture-related submodules that must remain importable regardless of mode.
-_REPORT_SUBMODULES = ["output", "checks", "diagnostics", "methods", "utils"]
+_REPORT_SUBMODULES = ["output", "checks", "diagnostics", "methods", "utils", "reproducibility"]
+
+# Report-time engines that tracked scripts must never pay for at import time.
+_REPORT_ONLY_MODULES = ["pubrun.report.checks", "pubrun.report.reproducibility"]
 
 _MODES = ["auto", "noauto", "full", "nopatch", "noconsole", "minimal"]
 
@@ -35,10 +38,15 @@ def test_report_is_callable_and_subpackage_under_every_mode(mode):
     """After `import pubrun.<mode>`, `pubrun.report` must be callable AND every
     report submodule must still import."""
     submods = ", ".join(f"'{s}'" for s in _REPORT_SUBMODULES)
+    report_only = ", ".join(f"'{m}'" for m in _REPORT_ONLY_MODULES)
     code = f"""
 import importlib, sys
 import pubrun.{mode} as pubrun
 import pubrun as base
+
+# 0. Selecting a mode does not load the report-time assessment engines.
+_loaded = [m for m in [{report_only}] if m in sys.modules]
+assert not _loaded, "report-only modules loaded at import under mode {mode}: " + repr(_loaded)
 
 # 1. Callable report() API still works.
 assert callable(base.report), "pubrun.report is not callable under mode {mode}"
@@ -113,6 +121,8 @@ pubrun.stop()
 import importlib
 importlib.import_module("pubrun.report.diagnostics")
 importlib.import_module("pubrun.report.checks")
+repro = importlib.import_module("pubrun.report.reproducibility")
+assert callable(repro.assess_run)
 print("OK")
 """
     r = _run(code)
