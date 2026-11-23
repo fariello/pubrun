@@ -6,7 +6,7 @@
 - Scope: Whole repository substance (`src/pubrun/`, `benchmarks/`, `scripts/sanitize_paths.py`, `.github/scripts/`, and additive documentation sync in `docs/cli.md`, `docs/functional_spec.md`, and `docs/configuration.md`), excluding `.aw/` workflow infrastructure and work already owned by the 6 pending IPD Sets (`file-prov`, `repro-check`, `startup-perf`, `cap-isolation`, `dep-capture`, `timing-acc`).
 - Scope-Paths: .aw/records/plans/pending/20261122-bugs-audit-00-jqqvkh-bugs-and-correctness-audit-remediation.ipd.md
 - Item-Dependencies: executed:njn1up, executed:2nm0pq, executed:m780uj, executed:l7ko8p, executed:r68o07, executed:ihh27o, executed:8ebjeg, executed:8k73qj, executed:kqzd15
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: orchestrator
 - Coverage: pass
@@ -21,12 +21,12 @@
 - Highest E allocated: 09
 - Author: Antigravity
 - Id: jqqvkh
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): RETIRED as the orchestrator rollup step of a runner Set completion, not executed by an agent: every child of Set bugs-audit reached executed, so the runner (run run-20261123T031231Z-2140837) retired this Order-0 plan as bookkeeping. Its own E-*/V-* items were NOT performed; the runner superseded them by enforcing the ordering, the isolation and the per-child merge gate. Justifying children: njn1up, 2nm0pq, m780uj, l7ko8p, r68o07, ihh27o, 8ebjeg, 8k73qj, kqzd15.
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 coverage pass (aw oc run): fingerprint beae1eeb107a, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-22 coverage fail (aw oc run): fingerprint 7e832cc9ba0a, model uri/its_direct/pt3-claude-opus-5.5-1m-us
@@ -71,6 +71,9 @@ flowchart TD
 ```
 
 ## Detailed Implementation Checklist (TODO)
+
+
+> Its own E-*/V-* items were NOT performed; the runner superseded them by enforcing the ordering, the isolation and the per-child merge gate.
 
 Execution-state rule: mark an `E-*` item complete only after performing the action. That mark is not validation. Accepted execution states: blocked, failed, pending, performed; terminal gate demands 'performed'.
 
