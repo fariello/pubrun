@@ -6,7 +6,9 @@
 - Scope: Confirm that `tests/test_tui.py::test_tui_cli_parser_and_run` restores `sys.modules["pubrun.tui.app"]` on HEAD, which commit `25dd11b` already does with `mock.patch.dict`. Add one new test function to `tests/test_tui.py` that fails if the injected `mock.Mock` module stays in `sys.modules` after `test_tui_cli_parser_and_run` returns. Run the TUI tests in file order, in shuffled order, and under xdist. No production code changes.
 - Scope-Paths: tests/test_tui.py
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: simple
 - Short-Description: Confirm test_tui_cli_parser_and_run restores sys.modules['pubrun.tui.app'] and add a test that fails if the Mock leaks again
 - Work-Kind: bug
 - Priority: low
@@ -22,6 +24,7 @@
 
 ## Workflow history
 
+- 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-23 draft (Claude Opus 5.5): created.
 - 2026-11-23 to-review (Claude Opus 5.5): authored from backlog item `pgcmea`; the leak was reproduced on the pre-fix copy of `tests/test_tui.py`, the fix was confirmed on HEAD, and the proposed guard test was prototyped in a scratch copy before authoring (see Findings).
 
@@ -46,7 +49,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 2: Run the TUI tests in every order the item names
 
-- [ ] E-03 Run the commands in P-03: `tests/test_tui.py` in file order in one process, in shuffled order with `pytest-randomly` for seeds `1` to `5`, and under `pytest-xdist` with `--dist loadfile`. Then run the leak-reintroduction check in P-04 on a scratch copy, and delete the scratch copy.
+- [ ] E-03 Run the commands in P-03: `tests/test_tui.py` in file order in one process, in shuffled order with `pytest-randomly` for seeds `1` to `5`, under `pytest-xdist` with `--dist loadfile`, and the targeted two-test order that exposed the leak. Then run the leak-reintroduction check in P-04 on a scratch copy, and delete the scratch copy.
   - Depends on: E-02
   - Expected outcome: Every P-03 run exits 0 with no failed test, and `TestTuiResourceView::test_resource_view_populates_and_degrades` reports `PASSED` in each run. The P-04 check reports `1 failed` for `test_tui_cli_parser_and_run_leaves_real_tui_module`, and `git status --short` shows no scratch file afterwards.
   - Execution state: pending
@@ -55,7 +58,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - Tests live in `tests/` and use plain pytest functions and classes. `tests/test_tui.py` imports `sys`, `pytest`, `unittest.mock` as `mock`, and `argparse` at module level.
 - TUI tests that need the optional `textual` dependency call `pytest.importorskip("textual")` first (for example `TestTuiResourceView.test_resource_view_populates_and_degrades`). The new guard test follows the same convention.
-- `pyproject.toml` (`[tool.pytest.ini_options]`) sets `addopts = "--cov=src --cov-report=term-missing --cov-report=xml -p no:randomly"`. Shuffled order therefore needs `-o addopts=""` (clears that default) and `-p randomly` (loads `pytest-randomly`, a plugin that shuffles test order). `pytest-randomly>=3.0` is a dev dependency in `pyproject.toml`.
+- `pyproject.toml` (`[tool.pytest.ini_options]`) sets `addopts = "--cov=src --cov-report=term-missing --cov-report=xml -p no:randomly"`. Shuffled order therefore needs `-o addopts=""` (clears that default) and `-p randomly` (loads `pytest-randomly`, a plugin that shuffles test order). `pytest-randomly>=3.0` is a dev dependency in `pyproject.toml`. Clearing `addopts` also removes `-p no:randomly`, and `pytest-randomly` then loads automatically with a random seed, so a run that must keep file order and also clears `addopts` needs `-p no:randomly` explicitly.
 - `aw suite` refuses narrowed selections (file paths, `-k`, `-m`, `::` node ids), so the targeted checks in this plan use plain `python3 -m pytest`.
 - `AGENTS.md` forbids tests that read production or test source code with `inspect`, `ast`, regex, or substring search. The guard test calls `test_tui_cli_parser_and_run` and asserts on the resulting `sys.modules` entry, which is observable runtime state, so it is a behavior test.
 
@@ -68,17 +71,19 @@ flowchart TD
     A[test_tui_cli_parser_and_run injects mock_module into sys.modules] --> B{Is sys.modules restored on exit?}
     B -->|Yes: mock.patch.dict on HEAD| C[later test imports the real PubrunTUIApp]
     C --> D[TestTuiResourceView passes]
-    B -->|No: plain assignment before 25dd11b| E[later test in the same process imports the Mock]
+    B -->|No: plain assignment before 25dd11b| G{Does a later test delete the entry first?}
+    G -->|Yes: test_tui_missing_dependencies_prints_notice runs first| C
+    G -->|No| E[later PubrunTUIApp test in the same process imports the Mock]
     E --> F[TestTuiResourceView fails]
 ```
 
 | ID | Finding | Evidence |
 | --- | --- | --- |
 | F-01 | The leak is already fixed on HEAD. Commit `25dd11b` ("test(tui): restore sys.modules['pubrun.tui.app'] after test_tui_cli_parser_and_run (2nm0pq combined-red)") injects the Mock with `with mock.patch.dict(sys.modules, {"pubrun.tui.app": mock_module}):`. `mock.patch.dict` restores the original dictionary contents when the `with` block exits. Its commit message cites backlog item `pgcmea`. | `git log --oneline -- tests/test_tui.py` lists `25dd11b` as the newest commit; `git show --stat 25dd11b` shows `tests/test_tui.py | 16 ++++++++--------`. |
-| F-02 | The pre-fix copy fails in plain file order, not only in shuffled order. On 2026-11-22 in the lane worktree, the copy from `25dd11b^` run with `-p no:xdist -o addopts=""` printed `3 failed, 8 passed`, failing `TestTuiResourceView::test_resource_view_populates_and_degrades` and both `TestTuiReproducibilityAndActions` tests. The same copy under `-p randomly` with seeds `1`, `2`, and `3` printed `11 passed` each time. The likely reason, not verified, is that those seeds scheduled the `PubrunTUIApp` tests before the leaking test. Shuffled order with a few seeds is therefore a weak detector, which is one reason for the guard test in P-02. | Commands run from a temporary file `tests/_pgcmea_prefix_probe.py` (deleted afterwards). |
-| F-03 | HEAD passes in the orders checked so far. `test_tui_cli_parser_and_run` followed by `TestTuiResourceView::test_resource_view_populates_and_degrades` in one process printed `2 passed`. The whole file under `-p randomly` with seeds `1`, `2`, and `3` printed `11 passed` each time. | Lane worktree, Linux, Python 3.14. |
+| F-02 | The pre-fix copy passes in file order and fails only in some other orders, so whole-file runs are a weak detector of the leak. In file order, the test right after the leaking test, `test_tui_missing_dependencies_prints_notice`, deletes `sys.modules["pubrun.tui.app"]` before any `PubrunTUIApp` test runs, which removes the leaked Mock. The leak shows only when a `PubrunTUIApp` test runs after `test_tui_cli_parser_and_run` and before that cleanup. Authoring recorded `3 failed, 8 passed` for a run with `-p no:xdist -o addopts=""`. That command clears `-p no:randomly`, so it ran in a random order, not in file order. Which seeds fail depends on the test node ids, so results from one scratch file name do not carry over to another. This is one reason for the guard test in P-02, which checks the cause regardless of order. | Re-run at review on 2026-11-23 from a scratch copy of `25dd11b^:tests/test_tui.py`, deleted afterwards: `-p no:xdist -o addopts="" -p no:randomly` printed `11 passed`; the two node ids `test_tui_cli_parser_and_run` and `TestTuiResourceView` alone printed `1 failed, 1 passed` (`FAILED ...::TestTuiResourceView::test_resource_view_populates_and_degrades`); `-p randomly` with seeds `1` to `5` printed `11 passed`, `11 passed`, `1 failed, 10 passed`, `1 failed, 10 passed`, `11 passed`. Cleanup at `tests/test_tui.py::test_tui_missing_dependencies_prints_notice` ("Remove mock module if populated"). |
+| F-03 | HEAD passes in the orders checked so far. `test_tui_cli_parser_and_run` followed by `TestTuiResourceView::test_resource_view_populates_and_degrades` in one process printed `2 passed`. The whole file under `-p randomly` with seeds `1`, `2`, and `3` printed `11 passed` each time. | Lane worktree, Linux, Python 3.14. Re-run at review on 2026-11-23 with `-o addopts="" -p no:randomly`: the pair printed `2 passed`; the whole file in file order, with seeds `1` and `2`, and with `-n 2 --dist loadfile` printed `11 passed`. |
 | F-04 | No test fails directly when the restore is missing. The symptom appears in whichever `PubrunTUIApp` test runs next in the same process, so a regression looks like a defect in an unrelated test. A guard test that calls `test_tui_cli_parser_and_run` and then checks `sys.modules["pubrun.tui.app"]` points at the cause directly. | Prototype on a scratch copy: with the HEAD body, the file printed `12 passed`. With the `mock.patch.dict` call replaced by a plain `sys.modules` assignment, the guard failed with `AssertionError: assert <Mock id='...'> is <module 'pubrun.tui.app' from '.../src/pubrun/tui/app.py'>`. Both scratch files were deleted. |
-| F-05 | Plan `vv4vdd` (Set `ivpkar`, pending) also runs `tests/test_tui.py` in shuffled order to confirm the same fix, but it declares no edit to `tests/test_tui.py` and leaves backlog item `pgcmea` open. This plan does not depend on `vv4vdd`, and `vv4vdd` does not depend on this plan. | `.aw/records/plans/pending/20261122-ivpkar-01-vv4vdd-make-the-parallel-test-suite-pass-fix-test-expected-script-m.ipd.md`, Finding F-06 and "Deferred / out of scope". |
+| F-05 | Plan `vv4vdd` (Set `ivpkar`, `- Status: reviewed`) also runs `tests/test_tui.py` in several orders to confirm the same fix, but it declares no edit to `tests/test_tui.py`. Its "Deferred / out of scope" entry for `tests/test_tui.py` names this plan as the carrier (`- Carrier: whacr3`) of backlog item `pgcmea`, which is `graduated` to this plan. This plan does not depend on `vv4vdd`, and `vv4vdd` does not depend on this plan. | `.aw/records/plans/pending/20261122-ivpkar-01-vv4vdd-make-the-parallel-test-suite-pass-fix-test-expected-script-m.ipd.md`, Findings F-06 and F-07 and "Deferred / out of scope"; `.aw/records/backlog/graduated/20261122-pgcmea-01-pgcmea-restore-sys-modules-pubrun-tui-app-in-tests-test-t.backlog.md` ("graduated by run run-20261123T005542Z-1001883: whacr3"). |
 
 ## Proposed changes (ordered, validatable)
 
@@ -110,14 +115,15 @@ The test imports the real module first, so the expected object exists before the
 
 P-03 (performed by E-03). Run each command from the repository root:
 
-1. `python3 -m pytest tests/test_tui.py -v -p no:xdist -o addopts="" -p no:cacheprovider` (file order, one process).
+1. `python3 -m pytest tests/test_tui.py -v -p no:xdist -o addopts="" -p no:randomly -p no:cacheprovider` (file order, one process; `-p no:randomly` is required because `-o addopts=""` drops the default that disables `pytest-randomly`).
 2. `python3 -m pytest tests/test_tui.py -v -p no:xdist -o addopts="" -p randomly --randomly-seed=<seed> -p no:cacheprovider`, five times, with `<seed>` set to `1`, `2`, `3`, `4`, and `5`.
-3. `python3 -m pytest tests/test_tui.py -v -n 2 --dist loadfile -o addopts="" -p no:cacheprovider` (xdist; `--dist loadfile` sends the whole file to one worker, so the tests share one process).
+3. `python3 -m pytest tests/test_tui.py -v -n 2 --dist loadfile -o addopts="" -p no:randomly -p no:cacheprovider` (xdist; `--dist loadfile` sends the whole file to one worker, so the tests share one process).
+4. `python3 -m pytest "tests/test_tui.py::test_tui_cli_parser_and_run" "tests/test_tui.py::TestTuiResourceView" -v -p no:xdist -o addopts="" -p no:randomly -p no:cacheprovider` (targeted order: the leaking test, then a `PubrunTUIApp` test, with no `sys.modules` cleanup in between). On the pre-fix copy this exact pair printed `1 failed, 1 passed` (Finding F-02), so it is the run that proves the restore, while runs 1 to 3 can pass even with the leak.
 
 P-04 (performed by E-03). Check that the guard detects a leak:
 
 1. Create `tests/_pgcmea_leak_probe.py` as a copy of `tests/test_tui.py` in which `with mock.patch.dict(sys.modules, {"pubrun.tui.app": mock_module}):` is replaced by a non-restoring assignment, for example `sys.modules["pubrun.tui.app"] = mock_module` followed by `if True:` to keep the indented block valid.
-2. Run `python3 -m pytest "tests/_pgcmea_leak_probe.py::test_tui_cli_parser_and_run_leaves_real_tui_module" -p no:xdist -o addopts="" -p no:cacheprovider -q`.
+2. Run `python3 -m pytest "tests/_pgcmea_leak_probe.py::test_tui_cli_parser_and_run_leaves_real_tui_module" -p no:xdist -o addopts="" -p no:randomly -p no:cacheprovider -q`. The scratch name does not match pytest's default `test_*.py` pattern, so `aw suite` would not collect it even if it were left behind; pytest still runs it when named explicitly.
 3. Delete `tests/_pgcmea_leak_probe.py` and run `git status --short`.
 
 ## Deferred / out of scope (with reason)
@@ -134,9 +140,10 @@ P-04 (performed by E-03). Check that the guard detects a leak:
 
 ## Required tests / validation
 
-- `python3 -m pytest tests/test_tui.py -v -p no:xdist -o addopts="" -p no:cacheprovider` exits 0, and `test_resource_view_populates_and_degrades` and `test_tui_cli_parser_and_run_leaves_real_tui_module` report `PASSED` (E-03).
+- `python3 -m pytest tests/test_tui.py -v -p no:xdist -o addopts="" -p no:randomly -p no:cacheprovider` exits 0, and `test_resource_view_populates_and_degrades` and `test_tui_cli_parser_and_run_leaves_real_tui_module` report `PASSED` (E-03).
 - `python3 -m pytest tests/test_tui.py -v -p no:xdist -o addopts="" -p randomly --randomly-seed=<seed> -p no:cacheprovider` exits 0 for seeds `1` to `5` (E-03).
-- `python3 -m pytest tests/test_tui.py -v -n 2 --dist loadfile -o addopts="" -p no:cacheprovider` exits 0 (E-03).
+- `python3 -m pytest tests/test_tui.py -v -n 2 --dist loadfile -o addopts="" -p no:randomly -p no:cacheprovider` exits 0 (E-03).
+- The P-03 run 4 targeted pair exits 0 with both `test_tui_cli_parser_and_run` and `test_resource_view_populates_and_degrades` `PASSED` (E-03).
 - The P-04 leak-reintroduction check reports `1 failed` for the guard test, and no scratch file remains (E-03).
 
 ## Spec / documentation sync
@@ -154,7 +161,7 @@ N/A. The change adds one test and changes no user-visible behavior, configuratio
 
 ## Validation and cross-check (verify before reporting done)
 
-Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
+Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
 - [ ] V-01 validates E-01
   - Required evidence: Paste the current body of `test_tui_cli_parser_and_run` from `tests/test_tui.py`. It must inject `mock_module` only through `mock.patch.dict(sys.modules, ...)`, `monkeypatch.setitem(sys.modules, ...)`, or a `try`/`finally` restore, and must contain no bare `sys.modules["pubrun.tui.app"] = ` assignment. If E-01 edited the function, also paste the part of `git diff -- tests/test_tui.py` that touches it.
@@ -165,7 +172,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
   - Observed evidence:
   - Result: pending
 - [ ] V-03 validates E-03
-  - Required evidence: Paste the result line of each P-03 run, and the `PASSED` lines for `test_resource_view_populates_and_degrades` and `test_tui_cli_parser_and_run_leaves_real_tui_module`: (1) the file-order run, (2) the five `-p randomly` runs for seeds `1` to `5`, and (3) the `-n 2 --dist loadfile` run. Every run must report 0 failed. A `SKIPPED` result for either named test fails this item, because it means `textual` is missing and the check did not run. Then paste the P-04 output, which must show `FAILED ...::test_tui_cli_parser_and_run_leaves_real_tui_module` and `1 failed`, followed by `git status --short` output that does not list `tests/_pgcmea_leak_probe.py`.
+  - Required evidence: Paste the result line of each P-03 run, and the `PASSED` lines for `test_resource_view_populates_and_degrades` and `test_tui_cli_parser_and_run_leaves_real_tui_module`: (1) the file-order run, whose header must not contain a `Using --randomly-seed=` line, (2) the five `-p randomly` runs for seeds `1` to `5`, (3) the `-n 2 --dist loadfile` run, and (4) the targeted pair run, which must show `test_tui_cli_parser_and_run PASSED` followed by `test_resource_view_populates_and_degrades PASSED` and `2 passed`. Every run must report 0 failed. A `SKIPPED` result for either named test fails this item, because it means `textual` is missing and the check did not run. Then paste the P-04 output, which must show `FAILED ...::test_tui_cli_parser_and_run_leaves_real_tui_module` and `1 failed`, followed by `git status --short` output that does not list `tests/_pgcmea_leak_probe.py`.
   - Observed evidence:
   - Result: pending
 
@@ -174,4 +181,9 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 - Size assessment: standard
 - Cohesion rationale: not required
 
-A human must approve this plan before execution. The executor changes only `tests/test_tui.py`, commits through `aw commit <this plan> -- tests/test_tui.py`, and does not push. After every `E-*` item is `performed` and every `V-*` item is `pass` with pasted evidence, the executor runs `aw ipd lint --phase pre-transition` on this plan. Only when it conforms does the executor perform the lifecycle move of this plan to `.aw/records/plans/executed/`, as defined in `.aw/system/workflows/ipd-lifecycle/ipd-lifecycle.md`.
+Execution contract:
+1. Precondition: wait for human approval (`- Status: approved`) with no unresolved `Blocking: yes` open question before you change code. OQ-01 is resolved and non-blocking.
+2. Scope declaration: the only expected modified file is the `- Scope-Paths:` entry `tests/test_tui.py`. If execution requires an out-of-scope file, justify it with `--scope-reason` at finalization. The P-04 scratch file is created and deleted inside E-03 and is never committed.
+3. Validation honesty: run each required validation command and paste its actual output into the matching `V-*` `Observed evidence:` field. Do not mark a `V-*` item `pass` without output captured from that run.
+4. Commit discipline: commit only the paths you changed with `aw commit whacr3 -- tests/test_tui.py`. Do not use `git add -A` or raw `git commit`. Do not push without an explicit human instruction.
+5. Lifecycle transition: after every `E-*` item is `performed` and every `V-*` item is `pass`, `aw ipd lint --phase pre-transition` must conform. Finalize with `aw ipd finalize whacr3`, never with a hand-written `git mv` to `.aw/records/plans/executed/`. Inside a runner lane (`aw oc run` or `aw agy run`), the runner finalizes after the turn. Outside a runner, the executor runs `aw ipd finalize whacr3`. The lifecycle is defined in `.aw/system/workflows/ipd-lifecycle/ipd-lifecycle.md`.
