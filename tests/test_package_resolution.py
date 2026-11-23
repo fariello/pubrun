@@ -239,7 +239,7 @@ def test_fallback_python38_39_parity_and_record_filtering(tmp_path, monkeypatch)
     assert "synth_hook.pth" not in idx.module_to_dists
     assert "__pycache__" not in idx.module_to_dists
 
-    if hasattr(importlib.metadata, "packages_distributions"):
+    if sys.version_info >= (3, 11) and hasattr(importlib.metadata, "packages_distributions"):
         stdlib_map = importlib.metadata.packages_distributions()
         expected_stdlib_mods = ("synth_inferred", "synth_single_mod")
         if sys.version_info >= (3, 12):

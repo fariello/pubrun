@@ -179,28 +179,46 @@ def _resolve_checkout_commit(repo_root, timeout=1.0):
         if not git_exe:
             return None
         cmd = [git_exe, "-C", str(repo_root), "rev-parse", "--show-toplevel", "HEAD"]
+
+        def _run_bounded():
+            proc = _sp.Popen(
+                cmd,
+                stdin=_sp.DEVNULL,
+                stdout=_sp.PIPE,
+                stderr=_sp.PIPE,
+                text=True,
+                env=clean_env,
+            )
+            try:
+                stdout, _ = proc.communicate(timeout=timeout)
+                return proc.returncode, stdout
+            except _sp.TimeoutExpired:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                for stream in (proc.stdout, proc.stderr):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except Exception:
+                            pass
+                try:
+                    proc.wait(timeout=0.5)
+                except Exception:
+                    pass
+                return None, ""
+
         spy_mod = sys.modules.get("pubrun.capture.subprocesses")
         if spy_mod is not None and hasattr(spy_mod, "disable_spy"):
             with spy_mod.disable_spy():
-                proc = _sp.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                    env=clean_env,
-                )
+                returncode, stdout = _run_bounded()
         else:
-            proc = _sp.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                env=clean_env,
-            )
+            returncode, stdout = _run_bounded()
 
-        if proc.returncode != 0:
+        if returncode != 0:
             return None
-        lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+        lines = [line.strip() for line in stdout.splitlines() if line.strip()]
         if len(lines) != 2:
             return None
         toplevel, head = lines
