@@ -56,22 +56,22 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Guard the OS line
 
-- [ ] E-01 In `src/pubrun/tui/widgets/details.py`, add a module-level helper `_format_os_text(host: Any) -> str` and use it for the OS line in `RunDetailsView.update_general_pane`.
+- [x] E-01 In `src/pubrun/tui/widgets/details.py`, add a module-level helper `_format_os_text(host: Any) -> str` and use it for the OS line in `RunDetailsView.update_general_pane`.
   - Depends on: none
   - Expected outcome: The helper sits beside `_filter_package_rows` and `_format_subprocess_rows` and has no `textual` dependency. It returns `"-"` when `host` is not a dict. Otherwise it normalizes `host.get("os_name")` and `host.get("os_release")` with one rule: a string is kept, `None` becomes `""`, and any other type is converted with `str()`; the result is then passed through `.strip()`, so a whitespace-only value counts as empty. (Measured on the lane base: `os_release` set to `"  "` renders `Linux (  )` today.) Then it returns, in this order of checks: `f"{name} ({release})"` when both are non-empty; `name` when only the name is non-empty; `f"unknown ({release})"` when only the release is non-empty; `"-"` when both are empty. It applies `_escape_markup` to `name` and to `release` before it formats them, so a bracketed token such as `[PREEMPT_DYNAMIC]` or `[/]` in a kernel build string is shown literally and does not raise `textual.markup.MarkupError`. In `update_general_pane`, the OS line becomes `lines.append(f"  [bold]OS:[/]            {_format_os_text(host)}")`. When both fields are non-empty strings without `[`, the rendered OS line is identical to the current output (for example `OS:            Linux (#101-Ubuntu SMP)`). No other line of `update_general_pane` changes; the CPU model line is out of scope (see `## Deferred / out of scope`).
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Regression tests and verification
 
-- [ ] E-02 Add a `TestRunDetailsOsLine` class to `tests/test_tui_bugs.py` with behavioral tests that render the General Info tab for manifests with missing or null OS fields.
+- [x] E-02 Add a `TestRunDetailsOsLine` class to `tests/test_tui_bugs.py` with behavioral tests that render the General Info tab for manifests with missing or null OS fields.
   - Depends on: E-01
   - Expected outcome: The class follows the pattern of the existing `TestRunDetailsGpu._render` helper: it writes a manifest with the file's `_write_manifest(run_dir, run_id, extra=...)` helper, passing a `host` section whose `capture_state` is `{"status": "complete"}` and whose `hostname` is `arm-01`. It then starts `PubrunTUIApp(output_dir=...)` under `app.run_test()`, calls `RunDetailsView.display_run(RunInfo(run_dir))`, awaits `pilot.pause()`, and reads `str(details.query_one("#lbl-general-info").render())`. Each test selects the single rendered line whose stripped text starts with `OS:` and asserts the exact text after the label (the stripped line with the leading `OS:` and following spaces removed). One test is parametrized over these `host` cases and also asserts that `"None"` is not in the OS line: (1) `os_release` key removed, expected `Linux`; (2) `os_release` set to `None`, expected `Linux`; (3) `os_name` key removed, `os_release` `#101-Ubuntu SMP`, expected `unknown (#101-Ubuntu SMP)`; (4) `os_name` set to `None`, same release, expected `unknown (#101-Ubuntu SMP)`; (5) both keys removed, expected `-`; (6) both set to `""`, expected `-`; (7) `os_release` set to `"  "`, expected `Linux`. A second test asserts that `os_name` `Linux` with `os_release` `#101-Ubuntu SMP` still renders `Linux (#101-Ubuntu SMP)`. A third test asserts that `os_release` `#1 SMP [PREEMPT_DYNAMIC] [/]` renders `Linux (#1 SMP [PREEMPT_DYNAMIC] [/])` without raising. The existing `TestRunDetailsGpu` tests are unchanged. No test reads production source code.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Run the new tests, the existing TUI tests, and the full test suite.
+- [x] E-03 Run the new tests, the existing TUI tests, and the full test suite.
   - Depends on: E-02
   - Expected outcome: `python3 -m pytest tests/test_tui_bugs.py -v`, `python3 -m pytest tests/test_tui.py tests/test_timing_consumers.py -q`, and `python3 -m pytest -q` each finish with zero failures. Running the reproduction script described in `## Findings` prints four OS lines, none of which contains `None`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -178,20 +178,102 @@ N/A. No spec under `.aw/records/specs/` and no page under `docs/` or `README.md`
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: The pasted `git diff -- src/pubrun/tui/widgets/details.py` output, showing the new `_format_os_text` helper (with the four-way result and `_escape_markup` on both values) and that the only changed line in `update_general_pane` is the OS line. Also the pasted output of the reproduction script from `## Findings` (it calls `RunDetailsView.display_run`, which calls `update_general_pane`, the code path E-01 changes), showing the four OS lines `Linux`, `Linux`, `unknown (#101-Ubuntu SMP)`, and `-`, none containing `None`.
   - Observed evidence:
-  - Result: pending
+    ```
+    $ git diff -- src/pubrun/tui/widgets/details.py
+    @@ -136,6 +136,32 @@ def _format_subprocess_rows(subprocesses: Any) -> List[Tuple[str, str, str, str]
+         return rows
 
-- [ ] V-02 validates E-02
+
+    +def _format_os_text(host: Any) -> str:
+    +    """Format manifest ``host.os_name``/``host.os_release`` for the OS line.
+    +
+    +    Pure helper with no ``textual`` dependency. Missing, null, or
+    +    whitespace-only fields never render as ``None``: a missing release is
+    +    omitted, a missing name becomes ``unknown``, and both missing gives ``-``.
+    +    Values are markup-escaped because the pane parses Textual markup.
+    +    """
+    +    if not isinstance(host, dict):
+    +        return "-"
+    +
+    +    def _norm(value: Any) -> str:
+    +        text = value if isinstance(value, str) else ("" if value is None else str(value))
+    +        return text.strip()
+    +
+    +    name = _norm(host.get("os_name"))
+    +    release = _norm(host.get("os_release"))
+    +    if name and release:
+    +        return f"{_escape_markup(name)} ({_escape_markup(release)})"
+    +    if name:
+    +        return _escape_markup(name)
+    +    if release:
+    +        return f"unknown ({_escape_markup(release)})"
+    +    return "-"
+    +
+    +
+     class RunDetailsView(Vertical):
+    @@ -297,7 +323,7 @@ class RunDetailsView(Vertical):
+    -            lines.append(f"  [bold]OS:[/]            {host.get('os_name')} ({host.get('os_release')})")
+    +            lines.append(f"  [bold]OS:[/]            {_format_os_text(host)}")
+                 lines.append(f"  [bold]CPU model:[/]     {cpu.get('model')} ({cpu.get('logical_cores')} cores, {cpu.get('architecture')})")
+
+    $ PUBRUN_AUTO_START=false PYTHONPATH=src python3 /tmp/opencode/zen6hs_repro.py
+    release-missing | OS:            Linux
+    release-null | OS:            Linux
+    name-missing | OS:            unknown (#101-Ubuntu SMP)
+    both-missing | OS:            -
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Pasted `python3 -m pytest tests/test_tui_bugs.py -v -k OsLine` output listing all seven parametrized cases, the unchanged-output test, and the bracket-escaping test of `TestRunDetailsOsLine` as PASSED. Also pasted output showing that the parametrized test fails on the pre-fix code. To get it, create a temporary `git worktree` of the pre-fix commit under `/tmp/opencode/`, copy the new `tests/test_tui_bugs.py` into it, run the same `-k OsLine` command there, and remove that worktree afterwards. Do not use `git stash` in the shared checkout.
   - Observed evidence:
-  - Result: pending
+    ```
+    $ python3 -m pytest tests/test_tui_bugs.py -v -k OsLine --no-cov   (post-fix lane)
+    tests/test_tui_bugs.py::TestRunDetailsOsLine::test_missing_fields_never_render_none[release-missing] PASSED [ 11%]
+    tests/test_tui_bugs.py::TestRunDetailsOsLine::test_missing_fields_never_render_none[release-null] PASSED [ 22%]
+    tests/test_tui_bugs.py::TestRunDetailsOsLine::test_missing_fields_never_render_none[name-missing] PASSED [ 33%]
+    tests/test_tui_bugs.py::TestRunDetailsOsLine::test_missing_fields_never_render_none[name-null] PASSED [ 44%]
+    tests/test_tui_bugs.py::TestRunDetailsOsLine::test_missing_fields_never_render_none[both-missing] PASSED [ 55%]
+    tests/test_tui_bugs.py::TestRunDetailsOsLine::test_missing_fields_never_render_none[both-empty] PASSED [ 66%]
+    tests/test_tui_bugs.py::TestRunDetailsOsLine::test_missing_fields_never_render_none[release-whitespace] PASSED [ 77%]
+    tests/test_tui_bugs.py::TestRunDetailsOsLine::test_both_present_unchanged PASSED [ 88%]
+    tests/test_tui_bugs.py::TestRunDetailsOsLine::test_bracketed_release_rendered_literally PASSED [100%]
+    ======================= 9 passed, 24 deselected in 6.57s =======================
 
-- [ ] V-03 validates E-03
+    $ git worktree add --detach /tmp/opencode/zen6hs-prefix b29d5fd ; cp tests/test_tui_bugs.py /tmp/opencode/zen6hs-prefix/tests/
+    $ (cd /tmp/opencode/zen6hs-prefix && PYTHONPATH=src python3 -m pytest tests/test_tui_bugs.py -v -k OsLine --no-cov -p no:cacheprovider)   (pre-fix)
+    ...[release-missing] FAILED / [release-null] FAILED / [name-missing] FAILED / [name-null] FAILED
+    ...[both-missing] FAILED / [both-empty] FAILED / [release-whitespace] FAILED
+    ...test_both_present_unchanged PASSED / test_bracketed_release_rendered_literally FAILED
+    E       AssertionError: assert 'Linux (None)' == 'Linux'
+    E       AssertionError: assert 'Linux (None)' == 'Linux'
+    E       AssertionError: assert 'None (#101-Ubuntu SMP)' == 'unknown (#101-Ubuntu SMP)'
+    E       AssertionError: assert 'None (#101-Ubuntu SMP)' == 'unknown (#101-Ubuntu SMP)'
+    E       AssertionError: assert 'None (None)' == '-'
+    E       AssertionError: assert '()' == '-'
+    E       AssertionError: assert 'Linux (  )' == 'Linux'
+    E       AssertionError: assert 'Linux (#1 SMP  )' == 'Linux (#1 SM...DYNAMIC] [/])'
+    ================== 8 failed, 1 passed, 24 deselected in 6.12s ==================
+    $ git worktree remove --force /tmp/opencode/zen6hs-prefix   -> removed
+    ```
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: Pasted summary lines of `python3 -m pytest tests/test_tui_bugs.py -v`, `python3 -m pytest tests/test_tui.py tests/test_timing_consumers.py -q`, and `python3 -m pytest -q`, each with zero failures.
   - Observed evidence:
-  - Result: pending
+    ```
+    $ python3 -m pytest tests/test_tui_bugs.py -v --no-cov
+    ============================= 33 passed in 21.53s ==============================
+    $ python3 -m pytest tests/test_tui.py tests/test_timing_consumers.py -q --no-cov
+    38 passed in 4.16s
+    $ aw suite   (full suite, per the runner's instruction in place of bare `python3 -m pytest -q`)
+    TOTAL                                  16108   3308    79%
+    ======================= 1884 passed in 134.08s (0:02:14) =======================
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 

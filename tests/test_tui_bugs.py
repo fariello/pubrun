@@ -469,6 +469,76 @@ class TestRunDetailsGpu:
 
 
 # --------------------------------------------------------------------------- #
+# zen6hs: OS line with missing or null host OS fields
+# --------------------------------------------------------------------------- #
+
+_DROP = object()
+
+
+class TestRunDetailsOsLine:
+    def _os_line(self, tmp_path, os_name, os_release):
+        from pubrun.tui.app import PubrunTUIApp
+        from pubrun.tui.widgets.details import RunDetailsView
+
+        host = {"capture_state": {"status": "complete"}, "hostname": "arm-01"}
+        if os_name is not _DROP:
+            host["os_name"] = os_name
+        if os_release is not _DROP:
+            host["os_release"] = os_release
+        runs = tmp_path / "runs"
+        run_dir = _write_manifest(runs / "pubrun-os000001", "os000001", extra={"host": host})
+        result = {}
+
+        async def _drive():
+            app = PubrunTUIApp(output_dir=str(runs))
+            async with app.run_test() as pilot:
+                details = app.query_one("#details-view", RunDetailsView)
+                details.display_run(RunInfo(run_dir))
+                await pilot.pause()
+                result["text"] = str(details.query_one("#lbl-general-info").render())
+
+        asyncio.run(_drive())
+        os_lines = [
+            line.strip() for line in result["text"].splitlines() if line.strip().startswith("OS:")
+        ]
+        assert len(os_lines) == 1
+        return os_lines[0][len("OS:"):].lstrip()
+
+    @pytest.mark.parametrize(
+        "os_name, os_release, expected",
+        [
+            ("Linux", _DROP, "Linux"),
+            ("Linux", None, "Linux"),
+            (_DROP, "#101-Ubuntu SMP", "unknown (#101-Ubuntu SMP)"),
+            (None, "#101-Ubuntu SMP", "unknown (#101-Ubuntu SMP)"),
+            (_DROP, _DROP, "-"),
+            ("", "", "-"),
+            ("Linux", "  ", "Linux"),
+        ],
+        ids=[
+            "release-missing",
+            "release-null",
+            "name-missing",
+            "name-null",
+            "both-missing",
+            "both-empty",
+            "release-whitespace",
+        ],
+    )
+    def test_missing_fields_never_render_none(self, tmp_path, os_name, os_release, expected):
+        text = self._os_line(tmp_path, os_name, os_release)
+        assert text == expected
+        assert "None" not in text
+
+    def test_both_present_unchanged(self, tmp_path):
+        assert self._os_line(tmp_path, "Linux", "#101-Ubuntu SMP") == "Linux (#101-Ubuntu SMP)"
+
+    def test_bracketed_release_rendered_literally(self, tmp_path):
+        text = self._os_line(tmp_path, "Linux", "#1 SMP [PREEMPT_DYNAMIC] [/]")
+        assert text == "Linux (#1 SMP [PREEMPT_DYNAMIC] [/])"
+
+
+# --------------------------------------------------------------------------- #
 # BUG-14: LogViewer
 # --------------------------------------------------------------------------- #
 

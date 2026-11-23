@@ -136,6 +136,32 @@ def _format_subprocess_rows(subprocesses: Any) -> List[Tuple[str, str, str, str]
     return rows
 
 
+def _format_os_text(host: Any) -> str:
+    """Format manifest ``host.os_name``/``host.os_release`` for the OS line.
+
+    Pure helper with no ``textual`` dependency. Missing, null, or
+    whitespace-only fields never render as ``None``: a missing release is
+    omitted, a missing name becomes ``unknown``, and both missing gives ``-``.
+    Values are markup-escaped because the pane parses Textual markup.
+    """
+    if not isinstance(host, dict):
+        return "-"
+
+    def _norm(value: Any) -> str:
+        text = value if isinstance(value, str) else ("" if value is None else str(value))
+        return text.strip()
+
+    name = _norm(host.get("os_name"))
+    release = _norm(host.get("os_release"))
+    if name and release:
+        return f"{_escape_markup(name)} ({_escape_markup(release)})"
+    if name:
+        return _escape_markup(name)
+    if release:
+        return f"unknown ({_escape_markup(release)})"
+    return "-"
+
+
 class RunDetailsView(Vertical):
     """Component to display all metadata groups for a single selected run."""
 
@@ -297,7 +323,7 @@ class RunDetailsView(Vertical):
             cpu = cpu if isinstance(cpu, dict) else {}
             gpus = hw.get("gpus")
             gpus = [g for g in gpus if isinstance(g, dict)] if isinstance(gpus, list) else []
-            lines.append(f"  [bold]OS:[/]            {host.get('os_name')} ({host.get('os_release')})")
+            lines.append(f"  [bold]OS:[/]            {_format_os_text(host)}")
             lines.append(f"  [bold]CPU model:[/]     {cpu.get('model')} ({cpu.get('logical_cores')} cores, {cpu.get('architecture')})")
             lines.append(f"  [bold]Total RAM:[/]     {_format_bytes(hw.get('memory_total_bytes'))}")
             if gpus:
