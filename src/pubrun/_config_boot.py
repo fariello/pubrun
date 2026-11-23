@@ -9,9 +9,12 @@ minimal and avoids circular imports.
 Resolution order (highest to lowest):
 1. PUBRUN_IMPORT_MODE environment variable
 2. PUBRUN_AUTO_START environment variable (legacy alias)
-3. [imports].mode from .pubrun.toml (project-local config)
-4. [core].auto_start from .pubrun.toml (legacy config key)
-5. Built-in default: "auto"
+3. Config files, searched in the same precedence order as
+   ``pubrun.config.resolve_config`` (highest first): ``./.pubrun.toml``,
+   ``./.config/pubrun/config.toml``, then the user global ``config.toml``.
+   The first file that sets a valid ``[imports].mode`` or a recognized
+   ``[core].auto_start`` (``[imports].mode`` wins within one file) decides.
+4. Built-in default: "auto"
 """
 import os
 import sys
@@ -19,18 +22,60 @@ from typing import Any, Dict, Optional, Tuple
 
 from pubrun._modes import VALID_MODES, get_mode_behavior
 
+_AUTO_START_TRUE = ("1", "true", "yes", "on")
+_AUTO_START_FALSE = ("0", "false", "no", "off")
 
-def _load_local_toml() -> Optional[Dict[str, Any]]:
-    """Read and parse ./.pubrun.toml once.
+
+def _auto_start_mode(value: Optional[str]) -> Optional[str]:
+    """Map a PUBRUN_AUTO_START / [core].auto_start value to "auto"/"noauto", or None."""
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in _AUTO_START_TRUE:
+        return "auto"
+    if normalized in _AUTO_START_FALSE:
+        return "noauto"
+    return None
+
+
+def _global_config_dir() -> Any:
+    """Return the user global config dir, mirroring ``pubrun.config.get_global_config_dir``."""
+    from pathlib import Path
+
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA", "").strip()
+        if appdata:
+            return Path(appdata) / "pubrun"
+    xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    base = xdg if xdg else os.path.expanduser("~/.config")
+    return Path(base) / "pubrun"
+
+
+def _boot_config_paths() -> list:
+    """Config file candidates, highest precedence first."""
+    from pathlib import Path
+
+    paths = []
+    try:
+        cwd = Path.cwd()
+        paths.extend([cwd / ".pubrun.toml", cwd / ".config" / "pubrun" / "config.toml"])
+    except Exception:
+        pass
+    try:
+        paths.append(_global_config_dir() / "config.toml")
+    except Exception:
+        pass
+    return paths
+
+
+def _load_toml_file(toml_path: Any) -> Optional[Dict[str, Any]]:
+    """Read and parse one TOML file.
 
     Returns the parsed dictionary if present and valid, or None on missing
     file, unavailable parser, or parse error (best-effort).
     """
     try:
-        from pathlib import Path
-
-        toml_path = Path.cwd() / ".pubrun.toml"
-        if not toml_path.exists():
+        if not toml_path.is_file():
             return None
 
         if sys.version_info >= (3, 11):
@@ -45,6 +90,16 @@ def _load_local_toml() -> Optional[Dict[str, Any]]:
             data = tomllib.load(f)
 
         return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _load_local_toml() -> Optional[Dict[str, Any]]:
+    """Read and parse ./.pubrun.toml once (best-effort, None on any failure)."""
+    try:
+        from pathlib import Path
+
+        return _load_toml_file(Path.cwd() / ".pubrun.toml")
     except Exception:
         return None
 
@@ -91,25 +146,22 @@ def resolve_import_mode() -> Tuple[str, str]:
         return (env_mode, "env:PUBRUN_IMPORT_MODE")
 
     # 2. PUBRUN_AUTO_START env var (legacy alias)
-    env_auto = os.environ.get("PUBRUN_AUTO_START", "").strip().lower()
-    if env_auto == "false":
-        return ("noauto", "env:PUBRUN_AUTO_START")
-    elif env_auto == "true":
-        return ("auto", "env:PUBRUN_AUTO_START")
+    env_auto = _auto_start_mode(os.environ.get("PUBRUN_AUTO_START", ""))
+    if env_auto is not None:
+        return (env_auto, "env:PUBRUN_AUTO_START")
 
-    # 3 & 4. Read .pubrun.toml at most once for [imports].mode and [core].auto_start
-    local_toml = _load_local_toml()
-    if local_toml is not None:
-        config_mode = _extract_toml_key(local_toml, "imports", "mode")
-        if config_mode and config_mode.lower() in VALID_MODES:
-            return (config_mode.lower(), "config:[imports].mode")
+    # 3. Config files, highest precedence first; each file is parsed at most once.
+    for toml_path in _boot_config_paths():
+        data = _load_toml_file(toml_path)
+        if data is None:
+            continue
+        config_mode = _extract_toml_key(data, "imports", "mode")
+        if config_mode and config_mode.strip().lower() in VALID_MODES:
+            return (config_mode.strip().lower(), "config:[imports].mode")
 
-        config_auto = _extract_toml_key(local_toml, "core", "auto_start")
+        config_auto = _auto_start_mode(_extract_toml_key(data, "core", "auto_start"))
         if config_auto is not None:
-            if config_auto.lower() in ("false", "0", "no"):
-                return ("noauto", "config:[core].auto_start")
-            elif config_auto.lower() in ("true", "1", "yes"):
-                return ("auto", "config:[core].auto_start")
+            return (config_auto, "config:[core].auto_start")
 
-    # 5. Built-in default
+    # 4. Built-in default
     return ("auto", "default")

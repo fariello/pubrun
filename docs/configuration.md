@@ -15,10 +15,12 @@
 | 1 (highest) | API overrides | `pubrun.start(profile="deep")` |
 | 2 | Environment variables | `PUBRUN_AUTO_START=false` |
 | 3 | Local project config | `./.pubrun.toml` and/or `./.config/pubrun/config.toml` |
-| 4 | User home config | `~/.config/pubrun/config.toml` |
+| 4 | User home config | `$XDG_CONFIG_HOME/pubrun/config.toml`, else `~/.config/pubrun/config.toml` (`%APPDATA%/pubrun/config.toml` on Windows); an empty `XDG_CONFIG_HOME` or `APPDATA` is treated as unset |
 | 5 (lowest) | Built-in defaults | `default.toml` (shipped with the library) |
 
 The local project config is a **single precedence tier** (both `./.pubrun.toml` and `./.config/pubrun/config.toml` are merged into one layer). When both files exist in the same directory, `.pubrun.toml` takes precedence (it is applied last).
+
+The import mode chosen at `import pubrun` time (`[imports].mode` or `[core].auto_start`) is read from the same files in the same order: `./.pubrun.toml`, then `./.config/pubrun/config.toml`, then the user home config. The first file that sets either key decides, and `[imports].mode` wins over `[core].auto_start` within one file.
 
 > **See what actually resolved:** `pubrun show config` prints the fully-resolved configuration and
 > annotates any key that a higher-precedence layer overrode (e.g. a local `.pubrun.toml` value that
@@ -142,7 +144,8 @@ Security policies for preventing secret leakage into manifest files.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `mode` | string | `"filtered"` | `"allowlist"` — only permitted vars; `"filtered"` — all vars with secret redaction; `"full"` — raw dump (unsafe). |
-| `depth` | string | `"standard"` | Capture depth for this category. |
+| `depth` | string | `"standard"` | Capture depth for this category. `"off"` suppresses the section (`capture_state.status = "suppressed"`) without reading the environment. |
+| `allowlist` | list | `[]` | Variable names captured when `mode = "allowlist"`. Each entry is an exact name or a case-sensitive shell-style glob matched with `fnmatch.fnmatchcase` (for example `["PATH", "SLURM_*"]`). An empty or missing list captures no variables. Secret redaction from `[redaction]` still applies to matched variables, so `SLURM_API_TOKEN` matched by `SLURM_*` is still redacted. Ignored in other modes. |
 
 ### `[capture.packages]`
 
@@ -165,25 +168,25 @@ When `mode` is not `"off"`, `pubrun` captures packages twice: a startup snapshot
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `depth` | string | `"standard"` | Capture depth for process metadata (PID, user, etc.). |
+| `depth` | string | `"standard"` | Capture depth for process metadata (PID, user, etc.). `"off"` suppresses the section (`capture_state.status = "suppressed"`) without collecting it. |
 
 ### `[capture.host]`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `depth` | string | `"standard"` | Capture depth for OS-level machine details. |
+| `depth` | string | `"standard"` | Capture depth for OS-level machine details. `"off"` suppresses the section (`capture_state.status = "suppressed"`) without collecting it. |
 
 ### `[capture.python]`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `depth` | string | `"standard"` | Capture depth for Python runtime details. |
+| `depth` | string | `"standard"` | Capture depth for Python runtime details. `"off"` suppresses the section (`capture_state.status = "suppressed"`) without collecting it. |
 
 ### `[capture.git]`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `depth` | string | `"standard"` | Capture depth for Git repository state. |
+| `depth` | string | `"standard"` | Capture depth for Git repository state. `"off"` suppresses the section (`capture_state.status = "suppressed"`) without collecting it. |
 | `check_dirty` | bool | `true` | Whether to run `git status --porcelain` to detect uncommitted changes. Set to `false` for faster startup on large or network-mounted repos. |
 | `timeout` | int | `5` | Per-command timeout (seconds) for every git invocation, including repository detection. A timeout is recorded as `capture_state.status = "timeout"` (distinct from "not a git repository"), so a slow/large repo is never mislabeled as "not a repo". |
 | `total_timeout` | number | `5` | Total monotonic wall-clock budget (seconds) across all Git subprocess calls in a single capture (defaults to `timeout` if omitted or invalid; accepts finite non-negative numbers). If the budget expires before `repo_root` is determined, `capture_state.status` is `"timeout"`; if a later query (`HEAD`, branch, `status --porcelain`, or `remote get-url origin`) times out or is skipped after budget exhaustion, `capture_state.status` is `"partial"`. |
@@ -357,7 +360,7 @@ long); override any of them in your `.pubrun.toml`.
 |---|---|
 | `PUBRUN_IMPORT_MODE` | Canonical import mode: `auto`, `noauto`, `nopatch`, `noconsole`, or `minimal`. Takes highest precedence. |
 | `PUBRUN_PROFILE` | **Deprecated and inert.** Sets `[core].profile`, which has no effect on capture (see the `[core]` table). Use the `capture.*` keys instead. |
-| `PUBRUN_AUTO_START` | Legacy alias for import mode. `"false"` maps to `noauto`, `"true"` maps to `auto`. |
+| `PUBRUN_AUTO_START` | Legacy alias for import mode. `"1"`, `"true"`, `"yes"`, or `"on"` maps to `auto`; `"0"`, `"false"`, `"no"`, or `"off"` maps to `noauto` (case-insensitive). Other values are ignored. |
 | `PUBRUN_META_REF` | Path to a parent `meta.json` for HPC hydration. Child runs will reference this. |
 | `PUBRUN_IMPORT_CONFLICT` | Override `[imports].on_conflict`. Set to `"ignore"`, `"warn"`, or `"error"`. |
 
