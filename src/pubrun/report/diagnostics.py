@@ -904,7 +904,10 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         print(f"{cyan}Host{rst}        : {yellow}capture failed{rst} ({hw_summary})")
     else:
         hostname = _unwrap_value(host.get("hostname"), default="unknown")
-        print(f"{cyan}Host{rst}        : {hostname} - {host.get('os_name')} {host.get('os_version')} ({hw_summary})")
+        os_name = _unwrap_value(host.get("os_name"), default="")
+        os_version = _unwrap_value(host.get("os_version"), default="")
+        os_text = " ".join(part for part in (os_name, os_version) if part) or "unknown OS"
+        print(f"{cyan}Host{rst}        : {hostname} - {os_text} ({hw_summary})")
 
     if git_status == "failed":
         print(f"{cyan}Git Commit{rst}  : {yellow}capture failed{rst}")

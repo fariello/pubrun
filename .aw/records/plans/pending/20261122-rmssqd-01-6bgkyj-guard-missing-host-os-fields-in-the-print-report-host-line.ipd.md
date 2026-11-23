@@ -54,22 +54,22 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Guard the Host line
 
-- [ ] E-01 In `src/pubrun/report/diagnostics.py::print_report`, build the OS part of the Host line from guarded values instead of raw `host.get(...)` calls.
+- [x] E-01 In `src/pubrun/report/diagnostics.py::print_report`, build the OS part of the Host line from guarded values instead of raw `host.get(...)` calls.
   - Depends on: none
   - Expected outcome: In the `else` branch that follows `if host_status == "failed":`, the code computes `os_name = _unwrap_value(host.get("os_name"), default="")` and `os_version = _unwrap_value(host.get("os_version"), default="")`. It sets `os_text` to the non-empty values among `os_name` and `os_version`, in that order, joined by one space, and sets `os_text` to `"unknown OS"` when both are empty. The printed line is `f"{cyan}Host{rst}        : {hostname} - {os_text} ({hw_summary})"`. The `capture failed` branch, the `hostname` computation, and `hw_summary` are unchanged. When both OS fields are non-empty strings, the printed line is byte-identical to the current output (for example `Host        : arm-01 - Linux 6.8.0 (unknown, 8.0 GB RAM)` with `NO_COLOR=1`). No other line of `print_report` changes.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Regression tests and verification
 
-- [ ] E-02 Add a `TestHostLineNeverRendersNone` class to `tests/test_report_checks_bugs.py` with behavioral tests that call `print_report` on manifests with missing or null OS fields.
+- [x] E-02 Add a `TestHostLineNeverRendersNone` class to `tests/test_report_checks_bugs.py` with behavioral tests that call `print_report` on manifests with missing or null OS fields.
   - Depends on: E-01
   - Expected outcome: The class reuses the file's existing `_report_manifest(tmp_path)` helper, edits the returned manifest's `host` section, and rewrites `manifest.json` at the returned path before each call. Each test sets `NO_COLOR=1` with `monkeypatch`, calls `print_report(path, "standard")`, and selects the single output line that starts with `Host`. One test is parametrized over these `host` cases and asserts the exact OS text between `"arm-01 - "` and `" ("` in that line, and that `"None"` is not in the line: (1) `os_version` key removed, expected `Linux`; (2) `os_version` set to `None`, expected `Linux`; (3) `os_name` key removed, expected `6.8.0`; (4) `os_name` set to `None`, expected `6.8.0`; (5) both keys removed, expected `unknown OS`; (6) both set to `""`, expected `unknown OS`; (7) `os_name` set to `{"representation": "redacted"}`, expected `<REDACTED> 6.8.0` (the same rendering `_unwrap_value` gives a redacted hostname; before the fix this case printed the raw dict text `{'representation': 'redacted'} 6.8.0`). A separate test asserts that the unmodified `_report_manifest` manifest still prints a Host line that contains `arm-01 - Linux 6.8.0 (`. The existing `TestNullCpuModelPins::test_print_report_never_renders_none` is unchanged. No test reads production source code.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Run the new tests, the existing report tests, and the full test suite.
+- [x] E-03 Run the new tests, the existing report tests, and the full test suite.
   - Depends on: E-02
   - Expected outcome: `python3 -m pytest tests/test_report_checks_bugs.py -v`, `python3 -m pytest tests/test_show_sections.py tests/test_reports.py -q`, and `python3 -m pytest -q` each finish with zero failures. Running the reproduction script described in `## Findings` prints no line that contains `None`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -162,20 +162,70 @@ N/A. No spec under `.aw/records/specs/` and no page under `docs/` describes the 
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: The pasted `git diff -- src/pubrun/report/diagnostics.py` hunk, showing that only the Host line `else` branch changed and that it uses `_unwrap_value(..., default="")` for both OS fields and the `"unknown OS"` fallback. Also the pasted output of the reproduction script from `## Findings` (it calls `print_report`, the code path E-01 changes), showing the four Host lines `arm-01 - Linux (`, `arm-01 - Linux (`, `arm-01 - 6.8.0 (`, and `arm-01 - unknown OS (`, none containing `None`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `git diff -- src/pubrun/report/diagnostics.py`:
+    ```
+    @@ -904,7 +904,10 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
+             print(f"{cyan}Host{rst}        : {yellow}capture failed{rst} ({hw_summary})")
+         else:
+             hostname = _unwrap_value(host.get("hostname"), default="unknown")
+    -        print(f"{cyan}Host{rst}        : {hostname} - {host.get('os_name')} {host.get('os_version')} ({hw_summary})")
+    +        os_name = _unwrap_value(host.get("os_name"), default="")
+    +        os_version = _unwrap_value(host.get("os_version"), default="")
+    +        os_text = " ".join(part for part in (os_name, os_version) if part) or "unknown OS"
+    +        print(f"{cyan}Host{rst}        : {hostname} - {os_text} ({hw_summary})")
+    ```
+    `PYTHONPATH=src python3 /tmp/opencode/rmssqd_repro.py`:
+    ```
+    version-missing | Host        : arm-01 - Linux (unknown, 0.0 GB RAM)
+    version-null | Host        : arm-01 - Linux (unknown, 0.0 GB RAM)
+    name-missing | Host        : arm-01 - 6.8.0 (unknown, 0.0 GB RAM)
+    both-missing | Host        : arm-01 - unknown OS (unknown, 0.0 GB RAM)
+    ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `python3 -m pytest tests/test_report_checks_bugs.py -v -k HostLine` output on the fixed tree in which every `TestHostLineNeverRendersNone` case reports PASSED: the seven `host` cases from E-02 (missing or null `os_version`, missing or null `os_name`, both missing, both empty, redacted `os_name`) and the unchanged complete-host case. Also pasted output of the same command run against the pre-fix code, in which every one of the seven `host` cases reports FAILED and the unchanged complete-host case reports PASSED; this shows the tests detect the defect and do not reject correct output. To get it, before committing, create a temporary worktree of the commit the lane started from with `git worktree add /tmp/opencode/6bgkyj-prefix HEAD`, copy the new `tests/test_report_checks_bugs.py` into it, run the command from that worktree's root, then run `git worktree remove --force /tmp/opencode/6bgkyj-prefix`, and paste `git worktree list` showing it is gone. Do not use `git stash` in the shared checkout.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Fixed tree, `python3 -m pytest tests/test_report_checks_bugs.py -v -k HostLine --no-cov`:
+    ```
+    ...test_missing_os_fields[version-missing] PASSED
+    ...test_missing_os_fields[version-null] PASSED
+    ...test_missing_os_fields[name-missing] PASSED
+    ...test_missing_os_fields[name-null] PASSED
+    ...test_missing_os_fields[both-missing] PASSED
+    ...test_missing_os_fields[both-empty] PASSED
+    ...test_missing_os_fields[name-redacted] PASSED
+    ...test_complete_host_unchanged PASSED
+    ======================= 8 passed, 38 deselected in 0.14s =======================
+    ```
+    Pre-fix worktree `/tmp/opencode/6bgkyj-prefix` at lane base `62c311f` with the new test file copied in:
+    ```
+    ...test_missing_os_fields[version-missing] FAILED
+    ...test_missing_os_fields[version-null] FAILED
+    ...test_missing_os_fields[name-missing] FAILED
+    ...test_missing_os_fields[name-null] FAILED
+    ...test_missing_os_fields[both-missing] FAILED
+    ...test_missing_os_fields[both-empty] FAILED
+    ...test_missing_os_fields[name-redacted] FAILED
+    ...test_complete_host_unchanged PASSED
+    ================== 7 failed, 1 passed, 38 deselected in 0.47s ==================
+    ```
+    After `git worktree remove --force /tmp/opencode/6bgkyj-prefix`, `git worktree list | grep -c 6bgkyj-prefix` printed `0`; remaining entries: `.aw/state/suite-baselines/6bgkyj-attempt1  62c311f (detached HEAD)` and `.aw/worktrees/6bgkyj  62c311f [aw/lane/6bgkyj]`.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted summary lines of `python3 -m pytest tests/test_report_checks_bugs.py -v`, `python3 -m pytest tests/test_show_sections.py tests/test_reports.py -q`, and `python3 -m pytest -q`, each with zero failures.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Summary lines of the three runs:
+    ```
+    python3 -m pytest tests/test_report_checks_bugs.py -v --no-cov
+    ============================== 46 passed in 0.87s ==============================
+    python3 -m pytest tests/test_show_sections.py tests/test_reports.py -q --no-cov
+    72 passed in 3.64s
+    aw suite (full suite)
+    ======================= 1857 passed in 165.79s (0:02:45) =======================
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 

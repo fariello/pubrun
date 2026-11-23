@@ -391,6 +391,51 @@ class TestNullCpuModelPins:
         assert host_lines and "None" not in host_lines[0] and "unknown" in host_lines[0]
 
 
+_DROP = object()
+
+
+class TestHostLineNeverRendersNone:
+    def _host_line(self, tmp_path, monkeypatch, capsys, overrides):
+        from pubrun.report.diagnostics import print_report
+        monkeypatch.setenv("NO_COLOR", "1")
+        m, path = _report_manifest(tmp_path)
+        for key, value in overrides.items():
+            if value is _DROP:
+                m["host"].pop(key, None)
+            else:
+                m["host"][key] = value
+        Path(path).write_text(json.dumps(m), encoding="utf-8")
+        print_report(path, "standard")
+        host_lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("Host")]
+        assert len(host_lines) == 1
+        return host_lines[0]
+
+    @pytest.mark.parametrize(
+        "overrides, expected",
+        [
+            ({"os_version": _DROP}, "Linux"),
+            ({"os_version": None}, "Linux"),
+            ({"os_name": _DROP}, "6.8.0"),
+            ({"os_name": None}, "6.8.0"),
+            ({"os_name": _DROP, "os_version": _DROP}, "unknown OS"),
+            ({"os_name": "", "os_version": ""}, "unknown OS"),
+            ({"os_name": {"representation": "redacted"}}, "<REDACTED> 6.8.0"),
+        ],
+        ids=["version-missing", "version-null", "name-missing", "name-null",
+             "both-missing", "both-empty", "name-redacted"],
+    )
+    def test_missing_os_fields(self, tmp_path, monkeypatch, capsys, overrides, expected):
+        line = self._host_line(tmp_path, monkeypatch, capsys, overrides)
+        assert "None" not in line
+        assert "arm-01 - " in line and " (" in line
+        os_text = line.split("arm-01 - ", 1)[1].split(" (", 1)[0]
+        assert os_text == expected
+
+    def test_complete_host_unchanged(self, tmp_path, monkeypatch, capsys):
+        line = self._host_line(tmp_path, monkeypatch, capsys, {})
+        assert "arm-01 - Linux 6.8.0 (" in line
+
+
 # --------------------------------------------------------------------------- BUG-49
 
 def _resources_run(tmp_path, scope, tree_values):
