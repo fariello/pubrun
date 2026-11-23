@@ -1,5 +1,6 @@
 - Id: zdkdyg
-- Status: open
+- Status: graduated
+- Graduated-To: zdkdyg
 - Set: zdkdyg
 - Work-Kind: bug
 - Priority: medium
@@ -10,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-23 graduated (aw backlog): graduated by run run-20261123T031947Z-2422676: 4cy3ft
 - 2026-11-22 created (aw backlog): Prepend repository src directory to PYTHONPATH for subprocess tests in tests/conftest.py
 
 ## Problem
