@@ -6,7 +6,9 @@
 - Scope: `src/pubrun/report/diagnostics.py` (the Host line in `print_report`) and regression tests in `tests/test_report_checks_bugs.py`.
 - Scope-Paths: src/pubrun/report/diagnostics.py, tests/test_report_checks_bugs.py
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: simple
 - Work-Kind: bug
 - Priority: low
 - From-Backlog: rmssqd
@@ -21,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-23 to-review (OpenCode agent): authored from backlog rmssqd: reproduction, guarded Host line, behavioral regression tests.
 - 2026-11-23 draft (OpenCode agent): created.
 
@@ -58,7 +61,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - [ ] E-02 Add a `TestHostLineNeverRendersNone` class to `tests/test_report_checks_bugs.py` with behavioral tests that call `print_report` on manifests with missing or null OS fields.
   - Depends on: E-01
-  - Expected outcome: The class reuses the file's existing `_report_manifest(tmp_path)` helper, edits the returned manifest's `host` section, and rewrites `manifest.json` at the returned path before each call. Each test sets `NO_COLOR=1` with `monkeypatch`, calls `print_report(path, "standard")`, and selects the single output line that starts with `Host`. One test is parametrized over these `host` cases and asserts the exact OS text between `"arm-01 - "` and `" ("` in that line, and that `"None"` is not in the line: (1) `os_version` key removed, expected `Linux`; (2) `os_version` set to `None`, expected `Linux`; (3) `os_name` key removed, expected `6.8.0`; (4) `os_name` set to `None`, expected `6.8.0`; (5) both keys removed, expected `unknown OS`; (6) both set to `""`, expected `unknown OS`. A separate test asserts that the unmodified `_report_manifest` manifest still prints a Host line that contains `arm-01 - Linux 6.8.0 (`. The existing `TestNullCpuModelPins::test_print_report_never_renders_none` is unchanged. No test reads production source code.
+  - Expected outcome: The class reuses the file's existing `_report_manifest(tmp_path)` helper, edits the returned manifest's `host` section, and rewrites `manifest.json` at the returned path before each call. Each test sets `NO_COLOR=1` with `monkeypatch`, calls `print_report(path, "standard")`, and selects the single output line that starts with `Host`. One test is parametrized over these `host` cases and asserts the exact OS text between `"arm-01 - "` and `" ("` in that line, and that `"None"` is not in the line: (1) `os_version` key removed, expected `Linux`; (2) `os_version` set to `None`, expected `Linux`; (3) `os_name` key removed, expected `6.8.0`; (4) `os_name` set to `None`, expected `6.8.0`; (5) both keys removed, expected `unknown OS`; (6) both set to `""`, expected `unknown OS`; (7) `os_name` set to `{"representation": "redacted"}`, expected `<REDACTED> 6.8.0` (the same rendering `_unwrap_value` gives a redacted hostname; before the fix this case printed the raw dict text `{'representation': 'redacted'} 6.8.0`). A separate test asserts that the unmodified `_report_manifest` manifest still prints a Host line that contains `arm-01 - Linux 6.8.0 (`. The existing `TestNullCpuModelPins::test_print_report_never_renders_none` is unchanged. No test reads production source code.
   - Execution state: pending
 
 - [ ] E-03 Run the new tests, the existing report tests, and the full test suite.
@@ -109,7 +112,9 @@ Observed output, one row per case:
 | no `os_name`, `os_version: "6.8.0"` | `Host        : arm-01 - None 6.8.0 (unknown, 0.0 GB RAM)` |
 | neither field | `Host        : arm-01 - None None (unknown, 0.0 GB RAM)` |
 
-Root cause: the Host line in `print_report` is `f"... {hostname} - {host.get('os_name')} {host.get('os_version')} ({hw_summary})"`. `dict.get` returns `None` for a missing key, and the f-string renders `None` as the text `None`. The backlog item names `os_version`; `os_name` has the same defect on the same line, so E-01 guards both.
+Root cause: the Host line in `print_report` is `f"... {hostname} - {host.get('os_name')} {host.get('os_version')} ({hw_summary})"`. `dict.get` returns `None` for a missing key, and the f-string renders `None` as the text `None`. The backlog item names `os_version`; `os_name` has the same defect on the same line, so E-01 guards both. The same raw interpolation also prints a wrapped value as Python dict text: with `os_name` set to `{"representation": "redacted"}` the line reads `arm-01 - {'representation': 'redacted'} 6.8.0 (...)`. Routing both fields through `_unwrap_value` renders it as `<REDACTED>`, which E-02 case (7) pins.
+
+Re-checked at review on 2026-11-23: the script above printed the four `None` lines on this tree; a scratch copy of `src/` with the E-01 change printed `arm-01 - Linux (`, `arm-01 - Linux (`, `arm-01 - 6.8.0 (`, and `arm-01 - unknown OS (`. On the unmodified tree, `python3 -m pytest -q` printed `1819 passed, 2 skipped in 517.10s`, so V-03's zero-failure bar starts from a green suite. The pytest `pythonpath = ["src"]` setting makes pytest import this checkout's `src/`, but a bare `python3` resolves `pubrun` to whatever editable install the interpreter has, so the reproduction script needs `PYTHONPATH=src` as written.
 
 ## Proposed changes (ordered, validatable)
 
@@ -153,7 +158,7 @@ N/A. No spec under `.aw/records/specs/` and no page under `docs/` describes the 
 
 ## Validation and cross-check (verify before reporting done)
 
-Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
+Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
 - [ ] V-01 validates E-01
   - Required evidence: The pasted `git diff -- src/pubrun/report/diagnostics.py` hunk, showing that only the Host line `else` branch changed and that it uses `_unwrap_value(..., default="")` for both OS fields and the `"unknown OS"` fallback. Also the pasted output of the reproduction script from `## Findings` (it calls `print_report`, the code path E-01 changes), showing the four Host lines `arm-01 - Linux (`, `arm-01 - Linux (`, `arm-01 - 6.8.0 (`, and `arm-01 - unknown OS (`, none containing `None`.
@@ -161,7 +166,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
   - Result: pending
 
 - [ ] V-02 validates E-02
-  - Required evidence: Pasted `python3 -m pytest tests/test_report_checks_bugs.py -v -k HostLine` output listing all six parametrized cases and the unchanged-output test of `TestHostLineNeverRendersNone` as PASSED. Also pasted output showing that the parametrized test fails on the pre-fix code. To get it, copy the new `tests/test_report_checks_bugs.py` into a temporary `git worktree` of the pre-fix commit under `/tmp/opencode/`, run the same `-k HostLine` command there, and remove that worktree afterwards. Do not use `git stash` in the shared checkout.
+  - Required evidence: Pasted `python3 -m pytest tests/test_report_checks_bugs.py -v -k HostLine` output on the fixed tree in which every `TestHostLineNeverRendersNone` case reports PASSED: the seven `host` cases from E-02 (missing or null `os_version`, missing or null `os_name`, both missing, both empty, redacted `os_name`) and the unchanged complete-host case. Also pasted output of the same command run against the pre-fix code, in which every one of the seven `host` cases reports FAILED and the unchanged complete-host case reports PASSED; this shows the tests detect the defect and do not reject correct output. To get it, before committing, create a temporary worktree of the commit the lane started from with `git worktree add /tmp/opencode/6bgkyj-prefix HEAD`, copy the new `tests/test_report_checks_bugs.py` into it, run the command from that worktree's root, then run `git worktree remove --force /tmp/opencode/6bgkyj-prefix`, and paste `git worktree list` showing it is gone. Do not use `git stash` in the shared checkout.
   - Observed evidence:
   - Result: pending
 
@@ -176,8 +181,8 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 - Cohesion rationale: not required
 
 Execution contract:
-1. Precondition: wait for human approval (`- Status: approved`) with no unresolved `Blocking: yes` open question before you change code.
+1. Precondition: wait for human approval (`- Status: approved`) with no unresolved `Blocking: yes` open question before you change code. OQ-01 is resolved and non-blocking.
 2. Scope declaration: the expected modified files are the `- Scope-Paths:` entries (`src/pubrun/report/diagnostics.py`, `tests/test_report_checks_bugs.py`). If execution requires an out-of-scope file, justify it with `--scope-reason` at finalization. If a declared file needs no edit, acknowledge it with `--scope-ack`.
 3. Validation honesty: run each required validation command and paste its actual output into the matching `V-*` `Observed evidence:` field. Do not mark a `V-*` item `pass` without output captured from that run.
 4. Commit discipline: commit only the paths you changed with `aw commit 6bgkyj -- src/pubrun/report/diagnostics.py tests/test_report_checks_bugs.py`. Do not use `git add -A` or raw `git commit`. Do not push without an explicit human instruction.
-5. Lifecycle transition: finalize this plan with `aw ipd finalize 6bgkyj`, never with a hand-written `git mv` to `.aw/records/plans/executed/`. Inside a runner lane (`aw oc run` or `aw agy run`), the runner finalizes after the turn. Outside a runner, the executor runs `aw ipd finalize 6bgkyj`.
+5. Lifecycle transition: after every `E-*` item is `performed` and every `V-*` item is `pass`, `aw ipd lint --phase pre-transition` must conform. Then finalize this plan with `aw ipd finalize 6bgkyj`, never with a hand-written `git mv` to `.aw/records/plans/executed/`. Inside a runner lane (`aw oc run` or `aw agy run`), the runner finalizes after the turn. Outside a runner, the executor runs `aw ipd finalize 6bgkyj`.
