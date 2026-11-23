@@ -53,6 +53,82 @@ def _append_manual_subprocess_record(current_run: Any, record: dict) -> None:
 
 # -- Internal helpers ---------------------------------------------------------
 
+# Cache for the [events].on_inactive_annotate policy used by _handle_inactive.
+# Each memo is replaced by assigning one new tuple, so a concurrent reader sees
+# either the old pair or the new pair, never a mix.
+_INACTIVE_POLICY_CACHE: Optional[tuple] = None  # (signature, policy)
+_USER_CONFIG_PATH_MEMO: Optional[tuple] = None  # (key, user config path)
+_LOCAL_CONFIG_PATHS_MEMO: Optional[tuple] = None  # (cwd, deep path, root path)
+
+# Every environment input of get_global_config_dir(), including the variables
+# os.path.expanduser reads on Windows.
+_USER_CONFIG_ENV_VARS = (
+    "APPDATA", "XDG_CONFIG_HOME", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+)
+
+
+def _stat_identity(path: str) -> Optional[tuple]:
+    """Return (st_ino, st_size, st_mtime_ns) for path, or None if it cannot be stat'ed."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_ino, st.st_size, st.st_mtime_ns)
+
+
+def _inactive_policy() -> str:
+    """Return the [events].on_inactive_annotate policy, resolving the config only on change.
+
+    The full configuration is resolved again only when the configuration
+    signature changes: the resolver or loader functions, the user config path
+    or its stat identity, the working directory, or the stat identity of either
+    local config file. PUBRUN_PROFILE and PUBRUN_META_REF only set [core] keys,
+    so they are not part of the signature.
+    """
+    global _INACTIVE_POLICY_CACHE, _USER_CONFIG_PATH_MEMO, _LOCAL_CONFIG_PATHS_MEMO
+    from pathlib import Path
+    from pubrun import config as _config
+
+    environ = os.environ
+    get_dir = _config.get_global_config_dir
+    user_key = (sys.platform, get_dir) + tuple(environ.get(n) for n in _USER_CONFIG_ENV_VARS)
+    user_memo = _USER_CONFIG_PATH_MEMO
+    if user_memo is None or user_memo[0] != user_key:
+        user_memo = (user_key, str(get_dir() / "config.toml"))
+        _USER_CONFIG_PATH_MEMO = user_memo
+    user_path = user_memo[1]
+
+    cwd = Path.cwd()
+    local_memo = _LOCAL_CONFIG_PATHS_MEMO
+    if local_memo is None or local_memo[0] != cwd:
+        cwd_str = str(cwd)
+        local_memo = (
+            cwd,
+            os.path.join(cwd_str, ".config", "pubrun", "config.toml"),
+            os.path.join(cwd_str, ".pubrun.toml"),
+        )
+        _LOCAL_CONFIG_PATHS_MEMO = local_memo
+
+    resolver = _config.resolve_config
+    signature = (
+        resolver,
+        _config.load_user_config,
+        _config.load_local_config,
+        user_path,
+        _stat_identity(user_path),
+        cwd,
+        _stat_identity(local_memo[1]),
+        _stat_identity(local_memo[2]),
+    )
+    cached = _INACTIVE_POLICY_CACHE
+    if cached is not None and cached[0] == signature:
+        return cached[1]
+
+    policy = resolver().get("events", {}).get("on_inactive_annotate", "ignore")
+    _INACTIVE_POLICY_CACHE = (signature, policy)
+    return policy
+
+
 def _handle_inactive(context: str) -> None:
     """Check the on_inactive_annotate policy and raise/warn/ignore accordingly.
 
@@ -62,8 +138,7 @@ def _handle_inactive(context: str) -> None:
         context: Human-readable label for the error/warning message
             (e.g. "pubrun.annotate()" or "pubrun.phase('training')").
     """
-    from pubrun.config import resolve_config
-    action = resolve_config().get("events", {}).get("on_inactive_annotate", "ignore")
+    action = _inactive_policy()
     if action == "error":
         raise RuntimeError(f"{context} called but no run is active.")
     elif action == "warn":

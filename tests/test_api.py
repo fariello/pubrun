@@ -521,3 +521,104 @@ class TestHandleInactivePolicy:
             with phase("should_raise"):
                 pass
 
+
+
+class TestInactivePolicyCache:
+    """The cached on_inactive_annotate policy still honors configuration changes on the next call."""
+
+    @pytest.fixture(autouse=True)
+    def empty_user_config_dir(self, tmp_path_factory, monkeypatch):
+        """Point the user configuration directory at an empty directory unless a test overrides it."""
+        empty = tmp_path_factory.mktemp("empty_user_cfg")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(empty))
+        monkeypatch.setenv("APPDATA", str(empty))
+        assert get_current_run() is None
+        yield
+
+    @staticmethod
+    def _policy_toml(policy):
+        return f'[events]\non_inactive_annotate = "{policy}"\n'
+
+    def test_local_file_lifecycle_is_honored_on_next_call(self, tmp_path, caplog):
+        import logging
+
+        local = tmp_path / ".pubrun.toml"
+        annotate("silent, no local file")
+
+        local.write_text(self._policy_toml("error"), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="no run is active"):
+            annotate("should raise")
+        with pytest.raises(RuntimeError, match="no run is active"):
+            with phase("p"):
+                pass
+
+        local.write_text(self._policy_toml("warn") + "# size differs from the error file\n",
+                         encoding="utf-8")
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            annotate("should warn")
+        assert any("dropped: No active run" in r.getMessage() for r in caplog.records)
+
+        local.unlink()
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            annotate("silent again")
+        assert not any("No active run" in r.getMessage() for r in caplog.records)
+
+    def test_deep_local_file_is_honored(self, tmp_path):
+        annotate("silent before the file exists")
+        deep = tmp_path / ".config" / "pubrun" / "config.toml"
+        deep.parent.mkdir(parents=True)
+        deep.write_text(self._policy_toml("error"), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="no run is active"):
+            annotate("should raise")
+
+    def test_user_config_dir_change_is_honored(self, tmp_path_factory, monkeypatch):
+        with_cfg = tmp_path_factory.mktemp("user_cfg_error")
+        (with_cfg / "pubrun").mkdir()
+        (with_cfg / "pubrun" / "config.toml").write_text(self._policy_toml("error"),
+                                                         encoding="utf-8")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(with_cfg))
+        monkeypatch.setenv("APPDATA", str(with_cfg))
+        with pytest.raises(RuntimeError, match="no run is active"):
+            annotate("should raise")
+
+        empty = tmp_path_factory.mktemp("user_cfg_empty")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(empty))
+        monkeypatch.setenv("APPDATA", str(empty))
+        annotate("silent after the user config dir changes")
+
+    def test_working_directory_change_is_honored(self, tmp_path, monkeypatch):
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        a.mkdir()
+        b.mkdir()
+        (a / ".pubrun.toml").write_text(self._policy_toml("error"), encoding="utf-8")
+
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: a)
+        with pytest.raises(RuntimeError, match="no run is active"):
+            annotate("should raise in a")
+
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: b)
+        annotate("silent in b")
+
+    def test_malformed_file_warns_once_per_change(self, tmp_path, caplog):
+        import logging
+
+        local = tmp_path / ".pubrun.toml"
+        local.write_text("this is = = not toml\n", encoding="utf-8")
+
+        def malformed_count():
+            return sum(1 for r in caplog.records
+                       if r.name == "pubrun" and r.levelno == logging.WARNING
+                       and "ignoring malformed config file" in r.getMessage())
+
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            for _ in range(3):
+                annotate("ignored")
+            assert malformed_count() == 1
+
+            local.write_text("[events\nstill broken, and a different size\n", encoding="utf-8")
+            for _ in range(3):
+                annotate("ignored")
+            assert malformed_count() == 2

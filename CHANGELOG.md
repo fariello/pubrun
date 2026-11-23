@@ -103,6 +103,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **Calls made with no active run no longer resolve the full configuration on every call.**
+  `annotate()`, `phase()`, `report()`, `artifact()`, `register_file()`, `register_input()`, and
+  `register_output()` with no active run now cache the `[events].on_inactive_annotate` policy and
+  resolve the configuration again only when the user or local configuration file, the working
+  directory, or the user configuration directory changes. An inactive `phase()` block dropped from
+  about 114 us to about 22 us on the reference machine (CPython 3.14.6, Intel Core i7-6800K). A
+  malformed configuration file is now reported once per change of that file instead of once per call.
 - **The minimal research workflow example no longer leaves `outputs/` in the caller's directory.**
   `examples/minimal-research-workflow/analysis.py` now writes `synthetic_data.csv` and
   `summary.json` to `outputs/` next to the script (already git-ignored) instead of the current
