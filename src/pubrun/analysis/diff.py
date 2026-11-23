@@ -5,8 +5,16 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 def _is_path_var(key_path: str) -> bool:
-    """Return True if the key looks like a PATH-style variable."""
-    return "PATH" in key_path.upper()
+    """Return True if the key is a PATH-style environment variable.
+
+    Only ``environment.<NAME>`` keys whose variable name contains ``PATH`` are
+    split on the OS path separator; manifest fields such as
+    ``invocation.script.path`` stay scalar diffs.
+    """
+    prefix = "environment."
+    if not key_path.startswith(prefix):
+        return False
+    return "PATH" in key_path[len(prefix):].upper()
 
 
 def _format_epoch(ts: float, include_float: bool) -> str:
@@ -35,7 +43,7 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str], depth: str
             if "*" in ig:
                 if fnmatch.fnmatch(key, ig):
                     return True
-            elif key.startswith(ig):
+            elif key == ig or key.startswith(ig if ig.endswith(".") else ig + "."):
                 return True
         return False
 
@@ -50,7 +58,20 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str], depth: str
             name = var.get("name")
             val = var.get("value")
             if isinstance(val, dict):
-                val = val.get("value")
+                rep = val.get("representation")
+                if rep == "hashed":
+                    hv = val.get("hash_value")
+                    algo = val.get("hash_algorithm")
+                    if hv and algo:
+                        val = f"[HASHED:{algo}:{hv}]"
+                    elif hv:
+                        val = f"[HASHED:{hv}]"
+                    else:
+                        val = "[HASHED]"
+                elif rep == "redacted":
+                    val = "[REDACTED]"
+                else:
+                    val = val.get("value")
 
             full_key = f"environment.{name}"
             if not _should_ignore(full_key):
@@ -263,13 +284,20 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Opt
                 }
             # PATH-style variable: split on OS path separator
             elif _is_path_var(k) and isinstance(val_a, str) and isinstance(val_b, str):
-                parts_a = set(val_a.split(os.pathsep)) if val_a else set()
-                parts_b = set(val_b.split(os.pathsep)) if val_b else set()
+                seq_a = val_a.split(os.pathsep) if val_a else []
+                seq_b = val_b.split(os.pathsep) if val_b else []
+                parts_a = set(seq_a)
+                parts_b = set(seq_b)
+                common_seq_a = [p for p in seq_a if p in parts_b]
+                common_seq_b = [p for p in seq_b if p in parts_a]
 
                 diff_report["modified"][k] = {
                     "type": "path_split",
                     "added": sorted(list(parts_b - parts_a)),
-                    "removed": sorted(list(parts_a - parts_b))
+                    "removed": sorted(list(parts_a - parts_b)),
+                    "order_changed": common_seq_a != common_seq_b,
+                    "old": val_a,
+                    "new": val_b,
                 }
             else:
                 diff_report["modified"][k] = {

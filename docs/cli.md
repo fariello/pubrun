@@ -521,7 +521,7 @@ pubrun methods [RUN_DIR] [--format markdown|latex] [--all] [-n N] [-f/-F/-s/-S .
 
 - Bound/curate the set with the shared run filters: `-n N` (most-recent N), `-f`/`-F` (include/exclude by script/args/**run-id**), `-s`/`-S` (by status). A differing git commit across the set is *disclosed as variance*, never an error.
 - A very large or divergent set prints a suggestion to stderr, **clearly marked as not part of the methods section** (so it can never be pasted into a paper); it respects `NO_COLOR`.
-- **Note the difference from `show`:** `pubrun show` (no run dir) prints a *separate report per matching run*; `pubrun methods` stays single-run unless you pass `--all`, and then produces *one aggregated paragraph*. This is deliberate — a methods section is a single publication artifact, so aggregation is opt-in.
+- **Note the difference from `show`:** bare `pubrun show` (no run dir, filter, or `-n`) reports only the single most recent run, and `pubrun show` with run filters or `-n` prints a *separate report per matching run*; `pubrun methods` stays single-run unless you pass `--all`, and then produces *one aggregated paragraph*. This is deliberate: a methods section is a single publication artifact, so aggregation is opt-in.
 
 **Examples:**
 ```bash
@@ -543,6 +543,9 @@ pubrun show [RUN_DIR ...] [--basic|--standard|--deep] [--utc]
 **Alias:** `report` (backward-compatible) — `report` accepts the same flags, including `--utc`.
 
 - Pass multiple directories to evaluate them sequentially.
+- With no run directory, filter, or `-n`/`--limit`, `pubrun show` reports the single most recent run.
+  Passing any run filter (`-f`, `-F`, `-s`, `-S`, `--older-than`, `--exit-code`) prints a separate
+  report for every matching run, and `-n N` limits that to the N most recent matches.
 - If the manifest references a `meta_ref`, the parent context is hydrated automatically.
 - Timestamps display in **local time** by default; pass `--utc` for UTC. They are shown in a
   compact `YYYY-MM-DD HH:MM:SS` form.
