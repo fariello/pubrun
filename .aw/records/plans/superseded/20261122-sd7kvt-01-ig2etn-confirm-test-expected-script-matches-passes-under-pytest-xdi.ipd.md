@@ -6,11 +6,10 @@
 - Scope: After plan `vv4vdd` has executed, confirm that `tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches` no longer depends on the command line of the pytest process, and that it passes serially, under pytest-xdist, and in the full parallel suite (`aw suite`). Edit `tests/test_liveness.py` only in the fallback case where the rewrite from plan `vv4vdd` is absent. No production code changes.
 - Scope-Paths: tests/test_liveness.py
 - Item-Dependencies: executed:vv4vdd
-- Status: to-review
+- Status: superseded
 - Work-Kind: bug
 - Priority: low
 - From-Backlog: sd7kvt
-- Blocks-Release: next
 - Set: sd7kvt
 - Order: 1
 - Highest E allocated: 03
@@ -21,6 +20,7 @@
 
 ## Workflow history
 
+- 2026-11-23 superseded (aw set): Superseded by vv4vdd (ivpkar), which fixes the same xdist liveness defect and verifies the full parallel suite
 - 2026-11-23 draft (agent): created.
 - 2026-11-23 to-review (agent): authored from backlog item `sd7kvt`; the failure was reproduced in the lane worktree before authoring (see Findings F-01).
 

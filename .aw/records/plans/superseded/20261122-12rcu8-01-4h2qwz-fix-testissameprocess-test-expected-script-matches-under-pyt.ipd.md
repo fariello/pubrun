@@ -6,11 +6,10 @@
 - Scope: Rewrite `TestIsSameProcess.test_expected_script_matches` in `tests/test_liveness.py` so that it checks `pubrun.capture.liveness.is_same_process(..., expected_script=...)` against a short-lived child process that runs a known script, instead of against the current pytest process. No production code changes.
 - Scope-Paths: tests/test_liveness.py
 - Item-Dependencies: none
-- Status: to-review
+- Status: superseded
 - Work-Kind: bug
 - Priority: low
 - From-Backlog: 12rcu8
-- Blocks-Release: next
 - Set: 12rcu8
 - Order: 1
 - Highest E allocated: 02
@@ -21,6 +20,7 @@
 
 ## Workflow history
 
+- 2026-11-23 superseded (aw set): Superseded by vv4vdd (ivpkar), which fixes the same xdist liveness defect and verifies the full parallel suite
 - 2026-11-23 draft (agent): created.
 - 2026-11-23 to-review (agent): authored from backlog item `12rcu8`; failure reproduced in the lane worktree before authoring (see Findings).
 
