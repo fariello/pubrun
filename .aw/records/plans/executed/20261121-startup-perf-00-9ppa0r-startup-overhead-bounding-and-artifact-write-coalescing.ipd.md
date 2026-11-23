@@ -6,7 +6,7 @@
 - Scope: Full-Set coordination for backlog item `t1xqpw` across baseline measurement, commit identity and boot configuration loading, snapshot write coalescing, explicit durability policy, bounded Git and hardware capture budgets, post-change benchmark comparison, documentation reconciliation, and whole-Set verification.
 - Scope-Paths: .aw/records/plans/pending/20261121-startup-perf-00-9ppa0r-startup-overhead-bounding-and-artifact-write-coalescing.ipd.md
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: orchestrator
 - Coverage: pass
@@ -21,12 +21,12 @@
 - Highest E allocated: 04
 - Author: agent
 - Id: 9ppa0r
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): RETIRED as the orchestrator rollup step of a runner Set completion, not executed by an agent: every child of Set startup-perf reached executed, so the runner (run run-20261122T213705Z-2482020) retired this Order-0 plan as bookkeeping. Its own E-*/V-* items were NOT performed; the runner superseded them by enforcing the ordering, the isolation and the per-child merge gate. Justifying children: fthyv5, 4il383, tkmm5p, ckc3vl.
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-22 coverage pass (aw oc run): fingerprint e17394621eff, model uri/its_direct/pt3-claude-opus-5.5-1m-us
@@ -61,6 +61,9 @@ erDiagram
 ```
 
 ## Detailed Implementation Checklist (TODO)
+
+
+> Its own E-*/V-* items were NOT performed; the runner superseded them by enforcing the ordering, the isolation and the per-child merge gate.
 
 Execution-state rule: mark an `E-*` item complete only after performing the action. That mark is not validation. Right-sizing rule: write for a modest executor that cannot hold much in its head. Each E-item is one step (one concern, about one file, executable in one focused pass) and its V-item names each unit it covers with its own check; a plan stays at about 5 E-items and 8 work Scope-Paths, else split it into more child plans (guidance, `IPD-Z603`). Accepted execution states: blocked, failed, pending, performed; terminal gate demands 'performed'.
 
