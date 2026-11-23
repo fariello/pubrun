@@ -1016,3 +1016,95 @@ print(json.dumps({{
         assert data["outputs"][0]["registration_source"] == "register_output"
         assert data["outputs"][0]["registered_before_creation"] is True
         assert data["outputs"][0]["path"] == os.path.abspath(str(out_path))
+
+
+class TestModeModuleBackgroundCapture:
+    """Every import mode completes hardware, host, and filesystem capture.
+
+    Regression for the auto-starting mode modules starting the ``pubrun-hw``
+    background thread before ``pubrun._run_lock`` was bound, which left the
+    manifest's ``hardware``/``host``/``filesystem`` sections ``pending`` and,
+    with ``[capture.hardware].depth = "off"``, disabled auto-start entirely.
+    Plain ``pubrun`` is a control that was never affected.
+    """
+
+    @staticmethod
+    def _env():
+        env = {
+            k: v for k, v in os.environ.items()
+            if k not in ("PUBRUN_IMPORT_MODE", "PUBRUN_AUTO_START")
+        }
+        src_dir = pathlib.Path(__file__).resolve().parents[1] / "src"
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing}" if existing else str(src_dir)
+        return env
+
+    def _run(self, script, tmp_path):
+        return subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(tmp_path), env=self._env(),
+        )
+
+    @pytest.mark.parametrize("module", [
+        "pubrun", "pubrun.auto", "pubrun.full", "pubrun.noauto",
+        "pubrun.nopatch", "pubrun.noconsole", "pubrun.minimal",
+    ])
+    def test_mode_module_captures_hardware(self, module, tmp_path):
+        script = f"""
+import json, os, time
+import {module} as pubrun
+run = pubrun.get_current_run() or pubrun.start()
+manifest_path = os.path.join(str(run.run_dir), "manifest.json")
+deadline = time.monotonic() + 20
+while time.monotonic() < deadline:
+    try:
+        with open(manifest_path) as fh:
+            status = json.load(fh)["hardware"]["capture_state"]["status"]
+    except (OSError, ValueError, KeyError):
+        status = "pending"
+    if status != "pending":
+        break
+    time.sleep(0.1)
+pubrun.stop()
+with open(manifest_path) as fh:
+    m = json.load(fh)
+print(json.dumps({{
+    "hardware": m["hardware"]["capture_state"]["status"],
+    "has_cpu": "cpu" in m["hardware"],
+    "host": m["host"]["capture_state"]["status"],
+}}))
+"""
+        result = self._run(script, tmp_path)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert "Exception in thread pubrun-hw" not in result.stderr
+        assert "cannot import name '_run_lock'" not in result.stderr
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["hardware"] != "pending"
+        assert data["has_cpu"] is True
+        assert data["host"] != "pending"
+
+    @pytest.mark.parametrize("module", [
+        "pubrun", "pubrun.auto", "pubrun.full", "pubrun.nopatch", "pubrun.noconsole",
+    ])
+    def test_mode_module_autostarts_with_hardware_off(self, module, tmp_path):
+        (tmp_path / ".pubrun.toml").write_text('[capture.hardware]\ndepth = "off"\n')
+        script = f"""
+import json, os
+import {module} as pubrun
+run = pubrun.get_current_run()
+out = {{"active": run is not None}}
+if run is not None:
+    manifest_path = os.path.join(str(run.run_dir), "manifest.json")
+    pubrun.stop()
+    with open(manifest_path) as fh:
+        out["hardware"] = json.load(fh)["hardware"]["capture_state"]["status"]
+print(json.dumps(out))
+"""
+        result = self._run(script, tmp_path)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["active"] is True, f"stderr: {result.stderr}"
+        assert "auto-start failed" not in result.stderr
+        assert "cannot import name '_run_lock'" not in result.stderr
+        assert data["hardware"] == "suppressed"

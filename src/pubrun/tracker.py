@@ -273,7 +273,7 @@ class Run:
                 or getattr(self.writer, "last_error", None)
                 or "unable to write startup manifest"
             )
-            from pubrun import _run_lock
+            from pubrun.core import _run_lock
             with _run_lock:
                 self._finalized = True
                 self._hardware_write_closed = True
@@ -480,7 +480,7 @@ class Run:
 
     def _collect_hardware_section(self) -> None:
         """Collect hardware metadata inside an isolated failure guard."""
-        from pubrun import _run_lock
+        from pubrun.core import _run_lock
         from pubrun.capture.redaction import format_safe_error_detail
 
         try:
@@ -509,7 +509,7 @@ class Run:
         Note: on macOS ``get_filesystem()`` runs a bounded 2-second ``mount``
         subprocess; on Linux and Windows it is non-blocking.
         """
-        from pubrun import _run_lock
+        from pubrun.core import _run_lock
         from pubrun.capture.redaction import format_safe_error_detail
 
         try:
@@ -649,7 +649,7 @@ class Run:
                 self._hardware_future_done.set()
         else:
             def _collect_hardware():
-                from pubrun import _run_lock
+                from pubrun.core import _run_lock
 
                 hw_start = time.perf_counter()
                 try:
@@ -1105,7 +1105,7 @@ class Run:
         # before waiting on deferred hardware collection so teardown latency never
         # inflates workload_seconds and the async hardware thread cannot overwrite
         # a finalized manifest (IPD 20260721-1425-01).
-        from pubrun import _run_lock
+        from pubrun.core import _run_lock
         with _run_lock:
             if self._finalized:
                 return
@@ -1382,7 +1382,7 @@ class Run:
         count reaches zero.
         """
         global _active_run
-        from pubrun import _run_lock
+        from pubrun.core import _run_lock
         with _run_lock:
             if not getattr(self, "_finalized", False) and self._outcome not in ("failed", "ghost"):
                 self._outcome = outcome

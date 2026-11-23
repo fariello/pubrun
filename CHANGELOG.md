@@ -103,6 +103,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **Hardware, host, and filesystem capture no longer fails under `import pubrun.auto`, `pubrun.full`,
+  `pubrun.nopatch`, or `pubrun.noconsole`.** These imports could print
+  `Exception in thread pubrun-hw: ... ImportError: cannot import name '_run_lock'` and leave the
+  `hardware`, `host`, and `filesystem` manifest sections `pending`. With
+  `[capture.hardware].depth = "off"` the same imports disabled tracking entirely. Plain `import pubrun`
+  was not affected, and a regression test now covers all six mode modules and plain `import pubrun`.
+- **A SIGTERM or SIGHUP that arrives while the background hardware refresh is writing the manifest no
+  longer hangs the process.** Reading the recorded signals no longer waits on a lock the interrupted
+  main thread may hold, so the two threads can no longer deadlock and the run finalizes as
+  `interrupted`.
 - **`[imports].on_conflict` set in `./.config/pubrun/config.toml` or in the user config file is
   no longer ignored.** The import-conflict policy was read only from `./.pubrun.toml`, so
   `on_conflict = "error"` in the other two files left the policy at the default `"warn"`. It is

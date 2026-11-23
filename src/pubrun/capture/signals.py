@@ -164,26 +164,41 @@ class SignalExitCapture:
             pass
 
     def get_records(self) -> Dict[str, Any]:
-        """Return the captured signal/exit data for manifest inclusion."""
-        with self._lock:
-            if self._install_error:
-                capture_state: Dict[str, Any] = {
-                    "status": "failed",
-                    "detail": self._install_error,
-                }
-            elif self._signals_unavailable:
-                capture_state = {
-                    "status": "partial",
-                    "detail": "signal handlers unavailable off main thread",
-                }
-            else:
-                capture_state = {"status": "complete"}
-            return {
-                "signals_received": list(self._signals_received),
-                "exit_code": self._exit_code,
-                "exit_exception": self._exit_exception,
-                "capture_state": capture_state,
+        """Return the captured signal/exit data for manifest inclusion.
+
+        Never blocks on ``_lock``. A background manifest refresh calls this
+        while holding ``pubrun.core._run_lock``; if the main thread holds
+        ``_lock`` and a lethal signal makes it finalize (which takes
+        ``_run_lock``), a blocking acquire here would deadlock both threads.
+        When the lock is busy the snapshot is taken lock-free, which is safe
+        because the signal shim and ``_set_exit`` already write lock-free.
+        """
+        acquired = self._lock.acquire(blocking=False)
+        try:
+            return self._snapshot_records()
+        finally:
+            if acquired:
+                self._lock.release()
+
+    def _snapshot_records(self) -> Dict[str, Any]:
+        if self._install_error:
+            capture_state: Dict[str, Any] = {
+                "status": "failed",
+                "detail": self._install_error,
             }
+        elif self._signals_unavailable:
+            capture_state = {
+                "status": "partial",
+                "detail": "signal handlers unavailable off main thread",
+            }
+        else:
+            capture_state = {"status": "complete"}
+        return {
+            "signals_received": list(self._signals_received),
+            "exit_code": self._exit_code,
+            "exit_exception": self._exit_exception,
+            "capture_state": capture_state,
+        }
 
     def record_exit_code(self, code: Optional[int]) -> None:
         """Explicitly record the process exit code (called at finalization).
