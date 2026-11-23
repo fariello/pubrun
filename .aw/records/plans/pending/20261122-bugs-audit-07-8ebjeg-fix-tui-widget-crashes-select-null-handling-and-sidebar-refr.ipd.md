@@ -51,34 +51,34 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: App message routing and ActionsPanel fixes
 
-- [ ] E-01 Fix `src/pubrun/tui/app.py::PubrunTUIApp.on_refresh_sidebar` so posted `RefreshSidebar` messages invoke `action_refresh_all()`, and add regression tests in `tests/test_tui_bugs.py`.
+- [x] E-01 Fix `src/pubrun/tui/app.py::PubrunTUIApp.on_refresh_sidebar` so posted `RefreshSidebar` messages invoke `action_refresh_all()`, and add regression tests in `tests/test_tui_bugs.py`.
   - Depends on: none
   - Expected outcome: `src/pubrun/tui/app.py::PubrunTUIApp.on_refresh_sidebar` is decorated with `@on(RefreshSidebar)` (importing `on` from `textual`), resolving the mismatch with Textual's derived nested-message handler name `on_pubrun_tuiapp_refresh_sidebar`. Posting `app.RefreshSidebar()` from any widget (such as after deleting, archiving with delete, or bulk pruning) invokes `action_refresh_all()` and refreshes both `#sidebar` (`RunsSidebar.load_runs()`) and `#diff-view` (`DiffView.populate_dropdowns(...)`). Tests in `tests/test_tui_bugs.py` cover `BUG-15`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Fix degraded-run deletion (`run_id is None`) and Bulk Prune `older_than` delegation and `ValueError` handling in `src/pubrun/tui/widgets/actions.py`, while preserving `ActionsPanel.rerun_command` on Textual 8.x, and add regression tests in `tests/test_tui_bugs.py`.
+- [x] E-02 Fix degraded-run deletion (`run_id is None`) and Bulk Prune `older_than` delegation and `ValueError` handling in `src/pubrun/tui/widgets/actions.py`, while preserving `ActionsPanel.rerun_command` on Textual 8.x, and add regression tests in `tests/test_tui_bugs.py`.
   - Depends on: E-01
   - Expected outcome: `src/pubrun/tui/widgets/actions.py::ActionsPanel` retains its public `self.rerun_command` attribute (already replacing `Static.renderable` and pinned by `tests/test_tui.py::TestTuiReproducibilityAndActions::test_actions_panel_redacted_advisory_clearing_and_clean_clipboard`, never renaming it to `_rerun_command`). Deleting a degraded run whose `run_id` is `None` passes `self.run_info.run_id or self.run_info.run_dir.name` into `ConfirmDeleteModal`, guards `(self.run_id or "unknown")[:8]` inside `ConfirmDeleteModal.compose`, uses `(self.run_info.run_id or self.run_info.run_dir.name)[:8]` in `handle_deletion_result` instead of slicing `None[:8]`, and clears `self.run_info` via `self.display_run(None)` after deletion. `ActionsPanel.run_bulk_prune` delegates `older_than=older_val or None` directly to `src/pubrun/status.py::clean_runs` (supporting `d`, `h`, `m`, `s`, and bare numeric days via `njn1up`'s canonical parser rather than duplicating incomplete parsing), catches `ValueError` from `clean_runs` on invalid/negative/non-finite ages (such as `"2w"`, `"abc"`, `"-5d"`, `"nan"`, `"inf"`), writes the error to `#cleanup-log-output`, notifies the user with `severity="error"`, leaves run directories untouched, and does not post `RefreshSidebar`. Tests in `tests/test_tui_bugs.py` cover `BUG-13` (regression guard), `BUG-53`, and `njn1up` Bulk Prune `ValueError` handling.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: ConfigPanel, DiffView, RunDetailsView, and LogViewer fixes
 
-- [ ] E-03 Fix `src/pubrun/tui/widgets/config.py::ConfigPanel` to guard `Select.NULL` safely without matching `Widget.BLANK` (`False`), prevent `"Select.NULL"` Tom's Obvious Minimal Language (TOML) writes, and tolerate unknown or legacy config values on mount, adding regression tests in `tests/test_tui_bugs.py`.
+- [x] E-03 Fix `src/pubrun/tui/widgets/config.py::ConfigPanel` to guard `Select.NULL` safely without matching `Widget.BLANK` (`False`), prevent `"Select.NULL"` Tom's Obvious Minimal Language (TOML) writes, and tolerate unknown or legacy config values on mount, adding regression tests in `tests/test_tui_bugs.py`.
   - Depends on: none
   - Expected outcome: `src/pubrun/tui/widgets/config.py` defines `_is_select_empty(val: Any) -> bool` checking `val is None or val == Select.NULL or ((blank := Select.__dict__.get("BLANK")) is not None and val == blank)` (using `Select.__dict__.get("BLANK")` so Textual 8.x's inherited `Widget.BLANK = False` is never treated as an empty sentinel and `False`/`0` are never misclassified). `ConfigPanel.save_settings` skips writing any `Select` whose value satisfies `_is_select_empty(val)` so `"Select.NULL"` is never written to `.pubrun.toml`. `ConfigPanel.load_settings` validates each loaded `Select` value (`core.profile`, `console.capture_mode`, `redaction.representation`) against that widget's allowed option values before assigning `.value`; when a config file or environment variable (such as `PUBRUN_PROFILE=standard`) supplies an unknown value, it sets the widget to `Select.NULL` (never `Select.BLANK`, which raises `InvalidSelectValueError` in Textual 8.x) and emits a warning notification so `pubrun ui` mounts cleanly without crashing and saving does not corrupt the setting. Tests in `tests/test_tui_bugs.py` cover `BUG-14` (`ConfigPanel`).
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Fix `Select.NULL` guards and hydration warnings in `src/pubrun/tui/widgets/diff.py::DiffView`, Graphics Processing Unit (GPU) model rendering in `src/pubrun/tui/widgets/details.py::RunDetailsView.update_general_pane`, and `Select.NULL` guards in `src/pubrun/tui/widgets/viewer.py::LogViewer`, adding regression tests in `tests/test_tui_bugs.py`.
+- [x] E-04 Fix `Select.NULL` guards and hydration warnings in `src/pubrun/tui/widgets/diff.py::DiffView`, Graphics Processing Unit (GPU) model rendering in `src/pubrun/tui/widgets/details.py::RunDetailsView.update_general_pane`, and `Select.NULL` guards in `src/pubrun/tui/widgets/viewer.py::LogViewer`, adding regression tests in `tests/test_tui_bugs.py`.
   - Depends on: E-03
   - Expected outcome: `src/pubrun/tui/widgets/diff.py::DiffView.run_difference` uses `_is_select_empty` (imported from `pubrun.tui.widgets.config` or an equivalent helper avoiding `Widget.BLANK = False`) on `#select-diff-a`, `#select-diff-b`, and `#select-diff-depth`: blank Run A or Run B shows the "Please select both Run A and Run B" error instead of raising `TypeError` on `Path(Select.NULL)` or falsely reporting self-comparison; blank `#select-diff-depth` falls back cleanly to `"basic"` instead of passing `Select.NULL` into `ignore_deep` and `compare_manifests`; and hydration warnings `(warn_a or []) + (warn_b or [])` are passed to `render_diff_report(diff_report, warnings=...)` and written to `#diff-output-area` after `output.clear()` so warnings are preserved visibly. `src/pubrun/tui/widgets/details.py::RunDetailsView.update_general_pane` guards non-dict `host`/`hardware`/`cpu`/`gpu` entries and displays `_escape_markup(str(gpu.get("model") or gpu.get("name") or "unknown"))` alongside `gpu.get("driver_version") or "-"` so real manifests (`hardware.gpus[*].model`) render the GPU model instead of `None`. `src/pubrun/tui/widgets/viewer.py::LogViewer` guards both `on_select_changed` (`event.value`) and `on_button_pressed` (`#btn-refresh-log`, `select_widget.value`) with `_is_select_empty` so blank selections never call `load_log_file("Select.NULL")` or print a bogus missing-file error. Tests in `tests/test_tui_bugs.py` cover `BUG-14` (`DiffView`, `LogViewer`), `BUG-51`, and `BUG-52`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Full-suite regression verification
 
-- [ ] E-05 Run `tests/test_tui_bugs.py`, `tests/test_tui.py`, and the full `pytest` regression suite to confirm zero regressions.
+- [x] E-05 Run `tests/test_tui_bugs.py`, `tests/test_tui.py`, and the full `pytest` regression suite to confirm zero regressions.
   - Depends on: E-01, E-02, E-03, E-04
   - Expected outcome: `pytest tests/test_tui_bugs.py tests/test_tui.py -v` and full `pytest -q` pass with zero failures and zero skipped regressions on Textual 8.x.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -133,30 +133,92 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest tests/test_tui_bugs.py -v` output confirming posting `PubrunTUIApp.RefreshSidebar()` invokes `action_refresh_all()` and updates both `#sidebar` (`RunsSidebar`) and `#diff-view` (`DiffView`) dropdowns.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_tui_bugs.py tests/test_tui.py -v -p no:cacheprovider --no-cov   (lane 8ebjeg attempt 2, commit 6254d4b on base fa9d645)
+    tests/test_tui_bugs.py::TestRefreshSidebarRouting::test_posted_refresh_sidebar_reloads_sidebar_and_diff_dropdowns PASSED [  2%]
+    ============================= 35 passed in 29.24s ==============================
+    ```
+    The test writes a second run on disk, posts `app.RefreshSidebar()`, and asserts `RunsSidebar.all_runs` grows from 1 to 2, `#select-diff-a` gains the new run directory as a legal option, and the "refreshed" notification fires. In attempt 1, against pre-fix source (HEAD 2f9b880 tree with this test file), it FAILED (`assert 1 == 2`).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest tests/test_tui_bugs.py -v` output confirming `ActionsPanel.rerun_command` works for Copy Rerun on Textual 8.x (including lock-only runs) without touching `Static.renderable`, deleting a degraded run with `run_id=None` opens `ConfirmDeleteModal` and completes `handle_deletion_result` without `TypeError`, and Bulk Prune handles valid `m`/`s` ages while invalid/negative/non-finite ages (`"2w"`, `"abc"`, `"-5d"`, `"nan"`) notify with `severity="error"`, log the failure, delete nothing, and do not crash.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_tui_bugs.py tests/test_tui.py -v -p no:cacheprovider --no-cov   (lane 8ebjeg attempt 2, commit 6254d4b on base fa9d645)
+    tests/test_tui_bugs.py::TestActionsPanel::test_rerun_copy_for_lock_only_run PASSED [  5%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_delete_degraded_run_with_none_run_id PASSED [  8%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_confirm_delete_modal_with_none_run_id_composes PASSED [ 11%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_bulk_prune_invalid_age_reports_error_and_deletes_nothing[2w] PASSED [ 14%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_bulk_prune_invalid_age_reports_error_and_deletes_nothing[abc] PASSED [ 17%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_bulk_prune_invalid_age_reports_error_and_deletes_nothing[-5d] PASSED [ 20%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_bulk_prune_invalid_age_reports_error_and_deletes_nothing[nan] PASSED [ 22%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_bulk_prune_invalid_age_reports_error_and_deletes_nothing[inf] PASSED [ 25%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_bulk_prune_accepts_canonical_age_units[60m-True] PASSED [ 28%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_bulk_prune_accepts_canonical_age_units[3600s-True] PASSED [ 31%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_bulk_prune_accepts_canonical_age_units[90d-False] PASSED [ 34%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_bulk_prune_accepts_canonical_age_units[7-True] PASSED [ 37%]
+    tests/test_tui.py::TestTuiReproducibilityAndActions::test_actions_panel_redacted_advisory_clearing_and_clean_clipboard PASSED [100%]
+    ============================= 35 passed in 29.24s ==============================
+    ```
+    Lock-only run: `panel.rerun_command` equals the reconstructed command and Copy Rerun copies it (no `Static.renderable`). Degraded run (`run_id=None`): the modal opens with `run_id == "pubrun-degraded"`, confirm deletes the directory, `panel.run_info is None`, and no error notification fires. Invalid ages log "Pruning failed", notify `severity="error"`, post no `RefreshSidebar`, and leave the 30-day-old run on disk; `60m`/`3600s`/`7` delete it and `90d` keeps it. In attempt 1, against pre-fix source, the delete, modal, `2w`/`abc`, `60m`, and `3600s` cases FAIL. During execution `ConfirmDeleteModal.is_running` also raised `AttributeError: property 'is_running' ... has no setter` (it shadows Textual 8.x `MessagePump.is_running`); the attribute is renamed `run_is_active`.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `pytest tests/test_tui_bugs.py -v` output confirming `_is_select_empty(Select.NULL)` is `True` while `_is_select_empty(False)` and `_is_select_empty(0)` are `False`, `ConfigPanel.save_settings` never writes `"Select.NULL"` to `.pubrun.toml`, and `ConfigPanel` mounts cleanly (setting `Select.NULL` with a warning, never raising `InvalidSelectValueError`) when config or environment holds an unknown value such as `PUBRUN_PROFILE=standard`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_tui_bugs.py tests/test_tui.py -v -p no:cacheprovider --no-cov   (lane 8ebjeg attempt 2, commit 6254d4b on base fa9d645)
+    tests/test_tui_bugs.py::TestConfigPanel::test_is_select_empty_sentinels PASSED [ 40%]
+    tests/test_tui_bugs.py::TestConfigPanel::test_save_never_writes_select_null PASSED [ 42%]
+    tests/test_tui_bugs.py::TestConfigPanel::test_save_writes_selected_values PASSED [ 45%]
+    tests/test_tui_bugs.py::TestConfigPanel::test_unknown_env_profile_mounts_with_warning PASSED [ 48%]
+    ============================= 35 passed in 29.24s ==============================
+    ```
+    Asserts `_is_select_empty(Select.NULL)` and `_is_select_empty(None)` are True while `False`, `0`, and `"basic"` are False; saving with all three Selects blank writes a `.pubrun.toml` with no `Select.NULL`, `profile`, `capture_mode`, or `representation`; with `PUBRUN_PROFILE=standard` and `representation = "legacy-mask"` the app mounts, both widgets hold `Select.NULL`, warning notifications name `core.profile` and `redaction.representation`, and a save preserves `representation = "legacy-mask"`. In attempt 1, against pre-fix source, the sentinel, save, and unknown-value tests FAIL.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest tests/test_tui_bugs.py -v` output confirming `DiffView` rejects blank `Select.NULL` Run A/B without `TypeError` or false self-comparison, falls back from blank `Select.NULL` depth to `"basic"` (and passes explicit `"standard"`/`"deep"` cleanly), preserves hydration warnings in `#diff-output-area` after `output.clear()`, `RunDetailsView.update_general_pane` displays `gpu["model"]` (falling back to `gpu["name"]`), and `LogViewer` ignores `Select.NULL` on both `on_select_changed` and `#btn-refresh-log`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_tui_bugs.py tests/test_tui.py -v -p no:cacheprovider --no-cov   (lane 8ebjeg attempt 2, commit 6254d4b on base fa9d645)
+    tests/test_tui_bugs.py::TestDiffView::test_blank_runs_report_selection_error PASSED [ 51%]
+    tests/test_tui_bugs.py::TestDiffView::test_depth_fallback_and_warnings_preserved[depth0] PASSED [ 54%]
+    tests/test_tui_bugs.py::TestDiffView::test_depth_fallback_and_warnings_preserved[standard] PASSED [ 57%]
+    tests/test_tui_bugs.py::TestDiffView::test_depth_fallback_and_warnings_preserved[deep] PASSED [ 60%]
+    tests/test_tui_bugs.py::TestRunDetailsGpu::test_gpu_model_key_rendered PASSED [ 62%]
+    tests/test_tui_bugs.py::TestRunDetailsGpu::test_non_dict_hardware_does_not_crash PASSED [ 65%]
+    tests/test_tui_bugs.py::TestLogViewer::test_blank_selection_ignored_on_change_and_refresh PASSED [ 68%]
+    ============================= 35 passed in 29.24s ==============================
+    ```
+    `depth0` is `Select.NULL`: `compare_manifests` receives `depth="basic"`; `standard`/`deep` pass through unchanged; both hydration warnings appear in `#diff-output-area` after the report header. Blank Run A/B shows "Select baseline and comparison runs" and the "Please select both Run A and Run B" notification, with no self-comparison or "Error computing diff". GPU pane renders `NVIDIA A100 [80GB]` (from `model`), `Legacy GPU` (from `name`), `(Driver: -)`, never `None (Driver`; a non-dict `hardware` renders without crashing. LogViewer records no `load_log_file` call after `Select.NULL` + Refresh. In attempt 1, against pre-fix source, all seven FAILED.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted `pytest tests/test_tui_bugs.py tests/test_tui.py -v` output and full `pytest -q` summary confirming all TUI tests and the full repository test suite pass with zero failures.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_tui_bugs.py tests/test_tui.py -v -p no:cacheprovider --no-cov
+    ============================= 35 passed in 29.24s ==============================
+
+    $ python3 -m pytest -q --no-cov -p no:cacheprovider -p no:xdist   (full suite, serial; lane 8ebjeg attempt 2, commit 6254d4b)
+    1647 passed, 2 skipped in 514.86s (0:08:34)
+
+    $ aw suite   (parallel xdist tier, same tree)
+    FAILED tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches
+    ================== 1 failed, 1648 passed in 158.34s (0:02:38) ==================
+
+    $ python3 -m pytest tests/test_liveness.py -q -p no:cacheprovider --no-cov -n 2
+    1 failed, 26 passed in 1.33s
+    $ python3 -m pytest tests/test_liveness.py -q -p no:cacheprovider --no-cov -p no:xdist
+    27 passed in 0.23s
+    ```
+    The single parallel-tier failure is pre-existing and unrelated: it is in liveness code this plan does not touch, fails under xdist on its own, passes serially, appears in every recent `aw suite` cache record from other lanes, and is filed as backlog 12rcu8 and sd7kvt (an xdist worker's cmdline lacks 'pytest'). The serial full suite passes with zero failures; the 2 skips match the njn1up baseline (`1575 passed, 2 skipped`).
+  - Result: pass
 
 ## Approval and execution gate
 
