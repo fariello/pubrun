@@ -1,5 +1,5 @@
 - Id: oh0que
-- Status: graduated
+- Status: done
 - Graduated-To: oh0que
 - Set: oh0que
 - Work-Kind: bug
@@ -11,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-23 done (aw backlog): closed by aw oc run: IPD 68iw9a executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261122-oh0que-01-68iw9a-cache-the-inactive-run-policy-so-pubrun-phase-with-no-active.ipd.md); evidence .aw/records/plans/executed/20261122-oh0que-01-68iw9a-cache-the-inactive-run-policy-so-pubrun-phase-with-no-active.ipd.md
 - 2026-11-23 graduated (aw backlog): graduated by run run-20261123T005542Z-1001883: 68iw9a
 - 2026-11-22 created (aw backlog): pubrun.phase() with no active run resolves the full configuration on every call (about 106 us per block)
 
