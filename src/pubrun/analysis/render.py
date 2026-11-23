@@ -15,6 +15,11 @@ class Colors:
     RESET = '\033[0m'
 
 
+def _tag(x: Any) -> Any:
+    """Type-tagged comparison key so ``True``/``1`` and ``False``/``0`` stay distinct."""
+    return (type(x).__name__, x)
+
+
 def _format_array_diff(
     elements: list,
     is_new_list: bool,
@@ -30,20 +35,30 @@ def _format_array_diff(
     yel = Colors.BOLD + Colors.YELLOW if use_color else ""
     rst = Colors.RESET if use_color else ""
 
+    # Compare by a type-tagged key so bool/int do not alias (True == 1, False == 0).
+    added_tags = {_tag(x) for x in added_set}
+    removed_tags = {_tag(x) for x in removed_set}
+    tags_a = [_tag(x) for x in common_a]
+    tags_b = [_tag(x) for x in common_b]
+
+    def _moved(t: Any) -> bool:
+        return t in tags_a and t in tags_b and tags_a.index(t) != tags_b.index(t)
+
     parts = []
     for x in elements:
         x_repr = repr(x)
+        t = _tag(x)
         if is_new_list:
-            if x in added_set:
+            if t in added_tags:
                 parts.append(f"{grn}+{x_repr}{rst}")
-            elif x in common_a and x in common_b and common_a.index(x) != common_b.index(x):
+            elif _moved(t):
                 parts.append(f"{yel}~{x_repr}{rst}")
             else:
                 parts.append(x_repr)
         else:
-            if x in removed_set:
+            if t in removed_tags:
                 parts.append(f"{red}-{x_repr}{rst}")
-            elif x in common_a and x in common_b and common_a.index(x) != common_b.index(x):
+            elif _moved(t):
                 parts.append(f"{yel}~{x_repr}{rst}")
             else:
                 parts.append(x_repr)
@@ -98,15 +113,22 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int
                 print(f"    {grn}+ {p_add}{rst}")
             for p_sub in mod.get("removed", []):
                 print(f"    {red}- {p_sub}{rst}")
+            if mod.get("order_changed") or (not mod.get("added") and not mod.get("removed")):
+                print(f"    {yel}~ [ORDER CHANGED]{rst}")
+                if "old" in mod and "new" in mod:
+                    print(f"    {red}- {_fmt(mod.get('old', ''), max_length, wrap)}{rst}")
+                    print(f"    {grn}+ {_fmt(mod.get('new', ''), max_length, wrap)}{rst}")
         elif mod["type"] == "list_diff":
             if depth in ("standard", "deep"):
-                added_set = set(mod.get("added", []))
-                removed_set = set(mod.get("removed", []))
+                added_set = list(mod.get("added", []))
+                removed_set = list(mod.get("removed", []))
                 val_a = mod.get("old", [])
                 val_b = mod.get("new", [])
 
-                common_a = [x for x in val_a if x in val_b]
-                common_b = [x for x in val_b if x in val_a]
+                tags_a = {_tag(x) for x in val_a}
+                tags_b = {_tag(x) for x in val_b}
+                common_a = [x for x in val_a if _tag(x) in tags_b]
+                common_b = [x for x in val_b if _tag(x) in tags_a]
 
                 old_repr = _format_array_diff(val_a, False, added_set, removed_set, common_a, common_b, use_color)
                 new_repr = _format_array_diff(val_b, True, added_set, removed_set, common_a, common_b, use_color)
@@ -152,6 +174,8 @@ def _summarize_change(mod: Dict[str, Any], max_length: int) -> str:
             bits.append(f"+{len(added)}")
         if removed:
             bits.append(f"-{len(removed)}")
+        if mod.get("order_changed"):
+            bits.append("reordered")
         cell = (f"PATH {' '.join(bits)}" if bits else "PATH changed") + note_suffix
         if len(cell) > max_length:
             cell = cell[:max_length] + " ..."
@@ -186,17 +210,29 @@ def _render_table(diff_report: Dict[str, Any], use_color: bool, max_length: int 
     bold = Colors.BOLD if use_color else ""
     rst = Colors.RESET if use_color else ""
 
+    dim = Colors.DIM if use_color else ""
+
+    def _cell(v: Any) -> str:
+        s = str(v)
+        if len(s) > max_length:
+            s = s[:max_length] + " ..."
+        return s
+
     rows = []  # (mark, color, key, detail)
     for k, v in sorted(diff_report.get("added", {}).items()):
-        rows.append(("+", grn, k, str(v)))
+        rows.append(("+", grn, k, _cell(v)))
     for k, v in sorted(diff_report.get("removed", {}).items()):
-        rows.append(("-", red, k, str(v)))
+        rows.append(("-", red, k, _cell(v)))
     for k, mod in sorted(diff_report.get("modified", {}).items()):
         rows.append(("~", yel, k, _summarize_change(mod, max_length)))
+    has_differences = bool(rows)
+    for k, v in sorted(diff_report.get("same", {}).items()):
+        rows.append(("=", dim, k, _cell(v)))
 
     print("--- Pubrun Diagnostic Difference ---")
-    if not rows:
+    if not has_differences:
         print("(no differences)")
+    if not rows:
         return
 
     # Column widths (based on the uncolored text), capped so a huge key can't blow out.

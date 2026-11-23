@@ -119,16 +119,20 @@ def _get_manifest_path(
 
         from pubrun.status import scan_runs, filter_runs
         all_runs = scan_runs(str(runs_dir))
-        matched = filter_runs(
-            all_runs,
-            filter_str=filter_str,
-            status_filter=status_filter,
-            limit=1,  # We only need the latest matching run
-            older_than=older_than,
-            exit_code=exit_code,
-            not_filter_str=not_filter_str,
-            not_status_filter=not_status_filter,
-        )
+        try:
+            matched = filter_runs(
+                all_runs,
+                filter_str=filter_str,
+                status_filter=status_filter,
+                limit=1,  # We only need the latest matching run
+                older_than=older_than,
+                exit_code=exit_code,
+                not_filter_str=not_filter_str,
+                not_status_filter=not_status_filter,
+            )
+        except ValueError as e:
+            _print_error(str(e))
+            sys.exit(1)
         if not matched:
             _print_error("No runs match the filter criteria.")
             sys.exit(1)
@@ -205,6 +209,7 @@ def _run_methods(
     except RunInProgressOrCrashedError as e:
         status = e.run_info.status if e.run_info else "crashed/running"
         _print_error(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.")
+        sys.exit(1)
     except FileNotFoundError as e:
         _print_error(str(e))
         sys.exit(1)
@@ -247,16 +252,20 @@ def _run_methods_aggregate(
         sys.exit(1)
 
     all_runs = scan_runs()
-    matched = filter_runs(
-        all_runs,
-        filter_str=filter_str,
-        status_filter=status_filter,
-        limit=limit,
-        older_than=older_than,
-        exit_code=exit_code,
-        not_filter_str=not_filter_str,
-        not_status_filter=not_status_filter,
-    )
+    try:
+        matched = filter_runs(
+            all_runs,
+            filter_str=filter_str,
+            status_filter=status_filter,
+            limit=limit,
+            older_than=older_than,
+            exit_code=exit_code,
+            not_filter_str=not_filter_str,
+            not_status_filter=not_status_filter,
+        )
+    except ValueError as e:
+        _print_error(str(e))
+        sys.exit(1)
     if not matched:
         _print_error("No runs match the filter criteria.")
         sys.exit(1)
@@ -710,6 +719,8 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
             # Resolve run_dir_a to its canonical path first
             r_a = find_run(run_dir_a)
             run_dir_a_path = r_a.run_dir if r_a else Path(run_dir_a)
+            if run_dir_a_path.is_file() and run_dir_a_path.name == "manifest.json":
+                run_dir_a_path = run_dir_a_path.parent
 
             run_dir_b_path = None
             for r in valid_runs:
@@ -824,6 +835,7 @@ def _run_resources(
     except RunInProgressOrCrashedError as e:
         status = e.run_info.status if e.run_info else "crashed/running"
         _print_error(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.")
+        sys.exit(1)
     except FileNotFoundError as e:
         _print_error(str(e))
         sys.exit(1)
@@ -986,7 +998,7 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None, utc: bo
                             print(se.read(), end="")
                     except Exception as le:
                         _print_error(f"Failed to read stderr log: {le}")
-                sys.exit(0)
+                return
             else:
                 raise
 
@@ -1826,16 +1838,32 @@ def _create_result_gist(path):
     page_url = _run_gh(["gist", "create", str(path),
                         "--desc", "pubrun redacted benchmark result"])
     # `gh gist create` prints the gist page URL (https://gist.github.com/<user>/<hexid>).
-    gist_id = urlparse(page_url.strip().splitlines()[-1]).path.rstrip("/").split("/")[-1] if page_url else ""
+    lines = (page_url or "").strip().splitlines()
+    try:
+        gist_id = urlparse(lines[-1].strip()).path.rstrip("/").split("/")[-1] if lines else ""
+    except Exception:
+        gist_id = ""
     if not gist_id or not all(c in "0123456789abcdefABCDEF" for c in gist_id):
         raise _GhError("could not parse a gist id from gh output")
-    metadata = json.loads(_run_gh(["api", f"/gists/{gist_id}"]))
-    files = metadata.get("files", {}) if isinstance(metadata, dict) else {}
-    if len(files) != 1:
-        raise _GhError("unexpected gist file count")
-    raw_url = next(iter(files.values())).get("raw_url", "")
-    if not _validate_gist_raw_url(raw_url):
-        raise _GhError("gist raw URL failed host/shape validation")
+    # From here on a gist exists: any failure must roll it back so no orphan leaks.
+    try:
+        try:
+            metadata = json.loads(_run_gh(["api", f"/gists/{gist_id}"]))
+        except ValueError:
+            raise _GhError("gist metadata was not valid JSON")
+        files = metadata.get("files", {}) if isinstance(metadata, dict) else {}
+        if not isinstance(files, dict) or len(files) != 1:
+            raise _GhError("unexpected gist file count")
+        entry = next(iter(files.values()))
+        raw_url = entry.get("raw_url", "") if isinstance(entry, dict) else ""
+        if not isinstance(raw_url, str) or not _validate_gist_raw_url(raw_url):
+            raise _GhError("gist raw URL failed host/shape validation")
+    except _GhError:
+        _delete_gist_best_effort(gist_id)
+        raise
+    except Exception as e:
+        _delete_gist_best_effort(gist_id)
+        raise _GhError(f"gist metadata inspection failed: {type(e).__name__}")
     return (gist_id, raw_url)
 
 
@@ -2123,6 +2151,10 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
                 print("`qsub` is present but PBS-vs-SGE could not be determined from the "
                       "environment. Re-run with --scheduler pbs|sge to choose.", file=sys.stderr)
             chosen = detected[0]
+        elif not local and _qsub_ambiguous():
+            print("`qsub` is present but PBS-vs-SGE could not be determined from the "
+                  "environment; running locally. Re-run with --scheduler pbs|sge to submit.",
+                  file=sys.stderr)
 
     want_submit = (submit or (not local and chosen is not None and not chosen.get("on_compute_node"))) \
         and scheduler != "local"
@@ -2186,6 +2218,9 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
             _print_error(f"Failed to submit: {e}")
             sys.exit(1)
         if not is_slurm:
+            if proc.returncode != 0:
+                _print_error(f"{label} submission failed (exit {proc.returncode}).")
+                sys.exit(proc.returncode if isinstance(proc.returncode, int) and proc.returncode > 0 else 1)
             print("Submitted. Results will be written under benchmarks/results/ on the compute node.", file=sys.stderr)
             return
         if proc.returncode != 0:
@@ -2312,16 +2347,20 @@ def _run_status(
     else:
         # List all runs
         all_runs = scan_runs(output_dir)
-        runs = filter_runs(
-            all_runs,
-            filter_str=filter_str,
-            status_filter=status_filter,
-            limit=limit,
-            older_than=older_than,
-            exit_code=exit_code,
-            not_filter_str=not_filter_str,
-            not_status_filter=not_status_filter,
-        )
+        try:
+            runs = filter_runs(
+                all_runs,
+                filter_str=filter_str,
+                status_filter=status_filter,
+                limit=limit,
+                older_than=older_than,
+                exit_code=exit_code,
+                not_filter_str=not_filter_str,
+                not_status_filter=not_status_filter,
+            )
+        except ValueError as e:
+            _print_error(str(e))
+            sys.exit(1)
 
         for r in runs:
             if r.status == "crashed" and (r.run_dir / ".pubrun.lock").exists():
@@ -2348,18 +2387,22 @@ def _run_clean(
     """Interactive or automatic cleanup of old run directories."""
     from pubrun.status import clean_runs
 
-    clean_runs(
-        output_dir=output_dir,
-        older_than=older_than,
-        status_filter=status,
-        yes=yes,
-        dry_run=dry_run,
-        filter_str=filter_str,
-        limit=limit,
-        exit_code=exit_code,
-        not_filter_str=not_filter_str,
-        not_status_filter=not_status_filter,
-    )
+    try:
+        clean_runs(
+            output_dir=output_dir,
+            older_than=older_than,
+            status_filter=status,
+            yes=yes,
+            dry_run=dry_run,
+            filter_str=filter_str,
+            limit=limit,
+            exit_code=exit_code,
+            not_filter_str=not_filter_str,
+            not_status_filter=not_status_filter,
+        )
+    except ValueError as e:
+        _print_error(str(e))
+        sys.exit(1)
 
 
 def _run_combined(
@@ -2385,18 +2428,24 @@ def _run_combined(
     if not run_ids:
         from pubrun.status import filter_runs
         all_runs = scan_runs(dir_path)
-        has_filters = any(v is not None for v in (filter_str, status_filter, older_than, exit_code))
+        has_filters = any(v is not None for v in (
+            filter_str, status_filter, older_than, exit_code, not_filter_str, not_status_filter
+        ))
         run_limit = limit if limit is not None else (None if has_filters else 1)
-        target_runs = filter_runs(
-            all_runs,
-            filter_str=filter_str,
-            status_filter=status_filter,
-            limit=run_limit,
-            older_than=older_than,
-            exit_code=exit_code,
-            not_filter_str=not_filter_str,
-            not_status_filter=not_status_filter,
-        )
+        try:
+            target_runs = filter_runs(
+                all_runs,
+                filter_str=filter_str,
+                status_filter=status_filter,
+                limit=run_limit,
+                older_than=older_than,
+                exit_code=exit_code,
+                not_filter_str=not_filter_str,
+                not_status_filter=not_status_filter,
+            )
+        except ValueError as e:
+            _print_error(str(e))
+            sys.exit(1)
         if not target_runs:
             _print_error("No runs match the filter criteria.")
             sys.exit(1)
@@ -2579,12 +2628,17 @@ def _run_tests() -> None:
     print("        pubrun Pipeline Evaluation Mode         ")
     print("==================================================\n")
 
+    failed = False
     if Path("tests").exists() and Path("tox.ini").exists():
         _out.info("Source repository detected. Running PyTest matrix...", stream=sys.stdout)
         try:
-            subprocess.run(["python", "-m", "pytest", "tests/", "-q"])
+            pytest_proc = subprocess.run([sys.executable, "-m", "pytest", "tests/", "-q"])
+            if pytest_proc.returncode != 0:
+                _out.fail(f"PyTest exited with code {pytest_proc.returncode}.", stream=sys.stdout)
+                failed = True
         except Exception:
             _out.warn("PyTest execution failed.", stream=sys.stdout)
+            failed = True
 
     print()
     _out.info("Executing Native End-to-End Mock Script...", stream=sys.stdout)
@@ -2621,31 +2675,30 @@ print('Mock Training Complete.')
 
         if result.returncode != 0:
             _out.fail(f"Mock Evaluation Failed. Exit Code: {result.returncode}")
-            return
+            sys.exit(1)
 
         _out.ok("Mock script executed without crashing.")
 
         runs_dir = Path(td) / "runs"
-        if not runs_dir.exists():
-            return
-
-        run_folders = list(runs_dir.iterdir())
-        if not run_folders:
-            return
-
-        active_run = run_folders[0]
-        manifest_p = active_run / "manifest.json"
-
-        if not manifest_p.exists():
-            return
+        run_folders = [p for p in runs_dir.iterdir() if p.is_dir()] if runs_dir.is_dir() else []
+        manifest_p = run_folders[0] / "manifest.json" if run_folders else None
+        if manifest_p is None or not manifest_p.exists():
+            _out.fail("Mock script produced no run manifest.")
+            sys.exit(1)
 
         try:
             manifest_data = json.loads(manifest_p.read_text(encoding="utf-8"))
+            if not isinstance(manifest_data, dict):
+                raise ValueError("manifest is not a JSON object")
             rcs = manifest_data.get("subprocesses", [])
             _out.ok(f"Subprocess spy captured {len(rcs)} shell commands.")
-            _out.ok("Validation complete.")
         except Exception as e:
-            pass
+            _out.fail(f"Mock run manifest is invalid: {e}")
+            sys.exit(1)
+
+    if failed:
+        sys.exit(1)
+    _out.ok("Validation complete.")
 
 
 def _run_bug_report() -> None:
@@ -2699,53 +2752,9 @@ def _add_run_filter_args(parser: argparse.ArgumentParser, include_limit: bool = 
 
 def main() -> None:
     """CLI entrypoint for the ``pubrun`` command."""
-    # Handle global --no-color flag regardless of position
-    # But do not strip it if it is part of the command run by 'pubrun run'
-    subcommands = {"report", "methods", "rerun", "diff", "meta", "status", "clean", "combined", "cite", "run", "ui", "tui", "gui", "show", "res", "resources", "cpu", "mem"}
-    run_idx = -1
-    for idx, arg in enumerate(sys.argv):
-        if arg in subcommands:
-            if arg == "run":
-                run_idx = idx
-            break
-
-    no_color_present = False
-    if run_idx != -1:
-        if "--no-color" in sys.argv[:run_idx]:
-            no_color_present = True
-            sys.argv = [arg for i, arg in enumerate(sys.argv) if i >= run_idx or arg != "--no-color"]
-    else:
-        if "--no-color" in sys.argv:
-            no_color_present = True
-            sys.argv = [arg for arg in sys.argv if arg != "--no-color"]
-
-    # Support placing run ID / prefix / path before the subcommand
-    # (e.g. `pubrun 16528343 cpu` -> `pubrun cpu 16528343`)
-    if len(sys.argv) > 2 and sys.argv[1] not in subcommands and not sys.argv[1].startswith("-"):
-        for idx in range(2, len(sys.argv)):
-            if sys.argv[idx] in subcommands:
-                cmd = sys.argv.pop(idx)
-                sys.argv.insert(1, cmd)
-                break
-
-    # Translate 'help' and subcommand translations
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "help":
-            if len(sys.argv) > 2 and sys.argv[2] in subcommands:
-                sys.argv = [sys.argv[0], sys.argv[2], "--help"]
-            else:
-                sys.argv = [sys.argv[0], "--help"]
-        elif sys.argv[1] in subcommands and len(sys.argv) > 2 and sys.argv[2] == "help":
-            sys.argv = [sys.argv[0], sys.argv[1], "--help"]
-
     prog_name = Path(sys.argv[0]).name if sys.argv[0] else "pubrun"
     if prog_name not in ("pubrun", "pbr"):
         prog_name = "pubrun"
-
-    # Easter egg
-    if len(sys.argv) >= 2 and prog_name == "pbr" and sys.argv[1] == "me":
-        print("ASAP")
-        sys.exit(0)
 
     # Primary commands (excluding aliases) for clean error messages.
     _PRIMARY_COMMANDS: list = []
@@ -3197,6 +3206,54 @@ def main() -> None:
         name for name in subparsers.choices if name not in _known_aliases
     )
 
+    # Every registered subcommand and alias, derived from the parser so a newly added
+    # command can never be missing from the argv preprocessing below.
+    subcommands = set(subparsers.choices.keys())
+
+    # Handle global --no-color flag regardless of position
+    # But do not strip it if it is part of the command run by 'pubrun run'
+    run_idx = -1
+    for idx, arg in enumerate(sys.argv[1:], start=1):
+        if arg in subcommands:
+            if arg == "run":
+                run_idx = idx
+            break
+
+    no_color_present = False
+    if run_idx != -1:
+        if "--no-color" in sys.argv[:run_idx]:
+            no_color_present = True
+            sys.argv = [arg for i, arg in enumerate(sys.argv) if i >= run_idx or arg != "--no-color"]
+    else:
+        if "--no-color" in sys.argv:
+            no_color_present = True
+            sys.argv = [arg for arg in sys.argv if arg != "--no-color"]
+
+    # Support placing run ID / prefix / path before the subcommand
+    # (e.g. `pubrun 16528343 cpu` -> `pubrun cpu 16528343`)
+    if (len(sys.argv) > 2 and sys.argv[1] not in subcommands and sys.argv[1] != "help"
+            and not sys.argv[1].startswith("-")):
+        for idx in range(2, len(sys.argv)):
+            if sys.argv[idx] in subcommands:
+                cmd = sys.argv.pop(idx)
+                sys.argv.insert(1, cmd)
+                break
+
+    # Translate 'help' and subcommand translations
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "help":
+            if len(sys.argv) > 2 and sys.argv[2] in subcommands:
+                sys.argv = [sys.argv[0], sys.argv[2], "--help"]
+            else:
+                sys.argv = [sys.argv[0], "--help"]
+        elif sys.argv[1] in subcommands and len(sys.argv) > 2 and sys.argv[2] == "help":
+            sys.argv = [sys.argv[0], sys.argv[1], "--help"]
+
+    # Easter egg
+    if len(sys.argv) >= 2 and prog_name == "pbr" and sys.argv[1] == "me":
+        print("ASAP")
+        sys.exit(0)
+
     args = parser.parse_args()
     if no_color_present:
         setattr(args, "no_color", True)
@@ -3244,16 +3301,23 @@ def main() -> None:
         if not run_dir:
             from pubrun.status import scan_runs, filter_runs
             all_runs = scan_runs()
-            matched = filter_runs(
-                all_runs,
-                filter_str=getattr(args, "filter", None),
-                status_filter=getattr(args, "status", None),
-                limit=getattr(args, "limit", None),
-                older_than=getattr(args, "older_than", None),
-                exit_code=getattr(args, "exit_code", None),
-                not_filter_str=getattr(args, "not_filter", None),
-                not_status_filter=getattr(args, "not_status", None),
-            )
+            show_filters = {
+                "filter_str": getattr(args, "filter", None),
+                "status_filter": getattr(args, "status", None),
+                "older_than": getattr(args, "older_than", None),
+                "exit_code": getattr(args, "exit_code", None),
+                "not_filter_str": getattr(args, "not_filter", None),
+                "not_status_filter": getattr(args, "not_status", None),
+            }
+            has_filters = any(v is not None for v in show_filters.values())
+            limit = getattr(args, "limit", None)
+            # Bare `pubrun show` reports the single most recent run; filters or -n widen it.
+            run_limit = limit if limit is not None else (None if has_filters else 1)
+            try:
+                matched = filter_runs(all_runs, limit=run_limit, **show_filters)
+            except ValueError as e:
+                _print_error(str(e))
+                sys.exit(1)
             if not matched:
                 _print_error("No runs match the filter criteria.")
                 sys.exit(1)
