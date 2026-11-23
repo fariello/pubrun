@@ -58,31 +58,31 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Fix the lock import
 
-- [ ] E-01 In `src/pubrun/tracker.py`, replace each function-local `from pubrun import _run_lock` with `from pubrun.core import _run_lock`.
+- [x] E-01 In `src/pubrun/tracker.py`, replace each function-local `from pubrun import _run_lock` with `from pubrun.core import _run_lock`.
   - Depends on: none
   - Expected outcome: The six imports in `Run.__init__` (the startup-failure rollback branch), `Run._collect_hardware_section`, `Run._collect_host_and_filesystem`, the nested `_collect_hardware` function inside `Run._bootstrap_engines`, `Run._finalize_state`, and `Run.stop` each read `from pubrun.core import _run_lock`. Each import stays inside its function, because `src/pubrun/core.py` imports `pubrun.tracker` at module level and a module-level import in `tracker.py` would be circular. `grep -n "from pubrun import _run_lock" src/pubrun/tracker.py` prints nothing, and `grep -c "from pubrun.core import _run_lock" src/pubrun/tracker.py` prints `6`. The `from pubrun import __version__, __commit__` import in `Run.to_manifest_dict` is unchanged (see `## Findings`). No other line changes, and the six mode modules and `src/pubrun/__init__.py` are not edited.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Regression tests
 
-- [ ] E-02 Add a `TestModeModuleBackgroundCapture` class to `tests/test_import_modes.py` with subprocess tests that import each explicit mode module and inspect stderr and the final manifest.
+- [x] E-02 Add a `TestModeModuleBackgroundCapture` class to `tests/test_import_modes.py` with subprocess tests that import each explicit mode module and inspect stderr and the final manifest.
   - Depends on: E-01
   - Expected outcome: Each test runs `[sys.executable, "-c", script]` with `subprocess.run(..., capture_output=True, text=True, timeout=60)`, `cwd=str(tmp_path)`, and an environment copied from `os.environ` with this checkout's `src` directory (`Path(__file__).resolve().parents[1] / "src"`) prepended to `PYTHONPATH` and `PUBRUN_IMPORT_MODE` and `PUBRUN_AUTO_START` removed. (1) `test_mode_module_captures_hardware` is parametrized over the module names `pubrun`, `pubrun.auto`, `pubrun.full`, `pubrun.noauto`, `pubrun.nopatch`, `pubrun.noconsole`, and `pubrun.minimal`. The plain `pubrun` case is a control: it passes before and after E-01 and pins the `CHANGELOG.md` claim that plain `import pubrun` was not affected. Its script runs `import <module> as pubrun`, gets the run with `pubrun.get_current_run() or pubrun.start()`, polls `<run_dir>/manifest.json` every 0.1 s for up to 20 s until `hardware.capture_state.status` is not `pending`, calls `pubrun.stop()`, and prints the final manifest's `hardware` status, whether `hardware` contains a `cpu` key, and the `host` status. The test asserts return code `0`, that stderr contains neither `Exception in thread pubrun-hw` nor `cannot import name '_run_lock'`, that the final `hardware` status is not `pending`, that `hardware` contains `cpu`, and that the `host` status is not `pending`. (2) `test_mode_module_autostarts_with_hardware_off` is parametrized over `pubrun` (the control) and the four auto-starting modules `pubrun.auto`, `pubrun.full`, `pubrun.nopatch`, and `pubrun.noconsole`. It writes `tmp_path / ".pubrun.toml"` containing `[capture.hardware]` and `depth = "off"`. Its script imports the module, prints whether `pubrun.get_current_run()` is not `None`, and only when a run is active stops it and prints the final `hardware` status, so that on the pre-fix code the test fails on the "run is active" assertion rather than on an `AttributeError` raised inside the script. The test asserts return code `0`, that a run is active, that stderr does not contain `auto-start failed` or `cannot import name '_run_lock'`, and that the `hardware` status is `suppressed`. No test reads production source code.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Changelog
 
-- [ ] E-03 Add a `### Fixed` entry to the `## [Unreleased]` section of `CHANGELOG.md`.
+- [x] E-03 Add a `### Fixed` entry to the `## [Unreleased]` section of `CHANGELOG.md`.
   - Depends on: E-01
   - Expected outcome: The `### Fixed` list under `## [Unreleased]` starts with a bold one-line title followed by two to four sentences. The entry states that `import pubrun.auto`, `pubrun.full`, `pubrun.nopatch`, and `pubrun.noconsole` could print `Exception in thread pubrun-hw: ... ImportError: cannot import name '_run_lock'` and leave the `hardware`, `host`, and `filesystem` manifest sections `pending`, that with `[capture.hardware].depth = "off"` these imports disabled tracking entirely, that plain `import pubrun` was not affected, and that a regression test now covers all six mode modules and plain `import pubrun`. The added lines contain no em or en dash, because `CHANGELOG.md` is user-facing.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Verification
 
-- [ ] E-04 Run the new tests, the neighboring import-mode and capture tests, the reproduction script, and the full test suite.
+- [x] E-04 Run the new tests, the neighboring import-mode and capture tests, the reproduction script, and the full test suite.
   - Depends on: E-02, E-03
   - Expected outcome: `python3 -m pytest tests/test_import_modes.py -v --no-cov`, `python3 -m pytest tests/test_full_mode.py tests/test_capture_isolation.py tests/test_startup_overhead_writes.py tests/test_hook_ownership_rollback.py -q --no-cov`, and `python3 -m pytest -q` each finish with zero failures, or with only failures that also occur on the unchanged base commit and that `V-04` names. The reproduction script from `## Findings` prints `hardware=complete host=complete | stderr: clean` (or `partial` instead of `complete` on a host whose hardware probe exceeds its budget) for all six modes.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -197,25 +197,120 @@ Plan `3aalwv` (Set `uatvzh`, pending) edits `Run.stop` and `Run._finalize_state`
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: The pasted `git diff -- src/pubrun/tracker.py`, showing exactly six changed import lines and no other change. The pasted output of `grep -n "from pubrun import _run_lock" src/pubrun/tracker.py` (empty) and `grep -c "from pubrun.core import _run_lock" src/pubrun/tracker.py` (`6`).
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ git diff -- src/pubrun/tracker.py   (six hunks, each exactly one line)
+    @@ -273,7 +273,7 @@  Run.__init__ startup-failure rollback
+    -            from pubrun import _run_lock
+    +            from pubrun.core import _run_lock
+    @@ -480,7 +480,7 @@  Run._collect_hardware_section
+    -        from pubrun import _run_lock
+    +        from pubrun.core import _run_lock
+    @@ -509,7 +509,7 @@  Run._collect_host_and_filesystem
+    -        from pubrun import _run_lock
+    +        from pubrun.core import _run_lock
+    @@ -649,7 +649,7 @@  nested _collect_hardware in Run._bootstrap_engines
+    -                from pubrun import _run_lock
+    +                from pubrun.core import _run_lock
+    @@ -1105,7 +1105,7 @@  Run._finalize_state
+    -        from pubrun import _run_lock
+    +        from pubrun.core import _run_lock
+    @@ -1382,7 +1382,7 @@  Run.stop
+    -        from pubrun import _run_lock
+    +        from pubrun.core import _run_lock
+    $ git diff --stat -- src/pubrun/tracker.py
+     src/pubrun/tracker.py | 12 ++++++------
+    $ grep -n "from pubrun import _run_lock" src/pubrun/tracker.py
+    (no output)
+    $ grep -c "from pubrun.core import _run_lock" src/pubrun/tracker.py
+    6
+    ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `python3 -m pytest tests/test_import_modes.py -v --no-cov` output listing the seven `test_mode_module_captures_hardware` cases and the five `test_mode_module_autostarts_with_hardware_off` cases as PASSED. Also the pasted output of the same `-k TestModeModuleBackgroundCapture` run in the temporary pre-fix worktree described under `## Required tests / validation`, showing exactly the `pubrun.auto`, `pubrun.full`, `pubrun.nopatch`, and `pubrun.noconsole` cases of both tests FAILED (eight cases) and the `pubrun`, `pubrun.noauto`, and `pubrun.minimal` cases PASSED (four cases), plus the pasted `git worktree list` after removal. The subprocesses in these tests run `Run._bootstrap_engines` through `pubrun.core._execute_boot_sequence` and `pubrun.start`, which is the code path E-01 changes.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_import_modes.py -v --no-cov
+    ...
+    tests/test_import_modes.py::TestModeModuleBackgroundCapture::test_mode_module_captures_hardware[pubrun] PASSED [ 85%]
+    tests/test_import_modes.py::TestModeModuleBackgroundCapture::test_mode_module_captures_hardware[pubrun.auto] PASSED [ 87%]
+    tests/test_import_modes.py::TestModeModuleBackgroundCapture::test_mode_module_captures_hardware[pubrun.full] PASSED [ 88%]
+    tests/test_import_modes.py::TestModeModuleBackgroundCapture::test_mode_module_captures_hardware[pubrun.noauto] PASSED [ 89%]
+    tests/test_import_modes.py::TestModeModuleBackgroundCapture::test_mode_module_captures_hardware[pubrun.nopatch] PASSED [ 91%]
+    tests/test_import_modes.py::TestModeModuleBackgroundCapture::test_mode_module_captures_hardware[pubrun.noconsole] PASSED [ 92%]
+    tests/test_import_modes.py::TestModeModuleBackgroundCapture::test_mode_module_captures_hardware[pubrun.minimal] PASSED [ 93%]
+    tests/test_import_modes.py::TestModeModuleBackgroundCapture::test_mode_module_autostarts_with_hardware_off[pubrun] PASSED [ 94%]
+    tests/test_import_modes.py::TestModeModuleBackgroundCapture::test_mode_module_autostarts_with_hardware_off[pubrun.auto] PASSED [ 96%]
+    tests/test_import_modes.py::TestModeModuleBackgroundCapture::test_mode_module_autostarts_with_hardware_off[pubrun.full] PASSED [ 97%]
+    tests/test_import_modes.py::TestModeModuleBackgroundCapture::test_mode_module_autostarts_with_hardware_off[pubrun.nopatch] PASSED [ 98%]
+    tests/test_import_modes.py::TestModeModuleBackgroundCapture::test_mode_module_autostarts_with_hardware_off[pubrun.noconsole] PASSED [100%]
+    ============================= 78 passed in 27.24s ==============================
 
-- [ ] V-03 validates E-03
+    $ git worktree add /tmp/opencode/updt75-prefix HEAD   (HEAD = bf2a959, unfixed src/)
+    $ cp tests/test_import_modes.py /tmp/opencode/updt75-prefix/tests/
+    $ (cd /tmp/opencode/updt75-prefix && python3 -m pytest tests/test_import_modes.py -k TestModeModuleBackgroundCapture -v --no-cov)
+    ...::test_mode_module_captures_hardware[pubrun] PASSED
+    ...::test_mode_module_captures_hardware[pubrun.auto] FAILED
+    ...::test_mode_module_captures_hardware[pubrun.full] FAILED
+    ...::test_mode_module_captures_hardware[pubrun.noauto] PASSED
+    ...::test_mode_module_captures_hardware[pubrun.nopatch] FAILED
+    ...::test_mode_module_captures_hardware[pubrun.noconsole] FAILED
+    ...::test_mode_module_captures_hardware[pubrun.minimal] PASSED
+    ...::test_mode_module_autostarts_with_hardware_off[pubrun] PASSED
+    ...::test_mode_module_autostarts_with_hardware_off[pubrun.auto] FAILED
+    ...::test_mode_module_autostarts_with_hardware_off[pubrun.full] FAILED
+    ...::test_mode_module_autostarts_with_hardware_off[pubrun.nopatch] FAILED
+    ...::test_mode_module_autostarts_with_hardware_off[pubrun.noconsole] FAILED
+    E           AssertionError: stderr: pubrun auto-start failed (tracking disabled): cannot import name '_run_lock' from 'pubrun' (/tmp/opencode/updt75-prefix/src/pubrun/__init__.py)
+    ============ 8 failed, 4 passed, 66 deselected in 95.25s (0:01:35) =============
+    $ git worktree remove --force /tmp/opencode/updt75-prefix
+    $ git worktree list | grep -c updt75-prefix
+    0
+    ```
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: The pasted `git diff -- CHANGELOG.md` hunk, showing the entry under `## [Unreleased]` / `### Fixed` with the facts E-03 lists, and the pasted dash count `0`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ git diff -- CHANGELOG.md
+    @@ -103,6 +103,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+       the deep pages, never the README front door.
 
-- [ ] V-04 validates E-04
+     ### Fixed
+    +- **Hardware, host, and filesystem capture no longer fails under `import pubrun.auto`, `pubrun.full`,
+    +  `pubrun.nopatch`, or `pubrun.noconsole`.** These imports could print
+    +  `Exception in thread pubrun-hw: ... ImportError: cannot import name '_run_lock'` and leave the
+    +  `hardware`, `host`, and `filesystem` manifest sections `pending`. With
+    +  `[capture.hardware].depth = "off"` the same imports disabled tracking entirely. Plain `import pubrun`
+    +  was not affected, and a regression test now covers all six mode modules and plain `import pubrun`.
+     - **`[imports].on_conflict` set in `./.config/pubrun/config.toml` or in the user config file is
+    $ git diff -U0 -- CHANGELOG.md | grep '^+' | grep -c $'\u2014\|\u2013'
+    0
+    ```
+  - Result: pass
+
+- [x] V-04 validates E-04
   - Required evidence: Pasted summary lines of the neighboring-suite command and of `python3 -m pytest -q`, each with zero failures; any failure must be shown to also occur on the base commit, with its pasted base-commit output. The pasted six lines of the reproduction script, each showing a non-`pending` `hardware` and `host` status and `stderr: clean`. The script drives `pubrun.<mode>` imports in fresh interpreters, which reach `Run._bootstrap_engines` through the boot sequence that E-01 fixes.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_full_mode.py tests/test_capture_isolation.py tests/test_startup_overhead_writes.py tests/test_hook_ownership_rollback.py -q --no-cov
+    107 passed in 29.22s
+    $ python3 /tmp/opencode/tmngjn_repro.py
+    auto | hardware=complete host=complete | stderr: clean
+    full | hardware=complete host=complete | stderr: clean
+    noauto | hardware=complete host=complete | stderr: clean
+    nopatch | hardware=complete host=complete | stderr: clean
+    noconsole | hardware=complete host=complete | stderr: clean
+    minimal | hardware=complete host=complete | stderr: clean
+    $ aw suite   (full suite, equivalent of python3 -m pytest -q with coverage)
+    TOTAL                                  16078   3308    79%
+    ======================= 1869 passed in 142.58s (0:02:22) =======================
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 
