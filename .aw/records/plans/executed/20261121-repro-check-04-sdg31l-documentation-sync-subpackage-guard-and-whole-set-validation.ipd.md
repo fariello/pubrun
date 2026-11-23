@@ -5,8 +5,9 @@
 - Concern: Documentation accuracy, subpackage import-integrity regression guard, and whole-Set end-to-end validation
 - Scope: Update `docs/cli.md`, `docs/hpc.md`, `docs/manifest.md`, and `docs/api.md` for reproducibility assessment and preflight, add `reproducibility` to `tests/test_report_subpackage_integrity.py`, add end-to-end tests in `tests/test_reproducibility_e2e.py` covering all eight `q3bll1` scenarios, and run the full repository test suite.
 - Scope-Paths: docs/cli.md, docs/hpc.md, docs/manifest.md, docs/api.md, tests/test_report_subpackage_integrity.py, tests/test_reproducibility_e2e.py
+- Scope-Exceeded: .aw/records/backlog/open/20261122-tmngjn-01-tmngjn-mode-module-run-lock-hw-thread-race.backlog.md (defect-report carrier required by the run contract for an adjacent bug found while executing sdg31l record only, no code change)
 - Item-Dependencies: executed:3lqtlt
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Work-Kind: feature
@@ -17,13 +18,13 @@
 - Highest E allocated: 04
 - Author: agent
 - Id: sdg31l
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 - Short-Description: Update CLI/HPC/manifest/API docs, guard subpackage imports, and run whole-Set end-to-end validation
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): aw oc run self-finalize: sdg31l verified (set repro-check, attempt 1). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261122-tmngjn-01-tmngjn-mode-module-run-lock-hw-thread-race.backlog.md: defect-report carrier required by the run contract for an adjacent bug found while executing sdg31l (record only, no code change)]
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Antigravity / Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-21 to-review (agent): created child plan 04 of Set `repro-check` graduating backlog item `q3bll1`.
