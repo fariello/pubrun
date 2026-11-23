@@ -1,5 +1,5 @@
 - Id: x6alw4
-- Status: graduated
+- Status: done
 - Graduated-To: file-prov
 - Set: pubrun-improve
 - Work-Kind: feature
@@ -10,6 +10,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-23 done (aw backlog): closed by aw oc run: IPD vtkkn1 executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261121-file-prov-00-vtkkn1-external-file-registration-and-explicit-hashing-guarantees.ipd.md); evidence .aw/records/plans/executed/20261121-file-prov-00-vtkkn1-external-file-registration-and-explicit-hashing-guarantees.ipd.md
 - 2026-11-22 graduated (aw backlog): graduated by run run-20261122T010822Z-2359880: 4gpguy, 52dl55, 98j0a3, hm32d9, vtkkn1, xxi3nc
 - 2026-11-21 created (aw backlog): Maintainer requested detailed backlog capture; implementation remains future work.
 
