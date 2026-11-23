@@ -37,6 +37,16 @@ When `[capture.hardware].depth == "off"`, hardware (suppressed), host, and files
 
 At startup, `ArtifactWriter.write_startup_manifest()` writes `manifest.json` and `config.resolved.json` atomically, records the config target path, canonical SHA-256 digest, and applied durability rank, and returns a boolean indicating whether startup output succeeded. If `run_dir` creation or initial startup manifest writing fails, `Run` latches `_finalized = True`, `_hardware_write_closed = True`, and `is_active = False` under `_run_lock`, rolls back only hooks, workers, file handles, and `.pubrun.lock` owned by that run via `_rollback_owned_hooks(stage="rollback")`, skips `atexit` registration, and enters ghost mode.
 
+### Timing anchors
+`Run` records four timing anchors. Each anchor stores a UTC epoch float (`time.time()`) for chronology and an in-memory monotonic reading (`time.perf_counter()`) for durations; the monotonic readings are never serialized.
+
+- **`t0`** (`started_at_utc`): `Run` construction begins.
+- **`t1`** (`workload_started_at_utc`): synchronous startup capture and the startup manifest write are complete and control returns to user code. `t1 - t0` is `startup_overhead_seconds`. Ghost mode never reaches `t1`.
+- **`t2`** (`ended_at_utc`): `_finalize_state()` latches `_finalized` under `_run_lock`, before waiting for background hardware capture. `t2 - t1` is `workload_seconds`, the observed tracked workload.
+- **`t3`** (`finalized_at_utc`): `ArtifactWriter.write_artifacts()` has written `config.resolved.json` and is about to build `manifest.json`. `t3 - t2` is `finalization_overhead_seconds` and `t3 - t0` is `session_seconds`. `Run.to_manifest_dict()` freezes the timing section on its first call after finalization, so the final atomic `manifest.json` write is not included in any persisted duration; `ArtifactWriter` keeps the whole write duration in memory only as `Run.writer_overhead_seconds`.
+
+The background `pubrun-hw` thread times itself (`background_hardware_seconds`) while running concurrently with the workload, and finalization times its bounded wait for that thread (`hardware_wait_seconds`, part of `t3 - t2`). These two values overlap other intervals and are never summed with them. Because tracking starts at `t0`, a late `import pubrun` or a late `start()` measures only the tracked interval, not the whole process lifetime.
+
 ### Active Capture
 Collect events, subprocess records, and console output. Update summary fields. If a re-entrant `start(**overrides)` call merges new configuration or migrates `run_dir` through `Run._merge_and_migrate()`, `ArtifactWriter.sync_config_if_changed()` writes the updated `config.resolved.json` immediately while the run is active and unfinalized. `Run._merge_and_migrate()` is a no-op on ghost, inactive, or finalized runs, guards `resolve_config()` failures safely, and checks import-mode `patch_subprocesses` permission before activating `SubprocessSpy` mid-run.
 
@@ -94,6 +104,8 @@ Events are optional, structured JSONL records written to `events.jsonl`. Each ev
 - `name` — Human-readable label
 - `payload` — Optional key-value data
 
+A `phase_end` event's payload carries `elapsed_seconds` (a nonnegative monotonic duration of the phase body) and `duration_clock: "monotonic"`, plus `error` when the body raised. The duration excludes optional phase profiler setup and profile dump I/O.
+
 Events are subject to throttling via `max_tracked_events` to prevent runaway disk usage.
 
 ## 7. Immutable vs Mutable
@@ -113,17 +125,21 @@ All timestamps in the manifest and event stream are stored as **POSIX epoch floa
 
 - **Precision**: IEEE 754 floats provide sub-second / microsecond resolution.
 - **Timezone agnostic**: No locale-dependent formatting or parsing ambiguity.
-- **Arithmetic simplicity**: Elapsed time is `ended_at - started_at` with no datetime conversion.
+- **Chronology only**: Timestamps order events in absolute time. They are not used to compute durations, because the system clock can jump during a run.
 - **Native production**: Directly matches `time.time()`, `os.stat().st_mtime`, and similar system calls.
 - **Deterministic**: No string formatting jitter across platforms or Python versions.
 - **Compact**: A float is smaller and faster to serialize than an ISO 8601 string.
+
+### Duration Format
+
+Durations (`timing.*_seconds`, `phase_end` `elapsed_seconds`, and subprocess `elapsed_seconds`) are nonnegative floats in seconds computed from differences of monotonic `time.perf_counter()` readings and are labeled `duration_clock: "monotonic"`. Raw monotonic counter readings are process-local and meaningless outside the process, so they are never serialized. Legacy manifests whose `timing` lacks `duration_clock` and `elapsed_basis` used wall-clock subtraction; consumers label them `wall_clock_legacy`. A crashed-run closeout written by `pubrun status` can only estimate its duration from wall-clock values and labels it `wall_clock_estimated` / `crashed_estimate`.
 
 ## 9. Observed vs Derived vs Inferred
 
 The manifest distinguishes between:
 
 - **Observed** — directly read from the system (e.g., `os.uname()`, `sys.version`)
-- **Derived** — computed from observed data (e.g., `elapsed_seconds = ended_at - started_at`)
+- **Derived**: computed from observed data (e.g., `workload_seconds` as the difference of two in-memory monotonic clock readings, or a crashed-run `elapsed_seconds` estimated from wall-clock values and labeled `crashed_estimate`)
 - **Inferred** — heuristically determined (e.g., input file detection from `sys.argv`)
 
 ## 10. Capture Categories
@@ -203,7 +219,7 @@ Contents:
 
 ## 15. Subprocess Model
 
-`SubprocessSpy` transparently monkey-patches `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` to capture spawned process metadata (argv, timing, exit codes). Record mutations and lifecycle transitions are thread-safe under `SubprocessSpy._lock`.
+`SubprocessSpy` transparently monkey-patches `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` to capture spawned process metadata (argv, UTC start and end timestamps, monotonic `elapsed_seconds` with `duration_clock: "monotonic"`, exit codes). Per-record monotonic start readings stay in an in-memory map keyed by record identity and are never serialized. Record mutations and lifecycle transitions are thread-safe under `SubprocessSpy._lock`.
 
 - **Live target chaining and transactional install:** `SubprocessSpy.install(max_records, config, owner)` snapshots the live `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` attributes at install time, builds generation-scoped wrapper closures that chain to those pre-existing targets, and rolls back any already-patched target if a later patch fails.
 - **Generation-scoped records:** Each spawned `Popen` instance carries its install generation's `state` dict and direct record reference (`_pubrun_state`, `_pubrun_rec`), and `os.system` holds a direct local reference to its record. Post-uninstall `wait()` calls or concurrent `uninstall()` calls cannot corrupt a newer run's records or raise `IndexError`. Failed spawn details pass through `format_safe_error_detail()`.

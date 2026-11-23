@@ -39,17 +39,50 @@ Run identity.
 
 ## `timing`
 
-Execution timestamps. All values are **POSIX epoch floats** (`time.time()`), not ISO 8601 strings.
+Execution chronology and durations. The section uses two clocks for two different jobs:
+
+- **Chronology (when something happened):** every `*_at_utc` field is a Portable Operating System Interface (POSIX) epoch float in Coordinated Universal Time (UTC) from `time.time()`, not an ISO 8601 string. These values place the run on the calendar and order it against other runs, but they can jump if the system clock is adjusted (for example by the Network Time Protocol (NTP) or a manual change).
+- **Durations (how long something took):** every `*_seconds` field is computed from the difference of two in-memory monotonic clock readings (`time.perf_counter()`). A monotonic clock never goes backwards, so these durations stay nonnegative and correct across wall-clock jumps. The raw monotonic counter values are process-local and are **never** written to the manifest; only the derived durations are.
+
+Durations are therefore **not** recomputed as `ended_at_utc - started_at_utc`. Subtracting the UTC fields gives an approximate wall-clock span that can disagree with the monotonic durations when the clock was adjusted during the run.
 
 | Field | Type | Description |
 |---|---|---|
-| `started_at_utc` | float | When `start()` was called. |
-| `ended_at_utc` | float | When `stop()` was called. |
-| `elapsed_seconds` | float | `ended_at_utc - started_at_utc`. |
-| `capture_state` | object | See [Capture State](#capture-state). |
+| `started_at_utc` | float | When tracking began (`Run` construction: `start()`, or `import pubrun` in auto mode). Required. |
+| `workload_started_at_utc` | float \| null | When synchronous startup capture finished and your code resumed. `null` if startup never completed (ghost mode). |
+| `ended_at_utc` | float \| null | When the tracked workload ended: the moment finalization began (`stop()`, the end of `tracked_run()` / `audit_run()`, or the `atexit` safety net), before `pubrun` waits for background hardware capture. |
+| `finalized_at_utc` | float \| null | When pre-manifest finalization finished, just before the final `manifest.json` is built and written. |
+| `elapsed_seconds` | float \| null | The headline duration. For new manifests it equals `workload_seconds` (see `elapsed_basis`). `null` while the run is in progress or if timing is incomplete. |
+| `workload_seconds` | float \| null | Monotonic duration of the observed tracked workload, from `workload_started_at_utc` to `ended_at_utc`. Excludes `pubrun`'s own startup and finalization work. |
+| `startup_overhead_seconds` | float \| null | Monotonic duration of synchronous startup capture, from `started_at_utc` to `workload_started_at_utc`. |
+| `finalization_overhead_seconds` | float \| null | Monotonic duration of pre-manifest finalization, from `ended_at_utc` to `finalized_at_utc`. Includes waiting for hardware capture, engine teardown, the package refresh, and writing `config.resolved.json`. Excludes the final atomic write of `manifest.json` itself, because the value must be known before that file is written. |
+| `session_seconds` | float \| null | Monotonic duration from `started_at_utc` to `finalized_at_utc`. Equals `startup_overhead_seconds + workload_seconds + finalization_overhead_seconds` (within floating-point rounding). |
+| `hardware_wait_seconds` | float \| null | Time finalization spent waiting (up to 2 s) for background hardware capture to finish. A sub-interval of `finalization_overhead_seconds`; do not add it to that value. |
+| `background_hardware_seconds` | float \| null | How long the background hardware, host, and filesystem capture took. It runs concurrently with your code, so it **overlaps** `workload_seconds` and must not be added to it. `0.0` when `[capture.hardware].depth = "off"` (collected synchronously during startup instead). |
+| `duration_clock` | string \| null | Which clock produced the durations: `"monotonic"` for new manifests, `"wall_clock"` for legacy semantics, `"wall_clock_estimated"` for a crashed-run closeout estimate. `null` when no duration is available (ghost mode). |
+| `elapsed_basis` | string \| null | What `elapsed_seconds` measures: `"workload"` (new manifests), `"session"`, `"wall_clock_legacy"`, or `"crashed_estimate"`. `null` when no duration is available. |
+| `interval_scope` | string \| null | Always `"tracked_interval"`: the durations cover only the interval `pubrun` tracked, never the whole process lifetime. |
+| `cpu_time_seconds` | float \| null | Reserved by the schema for CPU time; not currently emitted by `pubrun`. |
+| `capture_state` | object | `"complete"` once finalized timing is frozen, `"partial"` in the startup manifest, in ghost mode, and in crashed-run closeouts. See [Capture State](#capture-state). |
+
+**Disjoint versus overlapping intervals.** `startup_overhead_seconds`, `workload_seconds`, and `finalization_overhead_seconds` are disjoint and consecutive, so they add up to `session_seconds`. `background_hardware_seconds` overlaps the workload and `hardware_wait_seconds` lies inside finalization overhead; summing either with the three disjoint intervals double-counts time.
+
+```text
+started_at_utc   workload_started_at_utc            ended_at_utc   finalized_at_utc
+     |----------------------|----------------------------|----------------|-> manifest.json write
+       startup_overhead           workload_seconds          finalization
+                                                              overhead
+     |<------------------------- session_seconds ------------------------>|
+                         |<- background_hardware ->|        |<- hw wait ->|
+                            (overlaps workload)              (inside finalization)
+```
+
+**Tracked interval, not process lifetime.** Tracking starts when the `Run` is created. If `pubrun` is imported halfway through a script (or `start()` is called late), everything before that point is outside the measured interval. Likewise, anything the interpreter does after finalization (later `atexit` handlers, interpreter teardown) is not measured.
+
+**Legacy and estimated timing.** Manifests written before monotonic timing (schema `1.0` without `duration_clock` or `elapsed_basis`) remain valid and readable. Consumers (`pubrun status`, `inspect`, `report`, `diff`, and the TUI) classify a manifest that has `elapsed_seconds` but neither field as legacy wall-clock timing (`duration_clock = "wall_clock"`, `elapsed_basis = "wall_clock_legacy"`) and label it as such, because its `elapsed_seconds` was `ended_at_utc - started_at_utc` and includes `pubrun`'s own capture overhead. When `pubrun status` closes out a crashed run (its process died before finalization), it sets `ended_at_utc` from the lock file's modification time, estimates `elapsed_seconds` by wall-clock subtraction (clamped to be nonnegative), and records `duration_clock = "wall_clock_estimated"`, `elapsed_basis = "crashed_estimate"`, and `capture_state.status = "partial"`.
 
 > [!NOTE]
-> **Why floats?** POSIX epoch floats provide sub-second precision, timezone-agnostic storage, trivial elapsed-time arithmetic, and deterministic serialization. See [Architecture](architecture.md) for full rationale.
+> **Why floats?** POSIX epoch floats provide sub-second precision, timezone-agnostic storage, and deterministic serialization. They are used for chronology only; durations come from the monotonic clock. See [Architecture](architecture.md) for full rationale.
 
 ---
 
@@ -108,9 +141,13 @@ Array of subprocess records. Each element:
 | `argv` | list[string] | Command and arguments. Sensitive values may be redacted. |
 | `started_at_utc` | float | Start time (POSIX epoch float). |
 | `ended_at_utc` | float \| null | End time, or `null` if the process was still running at finalization. |
+| `elapsed_seconds` | float \| null | Optional. Nonnegative monotonic duration (`time.perf_counter()`) from launch until `pubrun` observed the process finish (`wait()`, `communicate()`, a completed `poll()`, `os.system` returning, or pipe close for `pubrun.popen()`), or until the launch attempt failed. For a process never waited on, it is the time until run finalization. Not derived from the UTC fields. |
+| `duration_clock` | string \| null | Optional. `"monotonic"` when `elapsed_seconds` is present. Absent on records written before monotonic subprocess timing. |
+| `pid` | int \| null | Optional. Written by the explicit wrappers only: the process ID for `pubrun.subprocess.Popen`, `null` for `pubrun.subprocess.run()`, `pubrun.popen()`, and failed launches. |
+| `error` | string \| null | Optional. Bounded, redacted error detail when an explicit wrapper's launch failed. |
 | `cwd` | string | Working directory of the subprocess. |
 | `exit_code` | int \| null | Exit code, or `null` if the process was not waited on. |
-| `capture_state` | object | See [Capture State](#capture-state). |
+| `capture_state` | object | `"complete"` for exit code 0 (and for a process still unwaited at finalization), `"failed"` for a nonzero exit code or a failed launch (with a redacted `detail`), `"partial"` while the process is still running. See [Capture State](#capture-state). |
 
 ---
 

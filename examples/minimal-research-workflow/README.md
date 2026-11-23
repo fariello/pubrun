@@ -102,6 +102,18 @@ pubrun diff ./runs/<FIRST_RUN_DIRECTORY> ./runs/<SECOND_RUN_DIRECTORY> --basic -
 
 Use `pubrun status -v` to identify the run directories.
 
+## What timing metrics measure
+
+The `timing` section of `manifest.json` (see `manifest_excerpt.json`) separates how long your analysis ran from how long `pubrun` spent recording it:
+
+- `workload_seconds` is your code: from the moment `pubrun` finished its startup capture to the moment the run began finalizing. `elapsed_seconds` reports the same value, and `elapsed_basis: "workload"` says so.
+- `startup_overhead_seconds` and `finalization_overhead_seconds` are `pubrun`'s own capture work before and after your code. These three intervals follow each other without overlap, so together they add up to `session_seconds`.
+- `background_hardware_seconds` is hardware capture that ran in a background thread *while* your code ran. It overlaps `workload_seconds`, so do not add the two together. `hardware_wait_seconds` is already part of `finalization_overhead_seconds`.
+- All durations come from a monotonic clock (`duration_clock: "monotonic"`), so a system clock change during the run cannot make them wrong or negative. The `*_at_utc` fields are calendar timestamps for ordering runs; do not subtract them to get durations.
+- The run measures only the tracked interval (`interval_scope: "tracked_interval"`). Here `analysis.py` imports `pubrun` right after a few standard-library imports, so nearly the whole script is covered, but interpreter startup and those earlier imports are not. If you import `pubrun` later in a script, earlier work is not measured.
+
+The numbers in `manifest_excerpt.json` are synthetic but internally consistent.
+
 ## Notes for reviewers
 
 This example intentionally uses synthetic data so that it can be run without private files, credentials, network access, or domain-specific dependencies.

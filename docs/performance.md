@@ -146,6 +146,64 @@ python3 benchmarks/startup_breakdown.py --workdir /path/to/shared/tmp --durabili
 
 See [Configuration](configuration.md#artifact-durability-policy) for full platform durability limits (Linux `fsync(2)`, macOS `fsync(2)` versus `F_FULLFSYNC`, Windows `FlushFileBuffers`, and shared-filesystem directory sync fallback).
 
+### Timing instrumentation and overhead separation
+
+Every manifest splits a run into three back-to-back intervals measured with the monotonic clock `time.perf_counter()`: `startup_overhead_seconds` (pubrun's startup capture), `workload_seconds` (your code), and `finalization_overhead_seconds` (pubrun's teardown and `config.resolved.json` write, before `manifest.json` is written). See [Manifest Reference](manifest.md#timing). This subsection measures what that timing instrumentation itself costs and checks that pubrun's overhead stays out of `workload_seconds`. The numbers come from one local machine and are not representative results; `## Representative results` above remains a multi-machine placeholder.
+
+- **Machine and runtime:** Operating System (OS) `Linux 6.8.0-149-generic` (`x86_64`), Central Processing Unit (CPU) `Intel(R) Core(TM) i7-6800K CPU @ 3.40GHz` (12 logical cores), CPython `3.14.6`, `pubrun 1.3.1`. The host was shared and busy: the 1-minute load average was between about 9 and 11 during the measurements, so absolute numbers are noisier than on an idle machine.
+- **Storage:** local `ext4` (`is_network = false`), detected with `pubrun.capture.filesystem.get_filesystem()` for the temporary work directory.
+- **Git revision:** `af36c852546aafa843cf4838ff7071d7477cf439`.
+- **Methods (local, non-publishing):**
+  1. An in-process microbenchmark (not committed) that ran 3 passes of 30 repetitions per measurement; Pass 1 is cold and Pass 3 is warm. It timed (a) 100,000 `time.perf_counter()` calls against an empty loop of the same length; (b) 1,000 `with pubrun.phase(...)` blocks with an active run and with no run, against `contextlib.nullcontext()`; and (c) 30 `pubrun.start()` / `time.sleep(0.020)` / `pubrun.stop()` runs per pass (default profile), reading the finalized `timing` section and the in-memory `Run.writer_overhead_seconds`. Its temporary directory was removed afterwards. The microbenchmark was run three times; the table reports the last run, and the earlier runs differed by up to about 2x in some warm medians because of host load.
+  2. `python3 benchmarks/harness.py --passes 3 --iterations 30 --redacted-out <temp_path>` (1 uncaptured baseline pass, then 3 measured passes of 30 iterations plus 1 discarded warmup per scenario; total wall time `946.4` s). The temporary result file was deleted after reading.
+
+#### In-process timing cost (Pass 1 cold / Pass 3 warm)
+
+Values are median / standard deviation (stdev) / interquartile range (IQR).
+
+| Measurement | Pass 1 cold | Pass 3 warm | Unit |
+|---|---|---|---|
+| Empty loop baseline (100,000 iterations) | 2.261 / 0.778 / 1.666 | 2.063 / 0.059 / 0.053 | ms |
+| `time.perf_counter()` loop (100,000 calls) | 10.559 / 3.170 / 4.525 | 8.721 / 0.202 / 0.181 | ms |
+| Cost per `perf_counter()` call (loop minus baseline) | 82.5 / 25.4 / 40.8 | 66.6 / 2.0 / 1.8 | ns |
+| `contextlib.nullcontext()` baseline (1,000 blocks) | 0.266 / 0.091 / 0.014 | 0.273 / 0.065 / 0.011 | ms |
+| Active `pubrun.phase()` (1,000 phases, 2 events each) | 38.401 / 7.553 / 11.343 | 18.592 / 2.659 / 0.423 | ms |
+| Active `pubrun.phase()` minus `nullcontext`, per phase | 38.14 / 7.53 / 11.33 | 18.32 / 2.66 / 0.44 | us |
+| Inactive `pubrun.phase()` (no run), per phase, minus `nullcontext` | 108.35 / 16.47 / 14.29 | 105.91 / 27.12 / 10.97 | us |
+| `startup_overhead_seconds` | 22.287 / 3.802 / 6.300 | 21.321 / 8.829 / 4.683 | ms |
+| `workload_seconds` (`time.sleep(0.020)`) | 20.091 / 0.738 / 0.017 | 20.099 / 0.534 / 0.028 | ms |
+| `finalization_overhead_seconds` | 2.832 / 0.618 / 0.312 | 2.811 / 0.911 / 0.871 | ms |
+| `hardware_wait_seconds` (part of finalization) | 0.004 / 0.001 / 0.001 | 0.004 / 0.001 / 0.001 | ms |
+| `background_hardware_seconds` (overlaps the workload) | 22.092 / 1.834 / 2.369 | 21.449 / 1.438 / 2.717 | ms |
+| `session_seconds` | 45.554 / 4.013 / 6.092 | 45.129 / 8.803 / 5.100 | ms |
+| `Run.writer_overhead_seconds` (in memory only; includes the `manifest.json` write) | 8.121 / 1.936 / 1.652 | 8.356 / 2.494 / 2.929 | ms |
+
+#### Whole-process harness context (`af36c852`, Pass 1 cold / Pass 3 warm)
+
+Values are median / stdev / IQR in milliseconds over 30 fresh processes.
+
+| Scenario | Pass 1 cold | Pass 3 warm |
+|---|---|---|
+| `baseline-noop` | 17.42 / 2.18 / 2.52 | 19.15 / 2.01 / 3.55 |
+| `import-minimal` | 131.35 / 23.69 / 24.95 | 127.87 / 6.04 / 7.41 |
+| `import-auto` (all features off) | 180.62 / 18.87 / 22.40 | 161.92 / 8.71 / 13.35 |
+| `startup-auto-default` | 554.11 / 55.61 / 46.92 | 528.14 / 17.82 / 21.78 |
+| `feature-baseline` | 235.85 / 15.15 / 10.71 | 236.14 / 11.74 / 16.26 |
+| `feature-none` | 382.23 / 11.83 / 14.95 | 369.95 / 33.39 / 21.38 |
+| `feature-hardware` | 388.08 / 19.08 / 19.33 | 415.96 / 46.46 / 49.91 |
+| `feature-packages-imported` | 713.94 / 26.79 / 31.61 | 749.90 / 38.33 / 54.29 |
+
+What these measurements show on this machine:
+
+- **The timing instrumentation itself is negligible.** A run takes a handful of `perf_counter()` readings, each about 67 ns warm, so the clock reads add well under a microsecond per run.
+- **pubrun's overhead stays out of `workload_seconds`.** A `time.sleep(0.020)` workload measured `20.099` ms warm median (`20.091` ms cold), about 0.1 ms above the requested sleep, while pubrun's own startup (about 21 to 22 ms in process) and finalization (about 2.8 ms) were reported separately. The three disjoint intervals add up to `session_seconds`. **Known exception (backlog `uatvzh`):** these runs wrote to a temporary directory where the background hardware refresh write took about 7 ms. With the run directory on the repository disk, that refresh write (an `fsync`ed `manifest.json` rewrite, made while holding the run lock) took a median of 180 ms, and a `stop()` issued during it waited for the lock before recording `ended_at_utc`. For a 20 ms workload this added a median of 47.3 ms (stdev 36.1, IQR 40.0, maximum 185.9, n=30) to `workload_seconds`; for a 500 ms workload, which ends after the refresh, it added 0.03 ms. Very short runs on slow-to-sync storage can therefore report an inflated `workload_seconds` until that defect is fixed.
+- **Background hardware capture overlaps the workload.** `background_hardware_seconds` (about 21 to 22 ms) is close to the 20 ms workload because the two ran concurrently; adding it to `workload_seconds` would double-count. The finalization wait for it was about 4 us because it had already finished.
+- **The `manifest.json` write is not in any persisted duration.** `Run.writer_overhead_seconds` (about 8 ms, held in memory only) is larger than `finalization_overhead_seconds` (about 2.8 ms) because it also covers building and atomically writing `manifest.json` and `methods.md`.
+- **An active `pubrun.phase()` costs about 18 us warm** (38 us cold) per block, mostly writing the `phase_start` and `phase_end` events. A `pubrun.phase()` with **no** active run cost more, about 106 us, because the inactive path resolves the configuration on every call to read `[events].on_inactive_annotate` (tracked as backlog `oh0que`).
+- **In-process versus whole-process numbers differ.** The in-process `startup_overhead_seconds` (about 21 ms) excludes importing pubrun and reuses the installed-distribution index cached by earlier runs in the same process, so it is much smaller than the whole-process `feature-none` and `startup-auto-default` harness scenarios, which include interpreter start, import, and the first package scan.
+
+Limits: one busy machine, local `ext4`, and one Python version only. Other OSes, Python 3.8 through 3.13, and network filesystems were not measured, and the earlier microbenchmark runs show that warm medians on this host varied by up to about 2x between runs.
+
 ## Capture-isolation startup and hot-path overhead (single-machine local measurements)
 
 The measurements below come from one local machine and are scoped strictly to that environment; they are not cross-machine representative numbers (`## Representative results` above remains a multi-machine placeholder):
