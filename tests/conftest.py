@@ -7,6 +7,31 @@ import pubrun.tracker
 
 
 FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
+SRC_DIR = pathlib.Path(__file__).resolve().parents[1] / "src"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _subprocess_pythonpath():
+    """Prepend this checkout's ``src`` to ``PYTHONPATH`` for the whole test session.
+
+    ``pythonpath = ["src"]`` in ``pyproject.toml`` changes ``sys.path`` of the pytest process
+    only. A child Python process that inherits the environment would otherwise import ``pubrun``
+    through the interpreter's editable-install ``.pth`` entry, which may point at a different
+    checkout (for example the main checkout when tests run inside a git worktree).
+    """
+    if not SRC_DIR.is_dir():
+        yield
+        return
+    previous = os.environ.get("PYTHONPATH")
+    if previous:
+        os.environ["PYTHONPATH"] = f"{SRC_DIR}{os.pathsep}{previous}"
+    else:
+        os.environ["PYTHONPATH"] = str(SRC_DIR)
+    yield
+    if previous is None:
+        os.environ.pop("PYTHONPATH", None)
+    else:
+        os.environ["PYTHONPATH"] = previous
 
 
 @pytest.fixture(autouse=True)

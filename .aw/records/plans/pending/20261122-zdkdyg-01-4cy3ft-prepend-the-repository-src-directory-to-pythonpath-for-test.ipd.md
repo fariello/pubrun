@@ -54,29 +54,29 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Session-level PYTHONPATH setup
 
-- [ ] E-01 Add a session-scoped autouse fixture named `_subprocess_pythonpath` to `tests/conftest.py` that prepends the repository `src` directory to `os.environ["PYTHONPATH"]` for the test session.
+- [x] E-01 Add a session-scoped autouse fixture named `_subprocess_pythonpath` to `tests/conftest.py` that prepends the repository `src` directory to `os.environ["PYTHONPATH"]` for the test session.
   - Depends on: none
   - Expected outcome: `tests/conftest.py` defines a module constant `SRC_DIR = pathlib.Path(__file__).resolve().parents[1] / "src"` and a fixture decorated with `@pytest.fixture(scope="session", autouse=True)`. The fixture behaves as the `## Goal` flowchart shows. When `SRC_DIR.is_dir()` is false, it yields without changing anything. Otherwise it records the previous value with `os.environ.get("PYTHONPATH")`, sets `PYTHONPATH` to `str(SRC_DIR)` when the previous value is `None` or empty, and to `f"{SRC_DIR}{os.pathsep}{previous}"` otherwise. After `yield` it restores the previous value, or removes the key with `os.environ.pop("PYTHONPATH", None)` when the previous value was `None`. The fixture sets `os.environ` directly; it does not use `monkeypatch`, because `monkeypatch` is function-scoped. The existing function-scoped fixtures `isolated_cwd`, `clean_active_run`, and `pubrun_state_isolation` are unchanged. `pubrun_state_isolation` snapshots `os.environ` after session fixtures run, so it keeps the prepended value between tests. A docstring states the reason: `pythonpath = ["src"]` changes `sys.path` only, and child processes would otherwise import an editable install from another checkout.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Regression test
 
-- [ ] E-02 Create `tests/test_subprocess_pythonpath.py` with behavioral tests that start child Python processes from the session environment and check where they import `pubrun` from.
+- [x] E-02 Create `tests/test_subprocess_pythonpath.py` with behavioral tests that start child Python processes from the session environment and check where they import `pubrun` from.
   - Depends on: E-01
   - Expected outcome: The module defines `_REPO_SRC = pathlib.Path(__file__).resolve().parents[1] / "src"`. Test `test_inherited_env_child_imports_pubrun_from_this_checkout` runs `subprocess.run([sys.executable, "-c", "import os, pubrun; print(os.path.realpath(pubrun.__file__))"], capture_output=True, text=True, timeout=60)` with no `env=` argument. It asserts return code 0 and that the printed path equals `os.path.realpath(_REPO_SRC / "pubrun" / "__init__.py")`. That test detects the defect only where the active interpreter's installed `pubrun` comes from another checkout; in CI the editable install is the checkout under test, so it passes there with or without the fixture. Test `test_child_prefers_this_checkout_over_a_later_pythonpath_entry` therefore detects the defect in every environment, including CI. It writes a decoy package `tmp_path / "decoy" / "pubrun" / "__init__.py"` containing `DECOY = True`, copies `os.environ`, and APPENDS `tmp_path / "decoy"` to the copied `PYTHONPATH` (after the inherited value, joined with `os.pathsep`). It then runs the same child command with that `env=`, `cwd=str(tmp_path)`, and `timeout=60`, and asserts return code 0 and that the printed path equals `os.path.realpath(_REPO_SRC / "pubrun" / "__init__.py")`. Without the fixture the inherited `PYTHONPATH` has no `src` entry, and `PYTHONPATH` entries precede the editable install's `.pth` entry on `sys.path`, so the child imports the decoy and the test fails. Test `test_pythonpath_starts_with_this_checkout_src` asserts that `os.environ["PYTHONPATH"].split(os.pathsep)[0]` resolves (with `os.path.realpath`) to `os.path.realpath(_REPO_SRC)`. The first test also passes `cwd=str(tmp_path)`. Every child runs in `tmp_path` because `import pubrun` with the default `auto_start = true` writes a `runs/` directory into the child's working directory, and with `--noconftest` the `isolated_cwd` fixture does not move the pytest process out of the repository root. No test reads production source with `inspect`, `ast`, or regex.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Verification
 
-- [ ] E-03 Run the backlog item's acceptance command inside a git worktree with the subprocess import probe described in `## Findings`, and confirm every child process imports `pubrun` from the worktree.
+- [x] E-03 Run the backlog item's acceptance command inside a git worktree with the subprocess import probe described in `## Findings`, and confirm every child process imports `pubrun` from the worktree.
   - Depends on: E-01
   - Expected outcome: Executed from the root of a git worktree of this repository (an `aw` runner lane qualifies), with the active Python's editable `pubrun` install pointing at a different checkout, the probe command from `## Findings` reports `passed` with zero failures, and every line of the probe log is the realpath of that worktree's `src/pubrun/__init__.py`. If the executor's environment has no editable install pointing at another checkout, the executor records that fact in V-03 and still records the probe log.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Run the new regression tests and the full test suite.
+- [x] E-04 Run the new regression tests and the full test suite.
   - Depends on: E-02, E-03
   - Expected outcome: `python3 -m pytest tests/test_subprocess_pythonpath.py -v`, `python3 -m pytest -q`, and `env -u PYTHONPATH python3 -m pytest -q` each finish with zero failures. The last command reproduces the CI condition in which `PYTHONPATH` is unset at session start (see OQ-02).
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -177,25 +177,64 @@ N/A. No spec under `.aw/records/specs/` covers the test harness. `CONTRIBUTING.m
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: The pasted `git diff -- tests/conftest.py` hunk, showing the `SRC_DIR` constant, the `@pytest.fixture(scope="session", autouse=True)` fixture with the `is_dir()` guard, the prepend using `os.pathsep`, and the restore or `pop` after `yield`, with the three existing fixtures unchanged.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Diff of tests/conftest.py (only hunk; the three existing fixtures are untouched):
+    +SRC_DIR = pathlib.Path(__file__).resolve().parents[1] / "src"
+    +@pytest.fixture(scope="session", autouse=True)
+    +def _subprocess_pythonpath():
+    +    """Prepend this checkout's ``src`` to ``PYTHONPATH`` for the whole test session. ..."""
+    +    if not SRC_DIR.is_dir():
+    +        yield
+    +        return
+    +    previous = os.environ.get("PYTHONPATH")
+    +    if previous:
+    +        os.environ["PYTHONPATH"] = f"{SRC_DIR}{os.pathsep}{previous}"
+    +    else:
+    +        os.environ["PYTHONPATH"] = str(SRC_DIR)
+    +    yield
+    +    if previous is None:
+    +        os.environ.pop("PYTHONPATH", None)
+    +    else:
+    +        os.environ["PYTHONPATH"] = previous
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `python3 -m pytest tests/test_subprocess_pythonpath.py -v` output showing all three behaviors of E-02 passing (test names are pointers, not the bar): a child with the inherited environment imports this checkout's `pubrun`; a child whose `PYTHONPATH` ends with a decoy `pubrun` still imports this checkout's `pubrun`; and the session `PYTHONPATH` starts with this checkout's `src`. Also the pasted output of `python3 -m pytest tests/test_subprocess_pythonpath.py -v --noconftest`, which skips `tests/conftest.py` and so reproduces the pre-fix condition in any environment, showing the decoy behavior FAILING with the decoy's path in the assertion message. Do not use `git stash` or edit `tests/conftest.py` to produce this run.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: python3 -m pytest tests/test_subprocess_pythonpath.py -v:
+    tests/test_subprocess_pythonpath.py::test_inherited_env_child_imports_pubrun_from_this_checkout PASSED [ 33%]
+    tests/test_subprocess_pythonpath.py::test_child_prefers_this_checkout_over_a_later_pythonpath_entry PASSED [ 66%]
+    tests/test_subprocess_pythonpath.py::test_pythonpath_starts_with_this_checkout_src PASSED [100%]
+    ============================== 3 passed in 4.69s ===============================
+  python3 -m pytest tests/test_subprocess_pythonpath.py -v --noconftest (pre-fix condition; conftest not edited, no stash):
+    test_inherited_env_child_imports_pubrun_from_this_checkout FAILED
+    test_child_prefers_this_checkout_over_a_later_pythonpath_entry FAILED
+    E       AssertionError: assert '/tmp/pytest-...n/__init__.py' == '<worktree-prefix>...n/__init__.py' (redacted)
+    E         + /tmp/pytest-of-<user>/pytest-6248/test_child_prefers_this_checko0/decoy/pubrun/__init__.py
+    test_pythonpath_starts_with_this_checkout_src FAILED
+    ============================== 3 failed in 4.03s ===============================
+  The decoy test fails with the decoy's path, as required.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: The pasted path of the git worktree used (from `git rev-parse --show-toplevel`), the pasted pytest summary line of the probe command from `## Findings`, and the pasted `sort /tmp/opencode/zdkdyg/probe.log | uniq -c` output in which every line names that worktree's `src/pubrun/__init__.py` and no line names another checkout. Also the pasted output of `python3 -c "import pubrun; print(pubrun.__file__)"` run from `/tmp/opencode`, showing where the editable install points. The fixture added by E-01 produces this observation; the probe only records it.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: (machine-local path prefixes redacted: `<worktree>` is this lane's git worktree root, `<main-checkout>` is the main checkout the editable install points at)
+    $ git rev-parse --show-toplevel
+    <worktree>
+    probe command summary line: 91 passed in 32.82s
+    $ sort /tmp/opencode/zdkdyg/probe.log | uniq -c
+         59 <worktree>/src/pubrun/__init__.py
+    $ (cd /tmp/opencode && python3 -c "import pubrun; print(pubrun.__file__)")
+    <main-checkout>/src/pubrun/__init__.py
+  The editable install points at another checkout, and every one of the 59 child imports came from this worktree (base commit had 37 of 47 from the main checkout).
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: The pasted summary lines of `python3 -m pytest tests/test_subprocess_pythonpath.py -v`, `python3 -m pytest -q`, and `env -u PYTHONPATH python3 -m pytest -q`, each with zero failures.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: python3 -m pytest tests/test_subprocess_pythonpath.py -v: 3 passed in 4.69s
+  python3 -m pytest -q: 1873 passed, 2 skipped in 447.70s (0:07:27)
+  env -u PYTHONPATH python3 -m pytest -q: 1873 passed, 2 skipped in 452.79s (0:07:32)
+  - Result: pass
 
 ## Approval and execution gate
 
