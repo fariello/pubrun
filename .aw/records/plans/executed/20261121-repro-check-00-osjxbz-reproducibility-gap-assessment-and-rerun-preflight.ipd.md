@@ -6,7 +6,7 @@
 - Scope: Orchestrate four child plans implementing a shared reproducibility evidence model, read-only offline preflight comparison, CLI and TUI integration with strict exit options, and documentation plus whole-Set validation for backlog item `q3bll1`.
 - Scope-Paths: src/pubrun/report/utils.py, src/pubrun/report/reproducibility.py, src/pubrun/report/checks.py, src/pubrun/capture/packages.py, src/pubrun/__main__.py, src/pubrun/report/diagnostics.py, src/pubrun/tui/widgets/details.py, src/pubrun/tui/widgets/actions.py, docs/cli.md, docs/hpc.md, docs/manifest.md, docs/api.md, tests/test_reproducibility_assessment.py, tests/test_reproducibility_preflight.py, tests/test_checks_commands.py, tests/test_cli.py, tests/test_tui.py, tests/test_report_subpackage_integrity.py, tests/test_reproducibility_e2e.py
 - Item-Dependencies: executed:0b8i7x, executed:tusvtd, executed:3lqtlt, executed:sdg31l
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: orchestrator
 - Coverage: pass
@@ -20,13 +20,13 @@
 - Highest E allocated: 04
 - Author: agent
 - Id: osjxbz
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 - Short-Description: Orchestrate shared reproducibility assessment, offline preflight comparison, CLI/TUI integration, and documentation sync
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): RETIRED as the orchestrator rollup step of a runner Set completion, not executed by an agent: every child of Set repro-check reached executed, so the runner (run run-20261122T213711Z-2482986) retired this Order-0 plan as bookkeeping. Its own E-*/V-* items were NOT performed; the runner superseded them by enforcing the ordering, the isolation and the per-child merge gate. Justifying children: 0b8i7x, tusvtd, 3lqtlt, sdg31l.
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-22 coverage pass (aw oc run): fingerprint 8696997d119f, model uri/its_direct/pt3-claude-opus-5.5-1m-us
@@ -51,6 +51,9 @@ flowchart TD
 ```
 
 ## Detailed Implementation Checklist (TODO)
+
+
+> Its own E-*/V-* items were NOT performed; the runner superseded them by enforcing the ordering, the isolation and the per-child merge gate.
 
 Execution-state rule: mark an `E-*` item complete only after performing the action. That mark is not validation. Right-sizing rule: write for a modest executor that cannot hold much in its head. Each E-item is one step (one concern, about one file, executable in one focused pass) and its V-item names each unit it covers with its own check; a plan stays at about 5 E-items and 8 work Scope-Paths, else split it into more child plans (guidance, `IPD-Z603`). Accepted execution states: blocked, failed, pending, performed; terminal gate demands 'performed'.
 
