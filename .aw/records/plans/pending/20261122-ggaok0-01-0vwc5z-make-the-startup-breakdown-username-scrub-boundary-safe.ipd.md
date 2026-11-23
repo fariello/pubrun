@@ -6,7 +6,7 @@
 - Scope: `benchmarks/startup_breakdown.py` (`_scrub_substrings`, `scrub_text`, `validate_redacted_output`, and new private scrub helpers) and regression tests in `tests/test_startup_benchmark.py`.
 - Scope-Paths: benchmarks/startup_breakdown.py, tests/test_startup_benchmark.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Port the boundary-safe, marker-preserving scrub from benchmarks/harness.py into benchmarks/startup_breakdown.py so a short username cannot corrupt <redacted> markers or schema strings
@@ -19,11 +19,13 @@
 - Highest E allocated: 04
 - Author: Claude Opus 5.5
 - Id: 0vwc5z
+- Approval: 2026-11-23, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-23 to-review (aw set): authored from backlog ggaok0: reproduction, port plan, falsifiable validation
 - 2026-11-23 draft (Claude Opus 5.5): created.

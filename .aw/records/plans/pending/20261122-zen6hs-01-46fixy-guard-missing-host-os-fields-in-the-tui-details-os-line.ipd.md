@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/tui/widgets/details.py` (a new module-level OS-text helper and the OS line in `RunDetailsView.update_general_pane`) and regression tests in `tests/test_tui_bugs.py`.
 - Scope-Paths: src/pubrun/tui/widgets/details.py, tests/test_tui_bugs.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Short-Description: The TUI run details pane prints the literal word None in its OS line when host.os_name or host.os_release is missing or null.
@@ -19,11 +19,13 @@
 - Highest E allocated: 03
 - Author: OpenCode agent
 - Id: 46fixy
+- Approval: 2026-11-23, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-23 to-review (OpenCode agent): authored from backlog zen6hs: reproduction, guarded OS line, behavioral regression tests.
 - 2026-11-23 draft (OpenCode agent): created.

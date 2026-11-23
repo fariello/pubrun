@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/report/diagnostics.py` (the Host line in `print_report`) and regression tests in `tests/test_report_checks_bugs.py`.
 - Scope-Paths: src/pubrun/report/diagnostics.py, tests/test_report_checks_bugs.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Work-Kind: bug
@@ -18,11 +18,13 @@
 - Highest E allocated: 03
 - Author: OpenCode agent
 - Id: 6bgkyj
+- Approval: 2026-11-23, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-23 to-review (OpenCode agent): authored from backlog rmssqd: reproduction, guarded Host line, behavioral regression tests.
 - 2026-11-23 draft (OpenCode agent): created.

@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/core.py` (`_handle_inactive` and a new private policy cache next to it), new behavioral tests in `tests/test_api.py`, the inactive-phase measurement sentence in `docs/performance.md`, and a `### Fixed` entry in `CHANGELOG.md`.
 - Scope-Paths: src/pubrun/core.py, tests/test_api.py, docs/performance.md, CHANGELOG.md
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Work-Kind: bug
@@ -18,11 +18,13 @@
 - Highest E allocated: 05
 - Author: Claude Opus 5.5
 - Id: 68iw9a
+- Approval: 2026-11-23, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-23 to-review (aw set): authored from backlog oh0que: baseline measurement, fingerprint-keyed policy cache, behavioral invalidation tests, measured threshold
 - 2026-11-23 draft (Claude Opus 5.5): created.

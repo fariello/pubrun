@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/_config_boot.py` (a new multi-file key reader next to `_read_local_toml_key`), `src/pubrun/_bootstrap.py` (`_resolve_conflict_policy` calls the new reader), new behavioral tests in `tests/test_config_capture_modes.py`, the boot-discovery paragraph of `docs/configuration.md`, and a `### Fixed` entry in `CHANGELOG.md`.
 - Scope-Paths: src/pubrun/_config_boot.py, src/pubrun/_bootstrap.py, tests/test_config_capture_modes.py, docs/configuration.md, CHANGELOG.md
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Work-Kind: bug
@@ -18,11 +18,13 @@
 - Highest E allocated: 05
 - Author: Claude Opus 5.5
 - Id: 2e6xfq
+- Approval: 2026-11-23, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-23 to-review (Claude Opus 5.5): authored from backlog ql671s: reproduction, multi-file boot key reader, conflict-policy switch, behavioral tests, documentation.
 - 2026-11-23 draft (Claude Opus 5.5): created.

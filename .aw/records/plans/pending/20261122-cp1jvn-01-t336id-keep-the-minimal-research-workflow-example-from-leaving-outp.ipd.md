@@ -6,7 +6,7 @@
 - Scope: `examples/minimal-research-workflow/analysis.py` (output directory resolution and a new `--output-dir` option), `tests/test_example_minimal_research_workflow.py` (behavior tests for the new resolution), `examples/minimal-research-workflow/README.md` (where outputs go), and one `### Fixed` entry in `CHANGELOG.md`.
 - Scope-Paths: examples/minimal-research-workflow/analysis.py, tests/test_example_minimal_research_workflow.py, examples/minimal-research-workflow/README.md, CHANGELOG.md
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Work-Kind: bug
@@ -18,11 +18,13 @@
 - Highest E allocated: 04
 - Author: Claude Opus 5.5
 - Id: t336id
+- Approval: 2026-11-23, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-23 to-review (aw set): authored from backlog cp1jvn: fix, tests, docs, validation
 - 2026-11-23 draft (Claude Opus 5.5): created.
