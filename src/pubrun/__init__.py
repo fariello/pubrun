@@ -193,16 +193,28 @@ def _resolve_checkout_commit(repo_root, timeout=1.0):
                 stdout, _ = proc.communicate(timeout=timeout)
                 return proc.returncode, stdout
             except _sp.TimeoutExpired:
+                if _os.name == "nt":
+                    try:
+                        taskkill = _os.path.join(
+                            _os.environ.get("SystemRoot", r"C:\Windows"),
+                            "System32",
+                            "taskkill.exe",
+                        )
+                        if not _os.path.isfile(taskkill):
+                            taskkill = "taskkill"
+                        _sp.run(
+                            [taskkill, "/F", "/T", "/PID", str(proc.pid)],
+                            stdin=_sp.DEVNULL,
+                            stdout=_sp.DEVNULL,
+                            stderr=_sp.DEVNULL,
+                            timeout=2.0,
+                        )
+                    except Exception:
+                        pass
                 try:
                     proc.kill()
                 except Exception:
                     pass
-                for stream in (proc.stdout, proc.stderr):
-                    if stream is not None:
-                        try:
-                            stream.close()
-                        except Exception:
-                            pass
                 try:
                     proc.wait(timeout=0.5)
                 except Exception:
