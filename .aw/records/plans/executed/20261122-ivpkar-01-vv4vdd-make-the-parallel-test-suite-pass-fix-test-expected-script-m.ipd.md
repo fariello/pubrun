@@ -6,7 +6,7 @@
 - Scope: Rewrite `TestIsSameProcess.test_expected_script_matches` in `tests/test_liveness.py` so that it checks `pubrun.capture.liveness.is_same_process(..., expected_script=...)` against a short-lived child process that runs a known script, instead of against the current pytest process. Confirm, without editing `tests/test_tui.py`, that the two `TestTuiReproducibilityAndActions` tests named by backlog item `ivpkar` pass in the test order that exposed the `PubrunTUIApp` mock leak. Confirm that the full parallel suite (`aw suite`) passes. No production code changes.
 - Scope-Paths: tests/test_liveness.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Work-Kind: bug
@@ -18,12 +18,12 @@
 - Highest E allocated: 03
 - Author: agent
 - Id: vv4vdd
-- Approval: 2026-11-23, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): aw oc run self-finalize: vv4vdd verified (set ivpkar, attempt 1).
 - 2026-11-23 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-23 draft (agent): created.
