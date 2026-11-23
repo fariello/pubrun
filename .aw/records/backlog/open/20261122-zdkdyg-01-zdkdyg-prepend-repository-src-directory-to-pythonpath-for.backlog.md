@@ -3,6 +3,7 @@
 - Set: zdkdyg
 - Work-Kind: bug
 - Priority: medium
+- Blocks-Release: next
 - Summary: Prepend repository src directory to PYTHONPATH for subprocess tests in tests/conftest.py
 - Short-Description: Prepend repository src directory to PYTHONPATH for subprocess tests in tests/conftest.py
 
