@@ -1,15 +1,15 @@
 - Id: wghq9s
-- Status: open
+- Status: done
 - Set: wghq9s
 - Work-Kind: bug
 - Priority: low
 - Summary: examples/verify_all.py runs minimal-research-workflow/analysis.py from repo root and leaves untracked outputs/ directory
 - Short-Description: examples/verify_all.py runs minimal-research-workflow/analysis.py from repo root and leaves untracked outputs/ directory
-- Blocks-Release: next
 
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-23 done (aw set): Duplicate of cp1jvn (carried by root-cause plan t336id)
 - 2026-11-22 created (aw backlog): examples/verify_all.py runs minimal-research-workflow/analysis.py from repo root and leaves untracked outputs/ directory
 
 ## Context
