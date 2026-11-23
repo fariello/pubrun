@@ -1,6 +1,6 @@
 - Id: cp1jvn
 - Status: graduated
-- Graduated-To: t336id
+- Graduated-To: cp1jvn
 - Set: cp1jvn
 - Work-Kind: bug
 - Priority: low
