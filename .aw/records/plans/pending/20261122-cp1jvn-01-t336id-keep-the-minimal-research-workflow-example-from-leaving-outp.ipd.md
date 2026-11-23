@@ -53,29 +53,29 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Script behavior
 
-- [ ] E-01 In `examples/minimal-research-workflow/analysis.py`, resolve the output directory independently of the current working directory and add an `--output-dir` option.
+- [x] E-01 In `examples/minimal-research-workflow/analysis.py`, resolve the output directory independently of the current working directory and add an `--output-dir` option.
   - Depends on: none
   - Expected outcome: `parse_args` accepts `--output-dir` (type `str`, default `None`, help text naming the default location). A new module-level default, `DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"`, is used when `--output-dir` is absent. `write_outputs(rows, summary, output_dir)` takes the directory as a `Path` argument, creates it with `mkdir(parents=True, exist_ok=True)`, and writes `synthetic_data.csv` and `summary.json` into it. `main` passes the resolved directory and replaces the fixed text `"Outputs written to ./outputs/"` with a line that prints the resolved directory. The docstrings of `parse_args`, `write_outputs`, and the module describe the new option and default. The `Path("outputs")` expression in `write_outputs` no longer exists. The file stays compatible with Python 3.8 (no new syntax beyond what the file already uses under `from __future__ import annotations`).
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Tests
 
-- [ ] E-02 Rewrite `tests/test_example_minimal_research_workflow.py` so it tests the new resolution through subprocess runs and writes nothing into the repository tree.
+- [x] E-02 Rewrite `tests/test_example_minimal_research_workflow.py` so it tests the new resolution through subprocess runs and writes nothing into the repository tree.
   - Depends on: E-01
   - Expected outcome: The file contains three behavior tests. (1) `test_minimal_research_workflow_runs`: runs the repository copy of `analysis.py` with `cwd=tmp_path` and `--output-dir <tmp_path>/out`, asserts exit code 0, `"Synthetic analysis complete."` in stdout, `<tmp_path>/out/summary.json` and `<tmp_path>/out/synthetic_data.csv` exist, `<tmp_path>/outputs` does not exist, and the existing `runs/pubrun-analysis-*` manifest and `config.resolved.json` assertions still hold. (2) `test_default_output_dir_is_next_to_script`: copies `analysis.py` into `<tmp_path>/example/`, creates `<tmp_path>/caller/`, runs the copy with `cwd=<tmp_path>/caller`, asserts exit code 0, `<tmp_path>/example/outputs/summary.json` exists and `<tmp_path>/caller/outputs` does not exist. (3) `test_output_dir_is_created_when_missing`: passes a nested, not-yet-existing `--output-dir` such as `<tmp_path>/a/b/c`, asserts exit code 0 and that `summary.json` there parses as JSON with an `"n"` key equal to the requested `--n`. No test reads source text with `inspect`, `ast`, or a regular expression.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Documentation
 
-- [ ] E-03 Update `examples/minimal-research-workflow/README.md` to state where outputs are written and how to change it.
+- [x] E-03 Update `examples/minimal-research-workflow/README.md` to state where outputs are written and how to change it.
   - Depends on: E-01
   - Expected outcome: The paragraph that currently reads "The script also writes ordinary analysis outputs under:" followed by an `outputs/` code block says that the outputs go to `outputs/` inside `examples/minimal-research-workflow/`, wherever the script is run from, and that `--output-dir <path>` writes them elsewhere. It also says that a relative `--output-dir` is resolved against the current working directory. The `runs/` paragraph is unchanged. Added lines contain no em dash (`U+2014`) or en dash (`U+2013`).
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Add one entry to the first `### Fixed` heading under `## [Unreleased]` in `CHANGELOG.md` describing the fix.
+- [x] E-04 Add one entry to the first `### Fixed` heading under `## [Unreleased]` in `CHANGELOG.md` describing the fix.
   - Depends on: E-01
   - Expected outcome: `## [Unreleased]` contains several `### Fixed` headings; the new entry goes under the first one, as a bullet with a bold title like the bullets around it. The new entry states that `examples/minimal-research-workflow/analysis.py` now writes its outputs next to the script (or to `--output-dir`) instead of the current working directory, so `examples/verify_all.py` no longer leaves an untracked `outputs/` directory. Added lines contain no em dash (`U+2014`) or en dash (`U+2013`).
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -151,25 +151,144 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted output, from the repository root of the execution worktree, of (a) `python3 examples/verify_all.py` ending in `[SUCCESS] All examples passed.` with exit code 0, (b) `test -e outputs; echo $?` printing `1`, (c) `git status --porcelain --untracked-files=all` containing no line with an `outputs/` path, (d) `ls examples/minimal-research-workflow/outputs` listing `summary.json` and `synthetic_data.csv`, and (e) after `(cd examples && python3 verify_all.py --no-clear)` exits 0, `test -e examples/outputs; echo $?` printing `1` and `git status --porcelain --untracked-files=all` still containing no line with an `outputs/` path. The observed run is produced by `examples/verify_all.py::main` invoking `analysis.py::main`, whose output path E-01 changes. Also paste `git diff -- examples/minimal-research-workflow/analysis.py` showing `Path("outputs")` removed, `--output-dir` added, and the fixed `./outputs/` message replaced.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 examples/verify_all.py; echo "exit=$?"   (lane worktree root, base f4072be, with this change)
+    Starting pubrun examples verification...
+    ...
+    Executing 12_external_file_provenance.py...
+    Testing 12_external_file_provenance...
+    [PASS] PASS: 12_external_file_provenance.py
+    ------------------------------------------------------------
+    Executing minimal-research-workflow/analysis.py...
+    ------------------------------------------------------------
+    [SUCCESS] All examples passed.
+    exit=0
+    $ test -e outputs; echo $?
+    1
+    $ git status --porcelain --untracked-files=all
+     M CHANGELOG.md
+     M examples/minimal-research-workflow/README.md
+     M examples/minimal-research-workflow/analysis.py
+     M tests/test_example_minimal_research_workflow.py
+    $ ls examples/minimal-research-workflow/outputs
+    summary.json
+    synthetic_data.csv
+    $ (cd examples && python3 verify_all.py --no-clear > /tmp/opencode/t336id-ex.log 2>&1; echo "exit=$?"); tail -2 /tmp/opencode/t336id-ex.log
+    exit=0
+    ------------------------------------------------------------
+    [SUCCESS] All examples passed.
+    $ test -e examples/outputs; echo $?
+    1
+    $ git status --porcelain --untracked-files=all
+     M CHANGELOG.md
+     M examples/minimal-research-workflow/README.md
+     M examples/minimal-research-workflow/analysis.py
+     M tests/test_example_minimal_research_workflow.py
+    $ git diff -- examples/minimal-research-workflow/analysis.py   (excerpt)
+    +DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"
+    +    parser.add_argument(
+    +        "--output-dir",
+    +        type=str,
+    +        default=None,
+    -def write_outputs(rows: List[Dict[str, float]], summary: Dict[str, float]) -> None:
+    +def write_outputs(
+    +    rows: List[Dict[str, float]],
+    +    summary: Dict[str, float],
+    +    output_dir: Path,
+    +) -> None:
+    -    output_dir = Path("outputs")
+    -    output_dir.mkdir(exist_ok=True)
+    +    output_dir.mkdir(parents=True, exist_ok=True)
+    +    output_dir = Path(args.output_dir) if args.output_dir is not None else DEFAULT_OUTPUT_DIR
+    -        write_outputs(rows, summary)
+    +        write_outputs(rows, summary, output_dir)
+    -    print("Outputs written to ./outputs/")
+    +    print(f"Outputs written to {output_dir.resolve()}")
+    $ python3 -c "import ast;ast.parse(open('examples/minimal-research-workflow/analysis.py').read(), feature_version=(3,8))" && echo py38-parse-ok
+    py38-parse-ok
+    ```
+    No untracked `outputs/` path appears in either `git status` listing; `outputs/` now lands in the git-ignored `examples/minimal-research-workflow/outputs/`.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest tests/test_example_minimal_research_workflow.py -v -o addopts=""` output with zero failures, plus the test source lines (re-derived at execution time) that pin each behavior: (a) with `--output-dir` given, the outputs land in that directory and no `outputs/` appears in the working directory; (b) with no `--output-dir`, the outputs land in `outputs/` next to the script copy and not in the separate working directory; (c) a nested, missing `--output-dir` is created and its `summary.json` parses with `"n"` equal to the requested `--n`. Each behavior must be pinned by a subprocess run asserting exit code and files on disk. The test names in E-02 are pointers, not the bar. Pasted `git status --porcelain --untracked-files=all` after that run, showing no new path under `examples/minimal-research-workflow/`. Pasted final summary line of `pytest tests/ -q` showing zero failures.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_example_minimal_research_workflow.py -v -o addopts=""
+    collecting ... collected 3 items
+    tests/test_example_minimal_research_workflow.py::test_minimal_research_workflow_runs PASSED [ 33%]
+    tests/test_example_minimal_research_workflow.py::test_default_output_dir_is_next_to_script PASSED [ 66%]
+    tests/test_example_minimal_research_workflow.py::test_output_dir_is_created_when_missing PASSED [100%]
+    ============================== 3 passed in 8.68s ===============================
+    $ git status --porcelain --untracked-files=all
+     M examples/minimal-research-workflow/analysis.py
+     M tests/test_example_minimal_research_workflow.py
+    ```
+    Test lines that pin each behavior (all via `subprocess.run` of `analysis.py`, asserting `returncode == 0` and files on disk):
+    (a) `test_minimal_research_workflow_runs`: `_run(SCRIPT_PATH, tmp_path, ["--output-dir", str(out_dir)])`, then `assert (out_dir / "summary.json").exists()`, `assert (out_dir / "synthetic_data.csv").exists()`, `assert not (tmp_path / "outputs").exists()`, plus the `runs/pubrun-analysis-*` `manifest.json` / `config.resolved.json` assertions.
+    (b) `test_default_output_dir_is_next_to_script`: `shutil.copy2(SCRIPT_PATH, script_copy)`; `_run(script_copy, caller_dir, [])`; `assert (example_dir / "outputs" / "summary.json").exists()`; `assert not (caller_dir / "outputs").exists()`.
+    (c) `test_output_dir_is_created_when_missing`: `nested = tmp_path / "a" / "b" / "c"`; run with `--n 60 --output-dir str(nested)`; `summary = json.loads((nested / "summary.json").read_text(encoding="utf-8"))`; `assert summary["n"] == 60`.
+    No test reads source text.
 
-- [ ] V-03 validates E-03
+    Full suite. The plan's `pytest tests/ -q` (repository `addopts` has no `-n`, so serial) was run in two halves of the 65 sorted `tests/test_*.py` files so each command stayed inside the lane's progress timeout:
+    ```text
+    $ python3 -m pytest $(cat /tmp/opencode/t336id-half00) -q -o addopts="-p no:randomly"
+    1134 passed in 353.04s (0:05:53)
+    $ python3 -m pytest $(cat /tmp/opencode/t336id-half01) -q -o addopts="-p no:randomly"
+    687 passed, 2 skipped in 161.13s (0:02:41)
+    ```
+    1821 passed + 2 skipped = 1823, matching the 1823 collected by `aw suite`. `aw suite` (parallel, xdist workers) reported:
+    ```text
+    FAILED tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches
+    ================== 1 failed, 1822 passed in 327.80s (0:05:27) ==================
+    ```
+    That single failure is pre-existing and unrelated: it reproduces on an unmodified `git archive HEAD` tree with `pytest tests/test_liveness.py -n 4` (`1 failed, 26 passed in 2.19s`), passes serially (`27 passed in 0.21s`), and is already tracked by backlog item `ivpkar` (graduated).
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: Pasted `git diff -- examples/minimal-research-workflow/README.md` showing the outputs paragraph names `examples/minimal-research-workflow/outputs/` and `--output-dir`, and pasted output of a Python check over the added lines of that diff reporting `0` characters `U+2014` and `0` characters `U+2013`.
   - Observed evidence:
-  - Result: pending
+    ````text
+    $ git diff -- examples/minimal-research-workflow/README.md
+    -The script also writes ordinary analysis outputs under:
+    +The script also writes ordinary analysis outputs (`synthetic_data.csv` and `summary.json`) under:
+     ```text
+    -outputs/
+    +examples/minimal-research-workflow/outputs/
+     ```
+    +The outputs go to that directory next to `analysis.py` wherever you run the script from, so running it from another directory leaves no `outputs/` folder there. To write them somewhere else, pass `--output-dir <path>`:
+    +```bash
+    +python analysis.py --seed 42 --n 1000 --output-dir ~/pubrun-example-outputs
+    +```
+    +A relative `--output-dir` is resolved against the current working directory. The directory is created if it does not exist.
+    $ (python check over added diff lines)
+    examples/minimal-research-workflow/README.md added_lines=10 U+2014=0 U+2013=0
+    ````
+    The `runs/` paragraph is unchanged.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `git diff -- CHANGELOG.md` showing exactly one new bullet under the first `### Fixed` heading of `## [Unreleased]` that names `examples/minimal-research-workflow/analysis.py` and `--output-dir`, and pasted output of a Python check over the added lines of that diff reporting `0` characters `U+2014` and `0` characters `U+2013`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ git diff -- CHANGELOG.md
+    @@ -103,6 +103,12 @@
+     ### Fixed
+    +- **The minimal research workflow example no longer leaves `outputs/` in the caller's directory.**
+    +  `examples/minimal-research-workflow/analysis.py` now writes `synthetic_data.csv` and
+    +  `summary.json` to `outputs/` next to the script (already git-ignored) instead of the current
+    +  working directory, and a new `--output-dir <path>` option writes them elsewhere. Running
+    +  `examples/verify_all.py` from the repository root or from `examples/` no longer leaves an
+    +  untracked `outputs/` directory behind.
+     - **Citation metadata and repository hygiene correction.** Cleaned up residual placeholder DOI
+    $ (python check over added diff lines)
+    CHANGELOG.md added_lines=6 U+2014=0 U+2013=0
+    ```
+    The heading at line 105 is the first `### Fixed` under `## [Unreleased]` (line 9).
+  - Result: pass
 
 ## Approval and execution gate
 

@@ -103,6 +103,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **The minimal research workflow example no longer leaves `outputs/` in the caller's directory.**
+  `examples/minimal-research-workflow/analysis.py` now writes `synthetic_data.csv` and
+  `summary.json` to `outputs/` next to the script (already git-ignored) instead of the current
+  working directory, and a new `--output-dir <path>` option writes them elsewhere. Running
+  `examples/verify_all.py` from the repository root or from `examples/` no longer leaves an
+  untracked `outputs/` directory behind.
 - **Citation metadata and repository hygiene correction.** Cleaned up residual placeholder DOI
   tokens and venue-specific phrasing in historical plan records. Earlier releases had shipped
   erroneous, unauthorized citation metadata introduced by an automated tooling error (the software

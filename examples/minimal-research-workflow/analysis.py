@@ -5,8 +5,12 @@ Minimal research workflow example for pubrun.
 This script performs a small deterministic synthetic analysis so that reviewers
 can see how pubrun records execution provenance for an ordinary Python script.
 
+Analysis outputs are written to ``outputs/`` next to this script, regardless
+of the current working directory. Pass ``--output-dir`` to write them elsewhere.
+
 Example:
     python analysis.py --seed 42 --n 1000
+    python analysis.py --output-dir /tmp/example-outputs
 """
 
 from __future__ import annotations
@@ -22,6 +26,8 @@ from typing import Dict, List, Sequence
 
 import pubrun
 
+DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"
+
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """
@@ -34,7 +40,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     Returns:
         argparse.Namespace:
-            Parsed arguments with ``seed``, ``n``, and ``effect`` fields.
+            Parsed arguments with ``seed``, ``n``, ``effect``, and
+            ``output_dir`` fields. ``output_dir`` is None when the option is
+            absent, meaning ``DEFAULT_OUTPUT_DIR`` should be used.
 
     Example:
         args = parse_args(["--seed", "42", "--n", "1000"])
@@ -59,6 +67,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=float,
         default=0.35,
         help="Synthetic effect size added to the treatment group.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help=(
+            "Directory for analysis outputs (default: outputs/ next to this "
+            "script). A relative path is resolved against the current "
+            "working directory."
+        ),
     )
 
     return parser.parse_args(argv)
@@ -146,24 +164,30 @@ def summarize(rows: List[Dict[str, float]]) -> Dict[str, float]:
     }
 
 
-def write_outputs(rows: List[Dict[str, float]], summary: Dict[str, float]) -> None:
+def write_outputs(
+    rows: List[Dict[str, float]],
+    summary: Dict[str, float],
+    output_dir: Path,
+) -> None:
     """
-    Write ordinary analysis outputs to the local example output directory.
+    Write ordinary analysis outputs to the given output directory.
 
     Args:
         rows:
             Synthetic observations.
         summary:
             Summary statistics.
+        output_dir:
+            Directory that receives ``synthetic_data.csv`` and
+            ``summary.json``. It and any missing parents are created.
 
     Returns:
         None.
 
     Example:
-        write_outputs(rows, summary)
+        write_outputs(rows, summary, DEFAULT_OUTPUT_DIR)
     """
-    output_dir = Path("outputs")
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     with (output_dir / "synthetic_data.csv").open("w", newline="", encoding="utf-8") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=["id", "group", "value"])
@@ -196,6 +220,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(main(["--seed", "42", "--n", "1000"]))
     """
     args = parse_args(argv)
+    output_dir = Path(args.output_dir) if args.output_dir is not None else DEFAULT_OUTPUT_DIR
 
     pubrun.annotate(
         "example_started",
@@ -211,7 +236,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         summary = summarize(rows)
 
     with pubrun.phase("write_outputs"):
-        write_outputs(rows, summary)
+        write_outputs(rows, summary, output_dir)
 
     pubrun.report("summary", summary)
     pubrun.artifact(
@@ -228,7 +253,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("Synthetic analysis complete.")
     print(f"Rows: {int(summary['n'])}")
     print(f"Observed effect: {summary['observed_effect']:.4f}")
-    print("Outputs written to ./outputs/")
+    print(f"Outputs written to {output_dir.resolve()}")
     print("Run provenance written to ./runs/")
 
     return 0

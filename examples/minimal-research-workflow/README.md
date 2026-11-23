@@ -47,11 +47,19 @@ After the script completes, `pubrun` writes a local run directory under:
 runs/
 ```
 
-The script also writes ordinary analysis outputs under:
+The script also writes ordinary analysis outputs (`synthetic_data.csv` and `summary.json`) under:
 
 ```text
-outputs/
+examples/minimal-research-workflow/outputs/
 ```
+
+The outputs go to that directory next to `analysis.py` wherever you run the script from, so running it from another directory leaves no `outputs/` folder there. To write them somewhere else, pass `--output-dir <path>`:
+
+```bash
+python analysis.py --seed 42 --n 1000 --output-dir ~/pubrun-example-outputs
+```
+
+A relative `--output-dir` is resolved against the current working directory. The directory is created if it does not exist.
 
 ## Inspect recent runs
 
