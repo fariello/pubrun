@@ -26,6 +26,18 @@ def test_tui_cli_parser_and_run():
                 mock_app.return_value.run.assert_called_once()
 
 
+def test_tui_cli_parser_and_run_leaves_real_tui_module():
+    """Running the CLI launch test must leave the real pubrun.tui.app module in sys.modules."""
+    pytest.importorskip("textual")
+    import pubrun.tui.app as real_app_module
+
+    test_tui_cli_parser_and_run()
+
+    assert sys.modules.get("pubrun.tui.app") is real_app_module
+    from pubrun.tui.app import PubrunTUIApp
+    assert PubrunTUIApp is real_app_module.PubrunTUIApp
+
+
 def test_tui_missing_dependencies_prints_notice(capsys):
     """Verify that when TUI dependencies are missing, a friendly explanation is printed and exits 1."""
     from pubrun.__main__ import main

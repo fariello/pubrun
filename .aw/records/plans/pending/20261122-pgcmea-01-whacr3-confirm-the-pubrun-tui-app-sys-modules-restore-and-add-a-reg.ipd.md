@@ -40,21 +40,21 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Confirm the restore and add the guard
 
-- [ ] E-01 Inspect `test_tui_cli_parser_and_run` in `tests/test_tui.py` and confirm that the injected module is restored. The function must inject `mock_module` only through a context manager or fixture that restores `sys.modules` on exit: `mock.patch.dict(sys.modules, {"pubrun.tui.app": mock_module})` (current HEAD), or `monkeypatch.setitem(sys.modules, "pubrun.tui.app", mock_module)`, or an equivalent `try`/`finally` restore. If the function instead assigns `sys.modules["pubrun.tui.app"] = mock_module` with no restore, replace that assignment with the `mock.patch.dict` form shown in Finding F-01, and keep the rest of the function unchanged.
+- [x] E-01 Inspect `test_tui_cli_parser_and_run` in `tests/test_tui.py` and confirm that the injected module is restored. The function must inject `mock_module` only through a context manager or fixture that restores `sys.modules` on exit: `mock.patch.dict(sys.modules, {"pubrun.tui.app": mock_module})` (current HEAD), or `monkeypatch.setitem(sys.modules, "pubrun.tui.app", mock_module)`, or an equivalent `try`/`finally` restore. If the function instead assigns `sys.modules["pubrun.tui.app"] = mock_module` with no restore, replace that assignment with the `mock.patch.dict` form shown in Finding F-01, and keep the rest of the function unchanged.
   - Depends on: none
   - Expected outcome: `test_tui_cli_parser_and_run` injects `mock_module` only inside a restoring construct. On HEAD this is already true, and E-01 makes no edit.
-  - Execution state: pending
-- [ ] E-02 Add the test function `test_tui_cli_parser_and_run_leaves_real_tui_module` to `tests/test_tui.py`, directly after `test_tui_cli_parser_and_run`, with the body given in "Proposed changes" (P-02).
+  - Execution state: performed
+- [x] E-02 Add the test function `test_tui_cli_parser_and_run_leaves_real_tui_module` to `tests/test_tui.py`, directly after `test_tui_cli_parser_and_run`, with the body given in "Proposed changes" (P-02).
   - Depends on: E-01
   - Expected outcome: The new test passes on the fixed file, and fails with an `AssertionError` that shows a `Mock` object when the restore in `test_tui_cli_parser_and_run` is removed.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Run the TUI tests in every order the item names
 
-- [ ] E-03 Run the commands in P-03: `tests/test_tui.py` in file order in one process, in shuffled order with `pytest-randomly` for seeds `1` to `5`, under `pytest-xdist` with `--dist loadfile`, and the targeted two-test order that exposed the leak. Then run the leak-reintroduction check in P-04 on a scratch copy, and delete the scratch copy.
+- [x] E-03 Run the commands in P-03: `tests/test_tui.py` in file order in one process, in shuffled order with `pytest-randomly` for seeds `1` to `5`, under `pytest-xdist` with `--dist loadfile`, and the targeted two-test order that exposed the leak. Then run the leak-reintroduction check in P-04 on a scratch copy, and delete the scratch copy.
   - Depends on: E-02
   - Expected outcome: Every P-03 run exits 0 with no failed test, and `TestTuiResourceView::test_resource_view_populates_and_degrades` reports `PASSED` in each run. The P-04 check reports `1 failed` for `test_tui_cli_parser_and_run_leaves_real_tui_module`, and `git status --short` shows no scratch file afterwards.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -165,18 +165,106 @@ N/A. The change adds one test and changes no user-visible behavior, configuratio
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste the current body of `test_tui_cli_parser_and_run` from `tests/test_tui.py`. It must inject `mock_module` only through `mock.patch.dict(sys.modules, ...)`, `monkeypatch.setitem(sys.modules, ...)`, or a `try`/`finally` restore, and must contain no bare `sys.modules["pubrun.tui.app"] = ` assignment. If E-01 edited the function, also paste the part of `git diff -- tests/test_tui.py` that touches it.
-  - Observed evidence:
-  - Result: pending
-- [ ] V-02 validates E-02
+  - Observed evidence: E-01 made no edit; the function on HEAD `422056b` already injects through `mock.patch.dict`:
+    ```text
+    def test_tui_cli_parser_and_run():
+        """Verify that pubrun ui parses correctly and launches when dependencies exist."""
+        from pubrun.__main__ import main
+
+        for sub in ("ui", "tui", "gui"):
+            with mock.patch("sys.argv", ["pubrun", sub, "--dir", "/tmp/runs"]):
+                with mock.patch("pubrun.tui.app.PubrunTUIApp") as mock_app:
+                    # Inject mocked module; patch.dict restores the real module on exit so
+                    # later tests in the same worker never import this Mock.
+                    mock_module = mock.Mock()
+                    mock_module.PubrunTUIApp = mock_app
+                    with mock.patch.dict(sys.modules, {"pubrun.tui.app": mock_module}):
+                        try:
+                            main()
+                        except SystemExit as e:
+                            # main() might exit 0 after executing command
+                            assert e.code in (0, None)
+
+                    mock_app.assert_called_once_with(output_dir="/tmp/runs")
+                    mock_app.return_value.run.assert_called_once()
+    ```
+    No bare `sys.modules["pubrun.tui.app"] = ` assignment is present.
+  - Result: pass
+- [x] V-02 validates E-02
   - Required evidence: Paste `git diff -- tests/test_tui.py`. It must add `test_tui_cli_parser_and_run_leaves_real_tui_module` with the P-02 body, and must not change any other test function except a change recorded under V-01.
-  - Observed evidence:
-  - Result: pending
-- [ ] V-03 validates E-03
+  - Observed evidence: `git diff -- tests/test_tui.py` (only change in the file):
+    ```text
+    @@ -26,6 +26,18 @@ def test_tui_cli_parser_and_run():
+                     mock_app.return_value.run.assert_called_once()
+
+
+    +def test_tui_cli_parser_and_run_leaves_real_tui_module():
+    +    """Running the CLI launch test must leave the real pubrun.tui.app module in sys.modules."""
+    +    pytest.importorskip("textual")
+    +    import pubrun.tui.app as real_app_module
+    +
+    +    test_tui_cli_parser_and_run()
+    +
+    +    assert sys.modules.get("pubrun.tui.app") is real_app_module
+    +    from pubrun.tui.app import PubrunTUIApp
+    +    assert PubrunTUIApp is real_app_module.PubrunTUIApp
+    +
+    +
+     def test_tui_missing_dependencies_prints_notice(capsys):
+    ```
+  - Result: pass
+- [x] V-03 validates E-03
   - Required evidence: Paste the result line of each P-03 run, and the `PASSED` lines for `test_resource_view_populates_and_degrades` and `test_tui_cli_parser_and_run_leaves_real_tui_module`: (1) the file-order run, whose header must not contain a `Using --randomly-seed=` line, (2) the five `-p randomly` runs for seeds `1` to `5`, (3) the `-n 2 --dist loadfile` run, and (4) the targeted pair run, which must show `test_tui_cli_parser_and_run PASSED` followed by `test_resource_view_populates_and_degrades PASSED` and `2 passed`. Every run must report 0 failed. A `SKIPPED` result for either named test fails this item, because it means `textual` is missing and the check did not run. Then paste the P-04 output, which must show `FAILED ...::test_tui_cli_parser_and_run_leaves_real_tui_module` and `1 failed`, followed by `git status --short` output that does not list `tests/_pgcmea_leak_probe.py`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: run in the lane worktree (Linux, Python 3.14), output filtered with grep:
+    ```text
+    == RUN1 (file order; no "Using --randomly-seed=" line in header)
+    tests/test_tui.py::test_tui_cli_parser_and_run_leaves_real_tui_module PASSED [ 16%]
+    tests/test_tui.py::TestTuiResourceView::test_resource_view_populates_and_degrades PASSED [ 66%]
+    ============================== 12 passed in 2.66s ==============================
+    == SEED 1
+    Using --randomly-seed=1
+    tests/test_tui.py::test_tui_cli_parser_and_run_leaves_real_tui_module PASSED [ 33%]
+    tests/test_tui.py::TestTuiResourceView::test_resource_view_populates_and_degrades PASSED [ 83%]
+    ============================== 12 passed in 2.63s ==============================
+    == SEED 2
+    Using --randomly-seed=2
+    tests/test_tui.py::test_tui_cli_parser_and_run_leaves_real_tui_module PASSED [ 66%]
+    tests/test_tui.py::TestTuiResourceView::test_resource_view_populates_and_degrades PASSED [100%]
+    ============================== 12 passed in 2.09s ==============================
+    == SEED 3
+    Using --randomly-seed=3
+    tests/test_tui.py::TestTuiResourceView::test_resource_view_populates_and_degrades PASSED [ 50%]
+    tests/test_tui.py::test_tui_cli_parser_and_run_leaves_real_tui_module PASSED [ 66%]
+    ============================== 12 passed in 2.57s ==============================
+    == SEED 4
+    Using --randomly-seed=4
+    tests/test_tui.py::TestTuiResourceView::test_resource_view_populates_and_degrades PASSED [ 25%]
+    tests/test_tui.py::test_tui_cli_parser_and_run_leaves_real_tui_module PASSED [ 41%]
+    ============================== 12 passed in 2.26s ==============================
+    == SEED 5
+    Using --randomly-seed=5
+    tests/test_tui.py::TestTuiResourceView::test_resource_view_populates_and_degrades PASSED [  8%]
+    tests/test_tui.py::test_tui_cli_parser_and_run_leaves_real_tui_module PASSED [ 50%]
+    ============================== 12 passed in 3.07s ==============================
+    == XDIST (-n 2 --dist loadfile)
+    [gw1] [ 16%] PASSED tests/test_tui.py::test_tui_cli_parser_and_run_leaves_real_tui_module
+    [gw1] [ 66%] PASSED tests/test_tui.py::TestTuiResourceView::test_resource_view_populates_and_degrades
+    ============================== 12 passed in 4.25s ==============================
+    == PAIR
+    tests/test_tui.py::test_tui_cli_parser_and_run PASSED                    [ 50%]
+    tests/test_tui.py::TestTuiResourceView::test_resource_view_populates_and_degrades PASSED [100%]
+    ============================== 2 passed in 1.46s ===============================
+    == P04 (scratch tests/_pgcmea_leak_probe.py with a non-restoring assignment)
+    E       AssertionError: assert <Mock id='131464910732800'> is <module 'pubrun.tui.app' from '.../.aw/worktrees/whacr3/src/pubrun/tui/app.py'>
+    FAILED tests/_pgcmea_leak_probe.py::test_tui_cli_parser_and_run_leaves_real_tui_module
+    1 failed in 0.78s
+    == git status --short (after rm tests/_pgcmea_leak_probe.py)
+     M tests/test_tui.py
+    ```
+    No SKIPPED results; 0 failed in every P-03 run; the scratch file is gone.
+  - Result: pass
 
 ## Approval and execution gate
 
