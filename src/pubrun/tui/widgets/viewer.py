@@ -11,6 +11,8 @@ from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal
 from textual.widgets import Select, Static, RichLog, Button
 
+from pubrun.tui.widgets.config import _is_select_empty
+
 class LogViewer(Vertical):
     """Component to select, load, and display log files associated with a run."""
 
@@ -55,7 +57,7 @@ class LogViewer(Vertical):
         # Build options list
         options = [(f.name, str(f)) for f in self.log_files]
         select_widget.set_options(options)
-        
+
         # Default select the first available log (often console.log, stdout.log)
         # Try to prioritize console.log or stdout.log
         default_val = None
@@ -80,7 +82,7 @@ class LogViewer(Vertical):
             if p.exists():
                 with open(p, "r", encoding="utf-8", errors="replace") as f:
                     content = f.read()
-                
+
                 # Write to the RichLog widget
                 log_content.write(content)
             else:
@@ -89,7 +91,7 @@ class LogViewer(Vertical):
             log_content.write(f"Failed to load log file: {e}")
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id == "select-log-file" and event.value:
+        if event.select.id == "select-log-file" and not _is_select_empty(event.value) and event.value:
             self.load_log_file(str(event.value))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -98,5 +100,5 @@ class LogViewer(Vertical):
             log_content.wrap = not log_content.wrap
         elif event.button.id == "btn-refresh-log":
             select_widget = self.query_one("#select-log-file", Select)
-            if select_widget.value:
+            if not _is_select_empty(select_widget.value) and select_widget.value:
                 self.load_log_file(str(select_widget.value))

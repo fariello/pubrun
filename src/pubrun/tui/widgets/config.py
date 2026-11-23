@@ -13,10 +13,36 @@ from textual.widgets import Label, Input, Checkbox, Button, Select
 
 from pubrun.config import resolve_config, load_local_config, get_global_config_dir
 
+
+def _is_select_empty(val: Any) -> bool:
+    """Return True when a ``Select`` value means "nothing selected".
+
+    ``Select.NULL`` is truthy, so a plain truthiness check misses it. ``BLANK`` is
+    read from ``Select.__dict__`` only: on Textual 8.x ``Select.BLANK`` resolves to
+    the inherited ``Widget.BLANK`` (``False``), which must not classify ``False`` or
+    ``0`` as empty.
+    """
+    if val is None or val is Select.NULL:
+        return True
+    try:
+        if val == Select.NULL:
+            return True
+    except Exception:
+        pass
+    blank = Select.__dict__.get("BLANK")
+    return blank is not None and val == blank
+
+
+_SELECT_OPTIONS: Dict[str, List[Any]] = {
+    "cfg-profile": [("Default", "default"), ("Minimal", "minimal"), ("Deep", "deep")],
+    "cfg-console-mode": [("Off", "off"), ("Basic (Tee to log)", "basic"), ("Standard", "standard"), ("Deep", "deep")],
+    "cfg-redact-repr": [("Redacted [REDACTED]", "redacted"), ("Hashed (SHA-256)", "hashed")],
+}
+
 def dict_to_toml(d: dict, prefix: str = "") -> str:
     """Zero-dependency recursive TOML serializer for simple nested dict configurations."""
     lines = []
-    
+
     # 1. Write flat key-value pairs first
     for k, v in sorted(d.items()):
         if not isinstance(v, dict):
@@ -42,7 +68,7 @@ def dict_to_toml(d: dict, prefix: str = "") -> str:
             if v:
                 lines.append(f"\n[{section_name}]")
                 lines.append(dict_to_toml(v, section_name))
-                
+
     return "\n".join(lines).strip()
 
 
@@ -57,25 +83,25 @@ class ConfigPanel(Vertical):
         with VerticalScroll(classes="panel-card"):
             yield Label("CORE SETTINGS", classes="panel-card-title")
             yield Label("Profile Mode (deprecated; no effect — use capture.* keys):", classes="info-label")
-            yield Select([("Default", "default"), ("Minimal", "minimal"), ("Deep", "deep")], id="cfg-profile")
-            
+            yield Select(_SELECT_OPTIONS["cfg-profile"], id="cfg-profile")
+
             yield Label("Base Output Directory (e.g. ./runs/):", classes="info-label")
             yield Input(id="cfg-output-dir", placeholder="Default: ./runs/")
-            
+
             yield Checkbox("Enable Auto Start on Import", value=True, id="cfg-auto-start")
 
             yield Label("CONSOLE INTERCEPTION", classes="panel-card-title")
             yield Label("Stdout / Stderr Interception Mode:", classes="info-label")
-            yield Select([("Off", "off"), ("Basic (Tee to log)", "basic"), ("Standard", "standard"), ("Deep", "deep")], id="cfg-console-mode")
+            yield Select(_SELECT_OPTIONS["cfg-console-mode"], id="cfg-console-mode")
 
             yield Label("EVENT STREAM SETTINGS", classes="panel-card-title")
             yield Checkbox("Enable Events Logging (events.jsonl)", value=True, id="cfg-events-enabled")
-            
+
             yield Label("REDACTION & SECURITY", classes="panel-card-title")
             yield Label("Sensitive Keys Regex Pattern:", classes="info-label")
             yield Input(id="cfg-sensitive-regex")
             yield Label("Masking Representation:", classes="info-label")
-            yield Select([("Redacted [REDACTED]", "redacted"), ("Hashed (SHA-256)", "hashed")], id="cfg-redact-repr")
+            yield Select(_SELECT_OPTIONS["cfg-redact-repr"], id="cfg-redact-repr")
             yield Checkbox("Redact Environment Variables", value=True, id="cfg-redact-env")
             yield Checkbox("Redact Command Line Arguments", value=True, id="cfg-redact-argv")
 
@@ -86,19 +112,33 @@ class ConfigPanel(Vertical):
     def on_mount(self) -> None:
         self.load_settings()
 
+    def _set_select(self, widget_id: str, setting: str, value: Any) -> None:
+        """Assign a loaded value to a Select, blanking it (with a warning) when unknown."""
+        select = self.query_one(f"#{widget_id}", Select)
+        allowed = [opt[1] for opt in _SELECT_OPTIONS[widget_id]]
+        if value in allowed:
+            select.value = value
+            return
+        select.value = Select.NULL
+        if value is not None:
+            self.app.notify(
+                f"Unknown {setting} value {value!r}; left unselected (expected one of: {', '.join(allowed)}).",
+                severity="warning",
+            )
+
     def load_settings(self) -> None:
         """Load configuration using resolve_config and populate form elements."""
         self.config_data = resolve_config()
 
         # Core
         core = self.config_data.get("core", {})
-        self.query_one("#cfg-profile", Select).value = core.get("profile", "default")
+        self._set_select("cfg-profile", "core.profile", core.get("profile", "default"))
         self.query_one("#cfg-output-dir", Input).value = core.get("output_dir") or ""
         self.query_one("#cfg-auto-start", Checkbox).value = core.get("auto_start", True)
 
         # Console
         console = self.config_data.get("console", {})
-        self.query_one("#cfg-console-mode", Select).value = console.get("capture_mode", "off")
+        self._set_select("cfg-console-mode", "console.capture_mode", console.get("capture_mode", "off"))
 
         # Events
         events = self.config_data.get("events", {})
@@ -107,7 +147,7 @@ class ConfigPanel(Vertical):
         # Redaction
         redact = self.config_data.get("redaction", {})
         self.query_one("#cfg-sensitive-regex", Input).value = redact.get("sensitive_keys_regex") or ""
-        self.query_one("#cfg-redact-repr", Select).value = redact.get("representation", "redacted")
+        self._set_select("cfg-redact-repr", "redaction.representation", redact.get("representation", "redacted"))
         self.query_one("#cfg-redact-env", Checkbox).value = redact.get("env_enabled", True)
         self.query_one("#cfg-redact-argv", Checkbox).value = redact.get("argv_enabled", True)
 
@@ -125,24 +165,24 @@ class ConfigPanel(Vertical):
 
         # 2. Update section values
         profile_val = self.query_one("#cfg-profile", Select).value
-        if profile_val is not None:
+        if not _is_select_empty(profile_val):
             local_conf.setdefault("core", {})["profile"] = profile_val
-            
+
         local_conf.setdefault("core", {})["output_dir"] = self.query_one("#cfg-output-dir", Input).value
         local_conf.setdefault("core", {})["auto_start"] = self.query_one("#cfg-auto-start", Checkbox).value
 
         console_mode = self.query_one("#cfg-console-mode", Select).value
-        if console_mode is not None:
+        if not _is_select_empty(console_mode):
             local_conf.setdefault("console", {})["capture_mode"] = console_mode
 
         local_conf.setdefault("events", {})["enabled"] = self.query_one("#cfg-events-enabled", Checkbox).value
 
         local_conf.setdefault("redaction", {})["sensitive_keys_regex"] = self.query_one("#cfg-sensitive-regex", Input).value
-        
+
         redact_repr = self.query_one("#cfg-redact-repr", Select).value
-        if redact_repr is not None:
+        if not _is_select_empty(redact_repr):
             local_conf.setdefault("redaction", {})["representation"] = redact_repr
-            
+
         local_conf.setdefault("redaction", {})["env_enabled"] = self.query_one("#cfg-redact-env", Checkbox).value
         local_conf.setdefault("redaction", {})["argv_enabled"] = self.query_one("#cfg-redact-argv", Checkbox).value
 

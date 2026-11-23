@@ -16,6 +16,7 @@ from pubrun.status import scan_runs, RunInfo
 from pubrun.report.utils import hydrate_manifest
 from pubrun.analysis.diff import compare_manifests
 from pubrun.config import resolve_config
+from pubrun.tui.widgets.config import _is_select_empty
 
 class DiffView(Vertical):
     """Component to select, execute, and display semantic differences between two runs."""
@@ -82,7 +83,7 @@ class DiffView(Vertical):
         run_dir_a = self.query_one("#select-diff-a", Select).value
         run_dir_b = self.query_one("#select-diff-b", Select).value
 
-        if not run_dir_a or not run_dir_b:
+        if _is_select_empty(run_dir_a) or _is_select_empty(run_dir_b) or not run_dir_a or not run_dir_b:
             self.app.notify("Please select both Run A and Run B to compare.", severity="error")
             output.write("Error: Select baseline and comparison runs.")
             return
@@ -116,12 +117,12 @@ class DiffView(Vertical):
             manifest_a, warn_a = hydrate_manifest(str(path_a), manifest_a)
             manifest_b, warn_b = hydrate_manifest(str(path_b), manifest_b)
 
-            # Warnings output
-            for w in (warn_a or []) + (warn_b or []):
-                output.write(Text(f"[Warning] {w}", style="#f9e2af"))
+            warnings = list(warn_a or []) + list(warn_b or [])
 
             # Determine ignores list
-            depth = self.query_one("#select-diff-depth", Select).value or "basic"
+            depth = self.query_one("#select-diff-depth", Select).value
+            if _is_select_empty(depth) or not depth:
+                depth = "basic"
             conf = resolve_config().get("diff", {})
             if depth == "basic":
                 ignores = conf.get("ignore_basic", [])
@@ -138,15 +139,18 @@ class DiffView(Vertical):
             )
 
             # Format and render
-            self.render_diff_report(diff_report)
+            self.render_diff_report(diff_report, warnings=warnings)
 
         except Exception as e:
             output.write(f"Error computing diff: {e}")
 
-    def render_diff_report(self, diff_report: Dict[str, Any]) -> None:
+    def render_diff_report(self, diff_report: Dict[str, Any], warnings: Optional[List[str]] = None) -> None:
         """Render difference report to the RichLog area using Textual colors."""
         output = self.query_one("#diff-output-area", RichLog)
         output.clear()
+
+        for w in warnings or []:
+            output.write(Text(f"[Warning] {w}", style="#f9e2af"))
 
         # Formatting values helper
         def _fmt_val(val: Any) -> str:

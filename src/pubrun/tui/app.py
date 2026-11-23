@@ -7,6 +7,7 @@ import os
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
+from textual import on
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Header, Footer, TabbedContent, TabPane, Tree
@@ -52,7 +53,7 @@ class PubrunTUIApp(App):
                     # Tab 1: Run Details
                     with TabPane("Run Details", id="tab-details"):
                         yield RunDetailsView(id="details-view")
-                    
+
                     # Tab 2: Console Logs
                     with TabPane("Console Logs", id="tab-logs"):
                         yield LogViewer(id="logs-view")
@@ -60,15 +61,15 @@ class PubrunTUIApp(App):
                     # Tab: Resource usage (CPU / memory over the run)
                     with TabPane("Resources", id="tab-resources"):
                         yield RunResourcesView(id="resources-view")
-                    
+
                     # Tab 3: Semantic Diff
                     with TabPane("Semantic Diff", id="tab-diff"):
                         yield DiffView(output_dir=self.output_dir, id="diff-view")
-                    
+
                     # Tab 4: Actions & Citations
                     with TabPane("Actions & Citations", id="tab-actions"):
                         yield ActionsPanel(output_dir=self.output_dir, id="actions-view")
-                    
+
                     # Tab 5: Configuration Settings
                     with TabPane("TUI Settings", id="tab-config"):
                         yield ConfigPanel(id="config-view")
@@ -96,12 +97,13 @@ class PubrunTUIApp(App):
         """Refresh the sidebar runs list and diff dropdown options."""
         sidebar = self.query_one("#sidebar", RunsSidebar)
         sidebar.load_runs()
-        
+
         diff_view = self.query_one("#diff-view", DiffView)
         diff_view.populate_dropdowns(sidebar.all_runs)
-        
+
         self.notify("Runs database and cache refreshed.", severity="information")
 
+    @on(RefreshSidebar)
     def on_refresh_sidebar(self, event: RefreshSidebar) -> None:
         """Handle custom RefreshSidebar messages sent from widgets."""
         self.action_refresh_all()
@@ -115,7 +117,7 @@ class PubrunTUIApp(App):
 
             # Update details pane
             self.query_one("#details-view", RunDetailsView).display_run(r_info)
-            
+
             # Update log viewer pane
             self.query_one("#logs-view", LogViewer).display_run_logs(r_info.run_dir)
 
