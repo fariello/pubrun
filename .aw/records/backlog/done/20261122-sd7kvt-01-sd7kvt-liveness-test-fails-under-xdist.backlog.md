@@ -1,16 +1,16 @@
 - Id: sd7kvt
-- Status: graduated
+- Status: done
 - Graduated-To: sd7kvt
 - Set: sd7kvt
 - Work-Kind: bug
 - Priority: low
 - Summary: tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches fails under pytest-xdist (aw suite)
 - Short-Description: tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches fails under pytest-xdist (aw suite)
-- Blocks-Release: next
 
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-23 done (aw set): Duplicate of ivpkar (carried by plan vv4vdd)
 - 2026-11-23 graduated (aw backlog): graduated by run run-20261123T005542Z-1001883: ig2etn
 - 2026-11-22 created (aw backlog): tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches fails under pytest-xdist (aw suite)
 

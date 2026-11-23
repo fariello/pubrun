@@ -1,16 +1,16 @@
 - Id: 12rcu8
-- Status: graduated
+- Status: done
 - Graduated-To: 4h2qwz
 - Set: 12rcu8
 - Work-Kind: bug
 - Priority: low
 - Summary: Fix TestIsSameProcess.test_expected_script_matches failure under pytest-xdist workers in tests/test_liveness.py
 - Short-Description: Fix TestIsSameProcess.test_expected_script_matches failure under pytest-xdist workers in tests/test_liveness.py
-- Blocks-Release: next
 
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-23 done (aw set): Duplicate of ivpkar (carried by plan vv4vdd)
 - 2026-11-23 graduated (aw set): salvaged plan 4h2qwz from aw/lane/12rcu8 (3fd18c2)
 - 2026-11-22 created (aw backlog): Fix TestIsSameProcess.test_expected_script_matches failure under pytest-xdist workers in tests/test_liveness.py
 
