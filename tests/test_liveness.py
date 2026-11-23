@@ -1,5 +1,6 @@
 """Tests for pubrun.capture.liveness -- cross-platform process liveness checks."""
 import os
+import subprocess
 import sys
 import time
 
@@ -80,22 +81,46 @@ class TestIsSameProcess:
         # Use a start time from 2 days ago -- beyond the default 24h tolerance
         assert is_same_process(os.getpid(), start - 172800) is False
 
-    def test_expected_script_matches(self):
+    def test_expected_script_matches(self, tmp_path):
         """If expected_script matches the actual process command line, it matches."""
         from pubrun.capture.liveness import _PLATFORM, _check_command_linux, _check_command_macos, _check_command_windows
-        functional = False
-        if _PLATFORM == "linux":
-            functional = _check_command_linux(os.getpid(), "pytest") is not None
-        elif _PLATFORM == "darwin":
-            functional = _check_command_macos(os.getpid(), "pytest") is not None
-        elif _PLATFORM == "win32":
-            functional = _check_command_windows(os.getpid(), "pytest") is not None
 
-        if not functional:
-            pytest.skip("Command-line checking is not functional on this platform")
+        # A child running a known script gives a command line the test controls;
+        # the pytest process's own command line varies (e.g. pytest-xdist workers).
+        script_name = "liveness_probe_script.py"
+        script = tmp_path / script_name
+        script.write_text('import sys\nprint("ready", flush=True)\nsys.stdin.read()\n')
+        child = subprocess.Popen(
+            [sys.executable, str(script)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            assert child.stdout.readline().strip() == "ready"
 
-        # Our own process should be running "pytest"
-        assert is_same_process(os.getpid(), time.time(), expected_script="pytest") is True
+            functional = False
+            if _PLATFORM == "linux":
+                functional = _check_command_linux(child.pid, script_name) is not None
+            elif _PLATFORM == "darwin":
+                functional = _check_command_macos(child.pid, script_name) is not None
+            elif _PLATFORM == "win32":
+                functional = _check_command_windows(child.pid, script_name) is not None
+
+            if not functional:
+                pytest.skip("Command-line checking is not functional on this platform")
+
+            # A start time beyond the 24h tolerance means only a confirmed script
+            # match (not the start-time fallback) can yield True.
+            assert is_same_process(child.pid, time.time() - 172800, expected_script=script_name) is True
+        finally:
+            child.stdin.close()
+            try:
+                child.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait()
+            child.stdout.close()
 
     def test_expected_script_mismatch(self):
         """If expected_script does not match, it should return False immediately (recycled PID)."""

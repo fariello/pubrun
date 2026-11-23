@@ -39,21 +39,21 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Fix the liveness test
 
-- [ ] E-01 In `tests/test_liveness.py`, replace the body of `TestIsSameProcess.test_expected_script_matches` with the child-process version described in "Proposed changes" (P-01). Keep the test name, its class, and its docstring purpose ("If expected_script matches the actual process command line, it matches."). Before editing, check whether the test body already uses a child process (see Finding F-07); if it does, record that fact in V-01 and make no edit.
+- [x] E-01 In `tests/test_liveness.py`, replace the body of `TestIsSameProcess.test_expected_script_matches` with the child-process version described in "Proposed changes" (P-01). Keep the test name, its class, and its docstring purpose ("If expected_script matches the actual process command line, it matches."). Before editing, check whether the test body already uses a child process (see Finding F-07); if it does, record that fact in V-01 and make no edit.
   - Depends on: none
   - Expected outcome: The test starts a child Python process that runs a script file named `liveness_probe_script.py` in the pytest `tmp_path` directory, waits until the child prints a ready line, asserts `is_same_process(child.pid, time.time() - 172800, expected_script="liveness_probe_script.py") is True` (an expected start time two days in the past, beyond the default 24-hour tolerance, so the assertion can only pass through the confirmed script match and not through the start-time fallback), and always stops the child in a `finally` block. The test no longer passes `"pytest"` or `os.getpid()` to `is_same_process` or to the platform command-line check.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Confirm the TUI tests and the full parallel suite
 
-- [ ] E-02 Run the `tests/test_tui.py` checks listed in P-02, which put `test_tui_cli_parser_and_run` before the `TestTuiReproducibilityAndActions` tests in the same process. Do not edit `tests/test_tui.py`. If any listed run fails, set this item to `blocked`, record the failing output in V-02, and file a backlog item with `aw backlog new` that names the failing test; do not widen this plan's scope.
+- [x] E-02 Run the `tests/test_tui.py` checks listed in P-02, which put `test_tui_cli_parser_and_run` before the `TestTuiReproducibilityAndActions` tests in the same process. Do not edit `tests/test_tui.py`. If any listed run fails, set this item to `blocked`, record the failing output in V-02, and file a backlog item with `aw backlog new` that names the failing test; do not widen this plan's scope.
   - Depends on: none
   - Expected outcome: Every run in P-02 exits 0, and both `TestTuiReproducibilityAndActions` tests report `PASSED` in every run.
-  - Execution state: pending
-- [ ] E-03 Run the targeted liveness checks and the full suite listed in P-03: `tests/test_liveness.py` serially and with 2 xdist workers, and `aw suite --no-cache`.
+  - Execution state: performed
+- [x] E-03 Run the targeted liveness checks and the full suite listed in P-03: `tests/test_liveness.py` serially and with 2 xdist workers, and `aw suite --no-cache`.
   - Depends on: E-01
   - Expected outcome: All runs exit 0. `test_expected_script_matches` reports `PASSED` (not `SKIPPED`) in the serial and xdist runs on this Linux host. `aw suite --no-cache` reports 0 failed.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -164,18 +164,18 @@ N/A. The change affects one test and no user-visible behavior, configuration key
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste `git diff -- tests/test_liveness.py`. The diff must show that `test_expected_script_matches` starts a child with `subprocess.Popen` running `liveness_probe_script.py` from `tmp_path`, reads a `ready` line before checking, passes `child.pid` to both the functional check and `is_same_process(child.pid, time.time() - 172800, expected_script="liveness_probe_script.py")` (an expected start time outside the 24-hour tolerance), and stops the child in a `finally` block. The diff must not contain `expected_script="pytest"` inside `test_expected_script_matches`, and must change no other test function. If E-01 found the child-process body already present (Finding F-07), paste the current body of `test_expected_script_matches` and the commit that introduced it (`git log -1 --format='%h %s' -S liveness_probe_script -- tests/test_liveness.py`) instead of a diff.
-  - Observed evidence:
-  - Result: pending
-- [ ] V-02 validates E-02
+  - Observed evidence: `git diff -- tests/test_liveness.py` (lane worktree, base 760a090) shows only: `+import subprocess` at module level, and `test_expected_script_matches` rewritten to `def test_expected_script_matches(self, tmp_path):`, writing `tmp_path / "liveness_probe_script.py"` (`import sys / print("ready", flush=True) / sys.stdin.read()`), starting `subprocess.Popen([sys.executable, str(script)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)`, then in `try:` `assert child.stdout.readline().strip() == "ready"`, functional check `_check_command_linux(child.pid, script_name) is not None` (and macos/windows equivalents), `pytest.skip(...)` when not functional, `assert is_same_process(child.pid, time.time() - 172800, expected_script=script_name) is True`; `finally:` `child.stdin.close()`, `child.wait(timeout=10)` with `except subprocess.TimeoutExpired: child.kill(); child.wait()`, `child.stdout.close()`. The removed lines include `assert is_same_process(os.getpid(), time.time(), expected_script="pytest") is True`; no `expected_script="pytest"` remains in the function. The diff hunk ends before `def test_expected_script_mismatch`, so no other test function changed. The body was not already a child-process version before editing (F-07 check: it still used `os.getpid()` and `"pytest"`).
+  - Result: pass
+- [x] V-02 validates E-02
   - Required evidence: Paste the tail of each P-02 run, including the result line and the lines for `test_details_reproducibility_markup_safety_running_and_no_live_preflight` and `test_actions_panel_redacted_advisory_clearing_and_clean_clipboard`: (1) the `-p no:xdist` run, (2) the `-n 2 --dist loadfile` run, and (3) the three `-p randomly --randomly-seed=<seed>` runs for seeds `1`, `2`, and `3`. Every run must exit 0 with both tests `PASSED`. Paste `git diff --stat -- tests/test_tui.py`, which must be empty. A `SKIPPED` result for either TUI test fails this item, because it means `textual` is missing and the check did not run.
-  - Observed evidence:
-  - Result: pending
-- [ ] V-03 validates E-03
+  - Observed evidence: (1) `python3 -m pytest tests/test_tui.py -v -p no:xdist -p no:cacheprovider`: `TestTuiReproducibilityAndActions::test_details_reproducibility_markup_safety_running_and_no_live_preflight PASSED [ 90%]`, `TestTuiReproducibilityAndActions::test_actions_panel_redacted_advisory_clearing_and_clean_clipboard PASSED [100%]`, `11 passed in 7.01s`, exit=0. (2) `-n 2 --dist loadfile`: `[gw1] [ 90%] PASSED ...test_details_reproducibility_markup_safety_running_and_no_live_preflight`, `[gw1] [100%] PASSED ...test_actions_panel_redacted_advisory_clearing_and_clean_clipboard`, `11 passed in 8.69s`, exit=0. (3) `-o addopts="" -p randomly --randomly-seed=N`: seed 1 `Using --randomly-seed=1`, both tests PASSED [63%]/[72%], `11 passed in 2.81s`, exit=0; seed 2 both PASSED [27%]/[36%], `11 passed in 3.81s`, exit=0; seed 3 both PASSED [36%]/[45%], `11 passed in 2.98s`, exit=0. No SKIPPED. `git diff --stat -- tests/test_tui.py` printed nothing (empty).
+  - Result: pass
+- [x] V-03 validates E-03
   - Required evidence: Paste the tail of each P-03 run, including the result line: (1) `python3 -m pytest tests/test_liveness.py -v -p no:xdist` shows `test_expected_script_matches PASSED` and exits 0; (2) `python3 -m pytest tests/test_liveness.py -v -n 2` shows `test_expected_script_matches PASSED` and exits 0; (3) `aw suite --no-cache` exits 0 and its result line reports no failed tests. A `SKIPPED` result for the target test on this Linux host fails this item, because it means the child-process check did not run. Reachability: the test itself (created by E-01) starts the child and calls `pubrun.capture.liveness.is_same_process`, which calls `_check_command_linux` on Linux. Also record one line stating that the `.github/workflows/ci.yml` matrix (Ubuntu, Windows, macOS; Python 3.8 through 3.14) has not run the change locally and remains the gate once the maintainer pushes.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: (1) `python3 -m pytest tests/test_liveness.py -v -p no:xdist`: `tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches PASSED [ 33%]`, `27 passed in 5.71s`, exit=0. (2) `python3 -m pytest tests/test_liveness.py -v -n 2`: `[gw0] [ 48%] PASSED tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches`, `27 passed in 9.10s`, exit=0. (3) `aw suite --no-cache`: `======================= 1833 passed in 153.14s (0:02:33) =======================`, exit=0. Host: Linux; target test PASSED, not SKIPPED, via `is_same_process` -> `_check_command_linux` on the child PID. The `.github/workflows/ci.yml` matrix (Ubuntu, Windows, macOS; Python 3.8 through 3.14) has not run this change; it remains the gate once the maintainer pushes.
+  - Result: pass
 
 ## Approval and execution gate
 
