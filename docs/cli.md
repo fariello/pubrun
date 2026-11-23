@@ -302,7 +302,7 @@ pubrun clean [--dir PATH] [--older-than AGE] [--status STATUS] [-y|--yes] [--dry
 | Flag | Description |
 |---|---|
 | `--dir PATH` | Override the output directory to scan |
-| `--older-than AGE` | Only consider runs older than AGE (e.g. `7d`, `24h`, `30` for 30 days) |
+| `--older-than AGE` | Only consider runs older than AGE (e.g. `7d`, `24h`, `30m`, `90s`, `30` for 30 days). Units are `d` (days), `h` (hours), `m` (minutes), and `s` (seconds); a bare number means days. An invalid, empty, or negative AGE is an error and deletes nothing |
 | `--status STATUS` | Comma-separated status filter (e.g. `completed,failed`). Default: all non-running statuses |
 | `-y`, `--yes` | Skip confirmation prompt (non-interactive mode) |
 | `--dry-run` | Show what would be deleted without actually deleting |

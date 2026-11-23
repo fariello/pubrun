@@ -521,7 +521,7 @@ pubrun clean [--dir PATH] [--older-than AGE] [--status STATUS] [-y|--yes] [--dry
 - Lists candidates with age and size before prompting for confirmation.
 - Interactive mode: requires explicit selection by number, range (e.g. `1-3,5`), or `all`. Shows a confirmation table of selected runs before final `y/N` prompt. Nothing is deleted without explicit confirmation.
 - Running processes are never deleted regardless of filters.
-- `--older-than` accepts days (`7d`), hours (`24h`), or bare numbers (days).
+- `--older-than` accepts days (`7d`), hours (`24h`), minutes (`30m`), seconds (`90s`), or bare numbers (days). Invalid, empty, non-finite, or negative values are rejected with an error and no runs are deleted.
 - `--status` accepts comma-separated values (e.g. `completed,failed`). Default: all non-running.
 
 ### 11.13 Import Mode Wrapper (`run`)

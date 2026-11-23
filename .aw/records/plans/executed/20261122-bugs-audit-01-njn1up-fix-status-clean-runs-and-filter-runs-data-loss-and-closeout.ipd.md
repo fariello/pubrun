@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/status.py`, dedicated regression tests in `tests/test_status_bugs.py`, and additive age-filter documentation sync in `docs/cli.md` and `docs/functional_spec.md`.
 - Scope-Paths: src/pubrun/status.py, tests/test_status_bugs.py, docs/cli.md, docs/functional_spec.md
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix Blocker data-loss bugs in clean_runs and filter_runs plus crashed-run closeout and display defects
@@ -18,12 +18,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: njn1up
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-22 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): aw oc run self-finalize: njn1up verified (set bugs-audit, attempt 1).
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-22 to-review (Antigravity): authored fix steps, citations, and falsifiable validation criteria.
@@ -56,34 +56,34 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Blocker data-loss guards in `clean_runs` and `filter_runs`
 
-- [ ] E-01 Guard `src/pubrun/status.py::clean_runs` against empty status filters after stripping empty tokens and `src/pubrun/status.py::STATUS_RUNNING`, enforce an unconditional post-filter `r.status != STATUS_RUNNING` check, and add `BUG-01` regression tests in `tests/test_status_bugs.py`.
+- [x] E-01 Guard `src/pubrun/status.py::clean_runs` against empty status filters after stripping empty tokens and `src/pubrun/status.py::STATUS_RUNNING`, enforce an unconditional post-filter `r.status != STATUS_RUNNING` check, and add `BUG-01` regression tests in `tests/test_status_bugs.py`.
   - Depends on: none
   - Expected outcome: Calling `clean_runs` with `status_filter="running"`, `["running"]`, `("running",)`, `""`, `"   "`, `",,,"` , or `[]` prints a clear message and returns `0` without calling `filter_runs` or deleting any directory on disk. Non-string iterables (such as lists, tuples, or sets) normalize cleanly, and `candidates` always excludes `STATUS_RUNNING` as defense in depth. Tests in `tests/test_status_bugs.py` verify both running and completed run directories remain intact.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Make `src/pubrun/status.py::filter_runs` strictly validate `older_than` via a dedicated `_parse_older_than_days` helper instead of swallowing `ValueError`, propagate strict validation to `older_than_days` in `clean_runs`, and add `BUG-02` regression tests in `tests/test_status_bugs.py`.
+- [x] E-02 Make `src/pubrun/status.py::filter_runs` strictly validate `older_than` via a dedicated `_parse_older_than_days` helper instead of swallowing `ValueError`, propagate strict validation to `older_than_days` in `clean_runs`, and add `BUG-02` regression tests in `tests/test_status_bugs.py`.
   - Depends on: none
   - Expected outcome: `filter_runs` checks `if older_than is not None:` (not truthiness) and parses finite non-negative durations supporting `d` (days), `h` (hours), `m` (minutes), `s` (seconds), and bare numeric days. Empty strings (`""`), whitespace-only strings (`"   "`), non-string values, unrecognized suffixes (`"2w"`), malformed strings (`"abc"`), negative numbers (`"-5d"`), Not a Number (`"nan"`), and infinity (`"inf"` / `"-inf"`) raise `ValueError` with a clear message instead of silently disabling age filtering. Invalid `older_than_days` values (negative, `NaN`, `inf`, or `bool`) passed to `clean_runs` also raise `ValueError` and delete nothing. Tests in `tests/test_status_bugs.py` cover every valid and invalid case.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Crashed-run closeout schema and status helper fixes
 
-- [ ] E-03 Fix `src/pubrun/status.py::close_out_crashed_run` to write fallback `host.hostname` as a plain `str | None` and populate `manifest["invocation"]["argv"]` from `lock_data["sys_argv"]` (with safe fallback), unwrap legacy dict `host.hostname` in `src/pubrun/status.py::RunInfo._load_from_manifest`, and add `BUG-41` regression tests in `tests/test_status_bugs.py`.
+- [x] E-03 Fix `src/pubrun/status.py::close_out_crashed_run` to write fallback `host.hostname` as a plain `str | None` and populate `manifest["invocation"]["argv"]` from `lock_data["sys_argv"]` (with safe fallback), unwrap legacy dict `host.hostname` in `src/pubrun/status.py::RunInfo._load_from_manifest`, and add `BUG-41` regression tests in `tests/test_status_bugs.py`.
   - Depends on: none
   - Expected outcome: When `manifest.json` does not yet exist, `close_out_crashed_run` writes `manifest["host"]["hostname"]` as a plain `str` (or `None` when absent), matching `schemas/manifest.schema.json` (`$defs.host.properties.hostname`) and `src/pubrun/capture/host.py::get_host`. It populates `manifest["invocation"]["argv"]` (never `manifest["process"]["argv"]`) from `lock_data["sys_argv"]` when present and non-empty; for legacy lock files lacking `sys_argv`, it prepends `lock_data["script"]` before `lock_data["argv"]` unless `lock_data["argv"]` already starts with the script name, so reloading via `RunInfo._load_from_manifest` preserves all CLI flags without dropping the first argument. Pre-existing manifests preserve their existing `host` section untouched (maintaining compatibility with `tests/test_tracker.py::TestManifestLifecycle::test_crashed_closeout_preserves_and_updates_manifest`), and `RunInfo._load_from_manifest` unwraps legacy `{"value": ...}` hostname dicts cleanly. Tests in `tests/test_status_bugs.py` verify fallback closeout, legacy lock fallback, existing-manifest preservation, and round-trip `RunInfo` reload.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Fix `src/pubrun/status.py::_parse_selection`, `src/pubrun/status.py::render_short_list`, and `src/pubrun/status.py::RunInfo._parse_dir_name`, and add `BUG-60` and `BUG-67` regression tests in `tests/test_status_bugs.py`.
+- [x] E-04 Fix `src/pubrun/status.py::_parse_selection`, `src/pubrun/status.py::render_short_list`, and `src/pubrun/status.py::RunInfo._parse_dir_name`, and add `BUG-60` and `BUG-67` regression tests in `tests/test_status_bugs.py`.
   - Depends on: none
   - Expected outcome: `_parse_selection(response, candidates)` keeps its two-argument signature and continues silently skipping out-of-range indices (`<= 0` or `> len(candidates)`, preserving `tests/test_status.py::TestParseSelection::test_out_of_bounds_skipped`), deduplicates selected indices while preserving first-seen order, and clamps range iteration bounds to `[0, len(candidates) - 1]` before looping so huge ranges such as `"1-999999999"` return immediately without hanging. `render_short_list` pads the `STATUS` column using visible text length (`max(1, 12 - len(r.status))` or exact 12-column padding for known statuses) instead of hardcoded `:<21`, so the `EXIT` and `ELAPSED` columns align identically with the header under both American National Standards Institute (ANSI) color mode and `NO_COLOR=1`. `RunInfo._parse_dir_name` joins `"-".join(parts[1:-3])` when `len(parts) >= 5 and parts[0] == "pubrun"` so hyphenated script names are preserved intact. Tests in `tests/test_status_bugs.py` cover all three helpers.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Documentation sync and full-suite regression verification
 
-- [ ] E-05 Synchronize `--older-than` documentation in `docs/cli.md` and `docs/functional_spec.md` and run the full `pytest` regression suite.
+- [x] E-05 Synchronize `--older-than` documentation in `docs/cli.md` and `docs/functional_spec.md` and run the full `pytest` regression suite.
   - Depends on: E-01, E-02, E-03, E-04
   - Expected outcome: `docs/cli.md` (the `clean` options table) and `docs/functional_spec.md#11.12 Run Cleanup (clean)` document that `--older-than` accepts `d` (days), `h` (hours), `m` (minutes), `s` (seconds), and bare numeric days, and that invalid or negative values fail closed with an error without deleting runs. Edits remain additive to the `clean` sections only (disjoint from sibling Sets) and introduce zero em dashes (`U+2014`) or en dashes (`U+2013`) in added diff lines. Both `pytest tests/test_status_bugs.py -v` and full `pytest -q` pass with zero failures.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -147,30 +147,121 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest tests/test_status_bugs.py -v` output showing tests for `clean_runs(..., status_filter="running", yes=True)`, `status_filter=["running"]`, `status_filter=("running",)`, `status_filter=""`, and `status_filter=" , "` returning `0` and leaving both running and completed run directories intact on disk.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_status_bugs.py -v --no-cov -p no:cacheprovider   (lane njn1up, commit 7571270; 54 passed in 0.31s)
+    TestBug01EmptyStatusFilter::test_empty_or_running_only_filter_deletes_nothing[running] PASSED
+    TestBug01EmptyStatusFilter::test_empty_or_running_only_filter_deletes_nothing[status_filter1] PASSED
+    TestBug01EmptyStatusFilter::test_empty_or_running_only_filter_deletes_nothing[status_filter2] PASSED
+    TestBug01EmptyStatusFilter::test_empty_or_running_only_filter_deletes_nothing[status_filter3] PASSED
+    TestBug01EmptyStatusFilter::test_empty_or_running_only_filter_deletes_nothing[] PASSED
+    TestBug01EmptyStatusFilter::test_empty_or_running_only_filter_deletes_nothing[   ] PASSED
+    TestBug01EmptyStatusFilter::test_empty_or_running_only_filter_deletes_nothing[,,,] PASSED
+    TestBug01EmptyStatusFilter::test_empty_or_running_only_filter_deletes_nothing[ , ] PASSED
+    TestBug01EmptyStatusFilter::test_empty_or_running_only_filter_deletes_nothing[status_filter8] PASSED
+    TestBug01EmptyStatusFilter::test_empty_or_running_only_filter_deletes_nothing[status_filter9] PASSED
+    TestBug01EmptyStatusFilter::test_tuple_and_set_filters_normalize PASSED
+    TestBug01EmptyStatusFilter::test_running_never_deleted_with_mixed_filter PASSED
+    TestBug01EmptyStatusFilter::test_running_never_deleted_by_default PASSED
+    (param ids: status_filter1=['running'], status_filter2=('running',), status_filter3={'running'}, status_filter8=[], status_filter9=['', ' ']; each asserts deleted == 0 and that both the completed and the running run directories still exist)
+    ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest tests/test_status_bugs.py -v` output showing `filter_runs(..., older_than="30m")` and `older_than="90s"` filter accurately by age, while empty/malformed/non-finite/negative values (`""`, `"   "`, `"2w"`, `"abc"`, `"-5d"`, `"nan"`, `"inf"`) and invalid `older_than_days` (`-1.0`, `float("nan")`, `float("inf")`, `True`) raise `ValueError` and `clean_runs(..., older_than="abc", yes=True)` deletes nothing on disk.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_status_bugs.py -v --no-cov -p no:cacheprovider   (lane njn1up, commit 7571270; 54 passed in 0.31s)
+    TestBug02AgeFilter::test_valid_units_filter_by_age[30m-expected0] PASSED
+    TestBug02AgeFilter::test_valid_units_filter_by_age[90s-expected1] PASSED
+    TestBug02AgeFilter::test_valid_units_filter_by_age[90m-expected2] PASSED
+    TestBug02AgeFilter::test_valid_units_filter_by_age[1h-expected3] PASSED
+    TestBug02AgeFilter::test_valid_units_filter_by_age[1d-expected4] PASSED
+    TestBug02AgeFilter::test_valid_units_filter_by_age[0-expected5] PASSED
+    TestBug02AgeFilter::test_valid_units_filter_by_age[ 30M -expected6] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_raises[] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_raises[   ] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_raises[2w] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_raises[abc] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_raises[-5d] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_raises[-1] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_raises[nan] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_raises[inf] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_raises[-inf] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_raises[d] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_raises[5] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_raises[1.5] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_days_raises_and_deletes_nothing[-1.0] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_days_raises_and_deletes_nothing[nan] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_days_raises_and_deletes_nothing[inf] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_days_raises_and_deletes_nothing[True] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_days_raises_and_deletes_nothing[3] PASSED
+    TestBug02AgeFilter::test_invalid_older_than_in_clean_deletes_nothing PASSED
+    TestBug02AgeFilter::test_valid_older_than_days_still_works PASSED
+    ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `pytest tests/test_status_bugs.py -v` output showing `close_out_crashed_run` on a lock-only run writes `manifest["host"]["hostname"]` as a plain `str` (or `None` when absent), preserves full `manifest["invocation"]["argv"]` (including `argv[0]` from `sys_argv` and legacy lock fallback) so reloaded `RunInfo.args` retains all CLI flags, leaves pre-existing `manifest["host"]` untouched when `manifest.json` already exists, and unwraps legacy dict `host.hostname` in `RunInfo._load_from_manifest`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_status_bugs.py -v --no-cov -p no:cacheprovider   (lane njn1up, commit 7571270; 54 passed in 0.31s)
+    TestBug41CrashCloseout::test_fallback_hostname_is_plain_string_and_argv_full PASSED
+    TestBug41CrashCloseout::test_fallback_hostname_none_when_absent PASSED
+    TestBug41CrashCloseout::test_legacy_lock_without_sys_argv_prepends_script PASSED
+    TestBug41CrashCloseout::test_legacy_lock_argv_already_starting_with_script_not_duplicated PASSED
+    TestBug41CrashCloseout::test_existing_manifest_host_untouched PASSED
+    TestBug41CrashCloseout::test_legacy_dict_hostname_unwrapped_on_load PASSED
+    TestBug41CrashCloseout::test_legacy_unavailable_dict_hostname_becomes_none PASSED
+    ```
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest tests/test_status_bugs.py -v` output confirming `_parse_selection` deduplicates preserving order, skips out-of-range indices without raising, and completes clamped huge ranges (`"1-999999999"`) immediately; `render_short_list` aligns `EXIT` and `ELAPSED` columns identically with the header under both `NO_COLOR=1` and ANSI color mode; and `RunInfo._parse_dir_name` preserves hyphenated script names (`my-train-script`).
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ python3 -m pytest tests/test_status_bugs.py -v --no-cov -p no:cacheprovider   (lane njn1up, commit 7571270; 54 passed in 0.31s)
+    TestBug60ParseSelection::test_deduplicates_preserving_order PASSED
+    TestBug60ParseSelection::test_out_of_range_skipped PASSED
+    TestBug60ParseSelection::test_huge_range_is_clamped_and_fast PASSED
+    TestBug60ParseSelection::test_empty_candidates PASSED
+    TestBug67Display::test_exit_and_elapsed_align_with_header[True] PASSED
+    TestBug67Display::test_exit_and_elapsed_align_with_header[False] PASSED
+    TestBug67Display::test_parse_dir_name_preserves_hyphenated_script PASSED
+    TestBug67Display::test_parse_dir_name_simple_script PASSED
+    (align[True] runs with NO_COLOR=1, align[False] with ANSI color on and asserts escape codes are present)
+    ```
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted `git diff -- docs/cli.md docs/functional_spec.md` plus Python check output confirming zero `U+2014`/`U+2013` characters in added doc lines, and pasted full `pytest -q` output confirming `tests/test_status_bugs.py` and the full repository test suite pass with zero failures.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ git diff 8489b10 -- docs/cli.md docs/functional_spec.md
+    -| `--older-than AGE` | Only consider runs older than AGE (e.g. `7d`, `24h`, `30` for 30 days) |
+    +| `--older-than AGE` | Only consider runs older than AGE (e.g. `7d`, `24h`, `30m`, `90s`, `30` for 30 days). Units are `d` (days), `h` (hours), `m` (minutes), and `s` (seconds); a bare number means days. An invalid, empty, or negative AGE is an error and deletes nothing |
+    -- `--older-than` accepts days (`7d`), hours (`24h`), or bare numbers (days).
+    +- `--older-than` accepts days (`7d`), hours (`24h`), minutes (`30m`), seconds (`90s`), or bare numbers (days). Invalid, empty, non-finite, or negative values are rejected with an error and no runs are deleted.
+
+    $ git diff -- docs/cli.md docs/functional_spec.md | python3 -c '<count added lines containing U+2014/U+2013>'
+    added lines: 2; lines with U+2014/U+2013: 0
+
+    $ python3 -m pytest tests/test_status_bugs.py -q --no-cov -p no:cacheprovider
+    54 passed in 0.31s
+
+    $ python3 -m pytest -q --no-cov -p no:cacheprovider   (full suite, serial; lane njn1up, commit 7571270)
+    1575 passed, 2 skipped in 516.21s (0:08:36)
+
+    $ aw suite   (parallel xdist tier, same tree)
+    FAILED tests/test_liveness.py::TestIsSameProcess::test_expected_script_matches
+    ================== 1 failed, 1576 passed in 147.91s (0:02:27) ==================
+    Pre-existing and unrelated: the same test fails on unmodified HEAD 8489b10 under
+    `python3 -m pytest tests/test_liveness.py -n 2` (1 failed, 26 passed) and passes serially;
+    it is already filed as backlog 12rcu8 (xdist worker cmdline lacks 'pytest').
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 
