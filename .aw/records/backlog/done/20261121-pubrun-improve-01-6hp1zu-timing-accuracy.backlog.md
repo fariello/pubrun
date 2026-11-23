@@ -1,5 +1,5 @@
 - Id: 6hp1zu
-- Status: graduated
+- Status: done
 - Graduated-To: timing-acc
 - Blocks-Release: next
 - Set: pubrun-improve
@@ -11,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-23 done (aw backlog): closed by aw oc run: IPD nr63qr executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261121-timing-acc-00-nr63qr-timing-accuracy-and-overhead-separation.ipd.md, .aw/records/plans/executed/20261121-timing-acc-04-3tvesf-timing-docs-examples-benchmark-and-whole-set-verification.ipd.md); evidence .aw/records/plans/executed/20261121-timing-acc-00-nr63qr-timing-accuracy-and-overhead-separation.ipd.md
 - 2026-11-22 graduated (aw set): Graduated to timing-acc IPD Set (salvaged from lane 6hp1zu)
 - 2026-11-22 same-status (aw set): Gate next release per check.live-bug-ungated
 - 2026-11-21 created (aw backlog): Maintainer requested detailed backlog capture; implementation remains future work.
