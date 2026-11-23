@@ -5,8 +5,9 @@
 - Concern: Specification and documentation reconciliation, understandable timing examples, timing-instrumentation cost benchmarking, and whole-Set verification.
 - Scope: Reconcile `docs/manifest.md`, `docs/architecture.md`, `docs/functional_spec.md`, `docs/api.md`, and `docs/performance.md`; update `examples/05_execution_phases.py`, `examples/minimal-research-workflow/manifest_excerpt.json`, and `examples/minimal-research-workflow/README.md`; measure timing instrumentation overhead locally and execute whole-Set regression checks.
 - Scope-Paths: docs/manifest.md, docs/architecture.md, docs/functional_spec.md, docs/api.md, docs/performance.md, examples/05_execution_phases.py, examples/minimal-research-workflow/manifest_excerpt.json, examples/minimal-research-workflow/README.md
+- Scope-Exceeded: .aw/records/backlog/open/20261122-g2434y-01-g2434y-verify-all-leaves-examples-outputs.backlog.md (Defect found while executing 3tvesf the driver execution contract requires filing each finding as a backlog item aw backlog new so it has a durable carrier no plan code or docs depend on it); .aw/records/backlog/open/20261122-oh0que-01-oh0que-inactive-phase-resolves-config.backlog.md (Defect found while executing 3tvesf the driver execution contract requires filing each finding as a backlog item aw backlog new so it has a durable carrier no plan code or docs depend on it); .aw/records/backlog/open/20261122-sd7kvt-01-sd7kvt-liveness-test-fails-under-xdist.backlog.md (Defect found while executing 3tvesf the driver execution contract requires filing each finding as a backlog item aw backlog new so it has a durable carrier no plan code or docs depend on it); .aw/records/backlog/open/20261122-uatvzh-01-uatvzh-hw-refresh-lock-inflates-workload.backlog.md (Defect found while executing 3tvesf the driver execution contract requires filing each finding as a backlog item aw backlog new so it has a durable carrier no plan code or docs depend on it)
 - Item-Dependencies: executed:e1fwy2, executed:8co0wy, executed:vrr1fv
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Sync specs, docs, and examples, benchmark timing instrumentation cost, and run whole-Set verification
@@ -19,12 +20,12 @@
 - Highest E allocated: 05
 - Author: agent
 - Id: 3tvesf
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): aw oc run self-finalize: 3tvesf verified (set timing-acc, attempt 2). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261122-g2434y-01-g2434y-verify-all-leaves-examples-outputs.backlog.md: Defect found while executing 3tvesf; the driver execution contract requires filing each finding as a backlog item (aw backlog new) so it has a durable carrier; no plan code or docs depend on it; out-of-scope .aw/records/backlog/open/20261122-oh0que-01-oh0que-inactive-phase-resolves-config.backlog.md: Defect found while executing 3tvesf; the driver execution contract requires filing each finding as a backlog item (aw backlog new) so it has a durable carrier; no plan code or docs depend on it; out-of-scope .aw/records/backlog/open/20261122-sd7kvt-01-sd7kvt-liveness-test-fails-under-xdist.backlog.md: Defect found while executing 3tvesf; the driver execution contract requires filing each finding as a backlog item (aw backlog new) so it has a durable carrier; no plan code or docs depend on it; out-of-scope .aw/records/backlog/open/20261122-uatvzh-01-uatvzh-hw-refresh-lock-inflates-workload.backlog.md: Defect found while executing 3tvesf; the driver execution contract requires filing each finding as a backlog item (aw backlog new) so it has a durable carrier; no plan code or docs depend on it]
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-22 draft (agent): created.
