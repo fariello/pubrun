@@ -1,5 +1,5 @@
 - Id: t1xqpw
-- Status: graduated
+- Status: done
 - Graduated-To: startup-perf
 - Set: pubrun-improve
 - Work-Kind: followup
@@ -10,6 +10,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-23 done (aw backlog): closed by aw oc run: IPD 9ppa0r executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261121-startup-perf-00-9ppa0r-startup-overhead-bounding-and-artifact-write-coalescing.ipd.md); evidence .aw/records/plans/executed/20261121-startup-perf-00-9ppa0r-startup-overhead-bounding-and-artifact-write-coalescing.ipd.md
 - 2026-11-22 graduated (aw backlog): graduated by run run-20261122T010822Z-2359880: 4il383, 9ppa0r, ckc3vl, fthyv5, tkmm5p
 - 2026-11-21 created (aw backlog): Maintainer requested detailed backlog capture; implementation remains future work.
 
