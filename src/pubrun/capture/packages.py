@@ -174,16 +174,33 @@ def _get_site_packages_roots() -> Tuple[str, ...]:
     roots: List[str] = []
     seen: Set[str] = set()
 
-    def _add(candidate: Any) -> None:
+    # On Windows, site.getsitepackages() includes the bare Python installation
+    # prefix alongside lib/site-packages. Treating bare prefix as a site-packages
+    # root would misclassify stdlib DLLs/ and Lib/ files as site-packages.
+    prefix_roots: Set[str] = set()
+    for raw_prefix in (
+        sys.prefix,
+        getattr(sys, "base_prefix", None),
+        sys.exec_prefix,
+        getattr(sys, "base_exec_prefix", None),
+    ):
+        if isinstance(raw_prefix, str) and raw_prefix:
+            norm_prefix = _normalize_real_path(raw_prefix)
+            if norm_prefix:
+                prefix_roots.add(norm_prefix)
+
+    def _add(candidate: Any, *, exclude_prefixes: bool = False) -> None:
         if isinstance(candidate, str) and candidate:
             norm = _normalize_real_path(candidate)
             if norm and norm not in seen:
+                if exclude_prefixes and norm in prefix_roots:
+                    return
                 seen.add(norm)
                 roots.append(norm)
 
     try:
         for path_entry in site.getsitepackages():
-            _add(path_entry)
+            _add(path_entry, exclude_prefixes=True)
     except Exception:
         pass
 
@@ -217,6 +234,22 @@ def _get_stdlib_path_context() -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
             norm = _normalize_real_path(raw)
             if norm and norm not in stdlib_roots:
                 stdlib_roots.append(norm)
+
+    # On Windows, stdlib C extensions (*.pyd) live under <prefix>/DLLs, which is
+    # outside sysconfig's stdlib/platstdlib (Lib) and matters on Python < 3.10
+    # where sys.stdlib_module_names does not exist.
+    if os.name == "nt":
+        for raw_prefix in (
+            getattr(sys, "base_exec_prefix", None),
+            sys.exec_prefix,
+            getattr(sys, "base_prefix", None),
+            sys.prefix,
+        ):
+            if isinstance(raw_prefix, str) and raw_prefix:
+                dlls_dir = os.path.join(raw_prefix, "DLLs")
+                norm_dlls = _normalize_real_path(dlls_dir)
+                if norm_dlls and norm_dlls not in stdlib_roots:
+                    stdlib_roots.append(norm_dlls)
 
     for key in ("purelib", "platlib"):
         raw = paths.get(key)

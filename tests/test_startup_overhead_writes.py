@@ -474,6 +474,12 @@ def test_concurrent_readers_always_see_valid_json_and_zero_tmp_leftovers(
                         reads_completed[0] += 1
                 except FileNotFoundError:
                     pass
+                except PermissionError:
+                    # On Windows, concurrent os.replace() can raise transient
+                    # sharing violations when a reader opens the target file.
+                    if os.name != "nt":
+                        with read_lock:
+                            read_errors.append((target.name, "PermissionError", "unexpected on POSIX"))
                 except Exception as exc:
                     with read_lock:
                         read_errors.append((target.name, type(exc).__name__, str(exc)))

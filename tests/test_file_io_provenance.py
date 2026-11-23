@@ -445,9 +445,15 @@ class TestChangeDetection:
         def _work(_base, _run):
             with pubrun.open(p, "r", encoding="utf-8") as fh:
                 assert fh.read() == "version 1\n"
-                replacement = tmp_path / "replacement.txt"
-                replacement.write_text("version 2 is different\n", encoding="utf-8")
-                os.replace(replacement, p)
+                if os.name == "nt":
+                    # Windows NTFS forbids os.replace() while the target has an open handle;
+                    # mutate in place to exercise text-read change detection on Windows.
+                    with open(p, "a", encoding="utf-8") as writer:
+                        writer.write("version 2 is different\n")
+                else:
+                    replacement = tmp_path / "replacement.txt"
+                    replacement.write_text("version 2 is different\n", encoding="utf-8")
+                    os.replace(replacement, p)
 
         m = _run_with_file_io(tmp_path, {"level": "hash"}, _work)
         inp = m["data_files"]["inputs"][0]

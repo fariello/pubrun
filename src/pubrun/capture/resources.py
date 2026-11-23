@@ -26,6 +26,48 @@ def set_poll_timeout(seconds: float) -> None:
 
 
 def _get_rss_windows() -> int:
+    # Primary path: Win32 GetProcessMemoryInfo via ctypes (in-process, no subprocess,
+    # works on Windows Server 2025+ where wmic was removed).
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            class _PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+                _fields_ = [
+                    ("cb", ctypes.c_ulong),
+                    ("PageFaultCount", ctypes.c_ulong),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                ]
+
+            kernel32 = ctypes.windll.kernel32
+            get_current_process = kernel32.GetCurrentProcess
+            get_current_process.restype = ctypes.c_void_p
+
+            get_mem_info = getattr(kernel32, "K32GetProcessMemoryInfo", None)
+            if get_mem_info is None:
+                get_mem_info = ctypes.windll.psapi.GetProcessMemoryInfo
+            get_mem_info.argtypes = [
+                ctypes.c_void_p,
+                ctypes.POINTER(_PROCESS_MEMORY_COUNTERS),
+                ctypes.c_ulong,
+            ]
+            get_mem_info.restype = ctypes.c_int
+
+            counters = _PROCESS_MEMORY_COUNTERS()
+            counters.cb = ctypes.sizeof(counters)
+            if get_mem_info(get_current_process(), ctypes.byref(counters), counters.cb):
+                return int(counters.WorkingSetSize)
+        except Exception as e:
+            logger.debug(f"pubrun failed Windows ctypes RSS poll: {e}")
+
+    # Fallback path: legacy wmic subprocess for older Windows environments.
     try:
         import subprocess
         from pubrun.capture.subprocesses import disable_spy

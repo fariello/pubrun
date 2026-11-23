@@ -71,10 +71,11 @@ def _init_git_repo(repo_dir: Path, files: Dict[str, str]) -> str:
         return res.stdout.strip()
 
     _git("init")
+    _git("config", "core.autocrlf", "false")
     for rel_path, content in files.items():
         target = repo_dir / rel_path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        target.write_bytes(content.encode("utf-8"))
     _git("add", ".")
     _git("commit", "-m", "initial")
     return _git("rev-parse", "HEAD")

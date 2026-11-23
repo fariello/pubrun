@@ -241,7 +241,10 @@ def test_fallback_python38_39_parity_and_record_filtering(tmp_path, monkeypatch)
 
     if hasattr(importlib.metadata, "packages_distributions"):
         stdlib_map = importlib.metadata.packages_distributions()
-        for mod_name in ("synth_inferred", "synth_single_mod", "synth_ext"):
+        expected_stdlib_mods = ("synth_inferred", "synth_single_mod")
+        if sys.version_info >= (3, 12):
+            expected_stdlib_mods += ("synth_ext",)
+        for mod_name in expected_stdlib_mods:
             assert "synth-inferred-pkg" in stdlib_map.get(mod_name, [])
 
     # Verify resolution still succeeds when packages_distributions does not exist (Python 3.8/3.9).

@@ -61,6 +61,19 @@ _warned_invalid_algorithms: Set[str] = set()
 _fallback_data_files_lock = threading.Lock()
 
 
+def _readlink_normalized(path: Union[str, os.PathLike]) -> str:
+    """Return ``os.readlink(path)``, stripping Windows ``\\\\?\\`` drive prefixes."""
+    target = os.readlink(path)
+    if (
+        os.name == "nt"
+        and len(target) >= 6
+        and target.startswith("\\\\?\\")
+        and target[5] == ":"
+    ):
+        return target[4:]
+    return target
+
+
 def validate_hash_algorithm(value: Any) -> str:
     """Validate a configured digest algorithm name.
 
@@ -518,7 +531,7 @@ def hash_file_checked(
         is_symlink = stat.S_ISLNK(lst.st_mode)
         if is_symlink:
             try:
-                symlink_target = os.readlink(path)
+                symlink_target = _readlink_normalized(path)
             except OSError:
                 symlink_target = None
     except FileNotFoundError:
@@ -1336,7 +1349,7 @@ def _inspect_local_target(
         is_symlink = stat.S_ISLNK(lst.st_mode)
         if is_symlink:
             try:
-                symlink_target = os.readlink(path_str)
+                symlink_target = _readlink_normalized(path_str)
             except OSError:
                 symlink_target = None
     except FileNotFoundError:
@@ -2305,7 +2318,7 @@ class ProvenanceFileProxy:
                         record["is_symlink"] = is_link
                         if is_link:
                             try:
-                                record["symlink_target"] = os.readlink(self._raw_path)
+                                record["symlink_target"] = _readlink_normalized(self._raw_path)
                             except OSError:
                                 record["symlink_target"] = None
                     except OSError:

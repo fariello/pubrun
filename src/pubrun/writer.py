@@ -107,7 +107,14 @@ def _atomic_json_write(
             f.flush()
             if durability in ("fsync", "strict"):
                 os.fsync(f.fileno())
-        os.replace(str(tmp_path), str(path))
+        for _attempt in range(10 if os.name == "nt" else 1):
+            try:
+                os.replace(str(tmp_path), str(path))
+                break
+            except PermissionError:
+                if os.name != "nt" or _attempt == 9:
+                    raise
+                time.sleep(0.005 * (_attempt + 1))
         if durability == "strict":
             _fsync_directory(path.parent)
     except Exception:

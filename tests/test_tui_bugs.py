@@ -17,6 +17,7 @@ pytest.importorskip("textual")
 from textual.widgets import Select, RichLog, Input  # noqa: E402
 
 from pubrun.status import RunInfo  # noqa: E402
+from pubrun.tui.widgets.config import _SELECT_EMPTY_VALUE  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -97,7 +98,10 @@ class TestRefreshSidebarRouting:
 
                 assert len(sidebar.all_runs) == 2
                 select_a = app.query_one("#select-diff-a", Select)
-                legal = {opt for opt in select_a._legal_values if opt != Select.NULL}
+                raw_legal = getattr(select_a, "_legal_values", None)
+                if raw_legal is None:
+                    raw_legal = [val for _, val in getattr(select_a, "_options", [])]
+                legal = {opt for opt in raw_legal if opt != _SELECT_EMPTY_VALUE}
                 assert str(runs / "pubrun-bbbb2222") in legal
                 assert any("refreshed" in msg for msg, _ in notes)
 
@@ -261,7 +265,7 @@ class TestConfigPanel:
     def test_is_select_empty_sentinels(self):
         from pubrun.tui.widgets.config import _is_select_empty
 
-        assert _is_select_empty(Select.NULL) is True
+        assert _is_select_empty(_SELECT_EMPTY_VALUE) is True
         assert _is_select_empty(None) is True
         assert _is_select_empty(False) is False
         assert _is_select_empty(0) is False
@@ -276,7 +280,7 @@ class TestConfigPanel:
             async with app.run_test() as pilot:
                 panel = app.query_one("#config-view", ConfigPanel)
                 for wid in ("#cfg-profile", "#cfg-console-mode", "#cfg-redact-repr"):
-                    panel.query_one(wid, Select).value = Select.NULL
+                    panel.query_one(wid, Select).value = _SELECT_EMPTY_VALUE
                 await pilot.pause()
                 panel.save_settings()
                 await pilot.pause()
@@ -284,6 +288,8 @@ class TestConfigPanel:
         asyncio.run(_drive())
         text = (tmp_path / ".pubrun.toml").read_text(encoding="utf-8")
         assert "Select.NULL" not in text
+        assert "Select.BLANK" not in text
+        assert str(_SELECT_EMPTY_VALUE) not in text
         assert "profile" not in text
         assert "capture_mode" not in text
         assert "representation" not in text
@@ -321,8 +327,8 @@ class TestConfigPanel:
             async with app.run_test() as pilot:
                 await pilot.pause()
                 panel = app.query_one("#config-view", ConfigPanel)
-                assert panel.query_one("#cfg-profile", Select).value == Select.NULL
-                assert panel.query_one("#cfg-redact-repr", Select).value == Select.NULL
+                assert panel.query_one("#cfg-profile", Select).value == _SELECT_EMPTY_VALUE
+                assert panel.query_one("#cfg-redact-repr", Select).value == _SELECT_EMPTY_VALUE
                 assert panel.query_one("#cfg-console-mode", Select).value == "off"
                 warnings = [m for m, s in notes if s == "warning"]
                 assert any("core.profile" in m and "standard" in m for m in warnings)
@@ -334,6 +340,8 @@ class TestConfigPanel:
         asyncio.run(_drive())
         text = (tmp_path / ".pubrun.toml").read_text(encoding="utf-8")
         assert "Select.NULL" not in text
+        assert "Select.BLANK" not in text
+        assert str(_SELECT_EMPTY_VALUE) not in text
         # The unknown file value is preserved rather than corrupted.
         assert 'representation = "legacy-mask"' in text
 
@@ -361,7 +369,7 @@ class TestDiffView:
             async with app.run_test() as pilot:
                 await _show_tab(app, pilot, "tab-diff")
                 view = app.query_one("#diff-view", DiffView)
-                assert view.query_one("#select-diff-a", Select).value == Select.NULL
+                assert view.query_one("#select-diff-a", Select).value == _SELECT_EMPTY_VALUE
                 view.run_difference()
                 await pilot.pause()
                 out = _log_text(view.query_one("#diff-output-area", RichLog))
@@ -372,7 +380,7 @@ class TestDiffView:
 
         asyncio.run(_drive())
 
-    @pytest.mark.parametrize("depth", [Select.NULL, "standard", "deep"])
+    @pytest.mark.parametrize("depth", [_SELECT_EMPTY_VALUE, "standard", "deep"])
     def test_depth_fallback_and_warnings_preserved(self, tmp_path, monkeypatch, depth):
         from pubrun.tui.app import PubrunTUIApp
         from pubrun.tui.widgets import diff as diff_mod
@@ -409,7 +417,7 @@ class TestDiffView:
                 assert "[Warning] hydration note for pubrun-diffb002" in out
 
         asyncio.run(_drive())
-        expected = "basic" if depth == Select.NULL else depth
+        expected = "basic" if depth == _SELECT_EMPTY_VALUE else depth
         assert seen_depth == [expected]
 
 
@@ -493,12 +501,12 @@ class TestLogViewer:
 
                 loaded.clear()
                 select = viewer.query_one("#select-log-file", Select)
-                select.value = Select.NULL
+                select.value = _SELECT_EMPTY_VALUE
                 await pilot.pause()
                 viewer.query_one("#btn-refresh-log").press()
                 await pilot.pause()
                 assert loaded == []
-                assert "Select.NULL" not in [str(p) for p in loaded]
+                assert str(_SELECT_EMPTY_VALUE) not in [str(p) for p in loaded]
                 out = _log_text(viewer.query_one("#log-content-area", RichLog))
                 assert "does not exist" not in out
 

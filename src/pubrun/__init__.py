@@ -171,10 +171,14 @@ def _resolve_checkout_commit(repo_root, timeout=1.0):
     """Resolve live HEAD in a verified pubrun source checkout with one bounded git call."""
     try:
         import os as _os
+        import shutil as _shutil
         import subprocess as _sp
 
         clean_env = {k: v for k, v in _os.environ.items() if k not in _GIT_ENV_STRIP}
-        cmd = ["git", "-C", str(repo_root), "rev-parse", "--show-toplevel", "HEAD"]
+        git_exe = _shutil.which("git", path=clean_env.get("PATH"))
+        if not git_exe:
+            return None
+        cmd = [git_exe, "-C", str(repo_root), "rev-parse", "--show-toplevel", "HEAD"]
         spy_mod = sys.modules.get("pubrun.capture.subprocesses")
         if spy_mod is not None and hasattr(spy_mod, "disable_spy"):
             with spy_mod.disable_spy():

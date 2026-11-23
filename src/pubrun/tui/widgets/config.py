@@ -14,23 +14,40 @@ from textual.widgets import Label, Input, Checkbox, Button, Select
 from pubrun.config import resolve_config, load_local_config, get_global_config_dir
 
 
+_SELECT_EMPTY_VALUE: Any = (
+    Select.__dict__["NULL"]
+    if "NULL" in Select.__dict__
+    else getattr(Select, "NULL", Select.__dict__.get("BLANK"))
+)
+
+
 def _is_select_empty(val: Any) -> bool:
     """Return True when a ``Select`` value means "nothing selected".
 
-    ``Select.NULL`` is truthy, so a plain truthiness check misses it. ``BLANK`` is
-    read from ``Select.__dict__`` only: on Textual 8.x ``Select.BLANK`` resolves to
-    the inherited ``Widget.BLANK`` (``False``), which must not classify ``False`` or
+    ``Select.NULL`` (Textual 8.x) and ``Select.BLANK`` (Textual 0.x) are truthy,
+    so a plain truthiness check misses them. ``BLANK`` is read from
+    ``Select.__dict__`` only: on Textual 8.x ``Select.BLANK`` resolves to the
+    inherited ``Widget.BLANK`` (``False``), which must not classify ``False`` or
     ``0`` as empty.
     """
-    if val is None or val is Select.NULL:
+    if val is None:
         return True
-    try:
-        if val == Select.NULL:
+    if _SELECT_EMPTY_VALUE is not None:
+        if val is _SELECT_EMPTY_VALUE:
             return True
-    except Exception:
-        pass
+        try:
+            if val == _SELECT_EMPTY_VALUE:
+                return True
+        except Exception:
+            pass
     blank = Select.__dict__.get("BLANK")
-    return blank is not None and val == blank
+    if blank is not None:
+        try:
+            if val == blank:
+                return True
+        except Exception:
+            pass
+    return False
 
 
 _SELECT_OPTIONS: Dict[str, List[Any]] = {
@@ -119,7 +136,7 @@ class ConfigPanel(Vertical):
         if value in allowed:
             select.value = value
             return
-        select.value = Select.NULL
+        select.value = _SELECT_EMPTY_VALUE
         if value is not None:
             self.app.notify(
                 f"Unknown {setting} value {value!r}; left unselected (expected one of: {', '.join(allowed)}).",

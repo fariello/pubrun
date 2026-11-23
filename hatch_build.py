@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from typing import Any, Dict, Optional
@@ -51,8 +52,11 @@ def _resolve_checkout_sha(root: str) -> Optional[str]:
     """Return verified HEAD SHA when root itself is the Git repository toplevel."""
     try:
         clean_env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_STRIP}
+        git_exe = shutil.which("git", path=clean_env.get("PATH"))
+        if not git_exe:
+            return None
         proc = subprocess.run(
-            ["git", "-C", root, "rev-parse", "--show-toplevel", "HEAD"],
+            [git_exe, "-C", root, "rev-parse", "--show-toplevel", "HEAD"],
             capture_output=True,
             text=True,
             timeout=5,
