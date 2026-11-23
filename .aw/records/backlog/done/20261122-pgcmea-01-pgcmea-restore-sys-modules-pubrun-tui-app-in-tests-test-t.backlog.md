@@ -1,5 +1,5 @@
 - Id: pgcmea
-- Status: graduated
+- Status: done
 - Graduated-To: pgcmea
 - Set: pgcmea
 - Work-Kind: bug
@@ -11,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-23 done (aw backlog): closed by aw oc run: IPD whacr3 executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261122-pgcmea-01-whacr3-confirm-the-pubrun-tui-app-sys-modules-restore-and-add-a-reg.ipd.md); evidence .aw/records/plans/executed/20261122-pgcmea-01-whacr3-confirm-the-pubrun-tui-app-sys-modules-restore-and-add-a-reg.ipd.md
 - 2026-11-23 graduated (aw backlog): graduated by run run-20261123T005542Z-1001883: whacr3
 - 2026-11-22 created (aw backlog): Restore sys.modules['pubrun.tui.app'] in tests/test_tui.py::test_tui_cli_parser_and_run to prevent order-dependent TUI test failure
 
