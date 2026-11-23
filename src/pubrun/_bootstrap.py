@@ -133,10 +133,12 @@ def _resolve_conflict_policy() -> str:
         return _conflict_policy
 
     # Fall back to config (lightweight read)
-    from pubrun._config_boot import _read_local_toml_key
-    config_policy = _read_local_toml_key("imports", "on_conflict")
-    if config_policy and config_policy.lower() in ("ignore", "warn", "error"):
-        _conflict_policy = config_policy.lower()
+    from pubrun._config_boot import _read_boot_toml_key
+    config_policy = _read_boot_toml_key(
+        "imports", "on_conflict", valid=("ignore", "warn", "error")
+    )
+    if config_policy is not None:
+        _conflict_policy = config_policy
         return _conflict_policy
 
     _conflict_policy = "warn"

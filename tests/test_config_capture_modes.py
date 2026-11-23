@@ -7,10 +7,14 @@ allowlist mode and per-collector ``depth = "off"``).
 import copy
 import os
 import subprocess
+import sys
+import warnings
 from pathlib import Path
 
 import pytest
 
+from pubrun import _bootstrap
+from pubrun._bootstrap import PubrunImportModeConflictError, PubrunImportModeConflictWarning
 from pubrun._config_boot import resolve_import_mode
 from pubrun.capture.environment import get_environment
 from pubrun.capture.git import get_git
@@ -225,6 +229,119 @@ class TestBootDiscovery:
 
     def test_no_files_is_default(self, isolated_home):
         assert resolve_import_mode() == ("auto", "default")
+
+
+# ---------------------------------------------------------------------------
+# ql671s: [imports].on_conflict is read from every boot config file
+# ---------------------------------------------------------------------------
+
+
+_REPO_SRC = str(Path(__file__).resolve().parents[1] / "src")
+
+
+def _conflict_toml(policy: str) -> str:
+    return f'[imports]\non_conflict = "{policy}"\n'
+
+
+def _trigger_conflict():
+    _bootstrap.select_mode("auto", "pubrun", "default")
+    _bootstrap.select_mode("minimal", "pubrun.minimal", "explicit")
+
+
+def _assert_conflict_raises():
+    _bootstrap.reset_state()
+    with pytest.raises(PubrunImportModeConflictError):
+        _trigger_conflict()
+
+
+def _assert_conflict_silent():
+    _bootstrap.reset_state()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _trigger_conflict()
+    assert not [w for w in caught if issubclass(w.category, PubrunImportModeConflictWarning)]
+
+
+class TestBootConflictPolicyDiscovery:
+    @pytest.fixture(autouse=True)
+    def _clear_conflict_env(self, monkeypatch):
+        monkeypatch.delenv("PUBRUN_IMPORT_CONFLICT", raising=False)
+
+    def test_project_deep_config_is_read(self, isolated_home, tmp_path):
+        _write(tmp_path / ".config" / "pubrun" / "config.toml", _conflict_toml("error"))
+        _assert_conflict_raises()
+
+    def test_user_global_config_is_read(self, isolated_home, monkeypatch):
+        _non_windows(monkeypatch)
+        _write(isolated_home / ".config" / "pubrun" / "config.toml", _conflict_toml("error"))
+        _assert_conflict_raises()
+
+    def test_xdg_config_home_is_honored(self, isolated_home, tmp_path, monkeypatch):
+        _non_windows(monkeypatch)
+        xdg = tmp_path / "xdg"
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+        _write(xdg / "pubrun" / "config.toml", _conflict_toml("error"))
+        _assert_conflict_raises()
+
+    def test_appdata_on_windows_is_honored(self, isolated_home, tmp_path, monkeypatch):
+        monkeypatch.setattr("sys.platform", "win32")
+        appdata = tmp_path / "appdata"
+        monkeypatch.setenv("APPDATA", str(appdata))
+        _write(appdata / "pubrun" / "config.toml", _conflict_toml("error"))
+        _assert_conflict_raises()
+
+    def test_precedence_pubrun_toml_over_deep(self, isolated_home, tmp_path):
+        _write(tmp_path / ".pubrun.toml", _conflict_toml("ignore"))
+        _write(tmp_path / ".config" / "pubrun" / "config.toml", _conflict_toml("error"))
+        _assert_conflict_silent()
+
+        (tmp_path / ".pubrun.toml").unlink()
+        _assert_conflict_raises()
+
+    def test_invalid_value_in_higher_file_falls_through(self, isolated_home, tmp_path):
+        _write(tmp_path / ".pubrun.toml", _conflict_toml("bogus"))
+        _write(tmp_path / ".config" / "pubrun" / "config.toml", _conflict_toml("error"))
+        _assert_conflict_raises()
+
+    def test_malformed_higher_file_is_skipped(self, isolated_home, tmp_path):
+        _write(tmp_path / ".pubrun.toml", "[imports\non_conflict = = \n")
+        _write(tmp_path / ".config" / "pubrun" / "config.toml", _conflict_toml("error"))
+        _assert_conflict_raises()
+
+    def test_env_beats_all_files(self, isolated_home, tmp_path, monkeypatch):
+        monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "ignore")
+        _write(tmp_path / ".config" / "pubrun" / "config.toml", _conflict_toml("error"))
+        _assert_conflict_silent()
+
+    def test_no_files_warns_once(self, isolated_home):
+        _bootstrap.reset_state()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _trigger_conflict()
+        conflicts = [w for w in caught if issubclass(w.category, PubrunImportModeConflictWarning)]
+        assert len(conflicts) == 1
+
+    def test_child_process_import_conflict_raises(self, isolated_home, tmp_path):
+        _write(tmp_path / ".config" / "pubrun" / "config.toml", _conflict_toml("error"))
+        env = dict(os.environ)
+        for name in ("PUBRUN_IMPORT_CONFLICT", "PUBRUN_IMPORT_MODE", "XDG_CONFIG_HOME", "APPDATA"):
+            env.pop(name, None)
+        env["PUBRUN_AUTO_START"] = "false"
+        env["HOME"] = str(isolated_home)
+        env["USERPROFILE"] = str(isolated_home)
+        env["XDG_CONFIG_HOME"] = str(isolated_home / ".config")
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = f"{_REPO_SRC}{os.pathsep}{existing}" if existing else _REPO_SRC
+        res = subprocess.run(
+            [sys.executable, "-c", "import pubrun, pubrun.minimal"],
+            cwd=str(tmp_path),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert res.returncode != 0
+        assert "PubrunImportModeConflictError" in res.stderr
 
 
 # ---------------------------------------------------------------------------

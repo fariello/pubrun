@@ -103,6 +103,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **`[imports].on_conflict` set in `./.config/pubrun/config.toml` or in the user config file is
+  no longer ignored.** The import-conflict policy was read only from `./.pubrun.toml`, so
+  `on_conflict = "error"` in the other two files left the policy at the default `"warn"`. It is
+  now read from the same files, in the same order, as `[imports].mode`.
 - **Calls made with no active run no longer resolve the full configuration on every call.**
   `annotate()`, `phase()`, `report()`, `artifact()`, `register_file()`, `register_input()`, and
   `register_output()` with no active run now cache the `[events].on_inactive_annotate` policy and

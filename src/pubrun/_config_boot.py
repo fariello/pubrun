@@ -15,10 +15,13 @@ Resolution order (highest to lowest):
    The first file that sets a valid ``[imports].mode`` or a recognized
    ``[core].auto_start`` (``[imports].mode`` wins within one file) decides.
 4. Built-in default: "auto"
+
+The import-conflict policy ``[imports].on_conflict`` is read from the same
+config files in the same order by ``_read_boot_toml_key``.
 """
 import os
 import sys
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Collection, Dict, Optional, Tuple
 
 from pubrun._modes import VALID_MODES, get_mode_behavior
 
@@ -129,6 +132,27 @@ def _read_local_toml_key(section: str, key: str) -> Optional[str]:
     Does not raise on any error (best-effort).
     """
     return _extract_toml_key(_load_local_toml(), section, key)
+
+
+def _read_boot_toml_key(
+    section: str, key: str, valid: Collection[str]
+) -> Optional[str]:
+    """Return the first acceptable ``[section].key`` value across the boot config files.
+
+    Searches ``_boot_config_paths()`` highest precedence first, parsing each
+    file at most once. A value is acceptable when its stripped, lowercased
+    form is in ``valid``; that normalized form is returned. Missing,
+    malformed, or unacceptable entries fall through to the next file.
+    Returns None when no file supplies an acceptable value. Never raises.
+    """
+    for toml_path in _boot_config_paths():
+        value = _extract_toml_key(_load_toml_file(toml_path), section, key)
+        if value is None:
+            continue
+        normalized = value.strip().lower()
+        if normalized in valid:
+            return normalized
+    return None
 
 
 def resolve_import_mode() -> Tuple[str, str]:

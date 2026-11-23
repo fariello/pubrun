@@ -20,7 +20,7 @@
 
 The local project config is a **single precedence tier** (both `./.pubrun.toml` and `./.config/pubrun/config.toml` are merged into one layer). When both files exist in the same directory, `.pubrun.toml` takes precedence (it is applied last).
 
-The import mode chosen at `import pubrun` time (`[imports].mode` or `[core].auto_start`) is read from the same files in the same order: `./.pubrun.toml`, then `./.config/pubrun/config.toml`, then the user home config. The first file that sets either key decides, and `[imports].mode` wins over `[core].auto_start` within one file.
+The import mode chosen at `import pubrun` time (`[imports].mode` or `[core].auto_start`) is read from the same files in the same order: `./.pubrun.toml`, then `./.config/pubrun/config.toml`, then the user home config. The first file that sets either key decides, and `[imports].mode` wins over `[core].auto_start` within one file. The import-conflict policy `[imports].on_conflict` is read from the same files in the same order; the first file with a valid value (`ignore`, `warn`, or `error`) decides, and `PUBRUN_IMPORT_CONFLICT` overrides all files.
 
 > **See what actually resolved:** `pubrun show config` prints the fully-resolved configuration and
 > annotates any key that a higher-precedence layer overrode (e.g. a local `.pubrun.toml` value that
