@@ -48,16 +48,17 @@ def copy_to_clipboard(text: str) -> bool:
 class ConfirmDeleteModal(ModalScreen[bool]):
     """Safety modal confirming deletion of a run directory."""
 
-    def __init__(self, run_id: str, is_running: bool = False) -> None:
+    def __init__(self, run_id: Optional[str], is_running: bool = False) -> None:
         super().__init__()
         self.run_id = run_id
-        self.is_running = is_running
+        self.run_is_active = is_running
 
     def compose(self) -> ComposeResult:
-        title = "CONFIRM ACTIVE RUN DELETION" if self.is_running else "CONFIRM RUN DELETION"
+        title = "CONFIRM ACTIVE RUN DELETION" if self.run_is_active else "CONFIRM RUN DELETION"
+        short_id = (self.run_id or "unknown")[:8]
         yield Vertical(
             Label(title, id="dialog-title"),
-            Label(f"Are you sure you want to permanently delete run {self.run_id[:8]}?", classes="info-label"),
+            Label(f"Are you sure you want to permanently delete run {short_id}?", classes="info-label"),
             Label("This will delete the manifest, configuration, and log files. This is irreversible!", id="dialog-message"),
             Input(placeholder="Type 'yes' to confirm", id="input-confirm-yes"),
             Horizontal(
@@ -128,7 +129,7 @@ class ActionsPanel(Vertical):
                 yield Button("Execute Prune", id="btn-prune-execute", variant="error")
             yield RichLog(id="cleanup-log-output", max_lines=500, classes="log-area")
 
-    def display_run(self, run_info: RunInfo) -> None:
+    def display_run(self, run_info: Optional[RunInfo]) -> None:
         """Update display citation, rerun, and manifest fields."""
         self.run_info = run_info
         self.raw_manifest = None
@@ -224,7 +225,10 @@ class ActionsPanel(Vertical):
 
         elif event.button.id == "btn-delete-selected":
             is_active = (self.run_info.status == STATUS_RUNNING)
-            self.app.push_screen(ConfirmDeleteModal(self.run_info.run_id, is_active), self.handle_deletion_result)
+            self.app.push_screen(
+                ConfirmDeleteModal(self.run_info.run_id or self.run_info.run_dir.name, is_active),
+                self.handle_deletion_result,
+            )
 
         elif event.button.id in ("btn-prune-dry", "btn-prune-execute"):
             dry_run = (event.button.id == "btn-prune-dry")
@@ -266,9 +270,11 @@ class ActionsPanel(Vertical):
         if not confirmed or not self.run_info:
             return
 
+        label = (self.run_info.run_id or self.run_info.run_dir.name)[:8]
         try:
             shutil.rmtree(self.run_info.run_dir)
-            self.app.notify(f"Successfully deleted run {self.run_info.run_id[:8]}", severity="information")
+            self.app.notify(f"Successfully deleted run {label}", severity="information")
+            self.display_run(None)
             self.app.post_message(self.app.RefreshSidebar())
         except Exception as e:
             self.app.notify(f"Deletion failed: {e}", severity="error")
@@ -278,21 +284,9 @@ class ActionsPanel(Vertical):
         log = self.query_one("#cleanup-log-output", RichLog)
         log.clear()
 
-        # Parse older than
+        # Age parsing (d/h/m/s or bare days) is owned by clean_runs, which raises
+        # ValueError on an invalid, negative, or non-finite age.
         older_val = self.query_one("#input-clean-older", Input).value.strip()
-        older_than_days: Optional[float] = None
-        if older_val:
-            val = older_val.lower()
-            try:
-                if val.endswith("d"):
-                    older_than_days = float(val[:-1])
-                elif val.endswith("h"):
-                    older_than_days = float(val[:-1]) / 24.0
-                else:
-                    older_than_days = float(val)
-            except ValueError:
-                self.app.notify("Invalid age format. Use '7d' or '24h'.", severity="error")
-                return
 
         # Parse statuses
         status_val = self.query_one("#input-clean-status", Input).value.strip()
@@ -310,7 +304,7 @@ class ActionsPanel(Vertical):
                 # Run the status.py clean_runs logic
                 clean_runs(
                     output_dir=self.output_dir,
-                    older_than_days=older_than_days,
+                    older_than=older_val or None,
                     status_filter=status_filter,
                     yes=True,
                     dry_run=dry_run
@@ -329,6 +323,9 @@ class ActionsPanel(Vertical):
             if not dry_run:
                 self.app.notify("Pruning complete.", severity="information")
                 self.app.post_message(self.app.RefreshSidebar())
+        except ValueError as e:
+            log.write(f"Pruning failed: {e}")
+            self.app.notify(f"Invalid prune criteria: {e}", severity="error")
         except Exception as e:
             log.write(f"Pruning failed: {e}")
             self.app.notify(f"Prune failed: {e}", severity="error")

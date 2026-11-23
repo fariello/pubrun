@@ -289,17 +289,23 @@ class RunDetailsView(Vertical):
         lines.append(f"[bold #cba6f7]=== HOST & HARDWARE SPECS ===[/bold #cba6f7]")
         lines.append(f"  [bold]Hostname:[/]      {r.hostname or '-'}")
         if r.manifest:
-            host = r.manifest.get("host", {})
-            hw = r.manifest.get("hardware", {})
-            cpu = hw.get("cpu", {})
-            gpus = hw.get("gpus", [])
+            host = r.manifest.get("host")
+            host = host if isinstance(host, dict) else {}
+            hw = r.manifest.get("hardware")
+            hw = hw if isinstance(hw, dict) else {}
+            cpu = hw.get("cpu")
+            cpu = cpu if isinstance(cpu, dict) else {}
+            gpus = hw.get("gpus")
+            gpus = [g for g in gpus if isinstance(g, dict)] if isinstance(gpus, list) else []
             lines.append(f"  [bold]OS:[/]            {host.get('os_name')} ({host.get('os_release')})")
             lines.append(f"  [bold]CPU model:[/]     {cpu.get('model')} ({cpu.get('logical_cores')} cores, {cpu.get('architecture')})")
             lines.append(f"  [bold]Total RAM:[/]     {_format_bytes(hw.get('memory_total_bytes'))}")
             if gpus:
                 lines.append("  [bold]GPUs Detected:[/]")
                 for idx, gpu in enumerate(gpus):
-                    lines.append(f"    - [{idx}] {gpu.get('name')} (Driver: {gpu.get('driver_version')})")
+                    gpu_model = _escape_markup(str(gpu.get("model") or gpu.get("name") or "unknown"))
+                    driver = _escape_markup(str(gpu.get("driver_version") or "-"))
+                    lines.append(f"    - [{idx}] {gpu_model} (Driver: {driver})")
         else:
             lines.append("  (No host specs recorded)")
         lines.append("")
