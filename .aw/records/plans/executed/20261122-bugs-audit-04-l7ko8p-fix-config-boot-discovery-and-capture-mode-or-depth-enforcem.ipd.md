@@ -5,8 +5,9 @@
 - Concern: Bugs and correctness (configuration discovery parity at boot, non-mutating config resolution, environment allowlist mode, and per-collector `depth = "off"` enforcement).
 - Scope: `src/pubrun/_config_boot.py`, `src/pubrun/config.py`, `src/pubrun/capture/environment.py`, `src/pubrun/capture/git.py`, `src/pubrun/capture/host.py`, `src/pubrun/capture/process.py`, `src/pubrun/capture/python_runtime.py`, `src/pubrun/resources/default.toml`, `docs/configuration.md`, and regression tests in `tests/test_config_capture_modes.py`.
 - Scope-Paths: src/pubrun/_config_boot.py, src/pubrun/config.py, src/pubrun/capture/environment.py, src/pubrun/capture/git.py, src/pubrun/capture/host.py, src/pubrun/capture/process.py, src/pubrun/capture/python_runtime.py, src/pubrun/resources/default.toml, docs/configuration.md, tests/test_config_capture_modes.py
+- Scope-Exceeded: .aw/records/backlog/open/20261122-2rhs16-01-2rhs16-docs-functional-spec-md-3-2-single-read-bullet-3-3.backlog.md (defect carrier filed by aw backlog new for a doc gap this plan exposed docs/functional_spec.md and docs/architecture.md still describe the old single-file boot read the runner contract requires filing...); .aw/records/backlog/open/20261122-ql671s-01-ql671s-bootstrap-import-conflict-policy-reads-imports-on.backlog.md (defect carrier filed by aw backlog new for an adjacent bug this plan exposed _bootstrap reads [imports].on_conflict only from ./.pubrun.toml the runner contract requires filing each defect found, and ...)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Honor environment allowlist mode, per-collector depth=off, XDG/global boot config files, and non-mutating config resolution
@@ -18,12 +19,12 @@
 - Highest E allocated: 04
 - Author: Antigravity
 - Id: l7ko8p
-- Approval: 2026-11-22, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): aw oc run self-finalize: l7ko8p verified (set bugs-audit, attempt 2). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261122-2rhs16-01-2rhs16-docs-functional-spec-md-3-2-single-read-bullet-3-3.backlog.md: defect carrier filed by aw backlog new for a doc gap this plan exposed (docs/functional_spec.md and docs/architecture.md still describe the old single-file boot read); the runner contract requires filing each defect found, and those docs are outside Scope-Paths; out-of-scope .aw/records/backlog/open/20261122-ql671s-01-ql671s-bootstrap-import-conflict-policy-reads-imports-on.backlog.md: defect carrier filed by aw backlog new for an adjacent bug this plan exposed (_bootstrap reads [imports].on_conflict only from ./.pubrun.toml); the runner contract requires filing each defect found, and src/pubrun/_bootstrap.py is outside Scope-Paths]
 - 2026-11-22 approved (aw set): status set to approved
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): APPROVE WITH REVISIONS APPLIED; PR-001 (resolved via OQ-01), PR-002, PR-003, PR-004, PR-005
 - 2026-11-22 /plan-review (Gemini 4 Neon (High)): REVIEWED - OPEN QUESTIONS; PR-001, PR-002, PR-003, PR-004, PR-005
