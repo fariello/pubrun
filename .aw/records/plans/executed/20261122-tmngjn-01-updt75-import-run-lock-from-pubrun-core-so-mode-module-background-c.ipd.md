@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/tracker.py` (the six function-local `from pubrun import _run_lock` imports in `Run`), behavioral regression tests in `tests/test_import_modes.py`, and a `### Fixed` entry in `CHANGELOG.md`.
 - Scope-Paths: src/pubrun/tracker.py, tests/test_import_modes.py, CHANGELOG.md
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Work-Kind: bug
@@ -18,12 +18,12 @@
 - Highest E allocated: 04
 - Author: OpenCode agent
 - Id: updt75
-- Approval: 2026-11-23, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-23 executed (aw oc run model=uri/its_direct/pt3-claude-opus-5.5-1m-us variant=high profile=opus): aw oc run self-finalize: updt75 verified (set tmngjn, attempt 1).
 - 2026-11-23 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-23 to-review (aw set): authored from backlog tmngjn: reproduction on 00636a1, pubrun.core lock import, subprocess regression tests over all six mode modules, changelog
