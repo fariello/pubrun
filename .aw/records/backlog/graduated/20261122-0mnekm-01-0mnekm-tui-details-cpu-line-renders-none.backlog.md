@@ -1,5 +1,6 @@
 - Id: 0mnekm
-- Status: open
+- Status: graduated
+- Graduated-To: 0mnekm
 - Set: 0mnekm
 - Work-Kind: bug
 - Priority: low
@@ -10,4 +11,5 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-24 graduated (aw backlog): graduated by run run-20261124T040340Z-475531: 67hcid
 - 2026-11-23 created (aw backlog): found while planning zen6hs (46fixy): same defect class on the line after the OS line
