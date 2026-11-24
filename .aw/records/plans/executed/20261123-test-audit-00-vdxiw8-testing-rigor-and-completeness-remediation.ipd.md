@@ -6,7 +6,7 @@
 - Scope: Whole repository substance (`src/pubrun/`, `tests/`, `.github/workflows/ci.yml`, `.github/scripts/`, `benchmarks/`, `examples/`, `pyproject.toml`, `tox.ini`, `hatch_build.py`, `schemas/`), excluding `.aw/` process artifacts and work already completed by the 11 executed bug/hygiene plans (`vv4vdd`, `4cy3ft`, `whacr3`, `t336id`, `updt75`, `3aalwv`, `2e6xfq`, `68iw9a`, `0vwc5z`, `6bgkyj`, `46fixy`) and graduated backlog item `0mnekm` (tracked in reviewed plan `67hcid`).
 - Scope-Paths: .aw/records/plans/pending/20261123-test-audit-00-vdxiw8-testing-rigor-and-completeness-remediation.ipd.md
 - Item-Dependencies: executed:bzi46m, executed:gzc672, executed:m66tfv, executed:g18xdt, executed:2mwjjw, executed:7y0gmc, executed:ic6z4s, executed:bwoyan
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: orchestrator
 - Coverage: pass
@@ -20,12 +20,12 @@
 - Highest E allocated: 08
 - Author: Antigravity
 - Id: vdxiw8
-- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 executed (aw agy run model=Gemini-4-Neon-High): RETIRED as the orchestrator rollup step of a runner Set completion, not executed by an agent: every child of Set test-audit reached executed, so the runner (run run-20261124T161504Z-99920) retired this Order-0 plan as bookkeeping. Its own E-*/V-* items were NOT performed; the runner superseded them by enforcing the ordering, the isolation and the per-child merge gate. Justifying children: bzi46m, gzc672, m66tfv, g18xdt, 2mwjjw, 7y0gmc, ic6z4s, bwoyan.
 - 2026-11-24 approved (aw set): status set to approved
 - 2026-11-24 coverage pass (aw oc run): fingerprint 83387f0c398a, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-24 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
@@ -64,6 +64,9 @@ flowchart TD
 ```
 
 ## Detailed Implementation Checklist (TODO)
+
+
+> Its own E-*/V-* items were NOT performed; the runner superseded them by enforcing the ordering, the isolation and the per-child merge gate.
 
 Execution-state rule: mark an `E-*` item complete only after performing the action. That mark is not validation. Accepted execution states: blocked, failed, pending, performed; terminal gate demands 'performed'.
 
