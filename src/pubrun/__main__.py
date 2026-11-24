@@ -7,7 +7,7 @@ import time
 import tempfile
 import subprocess
 from pathlib import Path
-from typing import List, Optional
+from typing import List, NoReturn, Optional
 
 from pubrun import __version__
 
@@ -62,7 +62,7 @@ class RunInProgressOrCrashedError(Exception):
         self.run_dir = run_dir
         try:
             from pubrun.status import RunInfo
-            self.run_info = RunInfo(run_dir)
+            self.run_info: Optional[RunInfo] = RunInfo(run_dir)
         except Exception:
             self.run_info = None
 
@@ -1052,7 +1052,8 @@ def _run_cite(style: str) -> None:
     """
     style = style.lower()
     try:
-        from pubrun import __version__ as _ver
+        from pubrun import __version__ as _ver_imported
+        _ver: Optional[str] = _ver_imported
     except Exception:
         _ver = None
     ver_apa = f" (Version {_ver})" if _ver else ""
@@ -2427,7 +2428,7 @@ def _run_combined(
             sys.exit(1)
 
     def _parse_log_file(file_path: Path, run_id: Optional[str], stream: str, multiple_runs: bool) -> list:
-        entries = []
+        entries: list = []
         current_ts = ""
         prefix = f"[{run_id}][{stream}] " if multiple_runs else f"[{stream}] "
         if not file_path.exists():
@@ -2620,7 +2621,7 @@ def _run_bug_report() -> None:
     import platform
     import sys
     import time
-    from pubrun.__init__ import __version__
+    from pubrun import __version__
 
     print("==================================================")
     print("        pubrun Bug & Feature Reporting           ")
@@ -2673,7 +2674,7 @@ def main() -> None:
     _PRIMARY_COMMANDS: list = []
 
     class _SubcommandAwareArgumentParser(argparse.ArgumentParser):
-        def error(self, message: str) -> None:
+        def error(self, message: str) -> NoReturn:
             subcommand = None
             subparsers_actions = [
                 act for act in self._actions

@@ -94,8 +94,8 @@ class DiffView(Vertical):
             return
 
         # Prepare paths
-        path_a = Path(run_dir_a) / "manifest.json"
-        path_b = Path(run_dir_b) / "manifest.json"
+        path_a = Path(str(run_dir_a)) / "manifest.json"
+        path_b = Path(str(run_dir_b)) / "manifest.json"
 
         if not path_a.exists():
             output.write(f"Error: Manifest A not found at {path_a}")
@@ -120,9 +120,8 @@ class DiffView(Vertical):
             warnings = list(warn_a or []) + list(warn_b or [])
 
             # Determine ignores list
-            depth = self.query_one("#select-diff-depth", Select).value
-            if _is_select_empty(depth) or not depth:
-                depth = "basic"
+            depth_val = self.query_one("#select-diff-depth", Select).value
+            depth = "basic" if _is_select_empty(depth_val) or not depth_val else str(depth_val)
             conf = resolve_config().get("diff", {})
             if depth == "basic":
                 ignores = conf.get("ignore_basic", [])

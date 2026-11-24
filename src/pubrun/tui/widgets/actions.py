@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 
 from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal, ScrollableContainer
+from textual.message import Message
 from textual.widgets import Static, Button, Label, RichLog, Input, Checkbox
 from textual.screen import ModalScreen
 from rich.text import Text
@@ -21,6 +22,16 @@ from pubrun.status import RunInfo, clean_runs, STATUS_RUNNING
 from pubrun.report.diagnostics import format_redacted_rerun_advisory
 from pubrun.report.methods import generate_report
 from pubrun.report.utils import hydrate_manifest
+
+
+def _refresh_sidebar_message(app: Any) -> Message:
+    """Create a RefreshSidebar message for ``app`` without a top-level circular import."""
+    refresh_cls = getattr(app, "RefreshSidebar", None)
+    if isinstance(refresh_cls, type) and issubclass(refresh_cls, Message):
+        return refresh_cls()
+    from pubrun.tui.app import PubrunTUIApp
+    return PubrunTUIApp.RefreshSidebar()
+
 
 # Dynamic clipboard helper
 def copy_to_clipboard(text: str) -> bool:
@@ -205,6 +216,8 @@ class ActionsPanel(Vertical):
                     self.app.notify(msg, severity="warning")
 
         elif event.button.id in ("btn-copy-md", "btn-copy-latex"):
+            if self.run_info is None:
+                return
             if not self.raw_manifest:
                 self.app.notify("Citations not available.", severity="error")
                 return
@@ -224,6 +237,8 @@ class ActionsPanel(Vertical):
             self.archive_selected_run()
 
         elif event.button.id == "btn-delete-selected":
+            if self.run_info is None:
+                return
             is_active = (self.run_info.status == STATUS_RUNNING)
             self.app.push_screen(
                 ConfirmDeleteModal(self.run_info.run_id or self.run_info.run_dir.name, is_active),
@@ -263,12 +278,12 @@ class ActionsPanel(Vertical):
                 shutil.rmtree(r.run_dir)
                 self.app.notify("Deleted original uncompressed directory.", severity="information")
                 # Post refresh to main app
-                self.app.post_message(self.app.RefreshSidebar())
+                self.app.post_message(_refresh_sidebar_message(self.app))
 
         except Exception as e:
             self.app.notify(f"Archive failed: {e}", severity="error")
 
-    def handle_deletion_result(self, confirmed: bool) -> None:
+    def handle_deletion_result(self, confirmed: Optional[bool]) -> None:
         if not confirmed or not self.run_info:
             return
 
@@ -277,7 +292,7 @@ class ActionsPanel(Vertical):
             shutil.rmtree(self.run_info.run_dir)
             self.app.notify(f"Successfully deleted run {label}", severity="information")
             self.display_run(None)
-            self.app.post_message(self.app.RefreshSidebar())
+            self.app.post_message(_refresh_sidebar_message(self.app))
         except Exception as e:
             self.app.notify(f"Deletion failed: {e}", severity="error")
 
@@ -324,7 +339,7 @@ class ActionsPanel(Vertical):
 
             if not dry_run:
                 self.app.notify("Pruning complete.", severity="information")
-                self.app.post_message(self.app.RefreshSidebar())
+                self.app.post_message(_refresh_sidebar_message(self.app))
         except ValueError as e:
             log.write(f"Pruning failed: {e}")
             self.app.notify(f"Invalid prune criteria: {e}", severity="error")

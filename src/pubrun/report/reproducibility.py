@@ -143,6 +143,28 @@ _SEVERITY_LABELS: Dict[str, Tuple[str, str]] = {
 }
 
 
+def _dict_field(container: Dict[str, Any], key: str) -> Dict[str, Any]:
+    """Return ``container[key]`` when it is a dict, else an empty dict."""
+    val = container.get(key)
+    return val if isinstance(val, dict) else {}
+
+
+def _list_field(container: Dict[str, Any], key: str) -> List[Any]:
+    """Return ``container[key]`` when it is a list, else an empty list."""
+    val = container.get(key)
+    return val if isinstance(val, list) else []
+
+
+def _str_field(container: Dict[str, Any], key: str) -> Optional[str]:
+    """Return ``container[key].strip()`` when it is a non-blank string, else None."""
+    val = container.get(key)
+    if isinstance(val, str):
+        stripped = val.strip()
+        if stripped:
+            return stripped
+    return None
+
+
 def _make_finding(
     severity: str,
     code: str,
@@ -400,7 +422,7 @@ def _assess_source(
     invocation = manifest.get("invocation")
     inv_dict = invocation if isinstance(invocation, dict) else {}
     entrypoint_type = inv_dict.get("entrypoint_type")
-    script = inv_dict.get("script") if isinstance(inv_dict.get("script"), dict) else {}
+    script = _dict_field(inv_dict, "script")
     script_sha256 = script.get("sha256") if isinstance(script.get("sha256"), str) else None
 
     if entrypoint_type == "script" and not script_sha256:
@@ -910,14 +932,14 @@ def _assess_inputs_outputs(
 
     data_files = manifest.get("data_files")
     df_dict = data_files if isinstance(data_files, dict) else {}
-    df_inputs = df_dict.get("inputs") if isinstance(df_dict.get("inputs"), list) else []
-    df_outputs = df_dict.get("outputs") if isinstance(df_dict.get("outputs"), list) else []
-    df_mixed = df_dict.get("mixed") if isinstance(df_dict.get("mixed"), list) else []
+    df_inputs = _list_field(df_dict, "inputs")
+    df_outputs = _list_field(df_dict, "outputs")
+    df_mixed = _list_field(df_dict, "mixed")
     all_df = [r for r in (df_inputs + df_outputs + df_mixed) if isinstance(r, dict)]
 
     invocation = manifest.get("invocation")
     inv_dict = invocation if isinstance(invocation, dict) else {}
-    inv_inputs_raw = inv_dict.get("inputs") if isinstance(inv_dict.get("inputs"), list) else []
+    inv_inputs_raw = _list_field(inv_dict, "inputs")
     inv_inputs = [r for r in inv_inputs_raw if isinstance(r, dict)]
 
     if not all_df and not inv_inputs:
@@ -1409,9 +1431,9 @@ def _assess_capture_completeness(
                 existing_codes.add(code)
 
     # 7. Import mode subprocess patching permission (preserves checks.py).
-    imports = manifest.get("pubrun_imports")
-    behavior = imports.get("selected_behavior", {}) if isinstance(imports, dict) else {}
-    if isinstance(behavior, dict) and behavior.get("patch_subprocesses") is False:
+    imports = _dict_field(manifest, "pubrun_imports")
+    behavior = _dict_field(imports, "selected_behavior")
+    if behavior.get("patch_subprocesses") is False:
         findings.append(
             _make_finding(
                 INFO,
@@ -1830,11 +1852,7 @@ def _assess_invocation(
         if isinstance(inv_dict.get("rerun_command"), str)
         else None
     )
-    wd = (
-        inv_dict.get("working_directory")
-        if isinstance(inv_dict.get("working_directory"), dict)
-        else {}
-    )
+    wd = _dict_field(inv_dict, "working_directory")
 
     argv_redacted = bool(
         argv and any(isinstance(arg, str) and "[REDACTED]" in arg for arg in argv)
@@ -1887,7 +1905,7 @@ def _assess_invocation(
     # and heuristic [REDACTED] markers inside plain string values.
     env_sec = manifest.get("environment")
     env_dict = env_sec if isinstance(env_sec, dict) else {}
-    env_vars = env_dict.get("variables") if isinstance(env_dict.get("variables"), list) else []
+    env_vars = _list_field(env_dict, "variables")
     redacted_env_names: List[str] = []
     for entry in env_vars:
         if not isinstance(entry, dict):
@@ -2050,7 +2068,7 @@ def _build_summary(
     ]
 
     if isinstance(preflight, dict) and preflight.get("requested") is True:
-        counts = preflight.get("counts") if isinstance(preflight.get("counts"), dict) else {}
+        counts = _dict_field(preflight, "counts")
         mismatch_n = int(counts.get("mismatch", 0))
         unknown_n = int(counts.get("unknown", 0))
         not_checked_n = int(counts.get("not_checked", 0))
@@ -2719,7 +2737,7 @@ def _preflight_runtime(
             )
         )
     else:
-        cpu_dict = hw_dict.get("cpu") if isinstance(hw_dict.get("cpu"), dict) else {}
+        cpu_dict = _dict_field(hw_dict, "cpu")
         rec_arch = cpu_dict.get("architecture")
         if not isinstance(rec_arch, str) or not rec_arch.strip():
             checks.append(
@@ -3509,17 +3527,9 @@ def _preflight_source(
     inv_sec = manifest_dict.get("invocation")
     inv_dict = inv_sec if isinstance(inv_sec, dict) else {}
     entrypoint_type = inv_dict.get("entrypoint_type")
-    script_dict = inv_dict.get("script") if isinstance(inv_dict.get("script"), dict) else {}
-    raw_path = (
-        script_dict.get("path").strip()
-        if isinstance(script_dict.get("path"), str) and script_dict.get("path").strip()
-        else None
-    )
-    raw_real = (
-        script_dict.get("real_path").strip()
-        if isinstance(script_dict.get("real_path"), str) and script_dict.get("real_path").strip()
-        else None
-    )
+    script_dict = _dict_field(inv_dict, "script")
+    raw_path = _str_field(script_dict, "path")
+    raw_real = _str_field(script_dict, "real_path")
 
     if entrypoint_type != "script" or (not raw_path and not raw_real):
         checks.append(
@@ -3592,11 +3602,7 @@ def _preflight_source(
         )
         return checks, findings
 
-    rec_sha256 = (
-        script_dict.get("sha256").strip()
-        if isinstance(script_dict.get("sha256"), str) and script_dict.get("sha256").strip()
-        else None
-    )
+    rec_sha256 = _str_field(script_dict, "sha256")
     rec_size = (
         script_dict.get("size")
         if isinstance(script_dict.get("size"), int) and not isinstance(script_dict.get("size"), bool)
@@ -3799,13 +3805,9 @@ def _resolve_input_local_path(
     base_dir: Path,
 ) -> Tuple[Optional[Path], str]:
     """Resolve a recorded input path locally from ``realpath``, ``real_path``, or ``path``."""
-    raw_realpath = rec.get("realpath") if isinstance(rec.get("realpath"), str) else ""
-    raw_real_path = rec.get("real_path") if isinstance(rec.get("real_path"), str) else ""
-    raw_path = rec.get("path") if isinstance(rec.get("path"), str) else ""
-
-    raw_realpath = raw_realpath.strip()
-    raw_real_path = raw_real_path.strip()
-    raw_path = raw_path.strip()
+    raw_realpath = _str_field(rec, "realpath") or ""
+    raw_real_path = _str_field(rec, "real_path") or ""
+    raw_path = _str_field(rec, "path") or ""
 
     display = raw_path or raw_realpath or raw_real_path
     primary_raw = raw_realpath or raw_real_path or raw_path
@@ -3839,12 +3841,12 @@ def _preflight_inputs(
 
     data_files = manifest_dict.get("data_files")
     df_dict = data_files if isinstance(data_files, dict) else {}
-    df_inputs = df_dict.get("inputs") if isinstance(df_dict.get("inputs"), list) else []
-    df_mixed = df_dict.get("mixed") if isinstance(df_dict.get("mixed"), list) else []
+    df_inputs = _list_field(df_dict, "inputs")
+    df_mixed = _list_field(df_dict, "mixed")
 
     inv_sec = manifest_dict.get("invocation")
     inv_dict = inv_sec if isinstance(inv_sec, dict) else {}
-    inv_inputs = inv_dict.get("inputs") if isinstance(inv_dict.get("inputs"), list) else []
+    inv_inputs = _list_field(inv_dict, "inputs")
 
     base_dir = Path(cwd) if cwd is not None else Path.cwd()
 
@@ -3934,7 +3936,7 @@ def _preflight_inputs(
 
         if st is None:
             msg = f"Recorded input '{display}' ({resolved_path}) is missing or inaccessible locally."
-            details = {
+            details: Dict[str, Any] = {
                 "path": display,
                 "resolved_path": str(resolved_path),
                 "evidence_basis": basis,
@@ -4275,16 +4277,8 @@ def _preflight_invocation(
     inv_sec = manifest_dict.get("invocation")
     inv_dict = inv_sec if isinstance(inv_sec, dict) else {}
 
-    wd = (
-        inv_dict.get("working_directory")
-        if isinstance(inv_dict.get("working_directory"), dict)
-        else {}
-    )
-    wd_path = (
-        wd.get("path").strip()
-        if isinstance(wd.get("path"), str) and wd.get("path").strip()
-        else None
-    )
+    wd = _dict_field(inv_dict, "working_directory")
+    wd_path = _str_field(wd, "path")
     if not wd_path:
         checks.append(
             _make_preflight_check(
@@ -4317,7 +4311,7 @@ def _preflight_invocation(
             )
         else:
             msg = f"Recorded working directory '{wd_path}' does not exist locally (relocated or different host path)."
-            details = {"recorded_working_directory": wd_path}
+            details: Dict[str, Any] = {"recorded_working_directory": wd_path}
             checks.append(
                 _make_preflight_check(
                     "working_directory",
@@ -4345,11 +4339,7 @@ def _preflight_invocation(
             )
 
     argv = inv_dict.get("argv") if isinstance(inv_dict.get("argv"), list) else None
-    rerun_cmd = (
-        inv_dict.get("rerun_command")
-        if isinstance(inv_dict.get("rerun_command"), str) and inv_dict.get("rerun_command").strip()
-        else None
-    )
+    rerun_cmd = _str_field(inv_dict, "rerun_command")
     if not argv and not rerun_cmd:
         checks.append(
             _make_preflight_check(
@@ -4814,7 +4804,7 @@ def format_reproducibility_summary(assessment: Dict[str, Any]) -> str:
 
     preflight = assessment.get("preflight")
     if isinstance(preflight, dict) and preflight.get("requested") is True:
-        counts = preflight.get("counts") if isinstance(preflight.get("counts"), dict) else {}
+        counts = _dict_field(preflight, "counts")
         pf_status = str(preflight.get("status") or "unknown").upper()
         lines.append(
             f"Preflight [{pf_status}]: "

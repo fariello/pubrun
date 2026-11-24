@@ -65,6 +65,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pass/fail receipt. Archival/aggregation is a later, separately gated phase.
 
 ### Changed
+- **Static type checking (`mypy`) repaired and gated in CI.** Fixed the duplicate-module import in
+  `src/pubrun/__main__.py` so `pubrun report-bug` no longer loads the `pubrun` package a second time,
+  resolved type errors in `src/pubrun/__main__.py`, `src/pubrun/tui/widgets/actions.py`,
+  `src/pubrun/tui/widgets/diff.py`, and `src/pubrun/report/reproducibility.py`, added a `[tool.mypy]`
+  per-module ratchet in `pyproject.toml`, and added a blocking Linux Python 3.12 `typecheck` job in
+  GitHub Actions CI.
 - **Pytest coverage is now opt-in, `tox` is repaired, and CI gates additional suites and builds.**
   Removed the unconditional `--cov` flags from `pyproject.toml` `addopts`, registered the `slow`
   pytest marker, and updated `tox.ini` for tox 4 using `extras = dev` so `pytest` and `tox` run

@@ -30,6 +30,13 @@ To run the intake-script and benchmark contract suites that live outside `tests/
 python -m pytest .github/scripts/ benchmarks/test_share_safety.py benchmarks/test_pull_submissions.py benchmarks/test_benchmarks.py
 ```
 
+Run static type checks locally before opening a pull request. The GitHub Actions CI `typecheck` job runs the same check on Linux and fails on a type error in any module not listed in the `ignore_errors` override in `pyproject.toml`:
+
+```bash
+python -m pip install -e ".[dev,tui]"
+mypy
+```
+
 ### Local hooks and path hygiene
 
 Install the pre-commit hooks once per clone:
