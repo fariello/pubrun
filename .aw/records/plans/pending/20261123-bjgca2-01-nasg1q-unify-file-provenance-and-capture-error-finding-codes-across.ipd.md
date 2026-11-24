@@ -38,30 +38,30 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Canonical emission in reproducibility.py and bridge removal
 
-- [ ] E-01 Port canonical file-provenance classification and finding emission (`file_provenance_changed`, `file_provenance_hash_failed`, `file_provenance_over_budget`, `file_provenance_asserted_only`, `file_provenance_unverified_paths`, `no_file_provenance`) directly into `src/pubrun/report/reproducibility.py`.
+- [x] E-01 Port canonical file-provenance classification and finding emission (`file_provenance_changed`, `file_provenance_hash_failed`, `file_provenance_over_budget`, `file_provenance_asserted_only`, `file_provenance_unverified_paths`, `no_file_provenance`) directly into `src/pubrun/report/reproducibility.py`.
   - Depends on: none
   - Expected outcome: `src/pubrun/report/reproducibility.py` classifies `data_files` (`inputs`, `outputs`, `mixed`) using the exact semantics currently in `checks.py::_classify_file_record`, `::_is_caller_digest_mismatch`, and `::_has_nonempty_digest_value` (including caller-digest mismatch detection when `caller_digest.verified is False`, `pending` vs `identified_only` message breakdown, `asserted` precedence when `evidence_source == "asserted"` and `hash_status != "completed"`, and unified `no_file_provenance` wording). Legacy codes `file_hash_changed`, `file_hash_unavailable`, `file_hash_over_budget`, and `file_provenance_unhashed` are no longer emitted; `inputs_outputs` category `finding_codes`, `status`, `evidence_status`, `warn_count`, and `info_count` reflect the canonical codes cleanly with valid type annotations.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Port canonical section capture-failure (`<section>_capture_failed`), bounded detail formatting (`_bound_detail`), deduplicated per-section `capture_error_<section>` grouping, `errors_capture_partial` truncation wording, and `_finding_action_priority` updates into `src/pubrun/report/reproducibility.py`.
+- [x] E-02 Port canonical section capture-failure (`<section>_capture_failed`), bounded detail formatting (`_bound_detail`), deduplicated per-section `capture_error_<section>` grouping, `errors_capture_partial` truncation wording, and `_finding_action_priority` updates into `src/pubrun/report/reproducibility.py`.
   - Depends on: E-01
   - Expected outcome: In `src/pubrun/report/reproducibility.py`: (a) `git` `status == "failed"` emits `git_capture_failed` (with `"errors.records"` in its suggestion) instead of `git_failed`, preserving `git_timeout`; (b) `packages` `status == "failed"` emits `packages_capture_failed` (with `"errors.records"` in its suggestion) while `packages` `status == "timeout"` emits `packages_timeout` (no longer conflated under `packages_failed`); (c) failed/timeout/partial section details pass through a single-line 160-character `_bound_detail` helper (matching `checks.py::_bound_detail`) and failed sections use `"errors.records"` in their suggestion; (d) `errors.records` entries with `kind == "capture-error"` emit per-section `capture_error_<section>` (normalized via `re.sub(r"[^a-z0-9_]+", "_", ...)` with `"general"` fallback, grouped with `(+N more)`, and deduplicated against every section already marked `failed` including `git` and `packages`) instead of `capture_errors_recorded`; (e) `errors` `capture_state.status == "partial"` with a non-empty detail emits `errors_capture_partial` with `"Capture errors list was truncated (<bounded detail>)."` once without duplication; and (f) `_finding_action_priority` keeps tier-0 priority for `WARN` findings where `code.startswith("capture_error_")`, `code.endswith("_capture_failed")`, or `ev == "unavailable"`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Remove the duplicate finding-code reconciliation bridge (`_apply_file_provenance_findings`, `_upsert_finding`, the `_TRACKED_CAPTURE_SECTIONS` failed-section rewrite pass, and the `errors.records` / `errors_capture_partial` rewrite pass) from `src/pubrun/report/checks.py` so `manifest_findings()` cleanly delegates to `assess_manifest_reproducibility()`.
+- [x] E-03 Remove the duplicate finding-code reconciliation bridge (`_apply_file_provenance_findings`, `_upsert_finding`, the `_TRACKED_CAPTURE_SECTIONS` failed-section rewrite pass, and the `errors.records` / `errors_capture_partial` rewrite pass) from `src/pubrun/report/checks.py` so `manifest_findings()` cleanly delegates to `assess_manifest_reproducibility()`.
   - Depends on: E-01, E-02
   - Expected outcome: `src/pubrun/report/checks.py::manifest_findings` returns the findings produced by `assess_manifest_reproducibility(manifest, current_hostname=current_hostname)` (wrapped defensively so it never raises on malformed inputs) with no post-pass code rewrites and no dead bridge helpers (`_apply_file_provenance_findings`, `_upsert_finding`, `_classify_file_record`, `_is_caller_digest_mismatch`, `_has_nonempty_digest_value`, `_iter_data_file_records`, `_TRACKED_CAPTURE_SECTIONS`, `_bound_detail`, `_normalize_error_section` removed if unused elsewhere in `checks.py`), preserving `import pubrun` import-isolation guarantees.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Remove `src/pubrun/__main__.py::_reconcile_cli_file_provenance` and update `src/pubrun/__main__.py::_assess_cli_run` to return `assess_run(...)` directly without importing `_apply_file_provenance_findings` from `pubrun.report.checks`.
+- [x] E-04 Remove `src/pubrun/__main__.py::_reconcile_cli_file_provenance` and update `src/pubrun/__main__.py::_assess_cli_run` to return `assess_run(...)` directly without importing `_apply_file_provenance_findings` from `pubrun.report.checks`.
   - Depends on: E-01, E-03
   - Expected outcome: `src/pubrun/__main__.py` no longer imports `_apply_file_provenance_findings` or rewrites `assessment["findings"]` / `inputs_outputs` category counts after `assess_run()`; `_assess_cli_run` delegates directly to `assess_run()` so `pubrun inspect` and `pubrun rerun --preflight` consume canonical findings, category statuses, and next actions straight from `reproducibility.py`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Update legacy assertions and add four-surface parity tests across `tests/test_reproducibility_assessment.py`, `tests/test_checks_commands.py`, `tests/test_report_checks_bugs.py`, and `tests/test_reproducibility_e2e.py`.
+- [x] E-05 Update legacy assertions and add four-surface parity tests across `tests/test_reproducibility_assessment.py`, `tests/test_checks_commands.py`, `tests/test_report_checks_bugs.py`, and `tests/test_reproducibility_e2e.py`.
   - Depends on: E-03, E-04
   - Expected outcome: Legacy assertions in `tests/test_reproducibility_assessment.py` and `tests/test_reproducibility_e2e.py` expect canonical codes (`git_capture_failed`, `packages_capture_failed`, `packages_timeout`, `file_provenance_changed`, `file_provenance_hash_failed`, `file_provenance_over_budget`, `file_provenance_unverified_paths`, `capture_error_<section>`, `errors_capture_partial`); existing tests in `tests/test_checks_commands.py` and `tests/test_report_checks_bugs.py` continue to pass unchanged; and new behavioral parity tests assert identical finding codes across `assess_manifest_reproducibility()`, `assess_run()`, `manifest_findings()`, and `_assess_cli_run()` for file-provenance anomalies, caller-digest mismatches, pending outputs, failed/timed-out sections, per-section capture errors, and truncated `errors` sections.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -169,30 +169,62 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste `git diff --stat src/pubrun/report/reproducibility.py` and actual `pytest tests/test_reproducibility_assessment.py -k "inputs_outputs or provenance or file"` output proving `assess_manifest_reproducibility()` directly emits canonical `file_provenance_changed`, `file_provenance_hash_failed` (including caller-digest mismatch), `file_provenance_over_budget`, `file_provenance_asserted_only`, `file_provenance_unverified_paths` (including pending vs path/metadata-only), and `no_file_provenance` with matching `inputs_outputs` category `finding_codes`.
   - Observed evidence:
-  - Result: pending
+    - `git diff --stat src/pubrun/report/reproducibility.py`:
+      `src/pubrun/report/reproducibility.py | 359 ++++++++++++++++++++++++++---------`
+      `1 file changed, 274 insertions(+), 85 deletions(-)`
+    - `python3 -m pytest --no-cov -v tests/test_reproducibility_assessment.py -k "inputs_outputs or provenance or file"`:
+      `tests/test_reproducibility_assessment.py::TestReproducibilityAssessmentModel::test_inputs_outputs_observed_asserted_inferred_stat_only_and_hash_anomalies PASSED [ 50%]`
+      `tests/test_reproducibility_assessment.py::TestReproducibilityAssessmentModel::test_four_surface_finding_code_parity[file_provenance_anomalies_and_pending-overrides0-expected_codes0] PASSED [100%]`
+      `2 passed, 21 deselected in 0.28s`
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Paste actual `pytest tests/test_reproducibility_assessment.py -k "git or packages or capture_error or priority or partial"` output proving `assess_manifest_reproducibility()` directly emits `git_capture_failed`, `packages_capture_failed`, `packages_timeout`, bounded-detail failed sections with `"errors.records"` suggestions, deduplicated `capture_error_<section>` (with `(+N more)` and `"general"` fallback), and `errors_capture_partial` truncation wording, and preserves tier-0 action priority.
   - Observed evidence:
-  - Result: pending
+    - `python3 -m pytest --no-cov -v tests/test_reproducibility_assessment.py -k "git or packages or capture_error or priority or partial"`:
+      `tests/test_reproducibility_assessment.py::TestReproducibilityAssessmentModel::test_packages_modes_editable_states_and_future_fields PASSED [ 25%]`
+      `tests/test_reproducibility_assessment.py::TestReproducibilityAssessmentModel::test_four_surface_finding_code_parity[failed_and_timed_out_sections_and_capture_errors-overrides1-expected_codes1] PASSED [ 50%]`
+      `tests/test_reproducibility_assessment.py::TestReproducibilityAssessmentModel::test_four_surface_finding_code_parity[packages_failed_deduped_against_errors-overrides2-expected_codes2] PASSED [ 75%]`
+      `tests/test_reproducibility_assessment.py::TestReproducibilityAssessmentModel::test_capture_error_dedup_partial_truncation_bounded_detail_and_priority PASSED [100%]`
+      `4 passed, 19 deselected in 0.15s`
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Paste `git diff src/pubrun/report/checks.py` confirming removal of `_apply_file_provenance_findings`, `_upsert_finding`, and the post-pass rewrite loops, plus actual `pytest tests/test_checks_commands.py tests/test_report_checks_bugs.py tests/test_report_subpackage_integrity.py` output confirming all check, deduplication, truncation, redaction, and `import pubrun` import-isolation tests pass.
   - Observed evidence:
-  - Result: pending
+    - `git diff --stat src/pubrun/report/checks.py` (with removed symbols from `git diff src/pubrun/report/checks.py`):
+      `src/pubrun/report/checks.py | 428 +-------------------------------------------`
+      `1 file changed, 4 insertions(+), 424 deletions(-)`
+      Removed symbols: `import re`, `_TRACKED_CAPTURE_SECTIONS`, `_MAX_DETAIL_LEN`, `_capture_state_status`, `_capture_state_detail`, `_bound_detail`, `_normalize_error_section`, `_DATA_FILE_SECTIONS`, `_iter_data_file_records`, `_is_caller_digest_mismatch`, `_has_nonempty_digest_value`, `_classify_file_record`, `_upsert_finding`, `_apply_file_provenance_findings`, and the post-pass rewrite loops in `manifest_findings()`.
+    - `python3 -m pytest --no-cov -q tests/test_checks_commands.py tests/test_report_checks_bugs.py tests/test_report_subpackage_integrity.py`:
+      `107 passed in 15.64s`
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Paste `git diff src/pubrun/__main__.py` confirming removal of `_reconcile_cli_file_provenance` and `_apply_file_provenance_findings` import, plus actual `pytest tests/test_reproducibility_e2e.py tests/test_checks_commands.py -k "cross_surface or inspect or preflight"` output confirming CLI `inspect` and `rerun --preflight` execute cleanly without `ImportError` and report canonical codes.
   - Observed evidence:
-  - Result: pending
+    - `git diff --unified=1 src/pubrun/__main__.py`:
+      `src/pubrun/__main__.py | 91 ++------------------------------------------------`
+      `1 file changed, 2 insertions(+), 89 deletions(-)`
+      Removed `def _reconcile_cli_file_provenance(manifest: dict, assessment: dict) -> dict:` and `from pubrun.report.checks import _apply_file_provenance_findings`; `_assess_cli_run` now returns `assess_run(...)` directly.
+    - `python3 -m pytest --no-cov -v tests/test_reproducibility_e2e.py tests/test_checks_commands.py -k "cross_surface or inspect or preflight"`:
+      `14 passed, 44 deselected in 12.54s` (including `test_cross_surface_agreement_inspect_rerun_show_and_tui_formatter`, `test_inspect_reconciled_caller_digest_mismatch_updates_category_status_and_summary`, and `test_four_surface_cli_parity_for_provenance_and_capture_errors`).
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Paste actual output of `pytest tests/test_reproducibility_assessment.py tests/test_checks_commands.py tests/test_report_checks_bugs.py tests/test_reproducibility_e2e.py tests/test_report_subpackage_integrity.py` showing all updated expectations and new four-surface parity tests (`assess_manifest_reproducibility`, `assess_run`, `manifest_findings`, `_assess_cli_run`) passing, paste the full `pytest` summary (noting baseline parity for any unrelated failure if one exists), and paste `python3 scripts/sanitize_paths.py --check --all` output with exit 0.
   - Observed evidence:
-  - Result: pending
+    - `python3 -m pytest --no-cov -q tests/test_reproducibility_assessment.py tests/test_checks_commands.py tests/test_report_checks_bugs.py tests/test_reproducibility_e2e.py tests/test_report_subpackage_integrity.py`:
+      `140 passed in 36.22s`
+    - Full test suite (`aw suite`):
+      `TOTAL 16063 stmts, 3264 miss, 80%`
+      `1911 passed in 158.83s (0:02:38)` (exit code 0)
+    - `python3 scripts/sanitize_paths.py --check --all`:
+      `SANITIZE_EXIT=0` (clean output, exit code 0)
+  - Result: pass
 
 ## Approval and execution gate
 

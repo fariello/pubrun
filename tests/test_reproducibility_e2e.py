@@ -371,9 +371,16 @@ def test_partial_failed_capture_and_failed_outcome(repo: Path):
     assert _cli(repo, "inspect", str(run), "--strict").returncode == 1
 
     manifest["packages"]["capture_state"] = {"status": "failed"}
+    manifest["git"] = {"capture_state": {"status": "failed", "detail": "git crash"}}
     _save(run, manifest)
     c = _cli_json(repo, "inspect", str(run), "--json")
-    assert "packages_failed" in _cat(c, "dependencies")["finding_codes"]
+    assert "packages_capture_failed" in _cat(c, "dependencies")["finding_codes"]
+    assert "git_capture_failed" in _cat(c, "source")["finding_codes"]
+
+    manifest["packages"]["capture_state"] = {"status": "timeout"}
+    _save(run, manifest)
+    d = _cli_json(repo, "inspect", str(run), "--json")
+    assert "packages_timeout" in _cat(d, "dependencies")["finding_codes"]
 
 
 def _tree_snapshot(root: Path) -> Dict[str, str]:

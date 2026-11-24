@@ -1141,3 +1141,70 @@ class TestInspectReproducibilityAndPreflightCLI:
         assert "file_provenance_hash_failed" in io_cat["finding_codes"]
         assert "inputs_outputs" in data["summary"]
         assert "data_files" in data["next_action"]
+
+    def test_four_surface_cli_parity_for_provenance_and_capture_errors(self, tmp_path):
+        import socket
+        from pubrun import __main__ as cli
+        from pubrun.report.reproducibility import assess_manifest_reproducibility, assess_run
+
+        cur_host = socket.gethostname()
+        run_dir = tmp_path / "runs" / "pubrun-parity"
+        manifest = self._clean_manifest(
+            tmp_path,
+            hostname=cur_host,
+            extra={
+                "git": {"capture_state": {"status": "failed", "detail": "git failure"}},
+                "packages": {"capture_state": {"status": "timeout", "detail": "pkg timeout"}},
+                "errors": {
+                    "records": [
+                        {"kind": "capture-error", "section": "git", "message": "dup"},
+                        {"kind": "capture-error", "section": "events", "message": "disk full"},
+                    ],
+                    "capture_state": {"status": "partial", "detail": "2 additional capture error(s) omitted"},
+                },
+                "data_files": {
+                    "inputs": [
+                        {"path": str(tmp_path / "input.csv"), "hash_status": "file_changed", "change_detected": True},
+                        {
+                            "path": str(tmp_path / "mismatch.csv"),
+                            "sha256": "a" * 64,
+                            "caller_digest": {"algorithm": "sha256", "value": "b" * 64, "verified": False},
+                        },
+                    ],
+                    "outputs": [{"path": str(tmp_path / "out.bin"), "hash_status": "pending"}],
+                    "mixed": [],
+                },
+            },
+        )
+        manifest_path = self._write_manifest(run_dir, manifest)
+
+        direct = assess_manifest_reproducibility(manifest, current_hostname=cur_host)
+        via_run = assess_run(manifest, manifest_path=str(manifest_path), current_hostname=cur_host, preflight=False)
+        via_checks = checks.manifest_findings(manifest, current_hostname=cur_host)
+        via_cli_fn = cli._assess_cli_run(
+            manifest,
+            manifest_path=str(manifest_path),
+            hydration_report=None,
+            current_hostname=cur_host,
+            preflight=False,
+        )
+        res_inspect = run_pubrun("inspect", str(run_dir), "--json", env={"NO_COLOR": "1"})
+        assert res_inspect.returncode == 0, res_inspect.stderr
+        via_inspect = json.loads(res_inspect.stdout)
+
+        expected = [f["code"] for f in direct["findings"]]
+        assert [f["code"] for f in via_run["findings"]] == expected
+        assert [f["code"] for f in via_checks] == expected
+        assert [f["code"] for f in via_cli_fn["findings"]] == expected
+        assert [f["code"] for f in via_inspect["findings"]] == expected
+        for code in (
+            "git_capture_failed",
+            "packages_timeout",
+            "capture_error_events",
+            "errors_capture_partial",
+            "file_provenance_changed",
+            "file_provenance_hash_failed",
+            "file_provenance_unverified_paths",
+        ):
+            assert code in expected
+        assert "capture_error_git" not in expected

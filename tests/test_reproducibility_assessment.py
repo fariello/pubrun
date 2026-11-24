@@ -484,12 +484,18 @@ class TestReproducibilityAssessmentModel:
         assert f_unc["evidence_status"] == "not_checked"
 
         # Timeout & failed -> warn / material / unavailable.
-        for status, code in (("timeout", "git_timeout"), ("failed", "git_failed")):
-            m = _adequate_manifest(git={"capture_state": {"status": status, "detail": "slow fs"}})
+        for status, code in (("timeout", "git_timeout"), ("failed", "git_capture_failed")):
+            m = _adequate_manifest(
+                git={"capture_state": {"status": status, "detail": "slow fs\nline2 " + ("x" * 200)}}
+            )
             f = _find_by_code(assess_manifest_reproducibility(m), code)
             assert f["severity"] == "warn"
             assert f["impact"] == "material"
             assert f["evidence_status"] == "unavailable"
+            assert "\n" not in f["message"]
+            assert "..." in f["message"]
+            if status == "failed":
+                assert "errors.records" in (f["suggestion"] or "")
 
         # Unavailable & suppressed -> info / unavailable (do not fail --strict).
         m_unavail = _adequate_manifest(git={"capture_state": {"status": "unavailable"}})
@@ -550,10 +556,18 @@ class TestReproducibilityAssessmentModel:
         assert f_part["impact"] == "material"
         assert f_part["evidence_status"] == "unavailable"
 
-        m_fail = _adequate_manifest(packages={"capture_state": {"status": "failed"}})
-        f_fail = _find_by_code(assess_manifest_reproducibility(m_fail), "packages_failed")
+        m_fail = _adequate_manifest(packages={"capture_state": {"status": "failed", "detail": "meta err"}})
+        f_fail = _find_by_code(assess_manifest_reproducibility(m_fail), "packages_capture_failed")
         assert f_fail["severity"] == "warn"
         assert f_fail["impact"] == "material"
+        assert f_fail["evidence_status"] == "unavailable"
+        assert "errors.records" in (f_fail["suggestion"] or "")
+
+        m_timeout = _adequate_manifest(packages={"capture_state": {"status": "timeout", "detail": "slow"}})
+        f_timeout = _find_by_code(assess_manifest_reproducibility(m_timeout), "packages_timeout")
+        assert f_timeout["severity"] == "warn"
+        assert f_timeout["impact"] == "material"
+        assert f_timeout["evidence_status"] == "unavailable"
 
         # Suppressed -> packages_off (info).
         m_off = _adequate_manifest(packages={"capture_state": {"status": "suppressed"}})
@@ -580,15 +594,33 @@ class TestReproducibilityAssessmentModel:
         assert _find_by_code(res_inf, "inputs_unhashed")["evidence_status"] == "not_checked"
         assert _category_map(res_inf)["inputs_outputs"]["evidence_status"] == "inferred"
 
-        # 3. Stat-only data_files -> file_provenance_unhashed (not_checked).
+        # 3. Stat-only and pending data_files -> file_provenance_unverified_paths (not_checked).
         m_stat = _adequate_manifest(
-            data_files={"inputs": [{"path": "a.csv", "size_bytes": 10, "sha256": None}], "outputs": []}
+            data_files={
+                "inputs": [{"path": "a.csv", "size_bytes": 10, "sha256": None}],
+                "outputs": [{"path": "out.bin", "hash_status": "pending", "evidence_strength": "path_only"}],
+            }
         )
-        f_stat = _find_by_code(assess_manifest_reproducibility(m_stat), "file_provenance_unhashed")
+        res_stat = assess_manifest_reproducibility(m_stat)
+        f_stat = _find_by_code(res_stat, "file_provenance_unverified_paths")
         assert f_stat["severity"] == "info"
         assert f_stat["evidence_status"] == "not_checked"
+        assert "path/metadata-only" in f_stat["message"]
+        assert "pending" in f_stat["message"]
+        assert "file_provenance_unverified_paths" in _category_map(res_stat)["inputs_outputs"]["finding_codes"]
 
-        # 4. Asserted caller digest -> file_provenance_asserted_only (asserted).
+        # 3b. hash_status="completed" without an actual digest is never treated as verified.
+        m_nodigest = _adequate_manifest(
+            data_files={
+                "inputs": [{"path": "nodigest.csv", "size_bytes": 10, "hash_status": "completed"}],
+                "outputs": [],
+            }
+        )
+        res_nd = assess_manifest_reproducibility(m_nodigest)
+        assert _find_by_code(res_nd, "file_provenance_unverified_paths")["severity"] == "info"
+        assert _category_map(res_nd)["inputs_outputs"]["status"] == "uncertain"
+
+        # 4. Asserted caller digest (including pending asserted output) -> file_provenance_asserted_only (asserted).
         m_asserted = _adequate_manifest(
             data_files={
                 "inputs": [
@@ -599,47 +631,104 @@ class TestReproducibilityAssessmentModel:
                         "hash_status": "asserted",
                     }
                 ],
-                "outputs": [],
+                "outputs": [
+                    {
+                        "path": "out_asserted.parquet",
+                        "evidence_source": "asserted",
+                        "caller_digest": {"algorithm": "sha256", "value": "e" * 64},
+                        "hash_status": "pending",
+                    }
+                ],
             }
         )
         res_asrt = assess_manifest_reproducibility(m_asserted)
         f_asrt = _find_by_code(res_asrt, "file_provenance_asserted_only")
         assert f_asrt["severity"] == "info"
         assert f_asrt["evidence_status"] == "asserted"
+        assert "2" in f_asrt["message"]
+        assert "file_provenance_unverified_paths" not in [f["code"] for f in res_asrt["findings"]]
         assert _category_map(res_asrt)["inputs_outputs"]["evidence_status"] == "asserted"
 
-        # 5. hash_status anomalies including data_files.mixed.
+        # 5. hash_status anomalies including data_files.mixed and caller-digest mismatch.
         m_anom = _adequate_manifest(
             data_files={
-                "inputs": [{"path": "x.bin", "hash_status": "file_changed"}],
+                "inputs": [
+                    {"path": "x.bin", "hash_status": "file_changed"},
+                    {
+                        "path": "m.csv",
+                        "sha256": "a" * 64,
+                        "caller_digest": {"algorithm": "sha256", "value": "b" * 64, "verified": False},
+                    },
+                ],
                 "outputs": [{"path": "y.bin", "hash_status": "over_budget"}],
                 "mixed": [{"path": "z.bin", "hash_status": "failed"}],
             }
         )
         res_anom = assess_manifest_reproducibility(m_anom)
-        assert _find_by_code(res_anom, "file_hash_changed")["severity"] == "warn"
-        assert _find_by_code(res_anom, "file_hash_over_budget")["severity"] == "info"
-        assert _find_by_code(res_anom, "file_hash_unavailable")["severity"] == "warn"
+        assert _find_by_code(res_anom, "file_provenance_changed")["severity"] == "warn"
+        assert _find_by_code(res_anom, "file_provenance_over_budget")["severity"] == "info"
+        f_hf = _find_by_code(res_anom, "file_provenance_hash_failed")
+        assert f_hf["severity"] == "warn"
+        assert "caller-digest mismatch" in f_hf["message"].lower()
+        io_codes = _category_map(res_anom)["inputs_outputs"]["finding_codes"]
+        assert set(io_codes) == {
+            "file_provenance_changed",
+            "file_provenance_hash_failed",
+            "file_provenance_over_budget",
+        }
 
     def test_capture_completeness_outcomes_section_states_errors_and_determinism(self):
         m = _adequate_manifest(
             status={"outcome": "failed", "exit_code": 1, "capture_state": {"status": "complete"}},
+            git={"capture_state": {"status": "failed", "detail": "git failed"}},
+            packages={"capture_state": {"status": "failed", "detail": "pkg failed"}},
             environment={"variables": [], "capture_state": {"status": "partial", "detail": "truncated"}},
             process={"pid": 1, "capture_state": {"status": "pending"}},
             errors={
-                "records": [{"kind": "capture-error", "type": "OSError", "message": "probe failed"}],
-                "capture_state": {"status": "complete"},
+                "records": [
+                    {"kind": "capture-error", "section": "git", "message": "already failed"},
+                    {"kind": "capture-error", "section": "packages", "message": "already failed"},
+                    {"kind": "capture-error", "section": "subprocesses", "message": "hook err 1"},
+                    {"kind": "capture-error", "section": "subprocesses", "message": "hook err 2"},
+                    {"kind": "capture-error", "section": "Custom-Sec!", "message": "bad probe"},
+                    {"kind": "capture-error", "type": "OSError", "message": "probe failed"},
+                ],
+                "capture_state": {"status": "partial", "detail": "4 additional capture error(s) omitted"},
             },
             determinism={"registered_seeds": [], "capture_state": {"status": "complete"}},
         )
         res = assess_manifest_reproducibility(m, current_hostname="compute-01")
+        codes = [f["code"] for f in res["findings"]]
         assert _find_by_code(res, "run_outcome_incomplete")["severity"] == "warn"
         assert _find_by_code(res, "environment_capture_partial")["severity"] == "warn"
         assert _find_by_code(res, "process_capture_pending")["severity"] == "info"
-        assert _find_by_code(res, "capture_errors_recorded")["severity"] == "warn"
+        assert "capture_errors_recorded" not in codes
+        assert "capture_error_git" not in codes
+        assert "capture_error_packages" not in codes
+        f_sub = _find_by_code(res, "capture_error_subprocesses")
+        assert f_sub["severity"] == "warn"
+        assert "(+1 more)" in f_sub["message"]
+        assert _find_by_code(res, "capture_error_custom_sec")["severity"] == "warn"
+        assert _find_by_code(res, "capture_error_general")["severity"] == "warn"
+        assert codes.count("errors_capture_partial") == 1
+        f_trunc = _find_by_code(res, "errors_capture_partial")
+        assert f_trunc["message"] == "Capture errors list was truncated (4 additional capture error(s) omitted)."
         f_det = _find_by_code(res, "determinism_seeds_not_recorded")
         assert f_det["severity"] == "info"
         assert f_det["evidence_status"] == "not_checked"
+
+        # Tier-0 priority: capture_error_* outranks material non-unavailable WARN (e.g. git_dirty_unrecorded).
+        m_prio = _adequate_manifest(
+            errors={
+                "records": [{"kind": "capture-error", "section": "events", "message": "disk full"}],
+                "capture_state": {"status": "complete"},
+            },
+        )
+        m_prio["git"]["dirty"] = True
+        res_prio = assess_manifest_reproducibility(m_prio, current_hostname="compute-01")
+        err_sugg = _find_by_code(res_prio, "capture_error_events")["suggestion"]
+        dirty_sugg = _find_by_code(res_prio, "git_dirty_unrecorded")["suggestion"]
+        assert res_prio["next_actions"].index(err_sugg) < res_prio["next_actions"].index(dirty_sugg)
 
     def test_invocation_redacted_argv_and_both_env_redaction_forms(self):
         m = _adequate_manifest()
@@ -794,6 +883,165 @@ class TestReproducibilityAssessmentModel:
         assert via_facade == direct
         assert via_checks == direct
         assert checks.manifest_findings(m, current_hostname="login-01") == direct["findings"]
+
+    @pytest.mark.parametrize(
+        "label, overrides, expected_codes",
+        [
+            (
+                "file_provenance_anomalies_and_pending",
+                {
+                    "data_files": {
+                        "inputs": [
+                            {"path": "a.bin", "hash_status": "file_changed", "change_detected": True},
+                            {"path": "b.bin", "hash_status": "over_budget"},
+                            {
+                                "path": "c.csv",
+                                "sha256": "1" * 64,
+                                "caller_digest": {"algorithm": "sha256", "value": "2" * 64, "verified": False},
+                            },
+                            {
+                                "path": "d.csv",
+                                "hash_status": "asserted",
+                                "evidence_source": "asserted",
+                                "caller_digest": {"algorithm": "sha256", "value": "3" * 64, "verified": None},
+                            },
+                        ],
+                        "outputs": [
+                            {"path": "out.bin", "hash_status": "pending", "evidence_strength": "path_only"},
+                        ],
+                        "mixed": [],
+                    }
+                },
+                {
+                    "file_provenance_changed",
+                    "file_provenance_hash_failed",
+                    "file_provenance_over_budget",
+                    "file_provenance_asserted_only",
+                    "file_provenance_unverified_paths",
+                },
+            ),
+            (
+                "failed_and_timed_out_sections_and_capture_errors",
+                {
+                    "git": {"capture_state": {"status": "failed", "detail": "git crash\nline2"}},
+                    "packages": {"capture_state": {"status": "timeout", "detail": "slow importlib"}},
+                    "hardware": {"capture_state": {"status": "failed", "detail": "hw fail " + ("z" * 200)}},
+                    "errors": {
+                        "records": [
+                            {"kind": "capture-error", "section": "git", "message": "deduped"},
+                            {"kind": "capture-error", "section": "events", "message": "write err 1"},
+                            {"kind": "capture-error", "section": "events", "message": "write err 2"},
+                            {"kind": "capture-error", "section": None, "type": "RuntimeError"},
+                        ],
+                        "capture_state": {"status": "partial", "detail": "5 additional capture error(s) omitted"},
+                    },
+                },
+                {
+                    "git_capture_failed",
+                    "packages_timeout",
+                    "hardware_capture_failed",
+                    "capture_error_events",
+                    "capture_error_general",
+                    "errors_capture_partial",
+                },
+            ),
+            (
+                "packages_failed_deduped_against_errors",
+                {
+                    "packages": {"capture_state": {"status": "failed", "detail": "broken metadata"}},
+                    "errors": {
+                        "records": [
+                            {"kind": "capture-error", "section": "packages", "message": "deduped"},
+                        ],
+                        "capture_state": {"status": "complete"},
+                    },
+                },
+                {"packages_capture_failed"},
+            ),
+        ],
+    )
+    def test_four_surface_finding_code_parity(self, tmp_path: Path, label: str, overrides: Dict[str, Any], expected_codes):
+        from pubrun import __main__ as cli
+
+        m = _adequate_manifest(**overrides)
+        manifest_path = str(tmp_path / f"{label}.json")
+
+        direct = assess_manifest_reproducibility(m, current_hostname="compute-01")
+        via_run = assess_run(m, manifest_path=manifest_path, current_hostname="compute-01", preflight=False)
+        via_checks = checks.manifest_findings(m, current_hostname="compute-01")
+        via_cli = cli._assess_cli_run(
+            m,
+            manifest_path=manifest_path,
+            hydration_report=None,
+            current_hostname="compute-01",
+            preflight=False,
+        )
+
+        direct_codes = [f["code"] for f in direct["findings"]]
+        assert [f["code"] for f in via_run["findings"]] == direct_codes
+        assert [f["code"] for f in via_checks] == direct_codes
+        assert [f["code"] for f in via_cli["findings"]] == direct_codes
+        assert via_run == direct
+        assert via_cli == direct
+        assert via_checks == direct["findings"]
+        assert expected_codes.issubset(set(direct_codes))
+
+    def test_capture_error_dedup_partial_truncation_bounded_detail_and_priority(self):
+        long_detail = "probe crashed\nsecond line " + ("x" * 220)
+        m = _adequate_manifest(
+            git={"capture_state": {"status": "failed", "detail": long_detail}},
+            packages={"capture_state": {"status": "failed", "detail": "pkg err"}},
+            hardware={"capture_state": {"status": "failed", "detail": long_detail}},
+            errors={
+                "records": [
+                    {"kind": "capture-error", "section": "git", "message": "dup git"},
+                    {"kind": "capture-error", "section": "packages", "message": "dup pkg"},
+                    {"kind": "capture-error", "section": "hardware", "message": "dup hw"},
+                    {"kind": "capture-error", "section": "subprocesses", "message": "sub err 1"},
+                    {"kind": "capture-error", "section": "subprocesses", "message": "sub err 2"},
+                    {"kind": "capture-error", "section": None, "type": "OSError"},
+                ],
+                "capture_state": {"status": "partial", "detail": "7 additional capture error(s) omitted"},
+            },
+        )
+        res = assess_manifest_reproducibility(m, current_hostname="compute-01")
+        codes = [f["code"] for f in res["findings"]]
+
+        for sec in ("git", "packages", "hardware"):
+            f_sec = _find_by_code(res, f"{sec}_capture_failed")
+            assert f_sec["severity"] == "warn"
+            assert "errors.records" in (f_sec["suggestion"] or "")
+            assert "\n" not in f_sec["message"]
+            assert f"capture_error_{sec}" not in codes
+
+        assert "..." in _find_by_code(res, "git_capture_failed")["message"]
+        assert len(_find_by_code(res, "hardware_capture_failed")["message"]) < 240
+
+        f_sub = _find_by_code(res, "capture_error_subprocesses")
+        assert f_sub["severity"] == "warn"
+        assert "sub err 1" in f_sub["message"]
+        assert "(+1 more)" in f_sub["message"]
+        assert _find_by_code(res, "capture_error_general")["severity"] == "warn"
+        assert "capture_errors_recorded" not in codes
+
+        assert codes.count("errors_capture_partial") == 1
+        assert (
+            _find_by_code(res, "errors_capture_partial")["message"]
+            == "Capture errors list was truncated (7 additional capture error(s) omitted)."
+        )
+
+        # Tier-0 priority: capture_error_* and *_capture_failed outrank material non-unavailable WARN.
+        m_prio = _adequate_manifest(
+            errors={
+                "records": [{"kind": "capture-error", "section": "events", "message": "write err"}],
+                "capture_state": {"status": "complete"},
+            },
+        )
+        m_prio["git"]["dirty"] = True
+        res_prio = assess_manifest_reproducibility(m_prio, current_hostname="compute-01")
+        err_sugg = _find_by_code(res_prio, "capture_error_events")["suggestion"]
+        dirty_sugg = _find_by_code(res_prio, "git_dirty_unrecorded")["suggestion"]
+        assert res_prio["next_actions"].index(err_sugg) < res_prio["next_actions"].index(dirty_sugg)
 
 
 class TestReproducibilityFormattersAndIsolation:

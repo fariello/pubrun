@@ -318,92 +318,6 @@ def _run_methods_aggregate(
             print(f"{Colors.CYAN}{line}{Colors.RESET}" if use_color else line, file=sys.stderr)
 
 
-def _reconcile_cli_file_provenance(manifest: dict, assessment: dict) -> dict:
-    """Reconcile canonical file-provenance finding codes from ``checks.py`` into an assessment.
-
-    Preserves structured finding keys (``category``, ``evidence_status``, ``impact``,
-    ``comparison``, ``details``) and synchronizes the ``inputs_outputs`` category
-    counts so CLI outputs agree across ``inspect`` and ``rerun --preflight`` while
-    honoring canonical ``file_provenance_*`` codes.
-    """
-    from pubrun.report.checks import _apply_file_provenance_findings
-
-    orig_findings = assessment.get("findings")
-    if not isinstance(orig_findings, list):
-        return assessment
-
-    reconciled = _apply_file_provenance_findings(manifest, list(orig_findings))
-    default_ev = {
-        "file_provenance_changed": "observed",
-        "file_provenance_hash_failed": "unavailable",
-        "file_provenance_over_budget": "not_checked",
-        "file_provenance_asserted_only": "asserted",
-        "file_provenance_unverified_paths": "not_checked",
-        "no_file_provenance": "not_checked",
-    }
-    normalized: List[dict] = []
-    for item in reconciled:
-        if not isinstance(item, dict):
-            continue
-        if "category" not in item:
-            code = item.get("code", "")
-            sev = item.get("severity", "info")
-            merged = dict(item)
-            merged["category"] = "inputs_outputs"
-            merged["evidence_status"] = default_ev.get(code, "observed")
-            merged["impact"] = "material" if sev == "warn" else "informational"
-            merged["comparison"] = None
-            merged["details"] = {}
-            normalized.append(merged)
-        else:
-            normalized.append(item)
-
-    assessment["findings"] = normalized
-    categories = assessment.get("categories")
-    io_status_changed = False
-    if isinstance(categories, list):
-        for cat in categories:
-            if isinstance(cat, dict) and cat.get("name") == "inputs_outputs":
-                cat_findings = [f for f in normalized if f.get("category") == "inputs_outputs"]
-                cat["finding_codes"] = [f.get("code") for f in cat_findings if f.get("code")]
-                cat["warn_count"] = sum(1 for f in cat_findings if f.get("severity") == "warn")
-                cat["info_count"] = sum(1 for f in cat_findings if f.get("severity") == "info")
-                if cat["warn_count"] > 0 and cat.get("status") not in ("mismatch", "gaps"):
-                    cat["status"] = "gaps"
-                    cat["summary"] = (
-                        "One or more tracked files had hashing failures or concurrent modifications."
-                    )
-                    io_status_changed = True
-                elif cat["warn_count"] == 0 and cat["info_count"] > 0 and cat.get("status") == "adequate":
-                    cat["status"] = "uncertain"
-                    io_status_changed = True
-                break
-
-    if io_status_changed or len(normalized) != len(orig_findings):
-        from pubrun.report.reproducibility import (
-            _DEFAULT_NEXT_ACTION,
-            _DEFAULT_PREFLIGHT_NEXT_ACTION,
-            _build_summary,
-            _prioritize_next_actions,
-        )
-
-        pf = assessment.get("preflight")
-        is_pf = isinstance(pf, dict) and pf.get("requested") is True
-        next_action, next_actions = _prioritize_next_actions(
-            normalized,
-            default_action=_DEFAULT_PREFLIGHT_NEXT_ACTION if is_pf else _DEFAULT_NEXT_ACTION,
-        )
-        assessment["next_action"] = next_action
-        assessment["next_actions"] = next_actions
-        if isinstance(categories, list):
-            assessment["summary"] = _build_summary(
-                categories,
-                normalized,
-                preflight=pf if is_pf else None,
-            )
-    return assessment
-
-
 def _assess_cli_run(
     hydrated_manifest: dict,
     *,
@@ -412,17 +326,16 @@ def _assess_cli_run(
     current_hostname: Optional[str],
     preflight: bool,
 ) -> dict:
-    """Run the shared reproducibility engine for CLI commands with file-provenance reconciliation."""
+    """Run the shared reproducibility engine for CLI commands."""
     from pubrun.report.checks import assess_run
 
-    assessment = assess_run(
+    return assess_run(
         hydrated_manifest,
         manifest_path=manifest_path,
         hydration_report=hydration_report,
         current_hostname=current_hostname,
         preflight=preflight,
     )
-    return _reconcile_cli_file_provenance(hydrated_manifest, assessment)
 
 
 def _format_rerun_cmd_for_platform(rerun_cmd: str) -> str:

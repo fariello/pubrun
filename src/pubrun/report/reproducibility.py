@@ -22,7 +22,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pubrun.report.utils import HYDRABLE_SECTIONS, HydrationReport
 
@@ -180,6 +180,9 @@ def _capture_state_status(section: Any) -> Optional[str]:
     return None
 
 
+_MAX_DETAIL_LEN: int = 160
+
+
 def _capture_state_detail(section: Any) -> Optional[str]:
     """Safely extract ``section['capture_state']['detail']`` when present."""
     if isinstance(section, dict):
@@ -189,6 +192,26 @@ def _capture_state_detail(section: Any) -> Optional[str]:
             if isinstance(detail, str) and detail.strip():
                 return detail.strip()
     return None
+
+
+def _bound_detail(text: Any, max_len: int = _MAX_DETAIL_LEN) -> str:
+    """Collapse whitespace to a single line and bound detail length."""
+    if not isinstance(text, str):
+        return ""
+    cleaned = " ".join(text.split())
+    if not cleaned:
+        return ""
+    if len(cleaned) <= max_len:
+        return cleaned
+    return cleaned[: max(0, max_len - 3)].rstrip() + "..."
+
+
+def _normalize_error_section(raw: Any) -> str:
+    """Normalize an ``errors.records`` section name into a finding-code suffix."""
+    if not isinstance(raw, str):
+        return "general"
+    normalized = re.sub(r"[^a-z0-9_]+", "_", raw.strip().lower()).strip("_")
+    return normalized or "general"
 
 
 def _unwrap_hostname(raw_hostname: Any) -> Optional[str]:
@@ -273,7 +296,7 @@ def _assess_source(
             )
         )
     elif git_status == "timeout":
-        detail = _capture_state_detail(git_dict)
+        detail = _bound_detail(_capture_state_detail(git_dict))
         suffix = f" ({detail})" if detail else ""
         findings.append(
             _make_finding(
@@ -288,14 +311,14 @@ def _assess_source(
             )
         )
     elif git_status == "failed":
-        detail = _capture_state_detail(git_dict)
+        detail = _bound_detail(_capture_state_detail(git_dict))
         suffix = f" ({detail})" if detail else ""
         findings.append(
             _make_finding(
                 WARN,
-                "git_failed",
-                f"Git provenance capture failed{suffix}; source commit and dirty state are unavailable.",
-                "Verify `git` is working in the repository so source provenance can be recorded.",
+                "git_capture_failed",
+                f"Section 'git' capture failed{suffix}.",
+                "Inspect `errors.records` in manifest.json and diagnostic logs for `git` capture failures.",
                 category="source",
                 evidence_status="unavailable",
                 impact="material",
@@ -303,7 +326,7 @@ def _assess_source(
             )
         )
     elif git_status == "partial":
-        detail = _capture_state_detail(git_dict)
+        detail = _bound_detail(_capture_state_detail(git_dict))
         suffix = f" ({detail})" if detail else ""
         findings.append(
             _make_finding(
@@ -318,7 +341,7 @@ def _assess_source(
             )
         )
     elif git_status == "unavailable":
-        detail = _capture_state_detail(git_dict)
+        detail = _bound_detail(_capture_state_detail(git_dict))
         suffix = f" ({detail})" if detail else ""
         findings.append(
             _make_finding(
@@ -609,7 +632,7 @@ def _assess_dependencies(
             )
         )
     elif pkg_status == "partial":
-        detail = _capture_state_detail(pkg_dict)
+        detail = _bound_detail(_capture_state_detail(pkg_dict))
         suffix = f" ({detail})" if detail else ""
         findings.append(
             _make_finding(
@@ -623,23 +646,38 @@ def _assess_dependencies(
                 details={"detail": detail} if detail else {},
             )
         )
-    elif pkg_status in ("failed", "timeout"):
-        detail = _capture_state_detail(pkg_dict)
+    elif pkg_status == "failed":
+        detail = _bound_detail(_capture_state_detail(pkg_dict))
         suffix = f" ({detail})" if detail else ""
         findings.append(
             _make_finding(
                 WARN,
-                "packages_failed",
-                f"Package inventory capture {pkg_status}{suffix}; dependency versions are unavailable.",
+                "packages_capture_failed",
+                f"Section 'packages' capture failed{suffix}.",
+                "Inspect `errors.records` in manifest.json and diagnostic logs for `packages` capture failures.",
+                category="dependencies",
+                evidence_status="unavailable",
+                impact="material",
+                details={"status": "failed", "detail": detail or None},
+            )
+        )
+    elif pkg_status == "timeout":
+        detail = _bound_detail(_capture_state_detail(pkg_dict))
+        suffix = f" ({detail})" if detail else ""
+        findings.append(
+            _make_finding(
+                WARN,
+                "packages_timeout",
+                f"Package inventory capture timed out{suffix}; dependency versions are unavailable.",
                 "Inspect environment metadata health and re-capture package versions.",
                 category="dependencies",
                 evidence_status="unavailable",
                 impact="material",
-                details={"status": pkg_status, "detail": detail},
+                details={"status": "timeout", "detail": detail or None},
             )
         )
     elif pkg_status == "unavailable":
-        detail = _capture_state_detail(pkg_dict)
+        detail = _bound_detail(_capture_state_detail(pkg_dict))
         suffix = f" ({detail})" if detail else ""
         findings.append(
             _make_finding(
@@ -803,18 +841,65 @@ def _record_is_asserted(rec: Dict[str, Any]) -> bool:
     return isinstance(caller_digest, dict) and bool(caller_digest.get("value")) and not has_observed_digest
 
 
-def _record_has_observed_digest(rec: Dict[str, Any]) -> bool:
-    """Return True when a file provenance record carries an observed content hash."""
-    if _record_is_asserted(rec):
-        return False
-    if isinstance(rec.get("sha256"), str) and rec["sha256"]:
+def _is_caller_digest_mismatch(rec: Dict[str, Any]) -> bool:
+    """Return True when a record indicates a verified caller digest mismatched content."""
+    if rec.get("hash_status_detail") == "caller_digest_mismatch":
         return True
-    digest = rec.get("digest")
-    if isinstance(digest, dict) and isinstance(digest.get("value"), str) and digest["value"]:
-        return True
-    if isinstance(rec.get("md5"), str) and rec["md5"]:
+    caller_digest = rec.get("caller_digest")
+    if isinstance(caller_digest, dict) and caller_digest.get("verified") is False:
         return True
     return False
+
+
+def _has_nonempty_digest_value(rec: Dict[str, Any]) -> bool:
+    """Return True when a record carries a non-empty digest, sha256, or md5 value."""
+    digest = rec.get("digest")
+    if isinstance(digest, dict):
+        val = digest.get("value")
+        if isinstance(val, str) and val.strip():
+            return True
+    sha256 = rec.get("sha256")
+    if isinstance(sha256, str) and sha256.strip():
+        return True
+    md5 = rec.get("md5")
+    if isinstance(md5, str) and md5.strip():
+        return True
+    return False
+
+
+def _classify_file_record(rec: Dict[str, Any]) -> str:
+    """Classify a single ``data_files`` record by evidence strength and hashing outcome."""
+    hash_status = rec.get("hash_status")
+    evidence_strength = rec.get("evidence_strength")
+    evidence_source = rec.get("evidence_source")
+
+    if hash_status == "file_changed" or rec.get("change_detected") is True:
+        return "changed"
+    if hash_status == "failed" or _is_caller_digest_mismatch(rec):
+        return "failed"
+    if hash_status == "unavailable":
+        return "unavailable"
+    if hash_status == "over_budget":
+        return "over_budget"
+    if hash_status == "completed" or evidence_strength == "verified_content":
+        return "verified" if _has_nonempty_digest_value(rec) else "identified_only"
+    if (
+        hash_status == "asserted"
+        or evidence_strength == "asserted_content"
+        or evidence_source == "asserted"
+    ):
+        return "asserted"
+    if hash_status == "pending":
+        return "pending"
+    if hash_status == "disabled" or evidence_strength in ("metadata_only", "path_only"):
+        return "identified_only"
+    if hash_status is None and evidence_strength is None and evidence_source is None:
+        return "verified" if _has_nonempty_digest_value(rec) else "identified_only"
+    if evidence_strength == "unavailable":
+        return "unavailable"
+    if evidence_strength == "changed_unverified":
+        return "changed"
+    return "identified_only"
 
 
 def _assess_inputs_outputs(
@@ -841,10 +926,10 @@ def _assess_inputs_outputs(
                 INFO,
                 "no_file_provenance",
                 "no file-I/O provenance was recorded - pubrun does NOT patch open() "
-                "globally, so file reads/writes are only recorded if the script calls "
-                "`pubrun.open()` (or `pubrun.subprocess`).",
-                "Use `pubrun.open(...)` in place of `open(...)` to record input/output "
-                "files (path + hash).",
+                "globally, so files are recorded only via `pubrun.open()`, "
+                "`pubrun.register_input()`, `pubrun.register_output()`, or `pubrun.register_file()`.",
+                "Use `pubrun.open(...)` or register external files with "
+                "`pubrun.register_input(...)` / `pubrun.register_output(...)` to record input/output provenance.",
                 category="inputs_outputs",
                 evidence_status="not_checked",
                 impact="informational",
@@ -861,12 +946,15 @@ def _assess_inputs_outputs(
             "info_count": 1,
         }
 
-    observed_hashed_count = 0
-    asserted_count = 0
-    stat_only_count = 0
+    verified_count = 0
     changed_count = 0
+    failed_count = 0
+    unavailable_count = 0
+    mismatch_count = 0
     over_budget_count = 0
-    failed_hash_count = 0
+    asserted_count = 0
+    identified_only_count = 0
+    pending_unverified_count = 0
 
     if not all_df and inv_inputs:
         findings.append(
@@ -899,84 +987,130 @@ def _assess_inputs_outputs(
             )
     else:
         for rec in all_df:
-            hash_status = rec.get("hash_status")
-            if hash_status == "file_changed" or rec.get("change_detected") is True:
+            cls = _classify_file_record(rec)
+            is_unverified_asserted = (
+                cls == "asserted"
+                or (
+                    rec.get("evidence_source") == "asserted"
+                    and rec.get("hash_status") != "completed"
+                )
+            )
+            if cls == "verified":
+                verified_count += 1
+            elif cls == "changed":
                 changed_count += 1
-            elif hash_status == "over_budget":
+            elif cls == "failed":
+                failed_count += 1
+                if _is_caller_digest_mismatch(rec):
+                    mismatch_count += 1
+            elif cls == "unavailable":
+                unavailable_count += 1
+            elif cls == "over_budget":
                 over_budget_count += 1
-            elif hash_status in ("failed", "unavailable"):
-                failed_hash_count += 1
-            elif _record_is_asserted(rec):
+            elif cls == "pending":
+                if not is_unverified_asserted:
+                    pending_unverified_count += 1
+            elif cls == "identified_only":
+                if not is_unverified_asserted:
+                    identified_only_count += 1
+
+            if is_unverified_asserted:
                 asserted_count += 1
-            elif _record_has_observed_digest(rec):
-                observed_hashed_count += 1
-            else:
-                if rec.get("entry_type") not in ("directory", "unsupported_remote_uri"):
-                    stat_only_count += 1
 
         if changed_count > 0:
             findings.append(
                 _make_finding(
                     WARN,
-                    "file_hash_changed",
-                    f"{changed_count} tracked file(s) changed while hashing or during capture; recorded content digest may not match the bytes consumed.",
-                    "Avoid mutating input or output files concurrently while a tracked run is hashing them.",
+                    "file_provenance_changed",
+                    f"{changed_count} tracked file(s) changed between access and hashing; recorded content evidence is unverified.",
+                    "Avoid mutating tracked input or output files while a run is reading or hashing them.",
                     category="inputs_outputs",
                     evidence_status="observed",
                     impact="material",
                     details={"count": changed_count},
                 )
             )
-        if failed_hash_count > 0:
+
+        failed_or_unavail = failed_count + unavailable_count
+        if failed_or_unavail > 0:
+            mismatch_note = (
+                f" (including {mismatch_count} caller-digest mismatch(es))"
+                if mismatch_count > 0
+                else ""
+            )
             findings.append(
                 _make_finding(
                     WARN,
-                    "file_hash_unavailable",
-                    f"Content hashing failed or the file was unavailable for {failed_hash_count} tracked file(s).",
-                    "Ensure tracked files remain readable until capture finalizes.",
+                    "file_provenance_hash_failed",
+                    f"Content hashing failed or target was unavailable for {failed_or_unavail} tracked file(s){mismatch_note}.",
+                    "Inspect `data_files` `hash_status_detail` in manifest.json and verify target readability or caller-supplied digests.",
                     category="inputs_outputs",
                     evidence_status="unavailable",
                     impact="material",
-                    details={"count": failed_hash_count},
+                    details={
+                        "count": failed_or_unavail,
+                        "mismatch_count": mismatch_count,
+                    },
                 )
             )
+
         if over_budget_count > 0:
             findings.append(
                 _make_finding(
                     INFO,
-                    "file_hash_over_budget",
-                    f"{over_budget_count} tracked file(s) exceeded the hashing size or time budget; content hashes are not checked.",
-                    "Increase `[capture.file_io]` hash budget limits or register verified external digests if full content hashing is required.",
+                    "file_provenance_over_budget",
+                    f"{over_budget_count} tracked file(s) exceeded the hashing size or time budget and were not content-hashed.",
+                    "Increase `[capture.file_io]` budget limits or supply verified external digests if content verification is required.",
                     category="inputs_outputs",
                     evidence_status="not_checked",
                     impact="informational",
                     details={"count": over_budget_count},
                 )
             )
+
         if asserted_count > 0:
             findings.append(
                 _make_finding(
                     INFO,
                     "file_provenance_asserted_only",
-                    f"{asserted_count} tracked file(s) carry caller-asserted digests rather than pubrun-observed content hashes.",
-                    "Hash files directly with `pubrun.open()` or verify asserted digests before relying on content equality.",
+                    f"{asserted_count} tracked file(s) carry caller-asserted digests that were not independently verified by pubrun.",
+                    "Pass `verify_digest=True` to `pubrun.register_input()` / `pubrun.register_output()` or hash with `pubrun.open()` for verified content evidence.",
                     category="inputs_outputs",
                     evidence_status="asserted",
                     impact="informational",
                     details={"count": asserted_count},
                 )
             )
-        if stat_only_count > 0:
+
+        unverified_total = identified_only_count + pending_unverified_count
+        if unverified_total > 0:
+            if identified_only_count > 0 and pending_unverified_count > 0:
+                unverified_msg = (
+                    f"{unverified_total} tracked file(s) lack verified content hashes "
+                    f"({identified_only_count} path/metadata-only, {pending_unverified_count} pending output(s))."
+                )
+            elif pending_unverified_count > 0:
+                unverified_msg = (
+                    f"{pending_unverified_count} tracked output file(s) remain pending without verified content hashes."
+                )
+            else:
+                unverified_msg = (
+                    f"{identified_only_count} tracked file(s) recorded path or stat metadata only without verified content hashes."
+                )
             findings.append(
                 _make_finding(
                     INFO,
-                    "file_provenance_unhashed",
-                    f"{stat_only_count} tracked file(s) recorded stat metadata only (size/mtime); content hash is not checked.",
-                    'Set `[capture.file_io].level = "hash"` to record SHA-256 content digests for tracked files.',
+                    "file_provenance_unverified_paths",
+                    unverified_msg,
+                    'Set `[capture.file_io].level = "hash"` or pass `level="hash"` to `pubrun.register_input()` / `pubrun.register_output()` to record content hashes.',
                     category="inputs_outputs",
                     evidence_status="not_checked",
                     impact="informational",
-                    details={"count": stat_only_count},
+                    details={
+                        "count": unverified_total,
+                        "identified_only_count": identified_only_count,
+                        "pending_count": pending_unverified_count,
+                    },
                 )
             )
 
@@ -993,7 +1127,8 @@ def _assess_inputs_outputs(
     else:
         cat_status = "adequate"
 
-    if observed_hashed_count > 0:
+    failed_hash_count = failed_count + unavailable_count
+    if verified_count > 0:
         cat_ev = "observed"
     elif asserted_count > 0:
         cat_ev = "asserted"
@@ -1001,21 +1136,21 @@ def _assess_inputs_outputs(
         cat_ev = "inferred"
     elif failed_hash_count > 0:
         cat_ev = "unavailable"
-    elif stat_only_count > 0:
+    elif identified_only_count > 0:
         cat_ev = "observed"
     else:
         cat_ev = "not_checked"
 
     if cat_status == "adequate":
-        cat_summary = f"Observed content digests recorded for {observed_hashed_count} tracked file(s)."
+        cat_summary = f"Observed content digests recorded for {verified_count} tracked file(s)."
     elif warn_count > 0:
         cat_summary = "One or more tracked files had hashing failures or concurrent modifications."
     elif not all_df and inv_inputs:
         cat_summary = f"Only argv-inferred paths ({len(inv_inputs)}) were recorded without `pubrun.open()` provenance."
-    elif asserted_count > 0 and observed_hashed_count == 0:
+    elif asserted_count > 0 and verified_count == 0:
         cat_summary = f"{asserted_count} file(s) carry caller-asserted digests rather than observed hashes."
     else:
-        cat_summary = "Tracked file provenance is partially unhashed (stat-only or over-budget)."
+        cat_summary = "Tracked file provenance is partially unhashed (stat-only, pending, or over-budget)."
 
     return findings, {
         "name": "inputs_outputs",
@@ -1166,25 +1301,48 @@ def _assess_capture_completeness(
         )
 
     # 5. Scan remaining top-level sections for failed/timeout/partial/pending capture_state.
-    # git and packages have dedicated findings in their owning categories.
+    # git and packages have dedicated findings in their owning categories, but still
+    # participate in failed-section deduplication for errors.records below.
     _dedicated_capture_sections = frozenset(("git", "packages"))
+    failed_sections: Set[str] = set()
     for sec_name, sec_val in manifest.items():
         if not isinstance(sec_val, dict):
             continue
         st = _capture_state_status(sec_val)
+        if st == "failed":
+            failed_sections.add(_normalize_error_section(sec_name))
         if st in ("failed", "timeout", "partial") and sec_name not in _dedicated_capture_sections:
-            detail = _capture_state_detail(sec_val)
+            detail = _bound_detail(_capture_state_detail(sec_val))
             suffix = f" ({detail})" if detail else ""
+            if st == "failed":
+                msg = f"Section '{sec_name}' capture failed{suffix}."
+                sugg = (
+                    f"Inspect `errors.records` in manifest.json and diagnostic logs "
+                    f"for `{sec_name}` capture failures."
+                )
+            elif sec_name == "errors" and st == "partial":
+                msg = (
+                    f"Capture errors list was truncated ({detail})."
+                    if detail
+                    else "Section 'errors' capture ended with status 'partial'."
+                )
+                sugg = "Inspect diagnostic logs for additional omitted capture errors."
+            else:
+                msg = f"Section '{sec_name}' capture ended with status '{st}'{suffix}."
+                sugg = (
+                    f"Inspect errors or configuration for `{sec_name}` capture "
+                    "so provenance is complete."
+                )
             findings.append(
                 _make_finding(
                     WARN,
                     f"{sec_name}_capture_{st}",
-                    f"Section '{sec_name}' capture ended with status '{st}'{suffix}.",
-                    f"Inspect errors or configuration for `{sec_name}` capture so provenance is complete.",
+                    msg,
+                    sugg,
                     category="capture_completeness",
                     evidence_status="unavailable",
                     impact="material",
-                    details={"section": sec_name, "status": st, "detail": detail},
+                    details={"section": sec_name, "status": st, "detail": detail or None},
                 )
             )
         elif st == "pending":
@@ -1201,27 +1359,54 @@ def _assess_capture_completeness(
                 )
             )
 
-    # 6. Optional errors.records capture-error entries (defensive tolerance for x21s6w).
+    # 6. Per-section deduplicated errors.records capture-error entries.
     errors_sec = manifest.get("errors")
     if isinstance(errors_sec, dict) and isinstance(errors_sec.get("records"), list):
         cap_errors = [
-            e
-            for e in errors_sec["records"]
-            if isinstance(e, dict) and e.get("kind") == "capture-error"
+            rec
+            for rec in errors_sec["records"]
+            if isinstance(rec, dict) and rec.get("kind") == "capture-error"
         ]
         if cap_errors:
-            findings.append(
-                _make_finding(
-                    WARN,
-                    "capture_errors_recorded",
-                    f"{len(cap_errors)} capture-error record(s) were logged during provenance capture.",
-                    "Inspect `errors.records` in the manifest to identify which capture probes failed.",
-                    category="capture_completeness",
-                    evidence_status="observed",
-                    impact="material",
-                    details={"count": len(cap_errors)},
+            grouped: Dict[str, Tuple[str, int]] = {}
+            for rec in cap_errors:
+                sec_key = _normalize_error_section(rec.get("section"))
+                if sec_key in failed_sections:
+                    continue
+                raw_msg = rec.get("message")
+                if not isinstance(raw_msg, str) or not raw_msg.strip():
+                    raw_msg = rec.get("type")
+                bounded = _bound_detail(raw_msg) or "capture error"
+                if sec_key in grouped:
+                    first_msg, count = grouped[sec_key]
+                    grouped[sec_key] = (first_msg, count + 1)
+                else:
+                    grouped[sec_key] = (bounded, 1)
+
+            existing_codes = {f["code"] for f in findings}
+            for sec_key, (first_msg, count) in grouped.items():
+                code = f"capture_error_{sec_key}"
+                if code in existing_codes:
+                    continue
+                count_suffix = f" (+{count - 1} more)" if count > 1 else ""
+                findings.append(
+                    _make_finding(
+                        WARN,
+                        code,
+                        f"Capture error recorded for '{sec_key}': {first_msg}{count_suffix}.",
+                        "Inspect `errors.records` in manifest.json and diagnostic logs "
+                        "for capture failure details.",
+                        category="capture_completeness",
+                        evidence_status="observed",
+                        impact="material",
+                        details={
+                            "section": sec_key,
+                            "count": count,
+                            "detail": first_msg,
+                        },
+                    )
                 )
-            )
+                existing_codes.add(code)
 
     # 7. Import mode subprocess patching permission (preserves checks.py).
     imports = manifest.get("pubrun_imports")
@@ -1810,7 +1995,11 @@ def _finding_action_priority(finding: Dict[str, Any]) -> Tuple[int, int, str]:
     except ValueError:
         cat_idx = len(CATEGORY_ORDER)
 
-    if severity == WARN and (ev == "unavailable" or code == "capture_errors_recorded"):
+    if severity == WARN and (
+        ev == "unavailable"
+        or code.startswith("capture_error_")
+        or code.endswith("_capture_failed")
+    ):
         tier = 0
     elif severity == WARN and (impact == "material" or comparison == "mismatch"):
         tier = 1
