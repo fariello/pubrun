@@ -1,5 +1,5 @@
 - Id: 86p7x3
-- Status: graduated
+- Status: done
 - Graduated-To: 86p7x3
 - Set: bugs-audit
 - Work-Kind: followup
@@ -10,6 +10,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-24 done (aw backlog): closed by aw agy run: IPD focjwv executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261123-86p7x3-01-focjwv-handle-popen-children-reaped-via-subprocess-internals-or-lef.ipd.md); evidence .aw/records/plans/executed/20261123-86p7x3-01-focjwv-handle-popen-children-reaped-via-subprocess-internals-or-lef.ipd.md
 - 2026-11-24 graduated (aw set): Graduated to review-ready IPD focjwv (Set: 86p7x3)
 - 2026-11-22 created (aw backlog): SubprocessSpy records no exit for a Popen child reaped only by subprocess internals (_cleanup/__del__ via _internal_poll) or never waited, so such records stay exit_code None
 
