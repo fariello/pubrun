@@ -6,7 +6,7 @@
 - Scope: Update `docs/functional_spec.md` and `docs/architecture.md` to match the multi-file boot configuration search order, the malformed-file fallthrough, and the accepted `PUBRUN_AUTO_START` values implemented in `src/pubrun/_config_boot.py` (landed in `l7ko8p` and `2e6xfq`).
 - Scope-Paths: docs/functional_spec.md, docs/architecture.md
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Work-Kind: followup
@@ -17,11 +17,13 @@
 - Highest E allocated: 02
 - Author: Antigravity
 - Id: mspqm6
+- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 approved (aw set): status set to approved
 - 2026-11-24 /plan-review (uri/its_direct/pt3-claude-opus-5.5-1m-us): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-24 to-review (Antigravity): graduated from backlog item `2rhs16` into a review-ready plan.
 - 2026-11-24 draft (Antigravity): created.

@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/__main__.py`, `src/pubrun/tui/widgets/actions.py`, `src/pubrun/tui/widgets/diff.py`, `src/pubrun/report/reproducibility.py`, `pyproject.toml`, `.github/workflows/ci.yml`, new `tests/test_type_repair_regressions.py`, and the contributor documentation (`CONTRIBUTING.md`, `CHANGELOG.md`).
 - Scope-Paths: src/pubrun/__main__.py, src/pubrun/tui/widgets/actions.py, src/pubrun/tui/widgets/diff.py, src/pubrun/report/reproducibility.py, pyproject.toml, .github/workflows/ci.yml, tests/test_type_repair_regressions.py, CONTRIBUTING.md, CHANGELOG.md
 - Item-Dependencies: executed:bzi46m
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix the duplicate-module import in __main__.py, fix type errors in four modules, configure a [tool.mypy] ratchet, and add a blocking CI mypy job
@@ -17,11 +17,13 @@
 - Highest E allocated: 07
 - Author: Antigravity
 - Id: gzc672
+- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (uri/its_direct/pt3-claude-opus-5.5-1m-us): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012, PR-013, PR-014, PR-015
 - 2026-11-23 to-review (Antigravity): authored from `/assess-testing` finding T-05 (serialized after `bzi46m` for `pyproject.toml` and `.github/workflows/ci.yml`).
 - 2026-11-23 draft (Antigravity): created.

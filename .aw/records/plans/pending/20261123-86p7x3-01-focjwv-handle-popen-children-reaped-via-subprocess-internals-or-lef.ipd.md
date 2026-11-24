@@ -6,7 +6,7 @@
 - Scope: Record the exit code of a `subprocess.Popen` child that the host never waits on or polls, when pubrun can observe it through public attributes (`Popen.returncode`, `Popen.poll()`, a patched `Popen.__del__`) without patching the private `Popen._internal_poll`. Record `capture_state.status = "partial"` with a `detail` for a child whose exit pubrun did not observe by `SubprocessSpy.finalize_all`. Update tests, the user-facing docs that describe the spy, and `CHANGELOG.md`.
 - Scope-Paths: src/pubrun/capture/subprocesses.py, tests/test_capture.py, docs/manifest.md, docs/functional_spec.md, docs/architecture.md, docs/api.md, CHANGELOG.md
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Work-Kind: followup
@@ -17,11 +17,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: focjwv
+- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 approved (aw set): status set to approved
 - 2026-11-24 /plan-review (uri/its_direct/pt3-claude-opus-5.5-1m-us): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007, PR-008, PR-009
 - 2026-11-24 to-review (Antigravity): graduated from backlog item `86p7x3` into a review-ready plan.
 - 2026-11-24 draft (Antigravity): created.

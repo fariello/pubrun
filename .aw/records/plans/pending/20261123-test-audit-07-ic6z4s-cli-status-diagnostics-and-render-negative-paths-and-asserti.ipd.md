@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/capture/liveness.py`, `src/pubrun/__main__.py`, `CHANGELOG.md`, `tests/test_cli.py`, `tests/test_status.py`, `tests/test_reports.py`, `tests/test_render.py`, `tests/test_combined.py`, `tests/test_report_subpackage_integrity.py`, and new `tests/test_cli_negative_paths.py`.
 - Scope-Paths: src/pubrun/capture/liveness.py, src/pubrun/__main__.py, CHANGELOG.md, tests/test_cli.py, tests/test_status.py, tests/test_reports.py, tests/test_render.py, tests/test_combined.py, tests/test_report_subpackage_integrity.py, tests/test_cli_negative_paths.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Keep live python -m runs from being cleaned, stop the --create-config EOF traceback, and replace weak CLI/status/report/render assertions and fixtures with exact, deterministic tests
@@ -17,11 +17,13 @@
 - Highest E allocated: 18
 - Author: Antigravity
 - Id: ic6z4s
+- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (uri/its_direct/pt3-claude-opus-5.5-1m-us): APPROVE WITH REVISIONS APPLIED; PR-001..PR-020 fixed (PR-001 live `python -m` run cleaned: E-06; PR-004 `--create-config` EOF traceback: E-07); review record `.aw/records/reviews/20261123-test-audit-07-ic6z4s-cli-status-diagnostics-and-render-negative-paths-and-asserti.review.md`.
 - 2026-11-23 to-review (Antigravity): authored from `/assess-testing` findings T-08 (`test_status.py`), T-14, and T-15.
 - 2026-11-23 draft (Antigravity): created.

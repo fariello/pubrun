@@ -6,7 +6,7 @@
 - Scope: `tests/test_capture_engines.py`, `tests/test_tracker.py`, `tests/test_quality.py`, `tests/test_new_features.py`, `tests/test_capture.py`, `tests/test_api.py`, `tests/test_manifest_schema.py`, and `tests/test_methods_multi.py`.
 - Scope-Paths: tests/test_capture_engines.py, tests/test_tracker.py, tests/test_quality.py, tests/test_new_features.py, tests/test_capture.py, tests/test_api.py, tests/test_manifest_schema.py, tests/test_methods_multi.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Remove bug-masking skips and repair zero-assertion, vacuous, and tautological tests across core and schema suites
@@ -17,11 +17,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: g18xdt
+- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (uri/its_direct/pt3-claude-opus-5.5-1m-us): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007, PR-008, PR-009, PR-010, PR-011
 - 2026-11-23 to-review (Antigravity): authored from `/assess-testing` findings T-08 (schema/methods) and T-09.
 - 2026-11-23 draft (Antigravity): created.

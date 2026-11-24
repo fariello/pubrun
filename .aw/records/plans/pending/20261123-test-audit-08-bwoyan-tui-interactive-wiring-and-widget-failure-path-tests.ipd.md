@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/tui/widgets/details.py`, `src/pubrun/tui/widgets/actions.py`, `src/pubrun/tui/widgets/config.py`, `CHANGELOG.md`, and new `tests/test_tui_widgets.py`.
 - Scope-Paths: src/pubrun/tui/widgets/details.py, src/pubrun/tui/widgets/actions.py, src/pubrun/tui/widgets/config.py, CHANGELOG.md, tests/test_tui_widgets.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix TUI git-pane crash and markup loss, Archive crash and silent no-op, and invalid TOML from Save Settings; add Textual Pilot tests for TUI wiring and widget failure paths
@@ -17,11 +17,13 @@
 - Highest E allocated: 18
 - Author: Antigravity
 - Id: bwoyan
+- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (uri/its_direct/pt3-claude-opus-5.5-1m-us): APPROVE WITH REVISIONS APPLIED; PR-001..PR-018 fixed (PR-001 git pane crash and PR-002 markup loss: E-06; PR-003 Archive crash and silent no-op: E-07; PR-004 Save Settings writes unloadable TOML: E-08); review record `.aw/records/reviews/20261123-test-audit-08-bwoyan-tui-interactive-wiring-and-widget-failure-path-tests.review.md`.
 - 2026-11-23 to-review (Antigravity): authored from `/assess-testing` findings T-16 and T-17.
 - 2026-11-23 draft (Antigravity): created.

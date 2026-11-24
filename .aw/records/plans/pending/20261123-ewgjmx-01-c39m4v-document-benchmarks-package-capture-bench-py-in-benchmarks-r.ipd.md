@@ -6,7 +6,7 @@
 - Scope: Add a design bullet and a running subsection in `benchmarks/README.md` documenting `benchmarks/package_capture_bench.py`, its CLI flags, measurement profiles/modes, cold-versus-warm methodology, and local redacted output.
 - Scope-Paths: benchmarks/README.md
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Work-Kind: chore
@@ -17,11 +17,13 @@
 - Highest E allocated: 02
 - Author: Antigravity
 - Id: c39m4v
+- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 approved (aw set): status set to approved
 - 2026-11-24 /plan-review (uri/its_direct/pt3-claude-opus-5.5-1m-us): APPROVE WITH REVISIONS APPLIED; PR-001..PR-007 fixed (PR-001 `--json-out` example path is not a share-safe or aggregatable result; PR-002 validation could not catch a missing flag, mode, profile, or schema string); review record `.aw/records/reviews/20261123-ewgjmx-01-c39m4v-document-benchmarks-package-capture-bench-py-in-benchmarks-r.review.md`.
 - 2026-11-24 draft (Antigravity): created.
 - 2026-11-24 to-review (Antigravity): graduated from backlog item `ewgjmx` into a review-ready plan.

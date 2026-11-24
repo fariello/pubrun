@@ -6,7 +6,7 @@
 - Scope: Emit canonical file-provenance, section capture-failure, and per-section capture-error finding codes directly from `src/pubrun/report/reproducibility.py`, remove the reconciliation bridges in `src/pubrun/report/checks.py` and `src/pubrun/__main__.py`, and align tests across `tests/`.
 - Scope-Paths: src/pubrun/report/reproducibility.py, src/pubrun/report/checks.py, src/pubrun/__main__.py, tests/test_reproducibility_assessment.py, tests/test_checks_commands.py, tests/test_report_checks_bugs.py, tests/test_reproducibility_e2e.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Work-Kind: followup
@@ -17,11 +17,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: nasg1q
+- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 approved (aw set): status set to approved
 - 2026-11-24 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-24 to-review (Antigravity): graduated from backlog item `bjgca2` into a review-ready plan.
 - 2026-11-24 draft (Antigravity): created.
