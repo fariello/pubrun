@@ -56,6 +56,11 @@ _SELECT_OPTIONS: Dict[str, List[Any]] = {
     "cfg-redact-repr": [("Redacted [REDACTED]", "redacted"), ("Hashed (SHA-256)", "hashed")],
 }
 
+def _toml_scalar_or_list(value: Any) -> str:
+    """Return a string or list as TOML, escaping quotes, backslashes, and control characters."""
+    return json.dumps(value, ensure_ascii=False).replace("\x7f", "\\u007f")
+
+
 def dict_to_toml(d: dict, prefix: str = "") -> str:
     """Zero-dependency recursive TOML serializer for simple nested dict configurations."""
     lines = []
@@ -68,11 +73,9 @@ def dict_to_toml(d: dict, prefix: str = "") -> str:
             elif isinstance(v, (int, float)):
                 val_str = str(v)
             elif isinstance(v, str):
-                # Double escape backslashes and quotes in strings
-                escaped = v.replace("\\", "\\\\").replace('"', '\\"')
-                val_str = f'"{escaped}"'
+                val_str = _toml_scalar_or_list(v)
             elif isinstance(v, list):
-                val_str = json.dumps(v)
+                val_str = _toml_scalar_or_list(v)
             else:
                 val_str = f'"{str(v)}"'
             lines.append(f"{k} = {val_str}")

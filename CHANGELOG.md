@@ -112,6 +112,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **`pubrun ui` run details pane handles null or plain-string `git.remote_url` and escapes Git markup.**
+  Selecting a run whose manifest stores `git.remote_url` as `null` or as a plain string, or whose
+  `git` section is not an object, no longer closes the TUI. Commit hashes, branch names, remote
+  URLs, and working directories are now escaped before rendering so bracketed text appears
+  literally and redacted remote URLs keep their `[REDACTED]` marker.
+- **`pubrun ui` Archive action reports errors instead of closing the TUI or returning silently.**
+  When the `archive` folder cannot be created, pressing Archive in the Actions tab now displays an
+  error notification and keeps the TUI running instead of exiting. When the selected run directory
+  was removed after selection, Archive now reports an error notification instead of doing nothing.
+- **`pubrun ui` Save Settings writes valid TOML for control characters and non-BMP characters.**
+  Saving settings now serializes string and list values containing newlines, control characters,
+  or characters outside the Basic Multilingual Plane (such as emoji) as valid TOML so pubrun can
+  load `.pubrun.toml` back instead of ignoring it as malformed.
 - **Live `python -m <package>` runs are no longer closed out as crashed or deleted by `pubrun clean`.**
   `pubrun clean` no longer deletes, and `pubrun status` no longer closes out as crashed, a run that
   is still executing when it was started with `python -m <package>`. The lock file records the

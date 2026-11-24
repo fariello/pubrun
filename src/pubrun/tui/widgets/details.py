@@ -136,6 +136,13 @@ def _format_subprocess_rows(subprocesses: Any) -> List[Tuple[str, str, str, str]
     return rows
 
 
+def _format_remote_url(remote: Any) -> str:
+    """Return the display text for a manifest ``git.remote_url`` value."""
+    if isinstance(remote, dict):
+        remote = remote.get("value")
+    return remote if isinstance(remote, str) and remote else "-"
+
+
 def _format_os_text(host: Any) -> str:
     """Format manifest ``host.os_name``/``host.os_release`` for the OS line.
 
@@ -332,15 +339,15 @@ class RunDetailsView(Vertical):
 
         # Git
         lines.append(f"[bold #cba6f7]=== REPOSITORY PROVENANCE (GIT) ===[/bold #cba6f7]")
-        if r.manifest and "git" in r.manifest:
-            git = r.manifest["git"]
-            lines.append(f"  [bold]Commit Hash:[/]   {git.get('commit') or '-'}")
-            lines.append(f"  [bold]Branch:[/]        {git.get('branch') or '-'}")
+        git = r.manifest.get("git") if isinstance(r.manifest, dict) else None
+        if isinstance(git, dict):
+            lines.append(f"  [bold]Commit Hash:[/]   {_escape_markup(str(git.get('commit') or '-'))}")
+            lines.append(f"  [bold]Branch:[/]        {_escape_markup(str(git.get('branch') or '-'))}")
             lines.append(f"  [bold]Repo Dirty:[/]     {str(git.get('dirty'))}")
-            lines.append(f"  [bold]Remote URL:[/]     {git.get('remote_url', {}).get('value') or '-'}")
+            lines.append(f"  [bold]Remote URL:[/]     {_escape_markup(_format_remote_url(git.get('remote_url')))}")
         elif r.lock_data:
-            lines.append(f"  [bold]Commit Hash:[/]   {r.git_commit or '-'}")
-            lines.append(f"  [bold]Working Cwd:[/]   {r.cwd or '-'}")
+            lines.append(f"  [bold]Commit Hash:[/]   {_escape_markup(str(r.git_commit or '-'))}")
+            lines.append(f"  [bold]Working Cwd:[/]   {_escape_markup(str(r.cwd or '-'))}")
         else:
             lines.append("  (No git information available)")
         lines.append("")

@@ -237,16 +237,18 @@ class ActionsPanel(Vertical):
     def archive_selected_run(self) -> None:
         """Create zip archive in runs_dir/archive/ and optionally delete original folder."""
         r = self.run_info
-        if not r or not r.run_dir.exists():
+        if not r:
+            return
+        if not r.run_dir.exists():
+            self.app.notify(f"Archive failed: run directory {r.run_dir.name} no longer exists.", severity="error")
             return
 
         runs_dir = r.run_dir.parent
         archive_dir = runs_dir / "archive"
-        archive_dir.mkdir(exist_ok=True)
-
         zip_path = archive_dir / f"{r.run_id or r.run_dir.name}.zip"
 
         try:
+            archive_dir.mkdir(exist_ok=True)
             # Zip original folder
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zip_f:
                 for file_p in r.run_dir.rglob("*"):
