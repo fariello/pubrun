@@ -6,7 +6,7 @@
 - Scope: Make every lock acquire reached from `src/pubrun/capture/signals.py::_finalize_active_run` bounded while a lethal signal (`SIGTERM`, `SIGHUP`) is being finalized, with a lock-free fallback that still writes `manifest.json`. Covers the same-thread form (the interrupted main thread holds a plain lock that finalization needs) and the cross-thread form (the `pubrun-hw` thread holds `_run_lock` and waits on a lock the interrupted main thread holds). Source modules: `signals.py`, `tracker.py`, `writer.py`, `events.py`, `capture/file_io.py`, `capture/subprocesses.py`, and `capture/resources.py`; plus `tests/test_signals.py`, `docs/architecture.md`, and `CHANGELOG.md`.
 - Scope-Paths: src/pubrun/capture/signals.py, src/pubrun/tracker.py, src/pubrun/writer.py, src/pubrun/events.py, src/pubrun/capture/file_io.py, src/pubrun/capture/subprocesses.py, src/pubrun/capture/resources.py, tests/test_signals.py, docs/architecture.md, CHANGELOG.md
 - Item-Dependencies: executed:focjwv
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Work-Kind: followup
@@ -17,12 +17,12 @@
 - Highest E allocated: 09
 - Author: Antigravity
 - Id: zcuoll
-- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: zcuoll verified (set a0o2xx, attempt 1).
 - 2026-11-24 approved (aw set): status set to approved
 - 2026-11-24 /plan-review (uri/its_direct/pt3-claude-opus-5.5-1m-us): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007, PR-008, PR-009, PR-010
 - 2026-11-24 to-review (Antigravity): graduated from backlog item `a0o2xx` into a review-ready plan.
