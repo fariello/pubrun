@@ -40,12 +40,12 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Deduplicate and reconcile pubrun_imports in docs/manifest.md
 
-- [ ] E-01 Remove the first, stale `## pubrun_imports` section in `docs/manifest.md`: the one between `## profiling` and `## capture` whose intro is the single sentence "Import-mode provenance metadata." and whose table lists `capture_state`.
+- [x] E-01 Remove the first, stale `## pubrun_imports` section in `docs/manifest.md`: the one between `## profiling` and `## capture` whose intro is the single sentence "Import-mode provenance metadata." and whose table lists `capture_state`.
   - Depends on: none
   - Expected outcome: The deleted block runs from that `## pubrun_imports` heading through the `---` separator that follows its table, so the file reads `## profiling` table, `---`, `## capture`, with exactly one `---` between them. `docs/manifest.md` then contains exactly one `## pubrun_imports` heading, located between `## capture` and `## status`. The file has no table of contents and no other Markdown file links to `#pubrun_imports` (checked at review), so no link needs updating.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Correct the remaining `## pubrun_imports` table and its `### pubrun_imports.requests[]` table in `docs/manifest.md` so they match `src/pubrun/_bootstrap.py::get_import_metadata`, `src/pubrun/_bootstrap.py::select_mode`, `src/pubrun/_modes.py::MODES`, and `schemas/manifest.schema.json`.
+- [x] E-02 Correct the remaining `## pubrun_imports` table and its `### pubrun_imports.requests[]` table in `docs/manifest.md` so they match `src/pubrun/_bootstrap.py::get_import_metadata`, `src/pubrun/_bootstrap.py::select_mode`, `src/pubrun/_modes.py::MODES`, and `schemas/manifest.schema.json`.
   - Depends on: E-01
   - Expected outcome: The rows change as follows; rows not named here keep their current text.
     1. `## pubrun_imports` has exactly nine rows, one per key: `selected_mode`, `selected_behavior`, `selected_by`, `selected_source`, `selected_at_utc`, `core_loaded`, `conflict_policy`, `conflicts_detected`, `requests`. There is no `capture_state` row.
@@ -56,7 +56,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     6. `requests` states that at most 50 requests are recorded.
     7. In `### pubrun_imports.requests[]`, `effective_behavior` names the same keys as `selected_behavior` (the five keys plus `force_console` for `"full"`); its other seven rows (`timestamp_utc`, `requested_mode`, `selected_by`, `selected`, `conflict`, `core_loaded_at_request`, `caller`) are unchanged.
     8. Neither section contains an em dash (U+2014) or en dash (U+2013).
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -160,15 +160,91 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste the heading-order output (Required tests 1) showing four lines in the order `profiling`, `capture`, `pubrun_imports`, `status`, and the hunk of `git diff docs/manifest.md` that deletes the stale section, showing its `capture_state` row among the removed lines and one `---` left between `## profiling` and `## capture`.
   - Observed evidence:
-  - Result: pending
+    Heading-order output (`grep -n -E '^## \`(profiling|capture|pubrun_imports|status)\`$' docs/manifest.md`, exit 0):
+    ```text
+    492:## `profiling`
+    505:## `capture`
+    521:## `pubrun_imports`
+    552:## `status`
+    ```
+    Deletion hunk from `git diff docs/manifest.md` (removes stale section including `capture_state` and leaves one `---` between `## profiling` and `## capture`):
+    ```diff
+    @@ -502,23 +502,6 @@ Phase-scoped profiling metadata (only present when `[capture.profiling].enabled
 
-- [ ] V-02 validates E-02
+     ---
+
+    -## `pubrun_imports`
+    -
+    -Import-mode provenance metadata.
+    -
+    -| Field | Type | Description |
+    -|---|---|---|
+    -| `selected_mode` | string \| null | The effective import mode (`"auto"`, `"noauto"`, `"nopatch"`, etc.). |
+    -| `selected_behavior` | object | Behavior flags: `auto_start`, `patch_subprocesses`, `patch_console`, `signal_hooks`. |
+    -| `selected_by` | string \| null | Who selected the mode (e.g., `"pubrun.noauto"`, `"config:[imports].mode"`). |
+    -| `selected_source` | string \| null | Where the selection came from (e.g., `"env:PUBRUN_IMPORT_MODE"`). |
+    -| `selected_at_utc` | float \| null | When the mode was selected. |
+    -| `conflict_policy` | string | `"ignore"`, `"warn"`, or `"error"`. |
+    -| `conflicts_detected` | int | Number of conflicting mode requests. |
+    -| `capture_state` | object | See [Capture State](#capture-state). |
+    -
+    ----
+    -
+     ## `capture`
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Paste the hunk of `git diff docs/manifest.md` for the remaining `## pubrun_imports` and `### pubrun_imports.requests[]` tables; the parity check output (Required tests 3) printing `OK: pubrun_imports docs match runtime, schema, and MODES` (the runtime keys come from `src/pubrun/_bootstrap.py::get_import_metadata`, reached through `src/pubrun/minimal.py` and `src/pubrun/full.py` imports in the probe); a sentence confirming that the diff makes each E-02 change 3 to 6 that the parity check does not test (`object \| null`, the `"explicit"` source, the `conflict_policy` `null` note, the 50-request limit); the dash check (Required tests 4) printing `0`; and the output and exit code of `python3 scripts/sanitize_paths.py --check --all`.
   - Observed evidence:
-  - Result: pending
+    Update hunks from `git diff docs/manifest.md` for `## pubrun_imports` and `### pubrun_imports.requests[]`:
+    ```diff
+    @@ -541,15 +524,15 @@ Import-mode provenance metadata. Records how pubrun was imported, which mode was
+
+     | Field | Type | Description |
+     |---|---|---|
+    -| `selected_mode` | string \| null | The effective import mode: `"auto"`, `"noauto"`, `"nopatch"`, `"noconsole"`, or `"minimal"`. |
+    -| `selected_behavior` | object | `{"auto_start": bool, "patch_subprocesses": bool, "patch_console": bool, "signal_hooks": bool}` — the effective behavior flags. |
+    -| `selected_by` | string \| null | Who selected the mode (e.g., `"pubrun"`, `"pubrun.noauto"`, `"pubrun.minimal"`). |
+    -| `selected_source` | string \| null | Where the selection came from (e.g., `"default"`, `"env:PUBRUN_IMPORT_MODE"`, `"config:[imports].mode"`). |
+    +| `selected_mode` | string \| null | The effective import mode: `"auto"`, `"noauto"`, `"nopatch"`, `"noconsole"`, `"minimal"`, or `"full"`. |
+    +| `selected_behavior` | object \| null | Effective behavior flags: `{"auto_start": bool, "global_hooks": bool, "patch_subprocesses": bool, "patch_console": bool, "signal_hooks": bool}`. Includes `"force_console": true` only for `"full"`. |
+    +| `selected_by` | string \| null | Who selected the mode (for example `"pubrun"` or `"pubrun.<mode>"`, such as `"pubrun.noauto"` or `"pubrun.minimal"`). |
+    +| `selected_source` | string \| null | Where the selection came from: `"default"`, `"explicit"` (a `pubrun.<mode>` import), `"env:PUBRUN_IMPORT_MODE"`, `"env:PUBRUN_AUTO_START"`, `"config:[imports].mode"`, or `"config:[core].auto_start"`. |
+     | `selected_at_utc` | float \| null | Timestamp when the mode was selected. |
+     | `core_loaded` | bool | Whether `pubrun.core` was loaded (irreversible work started). |
+    -| `conflict_policy` | string \| null | The active conflict policy: `"warn"`, `"error"`, or `"ignore"`. |
+    +| `conflict_policy` | string \| null | The active conflict policy: `null` until a conflicting import-mode request occurs, then `"warn"`, `"error"`, or `"ignore"`. |
+     | `conflicts_detected` | int | Number of conflicting import-mode requests observed. |
+    -| `requests` | list[object] | History of import-mode selection requests (see below). |
+    +| `requests` | list[object] | History of import-mode selection requests (at most 50 requests are recorded; see below). |
+
+     ### `pubrun_imports.requests[]`
+
+    @@ -558,7 +541,7 @@ Import-mode provenance metadata. Records how pubrun was imported, which mode was
+     | `timestamp_utc` | float | When this request was made. |
+     | `requested_mode` | string | The mode that was requested. |
+     | `selected_by` | string | Identifier for the requester. |
+    -| `effective_behavior` | object | `{"auto_start": bool, "patch_subprocesses": bool, "patch_console": bool, "signal_hooks": bool}` for the requested mode. |
+    +| `effective_behavior` | object | Behavior flags for the requested mode: `{"auto_start": bool, "global_hooks": bool, "patch_subprocesses": bool, "patch_console": bool, "signal_hooks": bool}`. Includes `"force_console": true` only for `"full"`. |
+     | `selected` | bool | Whether this request won (first request always wins). |
+     | `conflict` | bool | Whether this request conflicted with the already-selected mode. |
+     | `core_loaded_at_request` | bool | Whether `pubrun.core` was already loaded when this request arrived. |
+    ```
+    Parity check output (Required tests 3, exit 0):
+    ```text
+    OK: pubrun_imports docs match runtime, schema, and MODES
+    ```
+    Confirmed from the diff above for E-02 items 3 to 6 not covered by the parity script: `selected_behavior` has type `object \| null` and states `"force_console": true` is included only for `"full"`; `selected_by` includes `"pubrun"` and `"pubrun.<mode>"` (with `"pubrun.noauto"` and `"pubrun.minimal"`) and `selected_source` lists `"default"`, `"explicit"` (a `pubrun.<mode>` import), `"env:PUBRUN_IMPORT_MODE"`, `"env:PUBRUN_AUTO_START"`, `"config:[imports].mode"`, and `"config:[core].auto_start"`; `conflict_policy` states it is `null` until a conflicting import-mode request occurs and then `"warn"`, `"error"`, or `"ignore"`; and `requests` states at most 50 requests are recorded.
+    Dash check on added lines (`git diff -U0 docs/manifest.md | grep '^+[^+]' | grep -c $'[\u2013\u2014]'`, exit 1 because count is 0, as expected):
+    ```text
+    0
+    ```
+    Leak scan (`python3 scripts/sanitize_paths.py --check --all`): no output, exit code `0`.
+  - Result: pass
 
 ## Approval and execution gate
 

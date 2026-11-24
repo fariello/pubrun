@@ -502,23 +502,6 @@ Phase-scoped profiling metadata (only present when `[capture.profiling].enabled 
 
 ---
 
-## `pubrun_imports`
-
-Import-mode provenance metadata.
-
-| Field | Type | Description |
-|---|---|---|
-| `selected_mode` | string \| null | The effective import mode (`"auto"`, `"noauto"`, `"nopatch"`, etc.). |
-| `selected_behavior` | object | Behavior flags: `auto_start`, `patch_subprocesses`, `patch_console`, `signal_hooks`. |
-| `selected_by` | string \| null | Who selected the mode (e.g., `"pubrun.noauto"`, `"config:[imports].mode"`). |
-| `selected_source` | string \| null | Where the selection came from (e.g., `"env:PUBRUN_IMPORT_MODE"`). |
-| `selected_at_utc` | float \| null | When the mode was selected. |
-| `conflict_policy` | string | `"ignore"`, `"warn"`, or `"error"`. |
-| `conflicts_detected` | int | Number of conflicting mode requests. |
-| `capture_state` | object | See [Capture State](#capture-state). |
-
----
-
 ## `capture`
 
 Run-level capture metadata.
@@ -541,15 +524,15 @@ Import-mode provenance metadata. Records how pubrun was imported, which mode was
 
 | Field | Type | Description |
 |---|---|---|
-| `selected_mode` | string \| null | The effective import mode: `"auto"`, `"noauto"`, `"nopatch"`, `"noconsole"`, or `"minimal"`. |
-| `selected_behavior` | object | `{"auto_start": bool, "patch_subprocesses": bool, "patch_console": bool, "signal_hooks": bool}` — the effective behavior flags. |
-| `selected_by` | string \| null | Who selected the mode (e.g., `"pubrun"`, `"pubrun.noauto"`, `"pubrun.minimal"`). |
-| `selected_source` | string \| null | Where the selection came from (e.g., `"default"`, `"env:PUBRUN_IMPORT_MODE"`, `"config:[imports].mode"`). |
+| `selected_mode` | string \| null | The effective import mode: `"auto"`, `"noauto"`, `"nopatch"`, `"noconsole"`, `"minimal"`, or `"full"`. |
+| `selected_behavior` | object \| null | Effective behavior flags: `{"auto_start": bool, "global_hooks": bool, "patch_subprocesses": bool, "patch_console": bool, "signal_hooks": bool}`. Includes `"force_console": true` only for `"full"`. |
+| `selected_by` | string \| null | Who selected the mode (for example `"pubrun"` or `"pubrun.<mode>"`, such as `"pubrun.noauto"` or `"pubrun.minimal"`). |
+| `selected_source` | string \| null | Where the selection came from: `"default"`, `"explicit"` (a `pubrun.<mode>` import), `"env:PUBRUN_IMPORT_MODE"`, `"env:PUBRUN_AUTO_START"`, `"config:[imports].mode"`, or `"config:[core].auto_start"`. |
 | `selected_at_utc` | float \| null | Timestamp when the mode was selected. |
 | `core_loaded` | bool | Whether `pubrun.core` was loaded (irreversible work started). |
-| `conflict_policy` | string \| null | The active conflict policy: `"warn"`, `"error"`, or `"ignore"`. |
+| `conflict_policy` | string \| null | The active conflict policy: `null` until a conflicting import-mode request occurs, then `"warn"`, `"error"`, or `"ignore"`. |
 | `conflicts_detected` | int | Number of conflicting import-mode requests observed. |
-| `requests` | list[object] | History of import-mode selection requests (see below). |
+| `requests` | list[object] | History of import-mode selection requests (at most 50 requests are recorded; see below). |
 
 ### `pubrun_imports.requests[]`
 
@@ -558,7 +541,7 @@ Import-mode provenance metadata. Records how pubrun was imported, which mode was
 | `timestamp_utc` | float | When this request was made. |
 | `requested_mode` | string | The mode that was requested. |
 | `selected_by` | string | Identifier for the requester. |
-| `effective_behavior` | object | `{"auto_start": bool, "patch_subprocesses": bool, "patch_console": bool, "signal_hooks": bool}` for the requested mode. |
+| `effective_behavior` | object | Behavior flags for the requested mode: `{"auto_start": bool, "global_hooks": bool, "patch_subprocesses": bool, "patch_console": bool, "signal_hooks": bool}`. Includes `"force_console": true` only for `"full"`. |
 | `selected` | bool | Whether this request won (first request always wins). |
 | `conflict` | bool | Whether this request conflicted with the already-selected mode. |
 | `core_loaded_at_request` | bool | Whether `pubrun.core` was already loaded when this request arrived. |
