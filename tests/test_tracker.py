@@ -97,9 +97,8 @@ def test_atomic_manifest_write(tmp_path, monkeypatch):
 
     # manifest.json exists, no .tmp file remains
     manifest = tracker.run_dir / "manifest.json"
-    tmp_file = tracker.run_dir / "manifest.json.tmp"
     assert manifest.exists()
-    assert not tmp_file.exists()
+    assert list(tracker.run_dir.glob("*.tmp")) == []
 
     # Manifest is valid JSON
     with open(manifest) as f:
@@ -110,19 +109,17 @@ def test_atomic_manifest_write(tmp_path, monkeypatch):
 def test_atomic_write_cleans_temp_on_failure(tmp_path, monkeypatch):
     """P3-T4: Temp file is cleaned up if os.replace fails."""
     from pubrun.writer import _atomic_json_write
-    from pathlib import Path
 
     target = tmp_path / "output.json"
     # Make os.replace fail
     monkeypatch.setattr("os.replace", lambda src, dst: (_ for _ in ()).throw(OSError("cross-device link")))
 
-    import pytest
     with pytest.raises(OSError, match="cross-device"):
         _atomic_json_write(target, {"key": "value"})
 
-    # Temp file should NOT be left behind
-    tmp_file = target.with_suffix(".json.tmp")
-    assert not tmp_file.exists()
+    # Temp file should NOT be left behind and target should not exist
+    assert list(target.parent.glob("*.tmp")) == []
+    assert not target.exists()
 
 
 # ==========================================================================

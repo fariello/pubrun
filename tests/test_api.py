@@ -497,11 +497,14 @@ class TestHandleInactivePolicy:
         assert any("dropped" in r.message.lower() or "no active run" in r.message.lower()
                    for r in caplog.records)
 
-    def test_ignore_policy_is_silent(self):
+    def test_ignore_policy_is_silent(self, caplog, capsys):
         """on_inactive_annotate='ignore' (default) does nothing."""
+        import logging
         assert get_current_run() is None
-        # Should not raise, should not log (just return silently)
-        annotate("silently dropped")
+        with caplog.at_level(logging.DEBUG, logger="pubrun"):
+            annotate("silently dropped")
+        assert caplog.records == []
+        assert capsys.readouterr() == ("", "")
 
     def test_phase_error_policy_raises(self, monkeypatch):
         """on_inactive_annotate='error' also affects phase()."""

@@ -54,7 +54,6 @@ class TestSingleRunParity:
 
     def test_aggregate_of_one_equals_single(self):
         """generate_report_multi over exactly one manifest == single-run output."""
-        pytest.importorskip("pubrun.report.methods")
         from pubrun.report.methods import generate_report_multi
         m = _manifest()
         assert generate_report_multi([m], "markdown") == generate_report(m, "markdown")

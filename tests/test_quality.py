@@ -82,13 +82,20 @@ class TestDoubleStop:
         assert manifest_path.exists()
         with open(manifest_path, "r") as f:
             data1 = json.load(f)
+        mtime1 = os.stat(manifest_path).st_mtime_ns
 
         # Verify data integrity after first stop
         assert data1["status"]["outcome"] == "completed"
         elapsed1 = data1["timing"]["elapsed_seconds"]
 
-        # Second stop should not change the elapsed time
-        tracker.stop(outcome="completed")
+        # Second stop must not overwrite the manifest or alter outcome/timing/mtime
+        tracker.stop(outcome="failed")
+        with open(manifest_path, "r") as f:
+            data2 = json.load(f)
+        assert data2["status"]["outcome"] == "completed"
+        assert data2["timing"]["elapsed_seconds"] == elapsed1
+        assert data2 == data1
+        assert os.stat(manifest_path).st_mtime_ns == mtime1
 
 
 class TestDiffEngine:
@@ -479,12 +486,15 @@ class TestMetaRefSecurity:
 class TestConsoleRestoreSafety:
     """Test that console interceptor doesn't clobber third-party stream wrappers."""
 
-    def test_stop_preserves_third_party_wrapper(self):
+    def test_stop_preserves_third_party_wrapper(self, monkeypatch):
         """If another library wraps stdout after pubrun, stop() doesn't clobber it."""
         import sys
         from pubrun.capture.console import ConsoleInterceptor
         from pathlib import Path
         import tempfile
+
+        monkeypatch.setattr(sys, "stdout", sys.stdout)
+        monkeypatch.setattr(sys, "stderr", sys.stderr)
 
         with tempfile.TemporaryDirectory() as td:
             run_dir = Path(td)
@@ -510,9 +520,6 @@ class TestConsoleRestoreSafety:
             # sys.stdout should still be the third-party wrapper
             assert sys.stdout is third_party
 
-            # Clean up
-            sys.stdout = interceptor.original_stdout
-
 
 class TestRunDirPermissions:
     """Test that run directories are created with restrictive permissions."""
@@ -527,4 +534,3 @@ class TestRunDirPermissions:
         mode = run.run_dir.stat().st_mode & 0o777
         assert mode == 0o700, f"Expected 0o700, got {oct(mode)}"
         run.stop()
-

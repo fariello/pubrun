@@ -52,8 +52,9 @@ class TestEnvironment:
         with patch.dict(os.environ, {"TEST_API_TOKEN": "sk-live-xxx"}, clear=False):
             result = get_environment(config)
         by_name = {v["name"]: v for v in result["variables"]}
-        if "TEST_API_TOKEN" in by_name:
-            assert by_name["TEST_API_TOKEN"]["value"]["representation"] == "redacted"
+        assert "TEST_API_TOKEN" in by_name
+        assert by_name["TEST_API_TOKEN"]["value"]["representation"] == "redacted"
+        assert "value" not in by_name["TEST_API_TOKEN"]["value"]
 
     def test_redaction_disabled_via_config(self):
         config = {
@@ -63,9 +64,9 @@ class TestEnvironment:
         with patch.dict(os.environ, {"TEST_API_TOKEN": "visible"}, clear=False):
             result = get_environment(config)
         by_name = {v["name"]: v for v in result["variables"]}
-        if "TEST_API_TOKEN" in by_name:
-            assert by_name["TEST_API_TOKEN"]["value"]["representation"] == "plain"
-            assert by_name["TEST_API_TOKEN"]["value"]["value"] == "visible"
+        assert "TEST_API_TOKEN" in by_name
+        assert by_name["TEST_API_TOKEN"]["value"]["representation"] == "plain"
+        assert by_name["TEST_API_TOKEN"]["value"]["value"] == "visible"
 
 
 # ---------------------------------------------------------------------------
@@ -218,28 +219,61 @@ class TestPackages:
 # ---------------------------------------------------------------------------
 class TestGit:
 
+    @pytest.fixture
+    def git_repo(self, tmp_path, monkeypatch):
+        import subprocess
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(
+            ["git", "init"],
+            cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        (repo / "README.txt").write_text("init\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "README.txt"],
+            cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-c", "user.email=test@example.com",
+                "-c", "user.name=Test User",
+                "-c", "commit.gpgsign=false",
+                "commit", "-m", "initial commit",
+            ],
+            cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        monkeypatch.chdir(repo)
+        return repo
+
     def test_returns_correct_structure(self):
         result = get_git({})
         assert "capture_state" in result
 
-    def test_has_commit_when_in_repo(self):
-        """We're running from the pubrun repo, so git should find a commit."""
+    def test_has_commit_when_in_repo(self, git_repo):
+        """In a real git repository, git capture returns a 40-character commit SHA."""
         result = get_git({})
-        if result["capture_state"]["status"] == "complete":
-            assert "commit" in result
-            assert isinstance(result["commit"], str)
-            assert len(result["commit"]) == 40  # Full SHA-1
+        assert result["capture_state"]["status"] == "complete"
+        assert "commit" in result
+        assert isinstance(result["commit"], str)
+        assert len(result["commit"]) == 40  # Full SHA-1
 
-    def test_has_branch(self):
+    def test_has_branch(self, git_repo):
         result = get_git({})
-        if result["capture_state"]["status"] == "complete":
-            assert "branch" in result
+        assert result["capture_state"]["status"] == "complete"
+        assert "branch" in result
+        assert isinstance(result["branch"], str)
+        assert len(result["branch"]) > 0
 
-    def test_has_dirty(self):
+    def test_has_dirty(self, git_repo):
         result = get_git({})
-        if result["capture_state"]["status"] == "complete":
-            assert "dirty" in result
-            assert isinstance(result["dirty"], bool)
+        assert result["capture_state"]["status"] == "complete"
+        assert result["dirty"] is False
+
+        (git_repo / "untracked.txt").write_text("dirty\n", encoding="utf-8")
+        dirty_result = get_git({})
+        assert dirty_result["capture_state"]["status"] == "complete"
+        assert dirty_result["dirty"] is True
 
     def test_git_capture_redaction_token(self):
         """Test that git capture redacts token in remote url."""

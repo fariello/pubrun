@@ -87,11 +87,14 @@ class TestSubprocessInterceptor:
         p = _spawn_stdin_gated_child(0)
         try:
             tracker.stop()
+            assert p.poll() is None
             with open(tracker.run_dir / "manifest.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
             subs = data["subprocesses"]
+            unwatched = [s for s in subs if s["exit_code"] is None]
             assert len(subs) == 1
-            rec = subs[0]
+            assert len(unwatched) == 1
+            rec = unwatched[0]
             assert rec["exit_code"] is None
             assert rec["ended_at_utc"] is None
             assert rec["capture_state"] == {

@@ -390,21 +390,20 @@ class TestResourceWatcherTreeScope:
     """Test that tree scope reports tree fields in manifest."""
 
     def test_tree_scope_manifest_fields(self, tmp_path, monkeypatch):
-        """With scope='tree', manifest should have peak_tree_rss_bytes."""
+        """With scope='tree', manifest should have exact peak and end tree RSS fields."""
         os.environ["PUBRUN_AUTO_START"] = "false"
         import pubrun
 
-        # Mock tree RSS to return a known value
+        # Patch the cross-platform entry point so all OSes observe the exact value.
         monkeypatch.setattr(
-            "pubrun.capture.resources._get_tree_rss_linux",
-            lambda: 100_000_000
+            "pubrun.capture.resources.ResourceWatcher._poll_tree_rss",
+            lambda self: 100_000_000,
         )
 
         run = pubrun.start(
             output_dir=str(tmp_path),
-            capture={"resources": {"depth": "standard", "scope": "tree", "sample_interval_seconds": 0.1}}
+            capture={"resources": {"depth": "standard", "scope": "tree", "sample_interval_seconds": 0.1}},
         )
-        time.sleep(0.3)  # Let at least 2 samples fire
         run.stop()
 
         manifest_path = run.run_dir / "manifest.json"
@@ -413,7 +412,8 @@ class TestResourceWatcherTreeScope:
 
         resources = manifest["resources"]
         assert resources["scope"] == "tree"
-        assert "peak_tree_rss_bytes" in resources
+        assert resources["peak_tree_rss_bytes"] == 100_000_000
+        assert resources["end_tree_rss_bytes"] == 100_000_000
 
 
 # ---------------------------------------------------------------------------
@@ -467,7 +467,7 @@ class TestConcurrentStart:
         """5 threads calling start() simultaneously should yield 1 Run."""
         os.environ["PUBRUN_AUTO_START"] = "false"
         import pubrun
-        from pubrun.tracker import _active_run, get_current_run
+        from pubrun.tracker import get_current_run
 
         # Ensure no existing run
         if get_current_run():
@@ -491,12 +491,20 @@ class TestConcurrentStart:
         for t in threads:
             t.join(timeout=10)
 
-        assert not errors, f"Unexpected errors: {errors}"
-        # All threads should have gotten the same Run instance
-        unique_runs = set(id(r) for r in runs)
-        assert len(unique_runs) == 1, f"Expected 1 unique Run, got {len(unique_runs)}"
+        try:
+            assert all(not t.is_alive() for t in threads), "Worker thread did not finish"
+            assert not errors, f"Unexpected errors: {errors}"
+            assert len(runs) == 5, f"Expected 5 start() results, got {len(runs)}"
+            # All threads should have gotten the same Run instance
+            unique_runs = set(id(r) for r in runs)
+            assert len(unique_runs) == 1, f"Expected 1 unique Run, got {len(unique_runs)}"
+            assert runs[0].ref_count == 5
+        finally:
+            for _ in runs:
+                pubrun.stop()
 
-        pubrun.stop()
+        assert runs[0].is_active is False
+        assert get_current_run() is None
 
 
 # ---------------------------------------------------------------------------

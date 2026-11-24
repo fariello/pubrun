@@ -8,14 +8,15 @@ found 7 pre-existing conformance errors on a default-run manifest.
 These tests:
   1. Guard the sections fixed in that session (notably `config`, incl. the new
      `config.notices` field) so they conform NOW and cannot regress.
-  2. Track the KNOWN pre-existing whole-manifest drift with an xfail, so the day the
-     full reconciliation IPD lands (`.agents/plans/pending/` schema-reconciliation),
-     this flips to XPASS and we tighten it into a hard gate.
+  2. Validate complete real manifests as a hard gate (`test_full_manifest_conforms_to_schema`);
+     the temporary xfail was removed at the 2026-07-09 schema reconciliation.
 
 `jsonschema` is a dev/test-only dependency (never a runtime dep — pubrun stays
 zero-runtime-dependency); the tests skip cleanly if it is unavailable.
 """
+import copy
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -180,24 +181,24 @@ def test_startup_manifest_conforms_to_schema(tmp_path):
         import pubrun.noauto as pubrun
         t = pubrun.start()
         try:
-            # Read the manifest written synchronously at start(), BEFORE stop(). On Windows the
-            # run's file can be transiently locked / mid-atomic-write while the run is live, so read
-            # tolerantly with a few retries rather than failing on a momentary PermissionError.
+            # Read the manifest written synchronously at start(), BEFORE stop(). On Windows a
+            # live run's file can briefly raise PermissionError during concurrent access, so
+            # retry PermissionError only on win32; all other errors must fail immediately.
             mpath = t.run_dir / "manifest.json"
-            for _ in range(10):
+            for attempt in range(10):
                 try:
                     manifest = json.loads(mpath.read_text(encoding="utf-8"))
                     break
-                except (PermissionError, json.JSONDecodeError, FileNotFoundError):
+                except PermissionError:
+                    if sys.platform != "win32" or attempt == 9:
+                        raise
                     time.sleep(0.05)
         finally:
             pubrun.stop()
     finally:
         os.chdir(cwd)
 
-    if manifest is None:
-        pytest.skip("startup manifest was not readable while the run was live (platform file lock)")
-
+    assert manifest is not None
     jsonschema.validate(manifest, _schema())
 
 
@@ -767,3 +768,54 @@ def test_packages_schema_rejects_invalid_enums_and_unknown_keys(bad_section):
     pkg_schema = _packages_subschema(schema)
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(bad_section, pkg_schema)
+
+
+def test_populated_meta_ref_manifest_conforms(tmp_path):
+    """A real manifest with a non-null `meta_ref` must validate against the schema."""
+    manifest = _make_manifest(tmp_path, meta_ref="meta.json")
+    assert manifest["meta_ref"] == "meta.json"
+    jsonschema.validate(manifest, _schema())
+
+
+def test_populated_determinism_and_artifacts_sections_conform(tmp_path):
+    """Optional `determinism` and `artifacts` schema contracts accept valid records
+    and reject missing required seed values or negative artifact sizes."""
+    schema = _schema()
+    manifest = _make_manifest(tmp_path)
+    manifest["determinism"] = {
+        "python_hash_seed": {"representation": "plain", "value": "0"},
+        "registered_seeds": [
+            {"name": "random", "value": 42},
+            {"name": "numpy", "value": "12345"},
+        ],
+        "capture_state": {"status": "complete"},
+    }
+    manifest["artifacts"] = [
+        {
+            "role": "checkpoint",
+            "path": "model.pt",
+            "label": "final weights",
+            "exists": True,
+            "size_bytes": 1024,
+            "modified_at_utc": 1715280000.5,
+            "hash": {
+                "algorithm": "sha256",
+                "value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            },
+        },
+        {
+            "role": "log",
+            "path": "metrics.csv",
+        },
+    ]
+    jsonschema.validate(manifest, schema)
+
+    missing_seed_value = copy.deepcopy(manifest)
+    missing_seed_value["determinism"]["registered_seeds"] = [{"name": "random"}]
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(missing_seed_value, schema)
+
+    negative_artifact_size = copy.deepcopy(manifest)
+    negative_artifact_size["artifacts"][0]["size_bytes"] = -1
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(negative_artifact_size, schema)
