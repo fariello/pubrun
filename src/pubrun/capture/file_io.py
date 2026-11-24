@@ -16,6 +16,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple, Union
 
+from pubrun.capture.signals import finalization_lock
+
 logger = logging.getLogger("pubrun")
 
 # Progressive file-I/O provenance detail levels (see [capture.file_io].level).
@@ -304,7 +306,7 @@ class FileIoBudgetTracker:
 
         Returns an over-budget reason string, or ``None`` if hashing is permitted.
         """
-        with self._lock:
+        with finalization_lock(self._lock, 0.25):
             if (
                 self.max_hash_bytes > 0
                 and size_bytes is not None
@@ -343,7 +345,7 @@ class FileIoBudgetTracker:
         self, pending_bytes: int, pending_seconds: float
     ) -> Optional[str]:
         """Read-only check during streaming without committing bytes or time."""
-        with self._lock:
+        with finalization_lock(self._lock, 0.25):
             if self.max_hash_bytes > 0 and pending_bytes > self.max_hash_bytes:
                 return (
                     f"streamed bytes ({pending_bytes}) exceeded "
@@ -370,7 +372,7 @@ class FileIoBudgetTracker:
 
     def consume_chunk(self, n_bytes: int, elapsed_seconds: float) -> Optional[str]:
         """Record a chunk read during fallback hashing and check run-wide caps."""
-        with self._lock:
+        with finalization_lock(self._lock, 0.25):
             self.total_bytes_hashed += max(0, int(n_bytes))
             self.total_hash_seconds += max(0.0, float(elapsed_seconds))
             if (
@@ -393,13 +395,13 @@ class FileIoBudgetTracker:
 
     def commit_stream_hash(self, n_bytes: int, elapsed_seconds: float) -> None:
         """Commit bytes and elapsed time once when a streaming hash is accepted."""
-        with self._lock:
+        with finalization_lock(self._lock, 0.25):
             self.total_bytes_hashed += max(0, int(n_bytes))
             self.total_hash_seconds += max(0.0, float(elapsed_seconds))
 
     def record_outcome(self, status: str) -> None:
         """Increment the counter for a terminal hashing outcome."""
-        with self._lock:
+        with finalization_lock(self._lock, 0.25):
             if status == "completed":
                 self.files_hashed += 1
             elif status == "over_budget":
@@ -411,7 +413,7 @@ class FileIoBudgetTracker:
 
     def to_summary_dict(self) -> Dict[str, Any]:
         """Export a JSON-serializable summary matching manifest schema."""
-        with self._lock:
+        with finalization_lock(self._lock, 0.25):
             return {
                 "max_hash_bytes": self.max_hash_bytes,
                 "max_total_hash_bytes": self.max_total_hash_bytes,
@@ -432,7 +434,7 @@ def get_or_create_budget_tracker(run_instance: Any) -> FileIoBudgetTracker:
     if tracker is not None:
         return tracker
     lock = getattr(run_instance, "_data_files_lock", _fallback_data_files_lock)
-    with lock:
+    with finalization_lock(lock, 0.25):
         tracker = getattr(run_instance, "_file_io_budget", None)
         if tracker is None:
             cfg = resolve_file_io_config(run_instance)
@@ -1869,7 +1871,7 @@ def finalize_pending_registrations(run_instance: Any) -> None:
     manifest record in place. Safe in Ghost Mode and with closed event streams.
     """
     lock = getattr(run_instance, "_data_files_lock", _fallback_data_files_lock)
-    with lock:
+    with finalization_lock(lock, 0.25):
         pending_list = getattr(run_instance, "_pending_file_registrations", None)
         if not isinstance(pending_list, list) or not pending_list:
             return
@@ -1915,7 +1917,7 @@ def finalize_pending_registrations(run_instance: Any) -> None:
                 metadata_copy=None,
             )
 
-            with lock:
+            with finalization_lock(lock, 0.25):
                 existing_rec = item.record_ref
                 prev_count = int(existing_rec.get("registration_count", 1))
                 prev_reg_at = existing_rec.get("registered_at_utc")

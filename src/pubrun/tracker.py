@@ -28,7 +28,7 @@ from pubrun.capture.packages import get_packages, merge_package_snapshots
 from pubrun.capture.environment import get_environment
 from pubrun.capture.git import get_git
 from pubrun.capture.host import get_host
-from pubrun.capture.signals import SignalExitCapture
+from pubrun.capture.signals import SignalExitCapture, finalization_lock
 
 
 _REAL_GET_PACKAGES = get_packages
@@ -301,7 +301,7 @@ class Run:
         if isinstance(data, dict):
             cs = data.get("capture_state")
             if isinstance(cs, dict) and cs.get("status") == "failed":
-                with self._errors_lock:
+                with finalization_lock(self._errors_lock, 0.25):
                     self._failed_sections.add(section)
 
     def _store_capture_error_detail(
@@ -321,7 +321,7 @@ class Run:
             prefix = detail.split(":", 1)[0].strip()
             if prefix:
                 exc_type = prefix
-        with self._errors_lock:
+        with finalization_lock(self._errors_lock, 0.25):
             if (
                 not self._finalized
                 or not getattr(self, "_hardware_write_closed", True)
@@ -1111,7 +1111,7 @@ class Run:
         from pubrun.core import _run_lock
         end_mono = time.perf_counter()
         end_utc = time.time()
-        with _run_lock:
+        with finalization_lock(_run_lock, 2.0):
             if self._finalized:
                 return
             self._finalized = True
@@ -1135,10 +1135,10 @@ class Run:
                 self._record_capture_error("hardware", "finalization", exc)
             finally:
                 self._hardware_wait_seconds = max(0.0, time.perf_counter() - hw_wait_start)
-                with _run_lock:
+                with finalization_lock(_run_lock, 2.0):
                     self._hardware_write_closed = True
         else:
-            with _run_lock:
+            with finalization_lock(_run_lock, 2.0):
                 self._hardware_write_closed = True
 
         if self._outcome in ("unknown", "running"):
@@ -1465,7 +1465,7 @@ class Run:
 
         data_files_lock = getattr(self, "_data_files_lock", None)
         if data_files_lock is not None:
-            with data_files_lock:
+            with finalization_lock(data_files_lock, 0.25):
                 raw_data_files = getattr(self, "data_files", None) or {}
                 data_files_snapshot: Dict[str, Any] = {
                     "inputs": list(raw_data_files.get("inputs", [])),
@@ -1518,8 +1518,8 @@ class Run:
         # iteration races with the background hardware thread.
         errors_lock = getattr(self, "_errors_lock", None)
         if errors_lock is not None:
-            with errors_lock:
-                errors_copy = [dict(rec) for rec in getattr(self, "_capture_errors", [])]
+            with finalization_lock(errors_lock, 0.25):
+                errors_copy = [dict(rec) for rec in list(getattr(self, "_capture_errors", []))]
                 truncated = getattr(self, "_capture_errors_truncated", 0)
                 failed_sections = set(getattr(self, "_failed_sections", set()))
         else:

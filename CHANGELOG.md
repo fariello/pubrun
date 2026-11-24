@@ -112,6 +112,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **A SIGTERM or SIGHUP no longer hangs the process when it arrives while pubrun holds an internal lock.**
+  Previously, a lethal signal arriving while pubrun was recording a file, an error, a subprocess, an
+  event, or a resource sample (or while the background hardware thread was refreshing the manifest)
+  could deadlock signal finalization and leave the manifest at outcome `running`. During lethal-signal
+  finalization, pubrun now waits a bounded time for its own locks and falls back to lock-free
+  completion, so the run still finalizes as `interrupted` and the process exits.
 - **`pubrun ui` run details pane handles null or plain-string `git.remote_url` and escapes Git markup.**
   Selecting a run whose manifest stores `git.remote_url` as `null` or as a plain string, or whose
   `git` section is not an object, no longer closes the TUI. Commit hashes, branch names, remote

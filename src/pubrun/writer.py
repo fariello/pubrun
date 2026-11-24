@@ -10,6 +10,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from pubrun.capture.signals import finalization_lock
+
 logger = logging.getLogger("pubrun")
 
 _VALID_DURABILITY_POLICIES = frozenset({"fsync", "finalize", "atomic", "strict"})
@@ -271,7 +273,7 @@ class ArtifactWriter:
             # _write_lock is never held across _hardware_future_done.wait(2.0).
             self.run._finalize_state()
 
-            with self._write_lock:
+            with finalization_lock(self._write_lock, 2.0):
                 if self._artifacts_written and getattr(self.run, "_finalized", False):
                     return True
 

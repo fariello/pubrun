@@ -5,6 +5,8 @@ import threading
 import logging
 from typing import Any, Dict
 
+from pubrun.capture.signals import finalization_lock, in_signal_finalization
+
 logger = logging.getLogger("pubrun")
 
 # _get_rss_windows uses GetProcessMemoryInfo through ctypes first and falls back to wmic.
@@ -546,7 +548,7 @@ class ResourceWatcher(threading.Thread):
         Idempotent: safe to call multiple times or on an unstarted thread.
         """
         self._stop_event.set()
-        with self._lock:
+        with finalization_lock(self._lock, 0.25):
             if self._stopped:
                 return
             self._stopped = True
@@ -554,23 +556,25 @@ class ResourceWatcher(threading.Thread):
         was_started = self.ident is not None
         if was_started:
             # Wait for the daemon thread to finish its current cycle.
-            # Cap at 5s to prevent long hangs if OS polling is stuck.
+            # Cap at 0.5s during lethal-signal finalization, 5s normally.
+            join_timeout = 0.5 if in_signal_finalization() else min(self.interval + 1, 5)
             try:
-                self.join(timeout=min(self.interval + 1, 5))
+                self.join(timeout=join_timeout)
             except RuntimeError:
                 pass
 
-        with self._lock:
+        with finalization_lock(self._lock, 0.25) as lock_acquired:
             aborted = self._aborted_due_to_failures
 
         # Only take final measurement if the thread was started, actually stopped (P2-E7),
         # and did not self-abort due to consecutive poll failures.
         if was_started and not self.is_alive() and not aborted:
             try:
-                self._update_metrics()
+                if lock_acquired:
+                    self._update_metrics()
                 end_rss = self._poll_rss()
                 end_tree_rss = self._poll_tree_rss() if self._scope == "tree" else 0
-                with self._lock:
+                with finalization_lock(self._lock, 0.25):
                     if end_rss >= 0:
                         self.end_rss_bytes = end_rss
                         if self.end_rss_bytes > self.peak_rss_bytes:
@@ -584,7 +588,7 @@ class ResourceWatcher(threading.Thread):
 
     def to_manifest_dict(self) -> Dict[str, Any]:
         """Build the ``resources`` manifest section dict."""
-        with self._lock:
+        with finalization_lock(self._lock, 0.25):
             peak_rss = self.peak_rss_bytes
             end_rss = self.end_rss_bytes
             peak_cpu = self.peak_cpu_percent
@@ -623,7 +627,7 @@ class ResourceWatcher(threading.Thread):
             result["peak_tree_cpu_percent"] = peak_tree_cpu if peak_tree_cpu > 0 else None
 
         if self._system_metrics:
-            with self._lock:
+            with finalization_lock(self._lock, 0.25):
                 sysmem_start = self._sysmem_start
                 sysmem_last = self._sysmem_last
                 sysmem_min = self._sysmem_min_available

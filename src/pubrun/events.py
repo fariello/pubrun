@@ -5,6 +5,8 @@ import time
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
+from pubrun.capture.signals import finalization_lock
+
 logger = logging.getLogger("pubrun")
 
 class EventStream:
@@ -95,8 +97,8 @@ class EventStream:
 
         should_warn = False
         warn_detail = ""
-        with self._lock:
-            if self._file is None:
+        with finalization_lock(self._lock, 0.25) as acquired:
+            if not acquired or self._file is None:
                 return
             try:
                 if is_critical:
@@ -138,7 +140,9 @@ class EventStream:
 
     def close(self) -> None:
         """Flush and close the event stream file. Safe to call multiple times."""
-        with self._lock:
+        with finalization_lock(self._lock, 0.25) as acquired:
+            if not acquired:
+                return
             f, self._file = self._file, None
             buf = self._buffer
             self._buffer = []

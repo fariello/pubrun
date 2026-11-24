@@ -498,3 +498,273 @@ class TestGetRecordsDoesNotBlock:
             assert not t.is_alive(), "get_records() blocked on the held capture lock"
         assert result["records"]["exit_code"] == 3
         assert result["records"]["capture_state"]["status"] == "complete"
+
+
+class TestFinalizationLock:
+    """Unit tests for the bounded ``finalization_lock`` helper."""
+
+    def test_blocks_normally_outside_signal_finalization(self):
+        """Outside signal finalization, the helper blocks until the lock is released."""
+        import pubrun.capture.signals as signals_mod
+
+        lock = threading.Lock()
+        locked = threading.Event()
+
+        def holder():
+            with lock:
+                locked.set()
+                time.sleep(0.3)
+
+        orig_latch = signals_mod._finalizing_active_run
+        t = threading.Thread(target=holder, daemon=True)
+        try:
+            signals_mod._finalizing_active_run = False
+            signals_mod._timed_out_locks.clear()
+            t.start()
+            assert locked.wait(timeout=5)
+            with signals_mod.finalization_lock(lock, 0.05) as acquired:
+                assert acquired is True
+        finally:
+            t.join(timeout=5)
+            signals_mod._timed_out_locks.clear()
+            signals_mod._finalizing_active_run = orig_latch
+
+    def test_gives_up_within_bound_during_signal_finalization(self):
+        """During signal finalization, a busy lock yields False within timeout + 1.0 s."""
+        import pubrun.capture.signals as signals_mod
+
+        lock = threading.Lock()
+        locked = threading.Event()
+        release = threading.Event()
+
+        def holder():
+            with lock:
+                locked.set()
+                release.wait(timeout=5)
+
+        orig_latch = signals_mod._finalizing_active_run
+        timeout = 0.15
+        t = threading.Thread(target=holder, daemon=True)
+        try:
+            signals_mod._finalizing_active_run = True
+            signals_mod._timed_out_locks.clear()
+            t.start()
+            assert locked.wait(timeout=5)
+            start = time.monotonic()
+            with signals_mod.finalization_lock(lock, timeout) as acquired:
+                elapsed = time.monotonic() - start
+                assert acquired is False
+            assert elapsed < timeout + 1.0
+        finally:
+            release.set()
+            t.join(timeout=5)
+            signals_mod._timed_out_locks.clear()
+            signals_mod._finalizing_active_run = orig_latch
+
+    def test_skips_wait_for_lock_that_already_timed_out(self):
+        """A lock that already timed out during this finalization is not waited on again."""
+        import pubrun.capture.signals as signals_mod
+
+        lock = threading.Lock()
+        locked = threading.Event()
+        release = threading.Event()
+
+        def holder():
+            with lock:
+                locked.set()
+                release.wait(timeout=5)
+
+        orig_latch = signals_mod._finalizing_active_run
+        t = threading.Thread(target=holder, daemon=True)
+        try:
+            signals_mod._finalizing_active_run = True
+            signals_mod._timed_out_locks.clear()
+            t.start()
+            assert locked.wait(timeout=5)
+            with signals_mod.finalization_lock(lock, 0.1) as first_acquired:
+                assert first_acquired is False
+            start = time.monotonic()
+            with signals_mod.finalization_lock(lock, 2.0) as second_acquired:
+                elapsed = time.monotonic() - start
+                assert second_acquired is False
+            assert elapsed < 0.1
+        finally:
+            release.set()
+            t.join(timeout=5)
+            signals_mod._timed_out_locks.clear()
+            signals_mod._finalizing_active_run = orig_latch
+
+    def test_finalize_active_run_clears_timed_out_locks(self, monkeypatch):
+        """_finalize_active_run resets both _timed_out_locks and _finalizing_active_run."""
+        import pubrun.capture.signals as signals_mod
+        import pubrun.tracker as tracker_mod
+
+        lock = threading.Lock()
+        locked = threading.Event()
+        release = threading.Event()
+
+        def holder():
+            with lock:
+                locked.set()
+                release.wait(timeout=5)
+
+        class _DummyWriter:
+            def write_artifacts(self):
+                with signals_mod.finalization_lock(lock, 0.05) as acquired:
+                    assert acquired is False
+                    assert id(lock) in signals_mod._timed_out_locks
+
+        class _DummyRun:
+            writer = _DummyWriter()
+
+        monkeypatch.setattr(tracker_mod, "_active_run", _DummyRun())
+        t = threading.Thread(target=holder, daemon=True)
+        try:
+            t.start()
+            assert locked.wait(timeout=5)
+            signals_mod._finalize_active_run()
+            assert len(signals_mod._timed_out_locks) == 0
+            assert signals_mod._finalizing_active_run is False
+            assert signals_mod.in_signal_finalization() is False
+        finally:
+            release.set()
+            t.join(timeout=5)
+            signals_mod._timed_out_locks.clear()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGTERM is Unix-specific")
+class TestLethalSignalWhileLockHeld:
+    """Real-SIGTERM regression tests for every finalization-path lock."""
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            "errors_lock",
+            "data_files_lock",
+            "file_io_budget_lock",
+            "event_stream_lock",
+            "subprocess_spy_lock",
+            "resource_watcher_lock",
+            "write_lock_vs_hw_refresh",
+            "errors_lock_vs_hw_refresh",
+        ],
+    )
+    def test_sigterm_finalizes_while_lock_held(self, tmp_path, case):
+        """A child holding a pubrun lock exits promptly on SIGTERM and writes manifest.json."""
+        import json
+        import subprocess
+        from pathlib import Path
+
+        script_path = tmp_path / f"sigterm_{case}.py"
+        script_path.write_text(
+            f"""
+import sys
+import threading
+import time
+import pubrun
+import pubrun.core
+from pubrun.capture.file_io import get_or_create_budget_tracker
+from pubrun.capture.subprocesses import SubprocessSpy
+
+case = {case!r}
+run = pubrun.start(events={{"enabled": True}})
+if run._hardware_future_done is not None:
+    run._hardware_future_done.wait(5)
+if run._hardware_thread is not None:
+    run._hardware_thread.join(5)
+print(run.run_dir, flush=True)
+
+if case == "errors_lock":
+    lock = run._errors_lock
+elif case == "data_files_lock":
+    lock = run._data_files_lock
+elif case == "file_io_budget_lock":
+    lock = get_or_create_budget_tracker(run)._lock
+elif case == "event_stream_lock":
+    assert run.event_stream is not None
+    lock = run.event_stream._lock
+elif case == "subprocess_spy_lock":
+    assert run._spying_subprocesses
+    lock = SubprocessSpy._lock
+elif case == "resource_watcher_lock":
+    assert run.resource_watcher is not None
+    lock = run.resource_watcher._lock
+elif case == "write_lock_vs_hw_refresh":
+    lock = run.writer._write_lock
+elif case == "errors_lock_vs_hw_refresh":
+    lock = run._errors_lock
+else:
+    raise AssertionError(f"Unknown case: {{case}}")
+
+with lock:
+    if case == "write_lock_vs_hw_refresh":
+        run.writer._startup_included_hardware = False
+        ready = threading.Event()
+        def _bg():
+            with pubrun.core._run_lock:
+                ready.set()
+                run.writer.write_startup_manifest(is_refresh=True)
+        t = threading.Thread(target=_bg, daemon=True)
+        t.start()
+        assert ready.wait(5)
+        time.sleep(0.05)
+    elif case == "errors_lock_vs_hw_refresh":
+        ready = threading.Event()
+        def _bg():
+            with pubrun.core._run_lock:
+                ready.set()
+                run._check_section_failed(
+                    "hardware", {{"capture_state": {{"status": "failed"}}}}
+                )
+        t = threading.Thread(target=_bg, daemon=True)
+        t.start()
+        assert ready.wait(5)
+        time.sleep(0.05)
+
+    print("held", flush=True)
+    time.sleep(60)
+""",
+            encoding="utf-8",
+        )
+
+        proc = subprocess.Popen(
+            [sys.executable, str(script_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=tmp_path,
+        )
+        try:
+            assert proc.stdout is not None
+            run_dir_line = proc.stdout.readline().strip()
+            held_line = proc.stdout.readline().strip()
+            if not run_dir_line or held_line != "held":
+                proc.kill()
+                _, stderr = proc.communicate(timeout=5)
+                pytest.fail(
+                    f"Child failed handshake for {case}: "
+                    f"run_dir={run_dir_line!r}, held={held_line!r}, stderr={stderr!r}"
+                )
+
+            proc.send_signal(signal.SIGTERM)
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+                pytest.fail(f"process hung after SIGTERM while holding {case}")
+
+            assert proc.returncode == -signal.SIGTERM
+            manifest_path = Path(run_dir_line) / "manifest.json"
+            assert manifest_path.exists(), f"manifest.json missing for {case}"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            assert manifest["status"]["outcome"] == "interrupted"
+            sig_names = [
+                entry.get("signal_name")
+                for entry in manifest["signals"]["signals_received"]
+            ]
+            assert "SIGTERM" in sig_names
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)

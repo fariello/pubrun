@@ -19,7 +19,8 @@ import signal
 import sys
 import time
 import threading
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from contextlib import contextmanager
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
 
 # Signals we attempt to intercept (subset of catchable, meaningful signals).
@@ -47,8 +48,64 @@ for _sig_name in ("SIGTERM", "SIGHUP"):
 # thread between bytecodes, so a second lethal signal can arrive while the first
 # one is still writing artifacts; the nested call must return immediately.
 _finalizing_active_run = False
+# Lock object ids that already timed out during the current signal finalization;
+# subsequent acquires for the same lock only try a non-blocking acquire.
+_timed_out_locks: Set[int] = set()
 
 
+def in_signal_finalization() -> bool:
+    """Return True while ``_finalize_active_run`` is finalizing a lethal signal."""
+    return _finalizing_active_run
+
+
+@contextmanager
+def finalization_lock(lock: Any, timeout: float) -> Iterator[bool]:
+    """Acquire ``lock`` normally, or with a bound during lethal-signal finalization.
+
+    Outside signal finalization (``_finalizing_active_run`` is False), this
+    acquires ``lock`` with a normal blocking ``with lock:`` and always yields
+    ``True``. During signal finalization, it waits at most ``timeout`` seconds
+    (or uses ``acquire(blocking=False)`` if ``lock`` already timed out in this
+    finalization). Yields ``True`` when the lock is held and ``False`` when it
+    gave up so the caller can proceed lock-free.
+    """
+    if not _finalizing_active_run:
+        with lock:
+            yield True
+        return
+
+    lock_id = id(lock)
+    if lock_id in _timed_out_locks:
+        acquired = lock.acquire(blocking=False)
+    else:
+        acquired = lock.acquire(timeout=timeout)
+        if not acquired:
+            _timed_out_locks.add(lock_id)
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            lock.release()
+
+
+# Signal-context lock rule: during signal finalization, never block without a
+# bound; on timeout, do the work lock-free and still write the manifest.
+#
+# Lock inventory (every lock audited for lethal-signal finalization):
+# - src/pubrun/core.py::_run_lock (RLock): bounded 2.0 s via finalization_lock in Run._finalize_state; lock-free fallback prevents cross-thread deadlock with pubrun-hw.
+# - src/pubrun/writer.py::ArtifactWriter._write_lock (RLock): bounded 2.0 s via finalization_lock in ArtifactWriter.write_artifacts; lock-free fallback still writes manifest.json.
+# - src/pubrun/tracker.py::Run._errors_lock (Lock): bounded 0.25 s via finalization_lock in Run._check_section_failed, Run._store_capture_error_detail, and Run.to_manifest_dict; lock-free fallback.
+# - src/pubrun/tracker.py::Run._data_files_lock (Lock): bounded 0.25 s via finalization_lock in Run.to_manifest_dict, file_io.finalize_pending_registrations, and file_io.get_or_create_budget_tracker; lock-free fallback.
+# - src/pubrun/capture/file_io.py::FileIoBudgetTracker._lock (Lock): bounded 0.25 s via finalization_lock in all FileIoBudgetTracker methods; lock-free fallback.
+# - src/pubrun/events.py::EventStream._lock (Lock): bounded 0.25 s via finalization_lock in EventStream.emit (drops event on timeout) and EventStream.close (returns without closing; OS closes fd at exit).
+# - src/pubrun/capture/subprocesses.py::SubprocessSpy._lock (Lock, class): bounded 0.25 s via finalization_lock in SubprocessSpy.finalize_all (and its _complete_record helper) and SubprocessSpy.uninstall; lock-free fallback.
+# - src/pubrun/capture/resources.py::ResourceWatcher._lock (Lock): bounded 0.25 s via finalization_lock in ResourceWatcher.stop (with 0.5 s thread join cap) and ResourceWatcher.to_manifest_dict; lock-free fallback.
+# - src/pubrun/__init__.py::_commit_lock (Lock): unchanged; startup manifest write caches the commit before the active run is published, so _get_commit returns without taking the lock.
+# - src/pubrun/capture/signals.py::SignalExitCapture._lock (RLock): unchanged; get_records already uses acquire(blocking=False) with lock-free fallback (commit 94e504a).
+# - src/pubrun/capture/console.py::TqdmSafeTee._lock (RLock): unchanged; not taken by ConsoleInterceptor.stop.
+# - src/pubrun/capture/packages.py::_CACHE_LOCK and _DistributionIndex._files_lock (Lock): unchanged; main thread holds them only at startup (before handlers are installed) or inside _finalize_state after _finalized is latched.
+# - src/pubrun/writer.py::_durability_warn_lock and src/pubrun/capture/file_io.py::_warn_lock (Lock): unchanged; only acquired when a configuration value is invalid.
+# - src/pubrun/_bootstrap.py::_lock, src/pubrun/core.py::_start_lock, and src/pubrun/core.py::_pubrun_log_lock (Lock): unchanged; not reached during finalization (_bootstrap.get_import_metadata takes no lock).
 def _finalize_active_run() -> None:
     """Best-effort finalization of the active run before process death.
 
@@ -69,6 +126,7 @@ def _finalize_active_run() -> None:
     except Exception:
         pass  # Best-effort: never crash during signal handling
     finally:
+        _timed_out_locks.clear()
         _finalizing_active_run = False
 
 

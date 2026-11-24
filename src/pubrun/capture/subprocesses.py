@@ -10,6 +10,8 @@ import weakref
 from contextlib import contextmanager
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
+from pubrun.capture.signals import finalization_lock
+
 _spy_local = threading.local()
 
 
@@ -175,7 +177,7 @@ class SubprocessSpy:
                 if rec.get("exit_code") is not None:
                     return
                 try:
-                    with cls._lock:
+                    with finalization_lock(cls._lock, 0.25):
                         if not state["active"] or rec.get("exit_code") is not None:
                             return
                         cls._popen_refs.pop(id(rec), None)
@@ -505,7 +507,7 @@ class SubprocessSpy:
     @classmethod
     def uninstall(cls, owner: Optional[object] = None) -> None:
         """Deactivate recording and restore still-owned targets independently."""
-        with cls._lock:
+        with finalization_lock(cls._lock, 0.25):
             if not cls._installed:
                 return
             if owner is not None and cls._owner is not None and owner is not cls._owner:
@@ -592,7 +594,7 @@ class SubprocessSpy:
     @classmethod
     def finalize_all(cls) -> None:
         """Harvest observable exit codes and mark unobserved unwaited records partial."""
-        with cls._lock:
+        with finalization_lock(cls._lock, 0.25):
             state = cls._active_state
 
         if state is not None and state.get("active"):
@@ -607,8 +609,8 @@ class SubprocessSpy:
             # Phase 2: Collect live Popen objects for open records under _lock.
             live_procs: List[Tuple[Dict[str, Any], Any]] = []
             seen_rec_ids = set()
-            with cls._lock:
-                for rec in cls._records:
+            with finalization_lock(cls._lock, 0.25):
+                for rec in list(cls._records):
                     if rec.get("exit_code") is None and "ended_at_utc" not in rec:
                         rec_id = id(rec)
                         ref_entry = cls._popen_refs.get(rec_id)
@@ -657,8 +659,8 @@ class SubprocessSpy:
 
         # Phase 4: Mark remaining unobserved records partial and drop all Popen refs.
         now_mono = time.perf_counter()
-        with cls._lock:
-            for rec in cls._records:
+        with finalization_lock(cls._lock, 0.25):
+            for rec in list(cls._records):
                 if rec.get("exit_code") is None and "ended_at_utc" not in rec:
                     rec["ended_at_utc"] = None
                     entry = cls._start_monos.pop(id(rec), None)
