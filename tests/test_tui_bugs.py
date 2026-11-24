@@ -539,6 +539,144 @@ class TestRunDetailsOsLine:
 
 
 # --------------------------------------------------------------------------- #
+# 0mnekm: CPU model line with missing or null hardware.cpu fields
+# --------------------------------------------------------------------------- #
+
+class TestRunDetailsCpuLine:
+    _FULL_CPU = {
+        "model": "Intel(R) Xeon(R) Gold 6248",
+        "logical_cores": 8,
+        "architecture": "x86_64",
+    }
+
+    def _cpu_line(self, tmp_path, cpu):
+        from pubrun.tui.app import PubrunTUIApp
+        from pubrun.tui.widgets.details import RunDetailsView
+
+        extra = None
+        if cpu is not _DROP:
+            extra = {"hardware": {"capture_state": {"status": "complete"}, "cpu": cpu}}
+        runs = tmp_path / "runs"
+        run_dir = _write_manifest(runs / "pubrun-cpu00001", "cpu00001", extra=extra)
+        result = {}
+
+        async def _drive():
+            app = PubrunTUIApp(output_dir=str(runs))
+            async with app.run_test() as pilot:
+                details = app.query_one("#details-view", RunDetailsView)
+                details.display_run(RunInfo(run_dir))
+                await pilot.pause()
+                result["text"] = str(details.query_one("#lbl-general-info").render())
+
+        asyncio.run(_drive())
+        cpu_lines = [
+            line.strip()
+            for line in result["text"].splitlines()
+            if line.strip().startswith("CPU model:")
+        ]
+        assert len(cpu_lines) == 1
+        return cpu_lines[0][len("CPU model:"):].lstrip()
+
+    @pytest.mark.parametrize(
+        "cpu, expected",
+        [
+            (
+                {"logical_cores": 8, "architecture": "x86_64"},
+                "unknown (8 cores, x86_64)",
+            ),
+            (
+                {"model": None, "logical_cores": 8, "architecture": "x86_64"},
+                "unknown (8 cores, x86_64)",
+            ),
+            (
+                {"model": "Intel(R) Xeon(R) Gold 6248", "architecture": "x86_64"},
+                "Intel(R) Xeon(R) Gold 6248 (x86_64)",
+            ),
+            (
+                {
+                    "model": "Intel(R) Xeon(R) Gold 6248",
+                    "logical_cores": None,
+                    "architecture": "x86_64",
+                },
+                "Intel(R) Xeon(R) Gold 6248 (x86_64)",
+            ),
+            (
+                {"model": "Intel(R) Xeon(R) Gold 6248", "logical_cores": 8},
+                "Intel(R) Xeon(R) Gold 6248 (8 cores)",
+            ),
+            (
+                {
+                    "model": "Intel(R) Xeon(R) Gold 6248",
+                    "logical_cores": 8,
+                    "architecture": None,
+                },
+                "Intel(R) Xeon(R) Gold 6248 (8 cores)",
+            ),
+            (
+                {
+                    "model": "Intel(R) Xeon(R) Gold 6248",
+                    "logical_cores": None,
+                    "architecture": None,
+                },
+                "Intel(R) Xeon(R) Gold 6248",
+            ),
+            (
+                {"model": "  ", "logical_cores": None, "architecture": "x86_64"},
+                "unknown (x86_64)",
+            ),
+            (
+                {"model": None, "logical_cores": None, "architecture": None},
+                "-",
+            ),
+            (
+                {},
+                "-",
+            ),
+            (
+                _DROP,
+                "-",
+            ),
+            (
+                {
+                    "model": "Intel(R) Xeon(R) Gold 6248",
+                    "logical_cores": 0,
+                    "architecture": "x86_64",
+                },
+                "Intel(R) Xeon(R) Gold 6248 (0 cores, x86_64)",
+            ),
+        ],
+        ids=[
+            "model-missing",
+            "model-null",
+            "cores-missing",
+            "cores-null",
+            "arch-missing",
+            "arch-null",
+            "cores-and-arch-null",
+            "model-whitespace-cores-null",
+            "all-null",
+            "empty-cpu-dict",
+            "no-hardware-section",
+            "cores-zero",
+        ],
+    )
+    def test_missing_fields_never_render_none(self, tmp_path, cpu, expected):
+        text = self._cpu_line(tmp_path, cpu)
+        assert text == expected
+        assert "None" not in text
+
+    def test_all_present_unchanged(self, tmp_path):
+        assert (
+            self._cpu_line(tmp_path, dict(self._FULL_CPU))
+            == "Intel(R) Xeon(R) Gold 6248 (8 cores, x86_64)"
+        )
+
+    def test_bracketed_model_rendered_literally(self, tmp_path):
+        cpu = dict(self._FULL_CPU, model="Vendor [Rev 2] [/]")
+        assert self._cpu_line(tmp_path, cpu) == "Vendor [Rev 2] [/] (8 cores, x86_64)"
+
+
+# --------------------------------------------------------------------------- #
 # BUG-14: LogViewer
 # --------------------------------------------------------------------------- #
 

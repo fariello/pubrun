@@ -162,6 +162,40 @@ def _format_os_text(host: Any) -> str:
     return "-"
 
 
+def _format_cpu_text(cpu: Any) -> str:
+    """Format manifest ``hardware.cpu`` fields for the CPU model line.
+
+    Pure helper with no ``textual`` dependency. Missing, null, or
+    whitespace-only fields never render as ``None``: when all three fields
+    are missing the result is ``-``, a missing model becomes ``unknown``,
+    and a missing core count or architecture is omitted from the
+    parenthesized details. Values are markup-escaped because the pane
+    parses Textual markup.
+    """
+    if not isinstance(cpu, dict):
+        return "-"
+
+    def _norm(value: Any) -> str:
+        text = value if isinstance(value, str) else ("" if value is None else str(value))
+        return text.strip()
+
+    model = _norm(cpu.get("model"))
+    cores = _norm(cpu.get("logical_cores"))
+    arch = _norm(cpu.get("architecture"))
+    if not model and not cores and not arch:
+        return "-"
+
+    head = _escape_markup(model) if model else "unknown"
+    details: List[str] = []
+    if cores:
+        details.append(f"{_escape_markup(cores)} cores")
+    if arch:
+        details.append(_escape_markup(arch))
+    if details:
+        return f"{head} ({', '.join(details)})"
+    return head
+
+
 class RunDetailsView(Vertical):
     """Component to display all metadata groups for a single selected run."""
 
@@ -324,7 +358,7 @@ class RunDetailsView(Vertical):
             gpus = hw.get("gpus")
             gpus = [g for g in gpus if isinstance(g, dict)] if isinstance(gpus, list) else []
             lines.append(f"  [bold]OS:[/]            {_format_os_text(host)}")
-            lines.append(f"  [bold]CPU model:[/]     {cpu.get('model')} ({cpu.get('logical_cores')} cores, {cpu.get('architecture')})")
+            lines.append(f"  [bold]CPU model:[/]     {_format_cpu_text(cpu)}")
             lines.append(f"  [bold]Total RAM:[/]     {_format_bytes(hw.get('memory_total_bytes'))}")
             if gpus:
                 lines.append("  [bold]GPUs Detected:[/]")

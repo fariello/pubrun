@@ -56,22 +56,22 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Guard the CPU model line
 
-- [ ] E-01 In `src/pubrun/tui/widgets/details.py`, add a module-level helper `_format_cpu_text(cpu: Any) -> str` and use it for the CPU model line in `RunDetailsView.update_general_pane`.
+- [x] E-01 In `src/pubrun/tui/widgets/details.py`, add a module-level helper `_format_cpu_text(cpu: Any) -> str` and use it for the CPU model line in `RunDetailsView.update_general_pane`.
   - Depends on: none
   - Expected outcome: The helper sits directly after `_format_os_text`, has no `textual` dependency, and carries a docstring in the style of `_format_os_text` that states the `-`, `unknown`, and omitted-detail rules. It returns `"-"` when `cpu` is not a dict. Otherwise it normalizes `cpu.get("model")`, `cpu.get("logical_cores")`, and `cpu.get("architecture")` with one rule, the same rule `_format_os_text` uses: a string is kept, `None` becomes `""`, and any other type is converted with `str()`; the result is then passed through `.strip()`, so a whitespace-only value counts as empty. An integer `0` for `logical_cores` is therefore present and renders as `0 cores`. The helper then builds its result in this order: (1) when all three normalized values are empty, return `"-"`; (2) the head is the model when it is non-empty, else `unknown`; (3) the details list holds `f"{cores} cores"` when the core count is non-empty, followed by the architecture when it is non-empty; (4) return `f"{head} ({', '.join(details)})"` when the details list is non-empty, else return `head`. It applies `_escape_markup` to the model, the core count, and the architecture before it formats them, so a bracketed token such as `[Rev 2]` or `[/]` in a CPU model string is shown literally and does not raise `textual.markup.MarkupError`. In `update_general_pane`, the CPU model line becomes `lines.append(f"  [bold]CPU model:[/]     {_format_cpu_text(cpu)}")`. When all three fields are present and the model contains no `[`, the rendered line is identical to the current output (for example `CPU model:     Intel(R) Xeon(R) Gold 6248 (8 cores, x86_64)`). No other line of `update_general_pane` changes; the `cpu` local, which `update_general_pane` already coerces to `{}` when `hardware.cpu` is not a dict, is passed unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Regression tests and verification
 
-- [ ] E-02 Add a `TestRunDetailsCpuLine` class to `tests/test_tui_bugs.py` with behavioral tests that render the General Info tab for manifests with missing or null CPU fields.
+- [x] E-02 Add a `TestRunDetailsCpuLine` class to `tests/test_tui_bugs.py` with behavioral tests that render the General Info tab for manifests with missing or null CPU fields.
   - Depends on: E-01
   - Expected outcome: The class sits directly after `TestRunDetailsOsLine`, under a section banner comment naming `0mnekm`, and follows the pattern of `TestRunDetailsOsLine._os_line`. Its helper writes a manifest with the file's `_write_manifest(run_dir, run_id, extra=...)` helper. When the test passes a CPU dict, `extra` holds `{"hardware": {"capture_state": {"status": "complete"}, "cpu": <cpu dict>}}`; when the test passes the `_DROP` sentinel for the whole CPU dict, `extra` holds no `hardware` key. The helper then starts `PubrunTUIApp(output_dir=...)` under `app.run_test()`, calls `RunDetailsView.display_run(RunInfo(run_dir))`, awaits `pilot.pause()`, reads `str(details.query_one("#lbl-general-info").render())`, asserts that exactly one rendered line has stripped text starting with `CPU model:`, and returns the text after that label with leading spaces removed. Each CPU dict below starts from `{"model": "Intel(R) Xeon(R) Gold 6248", "logical_cores": 8, "architecture": "x86_64"}` and changes only the named fields. One test is parametrized over these cases and asserts both the exact text and that `"None"` is not in it: (1) `model` key removed, expected `unknown (8 cores, x86_64)`; (2) `model` set to `None`, expected `unknown (8 cores, x86_64)`; (3) `logical_cores` key removed, expected `Intel(R) Xeon(R) Gold 6248 (x86_64)`; (4) `logical_cores` set to `None`, same expected text as case 3; (5) `architecture` key removed, expected `Intel(R) Xeon(R) Gold 6248 (8 cores)`; (6) `architecture` set to `None`, same expected text as case 5; (7) `logical_cores` and `architecture` both set to `None`, expected `Intel(R) Xeon(R) Gold 6248`; (8) `model` set to `"  "` and `logical_cores` set to `None`, expected `unknown (x86_64)`; (9) all three set to `None`, expected `-`; (10) the CPU dict is `{}`, expected `-`; (11) no `hardware` section in the manifest, expected `-`; (12) `logical_cores` set to `0`, expected `Intel(R) Xeon(R) Gold 6248 (0 cores, x86_64)`, which pins that a zero core count is present and is not dropped by a truthiness test. A second test asserts that the unchanged full CPU dict still renders `Intel(R) Xeon(R) Gold 6248 (8 cores, x86_64)`. A third test asserts that `model` `Vendor [Rev 2] [/]` with the other two fields unchanged renders `Vendor [Rev 2] [/] (8 cores, x86_64)` without raising. The existing `TestRunDetailsGpu` and `TestRunDetailsOsLine` tests are unchanged. No test reads production source code.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Run the new tests, the existing TUI tests, the full test suite, and the reproduction script.
+- [x] E-03 Run the new tests, the existing TUI tests, the full test suite, and the reproduction script.
   - Depends on: E-02
   - Expected outcome: `python3 -m pytest tests/test_tui_bugs.py -v`, `python3 -m pytest tests/test_tui.py tests/test_timing_consumers.py -q`, and `python3 -m pytest -q` each finish with zero failures. The reproduction script in `## Findings` prints seven CPU model lines, none of which contains `None`, and the `bracket-model` case no longer raises.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -186,20 +186,133 @@ N/A. No spec under `.aw/records/specs/` and no page under `docs/` or `README.md`
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: The pasted `git diff -- src/pubrun/tui/widgets/details.py` output, showing the new `_format_cpu_text` helper (with the `-` result, the `unknown` head, the optional details list, and `_escape_markup` on all three values) and that the only changed line in `update_general_pane` is the CPU model line. Also the pasted output of the reproduction script from `## Findings` (it calls `RunDetailsView.display_run`, which calls `update_general_pane`, the code path E-01 changes), showing these seven CPU model lines in order: `-`, `unknown (8 cores, x86_64)`, `Intel(R) Xeon(R) Gold 6248 (x86_64)`, `Intel(R) Xeon(R) Gold 6248 (8 cores)`, `-`, `Intel(R) Xeon(R) Gold 6248 (8 cores, x86_64)`, and `Vendor [Rev 2] [/] (8 cores, x86_64)`, none containing `None`.
   - Observed evidence:
-  - Result: pending
+    ```
+    $ git diff -- src/pubrun/tui/widgets/details.py
+    diff --git a/src/pubrun/tui/widgets/details.py b/src/pubrun/tui/widgets/details.py
+    index 3ba4ace..8c9f93a 100644
+    --- a/src/pubrun/tui/widgets/details.py
+    +++ b/src/pubrun/tui/widgets/details.py
+    @@ -162,6 +162,40 @@ def _format_os_text(host: Any) -> str:
+         return "-"
 
-- [ ] V-02 validates E-02
+
+    +def _format_cpu_text(cpu: Any) -> str:
+    +    """Format manifest ``hardware.cpu`` fields for the CPU model line.
+    +
+    +    Pure helper with no ``textual`` dependency. Missing, null, or
+    +    whitespace-only fields never render as ``None``: when all three fields
+    +    are missing the result is ``-``, a missing model becomes ``unknown``,
+    +    and a missing core count or architecture is omitted from the
+    +    parenthesized details. Values are markup-escaped because the pane
+    +    parses Textual markup.
+    +    """
+    +    if not isinstance(cpu, dict):
+    +        return "-"
+    +
+    +    def _norm(value: Any) -> str:
+    +        text = value if isinstance(value, str) else ("" if value is None else str(value))
+    +        return text.strip()
+    +
+    +    model = _norm(cpu.get("model"))
+    +    cores = _norm(cpu.get("logical_cores"))
+    +    arch = _norm(cpu.get("architecture"))
+    +    if not model and not cores and not arch:
+    +        return "-"
+    +
+    +    head = _escape_markup(model) if model else "unknown"
+    +    details: List[str] = []
+    +    if cores:
+    +        details.append(f"{_escape_markup(cores)} cores")
+    +    if arch:
+    +        details.append(_escape_markup(arch))
+    +    if details:
+    +        return f"{head} ({', '.join(details)})"
+    +    return head
+    +
+    +
+     class RunDetailsView(Vertical):
+         """Component to display all metadata groups for a single selected run."""
+
+    @@ -324,7 +358,7 @@ class RunDetailsView(Vertical):
+                 gpus = hw.get("gpus")
+                 gpus = [g for g in gpus if isinstance(g, dict)] if isinstance(gpus, list) else []
+                 lines.append(f"  [bold]OS:[/]            {_format_os_text(host)}")
+    -            lines.append(f"  [bold]CPU model:[/]     {cpu.get('model')} ({cpu.get('logical_cores')} cores, {cpu.get('architecture')})")
+    +            lines.append(f"  [bold]CPU model:[/]     {_format_cpu_text(cpu)}")
+                 lines.append(f"  [bold]Total RAM:[/]     {_format_bytes(hw.get('memory_total_bytes'))}")
+                 if gpus:
+                     lines.append("  [bold]GPUs Detected:[/]")
+
+    $ PUBRUN_AUTO_START=false PYTHONPATH=src python3 /tmp/opencode/0mnekm_repro.py
+    no-hardware-section | CPU model:     -
+    model-missing | CPU model:     unknown (8 cores, x86_64)
+    cores-null | CPU model:     Intel(R) Xeon(R) Gold 6248 (x86_64)
+    arch-missing | CPU model:     Intel(R) Xeon(R) Gold 6248 (8 cores)
+    all-null | CPU model:     -
+    full | CPU model:     Intel(R) Xeon(R) Gold 6248 (8 cores, x86_64)
+    bracket-model | CPU model:     Vendor [Rev 2] [/] (8 cores, x86_64)
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Pasted `python3 -m pytest tests/test_tui_bugs.py -v -k CpuLine` output listing all twelve parametrized cases, the unchanged-output test, and the bracket-escaping test of `TestRunDetailsCpuLine` as PASSED. Also pasted output showing that, on the pre-fix code, parametrized cases (1) to (11) and the bracket-escaping test fail, while case (12) and the unchanged-output test pass (the pre-fix line already renders a present `0` core count and a full CPU dict correctly). To get it, create a temporary `git worktree` (with `git worktree add --detach`) of the pre-fix commit, which is the parent of the commit that carries the E-01 change, under `/tmp/opencode/`, copy the new `tests/test_tui_bugs.py` into it, run the same `-k CpuLine` command there with `PYTHONPATH=src`, and remove that worktree afterwards. Do not use `git stash` in the shared checkout.
   - Observed evidence:
-  - Result: pending
+    ```
+    $ python3 -m pytest tests/test_tui_bugs.py -v -k CpuLine --no-cov   (post-fix lane)
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[model-missing] PASSED [  7%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[model-null] PASSED [ 14%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[cores-missing] PASSED [ 21%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[cores-null] PASSED [ 28%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[arch-missing] PASSED [ 35%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[arch-null] PASSED [ 42%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[cores-and-arch-null] PASSED [ 50%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[model-whitespace-cores-null] PASSED [ 57%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[all-null] PASSED [ 64%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[empty-cpu-dict] PASSED [ 71%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[no-hardware-section] PASSED [ 78%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[cores-zero] PASSED [ 85%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_all_present_unchanged PASSED [ 92%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_bracketed_model_rendered_literally PASSED [100%]
+    ====================== 14 passed, 33 deselected in 8.14s =======================
 
-- [ ] V-03 validates E-03
+    $ git worktree add --detach /tmp/opencode/0mnekm-prefix 7afaf65f25220e47aa56dabaa55588702c698359 && cp tests/test_tui_bugs.py /tmp/opencode/0mnekm-prefix/tests/test_tui_bugs.py
+    $ (cd /tmp/opencode/0mnekm-prefix && PYTHONPATH=src python3 -m pytest tests/test_tui_bugs.py -v -k CpuLine --no-cov -p no:cacheprovider)   (pre-fix)
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[model-missing] FAILED [  7%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[model-null] FAILED [ 14%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[cores-missing] FAILED [ 21%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[cores-null] FAILED [ 28%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[arch-missing] FAILED [ 35%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[arch-null] FAILED [ 42%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[cores-and-arch-null] FAILED [ 50%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[model-whitespace-cores-null] FAILED [ 57%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[all-null] FAILED [ 64%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[empty-cpu-dict] FAILED [ 71%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[no-hardware-section] FAILED [ 78%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_missing_fields_never_render_none[cores-zero] PASSED [ 85%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_all_present_unchanged PASSED [ 92%]
+    tests/test_tui_bugs.py::TestRunDetailsCpuLine::test_bracketed_model_rendered_literally FAILED [100%]
+    E           textual.markup.MarkupError: auto closing tag ('[/]') has nothing to close
+    ================= 12 failed, 2 passed, 33 deselected in 7.89s ==================
+    $ git worktree remove --force /tmp/opencode/0mnekm-prefix   -> removed
+    ```
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: Pasted summary lines of `python3 -m pytest tests/test_tui_bugs.py -v`, `python3 -m pytest tests/test_tui.py tests/test_timing_consumers.py -q`, and `python3 -m pytest -q`, each with zero failures.
   - Observed evidence:
-  - Result: pending
+    ```
+    $ python3 -m pytest tests/test_tui_bugs.py -v --no-cov
+    ============================= 47 passed in 32.49s ==============================
+    $ python3 -m pytest tests/test_tui.py tests/test_timing_consumers.py -q --no-cov
+    38 passed in 5.76s
+    $ aw suite   (full suite, per the runner's instruction in place of bare `python3 -m pytest -q`)
+    TOTAL                                  16128   3308    79%
+    ======================= 1898 passed in 147.32s (0:02:27) =======================
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 
