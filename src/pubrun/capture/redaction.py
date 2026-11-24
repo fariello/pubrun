@@ -133,6 +133,10 @@ def _redact_any(val: Any, config: Optional[Dict[str, Any]] = None) -> Any:
     return val
 
 
+# Covers hyphenated prefixed keys such as sk-proj-...
+_PREFIXED_KEY_VALUE_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{20,}")
+
+
 def _redact_value_string_heuristics(val: str, config: Optional[Dict[str, Any]] = None) -> str:
     if not isinstance(val, str) or not val:
         return val
@@ -157,6 +161,7 @@ def _redact_value_string_heuristics(val: str, config: Optional[Dict[str, Any]] =
     # 3. Known API keys / Tokens
     openai_pattern = re.compile(r"sk-[a-zA-Z0-9]{20,}")
     val = openai_pattern.sub("[REDACTED]", val)
+    val = _PREFIXED_KEY_VALUE_RE.sub("[REDACTED]", val)
 
     bearer_pattern = re.compile(r"(?i)(bearer|token|auth)\s+([a-zA-Z0-9._~+/-]+=*)")
     val = bearer_pattern.sub(r"\1 [REDACTED]", val)
@@ -202,7 +207,7 @@ def redact_argv(argv: list, config: Optional[Dict[str, Any]] = None) -> list:
     if config:
         enabled = config.get("redaction", {}).get("argv_enabled", True)
         if not enabled:
-            return list(argv)
+            return [str(arg) for arg in argv]
 
     pattern = _get_secret_pattern(config)
     result = []

@@ -112,6 +112,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **Redacted `sys.argv` values are no longer recorded in `invocation.inputs`.** Input discovery in
+  `get_invocation()` now runs after `redact_argv()` and skips any argument whose value changed
+  during redaction, so file paths passed to secret flags (such as `--credentials creds.json`) no
+  longer appear in `invocation.inputs` or trigger MD5 warning logs.
+- **Hyphenated prefixed API keys (such as `sk-proj-...`) are now redacted in environment and
+  argument values.** Value heuristics in `redaction.py` now match prefixed keys containing hyphens
+  and underscores, closing the gap where hyphenated `sk-` keys survived in non-secret environment
+  variables, JSON payloads, and positional arguments.
+- **A `pathlib.Path` entry in `sys.argv` no longer fails invocation capture.** Removed the unused
+  pre-redaction `rerun_command` block in `get_invocation()`, stringified `sys.argv` entries during
+  input discovery, and ensured `redact_argv()` returns strings even when `argv_enabled` is false.
+- **An unknown `[capture.profiling].backend` value now logs a warning instead of failing
+  silently.** `phase.__enter__()` now raises `ValueError("unknown backend")` inside its guarded
+  profiling block so an unsupported backend name logs the documented warning and skips profiling.
 - **Unwaited `subprocess.Popen` children now record observable exit codes and report unobserved exits as `"partial"` instead of `"complete"`.**
   `SubprocessSpy` now hooks `subprocess.Popen.__del__` without taking locks and performs a single non-blocking poll of live unwaited `Popen` objects at finalization, recording the real `exit_code` with `capture_state.status: "complete"` (exit code 0) or `"failed"` (nonzero) when observable through public `Popen` attributes. A child still running at finalization, or whose exit status was collected outside `pubrun`, now records `exit_code: null`, `ended_at_utc: null`, and `capture_state: {"status": "partial", "detail": ...}` instead of `"complete"`. Downstream consumers that filter subprocess records on `capture_state.status == "complete"` should note that unobserved unwaited children now report `"partial"`.
 - **`workload_seconds` no longer includes a background manifest refresh write.** A `stop()` call made

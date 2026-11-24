@@ -95,10 +95,10 @@ What was run and how.
 | `argv` | list[string] | `sys.argv` at invocation time. Sensitive values may be redacted. |
 | `command_line` | string | Joined `argv` string. |
 | `rerun_command` | string | Shell command to reproduce the run (e.g., `cd /path && python script.py`). |
-| `entrypoint_type` | string | `"script"`, `"module"`, or `"interactive"`. |
+| `entrypoint_type` | string | `"script"`, `"module"`, `"interactive"`, or `"unknown"`. |
 | `script` | object | Script file metadata (see below). |
 | `working_directory` | object | `{"path": "/abs/path", "real_path": "/resolved/path"}`. |
-| `inputs` | list[object] | Detected input files from `sys.argv` (path, size, mtime, optional md5). |
+| `inputs` | list[object] | Detected input files from `sys.argv` (path, size, mtime, optional md5). An argument whose value is redacted in `argv` is not recorded. |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
 ### `invocation.script`

@@ -1,4 +1,7 @@
 """Tests for the redaction engine (T1)."""
+import json
+from pathlib import Path
+
 import pytest
 from pubrun.capture.redaction import (
     is_secret_key, redact_value, redact_env_vars, redact_argv,
@@ -121,3 +124,86 @@ class TestRedactArgv:
         argv = ["script.py", "--verbose"]
         result = redact_argv(argv)
         assert result is not argv
+
+
+def _env_by_name(env, config=None):
+    return {entry["name"]: entry["value"] for entry in redact_env_vars(env, config)}
+
+
+class TestValueHeuristics:
+    def test_json_object_in_env_value(self):
+        payload = {
+            "api_key": "k_secret",
+            "nested": {"password": "pw_secret"},
+            "items": [{"token": 7}, "plain"],
+            "n": 3,
+        }
+        vals = _env_by_name({"APP_CONFIG": json.dumps(payload)})
+        assert vals["APP_CONFIG"]["representation"] == "plain"
+        decoded = json.loads(vals["APP_CONFIG"]["value"])
+        assert decoded == {
+            "api_key": "[REDACTED]",
+            "nested": {"password": "[REDACTED]"},
+            "items": [{"token": "[REDACTED]"}, "plain"],
+            "n": 3,
+        }
+
+    def test_json_array_in_argv_value(self):
+        raw_array = json.dumps(["sk-" + "a" * 24, {"secret": "s"}, 1.5, None])
+        result = redact_argv(["s.py", raw_array])
+        assert json.loads(result[1]) == ["[REDACTED]", {"secret": "[REDACTED]"}, 1.5, None]
+
+    def test_invalid_json_falls_back_to_string_heuristics(self):
+        raw = "{not json: postgres://u:pw@db/x Bearer abc.def}"
+        vals = _env_by_name({"NOTE": raw})
+        assert vals["NOTE"]["value"] == (
+            "{not json: postgres://u:[REDACTED]@db/x Bearer [REDACTED]}"
+        )
+
+    def test_classic_sk_and_bearer_in_env_values(self):
+        classic_key = "sk-" + "A1" * 12
+        jwt_tok = "eyJhbGciOiJIUzI1NiJ9.payload.sig"
+        vals = _env_by_name({
+            "MSG": f"use {classic_key} today",
+            "HEADER": f"Authorization: Bearer {jwt_tok}",
+        })
+        assert vals["MSG"]["value"] == "use [REDACTED] today"
+        assert vals["HEADER"]["value"].endswith("Bearer [REDACTED]")
+        assert jwt_tok not in vals["HEADER"]["value"]
+
+    def test_uri_token_in_argv_positional(self):
+        assert redact_argv(["s.py", "https://ghp_abc123@github.com/o/r.git"]) == [
+            "s.py",
+            "https://[REDACTED]@github.com/o/r.git",
+        ]
+        note_key = "sk-" + "b" * 22
+        assert redact_argv(
+            ["s.py", "--db=postgres://u:pw@h/db", f"--note={note_key}"]
+        ) == [
+            "s.py",
+            "--db=postgres://u:[REDACTED]@h/db",
+            "--note=[REDACTED]",
+        ]
+
+    def test_non_string_argv_entries_are_stringified(self):
+        data_path = Path("data") / "x.csv"
+        result = redact_argv(["s.py", data_path, 3, "--password", Path("pw.txt")])
+        assert result == ["s.py", str(data_path), "3", "--password", "[REDACTED]"]
+
+    def test_hyphenated_prefixed_key_in_values(self):
+        key = "sk-" + "proj-abc123_def456-7890xyzABC"
+        vals = _env_by_name({"NOTE": f"key {key} end"})
+        assert vals["NOTE"]["value"] == "key [REDACTED] end"
+
+        json_arg = json.dumps({"openai": key})
+        res_json = redact_argv(["s.py", json_arg])
+        assert json.loads(res_json[1]) == {"openai": "[REDACTED]"}
+
+        res_pos = redact_argv(["s.py", key])
+        assert res_pos == ["s.py", "[REDACTED]"]
+
+    def test_short_sk_text_is_kept(self):
+        text = "task-runner sk-short sk-proj-tiny"
+        vals = _env_by_name({"NOTE": text})
+        assert vals["NOTE"]["value"] == text
+        assert redact_argv(["s.py", text]) == ["s.py", text]

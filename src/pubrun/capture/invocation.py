@@ -80,20 +80,9 @@ def get_invocation(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         else:
             entrypoint_type = "interactive"
 
-        # ---------------------------------------------------------
-        # 3. Re-run Replication Engine
-        # ---------------------------------------------------------
-        # Windows cmd chokes on POSIX single quotes (via shlex),
-        # and PowerShell pre-v7 crashes on `&&`.
-        if sys.platform == "win32":
-            import subprocess
-            escaped_args = subprocess.list2cmdline(argv)
-            cwd_str = subprocess.list2cmdline([str(cwd)])
-            # Multiline command avoids operator (&, &&, ;) inconsistencies on Windows
-            rerun_command = f"cd {cwd_str}\npython {escaped_args}"
-        else:
-            escaped_args = shlex.join(argv)
-            rerun_command = f"cd {shlex.quote(str(cwd))} && python {escaped_args}"
+        # Apply argv redaction before input discovery and manifest storage
+        from pubrun.capture.redaction import redact_argv
+        redacted_argv = redact_argv(argv, config)
 
         # ---------------------------------------------------------
         # 4. sys.argv Dataset Discovery Heuristics
@@ -106,7 +95,7 @@ def get_invocation(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if input_cfg.get("enabled", True):
             compute_md5 = input_cfg.get("compute_md5", False)
             ignore_ext = [x.lower() for x in input_cfg.get("ignore_extensions", [])]
-            for idx, arg in enumerate(argv[1:], start=1):
+            for idx, arg in enumerate((str(a) for a in argv[1:]), start=1):
                 try:
                     po = Path(arg)
 
@@ -114,6 +103,10 @@ def get_invocation(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
                     # If an argument looks like `--batch-size`, skip it to avoid
                     # accidentally treating a same-named directory as an input.
                     if arg.startswith("-") or arg.startswith("--"):
+                        continue
+
+                    # A value redaction removed from argv must not reappear here.
+                    if redacted_argv[idx] != arg:
                         continue
 
                     # Heuristic Safety 2: Discard Runtime Caches
@@ -159,10 +152,6 @@ def get_invocation(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
                         inputs_data.append(arg_data)
                 except Exception:
                     pass
-
-        # Apply argv redaction before storing in the manifest
-        from pubrun.capture.redaction import redact_argv
-        redacted_argv = redact_argv(argv, config)
 
         # Rebuild command_line and rerun_command from redacted argv
         if sys.platform == "win32":

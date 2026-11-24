@@ -437,3 +437,147 @@ def test_explicit_popen_monotonic_and_launch_failure_schema(tmp_path, monkeypatc
     assert "OSError" in fail_rec["error"]
     assert fail_rec["capture_state"]["status"] == "failed"
     assert "OSError" in fail_rec["capture_state"]["detail"]
+
+
+@pytest.fixture
+def active_run(monkeypatch):
+    """Manage active run lifecycle and yappi class latch without patching Path.cwd."""
+    import pubrun.tracker
+
+    pubrun.tracker._active_run = None
+    monkeypatch.setattr(pubrun.phase, "_yappi_active", False, raising=False)
+
+    def _start(**kwargs):
+        opts = {"console": {"capture_mode": "off"}}
+        opts.update(kwargs)
+        return pubrun.start(**opts)
+
+    yield _start
+
+    active = pubrun.tracker._active_run
+    if active is not None:
+        try:
+            active.stop()
+        except Exception:
+            pass
+        pubrun.tracker._active_run = None
+
+
+def test_report_and_artifact_inactive_error(tmp_path, active_run):
+    (tmp_path / ".pubrun.toml").write_text(
+        '[events]\non_inactive_annotate = "error"\n', encoding="utf-8"
+    )
+    with pytest.raises(RuntimeError, match="no run is active"):
+        pubrun.report("r", {"a": 1})
+    with pytest.raises(RuntimeError, match="no run is active"):
+        pubrun.artifact("a.txt", "x")
+
+
+def test_list_report_summarizes_item_count(active_run):
+    tracker = active_run()
+    pubrun.report("rows", [1, 2, 3])
+    tracker.stop()
+
+    report_path = tracker.run_dir / "rows.json"
+    assert report_path.exists()
+    assert json.loads(report_path.read_text(encoding="utf-8")) == [1, 2, 3]
+
+    events = [
+        json.loads(line)
+        for line in (tracker.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    report_events = [
+        e for e in events if e.get("type") == "annotation" and e.get("name") == "report: rows"
+    ]
+    assert len(report_events) == 1
+    assert report_events[0]["payload"] == {
+        "filename": "rows.json",
+        "summary": {"items": 3},
+    }
+
+
+def test_report_and_artifact_write_error_logs_warning(active_run, monkeypatch, caplog):
+    import logging
+
+    active_run()
+
+    def _disk_full(self, *args, **kwargs):
+        raise OSError("disk full")
+
+    with caplog.at_level(logging.WARNING, logger="pubrun"):
+        with monkeypatch.context() as mp:
+            mp.setattr(Path, "write_text", _disk_full)
+            pubrun.report("r", {"a": 1})
+            pubrun.artifact("a.txt", "x")
+
+    messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert "pubrun: failed to write report 'r': disk full" in messages
+    assert "pubrun: failed to write artifact 'a.txt': disk full" in messages
+
+
+def test_nested_yappi_phase_is_skipped_with_warning(active_run, monkeypatch, caplog):
+    import logging
+    import types
+
+    calls = []
+
+    class _FakeStats:
+        def save(self, path, type="pstat"):
+            calls.append("save")
+            Path(path).write_text("yappi-profile", encoding="utf-8")
+
+    fake_yappi = types.ModuleType("yappi")
+    fake_yappi.start = lambda: calls.append("start")
+    fake_yappi.stop = lambda: calls.append("stop")
+    fake_yappi.clear_stats = lambda: calls.append("clear")
+    fake_yappi.get_func_stats = lambda: _FakeStats()
+    monkeypatch.setitem(sys.modules, "yappi", fake_yappi)
+
+    tracker = active_run(capture={"profiling": {"enabled": True, "backend": "yappi"}})
+    with caplog.at_level(logging.WARNING, logger="pubrun"):
+        with pubrun.phase("outer"):
+            assert pubrun.phase._yappi_active is True
+            with pubrun.phase("inner"):
+                assert pubrun.phase._yappi_active is True
+
+    assert pubrun.phase._yappi_active is False
+    assert calls == ["start", "stop", "save", "clear"]
+    assert (tracker.run_dir / "profile-outer.prof").exists()
+    assert not (tracker.run_dir / "profile-inner.prof").exists()
+    messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert (
+        "pubrun: yappi already active (nested/concurrent phase); "
+        "skipping profiling for phase 'inner'"
+    ) in messages
+
+
+def test_yappi_import_error_warns_and_skips(active_run, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setitem(sys.modules, "yappi", None)
+    tracker = active_run(capture={"profiling": {"enabled": True, "backend": "yappi"}})
+    with caplog.at_level(logging.WARNING, logger="pubrun"):
+        with pubrun.phase("train"):
+            pass
+
+    messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(
+        msg.startswith("pubrun: profiling backend 'yappi' unavailable:") for msg in messages
+    )
+    assert list(tracker.run_dir.glob("profile-*.prof")) == []
+
+
+def test_unknown_backend_warns_and_skips(active_run, caplog):
+    import logging
+
+    tracker = active_run(capture={"profiling": {"enabled": True, "backend": "pyinstrument"}})
+    with caplog.at_level(logging.WARNING, logger="pubrun"):
+        with pubrun.phase("train"):
+            pass
+
+    messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert messages == [
+        "pubrun: profiling backend 'pyinstrument' unavailable: unknown backend"
+    ]
+    assert list(tracker.run_dir.glob("profile-*.prof")) == []

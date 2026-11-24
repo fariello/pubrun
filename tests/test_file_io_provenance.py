@@ -823,3 +823,124 @@ class TestDeduplicationAndHostPreservation:
         m = _run_with_file_io(tmp_path, {"level": "hash"}, _work)
         assert builtins.open is orig_open
         assert m["data_files"]["inputs"] == []
+
+
+class TestProxyEdgeMethods:
+
+    def test_read1_stream_hashes_and_sets_eof(self, tmp_path):
+        p = tmp_path / "read1.bin"
+        payload = bytes(range(100))
+        p.write_bytes(payload)
+
+        def _work(_base, _run):
+            chunks = []
+            with pubrun.open(p, "rb") as fh:
+                while True:
+                    chunk = fh.read1(16)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+            assert b"".join(chunks) == payload
+
+        m = _run_with_file_io(tmp_path, {"level": "hash"}, _work)
+        rec = m["data_files"]["inputs"][0]
+        assert rec["access_observations"]["eof_reached"] is True
+        assert rec["access_observations"]["bytes_read"] == 100
+        assert rec["hash_status"] == "completed"
+        assert rec["observation_time"] == "during_stream"
+        assert rec["sha256"] == hashlib.sha256(payload).hexdigest()
+
+    def test_readinto1_stream_hashes_and_sets_eof(self, tmp_path):
+        p = tmp_path / "readinto1.bin"
+        payload = (b"abcdefgh" * 96)  # 768 bytes
+        assert len(payload) == 768
+        p.write_bytes(payload)
+
+        def _work(_base, _run):
+            out = bytearray()
+            buf = bytearray(100)
+            with pubrun.open(p, "rb") as fh:
+                while True:
+                    n = fh.readinto1(buf)
+                    if not n:
+                        break
+                    out.extend(buf[:n])
+            assert bytes(out) == payload
+
+        m = _run_with_file_io(tmp_path, {"level": "hash"}, _work)
+        rec = m["data_files"]["inputs"][0]
+        assert rec["access_observations"]["eof_reached"] is True
+        assert rec["observation_time"] == "during_stream"
+        assert rec["hash_stats"]["extra_read_bytes"] == 0
+        assert rec["sha256"] == hashlib.sha256(payload).hexdigest()
+
+    def test_binary_readlines_hint_controls_eof(self, tmp_path):
+        payload = b"a\nb\nc\n"
+        p_partial = tmp_path / "partial.bin"
+        p_full = tmp_path / "full.bin"
+        p_partial.write_bytes(payload)
+        p_full.write_bytes(payload)
+
+        def _work(_base, _run):
+            with pubrun.open(p_partial, "rb") as fh:
+                assert fh.readlines(1) == [b"a\n"]
+            with pubrun.open(p_full, "rb") as fh:
+                assert fh.readlines() == [b"a\n", b"b\n", b"c\n"]
+
+        m = _run_with_file_io(tmp_path, {"level": "hash"}, _work)
+        by_name = {Path(r["path"]).name: r for r in m["data_files"]["inputs"]}
+        expected_sha = hashlib.sha256(payload).hexdigest()
+
+        partial = by_name["partial.bin"]
+        assert partial["access_observations"]["eof_reached"] is False
+        assert partial["access_observations"]["bytes_read"] == 2
+        assert partial["observation_time"] == "at_close"
+        assert partial["hash_stats"]["extra_read_bytes"] == 6
+        assert partial["sha256"] == expected_sha
+
+        full = by_name["full.bin"]
+        assert full["access_observations"]["eof_reached"] is True
+        assert full["observation_time"] == "during_stream"
+        assert full["sha256"] == expected_sha
+
+    def test_truncate_back_under_budget_is_hashed_at_close(self, tmp_path):
+        p_trunc = tmp_path / "trunc.bin"
+        p_over = tmp_path / "over.bin"
+
+        def _work(_base, _run):
+            with pubrun.open(p_trunc, "wb") as fh:
+                fh.write(b"x" * 20)
+                fh.truncate(5)
+            with pubrun.open(p_over, "wb") as fh:
+                fh.write(b"x" * 20)
+
+        m = _run_with_file_io(tmp_path, {"level": "hash", "max_hash_bytes": 10}, _work)
+        by_name = {Path(r["path"]).name: r for r in m["data_files"]["outputs"]}
+
+        trunc_rec = by_name["trunc.bin"]
+        assert trunc_rec["access_observations"]["truncate_used"] is True
+        assert trunc_rec["hash_status"] == "completed"
+        assert trunc_rec["observation_time"] == "at_close"
+        assert trunc_rec["sha256"] == hashlib.sha256(b"x" * 5).hexdigest()
+
+        over_rec = by_name["over.bin"]
+        assert over_rec["hash_status"] == "over_budget"
+        assert over_rec["sha256"] is None
+
+    def test_exclusive_create_xb_hashes_during_stream(self, tmp_path):
+        p = tmp_path / "exclusive.bin"
+
+        def _work(_base, _run):
+            with pubrun.open(p, "xb") as fh:
+                fh.write(b"exclusive\n")
+            with pytest.raises(FileExistsError):
+                pubrun.open(p, "xb")
+
+        m = _run_with_file_io(tmp_path, {"level": "hash"}, _work)
+        outputs = m["data_files"]["outputs"]
+        assert len(outputs) == 1
+        rec = outputs[0]
+        assert rec["open_disposition"] == "exclusive_create"
+        assert rec["hash_status"] == "completed"
+        assert rec["observation_time"] == "during_stream"
+        assert rec["sha256"] == hashlib.sha256(b"exclusive\n").hexdigest()

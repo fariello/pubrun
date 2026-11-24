@@ -145,8 +145,7 @@ def test_missing_config_uses_defaults(tmp_path):
 
 
 def test_config_toggles_ip_and_lists(tmp_path):
-    if sp._toml is None:
-        pytest.skip("no TOML parser available")
+    assert sp._toml is not None, "tomllib/tomli is a declared dependency and must import"
     (tmp_path / ".sanitize-local.toml").write_text(
         '[rules]\nenabled = ["home-any"]\n'
         '[ip]\nenabled = true\n'

@@ -45,7 +45,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Invocation fixes and behavioral tests
 
-- [ ] E-01 Fix `src/pubrun/capture/invocation.py:get_invocation` and create `tests/test_invocation.py`.
+- [x] E-01 Fix `src/pubrun/capture/invocation.py:get_invocation` and create `tests/test_invocation.py`.
   - Production changes, in this order inside the `try:` block of `get_invocation`:
     (a) Delete the whole "3. Re-run Replication Engine" block (the first `if sys.platform == "win32":` ... `rerun_command = f"cd {shlex.quote(str(cwd))} && python {escaped_args}"`). Nothing reads its `rerun_command`; the later "Rebuild command_line and rerun_command from redacted argv" block overwrites it.
     (b) Move the two lines `from pubrun.capture.redaction import redact_argv` and `redacted_argv = redact_argv(argv, config)` from just above "Rebuild command_line and rerun_command from redacted argv" to just above `inputs_data = []`.
@@ -62,11 +62,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Ordering: execute after E-02, because the `argv_enabled = False` test needs `redact_argv` to return strings.
   - Depends on: E-02
   - Expected outcome: The dead block is gone, redacted values never reach `invocation.inputs` or the log, a `Path` in `sys.argv` no longer fails capture, and every `get_invocation` branch listed above has a test.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Redaction fixes and tests
 
-- [ ] E-02 Fix `src/pubrun/capture/redaction.py` and add a `TestValueHeuristics` class to `tests/test_redaction.py`.
+- [x] E-02 Fix `src/pubrun/capture/redaction.py` and add a `TestValueHeuristics` class to `tests/test_redaction.py`.
   - Production changes:
     (a) Above `def _redact_value_string_heuristics(`, add the module constant `_PREFIXED_KEY_VALUE_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{20,}")` with a one-line comment that it covers hyphenated prefixed keys such as `sk-proj-...`. In `_redact_value_string_heuristics`, directly after `val = openai_pattern.sub("[REDACTED]", val)`, add `val = _PREFIXED_KEY_VALUE_RE.sub("[REDACTED]", val)`. Keep the existing `openai_pattern` line: removing it would change what an unanchored match such as `desk-<20 letters>` redacts today (PR-005).
     (b) In `redact_argv`, change the `argv_enabled = False` early return from `return list(argv)` to `return [str(arg) for arg in argv]`, so the function returns strings on both paths.
@@ -81,11 +81,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - False-positive guard: `"task-runner sk-short sk-proj-tiny"` is unchanged.
   - Depends on: none
   - Expected outcome: Hyphenated `sk-` keys are redacted in env and argv values, `redact_argv` always returns strings, and the JSON-in-string, URI, bearer, and flag-value paths of `_redact_value_string_heuristics`, `_redact_dict_keys`, and `_redact_any` each have a test.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: File I/O proxy edge methods and budget recovery
 
-- [ ] E-03 Add a `TestProxyEdgeMethods` class to `tests/test_file_io_provenance.py`, using the module's helper `_run_with_file_io(tmp_path, file_io_cfg, fn)` with `{"level": "hash"}`. No production change.
+- [x] E-03 Add a `TestProxyEdgeMethods` class to `tests/test_file_io_provenance.py`, using the module's helper `_run_with_file_io(tmp_path, file_io_cfg, fn)` with `{"level": "hash"}`. No production change.
   - Two `pubrun.open` calls on the same path merge into one record, so every case below that needs two records uses two files and selects records by `Path(r["path"]).name`.
   - Required tests:
     - `read1(16)` in a loop over 100 bytes: `eof_reached is True`, `bytes_read == 100`, `hash_status == "completed"`, `observation_time == "during_stream"`, and `sha256` matches.
@@ -95,11 +95,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - `pubrun.open(p, "xb")` writes `b"exclusive\n"`; a second `pubrun.open(p, "xb")` raises `FileExistsError`; the manifest has exactly one output with `open_disposition == "exclusive_create"`, `hash_status == "completed"`, `observation_time == "during_stream"`, and a matching `sha256`.
   - Depends on: none
   - Expected outcome: `ProvenanceFileProxy.read1`, `readinto1`, `readlines`, and `truncate`, and the `xb` mode, each have a test that fails under the mutations listed in V-03.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Core and capture fallbacks, and the sanitizer TOML assertion
 
-- [ ] E-04 Add the unknown-backend branch to `src/pubrun/core.py:phase.__enter__`, add report, artifact, and phase tests to `tests/test_explicit_api.py`, and create `tests/test_capture_fallbacks.py`.
+- [x] E-04 Add the unknown-backend branch to `src/pubrun/core.py:phase.__enter__`, add report, artifact, and phase tests to `tests/test_explicit_api.py`, and create `tests/test_capture_fallbacks.py`.
   - Production change (defect 4): in `phase.__enter__`, after the `elif backend == "yappi":` branch and inside the same `try:`, add `else: raise ValueError("unknown backend")`. The existing `except Exception as prof_err:` then logs `pubrun: profiling backend '<name>' unavailable: unknown backend`, as `docs/configuration.md` `[capture.profiling]` already promises.
   - `tests/test_explicit_api.py`: add an `active_run(monkeypatch)` fixture that clears `pubrun.tracker._active_run`, sets `pubrun.phase._yappi_active` to `False` through `monkeypatch.setattr(..., raising=False)` (the attribute exists only after first use, so monkeypatch must restore its absence), starts runs with `console={"capture_mode": "off"}`, and stops any active run on teardown. Do not patch `Path.cwd`: `isolated_cwd` already changes into `tmp_path`. Required tests:
     - With `.pubrun.toml` setting `[events] on_inactive_annotate = "error"` and no active run, both `pubrun.report("r", {"a": 1})` and `pubrun.artifact("a.txt", "x")` raise `RuntimeError` matching `"no run is active"`.
@@ -114,12 +114,12 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - `src/pubrun/capture/python_runtime.py:environment_kind`, with a `plain_env` fixture that sets `sys.prefix` and `sys.base_prefix` to `tmp_path`, sets `sys.executable` to a fixed path containing no `pyenv` text (`os.path.join(os.sep, "opt", "py", "bin", "python")`; a `tmp_path`-based path contains the test name and so matches `pyenv` in `test_pyenv_version_env_var`), and removes `real_prefix`, `frozen`, `CONDA_PREFIX`, and `PYENV_VERSION`: plain gives `"system"` and `pyenv is False`; a `conda-meta` directory gives `"conda"`; `sys.real_prefix` gives `"virtualenv"`; `sys.frozen` plus `conda-meta` gives `"frozen"`; `PYENV_VERSION` gives `pyenv is True` with kind `"system"`; `os.path.isdir` raising `OSError` still gives `"system"`.
   - Depends on: none
   - Expected outcome: An unknown backend logs the documented warning, and each fallback listed above has a test that fails under the mutations listed in V-04.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 In `tests/test_sanitize_paths.py:test_config_toggles_ip_and_lists`, replace `if sp._toml is None: pytest.skip("no TOML parser available")` with `assert sp._toml is not None, "tomllib/tomli is a declared dependency and must import"`.
+- [x] E-05 In `tests/test_sanitize_paths.py:test_config_toggles_ip_and_lists`, replace `if sp._toml is None: pytest.skip("no TOML parser available")` with `assert sp._toml is not None, "tomllib/tomli is a declared dependency and must import"`.
   - Depends on: none
   - Expected outcome: A broken TOML import in `scripts/sanitize_paths.py` fails the test instead of skipping it.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -187,30 +187,107 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 
 Mutation-check rule for V-01 to V-05: apply the named one-line change to the named file, run the named test file with `-o addopts="-p no:randomly" -q`, paste the failing test names, restore the file with `git checkout -- <file>` (or re-apply the E-item change for a file the E-item itself edits), and paste `git status --short src/ scripts/` showing only this plan's intended changes. A defect check means: revert only that E-item's production change, run its test file, and paste the failing test names.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: (1) Pasted output of `python3 -m pytest tests/test_invocation.py tests/test_capture.py tests/test_hook_ownership_rollback.py -o addopts="-p no:randomly" -q -rs` with 0 failures and 0 skips. (2) Pasted output of `grep -n "Re-run Replication Engine\|escaped_args" src/pubrun/capture/invocation.py` showing no match. (3) Defect check: with `src/pubrun/capture/invocation.py` at its pre-change content, `test_path_entry_in_argv_completes` and `test_redacted_argument_is_not_recorded_as_input` fail. (4) Mutation checks, each failing the named test: `<= _max_hash_size` to `< _max_hash_size` fails `test_script_at_limit_is_hashed`; removing `.lower()` from `po.suffix.lstrip(".").lower()` fails `test_ignore_extensions_is_case_insensitive`; `shlex.join(redacted_argv)` to `shlex.join(argv)` fails `test_posix_commands_use_redacted_argv`; `if compute_md5 and po.is_file():` to `if compute_md5:` fails `test_compute_md5_hashes_files_and_warns`; `arg.startswith("-") or arg.startswith("--")` to `arg.startswith("--")` fails `test_option_flags_are_not_inputs`; deleting the new `if redacted_argv[idx] != arg: continue` fails `test_redacted_argument_is_not_recorded_as_input`.
   - Observed evidence:
-  - Result: pending
+    - (1) `python3 -m pytest tests/test_invocation.py tests/test_capture.py tests/test_hook_ownership_rollback.py -o addopts="-p no:randomly" -q -rs`:
+      `99 passed in 2.59s` (0 failures, 0 skips).
+    - (2) `grep -n "Re-run Replication Engine\|escaped_args" src/pubrun/capture/invocation.py`:
+      `(no match, exit 1)`.
+    - (3) Defect check (`src/pubrun/capture/invocation.py` at HEAD):
+      `FAILED tests/test_invocation.py::TestCommandFormattingAndSecurity::test_path_entry_in_argv_completes`,
+      `FAILED tests/test_invocation.py::TestCommandFormattingAndSecurity::test_path_entry_with_argv_redaction_disabled_completes`,
+      `FAILED tests/test_invocation.py::TestCommandFormattingAndSecurity::test_redacted_argument_is_not_recorded_as_input` (`3 failed, 16 passed in 0.27s`).
+    - (4) Mutation checks in `src/pubrun/capture/invocation.py` (each restored afterwards):
+      - `<= _max_hash_size` -> `< _max_hash_size`: `FAILED tests/test_invocation.py::TestScriptHashing::test_script_at_limit_is_hashed` (`1 failed, 18 passed in 0.37s`).
+      - Remove `.lower()` from `po.suffix.lstrip(".").lower()`: `FAILED tests/test_invocation.py::TestInputDiscovery::test_ignore_extensions_is_case_insensitive` (`1 failed, 18 passed in 0.81s`).
+      - `shlex.join(redacted_argv)` -> `shlex.join(argv)`: `FAILED tests/test_invocation.py::TestCommandFormattingAndSecurity::test_posix_commands_use_redacted_argv` (plus 3 other command tests; `4 failed, 15 passed in 0.25s`).
+      - `if compute_md5 and po.is_file():` -> `if compute_md5:`: `FAILED tests/test_invocation.py::TestInputDiscovery::test_compute_md5_hashes_files_and_warns` (`1 failed, 18 passed in 2.01s`).
+      - `arg.startswith("-") or arg.startswith("--")` -> `arg.startswith("--")`: `FAILED tests/test_invocation.py::TestInputDiscovery::test_option_flags_are_not_inputs` (`1 failed, 18 passed in 0.31s`).
+      - Delete `if redacted_argv[idx] != arg: continue`: `FAILED tests/test_invocation.py::TestCommandFormattingAndSecurity::test_redacted_argument_is_not_recorded_as_input` (`1 failed, 18 passed in 0.33s`).
+    - `git status --short src/ scripts/`: `M src/pubrun/capture/invocation.py`, `M src/pubrun/capture/redaction.py`, `M src/pubrun/core.py`.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: (1) Pasted output of `python3 -m pytest tests/test_redaction.py tests/test_hook_ownership_rollback.py tests/test_capture_engine_bugs.py -o addopts="-p no:randomly" -q -rs` with 0 failures and 0 skips. (2) Defect check: with `src/pubrun/capture/redaction.py` at its pre-change content, `test_hyphenated_prefixed_key_in_values` fails in `tests/test_redaction.py`, and `test_path_entry_with_argv_redaction_disabled_completes` fails in `tests/test_invocation.py`. (3) Mutation checks: widening `_PREFIXED_KEY_VALUE_RE` to `{4,}` fails `test_short_sk_text_is_kept`; `res[k] = "[REDACTED]"` to `res[k] = v` in `_redact_dict_keys` fails the two JSON tests; `return json.dumps(redacted_data)` to `return val` fails the two JSON tests; deleting `arg_str = _redact_value_string_heuristics(arg_str, config)` in `redact_argv` fails `test_uri_token_in_argv_positional`. (4) Pasted output of `gitleaks detect --no-git --source tests/ --redact` reporting no leaks.
   - Observed evidence:
-  - Result: pending
+    - (1) `python3 -m pytest tests/test_redaction.py tests/test_hook_ownership_rollback.py tests/test_capture_engine_bugs.py -o addopts="-p no:randomly" -q -rs`:
+      `130 passed in 3.28s` (0 failures, 0 skips).
+    - (2) Defect check (`src/pubrun/capture/redaction.py` at HEAD):
+      `FAILED tests/test_redaction.py::TestValueHeuristics::test_hyphenated_prefixed_key_in_values`,
+      `FAILED tests/test_invocation.py::TestCommandFormattingAndSecurity::test_path_entry_with_argv_redaction_disabled_completes` (`2 failed, 60 passed in 0.47s`).
+    - (3) Mutation checks in `src/pubrun/capture/redaction.py` (each restored afterwards):
+      - `_PREFIXED_KEY_VALUE_RE` `{20,}` -> `{4,}`: `FAILED tests/test_redaction.py::TestValueHeuristics::test_short_sk_text_is_kept` (`1 failed, 42 passed in 0.47s`).
+      - `_redact_dict_keys` `res[k] = "[REDACTED]"` -> `res[k] = v`: `FAILED tests/test_redaction.py::TestValueHeuristics::test_json_object_in_env_value`, `FAILED tests/test_redaction.py::TestValueHeuristics::test_json_array_in_argv_value` (`2 failed, 41 passed in 0.31s`).
+      - `return json.dumps(redacted_data)` -> `return val`: `FAILED tests/test_redaction.py::TestValueHeuristics::test_json_object_in_env_value`, `FAILED tests/test_redaction.py::TestValueHeuristics::test_json_array_in_argv_value`, `FAILED tests/test_redaction.py::TestValueHeuristics::test_hyphenated_prefixed_key_in_values` (`3 failed, 40 passed in 0.24s`).
+      - Delete `arg_str = _redact_value_string_heuristics(arg_str, config)`: `FAILED tests/test_redaction.py::TestValueHeuristics::test_uri_token_in_argv_positional` (plus `test_json_array_in_argv_value` and `test_hyphenated_prefixed_key_in_values`; `3 failed, 40 passed in 0.20s`).
+    - (4) `gitleaks detect --no-git --source tests/ --redact`:
+      `2:04PM INF scan completed in 752ms` / `2:04PM INF no leaks found` (exit 0).
+    - `git status --short src/ scripts/`: `M src/pubrun/capture/invocation.py`, `M src/pubrun/capture/redaction.py`, `M src/pubrun/core.py`.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: (1) Pasted output of `python3 -m pytest tests/test_file_io_provenance.py -o addopts="-p no:randomly" -q -rs` with 0 failures and 0 skips. (2) Mutation checks in `src/pubrun/capture/file_io.py`: in `ProvenanceFileProxy.readlines`, replacing `if hint is None or (isinstance(hint, int) and hint <= 0):` with `if True:` fails `test_binary_readlines_hint_controls_eof`, and with `if False:` fails it too; in `_populate_hash_fields`, removing `and not self._truncate_used` from the over-budget shortcut fails `test_truncate_back_under_budget_is_hashed_at_close`; in `truncate`, deleting `self._truncate_used = True` fails the same test; in `read1`, deleting `self._update_stream_hash(data)` fails `test_read1_stream_hashes_and_sets_eof`.
   - Observed evidence:
-  - Result: pending
+    - (1) `python3 -m pytest tests/test_file_io_provenance.py -o addopts="-p no:randomly" -q -rs`:
+      `38 passed in 5.21s` (0 failures, 0 skips).
+    - (2) Mutation checks in `src/pubrun/capture/file_io.py` (each restored afterwards):
+      - `readlines` hint check -> `if True:`: `FAILED tests/test_file_io_provenance.py::TestProxyEdgeMethods::test_binary_readlines_hint_controls_eof` (`1 failed, 37 passed in 2.15s`).
+      - `readlines` hint check -> `if False:`: `FAILED tests/test_file_io_provenance.py::TestProxyEdgeMethods::test_binary_readlines_hint_controls_eof` (`1 failed, 37 passed in 1.93s`).
+      - Remove `and not self._truncate_used`: `FAILED tests/test_file_io_provenance.py::TestProxyEdgeMethods::test_truncate_back_under_budget_is_hashed_at_close` (`1 failed, 37 passed in 2.42s`).
+      - Delete `self._truncate_used = True`: `FAILED tests/test_file_io_provenance.py::TestProxyEdgeMethods::test_truncate_back_under_budget_is_hashed_at_close` (`1 failed, 37 passed in 2.32s`).
+      - Delete `self._update_stream_hash(data)` in `read1`: `FAILED tests/test_file_io_provenance.py::TestProxyEdgeMethods::test_read1_stream_hashes_and_sets_eof` (`1 failed, 37 passed in 3.21s`).
+    - `git status --short src/ scripts/`: `M src/pubrun/capture/invocation.py`, `M src/pubrun/capture/redaction.py`, `M src/pubrun/core.py`.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: (1) Pasted output of `python3 -m pytest tests/test_explicit_api.py tests/test_capture_fallbacks.py -o addopts="-p no:randomly" -q -rs` with 0 failures and 0 skips, and of the same command with `-o addopts="" -p randomly --randomly-seed=12345`. (2) Defect check: with `src/pubrun/core.py` at its pre-change content, `test_unknown_backend_warns_and_skips` fails. (3) Mutation checks: in `core.py:report`, `{"items": len(data)}` to `{}` fails `test_list_report_summarizes_item_count`; in `core.py:phase.__enter__`, `if not getattr(phase, "_yappi_active", False):` to `if True:` fails `test_nested_yappi_phase_is_skipped_with_warning`; in `process.py`, `username = "unknown"` to `username = None` fails `test_getuser_failure_reports_unknown`; in `host.py`, `platform.node() or socket.gethostname()` to `platform.node()` fails `test_empty_node_falls_back_to_socket_hostname`; in `python_runtime.py:environment_kind`, deleting `os.environ.get("PYENV_VERSION") or ` fails `test_pyenv_version_env_var`, and swapping the `frozen` and `conda` checks fails `test_frozen_wins_over_conda`.
   - Observed evidence:
-  - Result: pending
+    - (1) `python3 -m pytest tests/test_explicit_api.py tests/test_capture_fallbacks.py -o addopts="-p no:randomly" -q -rs`:
+      `23 passed in 2.29s` (0 failures, 0 skips).
+      With `-o addopts="" -p randomly --randomly-seed=12345`:
+      `23 passed in 1.89s` (0 failures, 0 skips).
+    - (2) Defect check (`src/pubrun/core.py` at HEAD):
+      `FAILED tests/test_explicit_api.py::test_unknown_backend_warns_and_skips` (`1 failed, 12 passed in 5.04s`).
+    - (3) Mutation checks (each restored afterwards):
+      - `core.py:report` `{"items": len(data)}` -> `{}`: `FAILED tests/test_explicit_api.py::test_list_report_summarizes_item_count` (`1 failed, 12 passed in 2.08s`).
+      - `core.py:phase.__enter__` `if not getattr(phase, "_yappi_active", False):` -> `if True:`: `FAILED tests/test_explicit_api.py::test_nested_yappi_phase_is_skipped_with_warning` (`1 failed, 12 passed in 2.02s`).
+      - `process.py` `username = "unknown"` -> `username = None`: `FAILED tests/test_capture_fallbacks.py::TestProcessFallbacks::test_getuser_failure_reports_unknown` (`1 failed, 9 passed in 0.22s`).
+      - `host.py` `platform.node() or socket.gethostname()` -> `platform.node()`: `FAILED tests/test_capture_fallbacks.py::TestHostFallbacks::test_empty_node_falls_back_to_socket_hostname` (`1 failed, 9 passed in 0.12s`).
+      - `python_runtime.py:environment_kind` delete `os.environ.get("PYENV_VERSION") or `: `FAILED tests/test_capture_fallbacks.py::TestPythonRuntimeEnvironmentKind::test_pyenv_version_env_var` (`1 failed, 9 passed in 0.87s`).
+      - `python_runtime.py:environment_kind` swap `frozen` and `conda` checks: `FAILED tests/test_capture_fallbacks.py::TestPythonRuntimeEnvironmentKind::test_frozen_wins_over_conda` (`1 failed, 9 passed in 0.22s`).
+    - `git status --short src/ scripts/`: `M src/pubrun/capture/invocation.py`, `M src/pubrun/capture/redaction.py`, `M src/pubrun/core.py`.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: (1) Pasted output of `python3 -m pytest tests/test_sanitize_paths.py -o addopts="-p no:randomly" -q -rs` with 0 failures and 0 skips. (2) Mutation check: in `scripts/sanitize_paths.py`, rename the import `tomllib` to `tomllib_missing` (and `tomli` to `tomli_missing`); `test_config_toggles_ip_and_lists` fails, where before E-05 it was reported `SKIPPED`. (3) Pasted output of `python3 scripts/sanitize_paths.py --check --all` exiting 0. (4) Pasted diff of `docs/manifest.md` and `CHANGELOG.md` showing the edits listed under `## Spec / documentation sync`, and pasted output of the full-suite command under `## Required tests / validation`.
   - Observed evidence:
-  - Result: pending
+    - (1) `python3 -m pytest tests/test_sanitize_paths.py -o addopts="-p no:randomly" -q -rs`:
+      `19 passed in 0.21s` (0 failures, 0 skips).
+    - (2) Mutation check (`scripts/sanitize_paths.py` renaming `tomllib` -> `tomllib_missing` and `tomli` -> `tomli_missing`, then restored):
+      `FAILED tests/test_sanitize_paths.py::test_config_toggles_ip_and_lists` (`1 failed, 18 passed in 0.26s`).
+    - (3) `python3 scripts/sanitize_paths.py --check --all`: exited 0 with no findings.
+    - (4) `git diff docs/manifest.md CHANGELOG.md`:
+      `docs/manifest.md` adds `"unknown"` to `invocation.entrypoint_type` and `"An argument whose value is redacted in `argv` is not recorded."` to `invocation.inputs`; `CHANGELOG.md` adds four bullets under `## [Unreleased]` `### Fixed` covering defects 1 through 4.
+      ```diff
+      --- a/docs/manifest.md
+      +++ b/docs/manifest.md
+      @@ -95,10 +95,10 @@
+      -| `entrypoint_type` | string | `"script"`, `"module"`, or `"interactive"`. |
+      +| `entrypoint_type` | string | `"script"`, `"module"`, `"interactive"`, or `"unknown"`. |
+       | `script` | object | Script file metadata (see below). |
+       | `working_directory` | object | `{"path": "/abs/path", "real_path": "/resolved/path"}`. |
+      -| `inputs` | list[object] | Detected input files from `sys.argv` (path, size, mtime, optional md5). |
+      +| `inputs` | list[object] | Detected input files from `sys.argv` (path, size, mtime, optional md5). An argument whose value is redacted in `argv` is not recorded. |
+      ```
+      Combined 10-file test suite: `305 passed in 18.61s` (default order) and `305 passed in 17.61s` (`--randomly-seed=12345`).
+      Combined all-production-reverted defect check: exactly 5 tests failed (`test_path_entry_in_argv_completes`, `test_path_entry_with_argv_redaction_disabled_completes`, `test_redacted_argument_is_not_recorded_as_input`, `test_hyphenated_prefixed_key_in_values`, `test_unknown_backend_warns_and_skips`; `5 failed, 70 passed in 2.10s`).
+      Full suite in random order (`python3 -m pytest tests/ benchmarks/test_pull_submissions.py -o addopts="" -p randomly --randomly-seed=12345 -q`):
+      `1991 passed, 2 skipped in 506.44s (0:08:26)`.
+      Full suite via `aw suite`:
+      `1974 passed in 159.50s (0:02:39)`.
+    - `git status --short src/ scripts/`: `M src/pubrun/capture/invocation.py`, `M src/pubrun/capture/redaction.py`, `M src/pubrun/core.py`.
+  - Result: pass
 
 ## Approval and execution gate
 

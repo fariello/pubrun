@@ -504,6 +504,8 @@ class phase:
                                 "pubrun: yappi already active (nested/concurrent phase); "
                                 f"skipping profiling for phase '{self.name}'"
                             )
+                    else:
+                        raise ValueError("unknown backend")
                 except Exception as prof_err:
                     logging.getLogger("pubrun").warning(
                         f"pubrun: profiling backend '{backend}' unavailable: {prof_err}"
