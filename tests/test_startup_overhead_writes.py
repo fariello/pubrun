@@ -462,7 +462,7 @@ def test_concurrent_readers_always_see_valid_json_and_zero_tmp_leftovers(
     stop_readers = threading.Event()
     read_errors = []
     reads_completed = [0]
-    read_lock = threading.Lock()
+    read_lock = threading.Condition()
 
     def _reader():
         while not stop_readers.is_set():
@@ -472,6 +472,7 @@ def test_concurrent_readers_always_see_valid_json_and_zero_tmp_leftovers(
                     json.loads(raw)
                     with read_lock:
                         reads_completed[0] += 1
+                        read_lock.notify_all()
                 except FileNotFoundError:
                     pass
                 except PermissionError:
@@ -494,7 +495,13 @@ def test_concurrent_readers_always_see_valid_json_and_zero_tmp_leftovers(
             run.writer.sync_config_if_changed()
             run.writer.write_startup_manifest(is_refresh=False)
         run.stop(outcome="completed")
-        time.sleep(0.02)
+        with read_lock:
+            target_reads = reads_completed[0] + len(readers) + 1
+            reached = read_lock.wait_for(
+                lambda: reads_completed[0] >= target_reads,
+                timeout=5.0,
+            )
+        assert reached, "readers did not complete post-stop reads within timeout"
     finally:
         stop_readers.set()
         for t in readers:

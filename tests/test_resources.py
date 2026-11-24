@@ -92,38 +92,25 @@ def test_resource_watcher_failure_threshold(tmp_path, monkeypatch):
     tracker.stop()
 
 
-def test_resource_watcher_legit_zero_does_not_abort(tmp_path, monkeypatch):
+def test_resource_watcher_legit_zero_does_not_abort(monkeypatch):
     """A legitimate RSS reading of 0 must NOT count toward the failure
     threshold, so telemetry is not permanently disabled by transient zeros.
     (IPD 20260705 EC-12.)"""
-    from pubrun import start
+    from pubrun.capture.resources import ResourceWatcher
 
-    monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
-    tracker = start(capture={"resources": {"depth": "standard", "sample_interval_seconds": 0.02,
-                                            "max_consecutive_failures": 3}})
-    watcher = tracker.resource_watcher
-    assert watcher is not None
+    class FakeTracker:
+        event_stream = None
 
+    watcher = ResourceWatcher(FakeTracker(), interval_seconds=1, max_failures=3)
     # A readable poll that returns 0 (not the -1 unreadable sentinel).
     monkeypatch.setattr(watcher, "_poll_rss", lambda: 0)
-    # Reset any state accrued BEFORE the mock was installed: on a slow runner (e.g. Windows,
-    # where the real RSS poll shells out to wmic and can time out), the watcher thread may have
-    # already recorded real unreadable polls between start() and this monkeypatch. Clearing here
-    # isolates the actual assertion (legit 0 must not count as a failure), not the setup race.
-    with watcher._lock:
-        watcher._consecutive_failures = 0
-    watcher._stop_event.clear()
 
-    # Let several intervals elapse; the watcher must NOT self-abort.
-    deadline = time.time() + 1.0
-    while time.time() < deadline:
-        if watcher._stop_event.is_set():
-            break
-        time.sleep(0.05)
+    for _ in range(watcher.max_failures + 2):
+        watcher._update_metrics()
 
     assert not watcher._stop_event.is_set()
     assert watcher._consecutive_failures == 0
-    tracker.stop()
+    assert watcher.to_manifest_dict()["capture_state"]["status"] == "complete"
 
 
 def test_resource_watcher_to_manifest_dict_zeros():

@@ -1,8 +1,13 @@
 import json
-import pytest
 import os
 import pathlib
+import signal
+import sys
+import threading
 
+import pytest
+
+import pubrun
 import pubrun.tracker
 
 
@@ -75,24 +80,17 @@ def clean_active_run():
 
 @pytest.fixture(autouse=True)
 def pubrun_state_isolation():
-    """Reset pubrun's PROCESS-GLOBAL state around every test so test ORDER cannot change outcomes.
+    """Reset pubrun process-global state around every test so test order cannot change outcomes.
 
-    Without this, module-globals leaked by one test silently changed later tests depending on run
-    order (a cluster of order/timing flakes surfaced across the CI matrix; see IPD
-    .agents/plans/executed/20260720-0026-01). The specific process-global state that leaks:
-
-    - The `_bootstrap` import-mode latch (`_selected_mode` etc., "first import wins"): reset via the
-      library's own `reset_state()` testing hook, NOT by poking individual globals.
-    - The `status._DISPLAY_UTC` display toggle (mutated by `set_display_utc`).
-    - Process environment variables some tests set directly on `os.environ` (e.g. `NO_COLOR`,
-      `PUBRUN_*`) rather than via monkeypatch: snapshot before, restore after, so a leak from one
-      test cannot pollute a successor regardless of order.
-
-    This resets ISOLATION state only; it does not change library behavior. Assertions still fail on a
-    real regression (they only stop being order-dependent).
+    Without this fixture, module globals and process hooks left behind by one test can alter
+    later tests depending on execution order. Setup snapshots `os.environ`, `sys.excepthook`,
+    `sys.exit`, `sys.stdout`, `sys.stderr`, and the handlers for all platform-defined signals
+    in `pubrun.capture.signals._TARGET_SIGNALS`. Teardown stops any leftover active run,
+    resets pubrun latches and the commit cache, and restores every snapshotted hook, signal
+    handler (on the main thread only), and environment variable that changed.
     """
-    import os as _os
     from pubrun import _bootstrap as _bs
+    import pubrun.capture.signals as _signals
     import pubrun.status as _status
 
     def _reset():
@@ -106,17 +104,73 @@ def pubrun_state_isolation():
         except Exception:
             pass
 
-    _env_snapshot = dict(_os.environ)
+    _env_snapshot = dict(os.environ)
+    _orig_excepthook = sys.excepthook
+    _orig_exit = sys.exit
+    _orig_stdout = sys.stdout
+    _orig_stderr = sys.stderr
+    _signal_snapshot = {}
+    for _sig_name in _signals._TARGET_SIGNALS:
+        _sig = getattr(signal, _sig_name, None)
+        if _sig is not None:
+            try:
+                _signal_snapshot[_sig] = signal.getsignal(_sig)
+            except (OSError, ValueError, TypeError):
+                pass
+
     _reset()
     yield
+
+    active = pubrun.tracker._active_run
+    if active is not None:
+        try:
+            if hasattr(active, "stop"):
+                active.ref_count = 1
+                active.stop()
+        except Exception:
+            pass
+
     _reset()
+
+    try:
+        pubrun._reset_commit_cache()
+    except Exception:
+        pass
+    try:
+        _signals._finalizing_active_run = False
+    except Exception:
+        pass
+    try:
+        import pubrun.core as _core
+        _core.phase._yappi_active = False
+    except Exception:
+        pass
+
+    if sys.excepthook is not _orig_excepthook:
+        sys.excepthook = _orig_excepthook
+    if sys.exit is not _orig_exit:
+        sys.exit = _orig_exit
+    if sys.stdout is not _orig_stdout:
+        sys.stdout = _orig_stdout
+    if sys.stderr is not _orig_stderr:
+        sys.stderr = _orig_stderr
+    if threading.current_thread() is threading.main_thread():
+        for _sig, _prev in _signal_snapshot.items():
+            if _prev is None:
+                continue
+            try:
+                if signal.getsignal(_sig) != _prev:
+                    signal.signal(_sig, _prev)
+            except (OSError, ValueError, TypeError):
+                pass
+
     # Restore the environment exactly (remove keys a test added, restore ones it changed/removed).
-    for k in list(_os.environ.keys()):
+    for k in list(os.environ.keys()):
         if k not in _env_snapshot:
-            del _os.environ[k]
+            del os.environ[k]
     for k, v in _env_snapshot.items():
-        if _os.environ.get(k) != v:
-            _os.environ[k] = v
+        if os.environ.get(k) != v:
+            os.environ[k] = v
 
 
 @pytest.fixture

@@ -354,13 +354,16 @@ class TestSignalNonMainThread:
 
         monkeypatch.setattr(signal, "signal", mock_signal_signal)
 
-        with caplog.at_level(logging.WARNING, logger="pubrun"):
-            cap.install()
+        try:
+            with caplog.at_level(logging.WARNING, logger="pubrun"):
+                cap.install()
 
-        # No handlers should have been installed
-        assert len(cap._previous_handlers) == 0
-        # Warning should have been emitted
-        assert any("signal capture unavailable" in r.message for r in caplog.records)
+            # No handlers should have been installed
+            assert len(cap._previous_handlers) == 0
+            # Warning should have been emitted
+            assert any("signal capture unavailable" in r.message for r in caplog.records)
+        finally:
+            cap.uninstall()
 
 
 class TestFinalizeActiveRun:
@@ -425,7 +428,6 @@ class TestLethalSignalFinalization:
     def test_lethal_signal_finalization_sigterm(self, tmp_path):
         import subprocess
         import sys
-        import time
         from pathlib import Path
         import json
         import signal
@@ -448,14 +450,14 @@ except KeyboardInterrupt:
             [sys.executable, "-c", script],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            cwd=tmp_path,
         )
 
         run_dir_str = proc.stdout.readline().strip()
         assert run_dir_str, "Subprocess failed to print run directory"
         run_dir = Path(run_dir_str)
 
-        time.sleep(0.5)
         proc.send_signal(signal.SIGTERM)
 
         # Wait for exit

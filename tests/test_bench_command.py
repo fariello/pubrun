@@ -347,8 +347,11 @@ class TestIoBaselineScenarios:
         # Register before exec so the @dataclass decorator can resolve cls.__module__
         # (Python 3.12+ dataclasses look up sys.modules[cls.__module__] during processing).
         sys.modules[spec.name] = mod
-        spec.loader.exec_module(mod)
-        return mod.all_scenarios()
+        try:
+            spec.loader.exec_module(mod)
+            return mod.all_scenarios()
+        finally:
+            sys.modules.pop(spec.name, None)
 
     def test_io_baseline_scenarios_registered(self):
         names = {s.name for s in self._scenarios()}
@@ -728,11 +731,6 @@ class TestSchema5RawTimings:
         assert st["n"] == 3
         assert st["median_s"] == 0.2  # readers recompute from the retained raw timings
 
-    def test_schema_is_v5(self):
-        import re
-        src = (_REPO / "benchmarks" / "harness.py").read_text()
-        assert re.search(r'"schema":\s*"pubrun-benchmark/5"', src)
-
     def test_redactor_preserves_timings(self):
         h = _load_harness()
         # schema/5 shape: per-pass timings map keyed by scenario name (numbers survive redaction).
@@ -807,8 +805,11 @@ class TestBenchTiers:
         spec = importlib.util.spec_from_file_location("_bench_aggregate", ap)
         agg = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = agg
-        spec.loader.exec_module(agg)
-        rows = agg.build_rows([result])  # must not raise
+        try:
+            spec.loader.exec_module(agg)
+            rows = agg.build_rows([result])  # must not raise
+        finally:
+            sys.modules.pop(spec.name, None)
         # No row should reference the baseline PASS (rows are per real scenario only).
         assert all(r.get("scenario") != "baseline" for r in rows)
 

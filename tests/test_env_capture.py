@@ -128,40 +128,68 @@ class TestLiveProbe:
         assert "total_bytes" in r or "avail_bytes" in r
 
     def test_hang_reports_pending_and_does_not_block(self, monkeypatch):
+        import threading
         import time as _t
-        started = _t.monotonic()
 
-        def _sleep_forever(path):
-            _t.sleep(30)  # simulate a wedged mount; daemon is abandoned, never joined.
+        release = threading.Event()
+        probes = []
+
+        def _block_until_released(path):
+            release.wait(timeout=30)
             return {}
-        monkeypatch.setattr(fs, "_statvfs_metrics", _sleep_forever)
-        p = fs.probe_filesystem_live("/whatever", wait_budget_s=0.2)
-        waited = _t.monotonic() - started
-        assert waited < 5  # caller unblocked at ~budget, NOT at 30s
-        r = p.result()
-        assert r["status"] == "pending" and r.get("hung") is True
-        # A second probe still starts and returns promptly (the abandoned daemon did not
-        # deadlock the caller or exhaust the probe cap). It also sleeps under this patch,
-        # so it too reports pending within its short budget — the point is it does not hang.
-        started2 = _t.monotonic()
-        p2 = fs.probe_filesystem_live("/other", wait_budget_s=0.2)
-        assert (_t.monotonic() - started2) < 5
-        assert "status" in p2.result()
+
+        monkeypatch.setattr(fs, "_statvfs_metrics", _block_until_released)
+        try:
+            started = _t.monotonic()
+            p = fs.probe_filesystem_live("/whatever", wait_budget_s=0.2)
+            probes.append(p)
+            waited = _t.monotonic() - started
+            assert waited < 5  # caller unblocked at ~budget, NOT at 30s
+            r = p.result()
+            assert r["status"] == "pending" and r.get("hung") is True
+            # A second probe still starts and returns promptly (the blocked daemon did not
+            # deadlock the caller or exhaust the probe cap). It also blocks on the gate,
+            # so it too reports pending within its short budget.
+            started2 = _t.monotonic()
+            p2 = fs.probe_filesystem_live("/other", wait_budget_s=0.2)
+            probes.append(p2)
+            assert (_t.monotonic() - started2) < 5
+            assert "status" in p2.result()
+        finally:
+            release.set()
+            for probe in probes:
+                assert probe._done.wait(timeout=5.0)
+                if hasattr(probe, "_thread"):
+                    probe._thread.join(timeout=5.0)
 
     def test_slow_return_marked_slow_on_late_read(self, monkeypatch):
-        import time as _t
+        import threading
+
+        release = threading.Event()
+        p = None
 
         def _slow(path):
-            _t.sleep(0.4)  # returns AFTER the caller's budget but is alive
+            release.wait(timeout=30)
             return {"total_bytes": 1, "free_bytes": 1, "avail_bytes": 1}
+
         monkeypatch.setattr(fs, "_statvfs_metrics", _slow)
-        p = fs.probe_filesystem_live("/x", wait_budget_s=0.1)
-        # Immediately after init the probe is still pending.
-        assert p.result()["status"] == "pending"
-        _t.sleep(0.5)  # let the daemon finish; re-read (non-blocking) picks up the late result
-        r = p.result()
-        assert r["status"] == "complete" and r.get("slow") is True
-        assert r["elapsed_s"] > 0.1
+        try:
+            p = fs.probe_filesystem_live("/x", wait_budget_s=0.1)
+            # Immediately after init the probe is still pending.
+            assert p.result()["status"] == "pending"
+            # Still pending past the 0.1 s budget before we release the gate.
+            assert not p._done.wait(timeout=0.2)
+            release.set()
+            assert p._done.wait(timeout=5.0)
+            r = p.result()
+            assert r["status"] == "complete" and r.get("slow") is True
+            assert r["elapsed_s"] > 0.1
+        finally:
+            release.set()
+            if p is not None:
+                assert p._done.wait(timeout=5.0)
+                if hasattr(p, "_thread"):
+                    p._thread.join(timeout=5.0)
 
     def test_probe_paths_dedupes_by_mount(self, monkeypatch):
         calls = []

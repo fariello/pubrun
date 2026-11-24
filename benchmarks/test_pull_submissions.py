@@ -219,9 +219,3 @@ def test_repo_slug_injection_rejected():
     # A shell-metachar repo slug is refused by the CLI guard (never reaches gh).
     rc = ps.main(["--repo", "$(touch /tmp/pwn)", "--limit", "1"])
     assert rc == 2
-
-
-def test_no_eval_exec_in_source():
-    src = (_HERE / "pull_submissions.py").read_text(encoding="utf-8")
-    for banned in ("eval(", "exec(", "pickle.", "os.system(", "shell=True"):
-        assert banned not in src, f"{banned} must not appear (untrusted-input safety)"

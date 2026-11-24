@@ -80,13 +80,23 @@ class TestDebugGate:
 
 
 class TestStreams:
-    def test_default_streams_preserved(self):
+    def test_default_streams_preserved(self, capsys, monkeypatch):
         # info/warn/error/debug default to stderr; ok/fail default to stdout.
-        assert out._DEFAULT_STREAM["info"] == "stderr"
-        assert out._DEFAULT_STREAM["warn"] == "stderr"
-        assert out._DEFAULT_STREAM["error"] == "stderr"
-        assert out._DEFAULT_STREAM["ok"] == "stdout"
-        assert out._DEFAULT_STREAM["fail"] == "stdout"
+        monkeypatch.setenv("NO_COLOR", "1")
+        monkeypatch.setattr(out, "_debug_enabled", True)
+        out.info("info-msg")
+        out.warn("warn-msg")
+        out.error("error-msg")
+        out.debug("debug-msg")
+        out.ok("ok-msg")
+        out.fail("fail-msg")
+        captured = capsys.readouterr()
+        for msg in ("info-msg", "warn-msg", "error-msg", "debug-msg"):
+            assert msg in captured.err
+            assert msg not in captured.out
+        for msg in ("ok-msg", "fail-msg"):
+            assert msg in captured.out
+            assert msg not in captured.err
 
 
 class TestHelpOrdering:
