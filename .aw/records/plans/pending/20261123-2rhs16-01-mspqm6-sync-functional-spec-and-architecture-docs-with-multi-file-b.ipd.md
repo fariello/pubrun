@@ -38,22 +38,22 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Update user-facing design and architecture documentation
 
-- [ ] E-01 Update three places in `docs/functional_spec.md`, all under `## 3.` and before `### 3.4 Import Modes`, to match `src/pubrun/_config_boot.py::resolve_import_mode`.
+- [x] E-01 Update three places in `docs/functional_spec.md`, all under `## 3.` and before `### 3.4 Import Modes`, to match `src/pubrun/_config_boot.py::resolve_import_mode`.
   - Depends on: none
   - Expected outcome:
     1. In `docs/functional_spec.md#3.2 Lightweight Import Requirement`, the paragraph starting "The boot sequence is wrapped in `try/except`." no longer claims that corrupt TOML disables auto-start. It states that a malformed, unreadable, or missing config file does not raise: the boot resolver skips it and continues with the next file. It also states that an exception raised during mode resolution or selection (`src/pubrun/core.py::_execute_boot_sequence`) does not fail the import: pubrun logs a warning on the `pubrun` logger and disables tracking.
     2. The `**Single-read boot configuration:**` bullet in the same section names the three config files in search order (`./.pubrun.toml`, then `./.config/pubrun/config.toml`, then the user config `config.toml`: `%APPDATA%/pubrun/config.toml` on Windows, else `$XDG_CONFIG_HOME/pubrun/config.toml` or `~/.config/pubrun/config.toml`). It states that each file is opened and parsed at most once per lookup, and that the first file setting a valid `[imports].mode` or a recognized `[core].auto_start` value decides. It states that `[imports].mode` wins over `[core].auto_start` within one file, and that `[imports].on_conflict` is read from the same files in the same order.
     3. In `docs/functional_spec.md#3.3 Auto-Start Behavior`, the bullet "The `PUBRUN_AUTO_START` environment variable is set to `"false"`." lists all four false values (`"0"`, `"false"`, `"no"`, `"off"`). The section also states that the true values (`"1"`, `"true"`, `"yes"`, `"on"`) enable auto-start, that matching ignores case and surrounding whitespace, that `[core].auto_start` accepts the same values, that any other value is ignored, and that `PUBRUN_IMPORT_MODE` takes precedence over `PUBRUN_AUTO_START`.
     4. Added or edited lines contain no em dash (U+2014) and no en dash (U+2013).
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update two places in `docs/architecture.md` to match `src/pubrun/_config_boot.py`.
+- [x] E-02 Update two places in `docs/architecture.md` to match `src/pubrun/_config_boot.py`.
   - Depends on: none
   - Expected outcome:
     1. In `docs/architecture.md#Initialization` (under `## 3. Run Lifecycle`), the sentence "`_config_boot.py` reads and parses `./.pubrun.toml` at most once when checking `[imports].mode` and `[core].auto_start`." is replaced. The new text names the same three config files in the same search order as E-01 item 2, states that each is parsed at most once without importing `pubrun.config`, that a malformed or missing file is skipped, and lists the accepted `PUBRUN_AUTO_START` values (`"1"`, `"true"`, `"yes"`, `"on"` enable; `"0"`, `"false"`, `"no"`, `"off"` disable).
     2. In `docs/architecture.md#21. System Components`, the `**Boot Config Resolver** (`_config_boot.py`)` bullet no longer says it "parses `./.pubrun.toml` at most once". It says the resolver searches the three boot config files, parsing each at most once.
     3. Added or edited lines contain no em dash (U+2014) and no en dash (U+2013). Pre-existing em dashes on untouched lines (for example the `**Bootstrap State**` bullet) stay unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -132,15 +132,109 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: (1) Paste `git diff -- docs/functional_spec.md` and, for each of E-01 outcomes 1 to 3, name the added line that satisfies it: malformed-file skip and exception warning; three file paths in order with the parse-once rule, the `[imports].mode` before `[core].auto_start` rule, and `[imports].on_conflict`; all eight `PUBRUN_AUTO_START` values, case and whitespace handling, `[core].auto_start` parity, other values ignored, and `PUBRUN_IMPORT_MODE` precedence. (2) Paste the output of `git diff -U0 -- docs/functional_spec.md | grep '^+[^+]' | grep -c '[—–]'` showing `0`. (3) Paste the output of `grep -n 'parses ...\.pubrun\.toml. at most once' docs/functional_spec.md` and `grep -n 'corrupt TOML' docs/functional_spec.md`, both showing no match.
   - Observed evidence:
-  - Result: pending
+    1. `git diff -- docs/functional_spec.md`:
+       ```diff
+       diff --git a/docs/functional_spec.md b/docs/functional_spec.md
+       index 1b94f8f..7600ed3 100644
+       --- a/docs/functional_spec.md
+       +++ b/docs/functional_spec.md
+       @@ -66,23 +66,25 @@ Importing `pubrun` MUST NOT:
+        - wrap stdout/stderr unless configured to do so
+        - write output unless configured to do so
 
-- [ ] V-02 validates E-02
+       -The boot sequence is wrapped in `try/except`. If configuration resolution fails (e.g., corrupt TOML), the import succeeds silently with auto-start disabled.
+       +The boot sequence is wrapped in `try/except`. A malformed, unreadable, or missing config file does not raise an exception: the boot resolver skips it and continues with the next file. If an exception is raised during mode resolution or selection (`src/pubrun/core.py::_execute_boot_sequence`), the import still succeeds: `pubrun` logs a warning on the `pubrun` logger and disables tracking.
+
+        To keep import and startup overhead bounded:
+
+        - **Lazy commit identity:** `pubrun.__commit__` resolves lazily via Python Enhancement Proposal 562 (PEP 562) module `__getattr__` and caches under a lock. Importing `pubrun.minimal` or `pubrun.noauto`, or importing an installed wheel, spawns zero `git` processes. Installed packages read version-checked `_build_meta.json` (falling back to legacy `COMMIT` only when `_build_meta.json` is absent) and never launch `git`. Verified `pubrun` source checkouts run one bounded (`1.0`s timeout) `git -C <repo_root> rev-parse --show-toplevel HEAD` call with `GIT_*` override variables stripped and `SubprocessSpy` disabled when loaded, returning `None` on missing Git, timeout, error, or ownership mismatch without falling back to an on-disk `COMMIT` file.
+       -- **Single-read boot configuration:** `src/pubrun/_config_boot.py::resolve_import_mode` opens and parses `./.pubrun.toml` at most once when checking `[imports].mode` and `[core].auto_start`.
+       +- **Single-read boot configuration:** `src/pubrun/_config_boot.py::resolve_import_mode` searches three config files in precedence order: `./.pubrun.toml`, then `./.config/pubrun/config.toml`, then the user config `config.toml` (`%APPDATA%/pubrun/config.toml` on Windows when `APPDATA` is set and non-empty, else `$XDG_CONFIG_HOME/pubrun/config.toml` or `~/.config/pubrun/config.toml`). It opens and parses each file at most once per lookup without importing `pubrun.config`, and the first file that sets a valid `[imports].mode` or a recognized `[core].auto_start` value decides. Within one file, `[imports].mode` wins over `[core].auto_start`. The import-conflict policy `[imports].on_conflict` is read from the same three files in the same order.
+        - **Bounded capture budgets:** Git and script source-state capture stay synchronous before user code runs so user modifications cannot invalidate captured state. `get_git()` combines `--show-toplevel`, `HEAD`, and `--abbrev-ref HEAD` into one `git rev-parse` subprocess call on normal repositories and enforces `[capture.git].total_timeout` (default `5`s), reporting `capture_state.status` `"timeout"` or `"partial"` when the budget expires. Hardware inspection runs in the background `pubrun-hw` thread within `[capture.hardware].total_timeout` (default `10`s), reporting `"timeout"` when zero probed fields succeed or `"partial"` when at least one succeeds; when `[capture.hardware].depth == "off"`, hardware, host, and filesystem run synchronously in separate failure-isolated guards with no background thread spawn.
+
+        ### 3.3 Auto-Start Behavior
+
+        When `auto_start = true` (the default), `import pubrun` automatically calls `start()`. This is suppressed when:
+
+       -- The `PUBRUN_AUTO_START` environment variable is set to `"false"`.
+       +- The `PUBRUN_AUTO_START` environment variable is set to `"0"`, `"false"`, `"no"`, or `"off"`.
+        - The `PUBRUN_IMPORT_MODE` environment variable is set to `"noauto"` or `"minimal"`.
+        - The `[imports].mode` config is set to `"noauto"` or `"minimal"`.
+        - The process is running the `pubrun` CLI itself (detected by checking `sys.argv[0]`).
+
+       +For `PUBRUN_AUTO_START`, `"1"`, `"true"`, `"yes"`, and `"on"` enable auto-start (`auto` mode), and `"0"`, `"false"`, `"no"`, and `"off"` disable it (`noauto` mode). Matching ignores case and surrounding whitespace, and `[core].auto_start` accepts the same values (including TOML booleans `true` and `false`). Any other value is ignored and falls through to the next configuration source. `PUBRUN_IMPORT_MODE` takes precedence over `PUBRUN_AUTO_START` when set to a valid import mode.
+       +
+        ### 3.4 Import Modes
+
+        The library supports five namespaced import modes via submodule imports:
+       ```
+       - Outcome 1 (`docs/functional_spec.md#3.2 Lightweight Import Requirement`): satisfied by added line `+The boot sequence is wrapped in \`try/except\`. A malformed, unreadable, or missing config file does not raise an exception: the boot resolver skips it and continues with the next file. If an exception is raised during mode resolution or selection (\`src/pubrun/core.py::_execute_boot_sequence\`), the import still succeeds: \`pubrun\` logs a warning on the \`pubrun\` logger and disables tracking.`
+       - Outcome 2 (`docs/functional_spec.md#3.2 Lightweight Import Requirement`, `**Single-read boot configuration:**` bullet): satisfied by added line `+- **Single-read boot configuration:** \`src/pubrun/_config_boot.py::resolve_import_mode\` searches three config files in precedence order: ...` (names the three paths in order, parse-once per lookup without `pubrun.config`, first valid `[imports].mode` or recognized `[core].auto_start` wins, `[imports].mode` beats `[core].auto_start` within one file, and `[imports].on_conflict` uses the same three files in the same order).
+       - Outcome 3 (`docs/functional_spec.md#3.3 Auto-Start Behavior`): satisfied by added bullet `+- The \`PUBRUN_AUTO_START\` environment variable is set to \`"0"\`, \`"false"\`, \`"no"\`, or \`"off"\`.` and added paragraph `+For \`PUBRUN_AUTO_START\`, \`"1"\`, \`"true"\`, \`"yes"\`, and \`"on"\` enable auto-start (\`auto\` mode), and \`"0"\`, \`"false"\`, \`"no"\`, and \`"off"\` disable it (\`noauto\` mode). ...` (all eight values, case and whitespace handling, `[core].auto_start` parity, other values ignored, `PUBRUN_IMPORT_MODE` precedence).
+    2. `git diff -U0 -- docs/functional_spec.md | grep '^+[^+]' | grep -c '[—–]'`:
+       ```text
+       0
+       ```
+    3. `grep -n 'parses ...\.pubrun\.toml. at most once' docs/functional_spec.md` and `grep -n 'corrupt TOML' docs/functional_spec.md`:
+       ```text
+       === V-01 STALE GREP 1 ===
+       exit=1
+       === V-01 STALE GREP 2 ===
+       exit=1
+       ```
+       Both returned no matches.
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: (1) Paste `git diff -- docs/architecture.md` and name the added lines in `### Initialization` (three files in order, parse-once without `pubrun.config`, malformed-file skip, eight `PUBRUN_AUTO_START` values) and in the `**Boot Config Resolver**` bullet (three-file search). (2) Paste the output of `git diff -U0 -- docs/architecture.md | grep '^+[^+]' | grep -c '[—–]'` showing `0`. (3) Paste the output of `grep -n 'parses ...\.pubrun\.toml. at most once' docs/architecture.md` showing no match. (4) Paste the output and exit code of `python3 scripts/sanitize_paths.py --check --all`, which must be 0.
   - Observed evidence:
-  - Result: pending
+    1. `git diff -- docs/architecture.md`:
+       ```diff
+       diff --git a/docs/architecture.md b/docs/architecture.md
+       index 526fbe2..afcd640 100644
+       --- a/docs/architecture.md
+       +++ b/docs/architecture.md
+       @@ -29,7 +29,7 @@ Structured events may be emitted during execution to `events.jsonl`, providing a
+        ## 3. Run Lifecycle
+
+        ### Initialization
+       -Resolve the import mode without importing the full configuration engine: `_config_boot.py` reads and parses `./.pubrun.toml` at most once when checking `[imports].mode` and `[core].auto_start`. Library commit identity (`pubrun.__commit__`) resolves lazily through Python Enhancement Proposal 562 (PEP 562) module `__getattr__` only when requested, so installed imports and `minimal` or `noauto` imports spawn zero `git` processes.
+       +`_config_boot.py` resolves the import mode without importing `pubrun.config`. It checks `PUBRUN_IMPORT_MODE`, then `PUBRUN_AUTO_START` (`"1"`, `"true"`, `"yes"`, and `"on"` enable auto-start; `"0"`, `"false"`, `"no"`, and `"off"` disable it, ignoring case and surrounding whitespace), and then searches three config files in precedence order: `./.pubrun.toml`, then `./.config/pubrun/config.toml`, then the user config `config.toml` (`%APPDATA%/pubrun/config.toml` on Windows when `APPDATA` is set and non-empty, else `$XDG_CONFIG_HOME/pubrun/config.toml` or `~/.config/pubrun/config.toml`). It parses each file at most once per lookup, skips any malformed, unreadable, or missing file, and uses the first file that sets a valid `[imports].mode` or a recognized `[core].auto_start` value (`[imports].mode` wins within one file). Library commit identity (`pubrun.__commit__`) resolves lazily through Python Enhancement Proposal 562 (PEP 562) module `__getattr__` only when requested, so installed imports and `minimal` or `noauto` imports spawn zero `git` processes.
+
+        When a run starts, `pubrun` assigns a run ID, creates the run directory, and runs every capture engine (`invocation`, `git`, `process`, `python`, `packages`, `environment`, `hardware`, `host`, `filesystem`, `subprocesses`, `console`, `events`, `resources`, and `signals`) inside its own isolated failure guard. A failure in one engine marks only that section `"failed"`, records a bounded redacted entry in `errors.records`, and never promotes healthy tracking into ghost mode. Package capture at this stage records a startup snapshot (`packages.snapshot_stage = "startup"`), so a run that crashes before finalization still records which distributions were loaded; the installed-distribution index it builds is cached under a fingerprint of `sys.path` and reused by the finalization refresh. Git and script source-state capture stay synchronous before user code runs so user edits cannot race with provenance capture; `get_git()` combines `--show-toplevel`, `HEAD`, and `--abbrev-ref HEAD` into one `git rev-parse` subprocess call and enforces a shared monotonic budget (`[capture.git].total_timeout`, default `5`s).
+
+       @@ -289,7 +289,7 @@ The execution engine is divided into these key systems:
+
+        - **Import Mode Router** (`__init__.py`): Target-aware package initializer that detects mode submodule imports, defers core loading when appropriate, and resolves `pubrun.__commit__` lazily via PEP 562 `__getattr__` (version-checked build metadata for installed wheels with zero `git` spawns; bounded ownership-verified live `HEAD` lookup for verified source checkouts).
+        - **Bootstrap State** (`_bootstrap.py`) — Singleton tracking selected import mode, conflict detection, and provenance metadata.
+       -- **Boot Config Resolver** (`_config_boot.py`): Lightweight import-mode resolver that reads environment variables and parses `./.pubrun.toml` at most once without importing the full config system.
+       +- **Boot Config Resolver** (`_config_boot.py`): Lightweight import-mode resolver that reads environment variables and searches the three boot config files (`./.pubrun.toml`, `./.config/pubrun/config.toml`, and the user config `config.toml`), parsing each at most once without importing `pubrun.config`.
+        - **Mode Definitions** (`_modes.py`) — Six import presets (auto, full, noauto, nopatch, noconsole, minimal) with behavior flags.
+        - **Core API** (`core.py`) — Public API implementation (start, stop, annotate, phase, diff, audit_run, tracked_run) and boot sequence logic.
+        - **Configuration Resolver** (`config.py`) — Merges and applies settings from API > env vars > local config > user config > defaults.
+       ```
+       - `### Initialization`: satisfied by added line `+\`_config_boot.py\` resolves the import mode without importing \`pubrun.config\`. ...` (names the three config files in precedence order, parses each at most once without importing `pubrun.config`, skips any malformed/unreadable/missing file, and lists all eight accepted `PUBRUN_AUTO_START` values).
+       - `## 21. System Components`, `**Boot Config Resolver**` bullet: satisfied by added line `+- **Boot Config Resolver** (\`_config_boot.py\`): Lightweight import-mode resolver that reads environment variables and searches the three boot config files (\`./.pubrun.toml\`, \`./.config/pubrun/config.toml\`, and the user config \`config.toml\`), parsing each at most once without importing \`pubrun.config\`.` (pre-existing em dashes on untouched lines such as `**Bootstrap State**` remain unchanged).
+    2. `git diff -U0 -- docs/architecture.md | grep '^+[^+]' | grep -c '[—–]'`:
+       ```text
+       0
+       ```
+    3. `grep -n 'parses ...\.pubrun\.toml. at most once' docs/architecture.md`:
+       ```text
+       === V-02 STALE GREP ===
+       exit=1
+       ```
+       Returned no match.
+    4. `python3 scripts/sanitize_paths.py --check --all`:
+       ```text
+       === SANITIZE PATHS ===
+       exit=0
+       ```
+       No stdout/stderr output; exit code 0.
+  - Result: pass
 
 ## Approval and execution gate
 

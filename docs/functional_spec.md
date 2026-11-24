@@ -66,22 +66,24 @@ Importing `pubrun` MUST NOT:
 - wrap stdout/stderr unless configured to do so
 - write output unless configured to do so
 
-The boot sequence is wrapped in `try/except`. If configuration resolution fails (e.g., corrupt TOML), the import succeeds silently with auto-start disabled.
+The boot sequence is wrapped in `try/except`. A malformed, unreadable, or missing config file does not raise an exception: the boot resolver skips it and continues with the next file. If an exception is raised during mode resolution or selection (`src/pubrun/core.py::_execute_boot_sequence`), the import still succeeds: `pubrun` logs a warning on the `pubrun` logger and disables tracking.
 
 To keep import and startup overhead bounded:
 
 - **Lazy commit identity:** `pubrun.__commit__` resolves lazily via Python Enhancement Proposal 562 (PEP 562) module `__getattr__` and caches under a lock. Importing `pubrun.minimal` or `pubrun.noauto`, or importing an installed wheel, spawns zero `git` processes. Installed packages read version-checked `_build_meta.json` (falling back to legacy `COMMIT` only when `_build_meta.json` is absent) and never launch `git`. Verified `pubrun` source checkouts run one bounded (`1.0`s timeout) `git -C <repo_root> rev-parse --show-toplevel HEAD` call with `GIT_*` override variables stripped and `SubprocessSpy` disabled when loaded, returning `None` on missing Git, timeout, error, or ownership mismatch without falling back to an on-disk `COMMIT` file.
-- **Single-read boot configuration:** `src/pubrun/_config_boot.py::resolve_import_mode` opens and parses `./.pubrun.toml` at most once when checking `[imports].mode` and `[core].auto_start`.
+- **Single-read boot configuration:** `src/pubrun/_config_boot.py::resolve_import_mode` searches three config files in precedence order: `./.pubrun.toml`, then `./.config/pubrun/config.toml`, then the user config `config.toml` (`%APPDATA%/pubrun/config.toml` on Windows when `APPDATA` is set and non-empty, else `$XDG_CONFIG_HOME/pubrun/config.toml` or `~/.config/pubrun/config.toml`). It opens and parses each file at most once per lookup without importing `pubrun.config`, and the first file that sets a valid `[imports].mode` or a recognized `[core].auto_start` value decides. Within one file, `[imports].mode` wins over `[core].auto_start`. The import-conflict policy `[imports].on_conflict` is read from the same three files in the same order.
 - **Bounded capture budgets:** Git and script source-state capture stay synchronous before user code runs so user modifications cannot invalidate captured state. `get_git()` combines `--show-toplevel`, `HEAD`, and `--abbrev-ref HEAD` into one `git rev-parse` subprocess call on normal repositories and enforces `[capture.git].total_timeout` (default `5`s), reporting `capture_state.status` `"timeout"` or `"partial"` when the budget expires. Hardware inspection runs in the background `pubrun-hw` thread within `[capture.hardware].total_timeout` (default `10`s), reporting `"timeout"` when zero probed fields succeed or `"partial"` when at least one succeeds; when `[capture.hardware].depth == "off"`, hardware, host, and filesystem run synchronously in separate failure-isolated guards with no background thread spawn.
 
 ### 3.3 Auto-Start Behavior
 
 When `auto_start = true` (the default), `import pubrun` automatically calls `start()`. This is suppressed when:
 
-- The `PUBRUN_AUTO_START` environment variable is set to `"false"`.
+- The `PUBRUN_AUTO_START` environment variable is set to `"0"`, `"false"`, `"no"`, or `"off"`.
 - The `PUBRUN_IMPORT_MODE` environment variable is set to `"noauto"` or `"minimal"`.
 - The `[imports].mode` config is set to `"noauto"` or `"minimal"`.
 - The process is running the `pubrun` CLI itself (detected by checking `sys.argv[0]`).
+
+For `PUBRUN_AUTO_START`, `"1"`, `"true"`, `"yes"`, and `"on"` enable auto-start (`auto` mode), and `"0"`, `"false"`, `"no"`, and `"off"` disable it (`noauto` mode). Matching ignores case and surrounding whitespace, and `[core].auto_start` accepts the same values (including TOML booleans `true` and `false`). Any other value is ignored and falls through to the next configuration source. `PUBRUN_IMPORT_MODE` takes precedence over `PUBRUN_AUTO_START` when set to a valid import mode.
 
 ### 3.4 Import Modes
 
