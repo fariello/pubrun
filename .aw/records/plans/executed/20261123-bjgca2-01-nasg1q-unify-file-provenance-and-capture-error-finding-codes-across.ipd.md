@@ -5,8 +5,9 @@
 - Concern: Reproducibility assessment, CLI assessment wrapper, and manifest-checks finding-code consistency
 - Scope: Emit canonical file-provenance, section capture-failure, and per-section capture-error finding codes directly from `src/pubrun/report/reproducibility.py`, remove the reconciliation bridges in `src/pubrun/report/checks.py` and `src/pubrun/__main__.py`, and align tests across `tests/`.
 - Scope-Paths: src/pubrun/report/reproducibility.py, src/pubrun/report/checks.py, src/pubrun/__main__.py, tests/test_reproducibility_assessment.py, tests/test_checks_commands.py, tests/test_report_checks_bugs.py, tests/test_reproducibility_e2e.py
+- Scope-Exceeded: .aw/records/backlog/open/20261124-t55vh8-01-t55vh8-reuse-canonical-classify-file-record-in-methods-py.backlog.md (Filed required defect-report backlog carrier t55vh8 for adjacent methods.py _classify_file_record digest check bug)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Work-Kind: followup
@@ -17,12 +18,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: nasg1q
-- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: nasg1q verified (set bjgca2, attempt 1). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261124-t55vh8-01-t55vh8-reuse-canonical-classify-file-record-in-methods-py.backlog.md: Filed required defect-report backlog carrier t55vh8 for adjacent methods.py _classify_file_record digest check bug; in-scope-unmodified tests/test_report_checks_bugs.py: declared-but-unmodified (auto-acknowledged by aw agy run)]
 - 2026-11-24 approved (aw set): status set to approved
 - 2026-11-24 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-24 to-review (Antigravity): graduated from backlog item `bjgca2` into a review-ready plan.
