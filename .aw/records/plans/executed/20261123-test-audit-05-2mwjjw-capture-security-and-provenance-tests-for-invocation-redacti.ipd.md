@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/capture/invocation.py`, `src/pubrun/capture/redaction.py`, `src/pubrun/core.py`, `tests/test_invocation.py`, `tests/test_redaction.py`, `tests/test_file_io_provenance.py`, `tests/test_explicit_api.py`, `tests/test_capture_fallbacks.py`, `tests/test_sanitize_paths.py`, `docs/manifest.md`, and `CHANGELOG.md`.
 - Scope-Paths: src/pubrun/capture/invocation.py, src/pubrun/capture/redaction.py, src/pubrun/core.py, tests/test_invocation.py, tests/test_redaction.py, tests/test_file_io_provenance.py, tests/test_explicit_api.py, tests/test_capture_fallbacks.py, tests/test_sanitize_paths.py, docs/manifest.md, CHANGELOG.md
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix four secret and capture defects in invocation, redaction, and phase profiling, and add behavioral tests for invocation, redaction, file I/O, and fallbacks
@@ -17,12 +17,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: 2mwjjw
-- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 2mwjjw verified (set test-audit, attempt 1).
 - 2026-11-24 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (uri/its_direct/pt3-claude-opus-5.5-1m-us): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012
 - 2026-11-23 to-review (Antigravity): authored from `/assess-testing` findings T-08 (`test_sanitize_paths.py`), T-10, T-11, and T-12.
