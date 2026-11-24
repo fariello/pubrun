@@ -15,6 +15,11 @@ machines.
   and finalization timings, compares source-checkout against isolated installed
   and nested-repository layouts, and counts Git subprocess spawns, manifest and
   config atomic writes, `os.fsync` calls, and writer JSON serialization time.
+- **`package_capture_bench.py`** - local, non-publishing package-capture
+  benchmark that uses only the Python standard library. It times the startup
+  package snapshot and the finalization refresh separately across all five
+  package-capture modes, using two synthetic profiles and the ambient (real)
+  interpreter profile.
 - **`scenarios.py`** — declarative scenario list (import mode, config overrides,
   workload) grouped into `startup`, `feature`, and `hotpath`.
 - **`workloads/`** — tiny scripts the scenarios execute (`noop`, `cpu_burn`,
@@ -119,6 +124,70 @@ What it measures and reports:
 - **Redaction and share-safety:** omits raw paths and mount points, scrubs hostname, username,
   home directory, `--workdir`, and repository root substrings, and validates output with
   `benchmarks/share_safety.py::check_share_safe` before writing or printing.
+
+### Package capture benchmark
+
+Use `benchmarks/package_capture_bench.py` to time `pubrun` package capture at
+run startup and at finalization separately. The script uses only the Python
+standard library and is local and non-publishing: it uploads nothing and submits
+no batch scheduler job. When you pass `--json-out`, the script writes a redacted
+JSON result file locally.
+
+```bash
+python benchmarks/package_capture_bench.py
+python benchmarks/package_capture_bench.py --small-count 10 --large-count 300 \
+  --repetitions 10 --cold-runs 3
+python benchmarks/package_capture_bench.py --workdir /path/to/shared/scratch \
+  --json-out /tmp/package-capture.json
+```
+
+CLI flags:
+
+- `--small-count`: synthetic distributions in the `small` profile (integer >= 1,
+  default `10`).
+- `--large-count`: synthetic distributions in the `large` profile (integer >= 1,
+  default `300`).
+- `--repetitions`: warm measured passes per profile and mode (integer >= 1,
+  default `10`).
+- `--cold-runs`: fresh-process cold runs per profile and mode (integer >= 1,
+  default `3`).
+- `--workdir`: optional parent directory for the synthetic environments, for
+  example a shared Network File System (NFS) or Lustre scratch path. The script
+  creates only a dedicated temporary subdirectory inside `--workdir` and removes
+  it on exit.
+- `--json-out`: optional local path for the redacted JSON result (never
+  published). Standard output always prints a redacted Markdown summary.
+
+Passing a value below `1` for `--small-count`, `--large-count`, `--repetitions`,
+or `--cold-runs` prints an error to standard error and exits with status `2`.
+
+What it measures and reports:
+
+- **Two timing points:** measures `startup` (the initial package snapshot) and
+  `finalization` (the final package refresh plus its merge with the startup
+  snapshot, matching `Run`) separately.
+- **Five capture modes:** runs `off`, `imported-only`, `imported-transitive`,
+  `top-level-installed`, and `full-environment`. The `off` mode is the baseline
+  used to compute each mode's `delta_vs_off_ms` values.
+- **Three environment profiles:** runs `small` and `large` (synthetic
+  `site-packages` trees executed under `python -S` so only the synthetic
+  distributions are installed) and `ambient` (the running interpreter's real
+  installed packages).
+- **Cold versus warm sampling:** cold samples run one fresh child process per
+  run with an empty distribution cache. Warm samples run one child process per
+  profile and mode, execute one discarded warmup pass, and then repeat measured
+  passes that reuse the distribution cache.
+- **Result format:** writes schema `pubrun-package-capture-bench/1`, which is
+  not the `pubrun-benchmark/5` format and is not read by `aggregate.py`.
+- **Redaction, share-safety, and exit status:** redacts hostname, username, and
+  machine-local paths (including `--workdir`) and validates the result with a
+  share-safety check before printing or writing any output. If that check fails,
+  the script refuses to emit output and exits with status `1`. The script also
+  exits with status `1` when any sample fails.
+
+See the
+[performance documentation](../docs/performance.md#package-capture-startup-and-finalization-overhead-single-machine-local-measurements)
+for single-machine local measurements collected with this script.
 
 ## Running on an HPC cluster
 

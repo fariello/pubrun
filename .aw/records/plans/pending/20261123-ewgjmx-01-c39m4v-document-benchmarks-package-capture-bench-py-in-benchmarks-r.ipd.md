@@ -40,12 +40,12 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Document package_capture_bench.py in benchmarks/README.md
 
-- [ ] E-01 Add a `package_capture_bench.py` bullet under `## Design` in `benchmarks/README.md`.
+- [x] E-01 Add a `package_capture_bench.py` bullet under `## Design` in `benchmarks/README.md`.
   - Depends on: none
   - Expected outcome: A bullet starting `- **`package_capture_bench.py`** - ` sits directly after the `startup_breakdown.py` bullet and before the `scenarios.py` bullet, in the same style (bold backticked name, then ` - `). It states that the script: uses only the Python standard library; is local and non-publishing; times the startup package snapshot and the finalization refresh separately; covers the five package-capture modes; and uses two synthetic profiles plus the ambient (real) interpreter profile. The bullet's own text contains no em dash (U+2014) or en dash (U+2013); the existing bullets keep their dashes, which are outside this plan's edit.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Add a `### Package capture benchmark` subsection under `## Running` in `benchmarks/README.md`.
+- [x] E-02 Add a `### Package capture benchmark` subsection under `## Running` in `benchmarks/README.md`.
   - Depends on: E-01
   - Expected outcome: A `### Package capture benchmark` subsection sits directly after the `### Startup and finalization breakdown` subsection and before `## Running on an HPC cluster`, laid out like that subsection: an intro paragraph, a fenced `bash` block of example commands, a `CLI flags:` list, and a `What it measures and reports:` list. It contains all of the following, each taken from `benchmarks/package_capture_bench.py` (see Project conventions):
     1. Intro: standard library only; local and non-publishing (it uploads nothing and submits no scheduler job); the `--json-out` file is written locally and redacted.
@@ -54,7 +54,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     4. `What it measures and reports:` the two timing points (`startup`: the startup snapshot; `finalization`: the refresh plus its merge with the startup snapshot, as `Run` does it); the five modes `off`, `imported-only`, `imported-transitive`, `top-level-installed`, `full-environment`, with `off` as the baseline that each mode's `delta_vs_off_ms` is measured against; the three profiles `small` and `large` (synthetic `site-packages` trees run under `python -S`) and `ambient` (the running interpreter's real packages); cold samples (one fresh child process per run, empty distribution cache) versus warm samples (one child process per profile and mode, one discarded warmup pass, then repeated passes that reuse the cache); the JSON result format `pubrun-package-capture-bench/1`, which is not the `pubrun-benchmark/5` format and is not read by `aggregate.py`; redaction of hostname, username, and machine-local paths with a share-safety check before any output; and exit status `1` when any sample failed.
     5. One sentence linking to the published single-machine results: `[performance documentation](../docs/performance.md#package-capture-startup-and-finalization-overhead-single-machine-local-measurements)`.
     6. The subsection's own text contains no em dash (U+2014) or en dash (U+2013).
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -143,15 +143,166 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste the `## Design` hunk of `git diff benchmarks/README.md` showing the new bullet; the output of the placement check (Required tests 2) showing the bullet line number between the `startup_breakdown.py` and `scenarios.py` bullets; and the dash check (Required tests 3) printing `0`.
   - Observed evidence:
-  - Result: pending
+    `## Design` hunk from `git diff benchmarks/README.md`:
 
-- [ ] V-02 validates E-02
+    ```diff
+    @@ -15,6 +15,11 @@ machines.
+       and finalization timings, compares source-checkout against isolated installed
+       and nested-repository layouts, and counts Git subprocess spawns, manifest and
+       config atomic writes, `os.fsync` calls, and writer JSON serialization time.
+    +- **`package_capture_bench.py`** - local, non-publishing package-capture
+    +  benchmark that uses only the Python standard library. It times the startup
+    +  package snapshot and the finalization refresh separately across all five
+    +  package-capture modes, using two synthetic profiles and the ambient (real)
+    +  interpreter profile.
+     - **`scenarios.py`** — declarative scenario list (import mode, config overrides,
+       workload) grouped into `startup`, `feature`, and `hotpath`.
+     - **`workloads/`** — tiny scripts the scenarios execute (`noop`, `cpu_burn`,
+    ```
+
+    Placement check (`grep -n -E '^## |^### |^- \*\*`(startup_breakdown|package_capture_bench|scenarios)\.py`\*\*' benchmarks/README.md`, exit 0):
+
+    ```text
+    7:## Design
+    13:- **`startup_breakdown.py`** - stdlib-only, local, non-publishing startup and
+    18:- **`package_capture_bench.py`** - local, non-publishing package-capture
+    23:- **`scenarios.py`** — declarative scenario list (import mode, config overrides,
+    35:## Running
+    78:### Startup and finalization breakdown
+    128:### Package capture benchmark
+    192:## Running on an HPC cluster
+    213:### Slurm details
+    235:## Contributing a result from a new machine
+    287:## Interpreting the numbers
+    ```
+
+    Line 18 falls between `startup_breakdown.py` (line 13) and `scenarios.py` (line 23).
+
+    Dash check (`git diff -U0 benchmarks/README.md | grep '^+[^+]' | grep -c $'[\u2013\u2014]'`): printed `0` (exit 1, expected for zero matches).
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Paste the `## Running` hunk of `git diff benchmarks/README.md` showing the new subsection; the placement check output showing `### Package capture benchmark` between `### Startup and finalization breakdown` and `## Running on an HPC cluster`; the content check (Required tests 4) printing `OK`; the full `python3 benchmarks/package_capture_bench.py --help` output (reachable through `benchmarks/package_capture_bench.py::parse_args`) with a sentence confirming each documented default equals the help text; and the output and exit code of `python3 scripts/sanitize_paths.py --check --all`.
   - Observed evidence:
-  - Result: pending
+    `## Running` hunk from `git diff benchmarks/README.md`:
+
+    ```diff
+    @@ -120,6 +125,70 @@ What it measures and reports:
+       home directory, `--workdir`, and repository root substrings, and validates output with
+       `benchmarks/share_safety.py::check_share_safe` before writing or printing.
+
+    +### Package capture benchmark
+    +
+    +Use `benchmarks/package_capture_bench.py` to time `pubrun` package capture at
+    +run startup and at finalization separately. The script uses only the Python
+    +standard library and is local and non-publishing: it uploads nothing and submits
+    +no batch scheduler job. When you pass `--json-out`, the script writes a redacted
+    +JSON result file locally.
+    +
+    +```bash
+    +python benchmarks/package_capture_bench.py
+    +python benchmarks/package_capture_bench.py --small-count 10 --large-count 300 \
+    +  --repetitions 10 --cold-runs 3
+    +python benchmarks/package_capture_bench.py --workdir /path/to/shared/scratch \
+    +  --json-out /tmp/package-capture.json
+    +```
+    +
+    +CLI flags:
+    +
+    +- `--small-count`: synthetic distributions in the `small` profile (integer >= 1,
+    +  default `10`).
+    +- `--large-count`: synthetic distributions in the `large` profile (integer >= 1,
+    +  default `300`).
+    +- `--repetitions`: warm measured passes per profile and mode (integer >= 1,
+    +  default `10`).
+    +- `--cold-runs`: fresh-process cold runs per profile and mode (integer >= 1,
+    +  default `3`).
+    +- `--workdir`: optional parent directory for the synthetic environments, for
+    +  example a shared Network File System (NFS) or Lustre scratch path. The script
+    +  creates only a dedicated temporary subdirectory inside `--workdir` and removes
+    +  it on exit.
+    +- `--json-out`: optional local path for the redacted JSON result (never
+    +  published). Standard output always prints a redacted Markdown summary.
+    +
+    +Passing a value below `1` for `--small-count`, `--large-count`, `--repetitions`,
+    +or `--cold-runs` prints an error to standard error and exits with status `2`.
+    +
+    +What it measures and reports:
+    +
+    +- **Two timing points:** measures `startup` (the initial package snapshot) and
+    +  `finalization` (the final package refresh plus its merge with the startup
+    +  snapshot, matching `Run`) separately.
+    +- **Five capture modes:** runs `off`, `imported-only`, `imported-transitive`,
+    +  `top-level-installed`, and `full-environment`. The `off` mode is the baseline
+    +  used to compute each mode's `delta_vs_off_ms` values.
+    +- **Three environment profiles:** runs `small` and `large` (synthetic
+    +  `site-packages` trees executed under `python -S` so only the synthetic
+    +  distributions are installed) and `ambient` (the running interpreter's real
+    +  installed packages).
+    +- **Cold versus warm sampling:** cold samples run one fresh child process per
+    +  run with an empty distribution cache. Warm samples run one child process per
+    +  profile and mode, execute one discarded warmup pass, and then repeat measured
+    +  passes that reuse the distribution cache.
+    +- **Result format:** writes schema `pubrun-package-capture-bench/1`, which is
+    +  not the `pubrun-benchmark/5` format and is not read by `aggregate.py`.
+    +- **Redaction, share-safety, and exit status:** redacts hostname, username, and
+    +  machine-local paths (including `--workdir`) and validates the result with a
+    +  share-safety check before printing or writing any output. If that check fails,
+    +  the script refuses to emit output and exits with status `1`. The script also
+    +  exits with status `1` when any sample fails.
+    +
+    +See the
+    +[performance documentation](../docs/performance.md#package-capture-startup-and-finalization-overhead-single-machine-local-measurements)
+    +for single-machine local measurements collected with this script.
+    +
+     ## Running on an HPC cluster
+    ```
+
+    Placement check (Required tests 2, exit 0) confirms `128:### Package capture benchmark` falls between `78:### Startup and finalization breakdown` and `192:## Running on an HPC cluster`.
+
+    Content check (Required tests 4): printed `OK` (exit 0).
+
+    `python3 benchmarks/package_capture_bench.py --help` (exit 0):
+
+    ```text
+    usage: package_capture_bench.py [-h] [--small-count SMALL_COUNT]
+                                    [--large-count LARGE_COUNT]
+                                    [--repetitions REPETITIONS]
+                                    [--cold-runs COLD_RUNS] [--workdir WORKDIR]
+                                    [--json-out JSON_OUT]
+
+    Local, non-publishing benchmark of pubrun package capture at startup and at
+    finalization.
+
+    options:
+      -h, --help            show this help message and exit
+      --small-count SMALL_COUNT
+                            Synthetic distributions in the small profile (default:
+                            10).
+      --large-count LARGE_COUNT
+                            Synthetic distributions in the large profile (default:
+                            300).
+      --repetitions REPETITIONS
+                            Warm measured passes per profile and mode (default:
+                            10).
+      --cold-runs COLD_RUNS
+                            Fresh-process cold runs per profile and mode (default:
+                            3).
+      --workdir WORKDIR     Optional parent directory for the synthetic
+                            environments, for example a shared NFS or Lustre
+                            scratch path. Only a dedicated ephemeral subdirectory
+                            is created inside it, and it is removed on exit.
+      --json-out JSON_OUT   Optional local path for the redacted JSON result
+                            (never published).
+    ```
+
+    Each documented default in `CLI flags:` equals the help text (`--small-count` `10`, `--large-count` `300`, `--repetitions` `10`, `--cold-runs` `3`, and optional `--workdir` and `--json-out` with no default path).
+
+    Leak scan (`python3 scripts/sanitize_paths.py --check --all`): no output (0 findings), exit code `0`.
+  - Result: pass
 
 ## Approval and execution gate
 
