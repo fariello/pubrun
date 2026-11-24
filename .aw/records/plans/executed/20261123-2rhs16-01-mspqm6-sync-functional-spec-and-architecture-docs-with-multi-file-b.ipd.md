@@ -5,8 +5,9 @@
 - Concern: Documentation accuracy for boot-time configuration and environment-variable parsing
 - Scope: Update `docs/functional_spec.md` and `docs/architecture.md` to match the multi-file boot configuration search order, the malformed-file fallthrough, and the accepted `PUBRUN_AUTO_START` values implemented in `src/pubrun/_config_boot.py` (landed in `l7ko8p` and `2e6xfq`).
 - Scope-Paths: docs/functional_spec.md, docs/architecture.md
+- Scope-Exceeded: .aw/records/backlog/open/20261124-m8buxe-01-m8buxe-fix-stale-mode-name-list-in-src-pubrun-config-boot.backlog.md (Follow-up backlog item filed per turn defect-report contract); .aw/records/backlog/open/20261124-mv1g3x-01-mv1g3x-sync-docs-functional-spec-md-sections-3-4-10-2-and.backlog.md (Follow-up backlog item filed per turn defect-report contract)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Work-Kind: followup
@@ -17,12 +18,12 @@
 - Highest E allocated: 02
 - Author: Antigravity
 - Id: mspqm6
-- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: mspqm6 verified (set 2rhs16, attempt 1). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261124-m8buxe-01-m8buxe-fix-stale-mode-name-list-in-src-pubrun-config-boot.backlog.md: Follow-up backlog item filed per turn defect-report contract; out-of-scope .aw/records/backlog/open/20261124-mv1g3x-01-mv1g3x-sync-docs-functional-spec-md-sections-3-4-10-2-and.backlog.md: Follow-up backlog item filed per turn defect-report contract]
 - 2026-11-24 approved (aw set): status set to approved
 - 2026-11-24 /plan-review (uri/its_direct/pt3-claude-opus-5.5-1m-us): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-24 to-review (Antigravity): graduated from backlog item `2rhs16` into a review-ready plan.
