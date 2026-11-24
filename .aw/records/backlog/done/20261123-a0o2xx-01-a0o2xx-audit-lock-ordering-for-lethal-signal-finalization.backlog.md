@@ -1,5 +1,5 @@
 - Id: a0o2xx
-- Status: graduated
+- Status: done
 - Graduated-To: a0o2xx
 - Set: a0o2xx
 - Work-Kind: followup
@@ -10,5 +10,6 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-24 done (aw backlog): closed by aw agy run: IPD zcuoll executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261123-a0o2xx-01-zcuoll-audit-lock-ordering-and-prevent-re-entrant-deadlocks-in-leth.ipd.md); evidence .aw/records/plans/executed/20261123-a0o2xx-01-zcuoll-audit-lock-ordering-and-prevent-re-entrant-deadlocks-in-leth.ipd.md
 - 2026-11-24 graduated (aw set): Graduated to review-ready IPD zcuoll (Set: a0o2xx)
 - 2026-11-23 created (aw backlog): Audit lock ordering for lethal-signal finalization: the SIGTERM/SIGHUP shim finalizes on the main thread (taking _run_lock and _write_lock) while the interrupted code may hold any pubrun lock; get_records() was one such deadlock (fixed in 94e504a), others may exist
