@@ -5,8 +5,9 @@
 - Concern: Manifest documentation accuracy and deduplication
 - Scope: Remove the stale duplicate `## pubrun_imports` section in `docs/manifest.md` and reconcile the single remaining `## pubrun_imports` and `### pubrun_imports.requests[]` section against `src/pubrun/_bootstrap.py::get_import_metadata`, `src/pubrun/_modes.py::MODES`, and `schemas/manifest.schema.json`.
 - Scope-Paths: docs/manifest.md
+- Scope-Exceeded: .aw/records/backlog/open/20261124-31kpnv-01-31kpnv-declare-all-selected-behavior-keys-in-schemas-mani.backlog.md (Filed required defect-report backlog carrier 31kpnv for incomplete selected_behavior properties in schemas/manifest.schema.json); .aw/records/backlog/open/20261124-kiir0y-01-kiir0y-add-full-import-mode-to-lock-file-import-mode-row.backlog.md (Filed required defect-report backlog carrier kiir0y for Lock File import_mode omitting full in docs/manifest.md); .aw/records/backlog/open/20261124-szf342-01-szf342-update-stale-mode-list-in-src-pubrun-bootstrap-py.backlog.md (Filed required defect-report backlog carrier szf342 for stale mode list in src/pubrun/_bootstrap.py::select_mode docstring)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Work-Kind: chore
@@ -17,12 +18,12 @@
 - Highest E allocated: 02
 - Author: Antigravity
 - Id: lwb332
-- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: lwb332 verified (set nqrhyn, attempt 1). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261124-31kpnv-01-31kpnv-declare-all-selected-behavior-keys-in-schemas-mani.backlog.md: Filed required defect-report backlog carrier 31kpnv for incomplete selected_behavior properties in schemas/manifest.schema.json; out-of-scope .aw/records/backlog/open/20261124-kiir0y-01-kiir0y-add-full-import-mode-to-lock-file-import-mode-row.backlog.md: Filed required defect-report backlog carrier kiir0y for Lock File import_mode omitting full in docs/manifest.md; out-of-scope .aw/records/backlog/open/20261124-szf342-01-szf342-update-stale-mode-list-in-src-pubrun-bootstrap-py.backlog.md: Filed required defect-report backlog carrier szf342 for stale mode list in src/pubrun/_bootstrap.py::select_mode docstring]
 - 2026-11-24 approved (aw set): status set to approved
 - 2026-11-24 /plan-review (uri/its_direct/pt3-claude-opus-5.5-1m-us): APPROVE WITH REVISIONS APPLIED; PR-001..PR-007 fixed (PR-001 both sections omit `global_hooks`; PR-002 the "second section is correct" premise was false; PR-003 E-02 named `force_console` without saying it is `full`-only); review record `.aw/records/reviews/20261123-nqrhyn-01-lwb332-deduplicate-overlapping-pubrun-imports-sections-in-docs-mani.review.md`.
 - 2026-11-24 draft (Antigravity): created.
