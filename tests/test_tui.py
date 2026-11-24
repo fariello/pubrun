@@ -10,20 +10,20 @@ def test_tui_cli_parser_and_run():
 
     for sub in ("ui", "tui", "gui"):
         with mock.patch("sys.argv", ["pubrun", sub, "--dir", "/tmp/runs"]):
-            with mock.patch("pubrun.tui.app.PubrunTUIApp") as mock_app:
-                # Inject mocked module; patch.dict restores the real module on exit so
-                # later tests in the same worker never import this Mock.
-                mock_module = mock.Mock()
-                mock_module.PubrunTUIApp = mock_app
-                with mock.patch.dict(sys.modules, {"pubrun.tui.app": mock_module}):
-                    try:
-                        main()
-                    except SystemExit as e:
-                        # main() might exit 0 after executing command
-                        assert e.code in (0, None)
+            mock_app = mock.Mock()
+            # Inject mocked module; patch.dict restores the real module on exit so
+            # later tests in the same worker never import this Mock.
+            mock_module = mock.Mock()
+            mock_module.PubrunTUIApp = mock_app
+            with mock.patch.dict(sys.modules, {"pubrun.tui.app": mock_module}):
+                try:
+                    main()
+                except SystemExit as e:
+                    # main() might exit 0 after executing command
+                    assert e.code in (0, None)
 
-                mock_app.assert_called_once_with(output_dir="/tmp/runs")
-                mock_app.return_value.run.assert_called_once()
+            mock_app.assert_called_once_with(output_dir="/tmp/runs")
+            mock_app.return_value.run.assert_called_once()
 
 
 def test_tui_cli_parser_and_run_leaves_real_tui_module():
@@ -68,6 +68,7 @@ def test_tui_missing_dependencies_prints_notice(capsys):
 
 def test_tui_toml_serialization():
     """Verify that the dict_to_toml helper serializes configurations correctly."""
+    pytest.importorskip("textual")
     from pubrun.tui.widgets.config import dict_to_toml
 
     test_dict = {

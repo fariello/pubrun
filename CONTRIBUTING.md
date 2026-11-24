@@ -18,6 +18,18 @@ Run the test suite before opening a pull request:
 python -m pytest
 ```
 
+To measure test coverage locally, pass the coverage flags explicitly (the GitHub Actions CI `ubuntu-latest` Python 3.12 job fails if total coverage drops below 78%):
+
+```bash
+python -m pytest --cov=src --cov-report=term-missing
+```
+
+To run the intake-script and benchmark contract suites that live outside `tests/`:
+
+```bash
+python -m pytest .github/scripts/ benchmarks/test_share_safety.py benchmarks/test_pull_submissions.py benchmarks/test_benchmarks.py
+```
+
 ### Local hooks and path hygiene
 
 Install the pre-commit hooks once per clone:

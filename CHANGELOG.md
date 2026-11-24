@@ -65,6 +65,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pass/fail receipt. Archival/aggregation is a later, separately gated phase.
 
 ### Changed
+- **Pytest coverage is now opt-in, `tox` is repaired, and CI gates additional suites and builds.**
+  Removed the unconditional `--cov` flags from `pyproject.toml` `addopts`, registered the `slow`
+  pytest marker, and updated `tox.ini` for tox 4 using `extras = dev` so `pytest` and `tox` run
+  without requiring `pytest-cov` by default. GitHub Actions CI now enforces a 78% total coverage
+  floor on the `ubuntu-latest` Python 3.12 matrix job, runs the numbered example smoke tests in
+  every matrix job, and adds three dedicated Linux Python 3.12 jobs: `extra-suites` (intake
+  scripts and benchmark contract suites), `no-tui` (editable install with only the `dev` extra),
+  and `packaging` (real sdist and wheel builds, sdist-to-wheel round-trip, and commit stamp
+  verification in clean virtual environments).
 - **Zenodo concept DOI live across citation surfaces.** Replaced the `10.5281/zenodo.PENDING`
   placeholder with the archived Zenodo concept DOI (`10.5281/zenodo.20801582`) across
   `CITATION.cff`, `pubrun cite` (all styles), `README.md` (with a Zenodo DOI badge),

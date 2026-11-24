@@ -69,11 +69,8 @@ Optional figures and the micro-benchmark suite (needs the extra):
 ```bash
 pip install -e .[bench]
 python benchmarks/plot.py benchmarks/results/summary.csv
-pytest benchmarks/ -o addopts="" --benchmark-only
+pytest benchmarks/ --benchmark-only
 ```
-
-`-o addopts=""` clears the repo's global `--cov` options, which would otherwise
-distort pytest-benchmark timings.
 
 ### Startup and finalization breakdown
 

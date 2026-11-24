@@ -84,7 +84,10 @@ pythonpath = ["src"]
 # it is deliberately DISABLED by default so CI and normal runs stay deterministic. Enabling
 # randomized order in CI is a separate, later step (see the flaky-test-hardening IPD, OQ1=C):
 # it would surface additional latent order-coupling that must be worked through first.
-addopts = "--cov=src --cov-report=term-missing --cov-report=xml -p no:randomly"
+addopts = "-p no:randomly"
+markers = [
+    "slow: runs the benchmark harness or another multi-subprocess workload (deselect with -m 'not slow')",
+]
 
 [tool.coverage.run]
 source = ["src"]

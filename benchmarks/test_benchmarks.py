@@ -1,16 +1,11 @@
-"""pytest-benchmark micro-suite for pubrun hot paths.
+"""pytest-benchmark micro-suite and schema/5 contract tests for pubrun.
 
 This file is NOT collected by the default `pytest` run: the project sets
 `testpaths = ["tests"]`, so a bare `pytest` never looks in `benchmarks/`.
 
-Run it explicitly (requires the optional extra `pip install -e .[bench]`):
+Run the micro-benchmarks explicitly (requires `pip install -e .[bench]`):
 
-    pytest benchmarks/ -o addopts="" --benchmark-only
-
-`-o addopts=""` clears the repo's global coverage addopts (`--cov=...`), which
-would otherwise distort pytest-benchmark timings. (Do not use `-p no:cov`: that
-disables the cov plugin but leaves the now-unrecognized `--cov` flags in
-addopts, which errors out.)
+    pytest benchmarks/ --benchmark-only
 """
 import builtins
 import importlib.util
@@ -47,17 +42,20 @@ class TestSchema5Shape:
         on_disk = json.loads(out.read_text(encoding="utf-8"))
         return h, out, result, on_disk
 
-    def test_schema_is_v5(self):
-        import re
-        src = (_REPO / "benchmarks" / "harness.py").read_text()
-        assert re.search(r'"schema":\s*"pubrun-benchmark/5"', src)
+    @pytest.mark.slow
+    def test_schema_is_v5(self, tmp_path):
+        _h, _out, result, on_disk = self._make(tmp_path)
+        assert result["schema"] == "pubrun-benchmark/5"
+        assert on_disk["schema"] == "pubrun-benchmark/5"
 
+    @pytest.mark.slow
     def test_compact_no_indent(self, tmp_path):
         _h, out, _r, _d = self._make(tmp_path)
         text = out.read_text(encoding="utf-8")
         assert "\n" not in text.rstrip("\n")          # single line -> compact
         assert ": " not in text and '",\n' not in text  # no pretty separators
 
+    @pytest.mark.slow
     def test_scenario_defs_present_and_no_top_scenarios(self, tmp_path):
         _h, _out, result, on_disk = self._make(tmp_path)
         assert "scenario_defs" in on_disk and on_disk["scenario_defs"]
@@ -68,6 +66,7 @@ class TestSchema5Shape:
         p0 = on_disk["pass_results"][0]
         assert set(p0.keys()) <= {"pass", "pass_env", "timings", "failures", "skipped"}
 
+    @pytest.mark.slow
     def test_both_timestamps_present(self, tmp_path):
         _h, _out, _r, on_disk = self._make(tmp_path)
         assert "generated_utc" in on_disk and on_disk["generated_utc"].endswith("+00:00")
@@ -75,6 +74,7 @@ class TestSchema5Shape:
         # local ISO-8601 WITH offset (not 'Z', not naive): last 6 chars are +HH:MM / -HH:MM.
         assert gl[-6] in "+-" and gl[-3] == ":"
 
+    @pytest.mark.slow
     def test_timings_rounded_6dp_and_grouped_by_pass(self, tmp_path):
         _h, _out, _r, on_disk = self._make(tmp_path)
         tim = on_disk["pass_results"][0]["timings"]
@@ -83,6 +83,7 @@ class TestSchema5Shape:
             for v in samples:
                 assert round(v, 6) == v            # stored at 6 dp
 
+    @pytest.mark.slow
     def test_no_stored_stats(self, tmp_path):
         _h, _out, _r, on_disk = self._make(tmp_path)
         # No derived-stat fields anywhere in a pass entry (recomputable from timings).
@@ -90,6 +91,7 @@ class TestSchema5Shape:
         for k in ("median_s", "mean_s", "p95_s", "stdev_s", "min_s", "max_s"):
             assert f'"{k}"' not in blob
 
+    @pytest.mark.slow
     def test_baseline_same_compact_shape(self, tmp_path):
         _h, _out, _r, on_disk = self._make(tmp_path)
         b = on_disk["baseline"]
@@ -97,6 +99,7 @@ class TestSchema5Shape:
         assert set(b.keys()) <= {"pass", "uncaptured", "pass_env", "timings", "failures", "skipped"}
         assert "scenarios" not in b               # no per-scenario stats/descriptors
 
+    @pytest.mark.slow
     def test_round_trips(self, tmp_path):
         _h, out, _r, on_disk = self._make(tmp_path)
         assert json.loads(out.read_text(encoding="utf-8")) == on_disk
@@ -159,6 +162,13 @@ class TestSchema5AggregateParity:
 
 # ------------------------------------------------- schema/5 JSON Schema conformance (IPD 20260720-1418)
 
+_COMMITTED_REDACTED_SAMPLES = sorted(
+    list((_REPO / "benchmarks" / "results").glob("*.redacted.json"))
+    + list((_REPO / "benchmarks" / "data" / "accepted").glob("*.redacted.json")),
+    key=lambda p: p.relative_to(_REPO).as_posix(),
+)
+
+
 class TestSchema5Conformance:
     """The published schemas/benchmark.schema.json must accept real /5 results (full AND
     redacted) and reject a broken one. Uses the dev-only jsonschema dependency."""
@@ -175,17 +185,23 @@ class TestSchema5Conformance:
     def test_schema_is_well_formed(self):
         self._validator()  # raises if malformed
 
-    def test_committed_redacted_sample_conforms(self):
-        """The committed redacted /5 sample is a valid, real example (guards it from drift)."""
+    @pytest.mark.parametrize(
+        "sample_path",
+        _COMMITTED_REDACTED_SAMPLES or [None],
+        ids=lambda p: p.relative_to(_REPO).as_posix() if p is not None else "missing",
+    )
+    def test_committed_redacted_sample_conforms(self, sample_path):
+        """Each committed redacted /5 sample is a valid, real example (guards it from drift)."""
+        assert _COMMITTED_REDACTED_SAMPLES and sample_path is not None, (
+            "no committed *.redacted.json sample to validate"
+        )
         v = self._validator()
-        samples = sorted((_REPO / "benchmarks" / "results").glob("*.redacted.json"))
-        assert samples, "no committed *.redacted.json sample to validate"
-        for s in samples:
-            data = json.loads(s.read_text(encoding="utf-8"))
-            errs = sorted(v.iter_errors(data), key=lambda e: list(e.absolute_path))
-            assert not errs, f"{s.name} does not conform: " + \
-                "; ".join(f"{list(e.absolute_path) or '[root]'}: {e.message}" for e in errs[:5])
+        data = json.loads(sample_path.read_text(encoding="utf-8"))
+        errs = sorted(v.iter_errors(data), key=lambda e: list(e.absolute_path))
+        assert not errs, f"{sample_path.name} does not conform: " + \
+            "; ".join(f"{list(e.absolute_path) or '[root]'}: {e.message}" for e in errs[:5])
 
+    @pytest.mark.slow
     def test_fresh_result_and_redaction_conform(self, tmp_path):
         """A freshly-produced /5 result AND its redacted copy both validate."""
         v = self._validator()
@@ -198,6 +214,7 @@ class TestSchema5Conformance:
         # redaction preserves the structure (schema-valid) while masking values
         assert redacted["schema"] == "pubrun-benchmark/5"
 
+    @pytest.mark.slow
     def test_broken_result_is_rejected(self, tmp_path):
         """The schema has teeth: structural breakage fails validation."""
         v = self._validator()

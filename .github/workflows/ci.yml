@@ -34,4 +34,105 @@ jobs:
       - name: Install package
         run: pip install -e ".[dev,tui]"
       - name: Run tests
+        if: ${{ !(matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12') }}
         run: pytest tests/ -v
+      - name: Run tests with coverage gate
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
+        run: pytest tests/ -v --cov=src --cov-report=term-missing --cov-fail-under=78
+
+  extra-suites:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -e ".[dev]" pyyaml
+      - name: Run script and benchmark contract tests
+        run: pytest .github/scripts/ benchmarks/test_share_safety.py benchmarks/test_pull_submissions.py benchmarks/test_benchmarks.py -v
+
+  no-tui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install package without tui extra
+        run: pip install -e ".[dev]"
+      - name: Run tests
+        run: pytest tests/ -v
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install build frontend
+        run: pip install build
+      - name: Build sdist and wheel
+        run: python -m build --outdir dist .
+      - name: Verify wheel contents and commit stamp in clean environments
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_SHA="$(git rev-parse HEAD)"
+          WORK_DIR="$(mktemp -d)"
+          trap 'rm -rf "$WORK_DIR"' EXIT
+
+          DIRECT_WHL="$(ls dist/*.whl)"
+          SDIST_TAR="$(ls dist/*.tar.gz)"
+
+          mkdir -p "$WORK_DIR/sdist-unpack" "$WORK_DIR/sdist-dist"
+          tar -xzf "$SDIST_TAR" -C "$WORK_DIR/sdist-unpack"
+          SDIST_SRC="$(find "$WORK_DIR/sdist-unpack" -mindepth 1 -maxdepth 1 -type d)"
+          python -m build --wheel --outdir "$WORK_DIR/sdist-dist" "$SDIST_SRC"
+          SDIST_WHL="$(ls "$WORK_DIR/sdist-dist"/*.whl)"
+
+          check_wheel() {
+            local label="$1"
+            local whl="$2"
+            local venv_dir="$WORK_DIR/venv-$label"
+            local listing
+            listing="$(python -m zipfile -l "$whl")"
+            echo "=== zipfile listing ($label) ==="
+            echo "$listing"
+            for required in "pubrun/_build_meta.json" "pubrun/COMMIT" "pubrun/py.typed"; do
+              if ! grep -Fq "$required" <<< "$listing"; then
+                echo "Missing $required in $whl" >&2
+                exit 1
+              fi
+            done
+
+            python -m venv "$venv_dir"
+            "$venv_dir/bin/pip" install --quiet "$whl"
+
+            (
+              cd "$WORK_DIR"
+              local py_commit
+              py_commit="$("$venv_dir/bin/python" -c 'import pubrun; print(pubrun.__commit__)')"
+              echo "[$label] pubrun.__commit__=$py_commit"
+              if [ "$py_commit" != "$EXPECTED_SHA" ]; then
+                echo "Expected pubrun.__commit__=$EXPECTED_SHA, got $py_commit" >&2
+                exit 1
+              fi
+              for cli in pubrun pbr; do
+                local first_line
+                first_line="$("$venv_dir/bin/$cli" --version | head -n 1)"
+                echo "[$label] $cli --version: $first_line"
+                if [[ "$first_line" != *"(commit $EXPECTED_SHA)"* ]]; then
+                  echo "Expected '(commit $EXPECTED_SHA)' in $cli --version line: $first_line" >&2
+                  exit 1
+                fi
+              done
+            )
+          }
+
+          check_wheel "direct" "$DIRECT_WHL"
+          check_wheel "from-sdist" "$SDIST_WHL"
