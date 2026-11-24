@@ -128,7 +128,7 @@ def test_combined_write_to_file(tmp_path, capsys):
     assert out_file.exists()
     assert out_file.read_text("utf-8").strip() == "[stdout] [2026-06-19T22:00:00.000Z] stdout line"
 
-def test_combined_size_checks_force(tmp_path):
+def test_combined_size_checks_force(tmp_path, capsys):
     """Files > 500 MB require --force."""
     runs_dir = tmp_path / "runs"
 
@@ -148,15 +148,13 @@ def test_combined_size_checks_force(tmp_path):
         with pytest.raises(SystemExit) as excinfo:
             _run_combined(["runE"], dir_path=str(runs_dir), output=None, yes=True, force=False)
         assert excinfo.value.code == 1
+        capsys.readouterr()
 
         # With force, should proceed (and skip prompt since yes=True)
-        with patch("pubrun.__main__.open") as mock_open:
-            # just mock to verify execution proceeds to reading
-            mock_open.side_effect = Exception("Stop execution here")
-            with pytest.raises(Exception, match="Stop execution here"):
-                _run_combined(["runE"], dir_path=str(runs_dir), output=None, yes=True, force=True)
+        _run_combined(["runE"], dir_path=str(runs_dir), output=None, yes=True, force=True)
+        assert capsys.readouterr().out.strip().splitlines() == ["[stdout] line", "[stderr] line"]
 
-def test_combined_size_checks_warning_yes(tmp_path):
+def test_combined_size_checks_warning_yes(tmp_path, capsys):
     """Files > 250 MB skip warning prompt if --yes is passed."""
     runs_dir = tmp_path / "runs"
     create_mock_run(runs_dir, "runF", 1000.0, ["line"], ["line"])
@@ -171,12 +169,10 @@ def test_combined_size_checks_warning_yes(tmp_path):
 
     with patch.object(Path, "stat", mock_stat_func):
         # With yes=True, it should proceed (not try to call input())
-        with patch("pubrun.__main__.open") as mock_open:
-            mock_open.side_effect = Exception("Stop execution here")
-            with pytest.raises(Exception, match="Stop execution here"):
-                _run_combined(["runF"], dir_path=str(runs_dir), output=None, yes=True, force=False)
+        _run_combined(["runF"], dir_path=str(runs_dir), output=None, yes=True, force=False)
+        assert capsys.readouterr().out.strip().splitlines() == ["[stdout] line", "[stderr] line"]
 
-def test_combined_size_checks_warning_prompt_accept(tmp_path):
+def test_combined_size_checks_warning_prompt_accept(tmp_path, capsys):
     """Files > 250 MB prompt user and proceed if accepted."""
     runs_dir = tmp_path / "runs"
     create_mock_run(runs_dir, "runG", 1000.0, ["line"], ["line"])
@@ -191,10 +187,8 @@ def test_combined_size_checks_warning_prompt_accept(tmp_path):
 
     with patch.object(Path, "stat", mock_stat_func):
         with patch("builtins.input", return_value="yes"):
-            with patch("pubrun.__main__.open") as mock_open:
-                mock_open.side_effect = Exception("Stop execution here")
-                with pytest.raises(Exception, match="Stop execution here"):
-                    _run_combined(["runG"], dir_path=str(runs_dir), output=None, yes=False, force=False)
+            _run_combined(["runG"], dir_path=str(runs_dir), output=None, yes=False, force=False)
+        assert capsys.readouterr().out.strip().splitlines() == ["[stdout] line", "[stderr] line"]
 
 def test_combined_size_checks_warning_prompt_reject(tmp_path):
     """Files > 250 MB prompt user and cancel if rejected."""

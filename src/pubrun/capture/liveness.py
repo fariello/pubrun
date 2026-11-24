@@ -72,7 +72,7 @@ def get_process_start_time(pid: int) -> Optional[float]:
 _GENERIC_SCRIPT_TOKENS = frozenset(
     {"python", "python2", "python3", "python3.8", "python3.9", "python3.10",
      "python3.11", "python3.12", "python3.13", "python3.14", "-c", "-m",
-     "sh", "bash", "env", "interactive"}
+     "__main__", "sh", "bash", "env", "interactive"}
 )
 
 

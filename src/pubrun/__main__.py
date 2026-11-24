@@ -3496,7 +3496,7 @@ def main() -> None:
 
             try:
                 choice = input("Select an option [1/2] (Default: 1): ").strip()
-            except KeyboardInterrupt:
+            except (KeyboardInterrupt, EOFError):
                 print("\nConfiguration abandoned.", file=sys.stderr)
                 sys.exit(1)
 

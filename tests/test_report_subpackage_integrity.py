@@ -26,15 +26,16 @@ _REPORT_ONLY_MODULES = ["pubrun.report.checks", "pubrun.report.reproducibility"]
 _MODES = ["auto", "noauto", "full", "nopatch", "noconsole", "minimal"]
 
 
-def _run(code: str) -> subprocess.CompletedProcess:
+def _run(code: str, cwd=None) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-c", code],
+        cwd=cwd,
         capture_output=True, text=True, timeout=60,
     )
 
 
 @pytest.mark.parametrize("mode", _MODES)
-def test_report_is_callable_and_subpackage_under_every_mode(mode):
+def test_report_is_callable_and_subpackage_under_every_mode(mode, tmp_path):
     """After `import pubrun.<mode>`, `pubrun.report` must be callable AND every
     report submodule must still import."""
     submods = ", ".join(f"'{s}'" for s in _REPORT_SUBMODULES)
@@ -58,8 +59,6 @@ for name in [{submods}]:
 # 3. A live run does not corrupt subpackage access afterwards.
 if hasattr(pubrun, "start"):
     try:
-        import os, tempfile
-        os.chdir(tempfile.mkdtemp())
         t = pubrun.start()
         pubrun.stop()
     except Exception:
@@ -67,13 +66,13 @@ if hasattr(pubrun, "start"):
 importlib.import_module("pubrun.report.diagnostics")
 print("OK")
 """
-    r = _run(code)
+    r = _run(code, cwd=tmp_path)
     assert r.returncode == 0, f"mode {mode} failed:\nSTDOUT:{r.stdout}\nSTDERR:{r.stderr}"
     assert "OK" in r.stdout
 
 
 @pytest.mark.parametrize("mode", _MODES)
-def test_no_mode_module_shadows_a_pubrun_subpackage(mode):
+def test_no_mode_module_shadows_a_pubrun_subpackage(mode, tmp_path):
     """Generalized guard: after selecting a mode, no top-level `pubrun` attribute that
     shares a name with a real subpackage may be a non-module that hides it.
 
@@ -99,17 +98,15 @@ for name in subpkgs:
 assert not broken, "shadowed/broken subpackages under mode {mode}: " + repr(broken)
 print("OK")
 """
-    r = _run(code)
+    r = _run(code, cwd=tmp_path)
     assert r.returncode == 0, f"mode {mode} failed:\nSTDOUT:{r.stdout}\nSTDERR:{r.stderr}"
     assert "OK" in r.stdout
 
 
-def test_report_call_and_submodule_coexist_same_process():
+def test_report_call_and_submodule_coexist_same_process(tmp_path):
     """In one process: call pubrun.report() AND import a report submodule, in both
     orders, to prove they coexist (the exact interaction the regression broke)."""
     code = """
-import os, tempfile
-os.chdir(tempfile.mkdtemp())
 import pubrun.noauto as pubrun
 # submodule first, then call
 import pubrun.report.output  # noqa
@@ -125,6 +122,6 @@ repro = importlib.import_module("pubrun.report.reproducibility")
 assert callable(repro.assess_run)
 print("OK")
 """
-    r = _run(code)
+    r = _run(code, cwd=tmp_path)
     assert r.returncode == 0, f"failed:\nSTDOUT:{r.stdout}\nSTDERR:{r.stderr}"
     assert "OK" in r.stdout

@@ -112,6 +112,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **Live `python -m <package>` runs are no longer closed out as crashed or deleted by `pubrun clean`.**
+  `pubrun clean` no longer deletes, and `pubrun status` no longer closes out as crashed, a run that
+  is still executing when it was started with `python -m <package>`. The lock file records the
+  script as `__main__`, which the liveness check now treats as too generic to decide by name and
+  resolves by process start time.
+- **`pubrun --create-config` now handles closed stdin cleanly without a traceback.** When invoked
+  with no destination and closed stdin, `pubrun --create-config` now prints `Configuration abandoned.`
+  and exits 1 instead of raising an uncaught `EOFError` traceback.
 - **Redacted `sys.argv` values are no longer recorded in `invocation.inputs`.** Input discovery in
   `get_invocation()` now runs after `redact_argv()` and skips any argument whose value changed
   during redaction, so file paths passed to secret flags (such as `--credentials creds.json`) no

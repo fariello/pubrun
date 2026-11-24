@@ -3,7 +3,13 @@ import os
 import sys
 import pytest
 
-from pubrun.analysis.render import _has_color, _render_inline, print_diff
+from pubrun.analysis.render import (
+    _has_color,
+    _render_inline,
+    _render_table,
+    _summarize_change,
+    print_diff,
+)
 
 
 class TestHasColor:
@@ -202,3 +208,53 @@ class TestPrintDiff:
         output = capsys.readouterr().out
         assert "Unchanged" in output
         assert "host.os" in output
+
+
+class TestRenderTableAndSummarize:
+    """Tests for _summarize_change and _render_table."""
+
+    def test_render_table_list_diff_reordered(self, capsys):
+        diff = {
+            "modified": {
+                "pkgs": {
+                    "type": "list_diff",
+                    "added": ["a", "b"],
+                    "removed": ["c"],
+                    "order_changed": True,
+                }
+            }
+        }
+        _render_table(diff, use_color=False)
+        lines = capsys.readouterr().out.splitlines()
+        assert "~  pkgs   list [+2, -1, reordered]" in lines
+
+    def test_summarize_change_truncation_and_empty_list_diff(self):
+        assert _summarize_change({"type": "path_split", "added": ["a"] * 3}, 5) == "PATH  ..."
+        assert _summarize_change({"type": "list_diff", "added": ["a"] * 3}, 5) == "list  ..."
+        assert (
+            _summarize_change({"type": "standard", "old": "abcdef", "new": "ghijkl"}, 10)
+            == "abcdef  -> ..."
+        )
+        assert _summarize_change({"type": "list_diff"}, 300) == "list changed"
+
+    def test_render_table_long_key_truncation_and_newline_flattening(self, capsys):
+        diff = {"added": {"k" * 60: "a\nb"}}
+        _render_table(diff, use_color=False)
+        lines = capsys.readouterr().out.splitlines()
+        assert len(lines) == 4
+        assert lines[-1] == "+  " + ("k" * 47) + "\u2026  a b"
+
+    def test_render_table_with_color(self, capsys):
+        diff = {
+            "added": {"y": 1},
+            "removed": {"z": 0},
+            "modified": {"x": {"type": "standard", "old": 1, "new": 2}},
+            "same": {"w": 3},
+        }
+        _render_table(diff, use_color=True)
+        output = capsys.readouterr().out
+        lines = output.splitlines()
+        assert "\x1b[1m   Field  Change\x1b[0m" in lines
+        assert "\x1b[92m+\x1b[0m  y      \x1b[92m1\x1b[0m" in output
+        assert "\x1b[93m~\x1b[0m  x      \x1b[93m1  ->  2\x1b[0m" in output
+        assert "\x1b[2m=\x1b[0m  w      \x1b[2m3\x1b[0m" in output

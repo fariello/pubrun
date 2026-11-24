@@ -1,6 +1,7 @@
 """Tests for pubrun.status and lock file mechanism."""
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -8,6 +9,67 @@ from pathlib import Path
 import pytest
 
 from pubrun.tracker import Run
+
+
+@pytest.fixture
+def live_child(tmp_path):
+    """Spawn a live child process with an active pubrun run and tear it down cleanly."""
+    script = tmp_path / "livechild.py"
+    script.write_text(
+        'import sys\n'
+        'import pubrun.noauto as p\n'
+        'p.start()\n'
+        'print("READY", flush=True)\n'
+        'sys.stdin.readline()\n'
+        'p.stop()\n',
+        encoding="utf-8",
+    )
+    child = subprocess.Popen(
+        [sys.executable, str(script)],
+        cwd=str(tmp_path),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        ready = child.stdout.readline().strip()
+        assert ready == "READY", f"Expected READY from child, got {ready!r}"
+        yield child, str(tmp_path / "runs")
+    finally:
+        try:
+            if child.stdin:
+                child.stdin.write("\n")
+                child.stdin.flush()
+        except (BrokenPipeError, ValueError, OSError):
+            pass
+        try:
+            child.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=5)
+
+
+def _write_manifest(
+    runs_dir: Path,
+    dirname: str,
+    run_id: str,
+    started_at: float,
+    outcome: str = "completed",
+    argv=None,
+    exit_code=0,
+) -> Path:
+    """Write a minimal manifest.json under runs_dir / dirname."""
+    run_dir = runs_dir / dirname
+    run_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "run": {"run_id": run_id},
+        "timing": {"started_at_utc": started_at},
+        "status": {"outcome": outcome},
+        "invocation": {"argv": argv if argv is not None else ["train.py"]},
+        "signals": {"exit_code": exit_code},
+    }
+    (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return run_dir
 
 
 class TestLockFile:
@@ -152,7 +214,7 @@ class TestStatusScan:
         assert len(runs) == 1
         assert runs[0].status == STATUS_BROKEN_PIPE
         # Exit code should remain unchanged (not overwritten)
-        assert runs[0].exit_code is not None or runs[0].exit_code is None  # just verify field exists
+        assert runs[0].exit_code == 0
 
     @pytest.mark.skipif(sys.platform == "win32", reason="SIGPIPE not available on Windows")
     def test_real_sigpipe_via_pipe(self, tmp_path):
@@ -215,26 +277,68 @@ pubrun.stop()
         acceptable = {STATUS_BROKEN_PIPE, "completed", "failed", "interrupted", "crashed"}
         assert latest.status in acceptable, f"unexpected status: {latest.status!r}"
 
-    def test_scan_running_run(self):
+    @pytest.mark.skipif(sys.platform == "win32", reason="uses POSIX-style child control via stdin")
+    def test_scan_running_run(self, live_child):
         """A run with a lock file and live PID is classified as running."""
         from pubrun.status import scan_runs, STATUS_RUNNING
 
-        run = Run()
-        run_dir = run.run_dir
-        output_dir = str(run_dir.parent)
+        child, od = live_child
+        assert [(r.script, r.status, r.pid) for r in scan_runs(od)] == [
+            ("livechild", STATUS_RUNNING, child.pid)
+        ]
 
-        # Don't stop -- simulate an active run
-        runs = scan_runs(output_dir)
-        assert len(runs) == 1
-        if runs[0].status != STATUS_RUNNING:
-            # On some CI runners (macOS), PID liveness detection via `ps` can be
-            # unreliable — skip rather than produce a flaky failure.
-            run.stop()
-            pytest.skip("PID liveness detection unreliable on this runner")
-        assert runs[0].pid == os.getpid()
+    @pytest.mark.skipif(sys.platform == "win32", reason="uses POSIX-style child control via stdin")
+    def test_python_dash_m_package_run_is_running_and_not_cleaned(self, tmp_path):
+        """A live `python -m <package>` run is detected as running and never cleaned."""
+        from pubrun.status import clean_runs, scan_runs, STATUS_RUNNING
 
-        # Clean up
-        run.stop()
+        pkg_root = tmp_path / "pkgroot"
+        pkg_dir = pkg_root / "livepkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "__init__.py").write_text("", encoding="utf-8")
+        (pkg_dir / "__main__.py").write_text(
+            'import sys\n'
+            'import pubrun.noauto as p\n'
+            'p.start()\n'
+            'print("READY", flush=True)\n'
+            'sys.stdin.readline()\n'
+            'p.stop()\n',
+            encoding="utf-8",
+        )
+
+        env = os.environ.copy()
+        existing_pp = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = f"{pkg_root}{os.pathsep}{existing_pp}" if existing_pp else str(pkg_root)
+
+        child = subprocess.Popen(
+            [sys.executable, "-m", "livepkg"],
+            cwd=str(tmp_path),
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            ready = child.stdout.readline().strip()
+            assert ready == "READY", f"Expected READY from child, got {ready!r}"
+            od = str(tmp_path / "runs")
+            runs = scan_runs(od)
+            assert [(r.script, r.status) for r in runs] == [("__main__", STATUS_RUNNING)]
+            run_dir = runs[0].run_dir
+            assert clean_runs(output_dir=od, yes=True) == 0
+            assert run_dir.exists()
+        finally:
+            try:
+                if child.stdin:
+                    child.stdin.write("\n")
+                    child.stdin.flush()
+            except (BrokenPipeError, ValueError, OSError):
+                pass
+            try:
+                child.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=5)
 
     def test_scan_crashed_run(self, tmp_path):
         """A run with a lock file but dead PID is classified as crashed."""
@@ -473,9 +577,8 @@ class TestStatusCli:
 
     def test_status_help(self):
         """pubrun status --help exits 0."""
-        import subprocess
         result = subprocess.run(
-            ["python", "-m", "pubrun", "status", "--help"],
+            [sys.executable, "-m", "pubrun", "status", "--help"],
             capture_output=True, text=True
         )
         assert result.returncode == 0
@@ -483,9 +586,8 @@ class TestStatusCli:
 
     def test_status_no_runs(self, tmp_path):
         """pubrun status with no runs prints 'No runs found'."""
-        import subprocess
         result = subprocess.run(
-            ["python", "-m", "pubrun", "status", "--dir", str(tmp_path)],
+            [sys.executable, "-m", "pubrun", "status", "--dir", str(tmp_path)],
             capture_output=True, text=True
         )
         assert result.returncode == 0
@@ -510,29 +612,19 @@ class TestCleanRuns:
         assert deleted == 1
         assert not run_dir.exists()
 
-    def test_clean_does_not_delete_running(self):
+    @pytest.mark.skipif(sys.platform == "win32", reason="uses POSIX-style child control via stdin")
+    def test_clean_does_not_delete_running(self, live_child):
         """clean_runs never deletes running runs."""
-        from pubrun.status import clean_runs, scan_runs, STATUS_RUNNING
+        from pubrun.status import clean_runs, scan_runs
 
-        run = Run()
-        run_dir = run.run_dir
-        output_dir = str(run_dir.parent)
+        _, od = live_child
+        runs = scan_runs(od)
+        assert len(runs) == 1
+        run_dir = runs[0].run_dir
 
-        # Verify the run is detected as running first
-        runs = scan_runs(output_dir)
-        if not runs or runs[0].status != STATUS_RUNNING:
-            # On some CI runners (macOS), PID liveness detection can be unreliable.
-            # Skip rather than produce a flaky failure.
-            run.stop()
-            pytest.skip("PID liveness detection unreliable on this runner")
-
-        # Don't stop -- it's "running"
-        deleted = clean_runs(output_dir=output_dir, yes=True)
+        deleted = clean_runs(output_dir=od, yes=True)
         assert deleted == 0
         assert run_dir.exists()
-
-        # Clean up
-        run.stop()
 
     def test_clean_older_than_filter(self):
         """clean_runs with older_than_days filters out recent runs."""
@@ -605,43 +697,41 @@ class TestCleanRuns:
         for r in runs:
             assert not r.run_dir.exists()
 
-    def test_clean_running_filter_stripped(self):
+    @pytest.mark.skipif(sys.platform == "win32", reason="uses POSIX-style child control via stdin")
+    def test_clean_running_filter_stripped(self, live_child):
         """Even if 'running' is in status_filter, running runs are not deleted."""
-        from pubrun.status import clean_runs
+        from pubrun.status import clean_runs, scan_runs, STATUS_RUNNING
 
-        run = Run()
-        run_dir = run.run_dir
-        output_dir = str(run_dir.parent)
+        _, od = live_child
+        runs = scan_runs(od)
+        assert len(runs) == 1
+        assert runs[0].status == STATUS_RUNNING
+        run_dir = runs[0].run_dir
 
         # Explicitly include "running" in the filter
-        deleted = clean_runs(output_dir=output_dir, status_filter=["running", "completed"], yes=True)
+        deleted = clean_runs(output_dir=od, status_filter=["running", "completed"], yes=True)
         assert deleted == 0
         assert run_dir.exists()
 
-        run.stop()
-
-    def test_clean_interactive_selection_and_confirm(self, monkeypatch):
+    def test_clean_interactive_selection_and_confirm(self, tmp_path, monkeypatch):
         """P3-T10: Test clean_runs with interactive selection (e.g., '1-2') and confirmation 'y'."""
         from pubrun.status import clean_runs
 
-        # Create 3 runs, stop them
-        runs = []
-        for _ in range(3):
-            r = Run()
-            runs.append(r)
-            r.stop()
-        output_dir = str(runs[0].run_dir.parent)
+        runs_dir = tmp_path / "runs"
+        d_old = _write_manifest(runs_dir, "pubrun-old", "old00001", 1000.0)
+        d_mid = _write_manifest(runs_dir, "pubrun-mid", "mid00002", 2000.0)
+        d_new = _write_manifest(runs_dir, "pubrun-new", "new00003", 3000.0)
 
         # Mock inputs: first select '1-2', then confirm 'y'
         inputs = iter(["1-2", "y"])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
 
-        deleted = clean_runs(output_dir=output_dir, yes=False)
+        deleted = clean_runs(output_dir=str(runs_dir), yes=False)
         assert deleted == 2
-        # verify the two newest runs are deleted, the oldest survives
-        assert not runs[2].run_dir.exists()
-        assert not runs[1].run_dir.exists()
-        assert runs[0].run_dir.exists()
+        # Verify the two newest runs are deleted, the oldest survives
+        assert not d_new.exists()
+        assert not d_mid.exists()
+        assert d_old.exists()
 
     def test_clean_interactive_cancel_at_selection(self, monkeypatch):
         """P3-T10: Test clean_runs with empty selection input to cancel."""
@@ -678,9 +768,8 @@ class TestCleanCli:
 
     def test_clean_help(self):
         """pubrun clean --help exits 0."""
-        import subprocess
         result = subprocess.run(
-            ["python", "-m", "pubrun", "clean", "--help"],
+            [sys.executable, "-m", "pubrun", "clean", "--help"],
             capture_output=True, text=True
         )
         assert result.returncode == 0
@@ -689,15 +778,111 @@ class TestCleanCli:
 
     def test_clean_dry_run_cli(self, tmp_path):
         """pubrun clean --dry-run --dir <empty> shows no candidates."""
-        import subprocess
         runs_dir = tmp_path / "runs"
         runs_dir.mkdir()
         result = subprocess.run(
-            ["python", "-m", "pubrun", "clean", "--dir", str(runs_dir), "--dry-run"],
+            [sys.executable, "-m", "pubrun", "clean", "--dir", str(runs_dir), "--dry-run"],
             capture_output=True, text=True
         )
         assert result.returncode == 0
         assert "No runs match" in result.stdout
+
+
+class TestFilterFindAndCleanEdgeCases:
+    """Unit tests for filter_runs regex fallback/exit_code, find_run ambiguity, and clean_runs cancel/failure."""
+
+    def test_filter_runs_invalid_regex_fallback_and_exit_code(self, tmp_path):
+        from pubrun.status import filter_runs, scan_runs
+
+        runs_dir = tmp_path / "runs"
+        _write_manifest(
+            runs_dir, "pubrun-a", "aaaa1111", 1000.0,
+            argv=["train.py", "--tag", "TRAIN[x]"], exit_code=0,
+        )
+        _write_manifest(
+            runs_dir, "pubrun-b", "bbbb2222", 2000.0,
+            argv=["eval.py"], exit_code=3,
+        )
+        runs = scan_runs(str(runs_dir))
+
+        assert [r.run_id for r in filter_runs(runs, filter_str="train[")] == ["aaaa1111"]
+        assert [r.run_id for r in filter_runs(runs, not_filter_str="train[")] == ["bbbb2222"]
+        assert [r.run_id for r in filter_runs(runs, exit_code=3)] == ["bbbb2222"]
+        assert [r.run_id for r in filter_runs(runs, exit_code=0)] == ["aaaa1111"]
+
+    def test_find_run_ambiguous_prefix_and_dirname_substring(self, tmp_path):
+        from pubrun.status import find_run
+
+        runs_dir = tmp_path / "runs"
+        _write_manifest(runs_dir, "pubrun-alpha", "abcd1111", 1000.0)
+        _write_manifest(runs_dir, "pubrun-beta", "abcd2222", 2000.0)
+        od = str(runs_dir)
+
+        assert find_run("abcd", od) is None
+        matched = find_run("lph", od)
+        assert matched is not None
+        assert matched.run_id == "abcd1111"
+        assert find_run("pubrun-", od) is None
+
+    @pytest.mark.parametrize(
+        "answers,expected_msg",
+        [
+            ([KeyboardInterrupt()], "\nCleanup cancelled.\n"),
+            ([EOFError()], "\nCleanup cancelled.\n"),
+            (["n"], "Cleanup cancelled.\n"),
+            (["none"], "Cleanup cancelled.\n"),
+            (["abc"], "No valid selections. Cleanup cancelled.\n"),
+            (["9"], "No valid selections. Cleanup cancelled.\n"),
+            (["all", KeyboardInterrupt()], "\nCleanup cancelled.\n"),
+            (["all", EOFError()], "\nCleanup cancelled.\n"),
+            (["all", "n"], "Cleanup cancelled.\n"),
+        ],
+    )
+    def test_clean_runs_interactive_cancel(self, tmp_path, monkeypatch, capsys, answers, expected_msg):
+        from pubrun.status import clean_runs
+
+        runs_dir = tmp_path / "runs"
+        run_dir = _write_manifest(runs_dir, "pubrun-keep", "keep1111", 1000.0)
+
+        seq = iter(answers)
+
+        def fake_input(prompt=""):
+            val = next(seq)
+            if isinstance(val, BaseException):
+                raise val
+            return val
+
+        monkeypatch.setattr("builtins.input", fake_input)
+        deleted = clean_runs(output_dir=str(runs_dir), yes=False)
+        out = capsys.readouterr().out
+        assert deleted == 0
+        assert run_dir.exists()
+        assert out.endswith(expected_msg), f"Expected stdout to end with {expected_msg!r}, got {out!r}"
+
+    def test_clean_runs_removal_failure(self, tmp_path, monkeypatch, capsys):
+        import shutil
+        from pubrun.status import clean_runs
+
+        runs_dir = tmp_path / "runs"
+        dir_a = _write_manifest(runs_dir, "pubrun-a", "aaaa1111", 1000.0)
+        dir_b = _write_manifest(runs_dir, "pubrun-b", "bbbb2222", 2000.0)
+
+        real_rmtree = shutil.rmtree
+
+        def selective_rmtree(path, *args, **kwargs):
+            if Path(path).name == "pubrun-a":
+                raise OSError("denied")
+            return real_rmtree(path, *args, **kwargs)
+
+        monkeypatch.setattr("pubrun.status.shutil.rmtree", selective_rmtree)
+        deleted = clean_runs(output_dir=str(runs_dir), yes=True)
+        captured = capsys.readouterr()
+
+        assert deleted == 1
+        assert "  Failed to remove pubrun-a: denied" in captured.err
+        assert "Deleted 1 run(s)." in captured.out
+        assert dir_a.exists()
+        assert not dir_b.exists()
 
 
 class TestParseSelection:
@@ -786,7 +971,7 @@ class TestStatusFormattingHelpers:
         completed_marker = _status_marker(STATUS_COMPLETED)
         assert STATUS_COMPLETED in completed_marker
         assert "\033[" in completed_marker  # verify ANSI code present
-        
+
         failed_marker = _status_marker(STATUS_FAILED)
         assert STATUS_FAILED in failed_marker
         assert "\033[" in failed_marker
@@ -795,12 +980,12 @@ class TestStatusFormattingHelpers:
         from pubrun.status import _dir_size
         # Nonexistent dir
         assert _dir_size(tmp_path / "nonexistent") == 0
-        
+
         # Empty dir
         d = tmp_path / "empty_dir"
         d.mkdir()
         assert _dir_size(d) == 0
-        
+
         # Dir with files
         f1 = d / "file1.txt"
         f1.write_bytes(b"12345")
@@ -841,7 +1026,7 @@ class TestStatusFormattingHelpers:
         runs = scan_runs(str(tmp_path / "runs"))
         assert len(runs) == 1
         close_out_crashed_run(runs[0].run_dir, runs[0].lock_data)
-        
+
         # Verify the timing fields in the manifest written
         manifest_path = run_dir / "manifest.json"
         assert manifest_path.exists()
@@ -891,7 +1076,7 @@ class TestStatusFormattingHelpers:
 
         runs = scan_runs(str(tmp_path / "runs"))
         assert len(runs) == 2
-        
+
         runs_map = {r.run_id: r for r in runs}
         assert runs_map["running-id"].status == STATUS_RUNNING
         assert runs_map["crashed-id"].status == STATUS_CRASHED
@@ -984,5 +1169,3 @@ pubrun.stop()
         for rid in run_ids:
             assert rid in final
             assert final[rid].status != STATUS_RUNNING
-
-

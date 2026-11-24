@@ -326,29 +326,37 @@ class TestPrintReportUnit:
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         return str(manifest_path)
 
-    def test_basic_depth_shows_timing(self, tmp_path, capsys):
+    def test_basic_depth_shows_timing(self, tmp_path, capsys, monkeypatch):
         """Basic depth includes timing information."""
         from pubrun.report.diagnostics import print_report
+        monkeypatch.setenv("NO_COLOR", "1")
         manifest_path = self._make_manifest(tmp_path)
         print_report(manifest_path, "basic")
         output = capsys.readouterr().out
-        assert "completed" in output.lower() or "60" in output
+        assert "Status      : completed (0)" in output
+        assert "Elapsed (legacy wall-clock, includes capture) : 00:01:00 (60.0s)" in output
+        assert not any("Git Commit" in line for line in output.splitlines())
 
-    def test_standard_depth_shows_git(self, tmp_path, capsys):
+    def test_standard_depth_shows_git(self, tmp_path, capsys, monkeypatch):
         """Standard depth includes git commit."""
         from pubrun.report.diagnostics import print_report
+        monkeypatch.setenv("NO_COLOR", "1")
         manifest_path = self._make_manifest(tmp_path)
         print_report(manifest_path, "standard")
         output = capsys.readouterr().out
-        assert "abcdef12" in output or "Git" in output
+        assert "Git Commit  : abcdef12 (unknown origin)" in output
+        assert "Packages    : 1 recorded" in output
+        assert "[ Packages ]" not in output
 
-    def test_deep_depth_shows_packages(self, tmp_path, capsys):
+    def test_deep_depth_shows_packages(self, tmp_path, capsys, monkeypatch):
         """Deep depth includes package listings."""
         from pubrun.report.diagnostics import print_report
+        monkeypatch.setenv("NO_COLOR", "1")
         manifest_path = self._make_manifest(tmp_path)
         print_report(manifest_path, "deep")
         output = capsys.readouterr().out
-        assert "torch" in output or "Packages" in output
+        assert "[ Packages ]" in output
+        assert "torch==2.0.1" in output
 
 
 class TestResourceMonitoring:

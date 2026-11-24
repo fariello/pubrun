@@ -3,10 +3,18 @@ import json
 import os
 import sys
 import subprocess
+import time
 import pytest
 from pathlib import Path
 
 PYTHON = sys.executable
+
+
+def _dead_pid() -> int:
+    """Spawn a short-lived child, wait for exit, and return its now-dead PID."""
+    proc = subprocess.Popen([PYTHON, "-c", "pass"])
+    proc.wait(timeout=30)
+    return proc.pid
 
 
 def run_pubrun(*args, cwd=None, env=None):
@@ -103,8 +111,7 @@ class TestCliInfo:
 
     def test_info_prints_system_info(self):
         result = run_pubrun("--info")
-        output = result.stdout.lower()
-        assert "python" in output or "system" in output or "pubrun" in output
+        assert "pubrun Hardware Diagnostics" in result.stdout
 
 
 class TestCliShowConfig:
@@ -115,8 +122,7 @@ class TestCliShowConfig:
 
     def test_show_config_prints_toml(self):
         result = run_pubrun("--show-config")
-        # Should contain TOML section headers
-        assert "[core]" in result.stdout or "core" in result.stdout
+        assert "[core]" in result.stdout.splitlines()
 
 
 class TestCliCreateConfig:
@@ -137,6 +143,20 @@ class TestCliCreateConfig:
         assert result.returncode == 1
         # Original content should be preserved
         assert Path(dest).read_text(encoding="utf-8") == "existing content"
+
+    def test_create_config_prompt_eof_abandons(self, tmp_path):
+        result = subprocess.run(
+            [sys.executable, "-m", "pubrun", "--create-config"],
+            cwd=str(tmp_path),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 1
+        assert "Configuration abandoned." in result.stderr
+        assert "Traceback" not in result.stderr
+        assert not (tmp_path / ".pubrun.toml").exists()
 
 
 class TestCliInit:
@@ -285,7 +305,7 @@ class TestCliMeta:
         meta_path = tmp_path / "runs" / "meta.json"
         assert meta_path.exists()
         data = json.loads(meta_path.read_text(encoding="utf-8"))
-        assert "host" in data or "python" in data or "hardware" in data
+        assert {"host", "python", "hardware"} <= set(data)
 
     def test_meta_to_file(self, tmp_path):
         out_path = str(tmp_path / "meta.json")
@@ -298,10 +318,14 @@ class TestCliMeta:
     def test_meta_basic_depth(self, tmp_path):
         result = run_pubrun("meta", "--basic", cwd=str(tmp_path))
         assert result.returncode == 0
+        data = json.loads((tmp_path / "runs" / "meta.json").read_text(encoding="utf-8"))
+        assert set(data["packages"]) == {"capture_state"}
 
     def test_meta_deep_depth(self, tmp_path):
         result = run_pubrun("meta", "--deep", cwd=str(tmp_path))
         assert result.returncode == 0
+        data = json.loads((tmp_path / "runs" / "meta.json").read_text(encoding="utf-8"))
+        assert "records" in data["packages"]
 
 
 class TestCliReport:
@@ -312,30 +336,40 @@ class TestCliReport:
         from pubrun import start as pubrun_start
         import pubrun.tracker
         pubrun.tracker._active_run = None
-        old_cwd = Path.cwd
         try:
-            Path.cwd = staticmethod(lambda: tmp_path)
             tracker = pubrun_start()
             tracker.stop()
             return str(tracker.run_dir)
         finally:
-            Path.cwd = old_cwd
             pubrun.tracker._active_run = None
 
-    def test_report_valid_run(self, run_dir):
-        result = run_pubrun("report", run_dir)
-        assert result.returncode == 0
+    def test_report_valid_run(self, run_dir, tmp_path):
+        manifest = json.loads((Path(run_dir) / "manifest.json").read_text(encoding="utf-8"))
+        run_id = manifest["run"]["run_id"]
+        res_basic = run_pubrun("report", run_dir, "--basic", cwd=str(tmp_path), env={"NO_COLOR": "1"})
+        res_default = run_pubrun("report", run_dir, cwd=str(tmp_path), env={"NO_COLOR": "1"})
+        res_deep = run_pubrun("report", run_dir, "--deep", cwd=str(tmp_path), env={"NO_COLOR": "1"})
+        assert res_basic.returncode == 0
+        assert res_default.returncode == 0
+        assert res_deep.returncode == 0
+        assert run_id in res_default.stdout
+        assert "[ Packages ]" not in res_basic.stdout
+        assert "[ Packages ]" not in res_default.stdout
+        assert "[ Packages ]" in res_deep.stdout
+        assert len(res_basic.stdout.splitlines()) < len(res_default.stdout.splitlines()) < len(res_deep.stdout.splitlines())
 
-    def test_report_basic_depth(self, run_dir):
-        result = run_pubrun("report", run_dir, "--basic")
+    def test_report_basic_depth(self, run_dir, tmp_path):
+        result = run_pubrun("report", run_dir, "--basic", cwd=str(tmp_path), env={"NO_COLOR": "1"})
         assert result.returncode == 0
+        assert "[ Packages ]" not in result.stdout
 
-    def test_report_deep_depth(self, run_dir):
-        result = run_pubrun("report", run_dir, "--deep")
+    def test_report_deep_depth(self, run_dir, tmp_path):
+        result = run_pubrun("report", run_dir, "--deep", cwd=str(tmp_path), env={"NO_COLOR": "1"})
         assert result.returncode == 0
+        assert "[ Packages ]" in result.stdout
 
     def test_report_invalid_path(self, tmp_path):
-        result = run_pubrun("report", str(tmp_path / "nonexistent"))
+        result = run_pubrun("report", str(tmp_path / "nonexistent"), cwd=str(tmp_path), env={"NO_COLOR": "1"})
         assert result.returncode != 0
 
 
@@ -347,14 +381,11 @@ class TestCliMethods:
         from pubrun import start as pubrun_start
         import pubrun.tracker
         pubrun.tracker._active_run = None
-        old_cwd = Path.cwd
         try:
-            Path.cwd = staticmethod(lambda: tmp_path)
             tracker = pubrun_start()
             tracker.stop()
             return str(tracker.run_dir)
         finally:
-            Path.cwd = old_cwd
             pubrun.tracker._active_run = None
 
     def test_methods_markdown(self, run_dir):
@@ -376,14 +407,11 @@ class TestCliRerun:
         from pubrun import start as pubrun_start
         import pubrun.tracker
         pubrun.tracker._active_run = None
-        old_cwd = Path.cwd
         try:
-            Path.cwd = staticmethod(lambda: tmp_path)
             tracker = pubrun_start()
             tracker.stop()
             return str(tracker.run_dir)
         finally:
-            Path.cwd = old_cwd
             pubrun.tracker._active_run = None
 
     def test_rerun_prints_command(self, run_dir):
@@ -483,45 +511,69 @@ class TestCliDiff:
         import pubrun.tracker
 
         dirs = []
-        old_cwd = Path.cwd
         try:
-            Path.cwd = staticmethod(lambda: tmp_path)
             for _ in range(2):
                 pubrun.tracker._active_run = None
                 tracker = pubrun_start()
                 tracker.stop()
                 dirs.append(str(tracker.run_dir))
         finally:
-            Path.cwd = old_cwd
             pubrun.tracker._active_run = None
         return dirs
 
-    def test_diff_two_valid_runs(self, two_runs):
-        result = run_pubrun("diff", two_runs[0], two_runs[1])
-        assert result.returncode == 0
+    def test_diff_two_valid_runs(self, two_runs, tmp_path):
+        res_basic = run_pubrun("diff", two_runs[0], two_runs[1], "--basic", "--no-color", cwd=str(tmp_path))
+        res_standard = run_pubrun("diff", two_runs[0], two_runs[1], "--standard", "--no-color", cwd=str(tmp_path))
+        res_deep = run_pubrun("diff", two_runs[0], two_runs[1], "--deep", "--no-color", cwd=str(tmp_path))
+        assert res_basic.returncode == 0
+        assert res_standard.returncode == 0
+        assert res_deep.returncode == 0
+        assert len({res_basic.stdout, res_standard.stdout, res_deep.stdout}) == 3
 
-    def test_diff_no_color(self, two_runs):
-        result = run_pubrun("diff", two_runs[0], two_runs[1], "--no-color")
-        assert result.returncode == 0
+    def test_diff_no_color(self, two_runs, tmp_path):
+        res_color = run_pubrun("diff", two_runs[0], two_runs[1], cwd=str(tmp_path), env={"NO_COLOR": ""})
+        res_no_color = run_pubrun(
+            "diff", two_runs[0], two_runs[1], "--no-color", cwd=str(tmp_path), env={"NO_COLOR": ""}
+        )
+        assert res_color.returncode == 0
+        assert res_no_color.returncode == 0
+        assert "\x1b[" in res_color.stdout
+        assert "\x1b[" not in res_no_color.stdout
 
-    def test_diff_export_txt(self, two_runs):
-        result = run_pubrun("diff", two_runs[0], two_runs[1], "--export", "txt")
+    def test_diff_export_txt(self, two_runs, tmp_path):
+        result = run_pubrun("diff", two_runs[0], two_runs[1], "--export", "txt", cwd=str(tmp_path))
         assert result.returncode == 0
+        name_a = Path(two_runs[0]).name
+        out_a = tmp_path / f".pubrun_diff_A_{name_a}_clean.txt"
+        assert out_a.exists()
+        first_line = out_a.read_text(encoding="utf-8").splitlines()[0]
+        assert " = " in first_line
+        assert f"Successfully exported semantic baseline A to: .pubrun_diff_A_{name_a}_clean.txt" in result.stdout
 
-    def test_diff_export_json(self, two_runs):
-        result = run_pubrun("diff", two_runs[0], two_runs[1], "--export", "json")
+    def test_diff_export_json(self, two_runs, tmp_path):
+        result = run_pubrun("diff", two_runs[0], two_runs[1], "--export", "json", cwd=str(tmp_path))
         assert result.returncode == 0
+        name_a = Path(two_runs[0]).name
+        name_b = Path(two_runs[1]).name
+        out_a = tmp_path / f".pubrun_diff_A_{name_a}_clean.json"
+        out_b = tmp_path / f".pubrun_diff_B_{name_b}_clean.json"
+        assert out_a.exists()
+        assert out_b.exists()
+        assert isinstance(json.loads(out_a.read_text(encoding="utf-8")), dict)
+        assert isinstance(json.loads(out_b.read_text(encoding="utf-8")), dict)
 
-    def test_diff_standard(self, two_runs):
-        result = run_pubrun("diff", two_runs[0], two_runs[1], "--standard")
+    def test_diff_standard(self, two_runs, tmp_path):
+        result = run_pubrun("diff", two_runs[0], two_runs[1], "--standard", "--no-color", cwd=str(tmp_path))
         assert result.returncode == 0
+        assert "--- Pubrun Diagnostic Difference ---" in result.stdout
 
-    def test_diff_deep(self, two_runs):
-        result = run_pubrun("diff", two_runs[0], two_runs[1], "--deep")
+    def test_diff_deep(self, two_runs, tmp_path):
+        result = run_pubrun("diff", two_runs[0], two_runs[1], "--deep", "--no-color", cwd=str(tmp_path))
         assert result.returncode == 0
+        assert "--- Pubrun Diagnostic Difference ---" in result.stdout
 
     def test_diff_invalid_paths(self, tmp_path):
-        result = run_pubrun("diff", "/nonexistent/a", "/nonexistent/b")
+        result = run_pubrun("diff", "/nonexistent/a", "/nonexistent/b", cwd=str(tmp_path))
         assert result.returncode != 0
 
     def test_diff_default_no_args(self, two_runs, tmp_path):
@@ -538,23 +590,20 @@ class TestCliDiff:
         from pubrun import start as pubrun_start
         import pubrun.tracker
 
-        old_cwd = Path.cwd
         try:
-            Path.cwd = staticmethod(lambda: tmp_path)
             pubrun.tracker._active_run = None
             tracker = pubrun_start()
             tracker.stop()
         finally:
-            Path.cwd = old_cwd
             pubrun.tracker._active_run = None
 
         result = run_pubrun("diff", cwd=str(tmp_path))
         assert result.returncode != 0
         assert "need at least 2 runs" in result.stderr.lower()
 
-    def test_diff_help_has_filter_flags(self):
+    def test_diff_help_has_filter_flags(self, tmp_path):
         """diff now exposes the standard run filters (-f/-F)."""
-        result = run_pubrun("diff", "--help")
+        result = run_pubrun("diff", "--help", cwd=str(tmp_path))
         assert result.returncode == 0
         assert "--filter" in result.stdout and "--not-filter" in result.stdout
 
@@ -679,7 +728,7 @@ class TestCliNoCommand:
         result = run_pubrun()
         # Should print help and exit 0 (no error)
         assert result.returncode == 0
-        assert "pubrun" in result.stdout.lower() or "usage" in result.stdout.lower()
+        assert result.stdout.splitlines()[0].startswith("usage: pubrun ")
 
 
 class TestCliBugReport:
@@ -765,14 +814,14 @@ class TestCliErrorExitCodes:
         result = run_pubrun("diff", str(tmp_path / "a"), str(tmp_path / "b"),
                            "--export", "yaml", cwd=str(tmp_path))
         assert result.returncode == 1
-        assert "unsupported" in result.stderr.lower() or "erro" in result.stderr.lower()
+        assert "Unsupported export format 'yaml'. Use 'txt' or 'json'." in result.stderr
 
     def test_status_nonexistent_run_id_exits_1(self, tmp_path):
         """pubrun status <nonexistent_id> exits 1."""
         result = run_pubrun("status", "zzzznonexistent", "--dir", str(tmp_path),
                            cwd=str(tmp_path))
         assert result.returncode == 1
-        assert "no run found" in result.stderr.lower() or "erro" in result.stderr.lower()
+        assert "No run found matching 'zzzznonexistent'." in result.stderr
 
     def test_cite_unknown_style_exits_1(self, tmp_path):
         """pubrun cite --style unknown exits 1."""
@@ -788,18 +837,20 @@ class TestCliErrorExitCodes:
         lock_data = {
             "run_id": "crashed-id",
             "pid": 99999,
-            "started_at_utc": 1782000000.0,
+            "started_at_utc": time.time() - 3 * 86400,
             "script": "train.py",
-            "args": ["--epochs", "10"],
+            "argv": ["train.py", "--epochs", "10"],
             "hostname": "localhost"
         }
         with open(run_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
             json.dump(lock_data, f)
 
         # Let's run `pubrun report` with the path
-        result = run_pubrun("report", str(run_dir), cwd=str(tmp_path))
+        result = run_pubrun("report", str(run_dir), cwd=str(tmp_path), env={"NO_COLOR": "1"})
         assert result.returncode == 1
-        assert "crashed" in result.stderr or "running" in result.stderr
+        assert "[ERROR] Run directory 'pubrun-crashed' is currently crashed and does not contain a manifest.json." in result.stderr
+        assert "  - Arguments: train.py --epochs 10" in result.stderr
+        assert "Status: CRASHED" in result.stderr
         assert "crashed-id" in result.stderr
         assert "train.py" in result.stderr
         assert "localhost" in result.stderr
@@ -824,23 +875,22 @@ class TestCliErrorExitCodes:
         lock_data = {
             "run_id": "crashed-id",
             "pid": 99999,
-            "started_at_utc": 1782000000.0,
+            "started_at_utc": time.time() - 3 * 86400,
             "script": "train.py",
-            "args": ["--epochs", "10"],
+            "argv": ["train.py", "--epochs", "10"],
             "hostname": "localhost"
         }
         with open(crashed_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
             json.dump(lock_data, f)
 
         # Set mtime of crashed run to be greater
-        import time
         os.utime(completed_dir, (time.time() - 100, time.time() - 100))
         os.utime(crashed_dir, (time.time(), time.time()))
 
         # Run report without arguments
-        result = run_pubrun("report", cwd=str(tmp_path))
+        result = run_pubrun("report", cwd=str(tmp_path), env={"NO_COLOR": "1"})
         assert result.returncode == 1
-        assert "crashed" in result.stderr or "running" in result.stderr
+        assert "Status: CRASHED" in result.stderr
         assert "Suggestion:" in result.stderr
         assert "pubrun-completed" in result.stderr
 
@@ -852,13 +902,10 @@ class TestCliColorControl:
         from pubrun import start as pubrun_start
         import pubrun.tracker
         pubrun.tracker._active_run = None
-        old_cwd = Path.cwd
         try:
-            Path.cwd = staticmethod(lambda: tmp_path)
             tracker = pubrun_start()
             tracker.stop()
         finally:
-            Path.cwd = old_cwd
             pubrun.tracker._active_run = None
 
         # Run pubrun status WITH color (default)
@@ -886,13 +933,10 @@ class TestCliColorControl:
         from pubrun import start as pubrun_start
         import pubrun.tracker
         pubrun.tracker._active_run = None
-        old_cwd = Path.cwd
         try:
-            Path.cwd = staticmethod(lambda: tmp_path)
             tracker = pubrun_start()
             tracker.stop()
         finally:
-            Path.cwd = old_cwd
             pubrun.tracker._active_run = None
 
         run_dirs = list((tmp_path / "runs").glob("pubrun-*"))
@@ -992,10 +1036,10 @@ class TestCliReportUsabilityDetails:
         # Create a mock lock file to simulate crashed run
         lock_data = {
             "run_id": "crashed-id",
-            "pid": 99999,
-            "started_at_utc": 1782000000.0,
+            "pid": _dead_pid(),
+            "started_at_utc": time.time() - 60,
             "script": "train.py",
-            "args": ["--epochs", "10"],
+            "argv": ["train.py", "--epochs", "10"],
             "hostname": current_host
         }
         with open(run_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
@@ -1027,10 +1071,10 @@ class TestCliReportUsabilityDetails:
         # Create a mock lock file to simulate crashed run
         lock_data = {
             "run_id": "crashed-id",
-            "pid": 99999,
-            "started_at_utc": 1782000000.0,
+            "pid": _dead_pid(),
+            "started_at_utc": time.time() - 60,
             "script": "train.py",
-            "args": ["--epochs", "10"],
+            "argv": ["train.py", "--epochs", "10"],
             "hostname": current_host
         }
         with open(run_dir / ".pubrun.lock", "w", encoding="utf-8") as f:
@@ -1115,6 +1159,7 @@ raise ValueError("TEST_EXCEPTION")
     def test_status_filtering_options(self, tmp_path):
         runs_dir = tmp_path / "runs"
         runs_dir.mkdir(parents=True)
+        base = time.time() - 4 * 86400
 
         # Create completed run
         run_completed = runs_dir / "pubrun-completed"
@@ -1124,7 +1169,7 @@ raise ValueError("TEST_EXCEPTION")
             "run": {"run_id": "comp-id"},
             "status": {"outcome": "completed"},
             "invocation": {"script": {"basename": "train.py"}, "argv": ["train.py", "--lr", "0.01"]},
-            "timing": {"started_at_utc": 1782000000.0}
+            "timing": {"started_at_utc": base}
         }), encoding="utf-8")
 
         # Create failed run
@@ -1135,14 +1180,14 @@ raise ValueError("TEST_EXCEPTION")
             "run": {"run_id": "fail-id"},
             "status": {"outcome": "failed"},
             "invocation": {"script": {"basename": "eval.py"}, "argv": ["eval.py", "--batch", "32"]},
-            "timing": {"started_at_utc": 1782000100.0}
+            "timing": {"started_at_utc": base + 100}
         }), encoding="utf-8")
 
         # Create crashed run
         run_crashed = runs_dir / "pubrun-crashed"
         run_crashed.mkdir()
         (run_crashed / ".pubrun.lock").write_text(json.dumps({
-            "run_id": "crash-id", "pid": 99999, "started_at_utc": 1782000200.0,
+            "run_id": "crash-id", "pid": 99999, "started_at_utc": base + 200,
             "script": "preprocess.py", "argv": ["preprocess.py", "--split", "train"],
             "hostname": "otherhost"
         }), encoding="utf-8")
@@ -1199,7 +1244,9 @@ raise ValueError("TEST_EXCEPTION")
             res = subprocess.run(cmd, capture_output=True, text=True)
             assert res.returncode == 0
             assert "Examples:" in res.stdout
-            assert "pubrun " in res.stdout or "pbr " in res.stdout
+            after_examples = res.stdout.split("Examples:", 1)[1]
+            expected_cmd = "ui" if sub in ("tui", "gui") else sub
+            assert f"  pubrun {expected_cmd}" in after_examples
 
     def test_pbr_alias_registered_in_pyproject(self):
         pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
@@ -1239,7 +1286,7 @@ raise ValueError("TEST_EXCEPTION")
                 with redirect_stdout(f):
                     main()
                 output = f.getvalue()
-                assert "usage: pubrun" in output or "usage: pbr" in output
+                assert output.splitlines()[0].startswith("usage: pubrun ")
                 assert "Found 1 run(s) in the output directory." in output
 
 
@@ -1474,7 +1521,7 @@ class TestCliResourcesAliases:
                 width=None
             )
 
-    def test_dead_dispatch_aliases_error_cleanly(self):
+    def test_dead_dispatch_aliases_error_cleanly(self, capsys):
         """`monitor`/`chart`/`stats` were dead dispatch strings; they must error
         as unknown commands, not silently route to resources."""
         import sys
@@ -1485,7 +1532,9 @@ class TestCliResourcesAliases:
             with patch.object(sys, 'argv', ['pbr', dead]):
                 with pytest.raises(SystemExit) as exc_info:
                     main()
-                assert exc_info.value.code != 0, f"'{dead}' should exit non-zero"
+                assert exc_info.value.code == 2, f"'{dead}' should exit with code 2"
+                captured = capsys.readouterr()
+                assert f"unknown command '{dead}'" in captured.err
 
 
 class TestCliRerunPreflightAndShowReproducibility:
