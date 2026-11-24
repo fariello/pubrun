@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/tui/widgets/details.py` (a new module-level CPU-text helper and the CPU model line in `RunDetailsView.update_general_pane`) and regression tests in `tests/test_tui_bugs.py`.
 - Scope-Paths: src/pubrun/tui/widgets/details.py, tests/test_tui_bugs.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Short-Description: The TUI run details pane prints the literal word None in its CPU model line when hardware.cpu.model, logical_cores, or architecture is missing or null.
@@ -19,12 +19,12 @@
 - Highest E allocated: 03
 - Author: OpenCode agent
 - Id: 67hcid
-- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 67hcid verified (set 0mnekm, attempt 1).
 - 2026-11-24 approved (aw set): status set to approved
 - 2026-11-24 /plan-review (Claude Opus 5.5): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-24 to-review (OpenCode agent): authored from backlog 0mnekm: reproduction, guarded CPU model line, behavioral regression tests.
