@@ -7,7 +7,7 @@ from typing import Any, Dict
 
 logger = logging.getLogger("pubrun")
 
-# Removed ctypes in favor of reliable OS wmic command for Python compatibility across Win10/11
+# _get_rss_windows uses GetProcessMemoryInfo through ctypes first and falls back to wmic.
 
 # Per-poll timeout (seconds) for the macOS/Windows sampling subprocesses
 # (ps/wmic). Bounds a hung tool so it cannot orphan the sampling thread.
@@ -452,9 +452,8 @@ class ResourceWatcher(threading.Thread):
                     avail = mem.get("available_bytes")
                     if avail is not None:
                         prev = self._sysmem_min_available
-                        if prev is None or avail < prev.get("available_bytes", avail) + 1:
-                            if prev is None or avail < prev.get("available_bytes", float("inf")):
-                                self._sysmem_min_available = mem
+                        if prev is None or avail < prev.get("available_bytes", float("inf")):
+                            self._sysmem_min_available = mem
                 if load is not None:
                     if self._load_start is None:
                         self._load_start = load

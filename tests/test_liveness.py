@@ -1,11 +1,15 @@
 """Tests for pubrun.capture.liveness -- cross-platform process liveness checks."""
+import ctypes
+import io
 import os
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 
+from pubrun.capture import liveness
 from pubrun.capture.liveness import (
     get_cpu_percent,
     get_hostname,
@@ -14,6 +18,13 @@ from pubrun.capture.liveness import (
     is_pid_alive,
     is_same_process,
 )
+
+
+def _unsupported(what: str) -> None:
+    """Fail on Linux where /proc readers must succeed; skip on other platforms."""
+    if sys.platform.startswith("linux"):
+        pytest.fail(f"{what} returned None on Linux")
+    pytest.skip(f"{what} is not supported on this platform")
 
 
 class TestIsPidAlive:
@@ -29,14 +40,8 @@ class TestIsPidAlive:
         assert is_pid_alive(4000000) is False
 
     def test_pid_zero_is_not_alive(self):
-        """PID 0 (kernel scheduler on Unix) should not be reported as alive via signal."""
-        # On Unix, kill(0, 0) sends signal to the process group, so we skip that.
-        # On Windows, PID 0 is the System Idle Process.
-        if sys.platform != "win32":
-            # PID 0 with os.kill sends to the process group -- different semantics
-            pass
-        else:
-            assert is_pid_alive(0) is False
+        """PID 0 must always be reported as not alive on every platform."""
+        assert is_pid_alive(0) is False
 
 
 class TestGetProcessStartTime:
@@ -46,7 +51,7 @@ class TestGetProcessStartTime:
         """Our own process should have a retrievable start time."""
         start = get_process_start_time(os.getpid())
         if start is None:
-            pytest.skip("Platform does not support start time retrieval")
+            _unsupported("get_process_start_time")
         # Start time should be recent (within the last hour for a test)
         assert start > time.time() - 3600
         assert start <= time.time()
@@ -66,7 +71,7 @@ class TestIsSameProcess:
         # Since we don't know our exact start time here, use a generous tolerance.
         start = get_process_start_time(os.getpid())
         if start is None:
-            pytest.skip("Platform does not support start time retrieval")
+            _unsupported("get_process_start_time")
         assert is_same_process(os.getpid(), start, tolerance=5.0) is True
 
     def test_dead_pid_does_not_match(self):
@@ -77,7 +82,7 @@ class TestIsSameProcess:
         """Alive PID but wrong start time (PID recycling) should not match when no script name is given."""
         start = get_process_start_time(os.getpid())
         if start is None:
-            pytest.skip("Platform does not support start time retrieval")
+            _unsupported("get_process_start_time")
         # Use a start time from 2 days ago -- beyond the default 24h tolerance
         assert is_same_process(os.getpid(), start - 172800) is False
 
@@ -108,7 +113,7 @@ class TestIsSameProcess:
                 functional = _check_command_windows(child.pid, script_name) is not None
 
             if not functional:
-                pytest.skip("Command-line checking is not functional on this platform")
+                _unsupported("command-line check")
 
             # A start time beyond the 24h tolerance means only a confirmed script
             # match (not the start-time fallback) can yield True.
@@ -134,19 +139,19 @@ class TestIsSameProcess:
             functional = _check_command_windows(os.getpid(), "pytest") is not None
 
         if not functional:
-            pytest.skip("Command-line checking is not functional on this platform")
+            _unsupported("command-line check")
 
         # Even if the start time is identical (current process), script name mismatch fails
         start = get_process_start_time(os.getpid())
         if start is None:
-            pytest.skip("Platform does not support start time retrieval")
+            _unsupported("get_process_start_time")
         assert is_same_process(os.getpid(), start, expected_script="nonexistent_script_xyz.py") is False
 
     def test_default_generous_tolerance(self):
         """The default tolerance should be 24 hours, so a start time off by 12 hours matches."""
         start = get_process_start_time(os.getpid())
         if start is None:
-            pytest.skip("Platform does not support start time retrieval")
+            _unsupported("get_process_start_time")
         # Off by 12 hours (43200 seconds) - within default 24h tolerance
         assert is_same_process(os.getpid(), start - 43200) is True
 
@@ -163,7 +168,7 @@ class TestLivenessCharacterization:
         """Live PID + correct start time + correct script -> same process (running)."""
         start = get_process_start_time(os.getpid())
         if start is None:
-            pytest.skip("Platform does not support start time retrieval")
+            _unsupported("get_process_start_time")
         assert is_same_process(os.getpid(), start, tolerance=30.0) is True
 
     def test_char_dead_pid_is_crashed(self):
@@ -175,7 +180,7 @@ class TestLivenessCharacterization:
         """Live PID + matching start, no script -> same (timing path)."""
         start = get_process_start_time(os.getpid())
         if start is None:
-            pytest.skip("Platform does not support start time retrieval")
+            _unsupported("get_process_start_time")
         assert is_same_process(os.getpid(), start, tolerance=30.0) is True
 
     def test_char_absent_script_is_mismatch(self):
@@ -193,10 +198,10 @@ class TestLivenessCharacterization:
         elif _PLATFORM == "win32":
             functional = _check_command_windows(os.getpid(), "pytest") is not None
         if not functional:
-            pytest.skip("Command-line checking is not functional on this platform")
+            _unsupported("command-line check")
         start = get_process_start_time(os.getpid())
         if start is None:
-            pytest.skip("Platform does not support start time retrieval")
+            _unsupported("get_process_start_time")
         assert is_same_process(
             os.getpid(), start, expected_script="nonexistent_script_xyz.py"
         ) is False
@@ -263,7 +268,7 @@ class TestGetRssBytes:
         """Our own process should report some RSS."""
         rss = get_rss_bytes(os.getpid())
         if rss is None:
-            pytest.skip("Platform does not support RSS retrieval")
+            _unsupported("get_rss_bytes")
         # Any Python process uses at least a few MB
         assert rss > 1_000_000
 
@@ -280,7 +285,7 @@ class TestGetCpuPercent:
         """Our own process should return a float (possibly 0.0)."""
         cpu = get_cpu_percent(os.getpid())
         if cpu is None:
-            pytest.skip("Platform does not support CPU retrieval")
+            _unsupported("get_cpu_percent")
         assert isinstance(cpu, float)
         assert cpu >= 0.0
 
@@ -298,3 +303,158 @@ class TestGetHostname:
         hostname = get_hostname()
         assert isinstance(hostname, str)
         assert len(hostname) > 0
+
+
+class TestLivenessPlatformBranches:
+    """Mocked cross-platform branch tests for Linux, macOS, and Windows liveness."""
+
+    def test_unix_kill_permission_error_alive_and_lookup_error_dead(self, monkeypatch):
+        monkeypatch.setattr(liveness, "_PLATFORM", "linux")
+
+        def raise_perm(pid, sig):
+            raise PermissionError("operation not permitted")
+
+        monkeypatch.setattr(liveness.os, "kill", raise_perm)
+        assert is_pid_alive(1) is True
+
+        def raise_lookup(pid, sig):
+            raise ProcessLookupError("no such process")
+
+        monkeypatch.setattr(liveness.os, "kill", raise_lookup)
+        assert is_pid_alive(1) is False
+
+    def test_linux_start_time_nested_parens_and_missing_btime(self, monkeypatch):
+        monkeypatch.setattr(liveness, "_PLATFORM", "linux")
+        monkeypatch.setattr(liveness.os, "sysconf", lambda name: 100, raising=False)
+
+        stat_line = "77 (my (odd) proc) S " + " ".join(["0"] * 18) + " 500 0\n"
+        proc_files = {
+            "/proc/77/stat": stat_line,
+            "/proc/stat": "cpu  10 0 5 80 5\nbtime 1000\n",
+        }
+
+        def fake_open(path, *args, **kwargs):
+            if path in proc_files:
+                return io.StringIO(proc_files[path])
+            raise FileNotFoundError(path)
+
+        monkeypatch.setattr(liveness, "open", fake_open, raising=False)
+
+        assert liveness._get_start_time_linux(77) == 1005.0
+        assert get_process_start_time(77) == 1005.0
+
+        proc_files["/proc/stat"] = "cpu  10 0 5 80 5\n"
+        assert liveness._get_start_time_linux(77) is None
+
+    def test_macos_ps_helpers(self, monkeypatch):
+        monkeypatch.setattr(liveness, "_PLATFORM", "darwin")
+        response = {"returncode": 0, "stdout": ""}
+
+        def fake_run(cmd, **kwargs):
+            return SimpleNamespace(
+                returncode=response["returncode"],
+                stdout=response["stdout"],
+            )
+
+        monkeypatch.setattr(liveness.subprocess, "run", fake_run)
+
+        response.update(returncode=0, stdout="2048\n")
+        assert liveness._get_rss_macos(123) == 2048 * 1024
+        assert get_rss_bytes(123) == 2048 * 1024
+
+        response.update(returncode=1, stdout="2048\n")
+        assert liveness._get_rss_macos(123) is None
+
+        response.update(returncode=0, stdout="12.5\n")
+        assert liveness._get_cpu_macos(123) == 12.5
+        assert get_cpu_percent(123) == 12.5
+
+        response.update(returncode=1, stdout="12.5\n")
+        assert liveness._get_cpu_macos(123) is None
+
+        response.update(returncode=0, stdout="python train.py\n")
+        assert liveness._check_command_macos(123, "train.py") is True
+
+        response.update(returncode=0, stdout="python other.py\n")
+        assert liveness._check_command_macos(123, "train.py") is False
+
+        response.update(returncode=1, stdout="python train.py\n")
+        assert liveness._check_command_macos(123, "train.py") is None
+
+    def test_windows_wmic_helpers(self, monkeypatch):
+        monkeypatch.setattr(liveness, "_PLATFORM", "win32")
+        response = {"returncode": 0, "stdout": ""}
+
+        def fake_run(cmd, **kwargs):
+            return SimpleNamespace(
+                returncode=response["returncode"],
+                stdout=response["stdout"],
+            )
+
+        monkeypatch.setattr(liveness.subprocess, "run", fake_run)
+
+        response.update(returncode=0, stdout="WorkingSetSize\n4096000\n")
+        assert liveness._get_rss_windows(123) == 4096000
+        assert get_rss_bytes(123) == 4096000
+
+        response.update(returncode=1, stdout="WorkingSetSize\n4096000\n")
+        assert liveness._get_rss_windows(123) is None
+
+        response.update(returncode=0, stdout="CommandLine\npython train.py\n")
+        assert liveness._check_command_windows(123, "train.py") is True
+
+        response.update(returncode=0, stdout="CommandLine\npython other.py\n")
+        assert liveness._check_command_windows(123, "train.py") is False
+
+        response.update(returncode=1, stdout="CommandLine\npython train.py\n")
+        assert liveness._check_command_windows(123, "train.py") is None
+
+    def test_windows_ctypes_pid_alive_start_time_and_overflow(self, monkeypatch):
+        monkeypatch.setattr(liveness, "_PLATFORM", "win32")
+
+        posix_ts = 1700000000.0
+        filetime = int(posix_ts * 10_000_000) + 116444736000000000
+        state = {"exit_code": 259, "open_calls": [], "closed_handles": []}
+
+        class FakeKernel32:
+            def OpenProcess(self, access, inherit, pid):
+                state["open_calls"].append(pid)
+                return 99
+
+            def GetExitCodeProcess(self, handle, exit_code_ptr):
+                exit_code_ptr._obj.value = state["exit_code"]
+                return 1
+
+            def GetProcessTimes(self, handle, creation_ptr, exit_ptr, kernel_ptr, user_ptr):
+                creation_ptr._obj.dwHighDateTime = (filetime >> 32) & 0xFFFFFFFF
+                creation_ptr._obj.dwLowDateTime = filetime & 0xFFFFFFFF
+                return 1
+
+            def CloseHandle(self, handle):
+                state["closed_handles"].append(handle)
+                return 1
+
+        monkeypatch.setattr(
+            ctypes,
+            "windll",
+            SimpleNamespace(kernel32=FakeKernel32()),
+            raising=False,
+        )
+
+        # STILL_ACTIVE (259) -> alive, handle closed
+        assert is_pid_alive(42) is True
+        assert state["closed_handles"] == [99]
+
+        # Exit code 0 -> not alive, handle closed
+        state["exit_code"] = 0
+        assert is_pid_alive(42) is False
+        assert state["closed_handles"] == [99, 99]
+
+        # FILETIME -> POSIX epoch conversion, handle closed
+        assert get_process_start_time(42) == pytest.approx(posix_ts)
+        assert state["closed_handles"] == [99, 99, 99]
+
+        # PID > 0xFFFFFFFF returns False without calling OpenProcess
+        calls_before = len(state["open_calls"])
+        assert liveness._is_pid_alive_windows(0x100000000) is False
+        assert len(state["open_calls"]) == calls_before

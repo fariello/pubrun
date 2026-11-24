@@ -39,14 +39,14 @@ def _is_network_fstype(fstype: str) -> bool:
     return ft.startswith("fuse.") and any(n in ft for n in ("nfs", "smb", "sshfs", "gluster", "ceph"))
 
 
-def _parse_proc_mounts() -> List[Tuple[str, str]]:
+def _parse_proc_mounts(path: str = "/proc/mounts") -> List[Tuple[str, str]]:
     """Return [(mount_point, fstype), ...] from /proc/mounts (Linux).
 
     Pure file read; never touches the mounted filesystems themselves.
     """
     entries: List[Tuple[str, str]] = []
     # /proc/mounts format: "device mountpoint fstype options dump pass"
-    with open("/proc/mounts", "r", encoding="utf-8", errors="replace") as f:
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             parts = line.split()
             if len(parts) >= 3:
@@ -56,7 +56,7 @@ def _parse_proc_mounts() -> List[Tuple[str, str]]:
     return entries
 
 
-def _parse_proc_mountinfo() -> List[Tuple[str, str]]:
+def _parse_proc_mountinfo(path: str = "/proc/self/mountinfo") -> List[Tuple[str, str]]:
     """Return [(mount_point, fstype), ...] from /proc/self/mountinfo (Linux).
 
     More accurate than /proc/mounts: it carries the super-block fstype and disambiguates
@@ -69,7 +69,7 @@ def _parse_proc_mountinfo() -> List[Tuple[str, str]]:
     "-" separator; the field AFTER "-" is the filesystem type.
     """
     entries: List[Tuple[str, str]] = []
-    with open("/proc/self/mountinfo", "r", encoding="utf-8", errors="replace") as f:
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             parts = line.split()
             if len(parts) < 5:
@@ -315,13 +315,19 @@ def _statvfs_metrics(path: str) -> Dict[str, Any]:
 class LiveProbe:
     """Handle to a running (daemon) statvfs probe. Already waited up to the budget on init."""
 
-    def __init__(self, path: str, wait_budget_s: float):
+    def __init__(
+        self,
+        path: str,
+        wait_budget_s: float,
+        semaphore: Optional[threading.BoundedSemaphore] = None,
+    ):
         self.path = path
         self._budget = wait_budget_s
+        self._sem = semaphore if semaphore is not None else _live_probe_sem
         self._done = threading.Event()
         self._slot: Dict[str, Any] = {}
         self._t0 = time.monotonic()
-        self._acquired = _live_probe_sem.acquire(blocking=False)
+        self._acquired = self._sem.acquire(blocking=False)
         if not self._acquired:
             # Too many probes in flight; skip rather than pile up daemons.
             self._slot = {"status": "skipped", "detail": "probe cap reached"}
@@ -334,7 +340,7 @@ class LiveProbe:
             # Thread creation can fail (e.g. "can't start new thread"); never raise and
             # never leak the semaphore slot, since _run() will not release it.
             try:
-                _live_probe_sem.release()
+                self._sem.release()
             except (ValueError, RuntimeError):
                 pass
             self._acquired = False
@@ -357,7 +363,7 @@ class LiveProbe:
             self._done.set()
             try:
                 if self._acquired:
-                    _live_probe_sem.release()
+                    self._sem.release()
             except (ValueError, RuntimeError):
                 pass
 

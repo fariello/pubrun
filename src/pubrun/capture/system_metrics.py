@@ -19,18 +19,18 @@ from typing import Dict, Any, Optional, Tuple
 logger = logging.getLogger("pubrun")
 
 
-def get_system_memory() -> Optional[Dict[str, int]]:
+def get_system_memory(path: str = "/proc/meminfo") -> Optional[Dict[str, int]]:
     """System memory in bytes: total / available / free / cached (Linux only).
 
     Returns None on non-Linux or on any read failure.
     """
     try:
-        if not sys.platform.startswith("linux") or not os.path.exists("/proc/meminfo"):
+        if not sys.platform.startswith("linux") or not os.path.exists(path):
             return None
         wanted = {"MemTotal": "total_bytes", "MemAvailable": "available_bytes",
                   "MemFree": "free_bytes", "Cached": "cached_bytes"}
         out: Dict[str, int] = {}
-        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             for line in f:
                 key = line.split(":", 1)[0]
                 if key in wanted:
@@ -53,15 +53,15 @@ def get_load_average() -> Optional[Dict[str, float]]:
         return None
 
 
-def read_proc_stat_cpu_times() -> Optional[Tuple[int, int]]:
+def read_proc_stat_cpu_times(path: str = "/proc/stat") -> Optional[Tuple[int, int]]:
     """Return (iowait_ticks, total_cpu_ticks) from /proc/stat's aggregate 'cpu' line.
 
     Used to compute a delta between two samples. Linux only; None otherwise/on failure.
     """
     try:
-        if not sys.platform.startswith("linux") or not os.path.exists("/proc/stat"):
+        if not sys.platform.startswith("linux") or not os.path.exists(path):
             return None
-        with open("/proc/stat", "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             first = f.readline()
         if not first.startswith("cpu "):
             return None
@@ -77,7 +77,7 @@ def read_proc_stat_cpu_times() -> Optional[Tuple[int, int]]:
         return None
 
 
-def get_proc_io() -> Optional[Dict[str, int]]:
+def get_proc_io(path: str = "/proc/self/io") -> Optional[Dict[str, int]]:
     """Cumulative I/O byte counters for THIS process from /proc/self/io (Linux only).
 
     Returns rchar/wchar (bytes passed to read()/write(), incl. cache hits) and
@@ -85,11 +85,11 @@ def get_proc_io() -> Optional[Dict[str, int]]:
     None on non-Linux or on any read failure. Zero interception — a single cheap read.
     """
     try:
-        if not sys.platform.startswith("linux") or not os.path.exists("/proc/self/io"):
+        if not sys.platform.startswith("linux") or not os.path.exists(path):
             return None
         wanted = {"rchar", "wchar", "read_bytes", "write_bytes", "syscr", "syscw"}
         out: Dict[str, int] = {}
-        with open("/proc/self/io", "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             for line in f:
                 key, _, val = line.partition(":")
                 if key in wanted:
