@@ -140,14 +140,14 @@ Array of subprocess records. Each element:
 |---|---|---|
 | `argv` | list[string] | Command and arguments. Sensitive values may be redacted. |
 | `started_at_utc` | float | Start time (POSIX epoch float). |
-| `ended_at_utc` | float \| null | End time, or `null` if the process was still running at finalization. |
-| `elapsed_seconds` | float \| null | Optional. Nonnegative monotonic duration (`time.perf_counter()`) from launch until `pubrun` observed the process finish (`wait()`, `communicate()`, a completed `poll()`, `os.system` returning, or pipe close for `pubrun.popen()`), or until the launch attempt failed. For a process never waited on, it is the time until run finalization. Not derived from the UTC fields. |
+| `ended_at_utc` | float \| null | End time, or `null` when `pubrun` did not observe the process end by finalization. |
+| `elapsed_seconds` | float \| null | Optional. Nonnegative monotonic duration (`time.perf_counter()`) from launch until `pubrun` observed the process finish (`wait()`, `communicate()`, a completed `poll()`, `Popen.__del__`, `os.system` returning, or pipe close for `pubrun.popen()`), or until the launch attempt failed. For a child whose exit `pubrun` first observed at the next `Popen` launch or at finalization, the duration ends at that observation. For a child still unobserved at finalization, the duration ends at finalization. Not derived from the UTC fields. |
 | `duration_clock` | string \| null | Optional. `"monotonic"` when `elapsed_seconds` is present. Absent on records written before monotonic subprocess timing. |
 | `pid` | int \| null | Optional. Written by the explicit wrappers only: the process ID for `pubrun.subprocess.Popen`, `null` for `pubrun.subprocess.run()`, `pubrun.popen()`, and failed launches. |
 | `error` | string \| null | Optional. Bounded, redacted error detail when an explicit wrapper's launch failed. |
 | `cwd` | string | Working directory of the subprocess. |
-| `exit_code` | int \| null | Exit code, or `null` if the process was not waited on. |
-| `capture_state` | object | `"complete"` for exit code 0 (and for a process still unwaited at finalization), `"failed"` for a nonzero exit code or a failed launch (with a redacted `detail`), `"partial"` while the process is still running. See [Capture State](#capture-state). |
+| `exit_code` | int \| null | Exit code, or `null` when `pubrun` did not observe the exit. |
+| `capture_state` | object | `"complete"` for exit code 0, `"failed"` for a nonzero exit code or a failed launch (with a redacted `detail`), and `"partial"` with a `detail` while the process runs, when `pubrun` did not observe its exit by finalization, or when its exit status is unavailable. See [Capture State](#capture-state). |
 
 ---
 

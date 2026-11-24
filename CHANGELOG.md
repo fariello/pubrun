@@ -103,6 +103,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **Unwaited `subprocess.Popen` children now record observable exit codes and report unobserved exits as `"partial"` instead of `"complete"`.**
+  `SubprocessSpy` now hooks `subprocess.Popen.__del__` without taking locks and performs a single non-blocking poll of live unwaited `Popen` objects at finalization, recording the real `exit_code` with `capture_state.status: "complete"` (exit code 0) or `"failed"` (nonzero) when observable through public `Popen` attributes. A child still running at finalization, or whose exit status was collected outside `pubrun`, now records `exit_code: null`, `ended_at_utc: null`, and `capture_state: {"status": "partial", "detail": ...}` instead of `"complete"`. Downstream consumers that filter subprocess records on `capture_state.status == "complete"` should note that unobserved unwaited children now report `"partial"`.
 - **`workload_seconds` no longer includes a background manifest refresh write.** A `stop()` call made
   while the background hardware capture was rewriting `manifest.json` waited for that write and counted
   it as workload; with the default fsynced durability on a slow disk this added tens to hundreds of

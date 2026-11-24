@@ -1,12 +1,37 @@
 """Tests for capture subsystems: invocation, subprocess spy, and console interceptor."""
-import os
-import sys
+import gc
 import json
+import os
 import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
+
+import pytest
 
 from pubrun import start, get_current_run
 from pubrun.capture.subprocesses import SubprocessSpy, disable_spy
+
+
+def _spawn_stdin_gated_child(exit_code: int) -> subprocess.Popen:
+    """Launch a child that stays running until stdin closes, then exits with exit_code."""
+    return subprocess.Popen(
+        [sys.executable, "-c", f"import sys; sys.stdin.read(); sys.exit({exit_code})"],
+        stdin=subprocess.PIPE,
+    )
+
+
+def _wait_with_orig_poll(proc: subprocess.Popen, orig_poll, timeout: float = 15.0) -> int:
+    """Wait for proc using an unpatched Popen.poll captured before SubprocessSpy.install."""
+    deadline = time.monotonic() + timeout
+    while True:
+        rc = orig_poll(proc)
+        if rc is not None:
+            return rc
+        if time.monotonic() >= deadline:
+            raise AssertionError("Timed out waiting for child process to exit")
+        time.sleep(0.005)
 
 
 class TestInvocationCapture:
@@ -59,16 +84,24 @@ class TestSubprocessInterceptor:
     def test_detached_subprocess_finalized(self):
         overrides = {"capture": {"subprocesses": {"enabled": True}}}
         tracker = start(**overrides)
-        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.1)"])
-        tracker.stop()
-        with open(tracker.run_dir / "manifest.json", "r", encoding="utf-8") as f:
-            data = json.load(f)
-        subs = data["subprocesses"]
-        assert len(subs) >= 1
-        # Detached process was finalized by finalize_all
-        unwatched = [s for s in subs if s["exit_code"] is None]
-        for s in unwatched:
-            assert s["capture_state"]["status"] == "complete"
+        p = _spawn_stdin_gated_child(0)
+        try:
+            tracker.stop()
+            with open(tracker.run_dir / "manifest.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+            subs = data["subprocesses"]
+            assert len(subs) == 1
+            rec = subs[0]
+            assert rec["exit_code"] is None
+            assert rec["ended_at_utc"] is None
+            assert rec["capture_state"] == {
+                "status": "partial",
+                "detail": "child process not waited on before finalization",
+            }
+        finally:
+            if p.stdin is not None:
+                p.stdin.close()
+            p.wait(timeout=15)
 
     def test_os_system_captured(self):
         overrides = {"capture": {"subprocesses": {"enabled": True}}}
@@ -173,16 +206,28 @@ class TestConsoleInterceptor:
 class TestFinalizeAll:
     """Unit tests for SubprocessSpy.finalize_all() state transitions."""
 
-    def test_upgrades_partial_to_complete(self):
-        """finalize_all() upgrades records with status 'partial' to 'complete'."""
+    def test_marks_unwaited_records_partial(self):
+        """finalize_all() marks records without a live Popen as partial with detail."""
         SubprocessSpy._records = [
             {"argv": ["cmd1"], "exit_code": None, "capture_state": {"status": "partial"}},
             {"argv": ["cmd2"], "exit_code": None, "capture_state": {"status": "partial"}},
         ]
-        SubprocessSpy.finalize_all()
-        for rec in SubprocessSpy._records:
-            assert rec["capture_state"]["status"] == "complete"
-            assert "ended_at_utc" in rec
+        try:
+            SubprocessSpy.finalize_all()
+            for rec in SubprocessSpy._records:
+                assert rec["exit_code"] is None
+                assert "ended_at_utc" in rec
+                assert rec["ended_at_utc"] is None
+                assert rec["capture_state"] == {
+                    "status": "partial",
+                    "detail": "child process not waited on before finalization",
+                }
+            # Calling finalize_all a second time leaves already-finalized records unchanged.
+            snapshot = [dict(rec, capture_state=dict(rec["capture_state"])) for rec in SubprocessSpy._records]
+            SubprocessSpy.finalize_all()
+            assert SubprocessSpy._records == snapshot
+        finally:
+            SubprocessSpy._records = []
 
     def test_does_not_modify_completed_records(self):
         """finalize_all() leaves records with exit_code already set untouched."""
@@ -517,15 +562,19 @@ class TestSubprocessSpyMonotonicTiming:
         assert "987654" not in json.dumps(records)
 
     def test_finalize_all_monotonic_non_collision_and_post_finalize_wait(self, monkeypatch):
-        import pytest
         import pubrun.capture.subprocesses as sub_mod
 
         clock = _FakeClock(wall=1_750_000_000.0, mono=987654.321)
         monkeypatch.setattr(sub_mod, "time", clock)
 
+        orig_poll = subprocess.Popen.poll
         SubprocessSpy.install(max_records=100)
+        proc = None
         try:
             proc = subprocess.Popen([sys.executable, "-c", "pass"])
+            # Deterministically ensure the child has exited before finalize_all().
+            assert _wait_with_orig_poll(proc, orig_poll) == 0
+
             synthetic = {
                 "argv": ["synthetic_cmd"],
                 "exit_code": None,
@@ -538,14 +587,19 @@ class TestSubprocessSpyMonotonicTiming:
             SubprocessSpy.finalize_all()
 
             real_rec = SubprocessSpy._records[0]
+            assert real_rec["exit_code"] == 0
             assert real_rec["ended_at_utc"] < real_rec["started_at_utc"]
             assert real_rec["elapsed_seconds"] == pytest.approx(0.25, abs=1e-9)
             assert real_rec["duration_clock"] == "monotonic"
-            assert real_rec["capture_state"]["status"] == "complete"
+            assert real_rec["capture_state"] == {"status": "complete"}
 
-            # Synthetic record has no monotonic entry and leaves elapsed_seconds unset.
-            assert synthetic["capture_state"]["status"] == "complete"
+            # Synthetic record has no live Popen or monotonic entry.
+            assert synthetic["capture_state"] == {
+                "status": "partial",
+                "detail": "child process not waited on before finalization",
+            }
             assert "ended_at_utc" in synthetic
+            assert synthetic["ended_at_utc"] is None
             assert "elapsed_seconds" not in synthetic
             assert "duration_clock" not in synthetic
 
@@ -558,9 +612,13 @@ class TestSubprocessSpyMonotonicTiming:
 
             serialized = json.dumps(SubprocessSpy._records)
         finally:
+            if proc is not None and proc.returncode is None:
+                proc.wait(timeout=15)
             SubprocessSpy.uninstall()
 
         assert SubprocessSpy._start_monos == {}
+        assert SubprocessSpy._popen_refs == {}
+        assert len(SubprocessSpy._pending_running) == 0
         assert "987654" not in serialized
 
     def test_subprocess_spy_manifest_validates_against_schema(self, tmp_path, monkeypatch):
@@ -664,3 +722,269 @@ class TestResourceWatcherMonotonicSampling:
         clock.advance(2.0)
         clock.jump_wall(-7200.0)
         assert watcher._poll_tree_cpu() == 75.0
+
+
+class TestUnwaitedPopenHarvesting:
+    """Deterministic tests for harvesting unwaited Popen children and partial states."""
+
+    def setup_method(self):
+        SubprocessSpy.uninstall()
+
+    def teardown_method(self):
+        SubprocessSpy.uninstall()
+
+    @pytest.mark.parametrize(
+        "expected_code,expected_status",
+        [(0, "complete"), (7, "failed")],
+    )
+    def test_unwaited_exited_child_exit_code_harvested_at_finalize(
+        self, expected_code, expected_status
+    ):
+        orig_poll = subprocess.Popen.poll
+        SubprocessSpy.install(max_records=100)
+        p = None
+        try:
+            p = _spawn_stdin_gated_child(expected_code)
+            assert p.stdin is not None
+            p.stdin.close()
+            # Reap through the original poll so returncode is set without hitting the spy's poll.
+            assert _wait_with_orig_poll(p, orig_poll) == expected_code
+
+            SubprocessSpy.finalize_all()
+            recs = SubprocessSpy.get_records()
+            assert len(recs) == 1
+            rec = recs[0]
+            assert rec["exit_code"] == expected_code
+            assert rec["ended_at_utc"] is not None
+            assert rec["capture_state"] == {"status": expected_status}
+            assert SubprocessSpy._popen_refs == {}
+            assert len(SubprocessSpy._pending_running) == 0
+        finally:
+            if p is not None:
+                if p.stdin is not None and not p.stdin.closed:
+                    p.stdin.close()
+                if p.returncode is None:
+                    p.wait(timeout=15)
+            SubprocessSpy.uninstall()
+
+    @pytest.mark.skipif(
+        not hasattr(os, "waitid") or not hasattr(os, "WNOWAIT"),
+        reason="requires POSIX os.waitid with WNOWAIT",
+    )
+    def test_unwaited_uncollected_child_polled_at_finalize(self):
+        SubprocessSpy.install(max_records=100)
+        p = None
+        try:
+            p = _spawn_stdin_gated_child(7)
+            assert p.stdin is not None
+            p.stdin.close()
+            # Wait for the child to exit without reaping it so p.returncode stays None.
+            os.waitid(os.P_PID, p.pid, os.WEXITED | os.WNOWAIT)
+            assert p.returncode is None
+
+            SubprocessSpy.finalize_all()
+            recs = SubprocessSpy.get_records()
+            assert len(recs) == 1
+            rec = recs[0]
+            assert rec["exit_code"] == 7
+            assert rec["ended_at_utc"] is not None
+            assert rec["capture_state"] == {"status": "failed"}
+        finally:
+            if p is not None:
+                if p.stdin is not None and not p.stdin.closed:
+                    p.stdin.close()
+                if p.returncode is None:
+                    p.wait(timeout=15)
+            SubprocessSpy.uninstall()
+
+    def test_gc_after_exit_records_exit_code(self):
+        orig_poll = subprocess.Popen.poll
+        SubprocessSpy.install(max_records=100)
+        p = None
+        try:
+            p = _spawn_stdin_gated_child(7)
+            assert p.stdin is not None
+            p.stdin.close()
+            assert _wait_with_orig_poll(p, orig_poll) == 7
+
+            # Drop the only strong reference so no live Popen exists for finalize_all() to poll.
+            del p
+            p = None
+            gc.collect()
+
+            SubprocessSpy.finalize_all()
+            recs = SubprocessSpy.get_records()
+            assert len(recs) == 1
+            rec = recs[0]
+            assert rec["exit_code"] == 7
+            assert rec["ended_at_utc"] is not None
+            assert rec["capture_state"] == {"status": "failed"}
+        finally:
+            if p is not None:
+                if p.stdin is not None and not p.stdin.closed:
+                    p.stdin.close()
+                if p.returncode is None:
+                    p.wait(timeout=15)
+            SubprocessSpy.uninstall()
+
+    @pytest.mark.skipif(
+        os.name != "posix" or not hasattr(os, "waitid") or not hasattr(os, "WNOWAIT"),
+        reason="requires POSIX subprocess._cleanup() and os.waitid with WNOWAIT",
+    )
+    @pytest.mark.filterwarnings("ignore::ResourceWarning")
+    def test_cleanup_reaped_child_records_exit_code(self):
+        SubprocessSpy.install(max_records=100)
+        stdin_pipe = None
+        pid = None
+        p = None
+        p2 = None
+        try:
+            p = _spawn_stdin_gated_child(7)
+            stdin_pipe = p.stdin
+            pid = p.pid
+            assert stdin_pipe is not None
+
+            # Drop p while the child is still running so CPython parks it in subprocess._active
+            # and the __del__ hook keeps it observable until subprocess._cleanup() reaps it.
+            del p
+            p = None
+            gc.collect()
+
+            stdin_pipe.close()
+            os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)
+
+            # Launching a second Popen triggers subprocess._cleanup() and drains the spy queue.
+            p2 = subprocess.Popen([sys.executable, "-c", "pass"])
+            assert p2.wait(timeout=15) == 0
+
+            recs = SubprocessSpy.get_records()
+            assert len(recs) == 2
+            first = recs[0]
+            assert first["exit_code"] == 7
+            assert first["ended_at_utc"] is not None
+            assert first["capture_state"] == {"status": "failed"}
+        finally:
+            if p is not None and p.returncode is None:
+                if p.stdin is not None and not p.stdin.closed:
+                    p.stdin.close()
+                p.wait(timeout=15)
+            if stdin_pipe is not None and not stdin_pipe.closed:
+                stdin_pipe.close()
+            if p2 is not None and p2.returncode is None:
+                p2.wait(timeout=15)
+            if pid is not None:
+                try:
+                    os.waitpid(pid, 0)
+                except ChildProcessError:
+                    pass
+            SubprocessSpy.uninstall()
+            assert len(SubprocessSpy._pending_running) == 0
+            assert SubprocessSpy._popen_refs == {}
+
+    @pytest.mark.skipif(
+        os.name != "posix",
+        reason="requires POSIX os.waitpid for external reaping",
+    )
+    @pytest.mark.filterwarnings("ignore::ResourceWarning")
+    def test_externally_reaped_child_is_partial_not_sentinel(self):
+        SubprocessSpy.install(max_records=100)
+        p = None
+        pid = None
+        try:
+            p = _spawn_stdin_gated_child(7)
+            pid = p.pid
+            assert p.stdin is not None
+            p.stdin.close()
+
+            # Reap the child outside subprocess so Popen.__del__ sets returncode = sys.maxsize.
+            os.waitpid(pid, 0)
+            pid = None
+
+            del p
+            p = None
+            gc.collect()
+
+            SubprocessSpy.finalize_all()
+            recs = SubprocessSpy.get_records()
+            assert len(recs) == 1
+            rec = recs[0]
+            assert rec["exit_code"] is None
+            assert rec["exit_code"] != sys.maxsize
+            assert rec["ended_at_utc"] is None
+            assert rec["capture_state"] == {
+                "status": "partial",
+                "detail": "child exit status was collected outside pubrun and is unavailable",
+            }
+        finally:
+            if p is not None:
+                if p.stdin is not None and not p.stdin.closed:
+                    p.stdin.close()
+                if p.returncode is None:
+                    p.wait(timeout=15)
+            if pid is not None:
+                try:
+                    os.waitpid(pid, 0)
+                except ChildProcessError:
+                    pass
+            SubprocessSpy.uninstall()
+
+    def test_popen_del_hook_does_not_take_spy_lock(self):
+        orig_poll = subprocess.Popen.poll
+        SubprocessSpy.install(max_records=100)
+        p = None
+        try:
+            p = _spawn_stdin_gated_child(7)
+            assert p.stdin is not None
+            p.stdin.close()
+            assert _wait_with_orig_poll(p, orig_poll) == 7
+
+            holder = [p]
+            del p
+            p = None
+
+            def _drop_and_collect() -> None:
+                holder.clear()
+                gc.collect()
+
+            worker = threading.Thread(target=_drop_and_collect)
+            with SubprocessSpy._lock:
+                worker.start()
+                worker.join(timeout=10.0)
+            assert not worker.is_alive(), (
+                "Popen.__del__ hook blocked while SubprocessSpy._lock was held"
+            )
+
+            SubprocessSpy.finalize_all()
+            recs = SubprocessSpy.get_records()
+            assert len(recs) == 1
+            assert recs[0]["exit_code"] == 7
+            assert recs[0]["capture_state"] == {"status": "failed"}
+        finally:
+            if p is not None:
+                if p.stdin is not None and not p.stdin.closed:
+                    p.stdin.close()
+                if p.returncode is None:
+                    p.wait(timeout=15)
+            SubprocessSpy.uninstall()
+
+    def test_uninstall_restores_popen_del(self):
+        orig_del = subprocess.Popen.__del__
+        try:
+            assert SubprocessSpy.install(owner="run1") is True
+            assert subprocess.Popen.__del__ is not orig_del
+            SubprocessSpy.uninstall(owner="run1")
+            assert subprocess.Popen.__del__ is orig_del
+
+            # A third-party wrapper installed after the spy stays in place on uninstall.
+            assert SubprocessSpy.install(owner="run2") is True
+            pubrun_del = subprocess.Popen.__del__
+
+            def tp_del(self, *args, **kwargs):
+                return pubrun_del(self, *args, **kwargs)
+
+            subprocess.Popen.__del__ = tp_del
+            SubprocessSpy.uninstall(owner="run2")
+            assert subprocess.Popen.__del__ is tp_del
+        finally:
+            SubprocessSpy.uninstall()
+            subprocess.Popen.__del__ = orig_del

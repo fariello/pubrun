@@ -661,11 +661,11 @@ produced elsewhere (see 14.1).
 
 ### 15.1 Mechanism
 
-`SubprocessSpy` monkey-patches `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` to transparently record spawned process metadata.
+`SubprocessSpy` monkey-patches `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `subprocess.Popen.poll`, `subprocess.Popen.__del__`, and `os.system` to transparently record spawned process metadata.
 
 ### 15.2 Recorded Fields
 
-Each subprocess record includes: `argv`, `started_at_utc`, `ended_at_utc`, `cwd`, `exit_code`, and `capture_state`. Once the process is observed to finish (or the launch fails, or finalization closes an unwaited record), the record also carries `elapsed_seconds` (nonnegative monotonic duration) and `duration_clock: "monotonic"`. Monotonic start readings are held in an internal map keyed by record identity and are never serialized. The explicit wrappers (`pubrun.subprocess.run`, `pubrun.subprocess.Popen`, `pubrun.popen`) record the same timing fields plus `pid`, and on a failed launch record `error` and `capture_state: {"status": "failed", "detail": ...}` before re-raising.
+Each subprocess record includes: `argv`, `started_at_utc`, `ended_at_utc`, `cwd`, `exit_code`, and `capture_state`. Once the process is observed to finish (or the launch fails, or finalization closes an unwaited record), the record also carries `elapsed_seconds` (nonnegative monotonic duration) and `duration_clock: "monotonic"`. Monotonic start readings are held in an internal map keyed by record identity and are never serialized. At finalization, `SubprocessSpy` records the exit of an unwaited child when `pubrun` can observe it (through `Popen.__del__`, `subprocess._cleanup()` on a later `Popen` launch, or a non-blocking `poll()`), and otherwise leaves `exit_code` and `ended_at_utc` as `null` and marks `capture_state` as `"partial"` with a `detail`. The explicit wrappers (`pubrun.subprocess.run`, `pubrun.subprocess.Popen`, `pubrun.popen`) record the same timing fields plus `pid`, and on a failed launch record `error` and `capture_state: {"status": "failed", "detail": ...}` before re-raising.
 
 ### 15.3 Memory Safety
 
@@ -834,7 +834,7 @@ The system MUST:
 - Set `capture.capture_state.status = "partial"` (naming the degraded sections in `detail`) whenever any section failed, covering both escaping exceptions and self-caught failed returns, while keeping `status.outcome` accurate to the host script's execution outcome.
 - Record structured `capture-error` entries (`kind = "capture-error"`, `type`, bounded redacted `message`, `traceback = null`, optional `section`, optional `stage`) in `errors.records` under `_errors_lock`, capped at `MAX_CAPTURE_ERRORS = 50`. When additional errors exceed the cap, set `errors.capture_state.status = "partial"` with the omitted count.
 - Emit bounded runtime warnings without traceback spam: at most one warning per `(section, stage)` in `Run`, at most one per write-failure episode in `EventStream` (outside its lock), and at most one on finalization write failure in `ArtifactWriter`.
-- Enforce transactional installation, prior `faulthandler.is_enabled()` preservation, identity-guarded restoration, and passive passthrough across all process-global hooks (`sys.stdout`/`sys.stderr`, `faulthandler`, signal handlers, `sys.excepthook`, `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `os.system`) so later third-party wrappers are never overwritten.
+- Enforce transactional installation, prior `faulthandler.is_enabled()` preservation, identity-guarded restoration, and passive passthrough across all process-global hooks (`sys.stdout`/`sys.stderr`, `faulthandler`, signal handlers, `sys.excepthook`, `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `subprocess.Popen.poll`, `subprocess.Popen.__del__`, `os.system`) so later third-party wrappers are never overwritten.
 - Surface partial manifests honestly in downstream consumers without crashing on `null` or malformed fields:
   - `pubrun report` (across `basic`, `standard`, `deep`, and `section="env"`/`"packages"` extracts, respecting `NO_COLOR`) renders a bounded `[WARN ]` summary of failed sections and up to 10 `capture-error` records (with overflow and truncation detail) and displays `capture failed` instead of misleading empty counts.
   - `pubrun inspect` emits `WARN` findings (`{section}_capture_failed`, deduplicated `capture_error_{section}`, and `errors_capture_partial` truncation notices) distinct from `"suppressed"` (`*_off`).

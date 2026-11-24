@@ -44,7 +44,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Harvest unwaited exit codes and mark unobserved children partial
 
-- [ ] E-01 Change `src/pubrun/capture/subprocesses.py::SubprocessSpy` to collect exit codes of unwaited children and to mark unobserved children `"partial"`, as specified in "Proposed changes" item 1.
+- [x] E-01 Change `src/pubrun/capture/subprocesses.py::SubprocessSpy` to collect exit codes of unwaited children and to mark unobserved children `"partial"`, as specified in "Proposed changes" item 1.
   - Depends on: none
   - Expected outcome:
     1. `SubprocessSpy.install` also patches `subprocess.Popen.__del__`, chaining to the previous `__del__`, and `SubprocessSpy.uninstall` restores it with the same identity guard as `__init__`, `wait`, and `poll`. `Popen._internal_poll` is not patched.
@@ -54,30 +54,30 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     5. `finalize_all` polls each still-open record's live `Popen` once with the chained non-blocking `poll()`, outside `SubprocessSpy._lock`. A record still without an exit code gets `exit_code: None`, `ended_at_utc: None`, `elapsed_seconds` to finalization, and `capture_state = {"status": "partial", "detail": "child process not waited on before finalization"}`.
     6. A `returncode` equal to `sys.maxsize` gives `capture_state = {"status": "partial", "detail": "child exit status was collected outside pubrun and is unavailable"}` with `exit_code: None`, never `exit_code: 9223372036854775807`.
     7. `finalize_all` and `uninstall` release every strong reference the spy holds to a `Popen`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update `tests/test_capture.py` so that the tests for unwaited children have deterministic outcomes, as listed in "Proposed changes" item 2.
+- [x] E-02 Update `tests/test_capture.py` so that the tests for unwaited children have deterministic outcomes, as listed in "Proposed changes" item 2.
   - Depends on: E-01
   - Expected outcome: The tests named in "Proposed changes" item 2 exist and pass, assert on records returned by `SubprocessSpy.get_records()` or on `manifest.json`, use no fixed sleeps to decide whether a child has exited, and leave no child process running after the test.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Update the `## subprocesses` table in `docs/manifest.md` for the new values.
+- [x] E-03 Update the `## subprocesses` table in `docs/manifest.md` for the new values.
   - Depends on: E-01
   - Expected outcome: The `capture_state` row says `"complete"` for exit code 0, `"failed"` for a nonzero exit code or a failed launch (with a redacted `detail`), and `"partial"` with a `detail` while the process runs, when pubrun did not observe its exit by finalization, or when its exit status is unavailable. The phrase "and for a process still unwaited at finalization" is gone. The `exit_code` row says `null` means pubrun did not observe the exit. The `ended_at_utc` row says `null` means pubrun did not observe the end by finalization. The `elapsed_seconds` row says that for a child whose exit pubrun first observed at the next `Popen` launch or at finalization, the duration ends at that observation. Edited lines contain no em dash (U+2014) and no en dash (U+2013).
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Update the descriptions of the patched targets and of finalization in `docs/functional_spec.md`, `docs/architecture.md`, and `docs/api.md`.
+- [x] E-04 Update the descriptions of the patched targets and of finalization in `docs/functional_spec.md`, `docs/architecture.md`, and `docs/api.md`.
   - Depends on: E-01
   - Expected outcome:
     1. Every list of the targets `SubprocessSpy` patches names `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `subprocess.Popen.poll`, `subprocess.Popen.__del__`, and `os.system`. The lists are at `docs/functional_spec.md#15.1 Mechanism`, `docs/functional_spec.md` (the bullet starting "Enforce transactional installation"), `docs/architecture.md` (the paragraph starting "`SubprocessSpy` transparently monkey-patches", the bullet "**Live target chaining and transactional install:**", and the bullet "**Independent cleanup and hook ownership:**"), and `docs/api.md` (the table row starting "| `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` (`SubprocessSpy`)").
     2. `docs/functional_spec.md#15.2 Recorded Fields` says that finalization records the exit of an unwaited child when pubrun can observe it, and otherwise marks the record `"partial"` with a `detail`.
     3. Edited lines contain no em dash (U+2014) and no en dash (U+2013).
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Add a `### Fixed` entry under `## [Unreleased]` in `CHANGELOG.md`.
+- [x] E-05 Add a `### Fixed` entry under `## [Unreleased]` in `CHANGELOG.md`.
   - Depends on: E-01
   - Expected outcome: The entry says that a `subprocess.Popen` child the program never waited on now records its exit code when pubrun can observe it, and is otherwise reported as `capture_state.status: "partial"` with a `detail` instead of `"complete"`. It names the manifest change for readers who filter on `"complete"`. It contains no em dash and no en dash.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -207,30 +207,657 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: (1) Paste `git diff -- src/pubrun/capture/subprocesses.py`, and for each of E-01 outcomes 1 to 7 name the added lines that satisfy it. (2) Paste the output of `grep -n "_internal_poll" src/pubrun/capture/subprocesses.py`; it must show no assignment to `Popen._internal_poll`. (3) Paste the output of the `-W error::pytest.PytestUnraisableExceptionWarning` run from "Required tests / validation". The behavior of each outcome is observed through the E-02 tests named in V-02.
   - Observed evidence:
-  - Result: pending
+    (1) Outcome-to-diff mapping for `src/pubrun/capture/subprocesses.py`:
+    - Outcome 1 (`Popen.__del__` patch, chaining, identity-guarded restore, no `_internal_poll` patch): `prev_popen_del = subprocess.Popen.__del__`, `_patched_popen_del` chaining to `prev_popen_del(self, *args, **kwargs)`, `(subprocess.Popen, "__del__", _patched_popen_del, prev_popen_del)` in `targets` and rollback in `install()`, and `(subprocess.Popen, "__del__", cls._installed_popen_del, state["prev_popen_del"])` in `restores` in `uninstall()`.
+    - Outcome 2 (lock-free, non-blocking `__del__` hook): `_patched_popen_del` binds `_now_wall`/`_now_mono` at install time, takes no lock, calls no blocking function, and only appends to `pending_running` or `pending_exits` (`collections.deque`) inside `try/except Exception: pass`; `_drain()` pops those deques and delegates to `_complete_record`, which acquires `SubprocessSpy._lock`.
+    - Outcome 3 (integer `returncode != sys.maxsize` records `exit_code` and `"complete"`/`"failed"`): `_complete_record` sets `rec["exit_code"] = exit_code`, `rec["ended_at_utc"] = end_ts`, `rec["capture_state"] = {"status": "complete" if exit_code == 0 else "failed"}`, and monotonic `elapsed_seconds`.
+    - Outcome 4 (running dropped `Popen` stays observable via strong ref and drained at next `__init__` and `finalize_all`): `_patched_popen_del` appends `self` to `pending_running` when `rc is None`; `_patched_popen_init` calls `_safe_drain()` in `finally` around `prev_popen_init` (after `subprocess._cleanup()` runs); `finalize_all` Phase 1 calls `state["drain"]()`.
+    - Outcome 5 (`finalize_all` polls live `Popen` once outside `_lock`; unobserved records get `exit_code: None`, `ended_at_utc: None`, `elapsed_seconds`, `"partial"` with `"child process not waited on before finalization"`): `finalize_all` Phase 2 collects live `(rec, proc)` under `cls._lock`, Phase 3 calls `state["prev_popen_poll"](proc)` outside `cls._lock` and completes integer returns, and Phase 4 sets `rec["ended_at_utc"] = None`, monotonic `elapsed_seconds`, and `rec["capture_state"] = {"status": "partial", "detail": _UNWAITED_DETAIL}`.
+    - Outcome 6 (`sys.maxsize` sentinel): `_complete_record` checks `exit_code == sys.maxsize and not isinstance(exit_code, bool)`, leaves `exit_code` `None`, sets `rec["ended_at_utc"] = None`, and sets `rec["capture_state"] = {"status": "partial", "detail": _EXTERNAL_REAP_DETAIL}`.
+    - Outcome 7 (release all strong `Popen` references on `finalize_all` and `uninstall`): `finalize_all` Phase 4 clears `cls._popen_refs`, `cls._pending_running`, and `state["pending_running"]` (and local `live_procs` drops on return); `uninstall` clears `state["pending_exits"]`, `state["pending_running"]`, and resets `cls._popen_refs = {}`, `cls._pending_exits = collections.deque()`, `cls._pending_running = collections.deque()`.
 
-- [ ] V-02 validates E-02
+    `git diff -- src/pubrun/capture/subprocesses.py`:
+    ```diff
+    diff --git a/src/pubrun/capture/subprocesses.py b/src/pubrun/capture/subprocesses.py
+    index 0b4be66..f1a5ddb 100644
+    --- a/src/pubrun/capture/subprocesses.py
+    +++ b/src/pubrun/capture/subprocesses.py
+    @@ -1,11 +1,14 @@
+    -import os
+    -import subprocess
+    +import collections
+     import logging
+    +import os
+     import shlex
+    +import subprocess
+    +import sys
+     import threading
+     import time
+    +import weakref
+     from contextlib import contextmanager
+    -from typing import Any, Dict, List, Optional, Tuple
+    +from typing import Any, Deque, Dict, List, Optional, Tuple
+
+     _spy_local = threading.local()
+
+    @@ -54,8 +57,14 @@ logger = logging.getLogger("pubrun")
+     _original_popen_init = subprocess.Popen.__init__
+     _original_popen_wait = subprocess.Popen.wait
+     _original_popen_poll = subprocess.Popen.poll
+    +_original_popen_del = subprocess.Popen.__del__
+     _original_os_system = os.system
+
+    +_UNWAITED_DETAIL = "child process not waited on before finalization"
+    +_EXTERNAL_REAP_DETAIL = (
+    +    "child exit status was collected outside pubrun and is unavailable"
+    +)
+    +
+
+     def _decode_wait_status(status: Any) -> Any:
+         """Convert an ``os.system`` return value to a process exit code for recording.
+    @@ -87,6 +96,9 @@ class SubprocessSpy:
+         _installed = False
+         _records: List[Dict[str, Any]] = []
+         _start_monos: Dict[int, Tuple[Dict[str, Any], float]] = {}
+    +    _popen_refs: Dict[int, Tuple[Dict[str, Any], Any]] = {}
+    +    _pending_exits: Deque[Tuple[Dict[str, Any], Any, float, float]] = collections.deque()
+    +    _pending_running: Deque[Any] = collections.deque()
+         _max_records = 5000
+         _truncated = False
+         _lock = threading.Lock()
+    @@ -96,6 +108,7 @@ class SubprocessSpy:
+         _installed_popen_init: Optional[Any] = None
+         _installed_popen_wait: Optional[Any] = None
+         _installed_popen_poll: Optional[Any] = None
+    +    _installed_popen_del: Optional[Any] = None
+         _installed_os_system: Optional[Any] = None
+
+         @classmethod
+    @@ -125,22 +138,115 @@ class SubprocessSpy:
+                 prev_popen_init = subprocess.Popen.__init__
+                 prev_popen_wait = subprocess.Popen.wait
+                 prev_popen_poll = subprocess.Popen.poll
+    +            prev_popen_del = subprocess.Popen.__del__
+                 prev_os_system = os.system
+
+    +            # Bind wall and monotonic clocks at install time so __del__ works
+    +            # even if module globals are cleared during interpreter shutdown.
+    +            _now_wall = time.time
+    +            _now_mono = time.perf_counter
+    +
+    +            pending_exits: Deque[
+    +                Tuple[Dict[str, Any], Any, float, float]
+    +            ] = collections.deque()
+    +            pending_running: Deque[Any] = collections.deque()
+    +
+                 state: Dict[str, Any] = {
+                     "active": True,
+                     "config": config,
+                     "prev_popen_init": prev_popen_init,
+                     "prev_popen_wait": prev_popen_wait,
+                     "prev_popen_poll": prev_popen_poll,
+    +                "prev_popen_del": prev_popen_del,
+                     "prev_os_system": prev_os_system,
+    +                "pending_exits": pending_exits,
+    +                "pending_running": pending_running,
+                 }
+
+    +            def _complete_record(
+    +                rec: Dict[str, Any],
+    +                exit_code: Any,
+    +                end_ts: float,
+    +                end_mono: float,
+    +            ) -> None:
+    +                """Record a child's observed exit or unavailable status once under _lock."""
+    +                if exit_code is None or not state["active"]:
+    +                    return
+    +                if rec.get("exit_code") is not None:
+    +                    return
+    +                try:
+    +                    with cls._lock:
+    +                        if not state["active"] or rec.get("exit_code") is not None:
+    +                            return
+    +                        cls._popen_refs.pop(id(rec), None)
+    +                        entry = cls._start_monos.pop(id(rec), None)
+    +                        if entry is not None and entry[0] is rec:
+    +                            rec["elapsed_seconds"] = max(0.0, end_mono - entry[1])
+    +                            rec["duration_clock"] = "monotonic"
+    +                        if exit_code == sys.maxsize and not isinstance(exit_code, bool):
+    +                            rec["ended_at_utc"] = None
+    +                            rec["capture_state"] = {
+    +                                "status": "partial",
+    +                                "detail": _EXTERNAL_REAP_DETAIL,
+    +                            }
+    +                        else:
+    +                            rec["exit_code"] = exit_code
+    +                            rec["ended_at_utc"] = end_ts
+    +                            rec["capture_state"] = {
+    +                                "status": "complete" if exit_code == 0 else "failed"
+    +                            }
+    +                except Exception as e:
+    +                    logger.debug(
+    +                        f"pubrun failed to finalize subprocess record: {e}"
+    +                    )
+    +
+    +            def _drain() -> None:
+    +                """Drain lock-free Popen.__del__ queues outside SubprocessSpy._lock."""
+    +                if not state["active"]:
+    +                    return
+    +                while True:
+    +                    try:
+    +                        rec, exit_code, end_ts, end_mono = pending_exits.popleft()
+    +                    except IndexError:
+    +                        break
+    +                    _complete_record(rec, exit_code, end_ts, end_mono)
+    +
+    +                still_running: List[Any] = []
+    +                while True:
+    +                    try:
+    +                        proc = pending_running.popleft()
+    +                    except IndexError:
+    +                        break
+    +                    rc = getattr(proc, "returncode", None)
+    +                    if rc is not None:
+    +                        rec = getattr(proc, "_pubrun_rec", None)
+    +                        if rec is not None:
+    +                            _complete_record(rec, rc, time.time(), time.perf_counter())
+    +                    else:
+    +                        still_running.append(proc)
+    +                if still_running and state["active"]:
+    +                    pending_running.extend(still_running)
+    +
+    +            def _safe_drain() -> None:
+    +                try:
+    +                    _drain()
+    +                except Exception as e:
+    +                    logger.debug(
+    +                        f"pubrun failed to drain subprocess exit queues: {e}"
+    +                    )
+    +
+    +            state["drain"] = _drain
+    +            state["complete_record"] = _complete_record
+    +
+                 def _patched_popen_init(
+                     self: Any, args: Any, *sys_args: Any, **kwargs: Any
+                 ) -> None:
+                     if not state["active"] or _spy_bypassed():
+    -                    return prev_popen_init(self, args, *sys_args, **kwargs)
+    +                    try:
+    +                        return prev_popen_init(self, args, *sys_args, **kwargs)
+    +                    finally:
+    +                        if state["active"]:
+    +                            _safe_drain()
+
+                     with cls._lock:
+                         if not state["active"]:
+    @@ -152,7 +258,11 @@ class SubprocessSpy:
+                             should_record = True
+
+                     if not should_record:
+    -                    return prev_popen_init(self, args, *sys_args, **kwargs)
+    +                    try:
+    +                        return prev_popen_init(self, args, *sys_args, **kwargs)
+    +                    finally:
+    +                        if state["active"]:
+    +                            _safe_drain()
+
+                     start_time = time.time()
+                     start_mono = time.perf_counter()
+    @@ -188,6 +298,8 @@ class SubprocessSpy:
+                                     "capture_state": {"status": "failed", "detail": detail},
+                                 })
+                         raise
+    +                finally:
+    +                    _safe_drain()
+
+                     rec: Dict[str, Any] = {
+                         "argv": argv_list,
+    @@ -196,6 +308,10 @@ class SubprocessSpy:
+                         "exit_code": None,
+                         "capture_state": {"status": "partial"},
+                     }
+    +                try:
+    +                    popen_ref: Optional[Any] = weakref.ref(self)
+    +                except TypeError:
+    +                    popen_ref = None
+                     with cls._lock:
+                         if state["active"]:
+                             self._pubrun_state = state
+    @@ -203,6 +319,8 @@ class SubprocessSpy:
+                             self._pubrun_idx = len(cls._records)
+                             cls._records.append(rec)
+                             cls._start_monos[id(rec)] = (rec, start_mono)
+    +                        if popen_ref is not None:
+    +                            cls._popen_refs[id(rec)] = (rec, popen_ref)
+
+                 def _complete_popen_record(self: Any, exit_code: Any) -> None:
+                     """Record a reaped child's exit once (idempotent across wait/poll)."""
+    @@ -210,33 +328,11 @@ class SubprocessSpy:
+                         return
+                     if getattr(self, "_pubrun_state", None) is not state:
+                         return
+    -                rec0 = getattr(self, "_pubrun_rec", None)
+    -                if rec0 is None or rec0.get("exit_code") is not None:
+    +                rec = getattr(self, "_pubrun_rec", None)
+    +                if rec is None or rec.get("exit_code") is not None:
+                         # Already recorded: repeated poll() calls stay cheap.
+                         return
+    -                end_ts = time.time()
+    -                end_mono = time.perf_counter()
+    -                try:
+    -                    with cls._lock:
+    -                        if (
+    -                            state["active"]
+    -                            and getattr(self, "_pubrun_state", None) is state
+    -                        ):
+    -                            rec = getattr(self, "_pubrun_rec", None)
+    -                            if rec is not None and rec.get("exit_code") is None:
+    -                                rec["exit_code"] = exit_code
+    -                                rec["ended_at_utc"] = end_ts
+    -                                rec["capture_state"]["status"] = (
+    -                                    "complete" if exit_code == 0 else "failed"
+    -                                )
+    -                                entry = cls._start_monos.pop(id(rec), None)
+    -                                if entry is not None and entry[0] is rec:
+    -                                    rec["elapsed_seconds"] = max(0.0, end_mono - entry[1])
+    -                                    rec["duration_clock"] = "monotonic"
+    -                except Exception as e:
+    -                    logger.debug(
+    -                        f"pubrun failed to finalize subprocess record wait hook: {e}"
+    -                    )
+    +                _complete_record(rec, exit_code, time.time(), time.perf_counter())
+
+                 def _patched_popen_wait(self: Any, *args: Any, **kwargs: Any) -> int:
+                     exit_code = prev_popen_wait(self, *args, **kwargs)
+    @@ -248,6 +344,27 @@ class SubprocessSpy:
+                     _complete_popen_record(self, exit_code)
+                     return exit_code
+
+    +            def _patched_popen_del(self: Any, *args: Any, **kwargs: Any) -> None:
+    +                try:
+    +                    prev_popen_del(self, *args, **kwargs)
+    +                finally:
+    +                    try:
+    +                        if (
+    +                            getattr(self, "_pubrun_state", None) is state
+    +                            and state["active"]
+    +                        ):
+    +                            rc = getattr(self, "returncode", None)
+    +                            if rc is None:
+    +                                pending_running.append(self)
+    +                            else:
+    +                                rec = getattr(self, "_pubrun_rec", None)
+    +                                if rec is not None and rec.get("exit_code") is None:
+    +                                    pending_exits.append(
+    +                                        (rec, rc, _now_wall(), _now_mono())
+    +                                    )
+    +                    except Exception:
+    +                        pass
+    +
+                 def _patched_os_system(command: str) -> int:
+                     if not state["active"] or _spy_bypassed():
+                         return prev_os_system(command)
+    @@ -336,6 +453,9 @@ class SubprocessSpy:
+                 cls._max_records = max_records
+                 cls._records = []
+                 cls._start_monos = {}
+    +            cls._popen_refs = {}
+    +            cls._pending_exits = pending_exits
+    +            cls._pending_running = pending_running
+                 cls._truncated = False
+                 cls._config = config
+
+    @@ -344,6 +464,7 @@ class SubprocessSpy:
+                     (subprocess.Popen, "__init__", _patched_popen_init, prev_popen_init),
+                     (subprocess.Popen, "wait", _patched_popen_wait, prev_popen_wait),
+                     (subprocess.Popen, "poll", _patched_popen_poll, prev_popen_poll),
+    +                (subprocess.Popen, "__del__", _patched_popen_del, prev_popen_del),
+                     (os, "system", _patched_os_system, prev_os_system),
+                 ]
+                 try:
+    @@ -364,13 +485,18 @@ class SubprocessSpy:
+                     cls._installed_popen_init = None
+                     cls._installed_popen_wait = None
+                     cls._installed_popen_poll = None
+    +                cls._installed_popen_del = None
+                     cls._installed_os_system = None
+    +                cls._popen_refs = {}
+    +                cls._pending_exits = collections.deque()
+    +                cls._pending_running = collections.deque()
+                     raise
+
+                 cls._active_state = state
+                 cls._installed_popen_init = _patched_popen_init
+                 cls._installed_popen_wait = _patched_popen_wait
+                 cls._installed_popen_poll = _patched_popen_poll
+    +            cls._installed_popen_del = _patched_popen_del
+                 cls._installed_os_system = _patched_os_system
+                 cls._owner = owner
+                 cls._installed = True
+    @@ -388,6 +514,8 @@ class SubprocessSpy:
+                 state = cls._active_state
+                 if state is not None:
+                     state["active"] = False
+    +                state["pending_exits"].clear()
+    +                state["pending_running"].clear()
+                     restores = [
+                         (
+                             subprocess.Popen,
+    @@ -407,6 +535,12 @@ class SubprocessSpy:
+                             cls._installed_popen_poll,
+                             state["prev_popen_poll"],
+                         ),
+    +                    (
+    +                        subprocess.Popen,
+    +                        "__del__",
+    +                        cls._installed_popen_del,
+    +                        state["prev_popen_del"],
+    +                    ),
+                         (
+                             os,
+                             "system",
+    @@ -431,10 +565,14 @@ class SubprocessSpy:
+                 cls._installed_popen_init = None
+                 cls._installed_popen_wait = None
+                 cls._installed_popen_poll = None
+    +            cls._installed_popen_del = None
+                 cls._installed_os_system = None
+                 # BUG-09: Clear records on uninstall to prevent cross-run leakage.
+                 cls._records = []
+                 cls._start_monos = {}
+    +            cls._popen_refs = {}
+    +            cls._pending_exits = collections.deque()
+    +            cls._pending_running = collections.deque()
+                 cls._truncated = False
+
+         @classmethod
+    @@ -453,19 +591,88 @@ class SubprocessSpy:
+
+         @classmethod
+         def finalize_all(cls) -> None:
+    -        """Mark any un-waited subprocess records as complete."""
+    -        now_ts = time.time()
+    +        """Harvest observable exit codes and mark unobserved unwaited records partial."""
+    +        with cls._lock:
+    +            state = cls._active_state
+    +
+    +        if state is not None and state.get("active"):
+    +            # Phase 1: Drain exits and reaped objects queued by Popen.__del__.
+    +            try:
+    +                state["drain"]()
+    +            except Exception as e:
+    +                logger.debug(
+    +                    f"pubrun failed to drain subprocess queues at finalization: {e}"
+    +                )
+    +
+    +            # Phase 2: Collect live Popen objects for open records under _lock.
+    +            live_procs: List[Tuple[Dict[str, Any], Any]] = []
+    +            seen_rec_ids = set()
+    +            with cls._lock:
+    +                for rec in cls._records:
+    +                    if rec.get("exit_code") is None and "ended_at_utc" not in rec:
+    +                        rec_id = id(rec)
+    +                        ref_entry = cls._popen_refs.get(rec_id)
+    +                        if ref_entry is not None and ref_entry[0] is rec:
+    +                            proc = ref_entry[1]()
+    +                            if proc is not None:
+    +                                live_procs.append((rec, proc))
+    +                                seen_rec_ids.add(rec_id)
+    +                pending_running = state["pending_running"]
+    +                while True:
+    +                    try:
+    +                        proc = pending_running.popleft()
+    +                    except IndexError:
+    +                        break
+    +                    rec = getattr(proc, "_pubrun_rec", None)
+    +                    if (
+    +                        rec is not None
+    +                        and rec.get("exit_code") is None
+    +                        and "ended_at_utc" not in rec
+    +                        and id(rec) not in seen_rec_ids
+    +                    ):
+    +                        live_procs.append((rec, proc))
+    +                        seen_rec_ids.add(id(rec))
+    +
+    +            # Phase 3: Poll each live Popen once outside _lock.
+    +            prev_poll = state["prev_popen_poll"]
+    +            complete_record = state["complete_record"]
+    +            for rec, proc in live_procs:
+    +                try:
+    +                    rc = prev_poll(proc)
+    +                except Exception as e:
+    +                    logger.debug(
+    +                        f"pubrun failed to poll subprocess at finalization: {e}"
+    +                    )
+    +                    continue
+    +                if isinstance(rc, int) and not isinstance(rc, bool):
+    +                    complete_record(rec, rc, time.time(), time.perf_counter())
+    +
+    +            # Drain any exits queued while Phase 2/3 ran.
+    +            try:
+    +                state["drain"]()
+    +            except Exception as e:
+    +                logger.debug(
+    +                    f"pubrun failed to drain subprocess queues after polling: {e}"
+    +                )
+    +
+    +        # Phase 4: Mark remaining unobserved records partial and drop all Popen refs.
+             now_mono = time.perf_counter()
+             with cls._lock:
+                 for rec in cls._records:
+                     if rec.get("exit_code") is None and "ended_at_utc" not in rec:
+    -                    rec["ended_at_utc"] = now_ts
+    +                    rec["ended_at_utc"] = None
+                         entry = cls._start_monos.pop(id(rec), None)
+                         if entry is not None and entry[0] is rec:
+                             rec["elapsed_seconds"] = max(0.0, now_mono - entry[1])
+                             rec["duration_clock"] = "monotonic"
+    -                    if rec.get("capture_state", {}).get("status") == "partial":
+    -                        rec["capture_state"]["status"] = "complete"
+    +                    rec["capture_state"] = {
+    +                        "status": "partial",
+    +                        "detail": _UNWAITED_DETAIL,
+    +                    }
+    +            cls._popen_refs.clear()
+    +            cls._pending_running.clear()
+    +            if state is not None:
+    +                state["pending_running"].clear()
+
+         @staticmethod
+         def _safe_shlex_split(args: Any) -> list:
+    ```
+    (2) `grep -n "_internal_poll" src/pubrun/capture/subprocesses.py` -> `<no match>` (exit 1; no reference or assignment to `Popen._internal_poll`).
+    (3) `python3 -m pytest tests/test_capture.py -k "unwaited or gc_after_exit or cleanup_reaped or externally_reaped or del_hook or popen_del" -W error::pytest.PytestUnraisableExceptionWarning --no-cov -q`:
+    ```text
+    .........                                                                [100%]
+    9 passed, 32 deselected in 0.43s
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: (1) Paste the `pytest tests/test_capture.py --no-cov -q -v` output lines for every test named in "Proposed changes" item 2, each `PASSED` (a POSIX-only test is `SKIPPED` only on a non-POSIX host). (2) Paste the summary line of the six-file related-suites run. (3) Paste the full-suite summary line, and for any failure paste the same test's result on unmodified `HEAD`. (4) Paste the two failing test results from the mutation check, then `git diff --stat` after restoring. (5) State which OS and Python version ran the tests, and that the CI matrix was not run.
   - Observed evidence:
-  - Result: pending
+    (1) `python3 -m pytest tests/test_capture.py --no-cov -v` (41 passed in 2.01s; every test from "Proposed changes" item 2):
+    ```text
+    tests/test_capture.py::TestSubprocessInterceptor::test_detached_subprocess_finalized PASSED [ 12%]
+    tests/test_capture.py::TestFinalizeAll::test_marks_unwaited_records_partial PASSED [ 36%]
+    tests/test_capture.py::TestSubprocessSpyMonotonicTiming::test_finalize_all_monotonic_non_collision_and_post_finalize_wait PASSED [ 73%]
+    tests/test_capture.py::TestUnwaitedPopenHarvesting::test_unwaited_exited_child_exit_code_harvested_at_finalize[0-complete] PASSED [ 82%]
+    tests/test_capture.py::TestUnwaitedPopenHarvesting::test_unwaited_exited_child_exit_code_harvested_at_finalize[7-failed] PASSED [ 85%]
+    tests/test_capture.py::TestUnwaitedPopenHarvesting::test_unwaited_uncollected_child_polled_at_finalize PASSED [ 87%]
+    tests/test_capture.py::TestUnwaitedPopenHarvesting::test_gc_after_exit_records_exit_code PASSED [ 90%]
+    tests/test_capture.py::TestUnwaitedPopenHarvesting::test_cleanup_reaped_child_records_exit_code PASSED [ 92%]
+    tests/test_capture.py::TestUnwaitedPopenHarvesting::test_externally_reaped_child_is_partial_not_sentinel PASSED [ 95%]
+    tests/test_capture.py::TestUnwaitedPopenHarvesting::test_popen_del_hook_does_not_take_spy_lock PASSED [ 97%]
+    tests/test_capture.py::TestUnwaitedPopenHarvesting::test_uninstall_restores_popen_del PASSED [100%]
+    ```
+    (2) Six-file related-suites run (`python3 -m pytest tests/test_capture.py tests/test_capture_engine_bugs.py tests/test_hook_ownership_rollback.py tests/test_capture_isolation.py tests/test_pause_resume.py tests/test_tracker.py --no-cov -q`):
+    ```text
+    202 passed in 17.50s
+    ```
+    (3) Full suite (`aw suite --no-cache`):
+    ```text
+    ======================= 1906 passed in 150.67s (0:02:30) =======================
+    ```
+    Zero failures.
+    (4) Mutation check (replaced body of `_patched_popen_del`'s `finally` block with `pass` and ran the two tests):
+    ```text
+    tests/test_capture.py::TestUnwaitedPopenHarvesting::test_gc_after_exit_records_exit_code FAILED [ 50%]
+    tests/test_capture.py::TestUnwaitedPopenHarvesting::test_cleanup_reaped_child_records_exit_code FAILED [100%]
+    FAILED tests/test_capture.py::TestUnwaitedPopenHarvesting::test_gc_after_exit_records_exit_code (assert None == 7)
+    FAILED tests/test_capture.py::TestUnwaitedPopenHarvesting::test_cleanup_reaped_child_records_exit_code (assert None == 7)
+    ======================= 2 failed, 39 deselected in 0.33s =======================
+    ```
+    `git diff --stat` after restoring `src/pubrun/capture/subprocesses.py`:
+    ```text
+     CHANGELOG.md                       |   2 +
+     docs/api.md                        |   2 +-
+     docs/architecture.md               |   6 +-
+     docs/functional_spec.md            |   6 +-
+     docs/manifest.md                   |   8 +-
+     src/pubrun/capture/subprocesses.py | 277 ++++++++++++++++++++++++----
+     tests/test_capture.py              | 368 ++++++++++++++++++++++++++++++++++---
+     7 files changed, 601 insertions(+), 68 deletions(-)
+    ```
+    (5) Environment: Linux x86_64 (kernel `6.8.0-151-generic`), Python `3.14.6`. The GitHub Actions CI matrix (3 OS x Python 3.8 to 3.14) was not run because pushing requires explicit human instruction.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: (1) Paste `git diff -- docs/manifest.md` and name the edited `capture_state`, `exit_code`, `ended_at_utc`, and `elapsed_seconds` rows. (2) Paste the output of `grep -n "still unwaited at finalization" docs/manifest.md`, which must show no match. (3) Paste the output of `git diff -U0 -- docs/manifest.md | grep '^+[^+]' | grep -c '[—–]'`, which must print `0`.
   - Observed evidence:
-  - Result: pending
+    (1) Edited rows in `docs/manifest.md#subprocesses`: `ended_at_utc`, `elapsed_seconds`, `exit_code`, and `capture_state`.
+    ```diff
+    diff --git a/docs/manifest.md b/docs/manifest.md
+    index 2f380a4..42ac818 100644
+    --- a/docs/manifest.md
+    +++ b/docs/manifest.md
+    @@ -140,14 +140,14 @@ Array of subprocess records. Each element:
+     |---|---|---|
+     | `argv` | list[string] | Command and arguments. Sensitive values may be redacted. |
+     | `started_at_utc` | float | Start time (POSIX epoch float). |
+    -| `ended_at_utc` | float \| null | End time, or `null` if the process was still running at finalization. |
+    -| `elapsed_seconds` | float \| null | Optional. Nonnegative monotonic duration (`time.perf_counter()`) from launch until `pubrun` observed the process finish (`wait()`, `communicate()`, a completed `poll()`, `os.system` returning, or pipe close for `pubrun.popen()`), or until the launch attempt failed. For a process never waited on, it is the time until run finalization. Not derived from the UTC fields. |
+    +| `ended_at_utc` | float \| null | End time, or `null` when `pubrun` did not observe the process end by finalization. |
+    +| `elapsed_seconds` | float \| null | Optional. Nonnegative monotonic duration (`time.perf_counter()`) from launch until `pubrun` observed the process finish (`wait()`, `communicate()`, a completed `poll()`, `Popen.__del__`, `os.system` returning, or pipe close for `pubrun.popen()`), or until the launch attempt failed. For a child whose exit `pubrun` first observed at the next `Popen` launch or at finalization, the duration ends at that observation. For a child still unobserved at finalization, the duration ends at finalization. Not derived from the UTC fields. |
+     | `duration_clock` | string \| null | Optional. `"monotonic"` when `elapsed_seconds` is present. Absent on records written before monotonic subprocess timing. |
+     | `pid` | int \| null | Optional. Written by the explicit wrappers only: the process ID for `pubrun.subprocess.Popen`, `null` for `pubrun.subprocess.run()`, `pubrun.popen()`, and failed launches. |
+     | `error` | string \| null | Optional. Bounded, redacted error detail when an explicit wrapper's launch failed. |
+     | `cwd` | string | Working directory of the subprocess. |
+    -| `exit_code` | int \| null | Exit code, or `null` if the process was not waited on. |
+    -| `capture_state` | object | `"complete"` for exit code 0 (and for a process still unwaited at finalization), `"failed"` for a nonzero exit code or a failed launch (with a redacted `detail`), `"partial"` while the process is still running. See [Capture State](#capture-state). |
+    +| `exit_code` | int \| null | Exit code, or `null` when `pubrun` did not observe the exit. |
+    +| `capture_state` | object | `"complete"` for exit code 0, `"failed"` for a nonzero exit code or a failed launch (with a redacted `detail`), and `"partial"` with a `detail` while the process runs, when `pubrun` did not observe its exit by finalization, or when its exit status is unavailable. See [Capture State](#capture-state). |
+    ```
+    (2) `grep -n "still unwaited at finalization" docs/manifest.md` -> `<no match>` (exit 1).
+    (3) `git diff -U0 -- docs/manifest.md | grep '^+[^+]' | grep -c '[—–]'` -> `0`.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: (1) Paste `git diff -- docs/functional_spec.md docs/architecture.md docs/api.md` and name each edited target list and the `#15.2 Recorded Fields` change. (2) Paste the output of `grep -n 'Popen.__init__' docs/functional_spec.md docs/architecture.md docs/api.md | grep -v 'Popen.__del__'`, which must show no match (at review it matched the six lists named in E-04 outcome 1). (3) Paste the output of `git diff -U0 -- docs/functional_spec.md docs/architecture.md docs/api.md | grep '^+[^+]' | grep -c '[—–]'`, which must print `0`.
   - Observed evidence:
-  - Result: pending
+    (1) Edited target lists (all six now name `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `subprocess.Popen.poll`, `subprocess.Popen.__del__`, and `os.system`):
+    - `docs/functional_spec.md#15.1 Mechanism`
+    - `docs/functional_spec.md#20. Failure Behavior` ("Enforce transactional installation" bullet)
+    - `docs/architecture.md#15. Subprocess Model` (opening paragraph and "**Live target chaining and transactional install:**" bullet)
+    - `docs/architecture.md#18. Failure Model` ("**Independent cleanup and hook ownership:**" bullet)
+    - `docs/api.md#Third-Party Hook Ownership Rules` (`SubprocessSpy` table row)
+    Also updated `docs/functional_spec.md#15.2 Recorded Fields` to describe finalization harvesting observable unwaited child exits and marking unobserved children `"partial"` with a `detail` and `null` `exit_code`/`ended_at_utc`.
+    ```diff
+    diff --git a/docs/api.md b/docs/api.md
+    index f419b45..1f44acf 100644
+    --- a/docs/api.md
+    +++ b/docs/api.md
+    @@ -482,7 +482,7 @@ When global hooks are permitted by the active import mode and enabled in configu
+     | `faulthandler` (`ConsoleInterceptor`) | Checks `faulthandler.is_enabled()` before touching it; enables `faulthandler` on `stderr.log` only when previously disabled. | Calls `faulthandler.disable()` (before closing `stderr.log`) only when `pubrun` enabled it. A pre-existing user or test-runner `faulthandler` remains enabled. |
+     | OS signal handlers (`SignalExitCapture`) | Records each installed shim and chains to the prior handler. Rolls back registered shims on unexpected install errors. | Restores each signal only when `signal.getsignal(signum)` is still `pubrun`'s shim. Deactivated shims left under a later third-party handler pass signals through passively without recording or calling `_finalize_active_run()`. |
+     | `sys.excepthook` (`SignalExitCapture`) | Captures the prior `sys.excepthook` in a local closure and redacts sensitive values in captured exception messages. | Restores `sys.excepthook` only when it is still `pubrun`'s wrapper. If a third-party hook wraps `pubrun`, `pubrun`'s deactivated wrapper forwards passively to the closure-captured prior hook. |
+    -| `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` (`SubprocessSpy`) | Snapshots live targets at `install()`, chains to pre-existing wrappers, tags spawned processes with install-generation state, and rolls back already-patched targets if a later patch fails. | Verifies caller ownership token when set, marks the generation inactive first, and restores each target independently only when it still matches `pubrun`'s installed wrapper. Any wrapper left beneath a later third-party wrapper passes calls through passively without recording. |
+    +| `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `subprocess.Popen.poll`, `subprocess.Popen.__del__`, and `os.system` (`SubprocessSpy`) | Snapshots live targets at `install()`, chains to pre-existing wrappers, tags spawned processes with install-generation state, and rolls back already-patched targets if a later patch fails. | Verifies caller ownership token when set, marks the generation inactive first, and restores each target independently only when it still matches `pubrun`'s installed wrapper. Any wrapper left beneath a later third-party wrapper passes calls through passively without recording. |
 
-- [ ] V-05 validates E-05
+     ---
+
+    diff --git a/docs/architecture.md b/docs/architecture.md
+    index afcd640..e904aff 100644
+    --- a/docs/architecture.md
+    +++ b/docs/architecture.md
+    @@ -219,9 +219,9 @@ Contents:
+
+     ## 15. Subprocess Model
+
+    -`SubprocessSpy` transparently monkey-patches `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` to capture spawned process metadata (argv, UTC start and end timestamps, monotonic `elapsed_seconds` with `duration_clock: "monotonic"`, exit codes). Per-record monotonic start readings stay in an in-memory map keyed by record identity and are never serialized. Record mutations and lifecycle transitions are thread-safe under `SubprocessSpy._lock`.
+    +`SubprocessSpy` transparently monkey-patches `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `subprocess.Popen.poll`, `subprocess.Popen.__del__`, and `os.system` to capture spawned process metadata (argv, UTC start and end timestamps, monotonic `elapsed_seconds` with `duration_clock: "monotonic"`, exit codes). Per-record monotonic start readings stay in an in-memory map keyed by record identity and are never serialized. Record mutations and lifecycle transitions are thread-safe under `SubprocessSpy._lock`.
+
+    -- **Live target chaining and transactional install:** `SubprocessSpy.install(max_records, config, owner)` snapshots the live `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` attributes at install time, builds generation-scoped wrapper closures that chain to those pre-existing targets, and rolls back any already-patched target if a later patch fails.
+    +- **Live target chaining and transactional install:** `SubprocessSpy.install(max_records, config, owner)` snapshots the live `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `subprocess.Popen.poll`, `subprocess.Popen.__del__`, and `os.system` attributes at install time, builds generation-scoped wrapper closures that chain to those pre-existing targets, and rolls back any already-patched target if a later patch fails.
+     - **Generation-scoped records:** Each spawned `Popen` instance carries its install generation's `state` dict and direct record reference (`_pubrun_state`, `_pubrun_rec`), and `os.system` holds a direct local reference to its record. Post-uninstall `wait()` calls or concurrent `uninstall()` calls cannot corrupt a newer run's records or raise `IndexError`. Failed spawn details pass through `format_safe_error_detail()`.
+     - **Ownership-guarded uninstall and passive passthrough:** `SubprocessSpy.uninstall(owner=...)` verifies the caller's ownership token when set, flips `state["active"] = False` first, and restores each target independently only when the current attribute is still `pubrun`'s installed wrapper. If a third-party wrapper sits outside `pubrun`, that wrapper remains intact while `pubrun`'s deactivated closure passes calls through passively without recording.
+
+    @@ -263,7 +263,7 @@ The system must:
+     ### Bounded Redacted Diagnostics, Independent Cleanup, and Consumer Honesty
+
+     - **Bounded redacted error records:** Capture and cleanup exceptions pass through `format_safe_error_detail()` (single-line, sensitive values redacted, 240-character cap, `traceback = null`, falling back to default patterns and then `type(exc).__name__`). `Run` retains up to `MAX_CAPTURE_ERRORS = 50` entries in `errors.records` under `_errors_lock`; additional errors increment the omitted counter and set `errors.capture_state.status = "partial"`. Runtime warnings in `Run`, `EventStream`, and `ArtifactWriter` are emitted at most once per `(section, stage)` or failure episode, outside internal locks.
+    -- **Independent cleanup and hook ownership:** `_finalize_state()` and `_rollback_owned_hooks()` isolate every pre-teardown and teardown step independently, separating `SubprocessSpy.finalize_all()` and record snapshotting from `SubprocessSpy.uninstall(owner=...)`. Process-global hooks (`sys.stdout`, `sys.stderr`, `faulthandler`, signal handlers, `sys.excepthook`, `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `os.system`) use identity-guarded restoration and passive passthrough so later third-party wrappers are never clobbered.
+    +- **Independent cleanup and hook ownership:** `_finalize_state()` and `_rollback_owned_hooks()` isolate every pre-teardown and teardown step independently, separating `SubprocessSpy.finalize_all()` and record snapshotting from `SubprocessSpy.uninstall(owner=...)`. Process-global hooks (`sys.stdout`, `sys.stderr`, `faulthandler`, signal handlers, `sys.excepthook`, `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `subprocess.Popen.poll`, `subprocess.Popen.__del__`, `os.system`) use identity-guarded restoration and passive passthrough so later third-party wrappers are never clobbered.
+     - **Honest consumers:** `pubrun report`, `pubrun inspect`, `pubrun methods`, and `pubrun status` tolerate failed, `null`, or malformed section fields without crashing. They surface failed sections and deduplicated `capture-error` findings explicitly (distinct from `"suppressed"`) and disclose partial provenance instead of claiming complete capture or standard-library-only dependencies.
+
+     ## 19. Redaction Model
+    diff --git a/docs/functional_spec.md b/docs/functional_spec.md
+    index 7600ed3..a171ddf 100644
+    --- a/docs/functional_spec.md
+    +++ b/docs/functional_spec.md
+    @@ -661,11 +661,11 @@ produced elsewhere (see 14.1).
+
+     ### 15.1 Mechanism
+
+    -`SubprocessSpy` monkey-patches `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` to transparently record spawned process metadata.
+    +`SubprocessSpy` monkey-patches `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `subprocess.Popen.poll`, `subprocess.Popen.__del__`, and `os.system` to transparently record spawned process metadata.
+
+     ### 15.2 Recorded Fields
+
+    -Each subprocess record includes: `argv`, `started_at_utc`, `ended_at_utc`, `cwd`, `exit_code`, and `capture_state`. Once the process is observed to finish (or the launch fails, or finalization closes an unwaited record), the record also carries `elapsed_seconds` (nonnegative monotonic duration) and `duration_clock: "monotonic"`. Monotonic start readings are held in an internal map keyed by record identity and are never serialized. The explicit wrappers (`pubrun.subprocess.run`, `pubrun.subprocess.Popen`, `pubrun.popen`) record the same timing fields plus `pid`, and on a failed launch record `error` and `capture_state: {"status": "failed", "detail": ...}` before re-raising.
+    +Each subprocess record includes: `argv`, `started_at_utc`, `ended_at_utc`, `cwd`, `exit_code`, and `capture_state`. Once the process is observed to finish (or the launch fails, or finalization closes an unwaited record), the record also carries `elapsed_seconds` (nonnegative monotonic duration) and `duration_clock: "monotonic"`. Monotonic start readings are held in an internal map keyed by record identity and are never serialized. At finalization, `SubprocessSpy` records the exit of an unwaited child when `pubrun` can observe it (through `Popen.__del__`, `subprocess._cleanup()` on a later `Popen` launch, or a non-blocking `poll()`), and otherwise leaves `exit_code` and `ended_at_utc` as `null` and marks `capture_state` as `"partial"` with a `detail`. The explicit wrappers (`pubrun.subprocess.run`, `pubrun.subprocess.Popen`, `pubrun.popen`) record the same timing fields plus `pid`, and on a failed launch record `error` and `capture_state: {"status": "failed", "detail": ...}` before re-raising.
+
+     ### 15.3 Memory Safety
+
+    @@ -834,7 +834,7 @@ The system MUST:
+     - Set `capture.capture_state.status = "partial"` (naming the degraded sections in `detail`) whenever any section failed, covering both escaping exceptions and self-caught failed returns, while keeping `status.outcome` accurate to the host script's execution outcome.
+     - Record structured `capture-error` entries (`kind = "capture-error"`, `type`, bounded redacted `message`, `traceback = null`, optional `section`, optional `stage`) in `errors.records` under `_errors_lock`, capped at `MAX_CAPTURE_ERRORS = 50`. When additional errors exceed the cap, set `errors.capture_state.status = "partial"` with the omitted count.
+     - Emit bounded runtime warnings without traceback spam: at most one warning per `(section, stage)` in `Run`, at most one per write-failure episode in `EventStream` (outside its lock), and at most one on finalization write failure in `ArtifactWriter`.
+    -- Enforce transactional installation, prior `faulthandler.is_enabled()` preservation, identity-guarded restoration, and passive passthrough across all process-global hooks (`sys.stdout`/`sys.stderr`, `faulthandler`, signal handlers, `sys.excepthook`, `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `os.system`) so later third-party wrappers are never overwritten.
+    +- Enforce transactional installation, prior `faulthandler.is_enabled()` preservation, identity-guarded restoration, and passive passthrough across all process-global hooks (`sys.stdout`/`sys.stderr`, `faulthandler`, signal handlers, `sys.excepthook`, `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `subprocess.Popen.poll`, `subprocess.Popen.__del__`, `os.system`) so later third-party wrappers are never overwritten.
+     - Surface partial manifests honestly in downstream consumers without crashing on `null` or malformed fields:
+       - `pubrun report` (across `basic`, `standard`, `deep`, and `section="env"`/`"packages"` extracts, respecting `NO_COLOR`) renders a bounded `[WARN ]` summary of failed sections and up to 10 `capture-error` records (with overflow and truncation detail) and displays `capture failed` instead of misleading empty counts.
+       - `pubrun inspect` emits `WARN` findings (`{section}_capture_failed`, deduplicated `capture_error_{section}`, and `errors_capture_partial` truncation notices) distinct from `"suppressed"` (`*_off`).
+    ```
+    (2) `grep -n 'Popen.__init__' docs/functional_spec.md docs/architecture.md docs/api.md | grep -v 'Popen.__del__'` -> `<no match>` (exit 1).
+    (3) `git diff -U0 -- docs/functional_spec.md docs/architecture.md docs/api.md | grep '^+[^+]' | grep -c '[—–]'` -> `0`.
+  - Result: pass
+
+- [x] V-05 validates E-05
   - Required evidence: (1) Paste `git diff -- CHANGELOG.md`, showing the entry under `## [Unreleased]` and `### Fixed`. (2) Paste the output of `git diff -U0 -- CHANGELOG.md | grep '^+[^+]' | grep -c '[—–]'`, which must print `0`. (3) Paste the output and exit code of `python3 scripts/sanitize_paths.py --check --all`, which must be 0.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- CHANGELOG.md`:
+    ```diff
+    diff --git a/CHANGELOG.md b/CHANGELOG.md
+    index 3be0fca..8e4b97c 100644
+    --- a/CHANGELOG.md
+    +++ b/CHANGELOG.md
+    @@ -103,6 +103,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+       the deep pages, never the README front door.
+
+     ### Fixed
+    +- **Unwaited `subprocess.Popen` children now record observable exit codes and report unobserved exits as `"partial"` instead of `"complete"`.**
+    +  `SubprocessSpy` now hooks `subprocess.Popen.__del__` without taking locks and performs a single non-blocking poll of live unwaited `Popen` objects at finalization, recording the real `exit_code` with `capture_state.status: "complete"` (exit code 0) or `"failed"` (nonzero) when observable through public `Popen` attributes. A child still running at finalization, or whose exit status was collected outside `pubrun`, now records `exit_code: null`, `ended_at_utc: null`, and `capture_state: {"status": "partial", "detail": ...}` instead of `"complete"`. Downstream consumers that filter subprocess records on `capture_state.status == "complete"` should note that unobserved unwaited children now report `"partial"`.
+     - **`workload_seconds` no longer includes a background manifest refresh write.** A `stop()` call made
+       while the background hardware capture was rewriting `manifest.json` waited for that write and counted
+       it as workload; with the default fsynced durability on a slow disk this added tens to hundreds of
+    ```
+    (2) `git diff -U0 -- CHANGELOG.md | grep '^+[^+]' | grep -c '[—–]'` -> `0`.
+    (3) `python3 scripts/sanitize_paths.py --check --all` -> no stdout/stderr findings, `sanitize_exit=0`.
+  - Result: pass
 
 ## Approval and execution gate
 

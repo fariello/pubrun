@@ -1,11 +1,14 @@
-import os
-import subprocess
+import collections
 import logging
+import os
 import shlex
+import subprocess
+import sys
 import threading
 import time
+import weakref
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 _spy_local = threading.local()
 
@@ -54,7 +57,13 @@ logger = logging.getLogger("pubrun")
 _original_popen_init = subprocess.Popen.__init__
 _original_popen_wait = subprocess.Popen.wait
 _original_popen_poll = subprocess.Popen.poll
+_original_popen_del = subprocess.Popen.__del__
 _original_os_system = os.system
+
+_UNWAITED_DETAIL = "child process not waited on before finalization"
+_EXTERNAL_REAP_DETAIL = (
+    "child exit status was collected outside pubrun and is unavailable"
+)
 
 
 def _decode_wait_status(status: Any) -> Any:
@@ -87,6 +96,9 @@ class SubprocessSpy:
     _installed = False
     _records: List[Dict[str, Any]] = []
     _start_monos: Dict[int, Tuple[Dict[str, Any], float]] = {}
+    _popen_refs: Dict[int, Tuple[Dict[str, Any], Any]] = {}
+    _pending_exits: Deque[Tuple[Dict[str, Any], Any, float, float]] = collections.deque()
+    _pending_running: Deque[Any] = collections.deque()
     _max_records = 5000
     _truncated = False
     _lock = threading.Lock()
@@ -96,6 +108,7 @@ class SubprocessSpy:
     _installed_popen_init: Optional[Any] = None
     _installed_popen_wait: Optional[Any] = None
     _installed_popen_poll: Optional[Any] = None
+    _installed_popen_del: Optional[Any] = None
     _installed_os_system: Optional[Any] = None
 
     @classmethod
@@ -125,7 +138,18 @@ class SubprocessSpy:
             prev_popen_init = subprocess.Popen.__init__
             prev_popen_wait = subprocess.Popen.wait
             prev_popen_poll = subprocess.Popen.poll
+            prev_popen_del = subprocess.Popen.__del__
             prev_os_system = os.system
+
+            # Bind wall and monotonic clocks at install time so __del__ works
+            # even if module globals are cleared during interpreter shutdown.
+            _now_wall = time.time
+            _now_mono = time.perf_counter
+
+            pending_exits: Deque[
+                Tuple[Dict[str, Any], Any, float, float]
+            ] = collections.deque()
+            pending_running: Deque[Any] = collections.deque()
 
             state: Dict[str, Any] = {
                 "active": True,
@@ -133,14 +157,96 @@ class SubprocessSpy:
                 "prev_popen_init": prev_popen_init,
                 "prev_popen_wait": prev_popen_wait,
                 "prev_popen_poll": prev_popen_poll,
+                "prev_popen_del": prev_popen_del,
                 "prev_os_system": prev_os_system,
+                "pending_exits": pending_exits,
+                "pending_running": pending_running,
             }
+
+            def _complete_record(
+                rec: Dict[str, Any],
+                exit_code: Any,
+                end_ts: float,
+                end_mono: float,
+            ) -> None:
+                """Record a child's observed exit or unavailable status once under _lock."""
+                if exit_code is None or not state["active"]:
+                    return
+                if rec.get("exit_code") is not None:
+                    return
+                try:
+                    with cls._lock:
+                        if not state["active"] or rec.get("exit_code") is not None:
+                            return
+                        cls._popen_refs.pop(id(rec), None)
+                        entry = cls._start_monos.pop(id(rec), None)
+                        if entry is not None and entry[0] is rec:
+                            rec["elapsed_seconds"] = max(0.0, end_mono - entry[1])
+                            rec["duration_clock"] = "monotonic"
+                        if exit_code == sys.maxsize and not isinstance(exit_code, bool):
+                            rec["ended_at_utc"] = None
+                            rec["capture_state"] = {
+                                "status": "partial",
+                                "detail": _EXTERNAL_REAP_DETAIL,
+                            }
+                        else:
+                            rec["exit_code"] = exit_code
+                            rec["ended_at_utc"] = end_ts
+                            rec["capture_state"] = {
+                                "status": "complete" if exit_code == 0 else "failed"
+                            }
+                except Exception as e:
+                    logger.debug(
+                        f"pubrun failed to finalize subprocess record: {e}"
+                    )
+
+            def _drain() -> None:
+                """Drain lock-free Popen.__del__ queues outside SubprocessSpy._lock."""
+                if not state["active"]:
+                    return
+                while True:
+                    try:
+                        rec, exit_code, end_ts, end_mono = pending_exits.popleft()
+                    except IndexError:
+                        break
+                    _complete_record(rec, exit_code, end_ts, end_mono)
+
+                still_running: List[Any] = []
+                while True:
+                    try:
+                        proc = pending_running.popleft()
+                    except IndexError:
+                        break
+                    rc = getattr(proc, "returncode", None)
+                    if rc is not None:
+                        rec = getattr(proc, "_pubrun_rec", None)
+                        if rec is not None:
+                            _complete_record(rec, rc, time.time(), time.perf_counter())
+                    else:
+                        still_running.append(proc)
+                if still_running and state["active"]:
+                    pending_running.extend(still_running)
+
+            def _safe_drain() -> None:
+                try:
+                    _drain()
+                except Exception as e:
+                    logger.debug(
+                        f"pubrun failed to drain subprocess exit queues: {e}"
+                    )
+
+            state["drain"] = _drain
+            state["complete_record"] = _complete_record
 
             def _patched_popen_init(
                 self: Any, args: Any, *sys_args: Any, **kwargs: Any
             ) -> None:
                 if not state["active"] or _spy_bypassed():
-                    return prev_popen_init(self, args, *sys_args, **kwargs)
+                    try:
+                        return prev_popen_init(self, args, *sys_args, **kwargs)
+                    finally:
+                        if state["active"]:
+                            _safe_drain()
 
                 with cls._lock:
                     if not state["active"]:
@@ -152,7 +258,11 @@ class SubprocessSpy:
                         should_record = True
 
                 if not should_record:
-                    return prev_popen_init(self, args, *sys_args, **kwargs)
+                    try:
+                        return prev_popen_init(self, args, *sys_args, **kwargs)
+                    finally:
+                        if state["active"]:
+                            _safe_drain()
 
                 start_time = time.time()
                 start_mono = time.perf_counter()
@@ -188,6 +298,8 @@ class SubprocessSpy:
                                 "capture_state": {"status": "failed", "detail": detail},
                             })
                     raise
+                finally:
+                    _safe_drain()
 
                 rec: Dict[str, Any] = {
                     "argv": argv_list,
@@ -196,6 +308,10 @@ class SubprocessSpy:
                     "exit_code": None,
                     "capture_state": {"status": "partial"},
                 }
+                try:
+                    popen_ref: Optional[Any] = weakref.ref(self)
+                except TypeError:
+                    popen_ref = None
                 with cls._lock:
                     if state["active"]:
                         self._pubrun_state = state
@@ -203,6 +319,8 @@ class SubprocessSpy:
                         self._pubrun_idx = len(cls._records)
                         cls._records.append(rec)
                         cls._start_monos[id(rec)] = (rec, start_mono)
+                        if popen_ref is not None:
+                            cls._popen_refs[id(rec)] = (rec, popen_ref)
 
             def _complete_popen_record(self: Any, exit_code: Any) -> None:
                 """Record a reaped child's exit once (idempotent across wait/poll)."""
@@ -210,33 +328,11 @@ class SubprocessSpy:
                     return
                 if getattr(self, "_pubrun_state", None) is not state:
                     return
-                rec0 = getattr(self, "_pubrun_rec", None)
-                if rec0 is None or rec0.get("exit_code") is not None:
+                rec = getattr(self, "_pubrun_rec", None)
+                if rec is None or rec.get("exit_code") is not None:
                     # Already recorded: repeated poll() calls stay cheap.
                     return
-                end_ts = time.time()
-                end_mono = time.perf_counter()
-                try:
-                    with cls._lock:
-                        if (
-                            state["active"]
-                            and getattr(self, "_pubrun_state", None) is state
-                        ):
-                            rec = getattr(self, "_pubrun_rec", None)
-                            if rec is not None and rec.get("exit_code") is None:
-                                rec["exit_code"] = exit_code
-                                rec["ended_at_utc"] = end_ts
-                                rec["capture_state"]["status"] = (
-                                    "complete" if exit_code == 0 else "failed"
-                                )
-                                entry = cls._start_monos.pop(id(rec), None)
-                                if entry is not None and entry[0] is rec:
-                                    rec["elapsed_seconds"] = max(0.0, end_mono - entry[1])
-                                    rec["duration_clock"] = "monotonic"
-                except Exception as e:
-                    logger.debug(
-                        f"pubrun failed to finalize subprocess record wait hook: {e}"
-                    )
+                _complete_record(rec, exit_code, time.time(), time.perf_counter())
 
             def _patched_popen_wait(self: Any, *args: Any, **kwargs: Any) -> int:
                 exit_code = prev_popen_wait(self, *args, **kwargs)
@@ -247,6 +343,27 @@ class SubprocessSpy:
                 exit_code = prev_popen_poll(self, *args, **kwargs)
                 _complete_popen_record(self, exit_code)
                 return exit_code
+
+            def _patched_popen_del(self: Any, *args: Any, **kwargs: Any) -> None:
+                try:
+                    prev_popen_del(self, *args, **kwargs)
+                finally:
+                    try:
+                        if (
+                            getattr(self, "_pubrun_state", None) is state
+                            and state["active"]
+                        ):
+                            rc = getattr(self, "returncode", None)
+                            if rc is None:
+                                pending_running.append(self)
+                            else:
+                                rec = getattr(self, "_pubrun_rec", None)
+                                if rec is not None and rec.get("exit_code") is None:
+                                    pending_exits.append(
+                                        (rec, rc, _now_wall(), _now_mono())
+                                    )
+                    except Exception:
+                        pass
 
             def _patched_os_system(command: str) -> int:
                 if not state["active"] or _spy_bypassed():
@@ -336,6 +453,9 @@ class SubprocessSpy:
             cls._max_records = max_records
             cls._records = []
             cls._start_monos = {}
+            cls._popen_refs = {}
+            cls._pending_exits = pending_exits
+            cls._pending_running = pending_running
             cls._truncated = False
             cls._config = config
 
@@ -344,6 +464,7 @@ class SubprocessSpy:
                 (subprocess.Popen, "__init__", _patched_popen_init, prev_popen_init),
                 (subprocess.Popen, "wait", _patched_popen_wait, prev_popen_wait),
                 (subprocess.Popen, "poll", _patched_popen_poll, prev_popen_poll),
+                (subprocess.Popen, "__del__", _patched_popen_del, prev_popen_del),
                 (os, "system", _patched_os_system, prev_os_system),
             ]
             try:
@@ -364,13 +485,18 @@ class SubprocessSpy:
                 cls._installed_popen_init = None
                 cls._installed_popen_wait = None
                 cls._installed_popen_poll = None
+                cls._installed_popen_del = None
                 cls._installed_os_system = None
+                cls._popen_refs = {}
+                cls._pending_exits = collections.deque()
+                cls._pending_running = collections.deque()
                 raise
 
             cls._active_state = state
             cls._installed_popen_init = _patched_popen_init
             cls._installed_popen_wait = _patched_popen_wait
             cls._installed_popen_poll = _patched_popen_poll
+            cls._installed_popen_del = _patched_popen_del
             cls._installed_os_system = _patched_os_system
             cls._owner = owner
             cls._installed = True
@@ -388,6 +514,8 @@ class SubprocessSpy:
             state = cls._active_state
             if state is not None:
                 state["active"] = False
+                state["pending_exits"].clear()
+                state["pending_running"].clear()
                 restores = [
                     (
                         subprocess.Popen,
@@ -406,6 +534,12 @@ class SubprocessSpy:
                         "poll",
                         cls._installed_popen_poll,
                         state["prev_popen_poll"],
+                    ),
+                    (
+                        subprocess.Popen,
+                        "__del__",
+                        cls._installed_popen_del,
+                        state["prev_popen_del"],
                     ),
                     (
                         os,
@@ -431,10 +565,14 @@ class SubprocessSpy:
             cls._installed_popen_init = None
             cls._installed_popen_wait = None
             cls._installed_popen_poll = None
+            cls._installed_popen_del = None
             cls._installed_os_system = None
             # BUG-09: Clear records on uninstall to prevent cross-run leakage.
             cls._records = []
             cls._start_monos = {}
+            cls._popen_refs = {}
+            cls._pending_exits = collections.deque()
+            cls._pending_running = collections.deque()
             cls._truncated = False
 
     @classmethod
@@ -453,19 +591,88 @@ class SubprocessSpy:
 
     @classmethod
     def finalize_all(cls) -> None:
-        """Mark any un-waited subprocess records as complete."""
-        now_ts = time.time()
+        """Harvest observable exit codes and mark unobserved unwaited records partial."""
+        with cls._lock:
+            state = cls._active_state
+
+        if state is not None and state.get("active"):
+            # Phase 1: Drain exits and reaped objects queued by Popen.__del__.
+            try:
+                state["drain"]()
+            except Exception as e:
+                logger.debug(
+                    f"pubrun failed to drain subprocess queues at finalization: {e}"
+                )
+
+            # Phase 2: Collect live Popen objects for open records under _lock.
+            live_procs: List[Tuple[Dict[str, Any], Any]] = []
+            seen_rec_ids = set()
+            with cls._lock:
+                for rec in cls._records:
+                    if rec.get("exit_code") is None and "ended_at_utc" not in rec:
+                        rec_id = id(rec)
+                        ref_entry = cls._popen_refs.get(rec_id)
+                        if ref_entry is not None and ref_entry[0] is rec:
+                            proc = ref_entry[1]()
+                            if proc is not None:
+                                live_procs.append((rec, proc))
+                                seen_rec_ids.add(rec_id)
+                pending_running = state["pending_running"]
+                while True:
+                    try:
+                        proc = pending_running.popleft()
+                    except IndexError:
+                        break
+                    rec = getattr(proc, "_pubrun_rec", None)
+                    if (
+                        rec is not None
+                        and rec.get("exit_code") is None
+                        and "ended_at_utc" not in rec
+                        and id(rec) not in seen_rec_ids
+                    ):
+                        live_procs.append((rec, proc))
+                        seen_rec_ids.add(id(rec))
+
+            # Phase 3: Poll each live Popen once outside _lock.
+            prev_poll = state["prev_popen_poll"]
+            complete_record = state["complete_record"]
+            for rec, proc in live_procs:
+                try:
+                    rc = prev_poll(proc)
+                except Exception as e:
+                    logger.debug(
+                        f"pubrun failed to poll subprocess at finalization: {e}"
+                    )
+                    continue
+                if isinstance(rc, int) and not isinstance(rc, bool):
+                    complete_record(rec, rc, time.time(), time.perf_counter())
+
+            # Drain any exits queued while Phase 2/3 ran.
+            try:
+                state["drain"]()
+            except Exception as e:
+                logger.debug(
+                    f"pubrun failed to drain subprocess queues after polling: {e}"
+                )
+
+        # Phase 4: Mark remaining unobserved records partial and drop all Popen refs.
         now_mono = time.perf_counter()
         with cls._lock:
             for rec in cls._records:
                 if rec.get("exit_code") is None and "ended_at_utc" not in rec:
-                    rec["ended_at_utc"] = now_ts
+                    rec["ended_at_utc"] = None
                     entry = cls._start_monos.pop(id(rec), None)
                     if entry is not None and entry[0] is rec:
                         rec["elapsed_seconds"] = max(0.0, now_mono - entry[1])
                         rec["duration_clock"] = "monotonic"
-                    if rec.get("capture_state", {}).get("status") == "partial":
-                        rec["capture_state"]["status"] = "complete"
+                    rec["capture_state"] = {
+                        "status": "partial",
+                        "detail": _UNWAITED_DETAIL,
+                    }
+            cls._popen_refs.clear()
+            cls._pending_running.clear()
+            if state is not None:
+                state["pending_running"].clear()
 
     @staticmethod
     def _safe_shlex_split(args: Any) -> list:
