@@ -1,5 +1,5 @@
 - Id: nqrhyn
-- Status: graduated
+- Status: done
 - Graduated-To: nqrhyn
 - Set: nqrhyn
 - Work-Kind: chore
@@ -10,6 +10,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-24 done (aw backlog): closed by aw agy run: IPD lwb332 executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261123-nqrhyn-01-lwb332-deduplicate-overlapping-pubrun-imports-sections-in-docs-mani.ipd.md); evidence .aw/records/plans/executed/20261123-nqrhyn-01-lwb332-deduplicate-overlapping-pubrun-imports-sections-in-docs-mani.ipd.md
 - 2026-11-24 graduated (aw set): Graduated to review-ready IPD lwb332 (Set: nqrhyn)
 - 2026-11-22 created (aw backlog): Deduplicate overlapping pubrun_imports sections in docs/manifest.md
 
