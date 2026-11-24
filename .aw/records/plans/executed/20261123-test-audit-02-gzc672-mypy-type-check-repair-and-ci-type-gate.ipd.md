@@ -5,8 +5,9 @@
 - Concern: Testing rigor and completeness (static type-checking reliability and CI enforcement for a package shipping `src/pubrun/py.typed` and `Typing :: Typed`).
 - Scope: `src/pubrun/__main__.py`, `src/pubrun/tui/widgets/actions.py`, `src/pubrun/tui/widgets/diff.py`, `src/pubrun/report/reproducibility.py`, `pyproject.toml`, `.github/workflows/ci.yml`, new `tests/test_type_repair_regressions.py`, and the contributor documentation (`CONTRIBUTING.md`, `CHANGELOG.md`).
 - Scope-Paths: src/pubrun/__main__.py, src/pubrun/tui/widgets/actions.py, src/pubrun/tui/widgets/diff.py, src/pubrun/report/reproducibility.py, pyproject.toml, .github/workflows/ci.yml, tests/test_type_repair_regressions.py, CONTRIBUTING.md, CHANGELOG.md
+- Scope-Exceeded: .aw/records/backlog/open/20261124-o9c3gr-01-o9c3gr-use-monkeypatch-in-tests-test-tui-py-test-tui-miss.backlog.md (Required defect-report carrier for tests/test_tui.py deleting sys.modules['pubrun.tui.app'] without restoring it, which required _refresh_sidebar_messageself.app in actions.py to check getattrapp, 'Re...); .aw/records/backlog/open/20261124-z5xr49-01-z5xr49-fix-2-mypy-assignment-errors-in-src-pubrun-capture.backlog.md (Required defect-report carrier for 2 mypy assignment errors introduced by focjwv edc6343 in out-of-scope src/pubrun/capture/subprocesses.py, which required listing pubrun.capture.subprocesses in pypro...)
 - Item-Dependencies: executed:bzi46m
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix the duplicate-module import in __main__.py, fix type errors in four modules, configure a [tool.mypy] ratchet, and add a blocking CI mypy job
@@ -17,12 +18,12 @@
 - Highest E allocated: 07
 - Author: Antigravity
 - Id: gzc672
-- Approval: 2026-11-24, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-24 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: gzc672 verified (set test-audit, attempt 2). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261124-o9c3gr-01-o9c3gr-use-monkeypatch-in-tests-test-tui-py-test-tui-miss.backlog.md: Required defect-report carrier for tests/test_tui.py deleting sys.modules['pubrun.tui.app'] without restoring it, which required _refresh_sidebar_message(self.app) in actions.py to check getattr(app, 'RefreshSidebar', None) first; out-of-scope .aw/records/backlog/open/20261124-z5xr49-01-z5xr49-fix-2-mypy-assignment-errors-in-src-pubrun-capture.backlog.md: Required defect-report carrier for 2 mypy assignment errors introduced by focjwv (edc6343) in out-of-scope src/pubrun/capture/subprocesses.py, which required listing pubrun.capture.subprocesses in pyproject.toml ignore_errors]
 - 2026-11-24 approved (aw set): status set to approved
 - 2026-11-23 /plan-review (uri/its_direct/pt3-claude-opus-5.5-1m-us): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012, PR-013, PR-014, PR-015
 - 2026-11-23 to-review (Antigravity): authored from `/assess-testing` finding T-05 (serialized after `bzi46m` for `pyproject.toml` and `.github/workflows/ci.yml`).
