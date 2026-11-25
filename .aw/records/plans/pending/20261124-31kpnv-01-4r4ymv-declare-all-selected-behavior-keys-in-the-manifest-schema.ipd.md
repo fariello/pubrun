@@ -43,22 +43,22 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Schema
 
-- [ ] E-01 In `schemas/manifest.schema.json`, replace the `selected_behavior` property inside `properties.pubrun_imports.properties` with the declaration given in "Proposed changes" item 1.
+- [x] E-01 In `schemas/manifest.schema.json`, replace the `selected_behavior` property inside `properties.pubrun_imports.properties` with the declaration given in "Proposed changes" item 1.
   - Depends on: none
   - Expected outcome: (1) `selected_behavior` keeps `"type": ["object", "null"]`. (2) It gains a non-empty `description` string. (3) Its `properties` declare exactly these six keys, each with `"type": "boolean"` and a non-empty `description` string: `auto_start`, `global_hooks`, `patch_subprocesses`, `patch_console`, `signal_hooks`, `force_console`. (4) It carries `"additionalProperties": false`. (5) It has no `required` list. (6) No other part of the schema changes, and the file keeps its 4-space multi-line JSON indentation.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Tests and changelog
 
-- [ ] E-02 In `tests/test_manifest_schema.py`, add the helper and three tests specified in "Proposed changes" item 2.
+- [x] E-02 In `tests/test_manifest_schema.py`, add the helper and three tests specified in "Proposed changes" item 2.
   - Depends on: E-01
   - Expected outcome: `tests/test_manifest_schema.py` extracts the `selected_behavior` subschema (for example via `_selected_behavior_subschema`) and verifies: (1) real subprocess-generated manifests for every mode in `src/pubrun/_modes.py::MODES` record the expected `selected_mode` and exact `selected_behavior` dictionary and validate against `schemas/manifest.schema.json`; (2) `null`, the two-key legacy shape, and `{}` validate against the `selected_behavior` subschema; and (3) string values for every declared flag, a non-boolean integer value (`{"force_console": 1}`), and an undeclared flag (`{"auto_start": True, "bogus_flag": True}`) each raise `jsonschema.ValidationError`. Every test asserts on real manifests or `jsonschema` validation results, and none reads production source code. All tests in `tests/test_manifest_schema.py` pass.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Add one bullet to `CHANGELOG.md` under `## [Unreleased]` `### Fixed`.
+- [x] E-03 Add one bullet to `CHANGELOG.md` under `## [Unreleased]` `### Fixed`.
   - Depends on: E-01
   - Expected outcome: One bullet, written for users with no em or en dashes, states that the manifest schema now declares the `patch_subprocesses`, `patch_console`, `signal_hooks`, and `force_console` flags in `pubrun_imports.selected_behavior` as booleans and rejects undeclared flags there, and that manifests pubrun writes are unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -241,20 +241,155 @@ flowchart TD
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: (1) Paste `git diff -- schemas/manifest.schema.json` and confirm it changes only the `selected_behavior` entry using the file's 4-space multi-line JSON layout. (2) Paste the output of `python3 -c "import json; s=json.load(open('schemas/manifest.schema.json', encoding='utf-8')); b=s['properties']['pubrun_imports']['properties']['selected_behavior']; print(sorted(b['properties'])); print({k: v['type'] for k, v in b['properties'].items()}); print(b['additionalProperties'], 'required' in b, b['type'], bool(b.get('description')), all(bool(v.get('description')) for v in b['properties'].values()))"`, which must print the six sorted key names, `'boolean'` for each, and `False False ['object', 'null'] True True`. (3) Paste the schema meta-validation (`validator_for(schema).check_schema(schema)`, e.g. `test_schema_is_valid_draft`) result line from the V-02 run showing `PASSED`.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- schemas/manifest.schema.json` (changes only `selected_behavior` with 4-space multi-line JSON layout):
+    ```diff
+    diff --git a/schemas/manifest.schema.json b/schemas/manifest.schema.json
+    index de80baf..ec2b9be 100644
+    --- a/schemas/manifest.schema.json
+    +++ b/schemas/manifest.schema.json
+    @@ -123,14 +123,34 @@
+                             "object",
+                             "null"
+                         ],
+    +                    "description": "Effective import-mode behavior flags for the selected mode. Null until a mode is selected. Manifests written before 2026-06-20 carry only auto_start and global_hooks.",
+                         "properties": {
+                             "auto_start": {
+    -                            "type": "boolean"
+    +                            "type": "boolean",
+    +                            "description": "Importing pubrun starts tracking automatically."
+                             },
+                             "global_hooks": {
+    -                            "type": "boolean"
+    +                            "type": "boolean",
+    +                            "description": "Obsolete unified flag kept for backward compatibility; true when process-global hooks are permitted."
+    +                        },
+    +                        "patch_subprocesses": {
+    +                            "type": "boolean",
+    +                            "description": "The mode permits the subprocess spy."
+    +                        },
+    +                        "patch_console": {
+    +                            "type": "boolean",
+    +                            "description": "The mode permits redirecting sys.stdout and sys.stderr (console tee)."
+    +                        },
+    +                        "signal_hooks": {
+    +                            "type": "boolean",
+    +                            "description": "The mode permits signal and excepthook handlers."
+    +                        },
+    +                        "force_console": {
+    +                            "type": "boolean",
+    +                            "description": "The mode forces the console tee on regardless of capture_mode. Present only for the full mode."
+                             }
+    -                    }
+    +                    },
+    +                    "additionalProperties": false
+                     },
+                     "selected_by": {
+                         "type": [
+    ```
+    (2) Inspection command output:
+    ```text
+    ['auto_start', 'force_console', 'global_hooks', 'patch_console', 'patch_subprocesses', 'signal_hooks']
+    {'auto_start': 'boolean', 'global_hooks': 'boolean', 'patch_subprocesses': 'boolean', 'patch_console': 'boolean', 'signal_hooks': 'boolean', 'force_console': 'boolean'}
+    False False ['object', 'null'] True True
+    ```
+    (3) Schema meta-validation line from the V-02 verbose run:
+    ```text
+    tests/test_manifest_schema.py::test_schema_is_valid_draft PASSED         [  5%]
+    ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: (1) Paste the pytest verbose result lines and summary line from `python3 -m pytest tests/test_manifest_schema.py --no-cov -q -v` proving all three new behavioral groups pass (non-binding pointers: `test_import_mode_manifest_selected_behavior_conforms`, `test_selected_behavior_schema_accepts_null_legacy_and_partial_shapes`, `test_selected_behavior_schema_rejects_bad_values`), re-deriving at execution time that every mode currently in `src/pubrun/_modes.py::MODES` ran in a subprocess and validated against `schemas/manifest.schema.json`, that `None`/legacy-two-key/`{}` validated, and that every declared flag's non-boolean case, the integer case, and the undeclared-key case raised `jsonschema.ValidationError`. The subprocess conformance cases observe real manifests written by the child process started in E-02 through `src/pubrun/tracker.py::Run._get_import_metadata`. (2) Paste the summary line of `python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py --no-cov -q`. (3) Paste the `aw suite --no-cache` summary, and for any failure paste the same test's result on unmodified `HEAD`. (4) Paste the failing output of both valid-JSON mutation checks in "Required tests / validation", followed by `git diff --stat -- schemas/manifest.schema.json` and a passing `python3 -m pytest tests/test_manifest_schema.py --no-cov -q` after restoring `schemas/manifest.schema.json` to its exact E-01 state. (5) State which operating system and Python version ran the tests, and that the CI matrix was not run.
   - Observed evidence:
-  - Result: pending
+    (1) Verbose pytest lines from `python3 -m pytest tests/test_manifest_schema.py --no-cov -v` (all six `MODES` entries, all three acceptance shapes, and all eight rejection cases passed; `-q -v` also passed `58 passed in 15.28s`):
+    ```text
+    tests/test_manifest_schema.py::test_import_mode_manifest_selected_behavior_conforms[auto] PASSED [ 72%]
+    tests/test_manifest_schema.py::test_import_mode_manifest_selected_behavior_conforms[full] PASSED [ 74%]
+    tests/test_manifest_schema.py::test_import_mode_manifest_selected_behavior_conforms[minimal] PASSED [ 75%]
+    tests/test_manifest_schema.py::test_import_mode_manifest_selected_behavior_conforms[noauto] PASSED [ 77%]
+    tests/test_manifest_schema.py::test_import_mode_manifest_selected_behavior_conforms[noconsole] PASSED [ 79%]
+    tests/test_manifest_schema.py::test_import_mode_manifest_selected_behavior_conforms[nopatch] PASSED [ 81%]
+    tests/test_manifest_schema.py::test_selected_behavior_schema_accepts_null_legacy_and_partial_shapes[null] PASSED [ 82%]
+    tests/test_manifest_schema.py::test_selected_behavior_schema_accepts_null_legacy_and_partial_shapes[legacy-two-keys] PASSED [ 84%]
+    tests/test_manifest_schema.py::test_selected_behavior_schema_accepts_null_legacy_and_partial_shapes[empty-object] PASSED [ 86%]
+    tests/test_manifest_schema.py::test_selected_behavior_schema_rejects_bad_values[string-auto_start] PASSED [ 87%]
+    tests/test_manifest_schema.py::test_selected_behavior_schema_rejects_bad_values[string-global_hooks] PASSED [ 89%]
+    tests/test_manifest_schema.py::test_selected_behavior_schema_rejects_bad_values[string-patch_subprocesses] PASSED [ 91%]
+    tests/test_manifest_schema.py::test_selected_behavior_schema_rejects_bad_values[string-patch_console] PASSED [ 93%]
+    tests/test_manifest_schema.py::test_selected_behavior_schema_rejects_bad_values[string-signal_hooks] PASSED [ 94%]
+    tests/test_manifest_schema.py::test_selected_behavior_schema_rejects_bad_values[string-force_console] PASSED [ 96%]
+    tests/test_manifest_schema.py::test_selected_behavior_schema_rejects_bad_values[int-force_console] PASSED [ 98%]
+    tests/test_manifest_schema.py::test_selected_behavior_schema_rejects_bad_values[undeclared-bogus_flag] PASSED [100%]
+    ============================= 58 passed in 15.03s ==============================
+    ```
+    (2) `python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py --no-cov -q`:
+    ```text
+    98 passed in 25.88s
+    ```
+    (3) `aw suite --no-cache`:
+    ```text
+    ======================= 2155 passed in 159.54s (0:02:39) =======================
+    ```
+    (4) Valid-JSON mutation checks on `schemas/manifest.schema.json`:
+    Mutation 1 (removed `"additionalProperties": false` and preceding comma):
+    ```text
+    exit_code=1
+    .......F                                                                 [100%]
+    E       Failed: DID NOT RAISE <class 'jsonschema.exceptions.ValidationError'>
+    FAILED tests/test_manifest_schema.py::test_selected_behavior_schema_rejects_bad_values[undeclared-bogus_flag]
+    1 failed, 7 passed, 50 deselected in 0.45s
+    ```
+    Mutation 2 (removed `"force_console"` property and preceding comma):
+    ```text
+    exit_code=1
+    F                                                                        [100%]
+    E           jsonschema.exceptions.ValidationError: Additional properties are not allowed ('force_console' was unexpected)
+    FAILED tests/test_manifest_schema.py::test_import_mode_manifest_selected_behavior_conforms[full]
+    1 failed, 57 deselected in 1.24s
+    ```
+    Restored exact E-01 content and verified:
+    ```text
+    $ git diff --stat -- schemas/manifest.schema.json
+     schemas/manifest.schema.json | 26 +++++++++++++++++++++++---
+     1 file changed, 23 insertions(+), 3 deletions(-)
+    $ python3 -m pytest tests/test_manifest_schema.py --no-cov -q
+    ..........................................................               [100%]
+    58 passed in 16.70s
+    ```
+    (5) Environment: Linux x86_64 with Python 3.14.6 (`pytest` 8.2.2). The GitHub Actions CI matrix (3 operating systems x Python 3.8 to 3.14) was not run because pushing requires explicit human instruction.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: (1) Paste `git diff -- CHANGELOG.md`, showing one added bullet under `## [Unreleased]` `### Fixed` that names the four added flags and says manifests are unchanged. (2) Paste the output and exit status `0` of the working-tree dash check command in "Required tests / validation", showing `added_lines>=1` and `dashes=0`. (3) Paste the exit status of `python3 scripts/sanitize_paths.py --check --all`, which must be `0`.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- CHANGELOG.md`:
+    ```diff
+    diff --git a/CHANGELOG.md b/CHANGELOG.md
+    index 4e90349..74d807a 100644
+    --- a/CHANGELOG.md
+    +++ b/CHANGELOG.md
+    @@ -118,6 +118,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+       the deep pages, never the README front door.
+
+     ### Fixed
+    +- **Manifest schema now declares every import-mode behavior flag.** `pubrun_imports.selected_behavior`
+    +  in `schemas/manifest.schema.json` now declares `patch_subprocesses`, `patch_console`,
+    +  `signal_hooks`, and `force_console` as booleans alongside `auto_start` and `global_hooks`, and
+    +  rejects undeclared flags. Previously the schema checked only two of the six flags pubrun can
+    +  write. Manifests that pubrun writes are unchanged, and older manifests with only `auto_start` and
+    +  `global_hooks` still validate.
+     - **A SIGTERM or SIGHUP no longer hangs the process when it arrives while pubrun holds an internal lock.**
+    ```
+    (2) Working-tree dash check output and exit status:
+    ```text
+    added_lines=6 dashes=0
+    dash_exit=0
+    ```
+    (3) `python3 scripts/sanitize_paths.py --check --all` exit status: `0`.
+  - Result: pass
 
 ## Approval and execution gate
 

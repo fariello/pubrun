@@ -123,14 +123,34 @@
                         "object",
                         "null"
                     ],
+                    "description": "Effective import-mode behavior flags for the selected mode. Null until a mode is selected. Manifests written before 2026-06-20 carry only auto_start and global_hooks.",
                     "properties": {
                         "auto_start": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "description": "Importing pubrun starts tracking automatically."
                         },
                         "global_hooks": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "description": "Obsolete unified flag kept for backward compatibility; true when process-global hooks are permitted."
+                        },
+                        "patch_subprocesses": {
+                            "type": "boolean",
+                            "description": "The mode permits the subprocess spy."
+                        },
+                        "patch_console": {
+                            "type": "boolean",
+                            "description": "The mode permits redirecting sys.stdout and sys.stderr (console tee)."
+                        },
+                        "signal_hooks": {
+                            "type": "boolean",
+                            "description": "The mode permits signal and excepthook handlers."
+                        },
+                        "force_console": {
+                            "type": "boolean",
+                            "description": "The mode forces the console tee on regardless of capture_mode. Present only for the full mode."
                         }
-                    }
+                    },
+                    "additionalProperties": false
                 },
                 "selected_by": {
                     "type": [
