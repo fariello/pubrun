@@ -6,7 +6,9 @@
 - Scope: In `docs/manifest.md`, section "Lock File (`.pubrun.lock`)", insert a `sys_argv` row in the field table immediately after `argv` and insert a matching `"sys_argv"` entry in the Lock File JSON example immediately after `"argv"`. No other file, section, row, or example field changes.
 - Scope-Paths: docs/manifest.md
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: simple
 - Short-Description: Add sys_argv to the Lock File table and JSON example in docs/manifest.md
 - Work-Kind: followup
 - Priority: low
@@ -21,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-25 /plan-review (Antigravity): APPROVE; no findings; review record `.aw/records/reviews/20261125-ln0vci-01-wg2l7b-document-sys-argv-in-the-lock-file-section-of-docs-manifest.review.md`.
 - 2026-11-25 to-review (aw set): graduated from backlog item ln0vci into a review-ready plan.
 - 2026-11-25 draft (antigravity): created.
 
