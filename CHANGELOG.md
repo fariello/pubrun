@@ -68,7 +68,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Testable entry points.** `pubrun.__main__.main()` now accepts an optional argument list without
   modifying `sys.argv`, and `print_report` and `print_resources_report` in
   `pubrun.report.diagnostics` accept a keyword-only `out` stream and raise `DiagnosticsError`
-  instead of exiting the process. Command-line output and exit codes are unchanged.
+  instead of exiting the process. Command-line output and exit codes are unchanged, except that
+  `pubrun --no-color --info` now reports `--no-color` in its printed invocation fields because
+  `main()` no longer strips it from `sys.argv`.
 - **Static type checking (`mypy`) repaired and gated in CI.** Fixed the duplicate-module import in
   `src/pubrun/__main__.py` so `pubrun report-bug` no longer loads the `pubrun` package a second time,
   resolved type errors in `src/pubrun/__main__.py`, `src/pubrun/tui/widgets/actions.py`,

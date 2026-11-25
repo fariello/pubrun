@@ -275,7 +275,7 @@ while IFS= read -r line; do
   (cd "$work" && eval "${PY:-python3} -m pubrun $line" > "$out/$n.out" 2> "$out/$n.err"; echo $? > "$out/$n.rc")
 done <<'CMDS'
 --help
---no-color --info
+--info
 help status
 status help
 help bogus
@@ -343,6 +343,13 @@ At authoring the exit codes were `01=0 02=0 03=0 04=0 05=0 06=2 07=2 08=2 09=0 .
 - Status: resolved
 - Owner: plan author
 - Resolution or deferral rationale: No. A `SystemExit` subclass would keep the testability problem: test code that calls `print_report` would still need `pytest.raises(SystemExit)`. It would also bypass the `except Exception` clauses in the CLI wrappers in a way that hides intent. The only callers are `_run_report` and `_run_resources`, and E-05 catches it explicitly. A plain `Exception` subclass is the seam the backlog item asks for.
+
+### OQ-03: How should parity check case 02 (`--no-color --info`) handle `main()` no longer mutating `sys.argv`?
+
+- Blocking: yes
+- Status: resolved
+- Owner: maintainer
+- Resolution or deferral rationale: On unmodified `HEAD`, `main()` mutated `sys.argv` in place to strip `--no-color`, so `pubrun --no-color --info` (which calls `src/pubrun/capture/invocation.py::get_invocation({})`) omitted `--no-color` from `invocation.argv`, `command_line`, and `rerun_command`. Under E-01 (`main()` never mutates `sys.argv`), `--no-color --info` now reports `--no-color` in those three fields. RESOLVED 2026-11-25 by the user via /askme: Accept the updated --no-color --info output and adjust parity check case 02. No reason was given.
 
 ## Validation and cross-check (verify before reporting done)
 
@@ -724,7 +731,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     ```
   - Result: pass
 
-- [ ] V-06 validates E-06
+- [x] V-06 validates E-06
   - Required evidence: (1) Paste the `python3 -m pytest tests/test_cli_seams.py tests/test_diagnostics_seams.py --no-cov -q -v` result lines for every test named in "Proposed changes" items 5 and 6, each `PASSED`, and its summary line. (2) Paste the summary line of the nine-file related-suites run from "Required tests / validation". (3) Paste the full-suite (`aw suite --no-cache`) summary line, and for any failure paste the same test's result on unmodified `HEAD`. (4) Paste the `mypy; echo "exit=$?"` output showing `Success: no issues found in <N> source files` (`58` at review; re-derive at execution time) and `exit=0`, and `git diff --stat -- pyproject.toml`, which must be empty. (5) Paste the parity commands' output from "Required tests / validation": the `IDENTICAL` line and the exit-code list, which must match the authoring list. (6) Paste the failing summary line of the `parse_args()` mutation check, then `git diff --stat` after restoring. (7) State which OS and Python version ran the tests, and that the CI matrix was not run.
   - Observed evidence:
     (1) `python3 -m pytest tests/test_cli_seams.py tests/test_diagnostics_seams.py --no-cov -v`: all 42 tests `PASSED` (every test line pasted across V-01, V-02, V-03, V-04, V-05, V-07); summary: `42 passed in 0.49s` (with `-q -v`: `42 passed in 0.73s`).
@@ -736,27 +743,11 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     exit=0
     ```
     `git diff --stat -- pyproject.toml`: empty.
-    (5) CLI parity script (`tmp/cli-seams-golden.sh` against `git archive HEAD src` at `26185bc` vs working tree):
-    Exit codes (exact match to authoring list):
+    (5) CLI parity script (`tmp/cli-seams-golden.sh` against pre-plan base `git archive 26185bc src` vs working tree, with case 02 adjusted from `--no-color --info` to `--info` per maintainer decision `OQ-03` so `pubrun --no-color --info` keeps reporting `--no-color` in its `invocation` block):
     ```text
+    IDENTICAL
     01=0 02=0 03=0 04=0 05=0 06=2 07=2 08=2 09=0 10=0 11=0 12=0 13=0 14=0 15=0 16=0 17=0 18=0 19=0 20=1 21=1 22=0 23=0 24=0 25=0 26=1 27=1 28=0 29=0 30=0
     ```
-    `diff -ru tmp/cli-seams-golden/before tmp/cli-seams-golden/after` was identical on 29 of 30 commands (all 30 stderr files and all 30 exit codes identical), and did NOT print `IDENTICAL` solely because command `02` (`--no-color --info`) calls `_show_info()` -> `get_invocation({})`, which reads `sys.argv`:
-    ```diff
-    diff -ru tmp/cli-seams-golden/before/02.out tmp/cli-seams-golden/after/02.out
-    @@ -15,10 +15,11 @@
-       "invocation": {
-         "argv": [
-           "<SRC>/pubrun/__main__.py",
-    +      "--no-color",
-           "--info"
-         ],
-    -    "command_line": "<SRC>/pubrun/__main__.py --info",
-    -    "rerun_command": "cd <WORK> && python <SRC>/pubrun/__main__.py --info",
-    +    "command_line": "<SRC>/pubrun/__main__.py --no-color --info",
-    +    "rerun_command": "cd <WORK> && python <SRC>/pubrun/__main__.py --no-color --info",
-    ```
-    On unmodified `HEAD`, `main()` mutated `sys.argv` globally to delete `"--no-color"`, causing `get_invocation({})` to omit `"--no-color"` from `invocation.argv`, `command_line`, and `rerun_command`. Because E-01 forbids mutating `sys.argv`, `get_invocation({})` now reports the actual process `sys.argv`. Raised as a human decision (`q-info-no-color-parity`) rather than weakening V-06 or re-introducing the inaccuracy.
     (6) `parse_args()` mutation check:
     ```text
     FAILED tests/test_cli_seams.py::TestMainArgv::test_main_argv_does_not_touch_sys_argv
@@ -776,7 +767,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
      3 files changed, 295 insertions(+), 223 deletions(-)
     ```
     (7) Ran on Linux 6.8.0-151-generic x86_64 with Python 3.14.6. The GitHub Actions CI matrix was not run (no push).
-  - Result: blocked
+  - Result: pass
 
 - [x] V-07 validates E-07
   - Required evidence: (1) Paste the `tests/test_diagnostics_seams.py` result lines from the V-06 run, every one `PASSED`, including `test_ascii_stream_gets_ascii_glyphs` and `test_out_default_is_current_stdout`. (2) Paste the output of `python3 -m pytest tests/test_diagnostics_seams.py --no-cov -q -p no:cacheprovider` run a second time, with the same pass count, showing the file does not depend on test order or cache state.
@@ -810,16 +801,18 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 - [x] V-08 validates E-08
   - Required evidence: (1) Paste `git diff -- CHANGELOG.md`, showing one bullet under `## [Unreleased]` `### Changed`. (2) Paste the output of `git diff -U0 -- CHANGELOG.md | grep '^+[^+]' | grep -c '[—–]'`, which must print `0`. (3) Paste the output and exit code of `python3 scripts/sanitize_paths.py --check --all`, which must be 0. (4) Paste `git status --short`, showing only the five Scope-Paths changed and no `tmp/` content tracked.
   - Observed evidence:
-    (1) `git diff -- CHANGELOG.md`:
+    (1) `git diff 26185bc -- CHANGELOG.md`:
     ```diff
      ### Changed
     +- **Testable entry points.** `pubrun.__main__.main()` now accepts an optional argument list without
     +  modifying `sys.argv`, and `print_report` and `print_resources_report` in
     +  `pubrun.report.diagnostics` accept a keyword-only `out` stream and raise `DiagnosticsError`
-    +  instead of exiting the process. Command-line output and exit codes are unchanged.
+    +  instead of exiting the process. Command-line output and exit codes are unchanged, except that
+    +  `pubrun --no-color --info` now reports `--no-color` in its printed invocation fields because
+    +  `main()` no longer strips it from `sys.argv`.
      - **Static type checking (`mypy`) repaired and gated in CI.** Fixed the duplicate-module import in
     ```
-    (2) `git diff -U0 -- CHANGELOG.md | grep '^+[^+]' | grep -c '[—–]'`: `0`
+    (2) `git diff -U0 26185bc -- CHANGELOG.md | grep '^+[^+]' | grep -c '[—–]'`: `0`
     (3) `python3 scripts/sanitize_paths.py --check --all`: (no output), `exit=0`.
     (4) `git status --short` (before updating this plan's evidence):
     ```text
