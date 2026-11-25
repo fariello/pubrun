@@ -1,5 +1,6 @@
 - Id: o9c3gr
-- Status: open
+- Status: graduated
+- Graduated-To: o9c3gr
 - Set: o9c3gr
 - Work-Kind: bug
 - Priority: low
@@ -10,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-25 graduated (aw set): Graduated to review-ready IPD lv41re (Set: o9c3gr)
 - 2026-11-24 created (aw backlog): Use monkeypatch in tests/test_tui.py::test_tui_missing_dependencies_prints_notice instead of permanently deleting sys.modules['pubrun.tui.app']
 
 ## Problem
