@@ -6,7 +6,9 @@
 - Scope: `src/pubrun/core.py`, `src/pubrun/tracker.py`, a new `tests/test_tracker_console_migration.py`, the deletion of the then-empty `ignore_errors` override block in `pyproject.toml`, and the contributor documentation (`CONTRIBUTING.md`, `CHANGELOG.md`).
 - Scope-Paths: src/pubrun/core.py, src/pubrun/tracker.py, tests/test_tracker_console_migration.py, pyproject.toml, CONTRIBUTING.md, CHANGELOG.md
 - Item-Dependencies: executed:gzc672, executed:m66tfv, executed:f5yisk, executed:qe6dad, executed:k6fs5k
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: standard
 - Short-Description: Fix mypy errors in core.py and tracker.py, delete the empty ignore_errors override, and update contributor docs
 - Work-Kind: chore
 - Priority: low
@@ -21,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-24 to-review (aw set): authored from backlog qqwebg
 - 2026-11-24 draft (uri/its_direct/pt3-claude-opus-5.5-1m-us): created.
 
@@ -52,49 +55,48 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 ### Task group 1: Fix the type errors
 
 - [ ] E-01 In `src/pubrun/core.py`, make `mypy` see the narrowing that the code already performs at runtime:
-  - `core.annotate`: replace `if current_run and getattr(current_run, "event_stream", None):` with the two lines `event_stream = getattr(current_run, "event_stream", None) if current_run else None` and `if event_stream:`, and replace `current_run.event_stream.emit("annotation", name=message, payload=payload)` with `event_stream.emit("annotation", name=message, payload=payload)`.
-  - `core.phase`: add the class attribute `_yappi_active: bool = False` as the first statement after the class docstring, and change `self._profiler = None` in `__init__` to `self._profiler: Any = None`. The attribute holds a `cProfile.Profile`, the string `"yappi"`, or `None`. `getattr(phase, "_yappi_active", False)` in `__enter__` already treats a missing attribute as `False`, so declaring it changes no result.
-  - `core.phase.__enter__`: the same pattern as `annotate`: `event_stream = getattr(self.run_tracker, "event_stream", None) if self.run_tracker else None`, then `if event_stream:` and `event_stream.emit("phase_start", name=self.name)`.
-  - `core.phase.__exit__`: replace `import yappi as yappi_mod  # type: ignore[import-not-found]` with `import yappi as _yappi_imported  # type: ignore[import-not-found]` followed by `yappi_mod = _yappi_imported`; keep `yappi_mod.stop()` on the next line. The import rebound a name already declared `yappi_mod: Any = None` (`no-redef`). Then replace `if self.run_tracker and getattr(self.run_tracker, "event_stream", None):` with `end_stream = getattr(self.run_tracker, "event_stream", None) if self.run_tracker else None` and `if end_stream:`, and `self.run_tracker.event_stream.emit(` with `end_stream.emit(`.
-  - `core.phase._emit_profile_saved`: `event_stream = getattr(self.run_tracker, "event_stream", None)`, then `if event_stream:` and `event_stream.emit(`.
+  - `src/pubrun/core.py::annotate`: replace `if current_run and getattr(current_run, "event_stream", None):` with the two lines `event_stream = getattr(current_run, "event_stream", None) if current_run else None` and `if event_stream:`, and replace `current_run.event_stream.emit("annotation", name=message, payload=payload)` with `event_stream.emit("annotation", name=message, payload=payload)`.
+  - `src/pubrun/core.py::phase`: add the class attribute `_yappi_active: bool = False` as the first statement after the class docstring, and change `self._profiler = None` in `__init__` to `self._profiler: Any = None`. The attribute holds a `cProfile.Profile`, the string `"yappi"`, or `None`. `getattr(phase, "_yappi_active", False)` in `__enter__` already treats a missing attribute as `False`, so declaring it changes no result.
+  - `src/pubrun/core.py::phase.__enter__`: the same pattern as `annotate`: `event_stream = getattr(self.run_tracker, "event_stream", None) if self.run_tracker else None`, then `if event_stream:` and `event_stream.emit("phase_start", name=self.name)`.
+  - `src/pubrun/core.py::phase.__exit__`: replace `import yappi as yappi_mod  # type: ignore[import-not-found]` with `import yappi as _yappi_imported  # type: ignore[import-not-found]` followed by `yappi_mod = _yappi_imported`; keep `yappi_mod.stop()` on the next line. The import rebound a name already declared `yappi_mod: Any = None` (`no-redef`). Then replace `if self.run_tracker and getattr(self.run_tracker, "event_stream", None):` with `end_stream = getattr(self.run_tracker, "event_stream", None) if self.run_tracker else None` and `if end_stream:`, and `self.run_tracker.event_stream.emit(` with `end_stream.emit(`.
+  - `src/pubrun/core.py::phase._emit_profile_saved`: `event_stream = getattr(self.run_tracker, "event_stream", None)`, then `if event_stream:` and `event_stream.emit(`.
   - Depends on: none
   - Expected outcome: The diff of `core.py` contains only these changes. `python3 -m pytest tests/test_api.py tests/test_events.py tests/test_core_lifecycle_bugs.py tests/test_new_features.py tests/test_pause_resume.py tests/test_file_registration.py -q` passes.
   - Execution state: pending
 
-- [ ] E-02 In `src/pubrun/tracker.py`:
-  - Change `from typing import Any, Dict, Optional, Tuple` to `from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple`, and after the line `_active_run: Optional["Run"] = None` add a block `if TYPE_CHECKING:` that imports `ConsoleInterceptor` from `pubrun.capture.console` and `EventStream` from `pubrun.events`. The guard keeps the runtime import graph unchanged (`tracker.py` imports these modules lazily today).
-  - `tracker.Run.__init__`: `self.console_interceptor = None` becomes `self.console_interceptor: Optional["ConsoleInterceptor"] = None`, and `self.event_stream = None` becomes `self.event_stream: Optional["EventStream"] = None`.
-  - `tracker.Run._merge_and_migrate`, in the block under the comment `# Close open files before moving the directory (required on Windows)`: bind `event_stream = self.event_stream` and `interceptor = self.console_interceptor` once, then use those locals for every later `self.event_stream` and `self.console_interceptor` reference in the close block and in the reopen block under `# Reopen or migrate the files to the active run_dir`. Replace each truthiness test `getattr(self, "event_stream", None)`, `getattr(self, "console_interceptor", None)`, `getattr(self.console_interceptor, "stdout_log", None)`, and `getattr(self.console_interceptor, "stderr_log", None)` with the matching `is not None` test on the local. Keep `getattr(event_stream, "_file", None)` unchanged (it reads a private attribute). Keep every assignment, including `interceptor.stdout_log = None`, `interceptor.stdout_tee.log_file = interceptor.stdout_log`, and the stderr pair.
+- [ ] E-02 In `src/pubrun/tracker.py` (`ConsoleInterceptor` and `EventStream` are already imported at module top level alongside `ArtifactWriter`, so no `TYPE_CHECKING` import or block is needed):
+  - `src/pubrun/tracker.py::Run.__init__`: `self.console_interceptor = None` becomes `self.console_interceptor: Optional[ConsoleInterceptor] = None`, and `self.event_stream = None` becomes `self.event_stream: Optional[EventStream] = None` (matching `self.writer: Optional[ArtifactWriter] = None`).
+  - `src/pubrun/tracker.py::Run._merge_and_migrate`, in the block under the comment `# Close open files before moving the directory (required on Windows)`: bind `event_stream = self.event_stream` and `interceptor = self.console_interceptor` once, then use those locals for every later `self.event_stream` and `self.console_interceptor` reference in the close block and in the reopen block under `# Reopen or migrate the files to the active run_dir`. Replace each truthiness test `getattr(self, "event_stream", None)`, `getattr(self, "console_interceptor", None)`, `getattr(self.console_interceptor, "stdout_log", None)`, and `getattr(self.console_interceptor, "stderr_log", None)` with the matching `is not None` test on the local. Keep `getattr(event_stream, "_file", None)` unchanged (it reads a private attribute). Keep every assignment, including `interceptor.stdout_log = None`, `interceptor.stdout_tee.log_file = interceptor.stdout_log`, and the stderr pair.
   - Depends on: none
   - Expected outcome: The diff of `tracker.py` contains only these changes. `EventStream`, `ConsoleInterceptor`, and file objects define no `__bool__` or `__len__`, so `is not None` gives the same result as the old truthiness tests for every value these attributes take. `python3 -m pytest tests/test_tracker.py tests/test_events.py tests/test_core_lifecycle_bugs.py -q` passes.
   - Execution state: pending
 
-- [ ] E-03 Create `tests/test_tracker_console_migration.py` with one test, `test_console_lines_after_migration_land_in_migrated_logs`, skipped on Windows with the reason used by `tests/test_tracker.py` `test_migrate_moves_directory` (`"Open file handles prevent shutil.move on Windows"`). It writes `tmp_path / ".pubrun.toml"` containing `[console]` with `capture_mode = "basic"` and `non_tty_mode = "basic"`, and a child script that imports `pubrun`, prints `before-out` to stdout and `before-err` to stderr (both with `flush=True`), calls `pubrun.start(output_dir="moved")`, then prints `after-out` and `after-err` the same way. It runs the script with `subprocess.run([sys.executable, script], cwd=tmp_path, capture_output=True, text=True, timeout=60)` and an environment built like `tests/test_core_lifecycle_bugs.py` `_child_env` (this checkout's `src` first on `PYTHONPATH`; `HOME`, `USERPROFILE`, and `XDG_CONFIG_HOME` under `tmp_path`; `PUBRUN_DISABLE`, `PUBRUN_IMPORT_MODE`, `PUBRUN_PROFILE`, and `PUBRUN_META_REF` removed). It asserts the exit code is 0, that exactly one run directory under `tmp_path / "moved"` holds a `stdout.log`, that its `stdout.log` contains both `before-out` and `after-out`, and that its `stderr.log` contains both `before-err` and `after-err`.
+- [ ] E-03 Create `tests/test_tracker_console_migration.py` with one test, `test_console_lines_after_migration_land_in_migrated_logs`, skipped on Windows with the reason used by `tests/test_tracker.py::TestMergeAndMigrate.test_migrate_moves_directory` (`"Open file handles prevent shutil.move on Windows"`). It writes `tmp_path / ".pubrun.toml"` containing `[console]` with `capture_mode = "basic"` and `non_tty_mode = "basic"`, and a child script that imports `pubrun`, prints `before-out` to stdout and `before-err` to stderr (both with `flush=True`), calls `pubrun.start(output_dir="moved")`, then prints `after-out` and `after-err` the same way. It runs the script with `subprocess.run([sys.executable, script], cwd=tmp_path, capture_output=True, text=True, timeout=60)` and an environment built like `tests/test_core_lifecycle_bugs.py::_child_env` (this checkout's `src` first on `PYTHONPATH`; `HOME`, `USERPROFILE`, `APPDATA`, and `XDG_CONFIG_HOME` under `tmp_path`; `PUBRUN_DISABLE`, `PUBRUN_AUTO_START`, `PUBRUN_IMPORT_MODE`, `PUBRUN_PROFILE`, and `PUBRUN_META_REF` removed). It asserts the exit code is 0, that exactly one run directory under `tmp_path / "moved"` holds a `stdout.log`, that its `stdout.log` contains both `before-out` and `after-out`, and that its `stderr.log` contains both `before-err` and `after-err`.
   - Depends on: E-02
   - Expected outcome: The test passes with and without E-02 (it characterizes the migration), and fails when either tee re-point line in `_merge_and_migrate` is replaced by `pass` (V-03).
   - Execution state: pending
 
 ### Task group 2: Retire the override
 
-- [ ] E-04 In `pyproject.toml`, delete the whole `[[tool.mypy.overrides]]` block that sets `ignore_errors = true`, including its `module` list (which now holds only `pubrun.core` and `pubrun.tracker`) and the comment lines above it that say the list may only shrink and point at backlog item `qqwebg`. Keep `[tool.mypy]` and the `ignore_missing_imports` override for `IPython`, `yappi`, and `tomli`. Change nothing else.
+- [ ] E-04 In `pyproject.toml`, delete the whole `[[tool.mypy.overrides]]` block that sets `ignore_errors = true`, including its `module` list (which now holds only `pubrun.core` and `pubrun.tracker`) and the comment lines above it that say the list may only shrink and point at backlog items `qqwebg` and `z5xr49`. Keep `[tool.mypy]` and the `ignore_missing_imports` override for `IPython`, `yappi`, and `tomli`. Change nothing else.
   - Depends on: E-01, E-02
-  - Expected outcome: `grep -n "ignore_errors" pyproject.toml` finds no match. `rm -rf .mypy_cache && mypy` prints `Success: no issues found in 58 source files` and exits 0. Appending `_aw_mut: int = "x"` to `tracker.py`, which exited 0 under the override at `gzc672` review, now makes `mypy` exit 1.
+  - Expected outcome: `grep -n "ignore_errors" pyproject.toml` finds no match. `rm -rf .mypy_cache && mypy` prints `Success: no issues found in <N> source files` (`58` at review; re-derive at execution time if modules were added) and exits 0. Appending `_aw_mut: int = "x"` to `tracker.py`, which exited 0 under the override at `gzc672` review, now makes `mypy --no-incremental` exit 1.
   - Execution state: pending
 
 - [ ] E-05 Update the contributor documentation that `gzc672` E-07 wrote:
-  - `CONTRIBUTING.md` "Development setup": in the paragraph about `mypy`, replace the statement that CI fails on a type error "in any module not listed in the `ignore_errors` override in `pyproject.toml`" with a statement that CI fails on a type error in any module of the package. Remove any other sentence that refers to the override or to its module list.
+  - `CONTRIBUTING.md#Development setup`: in the paragraph about `mypy`, replace the statement that CI fails on a type error "in any module not listed in the `ignore_errors` override in `pyproject.toml`" with a statement that CI fails on a type error in any module of the package. Remove any other sentence that refers to the override or to its module list.
   - `CHANGELOG.md` `## [Unreleased]`: add one `### Changed` entry (create the subsection if it does not exist) stating that `mypy` now checks every module of the package and that the per-module `ignore_errors` exemption list has been removed.
-  - Follow the `AGENTS.md` dash rule: no em or en dashes in the added prose.
+  - Follow `AGENTS.md#Agent execution contract`: no em or en dashes in the added prose.
   - Depends on: E-04
   - Expected outcome: `grep -n "ignore_errors" CONTRIBUTING.md` finds no match, and `CHANGELOG.md` `## [Unreleased]` has the new entry.
   - Execution state: pending
 
 ## Project conventions discovered (Step 0)
 
-- Plan `gzc672` (status `approved`, not yet executed at authoring) E-03 adds the `ignore_errors` override with 20 legacy modules and a comment that the list may only shrink; E-04 adds the blocking Linux `typecheck` CI job; E-07 writes the `CONTRIBUTING.md` paragraph and the `CHANGELOG.md` entry about the override. This plan edits all three results, hence `Item-Dependencies: executed:gzc672`.
-- Children `f5yisk`, `qe6dad`, and `k6fs5k` remove the other 18 modules from the list. This plan deletes the block, so it must run after all three. `k6fs5k` is also a type dependency: `tracker.py`'s 18 errors include `TextIOWrapper` assignments that stay errors until `k6fs5k` E-01 annotates `ConsoleInterceptor.stdout_log` and `stderr_log`. At authoring, applying this plan's `core.py` and `tracker.py` edits to `gzc672`'s tree without `k6fs5k`'s edits left `tracker.py` errors on the two lines that re-open `stdout.log` and `stderr.log` (`variable has type "None"`).
-- `tests/test_core_lifecycle_bugs.py` `_child_env` and `_run_script` show the subprocess pattern for testing a whole run; `tests/test_tracker.py` `TestMergeAndMigrate` holds the in-process migration tests and the Windows skip.
-- `CHANGELOG.md` follows Keep a Changelog with an `## [Unreleased]` section. `AGENTS.md` forbids em and en dashes in user-facing prose such as `CONTRIBUTING.md` and `CHANGELOG.md`.
+- Plan `gzc672` (now `executed`; `approved` at authoring) E-03 added the `ignore_errors` override with 21 legacy modules (the original 20 plus `pubrun.capture.subprocesses`, added during `gzc672` execution; comment cites backlog items `qqwebg` and `z5xr49`) and a comment that the list may only shrink; E-04 added the blocking Linux `typecheck` CI job; E-07 wrote the `CONTRIBUTING.md` paragraph and the `CHANGELOG.md` entry about the override. This plan edits all three results, hence `Item-Dependencies: executed:gzc672`.
+- Children `f5yisk` (7 modules), `qe6dad` (6 modules), and `k6fs5k` (6 modules, including `pubrun.capture.subprocesses`) remove the other 19 modules from the list. This plan deletes the block, so it must run after all three. `k6fs5k` is also a type dependency: `tracker.py`'s 18 errors include `TextIOWrapper` assignments that stay errors until `k6fs5k` E-01 annotates `ConsoleInterceptor.stdout_log` and `stderr_log`. At authoring, applying this plan's `core.py` and `tracker.py` edits to `gzc672`'s tree without `k6fs5k`'s edits left `tracker.py` errors on the two lines that re-open `stdout.log` and `stderr.log` (`variable has type "None"`).
+- `tests/test_core_lifecycle_bugs.py::_child_env` and `::_run_script` show the subprocess pattern for testing a whole run; `tests/test_tracker.py::TestMergeAndMigrate` holds the in-process migration tests and the Windows skip.
+- `CHANGELOG.md` follows Keep a Changelog with an `## [Unreleased]` section. `AGENTS.md#Agent execution contract` forbids em and en dashes in user-facing prose such as `CONTRIBUTING.md` and `CHANGELOG.md`.
 
 ## Findings
 
@@ -138,10 +140,10 @@ Rejected alternatives:
 
 ## Required tests / validation
 
-- `rm -rf .mypy_cache && mypy; echo "exit=$?"`: `Success: no issues found in 58 source files`, `exit=0`.
-- Mutation checks of the gate, each restored before the next: append `_aw_mut: int = "x"` to `src/pubrun/tracker.py`, then to `src/pubrun/core.py`; each `mypy` run prints an `error:` line for that file and exits 1.
+- `rm -rf .mypy_cache && mypy; echo "exit=$?"`: `Success: no issues found in <N> source files` (`58` at review; re-derive at execution time if modules were added), `exit=0`.
+- Mutation checks of the gate, each restored before the next: append `_aw_mut: int = "x"` to `src/pubrun/tracker.py`, then to `src/pubrun/core.py`; each `mypy --no-incremental; echo "exit=$?"` run prints an `error:` line for that file and `exit=1`.
 - Mutation checks of E-03 (V-03).
-- `python3 -m pytest -q`: the full suite, exit 0.
+- Full suite (`aw suite --no-cache`, or `python3 -m pytest -q` if `aw suite` is unavailable): exit 0.
 - `python3 scripts/sanitize_paths.py --check --all`: exit 0.
 
 ## Spec / documentation sync
@@ -163,7 +165,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
   - Result: pending
 
 - [ ] V-02 validates E-02
-  - Required evidence: Pasted `git diff src/pubrun/tracker.py` showing only the import, the `TYPE_CHECKING` block, the two annotated attributes, and the `_merge_and_migrate` local bindings and `is not None` tests; and the last line of `python3 -m pytest tests/test_tracker.py tests/test_events.py tests/test_core_lifecycle_bugs.py -q` showing all passed.
+  - Required evidence: Pasted `git diff src/pubrun/tracker.py` showing only the two annotated attributes (`self.console_interceptor` and `self.event_stream`) and the `_merge_and_migrate` local bindings and `is not None` tests; and the last line of `python3 -m pytest tests/test_tracker.py tests/test_events.py tests/test_core_lifecycle_bugs.py -q` showing all passed.
   - Observed evidence:
   - Result: pending
 
@@ -173,12 +175,12 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
   - Result: pending
 
 - [ ] V-04 validates E-04
-  - Required evidence: (1) Pasted `git diff pyproject.toml` showing only the deleted override block and its comment. (2) Pasted output of `grep -n "ignore_errors" pyproject.toml; echo "exit=$?"` showing `exit=1` (no match). (3) Pasted output of `rm -rf .mypy_cache && mypy; echo "exit=$?"` showing `Success: no issues found in 58 source files` and `exit=0`. (4) Pasted output of the two gate mutation checks, each with an `error:` line for the mutated file and `exit=1`, then `git diff --stat src/pubrun` showing only E-01 and E-02 files. (5) The last line of the full `python3 -m pytest -q` run and `exit=0`. (6) `python3 scripts/sanitize_paths.py --check --all` exiting 0.
+  - Required evidence: (1) Pasted `git diff pyproject.toml` showing only the deleted override block and its comment. (2) Pasted output of `grep -n "ignore_errors" pyproject.toml; echo "exit=$?"` showing `exit=1` (no match). (3) Pasted output of `rm -rf .mypy_cache && mypy; echo "exit=$?"` showing `Success: no issues found in <N> source files` (`58` at review; re-derive at execution time if modules were added) and `exit=0`. (4) Pasted output of the two `mypy --no-incremental; echo "exit=$?"` gate mutation checks, each with an `error:` line for the mutated file and `exit=1`, then `git diff --stat src/pubrun` showing only E-01 and E-02 files. (5) The last line of `aw suite --no-cache` (or `python3 -m pytest -q` if `aw suite` is unavailable) and `exit=0`. (6) `python3 scripts/sanitize_paths.py --check --all` exiting 0.
   - Observed evidence:
   - Result: pending
 
 - [ ] V-05 validates E-05
-  - Required evidence: Pasted `git diff CONTRIBUTING.md CHANGELOG.md`; pasted output of `grep -n "ignore_errors" CONTRIBUTING.md; echo "exit=$?"` showing `exit=1`; and pasted output of `git diff -U0 CONTRIBUTING.md CHANGELOG.md | grep "^+" | grep -nP "[\x{2013}\x{2014}]"; echo "exit=$?"` showing `exit=1` (no em or en dash added).
+  - Required evidence: Pasted `git diff CONTRIBUTING.md CHANGELOG.md`; pasted output of `grep -n "ignore_errors" CONTRIBUTING.md; echo "exit=$?"` showing `exit=1`; and pasted output of `python3 -c 'import subprocess; diff = subprocess.check_output(["git", "diff", "-U0", "--", "CONTRIBUTING.md", "CHANGELOG.md"], text=True); added = [l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++")]; assert added, "no added doc lines"; bad = [l for l in added if "\u2013" in l or "\u2014" in l]; assert not bad, bad; print(f"OK: {len(added)} added line(s), 0 en/em dashes")'` printing `OK: ... 0 en/em dashes` and exiting 0.
   - Observed evidence:
   - Result: pending
 
@@ -192,4 +194,4 @@ Execution contract:
 2. Scope declaration: the expected modified files are the `- Scope-Paths:` entries. If execution requires an out-of-scope file, justify it with `--scope-reason` at finalization. If a declared file needs no edit, acknowledge it with `--scope-ack`.
 3. Validation honesty: you MUST run each required validation command and paste its actual output into the matching `V-*` `Observed evidence:` field. Do not mark a `V-*` item `pass` without output captured from that run.
 4. Commit discipline: commit only the paths you changed with `aw commit 0uxy76 -- <paths>`. Do not use `git add -A` or raw `git commit`. Do not push without an explicit human instruction.
-5. Lifecycle transition: finalize this plan with `aw ipd finalize 0uxy76`, never with a hand-written `git mv`. Outside a runner, run it after every `E-*` item is `performed`, every `V-*` item is `pass`, and `aw ipd lint --phase pre-transition` reports `conforming`.
+5. Lifecycle transition: inside `aw oc run` / `aw agy run`, the runner owns finalization once every `E-*` item is `performed` and every `V-*` item is `pass`. Outside a runner, after every `E-*` item is `performed`, every `V-*` item is `pass`, and `aw ipd lint --phase pre-transition` reports `conforming`, finalize this plan with `aw ipd finalize 0uxy76` (never with a hand-written `git mv`).
