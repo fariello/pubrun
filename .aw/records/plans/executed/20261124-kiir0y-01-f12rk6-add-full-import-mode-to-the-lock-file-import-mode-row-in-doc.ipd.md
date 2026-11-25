@@ -5,8 +5,9 @@
 - Concern: The `import_mode` row of the Lock File table in `docs/manifest.md` lists five import modes and omits `full`, although pubrun writes `"full"` to that field of `.pubrun.lock` when a script runs `import pubrun.full`.
 - Scope: In `docs/manifest.md`, section "Lock File (`.pubrun.lock`)", change the description of the `import_mode` row so that it lists all six import modes, including `"full"`. No other file or row changes.
 - Scope-Paths: docs/manifest.md
+- Scope-Exceeded: .aw/records/backlog/open/20261124-ln0vci-01-ln0vci-document-sys-argv-in-the-lock-file-section-of-docs.backlog.md (Filed required defect-report backlog carrier ln0vci for undocumented sys_argv field in docs/manifest.md Lock File section)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Short-Description: List "full" in the Lock File import_mode row of docs/manifest.md
@@ -18,12 +19,12 @@
 - Highest E allocated: 01
 - Author: opencode
 - Id: f12rk6
-- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: f12rk6 verified (set kiir0y, attempt 1). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261124-ln0vci-01-ln0vci-document-sys-argv-in-the-lock-file-section-of-docs.backlog.md: Filed required defect-report backlog carrier ln0vci for undocumented sys_argv field in docs/manifest.md Lock File section]
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003 fixed; review record `.aw/records/reviews/20261124-kiir0y-01-f12rk6-add-full-import-mode-to-the-lock-file-import-mode-row-in-doc.review.md`.
 - 2026-11-25 to-review (opencode): graduated from backlog item `kiir0y` into a review-ready plan.
