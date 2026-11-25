@@ -22,22 +22,26 @@ def test_conftest_teardown_stops_active_run_and_restores_hooks(pytester):
         from pubrun.capture.signals import SignalExitCapture, _TARGET_SIGNALS
 
         _leaked_runs = []
+        _pre_test_excepthook = []
 
 
         def test_01_leaks_active_run_and_signal_capture():
+            _pre_test_excepthook.append(sys.excepthook)
             run = pubrun.start()
             _leaked_runs.append(run)
             assert run.is_active is True
             cap = SignalExitCapture()
             cap.install()
             assert cap._installed is True
+            assert sys.excepthook is not _pre_test_excepthook[0]
 
 
         def test_02_sees_clean_process_state():
             assert len(_leaked_runs) == 1
             assert _leaked_runs[0].is_active is False
             assert pubrun.tracker._active_run is None
-            assert sys.excepthook is sys.__excepthook__
+            assert sys.excepthook is _pre_test_excepthook[0]
+            assert getattr(sys.excepthook, "__module__", None) != "pubrun.capture.signals"
             assert isinstance(sys.exit, types.BuiltinFunctionType)
             assert getattr(sys.exit, "__module__", None) == "sys"
             for sig_name in _TARGET_SIGNALS:

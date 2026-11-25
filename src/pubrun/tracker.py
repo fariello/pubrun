@@ -209,8 +209,8 @@ class Run:
         self._active_profilers: list = []
         self.console_interceptor: Optional[ConsoleInterceptor] = None
         self.event_stream: Optional[EventStream] = None
-        self.resource_watcher = None
-        self.signal_capture = None
+        self.resource_watcher: Optional[ResourceWatcher] = None
+        self.signal_capture: Optional[SignalExitCapture] = None
         self._hardware_thread: Optional[threading.Thread] = None
         self._hardware_future_done: Optional[threading.Event] = None
 

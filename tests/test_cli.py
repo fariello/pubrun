@@ -505,16 +505,19 @@ class TestCliRerun:
 class TestCliDiff:
 
     @pytest.fixture
-    def two_runs(self, tmp_path):
-        """Create two runs to diff."""
+    def two_runs(self, tmp_path, monkeypatch):
+        """Create two runs with deterministic basic, standard, and deep differences."""
         from pubrun import start as pubrun_start
         import pubrun.tracker
 
         dirs = []
         try:
-            for _ in range(2):
+            for idx in range(2):
+                monkeypatch.setenv("PUBRUN_TEST_DIFF_ENV", f"run-{idx}")
                 pubrun.tracker._active_run = None
-                tracker = pubrun_start()
+                tracker = pubrun_start(
+                    capture={"inputs": {"compute_md5": bool(idx)}},
+                )
                 tracker.stop()
                 dirs.append(str(tracker.run_dir))
         finally:
