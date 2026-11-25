@@ -38,13 +38,12 @@ def test_tui_cli_parser_and_run_leaves_real_tui_module():
     assert PubrunTUIApp is real_app_module.PubrunTUIApp
 
 
-def test_tui_missing_dependencies_prints_notice(capsys):
+def test_tui_missing_dependencies_prints_notice(capsys, monkeypatch):
     """Verify that when TUI dependencies are missing, a friendly explanation is printed and exits 1."""
     from pubrun.__main__ import main
 
-    # Remove mock module if populated
-    if "pubrun.tui.app" in sys.modules:
-        del sys.modules["pubrun.tui.app"]
+    # Temporarily remove pubrun.tui.app so pytest restores any pre-existing module on teardown.
+    monkeypatch.delitem(sys.modules, "pubrun.tui.app", raising=False)
 
     with mock.patch("sys.argv", ["pubrun", "ui"]):
         # Mock import to raise ImportError
@@ -64,6 +63,20 @@ def test_tui_missing_dependencies_prints_notice(capsys):
             captured = capsys.readouterr()
             assert "pubrun is by default zero-dependency based" in captured.err
             assert "Run `pip install textual rich`" in captured.err
+
+
+def test_tui_missing_dependencies_leaves_real_tui_module(capsys, monkeypatch):
+    """Running the missing-dependency test must restore the real pubrun.tui.app module on teardown."""
+    pytest.importorskip("textual")
+    import pubrun.tui.app as real_app_module
+
+    with monkeypatch.context() as inner_mp:
+        test_tui_missing_dependencies_prints_notice(capsys, inner_mp)
+
+    assert sys.modules.get("pubrun.tui.app") is real_app_module
+    from pubrun.tui.app import PubrunTUIApp
+    assert PubrunTUIApp is real_app_module.PubrunTUIApp
+    assert PubrunTUIApp.RefreshSidebar is real_app_module.PubrunTUIApp.RefreshSidebar
 
 
 def test_tui_toml_serialization():
