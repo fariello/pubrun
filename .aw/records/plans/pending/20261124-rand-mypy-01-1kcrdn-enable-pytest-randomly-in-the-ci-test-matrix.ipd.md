@@ -56,7 +56,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Randomize the CI test order
 
-- [ ] E-01 In `.github/workflows/ci.yml`, add `-p randomly` to each of the four `pytest` commands and change nothing else in the file:
+- [x] E-01 In `.github/workflows/ci.yml`, add `-p randomly` to each of the four `pytest` commands and change nothing else in the file:
   - `test` job, step "Run tests": `pytest tests/ -v` becomes `pytest tests/ -v -p randomly`.
   - `test` job, step "Run tests with coverage gate": `pytest tests/ -v --cov=src --cov-report=term-missing --cov-fail-under=78` becomes `pytest tests/ -v -p randomly --cov=src --cov-report=term-missing --cov-fail-under=78`.
   - `no-tui` job, step "Run tests": `pytest tests/ -v` becomes `pytest tests/ -v -p randomly`.
@@ -64,24 +64,25 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   Do not pass `--randomly-seed`: each job then draws its own seed, so the 21 matrix jobs exercise 21 different orders per push, and each job prints its seed in the `pytest` header.
   - Depends on: none
   - Expected outcome: `yaml.safe_load` of the file shows `-p randomly` in exactly these four `run:` commands, and the job set, the matrix, and every other step are unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 In `pyproject.toml` `[tool.pytest.ini_options]`, replace the four-line comment above `addopts = "-p no:randomly"` (it begins "`pytest-randomly` is a dev dependency for LOCAL adverse-order testing" and says enabling random order in CI "is a separate, later step"). The new comment says: `pytest-randomly` stays disabled by default so local and `tox` runs are deterministic; CI passes `-p randomly` to every `pytest` command (`.github/workflows/ci.yml`), and a later `-p randomly` overrides this setting; reproduce a CI order with `-p randomly --randomly-seed=<N>` using the seed from the job log. Leave the `addopts` value itself unchanged.
+- [x] E-02 In `pyproject.toml` `[tool.pytest.ini_options]`, replace the four-line comment above `addopts = "-p no:randomly"` (it begins "`pytest-randomly` is a dev dependency for LOCAL adverse-order testing" and says enabling random order in CI "is a separate, later step"). The new comment says: `pytest-randomly` stays disabled by default so local and `tox` runs are deterministic; CI passes `-p randomly` to every `pytest` command (`.github/workflows/ci.yml`), and a later `-p randomly` overrides this setting; reproduce a CI order with `-p randomly --randomly-seed=<N>` using the seed from the job log. Leave the `addopts` value itself unchanged.
   - Depends on: E-01
   - Expected outcome: `python3 -m pytest tests/test_config.py -v -p no:cacheprovider` exits 0 and prints no `Using --randomly-seed` header (still disabled locally), and `python3 -m pytest tests/test_config.py -v -p randomly -p no:cacheprovider` exits 0 and prints one `Using --randomly-seed=` header line.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Document the change for contributors. In `CONTRIBUTING.md#Development setup`, after the `python -m pytest` code block, add a short paragraph and code block: CI runs every test suite in random order with `pytest-randomly`; the job log's `pytest` header shows `Using --randomly-seed=<N>`; reproduce the same order locally with `python -m pytest -p randomly --randomly-seed=<N>`. In `CHANGELOG.md` (`## [Unreleased]`, `### Changed`), add one entry saying CI now runs the test suites in random order with `pytest-randomly` and a logged seed (reproducible locally with `-p randomly --randomly-seed=<N>`), while local and `tox` runs keep the fixed order. In `TODO.md`, delete the `### Enable pytest-randomly in CI` section (heading and its paragraph), which this plan completes. Follow the `AGENTS.md` dash rule for `CONTRIBUTING.md` and `CHANGELOG.md`: no em or en dashes in the added prose.
+- [x] E-03 Document the change for contributors. In `CONTRIBUTING.md#Development setup`, after the `python -m pytest` code block, add a short paragraph and code block: CI runs every test suite in random order with `pytest-randomly`; the job log's `pytest` header shows `Using --randomly-seed=<N>`; reproduce the same order locally with `python -m pytest -p randomly --randomly-seed=<N>`. In `CHANGELOG.md` (`## [Unreleased]`, `### Changed`), add one entry saying CI now runs the test suites in random order with `pytest-randomly` and a logged seed (reproducible locally with `-p randomly --randomly-seed=<N>`), while local and `tox` runs keep the fixed order. In `TODO.md`, delete the `### Enable pytest-randomly in CI` section (heading and its paragraph), which this plan completes. Follow the `AGENTS.md` dash rule for `CONTRIBUTING.md` and `CHANGELOG.md`: no em or en dashes in the added prose.
   - Depends on: E-01
   - Expected outcome: `grep -n "randomly-seed" CONTRIBUTING.md CHANGELOG.md` shows the new lines in both files; `grep -n "Enable pytest-randomly in CI" TODO.md` finds no match (`exit=1`).
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Prove the randomized order on the full CI matrix
 
 - [ ] E-04 Run the local random-order checks named in "Required tests / validation" and record their output. Then ask the human to trigger `.github/workflows/ci.yml` by pushing to `main` or opening a pull request targeting `main` (`.github/workflows/ci.yml` runs only on `push` to `main` or `pull_request` targeting `main`, and pushing needs an explicit human instruction under the `AGENTS.md` agent execution contract). Record the conclusion of every CI job in that workflow run. If no push or pull request is authorized yet (for example in an unattended runner lane), record the local results, mark E-04 and V-04 `blocked` with that reason, and leave the plan in `pending/`. If any CI job fails on an order dependence, reproduce it locally with the job's seed, record the seed and the failing test, and stop: the fix is a new corrective plan, not an edit to this one.
   - Depends on: E-01, E-02, E-03
   - Expected outcome: Local runs exit 0 under three seeds plus the extra suites, each printing a `Using --randomly-seed=` header; and in the GitHub Actions run, all 25 jobs (`21 test` matrix jobs, `no-tui`, `extra-suites`, `packaging`, and `typecheck`) conclude `success`, with every `pytest` job printing a `Using --randomly-seed=` header in its log.
-  - Execution state: pending
+  - Execution state: blocked
+  - Execution note: All four local randomized pytest runs passed (three `tests/` seeds with 2138 passed each, plus extra-suites with 90 passed and 3 skipped). Remote GitHub Actions CI validation of `.github/workflows/ci.yml` is blocked in this unattended runner lane because pushing to `main` or opening a pull request targeting `main` requires explicit human authorization.
 
 ## Project conventions discovered (Step 0)
 
@@ -158,25 +159,189 @@ Rejected alternatives:
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted diff of `.github/workflows/ci.yml` showing only the four `-p randomly` additions; pasted output of a `python3 -c` script that `yaml.safe_load`s the file and prints every job name and every `run:` command containing `pytest`, with `-p randomly` in exactly four commands.
   - Observed evidence:
-  - Result: pending
+    ```diff
+    diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+    index b5b7ce6..f498b1f 100644
+    --- a/.github/workflows/ci.yml
+    +++ b/.github/workflows/ci.yml
+    @@ -35,10 +35,10 @@ jobs:
+             run: pip install -e ".[dev,tui]"
+           - name: Run tests
+             if: ${{ !(matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12') }}
+    -        run: pytest tests/ -v
+    +        run: pytest tests/ -v -p randomly
+           - name: Run tests with coverage gate
+             if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
+    -        run: pytest tests/ -v --cov=src --cov-report=term-missing --cov-fail-under=78
+    +        run: pytest tests/ -v -p randomly --cov=src --cov-report=term-missing --cov-fail-under=78
 
-- [ ] V-02 validates E-02
+       extra-suites:
+         runs-on: ubuntu-latest
+    @@ -51,7 +51,7 @@ jobs:
+           - name: Install dependencies
+             run: pip install -e ".[dev]" pyyaml
+           - name: Run script and benchmark contract tests
+    -        run: pytest .github/scripts/ benchmarks/test_share_safety.py benchmarks/test_pull_submissions.py benchmarks/test_benchmarks.py -v
+    +        run: pytest .github/scripts/ benchmarks/test_share_safety.py benchmarks/test_pull_submissions.py benchmarks/test_benchmarks.py -v -p randomly
+
+       no-tui:
+         runs-on: ubuntu-latest
+    @@ -64,7 +64,7 @@ jobs:
+           - name: Install package without tui extra
+             run: pip install -e ".[dev]"
+           - name: Run tests
+    -        run: pytest tests/ -v
+    +        run: pytest tests/ -v -p randomly
+
+       packaging:
+         runs-on: ubuntu-latest
+    ```
+    `yaml.safe_load` verification output (exit 0):
+    ```text
+    jobs: ['test', 'extra-suites', 'no-tui', 'packaging', 'typecheck']
+    test | Run tests | pytest tests/ -v -p randomly
+    test | Run tests with coverage gate | pytest tests/ -v -p randomly --cov=src --cov-report=term-missing --cov-fail-under=78
+    extra-suites | Run script and benchmark contract tests | pytest .github/scripts/ benchmarks/test_share_safety.py benchmarks/test_pull_submissions.py benchmarks/test_benchmarks.py -v -p randomly
+    no-tui | Run tests | pytest tests/ -v -p randomly
+    total_pytest_cmds=4 with_randomly=4
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Pasted diff of `pyproject.toml` showing the comment change and an unchanged `addopts = "-p no:randomly"` line; pasted output of `python3 -c "import subprocess, sys; p = subprocess.run([sys.executable, '-m', 'pytest', 'tests/test_config.py', '-v', '-p', 'no:cacheprovider'], capture_output=True, text=True); n = (p.stdout + p.stderr).count('Using --randomly-seed'); print(f'default exit={p.returncode} seed_lines={n}'); assert p.returncode == 0 and n == 0"` printing `default exit=0 seed_lines=0`; and pasted output of `python3 -c "import subprocess, sys; p = subprocess.run([sys.executable, '-m', 'pytest', 'tests/test_config.py', '-v', '-p', 'randomly', '-p', 'no:cacheprovider'], capture_output=True, text=True); lines = [l for l in (p.stdout + p.stderr).splitlines() if 'Using --randomly-seed' in l]; print(f'randomly exit={p.returncode} seed_lines={len(lines)}'); print(*lines, sep='\n'); assert p.returncode == 0 and len(lines) == 1"` printing `randomly exit=0 seed_lines=1` and the `Using --randomly-seed=` header line.
   - Observed evidence:
-  - Result: pending
+    ```diff
+    diff --git a/pyproject.toml b/pyproject.toml
+    index 2144170..53b633a 100644
+    --- a/pyproject.toml
+    +++ b/pyproject.toml
+    @@ -80,10 +80,10 @@ path = "hatch_build.py"
+     [tool.pytest.ini_options]
+     testpaths = ["tests"]
+     pythonpath = ["src"]
+    -# `pytest-randomly` is a dev dependency for LOCAL adverse-order testing (opt in with `-p randomly`);
+    -# it is deliberately DISABLED by default so CI and normal runs stay deterministic. Enabling
+    -# randomized order in CI is a separate, later step (see the flaky-test-hardening IPD, OQ1=C):
+    -# it would surface additional latent order-coupling that must be worked through first.
+    +# `pytest-randomly` stays disabled by default so local and `tox` runs are deterministic.
+    +# CI passes `-p randomly` to every `pytest` command in `.github/workflows/ci.yml`, and a later
+    +# `-p randomly` on the command line overrides this setting. Reproduce a CI test order locally
+    +# with `-p randomly --randomly-seed=<N>` using the seed printed in the job log.
+     addopts = "-p no:randomly"
+     markers = [
+         "slow: runs the benchmark harness or another multi-subprocess workload (deselect with -m 'not slow')",
+    ```
+    Default and `-p randomly` checks (both exit 0):
+    ```text
+    default exit=0 seed_lines=0
+    randomly exit=0 seed_lines=1
+    Using --randomly-seed=1811028625
+    ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted diffs of `CONTRIBUTING.md`, `CHANGELOG.md`, and `TODO.md`; pasted output of `grep -n "randomly-seed" CONTRIBUTING.md CHANGELOG.md` showing the new lines in both files; pasted output of `grep -n "Enable pytest-randomly in CI" TODO.md; echo "exit=$?"` showing no match and `exit=1`; pasted output of `python3 -c 'import subprocess, sys; res = [(p, len(a), sum("\u2013" in l or "\u2014" in l for l in a)) for p in ("CONTRIBUTING.md", "CHANGELOG.md") for a in [[l for l in subprocess.check_output(["git", "diff", "-U0", "--", p], text=True).splitlines() if l.startswith("+") and not l.startswith("+++")]]]; print(res); sys.exit(0 if all(n > 0 and d == 0 for _, n, d in res) else 1)'` exiting 0 with positive added-line counts and zero dashes for both files; and pasted output of `python3 scripts/sanitize_paths.py --check --all` exiting 0.
   - Observed evidence:
-  - Result: pending
+    ```diff
+    diff --git a/CHANGELOG.md b/CHANGELOG.md
+    index 4e90349..725d0c1 100644
+    --- a/CHANGELOG.md
+    +++ b/CHANGELOG.md
+    @@ -65,6 +65,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+       pass/fail receipt. Archival/aggregation is a later, separately gated phase.
+
+     ### Changed
+    +- **CI test suites now run in random order with `pytest-randomly`.** Every `pytest` command in
+    +  `.github/workflows/ci.yml` now passes `-p randomly` without a fixed seed, so each CI job exercises
+    +  a different test order and prints its seed in the `pytest` header (`Using --randomly-seed=<N>`).
+    +  Reproduce a CI test order locally with `python -m pytest -p randomly --randomly-seed=<N>`. Local
+    +  and `tox` runs keep the fixed default order through `addopts = "-p no:randomly"` in
+    +  `pyproject.toml`.
+     - **Static type checking (`mypy`) repaired and gated in CI.** Fixed the duplicate-module import in
+       `src/pubrun/__main__.py` so `pubrun report-bug` no longer loads the `pubrun` package a second time,
+       resolved type errors in `src/pubrun/__main__.py`, `src/pubrun/tui/widgets/actions.py`,
+    diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+    index bbc3201..170afb8 100644
+    --- a/CONTRIBUTING.md
+    +++ b/CONTRIBUTING.md
+    @@ -18,6 +18,12 @@ Run the test suite before opening a pull request:
+     python -m pytest
+     ```
+
+    +GitHub Actions CI runs every test suite in random order with `pytest-randomly`, while local and `tox` runs stay in fixed order. Each CI job log prints its seed in the `pytest` header as `Using --randomly-seed=<N>`. To reproduce a CI test order locally, pass that seed on the command line:
+    +
+    +```bash
+    +python -m pytest -p randomly --randomly-seed=<N>
+    +```
+    +
+     To measure test coverage locally, pass the coverage flags explicitly (the GitHub Actions CI `ubuntu-latest` Python 3.12 job fails if total coverage drops below 78%):
+
+     ```bash
+    diff --git a/TODO.md b/TODO.md
+    index a02869b..e521730 100644
+    --- a/TODO.md
+    +++ b/TODO.md
+    @@ -38,13 +38,6 @@ scripted, reviewable transform plus a follow-up grep gate and a pre-commit or CI
+     prevent regressions. Deferred from the sanitizer and adoption-and-signal IPDs. Needs its
+     own IPD.
+
+    -### Enable pytest-randomly in CI
+    -
+    -The flaky-test isolation work added `pytest-randomly` to `[dev]` but disabled it by default
+    -via `-p no:randomly` in `addopts`, so CI stays deterministic. Enabling randomized test order
+    -in CI (or a dedicated CI job) would catch cross-test state leaks that a fixed order hides.
+    -Deferred as OQ1=C in `.agents/plans/executed/20260720-0026-01-flaky-test-isolation-hardening.md`.
+    -
+     ### Runs directory index for fast `pubrun status` (PERF-09)
+
+     When a user accumulates 500+ runs, `pubrun status` gets slow because it reads and parses
+    ```
+    Grep, dash, and path-sanitizer checks:
+    ```text
+    CONTRIBUTING.md:21:GitHub Actions CI runs every test suite in random order with `pytest-randomly`, while local and `tox` runs stay in fixed order. Each CI job log prints its seed in the `pytest` header as `Using --randomly-seed=<N>`. To reproduce a CI test order locally, pass that seed on the command line:
+    CONTRIBUTING.md:24:python -m pytest -p randomly --randomly-seed=<N>
+    CHANGELOG.md:70:  a different test order and prints its seed in the `pytest` header (`Using --randomly-seed=<N>`).
+    CHANGELOG.md:71:  Reproduce a CI test order locally with `python -m pytest -p randomly --randomly-seed=<N>`. Local
+    exit=1
+    [('CONTRIBUTING.md', 6, 0), ('CHANGELOG.md', 6, 0)]
+    dash_exit=0
+    sanitize_exit=0
+    ```
+  - Result: pass
 
 - [ ] V-04 validates E-04
   - Required evidence: (1) For each of the four local runs in "Required tests / validation" (the three `tests/` seeds and the extra suites), the pasted `Using --randomly-seed=` header line from the session header, the final pytest summary line, and `exit=0`. (2) After a human-authorized push to `main` or pull request targeting `main`, the GitHub Actions run URL and a pasted list (for example from `gh run view <id> --json jobs --jq '.jobs[] | [.name, .conclusion] | @tsv'`) showing all 25 jobs (the 21 `test` matrix jobs, `extra-suites`, `no-tui`, `packaging`, and `typecheck`) with conclusion `success`. (3) Pasted `Using --randomly-seed=` lines copied from CI logs (`gh run view <id> --log --job <job-id> | grep "Using --randomly-seed"`) covering all four edited CI commands: one Windows `test` job, one macOS `test` job, the `ubuntu-latest` Python 3.12 coverage-gate `test` job, `no-tui`, and `extra-suites`. If no push to `main` or pull request targeting `main` is authorized yet, mark this item `blocked` with that reason and keep the plan in `pending/`. The CI observation is produced by the commands E-01 edits.
   - Observed evidence:
-  - Result: pending
+    (1) Local randomized runs completed on Python 3.14.6, `pytest` 8.2.2, `pytest-randomly` 4.1.0, Linux:
+    - `python3 -m pytest tests/ -p randomly --randomly-seed=1 -p no:cacheprovider`:
+      ```text
+      Using --randomly-seed=1
+      ======================= 2138 passed in 609.91s (0:10:09) =======================
+      exit=0
+      ```
+    - `python3 -m pytest tests/ -p randomly --randomly-seed=20261124 -p no:cacheprovider`:
+      ```text
+      Using --randomly-seed=20261124
+      ======================= 2138 passed in 608.42s (0:10:08) =======================
+      exit=0
+      ```
+    - `python3 -m pytest tests/ -p randomly --randomly-seed=773002456 -p no:cacheprovider` (seed drawn at random via `secrets.randbelow(2**31 - 1) + 1`):
+      ```text
+      Using --randomly-seed=773002456
+      ======================= 2138 passed in 576.82s (0:09:36) =======================
+      exit=0
+      ```
+    - `python3 -m pytest .github/scripts/ benchmarks/test_share_safety.py benchmarks/test_pull_submissions.py benchmarks/test_benchmarks.py -p randomly -p no:cacheprovider`:
+      ```text
+      Using --randomly-seed=2690959947
+      ================== 90 passed, 3 skipped in 426.69s (0:07:06) ===================
+      exit=0
+      ```
+    (2) and (3) Blocked: this run is an unattended runner lane (`run-20261125T045452Z-2919714`) with no human authorization to push to `main` or open a pull request targeting `main` to trigger `.github/workflows/ci.yml`. Per E-04 and the `AGENTS.md` agent execution contract (never push without explicit human instruction), E-04 and V-04 are marked `blocked` and the plan remains in `pending/` until an attended session authorizes the push or pull request and records the 25-job CI run URL, job conclusions, and CI log `Using --randomly-seed=` lines.
+  - Result: blocked
 
 ## Approval and execution gate
 

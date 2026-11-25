@@ -38,13 +38,6 @@ scripted, reviewable transform plus a follow-up grep gate and a pre-commit or CI
 prevent regressions. Deferred from the sanitizer and adoption-and-signal IPDs. Needs its
 own IPD.
 
-### Enable pytest-randomly in CI
-
-The flaky-test isolation work added `pytest-randomly` to `[dev]` but disabled it by default
-via `-p no:randomly` in `addopts`, so CI stays deterministic. Enabling randomized test order
-in CI (or a dedicated CI job) would catch cross-test state leaks that a fixed order hides.
-Deferred as OQ1=C in `.agents/plans/executed/20260720-0026-01-flaky-test-isolation-hardening.md`.
-
 ### Runs directory index for fast `pubrun status` (PERF-09)
 
 When a user accumulates 500+ runs, `pubrun status` gets slow because it reads and parses
