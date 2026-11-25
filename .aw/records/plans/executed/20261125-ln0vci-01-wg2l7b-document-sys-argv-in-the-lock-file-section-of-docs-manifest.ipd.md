@@ -6,7 +6,7 @@
 - Scope: In `docs/manifest.md`, section "Lock File (`.pubrun.lock`)", insert a `sys_argv` row in the field table immediately after `argv` and insert a matching `"sys_argv"` entry in the Lock File JSON example immediately after `"argv"`. No other file, section, row, or example field changes.
 - Scope-Paths: docs/manifest.md
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Short-Description: Add sys_argv to the Lock File table and JSON example in docs/manifest.md
@@ -18,12 +18,12 @@
 - Highest E allocated: 01
 - Author: antigravity
 - Id: wg2l7b
-- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: wg2l7b verified (set ln0vci, attempt 1).
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE; no findings; review record `.aw/records/reviews/20261125-ln0vci-01-wg2l7b-document-sys-argv-in-the-lock-file-section-of-docs-manifest.review.md`.
 - 2026-11-25 to-review (aw set): graduated from backlog item ln0vci into a review-ready plan.
