@@ -39,10 +39,10 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Update PUBRUN_IMPORT_MODE row in docs/configuration.md
 
-- [ ] E-01 Update the `PUBRUN_IMPORT_MODE` row in `docs/configuration.md#Environment Variables` so it lists all six valid import modes (`auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, and `full`) without modifying any other row or introducing em or en dashes.
+- [x] E-01 Update the `PUBRUN_IMPORT_MODE` row in `docs/configuration.md#Environment Variables` so it lists all six valid import modes (`auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, and `full`) without modifying any other row or introducing em or en dashes.
   - Depends on: none
   - Expected outcome: The `PUBRUN_IMPORT_MODE` row reads ``| `PUBRUN_IMPORT_MODE` | Canonical import mode: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Takes highest precedence. |`` (no other row in `docs/configuration.md` changes, and the edited line contains zero em or en dashes).
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -92,10 +92,29 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste `git diff docs/configuration.md` showing only the `PUBRUN_IMPORT_MODE` row updated to include all six modes (`auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, `full`) with zero em or en dashes; paste output of the side-effect-free `PUBRUN_AUTO_START=false PYTHONPATH=src python3 -c ...` check from `Required tests / validation` confirming `src/pubrun/_config_boot.py::resolve_import_mode` returns `('full', 'env:PUBRUN_IMPORT_MODE')`, every mode in `src/pubrun/_modes.py::VALID_MODES` appears in the `PUBRUN_IMPORT_MODE` row, and zero em or en dashes appear in the row (printing `OK: ...` with exit 0 and leaving no untracked `runs/` files); and paste `python3 scripts/sanitize_paths.py --check --all` exiting 0.
   - Observed evidence:
-  - Result: pending
+    1. `git diff docs/configuration.md`:
+    ```diff
+    diff --git a/docs/configuration.md b/docs/configuration.md
+    index f16789b..929e83f 100644
+    --- a/docs/configuration.md
+    +++ b/docs/configuration.md
+    @@ -358,7 +358,7 @@ long); override any of them in your `.pubrun.toml`.
+
+     | Variable | Description |
+     |---|---|
+    -| `PUBRUN_IMPORT_MODE` | Canonical import mode: `auto`, `noauto`, `nopatch`, `noconsole`, or `minimal`. Takes highest precedence. |
+    +| `PUBRUN_IMPORT_MODE` | Canonical import mode: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Takes highest precedence. |
+     | `PUBRUN_PROFILE` | **Deprecated and inert.** Sets `[core].profile`, which has no effect on capture (see the `[core]` table). Use the `capture.*` keys instead. |
+     | `PUBRUN_AUTO_START` | Legacy alias for import mode. `"1"`, `"true"`, `"yes"`, or `"on"` maps to `auto`; `"0"`, `"false"`, `"no"`, or `"off"` maps to `noauto` (case-insensitive). Other values are ignored. |
+     | `PUBRUN_META_REF` | Path to a parent `meta.json` for HPC hydration. Child runs will reference this. |
+    ```
+    2. Side-effect-free runtime and documentation parity check (`PUBRUN_AUTO_START=false PYTHONPATH=src python3 -c ...`):
+    `OK: ('full', 'env:PUBRUN_IMPORT_MODE') ['auto', 'full', 'minimal', 'noauto', 'noconsole', 'nopatch']` (exit code `0`; `git status -sb` showed `M docs/configuration.md` with no untracked `runs/` directory or files).
+    3. `python3 scripts/sanitize_paths.py --check --all`: exit code `0` (zero findings).
+  - Result: pass
 
 ## Approval and execution gate
 
