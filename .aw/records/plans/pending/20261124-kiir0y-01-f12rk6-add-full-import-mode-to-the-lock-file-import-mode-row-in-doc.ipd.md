@@ -39,10 +39,10 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Documentation
 
-- [ ] E-01 In `docs/manifest.md`, section `## Lock File (.pubrun.lock)` (heading `` ## Lock File (`.pubrun.lock`) ``), replace the description cell of the `import_mode` table row with the text given in "Proposed changes" item 1.
+- [x] E-01 In `docs/manifest.md`, section `## Lock File (.pubrun.lock)` (heading `` ## Lock File (`.pubrun.lock`) ``), replace the description cell of the `import_mode` table row with the text given in "Proposed changes" item 1.
   - Depends on: none
   - Expected outcome: (1) The `import_mode` row reads exactly as shown in "Proposed changes" item 1. (2) The row's field name cell (`` `import_mode` ``) and type cell (`string \| null`) are unchanged. (3) No other line of `docs/manifest.md` changes, including the Lock File JSON example, whose `"import_mode": "auto"` value stays valid.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -167,10 +167,32 @@ No diagram is included. The change affects one table row, and the producer chain
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: (1) Paste `git diff -- docs/manifest.md`, showing one removed and one added line, both the Lock File `import_mode` row, with the added line identical to "Proposed changes" item 1. (2) Paste the output of ``grep -n '^| `import_mode` |' docs/manifest.md``: one line containing `` `"full"` ``. (3) Paste the output and exit status `0` of the working-tree dash check command in "Required tests / validation", showing `added_lines=1 dashes=0`. (4) Paste the output of the isolated temporary-directory probe in "Required tests / validation", `full pubrun.full`, produced by `src/pubrun/tracker.py::Run._write_lock_file` through `src/pubrun/full.py`, and confirm `git status --short` shows no untracked probe files. (5) Paste the summary line of `python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py --no-cov -q`. (6) Paste the exit status of `python3 scripts/sanitize_paths.py --check --all`, which must be `0`.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- docs/manifest.md`:
+    ```diff
+    diff --git a/docs/manifest.md b/docs/manifest.md
+    index 94c873e..74e723d 100644
+    --- a/docs/manifest.md
+    +++ b/docs/manifest.md
+    @@ -618,7 +618,7 @@ While a run is active, a `.pubrun.lock` JSON file exists in the run directory. I
+     | `git_commit` | string \| null | Git commit hash at start, or `null` if not in a repo. |
+     | `cwd` | string | Working directory of the process. |
+     | `argv` | list[string] | Command-line arguments (excluding `sys.argv[0]`). Sensitive values are redacted. |
+    -| `import_mode` | string \| null | The active import mode (`"auto"`, `"noauto"`, `"nopatch"`, `"noconsole"`, `"minimal"`). |
+    +| `import_mode` | string \| null | The active import mode (`"auto"`, `"noauto"`, `"nopatch"`, `"noconsole"`, `"minimal"`, or `"full"`). |
+     | `import_selected_by` | string \| null | Who selected the mode (e.g., `"pubrun"`, `"pubrun.noauto"`). |
+
+     **Example:**
+    ```
+    (2) ``grep -n '^| `import_mode` |' docs/manifest.md``:
+    `621:| `import_mode` | string \| null | The active import mode (`"auto"`, `"noauto"`, `"nopatch"`, `"noconsole"`, `"minimal"`, or `"full"`). |`
+    (3) Working-tree dash check: `added_lines=1 dashes=0`, exit status `0`.
+    (4) Isolated temporary-directory probe (`src/pubrun/tracker.py::Run._write_lock_file` via `src/pubrun/full.py`): `full pubrun.full`, exit status `0`; `git status --short` output: ` M docs/manifest.md` (no untracked probe files).
+    (5) `python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py --no-cov -q`: `98 passed in 24.54s`, exit status `0`.
+    (6) `python3 scripts/sanitize_paths.py --check --all`: exit status `0`.
+  - Result: pass
 
 ## Approval and execution gate
 

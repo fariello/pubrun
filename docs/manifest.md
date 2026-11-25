@@ -618,7 +618,7 @@ While a run is active, a `.pubrun.lock` JSON file exists in the run directory. I
 | `git_commit` | string \| null | Git commit hash at start, or `null` if not in a repo. |
 | `cwd` | string | Working directory of the process. |
 | `argv` | list[string] | Command-line arguments (excluding `sys.argv[0]`). Sensitive values are redacted. |
-| `import_mode` | string \| null | The active import mode (`"auto"`, `"noauto"`, `"nopatch"`, `"noconsole"`, `"minimal"`). |
+| `import_mode` | string \| null | The active import mode (`"auto"`, `"noauto"`, `"nopatch"`, `"noconsole"`, `"minimal"`, or `"full"`). |
 | `import_selected_by` | string \| null | Who selected the mode (e.g., `"pubrun"`, `"pubrun.noauto"`). |
 
 **Example:**
