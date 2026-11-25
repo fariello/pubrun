@@ -1,5 +1,8 @@
 """Tests for report generation: methods, diagnostics utilities, and hydration."""
 import json
+import os
+import subprocess
+import sys
 import time
 import pytest
 from pathlib import Path
@@ -898,3 +901,93 @@ class TestMethodsFileProvenanceDistinction:
         tex = generate_report_multi([m_empty, m_tracked], "latex")
         assert "% Note: data file provenance across 1 of 2 runs tracked 2 file records" in tex
         assert "% Note: partial provenance across 1 of 2 runs;" in tex
+
+    def test_digestless_completed_records_are_not_counted_verified(self):
+        from pubrun.report.methods import generate_report_multi
+
+        recs = [
+            {"path": "data/no-digest.csv", "hash_status": "completed", "evidence_strength": "verified_content"},
+            {"path": "data/empty-sha256.csv", "evidence_strength": "verified_content", "sha256": ""},
+            {"path": "data/blank-digest.csv", "hash_status": "completed", "digest": {"algorithm": "sha256", "value": "  "}},
+            {"path": "data/hashed.csv", "hash_status": "completed", "evidence_strength": "verified_content", "sha256": "a" * 64},
+        ]
+        m = self._base_manifest(data_files={"inputs": recs, "outputs": [], "mixed": []})
+        expected_single = (
+            "Data file provenance tracked 4 file records "
+            "(1 with independently verified content digest, 3 recorded by path or stat metadata only)."
+        )
+        assert expected_single in generate_report(m, "markdown")
+        assert expected_single in generate_report(m, "latex")
+        assert (
+            "across 2 of 2 runs tracked 8 file records "
+            "(2 with independently verified content digests, 6 recorded by path or stat metadata only)"
+            in generate_report_multi([m, m], "markdown")
+        )
+
+    @pytest.mark.parametrize(
+        "rec, expected",
+        [
+            ({"hash_status": "completed"}, "identified_only"),
+            ({"evidence_strength": "verified_content", "sha256": ""}, "identified_only"),
+            ({"hash_status": "completed", "digest": {"algorithm": "sha256", "value": "  "}}, "identified_only"),
+            ({"hash_status": "completed", "sha256": "a" * 64}, "verified"),
+            (
+                {"hash_status": "completed", "sha256": None, "digest": {"algorithm": "sha512", "value": "a" * 128}},
+                "verified",
+            ),
+            ({"md5": "e" * 32}, "verified"),
+            ({}, "identified_only"),
+            (
+                {"hash_status": "asserted", "evidence_source": "asserted", "evidence_strength": "asserted_content"},
+                "asserted",
+            ),
+            ({"hash_status": "file_changed", "change_detected": True}, "changed"),
+            (
+                {
+                    "hash_status": "completed",
+                    "sha256": "a" * 64,
+                    "caller_digest": {"algorithm": "sha256", "value": "b" * 64, "verified": False},
+                },
+                "failed",
+            ),
+            ({"hash_status": "over_budget"}, "over_budget"),
+            ({"hash_status": "pending"}, "pending"),
+            ({"hash_status": "disabled"}, "identified_only"),
+            ({"hash_status": "unavailable"}, "unavailable"),
+        ],
+    )
+    def test_shared_classifier_requires_nonempty_digest(self, rec, expected):
+        from pubrun.report.file_evidence import _classify_file_record
+
+        assert _classify_file_record(rec) == expected
+        md = generate_report(
+            self._base_manifest(data_files={"inputs": [rec], "outputs": [], "mixed": []}),
+            "markdown",
+        )
+        assert ("independently verified content digest" in md) is (expected == "verified")
+
+    def test_run_stop_writes_verified_methods_without_loading_reproducibility(self, tmp_path):
+        script = "\n".join(
+            [
+                "import pathlib, sys",
+                "import pubrun.noauto as pubrun",
+                'pathlib.Path("in.csv").write_text("x\\n")',
+                "run = pubrun.start()",
+                'pubrun.register_input("in.csv", level="hash")',
+                "pubrun.stop()",
+                'assert "pubrun.report.reproducibility" not in sys.modules, sorted(sys.modules)',
+                'text = (pathlib.Path(run.run_dir) / "methods.md").read_text(encoding="utf-8")',
+                'assert "1 file record (1 with independently verified content digest)" in text, text',
+                'print("OK")',
+            ]
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=str(tmp_path),
+            env={**os.environ, "XDG_CONFIG_HOME": str(tmp_path), "APPDATA": str(tmp_path)},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        assert result.stdout.strip() == "OK"
