@@ -1,5 +1,5 @@
 - Id: t55vh8
-- Status: graduated
+- Status: done
 - Graduated-To: t55vh8
 - Set: t55vh8
 - Work-Kind: bug
@@ -11,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-25 done (aw backlog): closed by aw agy run: IPD w24lw1 executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261124-t55vh8-01-w24lw1-reuse-the-canonical-file-record-classifier-in-methods-report.ipd.md); evidence .aw/records/plans/executed/20261124-t55vh8-01-w24lw1-reuse-the-canonical-file-record-classifier-in-methods-report.ipd.md
 - 2026-11-25 graduated (aw backlog): graduated by run run-20261124T202433Z-1567679: w24lw1
 - 2026-11-24 created (aw backlog): Reuse canonical _classify_file_record in methods.py and require a non-empty digest before classifying hash_status=completed as verified
 
