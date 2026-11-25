@@ -163,9 +163,10 @@ def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
         >>> pubrun.annotate("Model Configured", layers=50, optimizer="adamw")
     """
     current_run = get_current_run()
-    if current_run and getattr(current_run, "event_stream", None):
+    event_stream = getattr(current_run, "event_stream", None) if current_run else None
+    if event_stream:
         payload = kwargs.copy()
-        current_run.event_stream.emit("annotation", name=message, payload=payload)
+        event_stream.emit("annotation", name=message, payload=payload)
     else:
         _handle_inactive("pubrun.annotate()")
 
@@ -461,10 +462,12 @@ class phase:
         >>> with pubrun.phase("data_ingestion"):
         ...     df = pd.read_csv("huge.csv")
     """
+    _yappi_active: bool = False
+
     def __init__(self, name: str) -> None:
         self.name = name
         self.run_tracker: Optional[Run] = None
-        self._profiler = None
+        self._profiler: Any = None
         self._started_yappi = False
         self._start_mono: Optional[float] = None
 
@@ -472,8 +475,9 @@ class phase:
         # Bind at entry, not construction, so a phase object created before
         # start() (or reused across runs) logs to the run active when it runs.
         self.run_tracker = get_current_run()
-        if self.run_tracker and getattr(self.run_tracker, "event_stream", None):
-            self.run_tracker.event_stream.emit("phase_start", name=self.name)
+        event_stream = getattr(self.run_tracker, "event_stream", None) if self.run_tracker else None
+        if event_stream:
+            event_stream.emit("phase_start", name=self.name)
         else:
             _handle_inactive(f"pubrun.phase('{self.name}')")
         # Phase-scoped profiling (opt-in via [capture.profiling].enabled)
@@ -521,7 +525,8 @@ class phase:
             # run stopped inside the phase, so later phases can profile again.
             yappi_mod: Any = None
             try:
-                import yappi as yappi_mod  # type: ignore[import-not-found]
+                import yappi as _yappi_imported  # type: ignore[import-not-found]
+                yappi_mod = _yappi_imported
                 yappi_mod.stop()
             except Exception as prof_err:
                 logging.getLogger("pubrun").debug(f"pubrun: yappi stop failed: {prof_err}")
@@ -561,7 +566,8 @@ class phase:
                         pass
             self._profiler = None
 
-        if self.run_tracker and getattr(self.run_tracker, "event_stream", None):
+        end_stream = getattr(self.run_tracker, "event_stream", None) if self.run_tracker else None
+        if end_stream:
             end_payload: Dict[str, Any] = {}
             if self._start_mono is not None:
                 end_payload["elapsed_seconds"] = max(0.0, end_mono - self._start_mono)
@@ -570,7 +576,7 @@ class phase:
                 end_payload["error"] = (
                     exc_val.__class__.__name__ if exc_val is not None else exc_type.__name__
                 )
-            self.run_tracker.event_stream.emit(
+            end_stream.emit(
                 "phase_end",
                 name=self.name,
                 payload=end_payload if end_payload else None,
@@ -578,8 +584,9 @@ class phase:
 
     def _emit_profile_saved(self, prof_name: str) -> None:
         """Emit a ``profile_saved`` event so the saved profile is discoverable."""
-        if getattr(self.run_tracker, "event_stream", None):
-            self.run_tracker.event_stream.emit(
+        event_stream = getattr(self.run_tracker, "event_stream", None)
+        if event_stream:
+            event_stream.emit(
                 "profile_saved", name=self.name, payload={"path": prof_name}
             )
 

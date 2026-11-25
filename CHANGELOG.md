@@ -65,6 +65,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pass/fail receipt. Archival/aggregation is a later, separately gated phase.
 
 ### Changed
+- **Full-package static type checking with `mypy`.** Static type checking with `mypy` now checks
+  every module of the `pubrun` package on Linux. The per-module `ignore_errors` exemption list has
+  been removed from `pyproject.toml`.
 - **Testable entry points.** `pubrun.__main__.main()` now accepts an optional argument list without
   modifying `sys.argv`, and `print_report` and `print_resources_report` in
   `pubrun.report.diagnostics` accept a keyword-only `out` stream and raise `DiagnosticsError`

@@ -207,8 +207,8 @@ class Run:
         self._pending_file_registrations: list = []
         self.manual_subprocess_records: list = []
         self._active_profilers: list = []
-        self.console_interceptor = None
-        self.event_stream = None
+        self.console_interceptor: Optional[ConsoleInterceptor] = None
+        self.event_stream: Optional[EventStream] = None
         self.resource_watcher = None
         self.signal_capture = None
         self._hardware_thread: Optional[threading.Thread] = None
@@ -860,24 +860,26 @@ class Run:
                     done.wait(timeout=5)
 
                 # Close open files before moving the directory (required on Windows)
-                if getattr(self, "event_stream", None):
-                    self.event_stream.close()
+                event_stream = self.event_stream
+                interceptor = self.console_interceptor
+                if event_stream is not None:
+                    event_stream.close()
 
-                if getattr(self, "console_interceptor", None):
-                    if getattr(self.console_interceptor, "stdout_log", None):
+                if interceptor is not None:
+                    if interceptor.stdout_log is not None:
                         try:
-                            self.console_interceptor.stdout_log.flush()
-                            self.console_interceptor.stdout_log.close()
+                            interceptor.stdout_log.flush()
+                            interceptor.stdout_log.close()
                         except Exception:
                             pass
-                        self.console_interceptor.stdout_log = None
-                    if getattr(self.console_interceptor, "stderr_log", None):
+                        interceptor.stdout_log = None
+                    if interceptor.stderr_log is not None:
                         try:
-                            self.console_interceptor.stderr_log.flush()
-                            self.console_interceptor.stderr_log.close()
+                            interceptor.stderr_log.flush()
+                            interceptor.stderr_log.close()
                         except Exception:
                             pass
-                        self.console_interceptor.stderr_log = None
+                        interceptor.stderr_log = None
 
                 try:
                     import shutil
@@ -897,28 +899,28 @@ class Run:
                     old_dir_str = str(self.run_dir)
 
                 # Reopen or migrate the files to the active run_dir
-                if getattr(self, "event_stream", None):
-                    self.event_stream.migrate_directory(new_dir)
+                if event_stream is not None:
+                    event_stream.migrate_directory(new_dir)
                     # BUG-10: Only emit if the stream successfully reopened.
                     if new_dir != Path(old_dir_str):
-                        if getattr(self.event_stream, "_file", None):
-                            self.event_stream.emit("warning", payload={"message": f"Storage directory changed mid-execution from {old_dir_str} to {new_dir}"})
+                        if getattr(event_stream, "_file", None):
+                            event_stream.emit("warning", payload={"message": f"Storage directory changed mid-execution from {old_dir_str} to {new_dir}"})
                         else:
                             logging.getLogger("pubrun").warning(
                                 "pubrun: storage migrated to %s but event stream failed to reopen",
                                 new_dir,
                             )
 
-                if getattr(self, "console_interceptor", None):
-                    if self.console_interceptor.mode != "off":
+                if interceptor is not None:
+                    if interceptor.mode != "off":
                         try:
-                            self.console_interceptor.stdout_log = open(new_dir / "stdout.log", "a", encoding="utf-8")
-                            if self.console_interceptor.stdout_tee:
-                                self.console_interceptor.stdout_tee.log_file = self.console_interceptor.stdout_log
+                            interceptor.stdout_log = open(new_dir / "stdout.log", "a", encoding="utf-8")
+                            if interceptor.stdout_tee:
+                                interceptor.stdout_tee.log_file = interceptor.stdout_log
 
-                            self.console_interceptor.stderr_log = open(new_dir / "stderr.log", "a", encoding="utf-8")
-                            if self.console_interceptor.stderr_tee:
-                                self.console_interceptor.stderr_tee.log_file = self.console_interceptor.stderr_log
+                            interceptor.stderr_log = open(new_dir / "stderr.log", "a", encoding="utf-8")
+                            if interceptor.stderr_tee:
+                                interceptor.stderr_tee.log_file = interceptor.stderr_log
                         except Exception as reopen_err:
                             logging.getLogger("pubrun").debug(
                                 "Failed to reopen console logs after migration: %s", reopen_err

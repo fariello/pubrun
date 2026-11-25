@@ -111,12 +111,3 @@ files = ["src/pubrun"]
 [[tool.mypy.overrides]]
 module = ["IPython", "IPython.*", "yappi", "tomli"]
 ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-# Legacy type-check ratchet: this list may only shrink, never grow.
-# Remove each module as its existing errors are fixed (backlog item qqwebg).
-module = [
-    "pubrun.core",
-    "pubrun.tracker",
-]
-ignore_errors = true
