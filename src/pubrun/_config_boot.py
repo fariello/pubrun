@@ -160,7 +160,8 @@ def resolve_import_mode() -> Tuple[str, str]:
 
     Returns:
         (mode_name, source) where source describes where the mode came from.
-        mode_name is one of: "auto", "noauto", "nopatch", "quiet".
+        mode_name is one of the keys of ``pubrun._modes.MODES``: "auto",
+            "noauto", "nopatch", "noconsole", "minimal", or "full".
         source is one of: "env:PUBRUN_IMPORT_MODE", "env:PUBRUN_AUTO_START",
             "config:[imports].mode", "config:[core].auto_start", "default".
     """

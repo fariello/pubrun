@@ -39,10 +39,10 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Docstring
 
-- [ ] E-01 In `src/pubrun/_config_boot.py`, in the `Returns:` section of the `resolve_import_mode` docstring, replace the line `mode_name is one of: "auto", "noauto", "nopatch", "quiet".` with the two lines given in "Proposed changes" item 1.
+- [x] E-01 In `src/pubrun/_config_boot.py`, in the `Returns:` section of the `resolve_import_mode` docstring, replace the line `mode_name is one of: "auto", "noauto", "nopatch", "quiet".` with the two lines given in "Proposed changes" item 1.
   - Depends on: none
   - Expected outcome: (1) The `Returns:` section of the docstring reads exactly as shown in "Proposed changes" item 1. (2) The `(mode_name, source) where ...` line and the two `source is one of:` lines are unchanged. (3) No executable line of `src/pubrun/_config_boot.py` changes, and no other line of the file changes. (4) The string `"quiet"` no longer appears in `src/pubrun/_config_boot.py`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -206,10 +206,53 @@ No diagram is included. The change affects one docstring sentence of one functio
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: (1) Paste `git diff -- src/pubrun/_config_boot.py`, showing one removed and two added lines inside the `resolve_import_mode` docstring, with the added lines identical to "Proposed changes" item 1. (2) Paste the output of `PYTHONPATH=src python3 -c "import pubrun._config_boot as m; print(m.resolve_import_mode.__doc__)"`, whose `Returns:` section matches "Proposed changes" item 1. (3) Paste the output and exit status `0` of the `"quiet"` check command in "Required tests / validation", showing `quiet_count=0`. (4) Paste the output and exit status `0` of the portable working-tree dash check command in "Required tests / validation", showing `added_lines=2 dashes=0`. (5) Paste the `Found N errors.` line of both the `HEAD` stdin baseline (`git show HEAD:src/pubrun/_config_boot.py | ruff check --stdin-filename src/pubrun/_config_boot.py -`) and post-edit `ruff check src/pubrun/_config_boot.py`; the two counts must be equal. (6) Paste the seven output lines of the config-isolated runtime probe in "Required tests / validation", produced by `src/pubrun/_config_boot.py::resolve_import_mode` against `src/pubrun/_modes.py::VALID_MODES`, matching the Findings output. (7) Paste the summary line of `python3 -m pytest tests/test_import_modes.py tests/test_config_capture_modes.py --no-cov -q`. (8) Paste the exit status of `python3 scripts/sanitize_paths.py --check --all`, which must be `0`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: All eight checks passed against `src/pubrun/_config_boot.py` (diff +2/-1 inside `resolve_import_mode` docstring; docstring `Returns:` matches Proposed changes item 1; `quiet_count=0` exit 0; portable dash check `added_lines=2 dashes=0` exit 0; `ruff check` 19 errors baseline vs 19 errors after edit; config-isolated runtime probe 7/7 matching Findings; pytest 165 passed in 25.00s; `sanitize_paths.py --check --all` exit 0). Full captured outputs:
+    - (1) `git diff -- src/pubrun/_config_boot.py`:
+      ```diff
+      diff --git a/src/pubrun/_config_boot.py b/src/pubrun/_config_boot.py
+      index b200b58..3fd0fc0 100644
+      --- a/src/pubrun/_config_boot.py
+      +++ b/src/pubrun/_config_boot.py
+      @@ -160,7 +160,8 @@ def resolve_import_mode() -> Tuple[str, str]:
+
+           Returns:
+               (mode_name, source) where source describes where the mode came from.
+      -        mode_name is one of: "auto", "noauto", "nopatch", "quiet".
+      +        mode_name is one of the keys of ``pubrun._modes.MODES``: "auto",
+      +            "noauto", "nopatch", "noconsole", "minimal", or "full".
+               source is one of: "env:PUBRUN_IMPORT_MODE", "env:PUBRUN_AUTO_START",
+                   "config:[imports].mode", "config:[core].auto_start", "default".
+           """
+      ```
+    - (2) `PYTHONPATH=src python3 -c "import pubrun._config_boot as m; print(m.resolve_import_mode.__doc__)"`:
+      ```text
+      Resolve the effective import mode at boot time.
+
+      Returns:
+          (mode_name, source) where source describes where the mode came from.
+          mode_name is one of the keys of ``pubrun._modes.MODES``: "auto",
+              "noauto", "nopatch", "noconsole", "minimal", or "full".
+          source is one of: "env:PUBRUN_IMPORT_MODE", "env:PUBRUN_AUTO_START",
+              "config:[imports].mode", "config:[core].auto_start", "default".
+      ```
+    - (3) `"quiet"` check: `quiet_count=0` (exit `0`)
+    - (4) Portable working-tree dash check: `added_lines=2 dashes=0` (exit `0`)
+    - (5) `ruff check` baseline (`git show HEAD:src/pubrun/_config_boot.py | ruff check --stdin-filename src/pubrun/_config_boot.py -`): `Found 19 errors.` Post-edit (`ruff check src/pubrun/_config_boot.py`): `Found 19 errors.` (equal counts; 0 findings added)
+    - (6) Config-isolated runtime probe (`src/pubrun/_config_boot.py::resolve_import_mode` against `src/pubrun/_modes.py::VALID_MODES`):
+      ```text
+      auto ('auto', 'env:PUBRUN_IMPORT_MODE')
+      noauto ('noauto', 'env:PUBRUN_IMPORT_MODE')
+      nopatch ('nopatch', 'env:PUBRUN_IMPORT_MODE')
+      noconsole ('noconsole', 'env:PUBRUN_IMPORT_MODE')
+      minimal ('minimal', 'env:PUBRUN_IMPORT_MODE')
+      full ('full', 'env:PUBRUN_IMPORT_MODE')
+      quiet ('auto', 'default')
+      ```
+    - (7) `python3 -m pytest tests/test_import_modes.py tests/test_config_capture_modes.py --no-cov -q`: `165 passed in 25.00s` (exit `0`)
+    - (8) `python3 scripts/sanitize_paths.py --check --all`: exit `0`
+  - Result: pass
 
 ## Approval and execution gate
 
