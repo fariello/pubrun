@@ -1448,7 +1448,7 @@ def clean_runs(
             script_with_args = script_name
         script = _truncate(script_with_args, script_max - 2)
         status = r.status
-        exit_code = str(r.exit_code) if r.exit_code is not None else "-"
+        exit_str = str(r.exit_code) if r.exit_code is not None else "-"
         age_seconds = (now - r.started_at_utc) if r.started_at_utc else None
         age = _format_age(age_seconds)
         size = _format_bytes(_dir_size(r.run_dir))
@@ -1457,7 +1457,7 @@ def clean_runs(
             f"{run_id:<10}"
             f"{script:<{script_max}}"
             f"{status:<13}"
-            f"{exit_code:<6}"
+            f"{exit_str:<6}"
             f"{age:<14}"
             f"{size:<10}"
         )

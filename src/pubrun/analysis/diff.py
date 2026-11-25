@@ -35,7 +35,7 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str], depth: str
     Environment variables and packages are expanded into individual keys.
     Keys matching any pattern in ``ignores`` are excluded.
     """
-    flat = {}
+    flat: Dict[str, Any] = {}
 
     # Helper to check if a key matches any ignore pattern
     def _should_ignore(key: str) -> bool:
@@ -239,7 +239,7 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Opt
     flat_a = _normalize_manifest(raw_a, ignores, depth)
     flat_b = _normalize_manifest(raw_b, ignores, depth)
 
-    diff_report = {
+    diff_report: Dict[str, Dict[str, Any]] = {
         "added": {},    # Exists in B, missing from A
         "removed": {},  # Exists in A, missing from B
         "modified": {}, # Shared key, but value changed

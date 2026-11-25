@@ -3,7 +3,7 @@ Diff report rendering -- plain-text ANSI output (git-style).
 """
 import json
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 
 
 class Colors:
@@ -23,8 +23,8 @@ def _tag(x: Any) -> Any:
 def _format_array_diff(
     elements: list,
     is_new_list: bool,
-    added_set: set,
-    removed_set: set,
+    added_set: Iterable[Any],
+    removed_set: Iterable[Any],
     common_a: list,
     common_b: list,
     use_color: bool
