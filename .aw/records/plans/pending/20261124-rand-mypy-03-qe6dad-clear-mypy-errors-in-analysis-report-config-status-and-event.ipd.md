@@ -129,8 +129,14 @@ Rejected alternative: `# type: ignore[...]` comments on each error line. They hi
 
 ## Deferred / out of scope (with reason)
 
-- The capture modules, `core.py`, `tracker.py`, and the import-mode modules: owned by children `k6fs5k`, `0uxy76`, and `f5yisk`.
+- The capture modules: owned by child `k6fs5k`.
   - Carrier: k6fs5k
+  - Carrier-Evidence: .aw/records/plans/executed/20261124-rand-mypy-04-k6fs5k-clear-mypy-errors-in-capture-modules.ipd.md
+- `core.py` and `tracker.py`: owned by child `0uxy76`.
+  - Carrier: 0uxy76
+- The import-mode modules and `_bootstrap.py`: owned by child `f5yisk`.
+  - Carrier: f5yisk
+  - Carrier-Evidence: .aw/records/plans/executed/20261124-rand-mypy-02-f5yisk-clear-mypy-errors-in-import-mode-shims-and-bootstrap.ipd.md
 - Errors that appear only under `mypy --platform win32`: owned by child `juoqy2`; none is in this plan's modules.
   - Carrier: juoqy2
 
