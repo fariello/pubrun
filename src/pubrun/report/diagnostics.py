@@ -2,7 +2,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, TextIO, Tuple
 import os
 import sys
 from pathlib import Path
@@ -254,8 +254,14 @@ def _format_data_files_summary_line(counts: Dict[str, int]) -> str:
     return f"{counts['total']} tracked ({', '.join(parts)})"
 
 
-def _print_data_files_block(manifest: Dict[str, Any], use_color: bool) -> None:
+def _print_data_files_block(
+    manifest: Dict[str, Any],
+    use_color: bool,
+    *,
+    out: Optional[TextIO] = None,
+) -> None:
     """Render the Deep-depth ``[ Data Files ]`` subsection without ``Colors.DIM``."""
+    stream = out if out is not None else sys.stdout
     blue = Colors.BLUE if use_color else ""
     green = Colors.GREEN if use_color else ""
     yellow = Colors.YELLOW if use_color else ""
@@ -264,9 +270,9 @@ def _print_data_files_block(manifest: Dict[str, Any], use_color: bool) -> None:
     rst = Colors.RESET if use_color else ""
 
     entries = _iter_data_file_entries(manifest.get("data_files"))
-    print(f"\n{blue}[ Data Files ]{rst}")
+    print(f"\n{blue}[ Data Files ]{rst}", file=stream)
     if not entries:
-        print("  (None captured)")
+        print("  (None captured)", file=stream)
         return
 
     badge_colors = {
@@ -307,7 +313,7 @@ def _print_data_files_block(manifest: Dict[str, Any], use_color: bool) -> None:
             if detail_txt:
                 pieces.append(f"({detail_txt})")
 
-        print(" ".join(pieces))
+        print(" ".join(pieces), file=stream)
 
 
 def _unwrap_value(val: Any, default: str = "unknown") -> str:
@@ -361,6 +367,15 @@ class Colors:
 
 def _has_color() -> bool:
     return not os.environ.get("NO_COLOR", "")
+
+class DiagnosticsError(Exception):
+    """A diagnostics report could not be produced; the CLI prints ``message`` and exits."""
+
+    def __init__(self, message: str, exit_code: int = 1) -> None:
+        super().__init__(message)
+        self.message = message
+        self.exit_code = exit_code
+
 
 def _print_error(message: str) -> None:
     from pubrun.report import output as _out
@@ -487,8 +502,10 @@ def _print_packages_block(
     use_color: bool,
     *,
     leading_newline: bool = False,
+    out: Optional[TextIO] = None,
 ) -> None:
     """Render the ``[ Packages ]`` block and any ``unresolved`` summary cleanly."""
+    stream = out if out is not None else sys.stdout
     pkg_sec = _as_dict(manifest.get("packages"))
     pkgs = _as_dict_list(pkg_sec.get("records"))
     unresolved = _as_dict_list(pkg_sec.get("unresolved"))
@@ -500,15 +517,15 @@ def _print_packages_block(
     rst = Colors.RESET if use_color else ""
 
     prefix = "\n" if leading_newline else ""
-    print(f"{prefix}{blue}[ Packages ]{rst}")
+    print(f"{prefix}{blue}[ Packages ]{rst}", file=stream)
     if pkg_status == "failed":
         detail = _bound_text(_section_detail(manifest, "packages"))
         if detail:
-            print(f"  {yellow}(capture failed: {detail}){rst}")
+            print(f"  {yellow}(capture failed: {detail}){rst}", file=stream)
         else:
-            print(f"  {yellow}(capture failed){rst}")
+            print(f"  {yellow}(capture failed){rst}", file=stream)
     elif not pkgs:
-        print("  (None captured)")
+        print("  (None captured)", file=stream)
 
     for i, p in enumerate(pkgs):
         raw_name = p.get("name")
@@ -519,14 +536,14 @@ def _print_packages_block(
         display_len = len(pkg_str)
         if use_color:
             pkg_str = f"{green}{name}{rst}=={ver}"
-        print(pkg_str.ljust(30 + (len(pkg_str) - display_len)), end="")
+        print(pkg_str.ljust(30 + (len(pkg_str) - display_len)), end="", file=stream)
         if (i + 1) % 3 == 0:
-            print()
+            print(file=stream)
     if len(pkgs) % 3 != 0:
-        print()
+        print(file=stream)
 
     if unresolved:
-        print(f"  {yellow}Unresolved ({len(unresolved)}):{rst}")
+        print(f"  {yellow}Unresolved ({len(unresolved)}):{rst}", file=stream)
         for entry in unresolved:
             raw_mod = entry.get("module")
             mod = raw_mod if isinstance(raw_mod, str) and raw_mod else "<unknown>"
@@ -541,16 +558,22 @@ def _print_packages_block(
             if cands:
                 preview = ", ".join(cands[:5])
                 more = f" (+{len(cands) - 5} more)" if len(cands) > 5 else ""
-                print(f"    - {mod}: {reason} ({len(cands)} candidates: {preview}{more})")
+                print(f"    - {mod}: {reason} ({len(cands)} candidates: {preview}{more})", file=stream)
             else:
                 detail = _bound_text(entry.get("detail"))
                 if detail:
-                    print(f"    - {mod}: {reason} ({detail})")
+                    print(f"    - {mod}: {reason} ({detail})", file=stream)
                 else:
-                    print(f"    - {mod}: {reason}")
+                    print(f"    - {mod}: {reason}", file=stream)
 
-def print_report(manifest_path: str, depth: str = "standard", section: Optional[str] = None,
-                 utc: bool = False) -> None:
+def print_report(
+    manifest_path: str,
+    depth: str = "standard",
+    section: Optional[str] = None,
+    utc: bool = False,
+    *,
+    out: Optional[TextIO] = None,
+) -> None:
     """Print a human-readable diagnostic summary of a recorded run.
 
     Args:
@@ -558,16 +581,18 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         depth: Verbosity level (``"basic"``, ``"standard"``, or ``"deep"``).
         section: Optional section to extract (``"logs"``, ``"env"``, or ``"packages"``).
         utc: Show timestamps in UTC instead of local time.
+        out: Optional output stream (defaults to ``sys.stdout`` at call time).
     """
+    stream = out if out is not None else sys.stdout
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
-    except FileNotFoundError:
-        _print_error(f"Could not find manifest file at '{manifest_path}'.")
-        sys.exit(1)
-    except json.JSONDecodeError:
-        _print_error(f"The manifest file at '{manifest_path}' is corrupt or contains invalid JSON.")
-        sys.exit(1)
+    except FileNotFoundError as e:
+        raise DiagnosticsError(f"Could not find manifest file at '{manifest_path}'.") from e
+    except json.JSONDecodeError as e:
+        raise DiagnosticsError(
+            f"The manifest file at '{manifest_path}' is corrupt or contains invalid JSON."
+        ) from e
 
     # Hydrate!
     if not isinstance(manifest, dict):
@@ -583,17 +608,15 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         if stdout_path.exists():
             try:
                 with open(stdout_path, "r", encoding="utf-8", errors="replace") as sf:
-                    print(sf.read(), end="")
+                    print(sf.read(), end="", file=stream)
             except Exception as e:
-                _print_error(f"Failed to read stdout log: {e}")
-                sys.exit(1)
+                raise DiagnosticsError(f"Failed to read stdout log: {e}") from e
         if stderr_path.exists():
             try:
                 with open(stderr_path, "r", encoding="utf-8", errors="replace") as se:
-                    print(se.read(), end="")
+                    print(se.read(), end="", file=stream)
             except Exception as e:
-                _print_error(f"Failed to read stderr log: {e}")
-                sys.exit(1)
+                raise DiagnosticsError(f"Failed to read stderr log: {e}") from e
         return
 
     if section == "env":
@@ -606,31 +629,31 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         yellow = Colors.YELLOW if use_color else ""
         rst = Colors.RESET if use_color else ""
 
-        print(f"{blue}[ Environment Variables ]{rst}")
+        print(f"{blue}[ Environment Variables ]{rst}", file=stream)
         if env_status == "failed":
             detail = _bound_text(_section_detail(manifest, "environment"))
             if detail:
-                print(f"  {yellow}(capture failed: {detail}){rst}")
+                print(f"  {yellow}(capture failed: {detail}){rst}", file=stream)
             else:
-                print(f"  {yellow}(capture failed){rst}")
+                print(f"  {yellow}(capture failed){rst}", file=stream)
         elif not envs:
-            print("  (None captured)")
+            print("  (None captured)", file=stream)
         for var in envs:
             name = var.get("name")
             val_obj = var.get("value", {})
             if isinstance(val_obj, dict) and "representation" in val_obj:
                 rep = val_obj.get("representation")
                 if rep == "plain":
-                    print(f"  {green}{name}{rst}={val_obj.get('value', '')}")
+                    print(f"  {green}{name}{rst}={val_obj.get('value', '')}", file=stream)
                 else:
                     rep_label = str(rep).upper() if rep not in (None, "") else "REDACTED"
-                    print(f"  {green}{name}{rst}={yellow}<{rep_label}>{rst}")
+                    print(f"  {green}{name}{rst}={yellow}<{rep_label}>{rst}", file=stream)
             else:
-                print(f"  {green}{name}{rst}={val_obj}")
+                print(f"  {green}{name}{rst}={val_obj}", file=stream)
         return
 
     if section == "packages":
-        _print_packages_block(manifest, _has_color(), leading_newline=False)
+        _print_packages_block(manifest, _has_color(), leading_newline=False, out=stream)
         return
 
     use_color = _has_color()
@@ -644,29 +667,29 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     dim = Colors.DIM if use_color else ""
 
     if use_color:
-        if _supports_unicode(sys.stdout):
-            print(f"\n{cyan}{bold}┌─────────────────────────────────────────────────┐{rst}")
-            print(f"{cyan}{bold}│               PUBRUN DIAGNOSTICS                │{rst}")
-            print(f"{cyan}{bold}└─────────────────────────────────────────────────┘{rst}")
+        if _supports_unicode(stream):
+            print(f"\n{cyan}{bold}┌─────────────────────────────────────────────────┐{rst}", file=stream)
+            print(f"{cyan}{bold}│               PUBRUN DIAGNOSTICS                │{rst}", file=stream)
+            print(f"{cyan}{bold}└─────────────────────────────────────────────────┘{rst}", file=stream)
         else:
-            print(f"\n{cyan}{bold}+-------------------------------------------------+{rst}")
-            print(f"{cyan}{bold}|               PUBRUN DIAGNOSTICS                |{rst}")
-            print(f"{cyan}{bold}+-------------------------------------------------+{rst}")
+            print(f"\n{cyan}{bold}+-------------------------------------------------+{rst}", file=stream)
+            print(f"{cyan}{bold}|               PUBRUN DIAGNOSTICS                |{rst}", file=stream)
+            print(f"{cyan}{bold}+-------------------------------------------------+{rst}", file=stream)
     else:
-        print(f"\n=================================================")
-        print(f"               PUBRUN DIAGNOSTICS                ")
-        print(f"=================================================")
+        print(f"\n=================================================", file=stream)
+        print(f"               PUBRUN DIAGNOSTICS                ", file=stream)
+        print(f"=================================================", file=stream)
 
-    print(f"{cyan}Source{rst}      : {manifest_path}")
+    print(f"{cyan}Source{rst}      : {manifest_path}", file=stream)
 
     meta_ref = manifest.get("meta_ref")
     if meta_ref:
-        print(f"{cyan}Parent{rst}      : {meta_ref}")
+        print(f"{cyan}Parent{rst}      : {meta_ref}", file=stream)
 
     for w in warnings:
         # Report-body warning (stays on stdout as part of the rendered report); label
         # normalized to the canonical [WARN ] prefix for consistency.
-        print(f"\n{yellow}[WARN ]{rst} {w}")
+        print(f"\n{yellow}[WARN ]{rst} {w}", file=stream)
 
     # Non-disruptive config notices recorded at run time (e.g. deprecated core.profile).
     cfg_notices = _as_dict(manifest.get("config")).get("notices")
@@ -678,7 +701,7 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
                 msg = str(notice)
             else:
                 continue
-            print(f"\n{yellow}[WARN ]{rst} {msg}")
+            print(f"\n{yellow}[WARN ]{rst} {msg}", file=stream)
 
     # Surface failed capture sections and recorded capture errors at every depth.
     failed_sections = sorted(
@@ -697,10 +720,10 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
                 f"{sec} ({detail})" if detail else sec
                 for sec, detail in failed_sections
             ]
-            print(f"\n{yellow}[WARN ]{rst} Capture failed for section(s): {', '.join(sec_parts)}")
+            print(f"\n{yellow}[WARN ]{rst} Capture failed for section(s): {', '.join(sec_parts)}", file=stream)
         if cap_errors:
             lead = "\n" if not failed_sections else ""
-            print(f"{lead}{yellow}[WARN ]{rst} Capture errors recorded ({len(cap_errors)}):")
+            print(f"{lead}{yellow}[WARN ]{rst} Capture errors recorded ({len(cap_errors)}):", file=stream)
             for rec in cap_errors[:_MAX_DISPLAYED_CAPTURE_ERRORS]:
                 raw_sec = rec.get("section")
                 sec_label = raw_sec.strip() if isinstance(raw_sec, str) and raw_sec.strip() else "general"
@@ -710,19 +733,19 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
                 if not isinstance(raw_msg, str) or not raw_msg.strip():
                     raw_msg = rec.get("type")
                 msg = _bound_text(raw_msg) or "capture error"
-                print(f"  - {sec_label}{stage_label}: {msg}")
+                print(f"  - {sec_label}{stage_label}: {msg}", file=stream)
             if len(cap_errors) > _MAX_DISPLAYED_CAPTURE_ERRORS:
                 overflow = len(cap_errors) - _MAX_DISPLAYED_CAPTURE_ERRORS
-                print(f"  ... (+{overflow} more capture error(s))")
+                print(f"  ... (+{overflow} more capture error(s))", file=stream)
         if errors_partial:
             lead = "\n" if not failed_sections and not cap_errors else ""
             err_detail = _bound_text(_section_detail(manifest, "errors"))
             if err_detail:
-                print(f"{lead}{yellow}[WARN ]{rst} Capture errors truncated: {err_detail}")
+                print(f"{lead}{yellow}[WARN ]{rst} Capture errors truncated: {err_detail}", file=stream)
             else:
-                print(f"{lead}{yellow}[WARN ]{rst} Capture errors truncated.")
+                print(f"{lead}{yellow}[WARN ]{rst} Capture errors truncated.", file=stream)
 
-    print(f"\n{blue}{bold}--- Basic Information ---{rst}")
+    print(f"\n{blue}{bold}--- Basic Information ---{rst}", file=stream)
     run = _as_dict(manifest.get("run"))
     timing = _as_dict(manifest.get("timing"))
     status = _as_dict(manifest.get("status"))
@@ -760,20 +783,20 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
             code_color = Colors.BOLD + Colors.RED if use_color else ""
         exit_str = f" ({code_color}{exit_code}{rst})"
 
-    print(f"{cyan}Run ID{rst}      : {run.get('run_id')}")
-    print(f"{cyan}Script{rst}      : {script_name}")
-    print(f"{cyan}Status{rst}      : {out_color}{outcome}{rst}{exit_str}")
+    print(f"{cyan}Run ID{rst}      : {run.get('run_id')}", file=stream)
+    print(f"{cyan}Script{rst}      : {script_name}", file=stream)
+    print(f"{cyan}Status{rst}      : {out_color}{outcome}{rst}{exit_str}", file=stream)
     if exit_exception:
-        print(f"{cyan}Exception{rst}   : {red}{exit_exception}{rst}")
+        print(f"{cyan}Exception{rst}   : {red}{exit_exception}{rst}", file=stream)
     if signals_received:
         sig_names = [
             str(s.get("signal_name") or f"SIG{s.get('signal')}")
             for s in signals_received
         ]
-        print(f"{cyan}Signals{rst}     : {yellow}{', '.join(sig_names)}{rst}")
+        print(f"{cyan}Signals{rst}     : {yellow}{', '.join(sig_names)}{rst}", file=stream)
 
     start_str = _format_report_timestamp(timing.get("started_at_utc"), utc=utc)
-    print(f"{cyan}Started{rst}     : {start_str}")
+    print(f"{cyan}Started{rst}     : {start_str}", file=stream)
 
     timing_sem = classify_timing_semantics(timing)
     workload_val = _as_float(timing.get("workload_seconds"))
@@ -794,32 +817,34 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         if elapsed_val is None
         else _format_duration_detail(elapsed_val)
     )
-    print(f"{cyan}{elapsed_label}{rst} : {elapsed_str}")
+    print(f"{cyan}{elapsed_label}{rst} : {elapsed_str}", file=stream)
     print(
         f"{cyan}Timing Scope{rst} : tracked interval "
-        "(start() to stop(), not full application lifetime when imported late)"
+        "(start() to stop(), not full application lifetime when imported late)",
+        file=stream,
     )
     if startup_overhead is not None:
-        print(f"{cyan}Startup overhead{rst} : {_format_duration_detail(startup_overhead)}")
+        print(f"{cyan}Startup overhead{rst} : {_format_duration_detail(startup_overhead)}", file=stream)
     if finalization_overhead is not None:
         fin_str = _format_duration_detail(finalization_overhead)
         if hardware_wait is not None:
             fin_str += f" (includes Hardware wait: {_format_duration_detail(hardware_wait)})"
-        print(f"{cyan}Finalization overhead{rst} : {fin_str}")
+        print(f"{cyan}Finalization overhead{rst} : {fin_str}", file=stream)
     elif hardware_wait is not None:
-        print(f"{cyan}Hardware wait{rst} : {_format_duration_detail(hardware_wait)}")
+        print(f"{cyan}Hardware wait{rst} : {_format_duration_detail(hardware_wait)}", file=stream)
     if session_val is not None:
-        print(f"{cyan}Tracked session{rst} : {_format_duration_detail(session_val)}")
+        print(f"{cyan}Tracked session{rst} : {_format_duration_detail(session_val)}", file=stream)
     if bg_hardware is not None:
         print(
             f"{cyan}Background hardware{rst} : "
-            f"{_format_duration_detail(bg_hardware)} (overlaps workload)"
+            f"{_format_duration_detail(bg_hardware)} (overlaps workload)",
+            file=stream,
         )
 
     # Read Events if available
     events_path = Path(manifest_path).parent / "events.jsonl"
     if events_path.exists():
-        print(f"\n{blue}{bold}--- Event Timeline ---{rst}")
+        print(f"\n{blue}{bold}--- Event Timeline ---{rst}", file=stream)
         try:
             with open(events_path, "r", encoding="utf-8") as ef:
                 # Show ALL events when <= 20; otherwise the OLDEST 10 + NEWEST 10 with a
@@ -841,21 +866,21 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
                     if not utc:
                         dt = dt.astimezone()  # local time
                     ts_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-                    print(f"  [{cyan}{ts_str}{rst}] {green}{e.get('type')}{rst}: {e.get('name', '')} {e.get('payload', '')}")
+                    print(f"  [{cyan}{ts_str}{rst}] {green}{e.get('type')}{rst}: {e.get('name', '')} {e.get('payload', '')}", file=stream)
 
                 for line in first_events:
                     _print_ev(line)
 
                 if total_events > 20:
-                    print(f"  {dim}... [ {total_events - 20} events truncated ] ...{rst}")
+                    print(f"  {dim}... [ {total_events - 20} events truncated ] ...{rst}", file=stream)
                     for line in last_events:
                         _print_ev(line)
                 del all_lines
         except Exception:
-            print("  (Events file corrupt or unreadable)")
+            print("  (Events file corrupt or unreadable)", file=stream)
 
     if depth == "basic":
-        print()
+        print(file=stream)
         return
 
     # --- STANDARD ---
@@ -883,17 +908,17 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
     else:
         argv_str = ""
 
-    print(f"\n{blue}{bold}--- Standard Information ---{rst}")
-    print(f"{cyan}Arguments{rst}   : {argv_str}")
+    print(f"\n{blue}{bold}--- Standard Information ---{rst}", file=stream)
+    print(f"{cyan}Arguments{rst}   : {argv_str}", file=stream)
 
     # Safely extract python version
     if python_status == "failed":
-        print(f"{cyan}Python{rst}      : {yellow}capture failed{rst}")
+        print(f"{cyan}Python{rst}      : {yellow}capture failed{rst}", file=stream)
     else:
         py_ver = python.get("version")
         py_parts = py_ver.split() if isinstance(py_ver, str) else []
         v_tag = py_parts[0] if py_parts else "unknown"
-        print(f"{cyan}Python{rst}      : {python.get('executable')} (v{v_tag})")
+        print(f"{cyan}Python{rst}      : {python.get('executable')} (v{v_tag})", file=stream)
 
     hw_summary = (
         "hardware: capture failed"
@@ -901,39 +926,39 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         else f"{cpu_model}, {ram_gb} GB RAM"
     )
     if host_status == "failed":
-        print(f"{cyan}Host{rst}        : {yellow}capture failed{rst} ({hw_summary})")
+        print(f"{cyan}Host{rst}        : {yellow}capture failed{rst} ({hw_summary})", file=stream)
     else:
         hostname = _unwrap_value(host.get("hostname"), default="unknown")
         os_name = _unwrap_value(host.get("os_name"), default="")
         os_version = _unwrap_value(host.get("os_version"), default="")
         os_text = " ".join(part for part in (os_name, os_version) if part) or "unknown OS"
-        print(f"{cyan}Host{rst}        : {hostname} - {os_text} ({hw_summary})")
+        print(f"{cyan}Host{rst}        : {hostname} - {os_text} ({hw_summary})", file=stream)
 
     if git_status == "failed":
-        print(f"{cyan}Git Commit{rst}  : {yellow}capture failed{rst}")
+        print(f"{cyan}Git Commit{rst}  : {yellow}capture failed{rst}", file=stream)
     else:
         commit = git.get("commit")
         if isinstance(commit, str) and commit:
             remote = _unwrap_value(git.get("remote_url"), default="unknown origin")
-            print(f"{cyan}Git Commit{rst}  : {commit[:8]} ({remote})")
+            print(f"{cyan}Git Commit{rst}  : {commit[:8]} ({remote})", file=stream)
         else:
-            print(f"{cyan}Git Commit{rst}  : Not found or un-tracked")
+            print(f"{cyan}Git Commit{rst}  : Not found or un-tracked", file=stream)
 
     pkg_unresolved = _as_dict_list(_as_dict(manifest.get("packages")).get("unresolved"))
     if pkg_status == "failed":
-        print(f"{cyan}Packages{rst}    : {yellow}capture failed{rst}")
+        print(f"{cyan}Packages{rst}    : {yellow}capture failed{rst}", file=stream)
     else:
         unresolved_suffix = f" ({len(pkg_unresolved)} unresolved)" if pkg_unresolved else ""
-        print(f"{cyan}Packages{rst}    : {len(pkgs)} recorded{unresolved_suffix}")
+        print(f"{cyan}Packages{rst}    : {len(pkgs)} recorded{unresolved_suffix}", file=stream)
 
     if env_status == "failed":
-        print(f"{cyan}Env Vars{rst}    : {yellow}capture failed{rst}")
+        print(f"{cyan}Env Vars{rst}    : {yellow}capture failed{rst}", file=stream)
     else:
-        print(f"{cyan}Env Vars{rst}    : {len(envs)} captured")
+        print(f"{cyan}Env Vars{rst}    : {len(envs)} captured", file=stream)
 
     df_counts = _summarize_data_files(manifest.get("data_files"))
     if df_counts["total"] > 0:
-        print(f"{cyan}Data Files{rst}  : {_format_data_files_summary_line(df_counts)}")
+        print(f"{cyan}Data Files{rst}  : {_format_data_files_summary_line(df_counts)}", file=stream)
 
     # Concise reproducibility summary (standard and deep depths only; never in basic or section extracts).
     try:
@@ -954,31 +979,33 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
             preflight=False,
         )
         repro_lines = _format_repro_summary(repro).splitlines()
-        print(f"\n{blue}{bold}--- Reproducibility ---{rst}")
+        print(f"\n{blue}{bold}--- Reproducibility ---{rst}", file=stream)
         for rline in repro_lines:
-            print(f"  {rline}")
+            print(f"  {rline}", file=stream)
         if hydration_report.inherited_sections and not any(
             "Inherited from parent snapshot:" in rl for rl in repro_lines
         ):
             inherited_str = ", ".join(hydration_report.inherited_sections)
             print(
                 f"  Inherited from parent snapshot: {inherited_str} "
-                "(script mtime alone does not prove dependencies matched)."
+                "(script mtime alone does not prove dependencies matched).",
+                file=stream,
             )
         if not any("pubrun inspect --preflight" in rl for rl in repro_lines):
             print(
                 f"  {cyan}Preflight{rst}   : Run `pubrun inspect --preflight` to compare "
-                "recorded requirements against this environment."
+                "recorded requirements against this environment.",
+                file=stream,
             )
     except Exception:
         pass
 
     if depth == "standard":
-        print()
+        print(file=stream)
         return
 
     # --- DEEP ---
-    print(f"\n{blue}{bold}--- Deep Information ---{rst}")
+    print(f"\n{blue}{bold}--- Deep Information ---{rst}", file=stream)
 
     # Read Config
     cfg_path = Path(manifest_path).parent / "config.resolved.json"
@@ -986,41 +1013,41 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
         try:
             with open(cfg_path, "r", encoding="utf-8") as cf:
                 cfg = _as_dict(json.load(cf))
-            print(f"\n{blue}[ Overridden Configurations ]{rst}")
-            print(f"  {cyan}Profile{rst}: {_as_dict(cfg.get('core')).get('profile')}")
+            print(f"\n{blue}[ Overridden Configurations ]{rst}", file=stream)
+            print(f"  {cyan}Profile{rst}: {_as_dict(cfg.get('core')).get('profile')}", file=stream)
             cfg_cap = _as_dict(cfg.get("capture"))
-            print(f"  {cyan}Inputs Mode{rst}: {_as_dict(cfg_cap.get('inputs')).get('enabled')}")
-            print(f"  {cyan}Packages Mode{rst}: {_as_dict(cfg_cap.get('packages')).get('mode')}")
+            print(f"  {cyan}Inputs Mode{rst}: {_as_dict(cfg_cap.get('inputs')).get('enabled')}", file=stream)
+            print(f"  {cyan}Packages Mode{rst}: {_as_dict(cfg_cap.get('packages')).get('mode')}", file=stream)
         except Exception:
             pass
 
-    print(f"\n{blue}[ Environment Variables ]{rst}")
+    print(f"\n{blue}[ Environment Variables ]{rst}", file=stream)
     if env_status == "failed":
         detail = _bound_text(_section_detail(manifest, "environment"))
         if detail:
-            print(f"  {yellow}(capture failed: {detail}){rst}")
+            print(f"  {yellow}(capture failed: {detail}){rst}", file=stream)
         else:
-            print(f"  {yellow}(capture failed){rst}")
+            print(f"  {yellow}(capture failed){rst}", file=stream)
     elif not envs:
-        print("  (None captured)")
+        print("  (None captured)", file=stream)
     for var in envs:
         name = var.get("name")
         val_obj = var.get("value", {})
         if isinstance(val_obj, dict) and "representation" in val_obj:
             rep = val_obj.get("representation")
             if rep == "plain":
-                print(f"  {green}{name}{rst}={val_obj.get('value', '')}")
+                print(f"  {green}{name}{rst}={val_obj.get('value', '')}", file=stream)
             else:
                 rep_label = str(rep).upper() if rep not in (None, "") else "REDACTED"
-                print(f"  {green}{name}{rst}={yellow}<{rep_label}>{rst}")
+                print(f"  {green}{name}{rst}={yellow}<{rep_label}>{rst}", file=stream)
         else:
-            print(f"  {green}{name}{rst}={val_obj}")
+            print(f"  {green}{name}{rst}={val_obj}", file=stream)
 
-    _print_packages_block(manifest, use_color, leading_newline=True)
-    _print_data_files_block(manifest, use_color)
+    _print_packages_block(manifest, use_color, leading_newline=True, out=stream)
+    _print_data_files_block(manifest, use_color, out=stream)
 
     subprocs = _as_dict_list(manifest.get("subprocesses"))
-    print(f"\n{blue}[ Subprocesses ]{rst} ({len(subprocs)} executed)")
+    print(f"\n{blue}[ Subprocesses ]{rst} ({len(subprocs)} executed)", file=stream)
     for sp in subprocs:
         cmd = sp.get("argv", [])
         if isinstance(cmd, list):
@@ -1046,9 +1073,9 @@ def print_report(manifest_path: str, depth: str = "standard", section: Optional[
                 dur_str = f" ({elapsed}s, wall-clock)"
             else:
                 dur_str = ""
-        print(f"  [{green if rc == 0 else red}{rc}{rst}] {cmd_str}{dur_str}")
+        print(f"  [{green if rc == 0 else red}{rc}{rst}] {cmd_str}{dur_str}", file=stream)
 
-    print()
+    print(file=stream)
 
 
 def format_elapsed_range(total_seconds: float) -> tuple[str, str]:
@@ -1092,8 +1119,11 @@ def draw_ascii_chart(
     color: str = "",
     use_color: bool = True,
     average: bool = False,
+    *,
+    out: Optional[TextIO] = None,
 ) -> None:
     """Helper to render a standardized ASCII utilization area graph."""
+    stream = out if out is not None else sys.stdout
     min_val = 0.0
     max_val = max(0.1, max(data))
     if unit == "%":
@@ -1141,7 +1171,7 @@ def draw_ascii_chart(
 
     grid = [[" " for _ in range(width)] for _ in range(height)]
 
-    char = "█" if _supports_unicode(sys.stdout) else "#"
+    char = "█" if _supports_unicode(stream) else "#"
 
     for x in range(width):
         y = y_vals[x]
@@ -1155,9 +1185,9 @@ def draw_ascii_chart(
     bold = Colors.BOLD if use_color else ""
     rst = Colors.RESET if use_color else ""
 
-    corner = "└" if _supports_unicode(sys.stdout) else "+"
-    pipe = "│" if _supports_unicode(sys.stdout) else "|"
-    hline = "─" if _supports_unicode(sys.stdout) else "-"
+    corner = "└" if _supports_unicode(stream) else "+"
+    pipe = "│" if _supports_unicode(stream) else "|"
+    hline = "─" if _supports_unicode(stream) else "-"
 
     # Format max value string
     if data:
@@ -1173,7 +1203,7 @@ def draw_ascii_chart(
         max_str = ""
 
     title_suffix = f" ({max_str})" if max_str else ""
-    print(f"\n{bold}{title}{title_suffix}{rst}")
+    print(f"\n{bold}{title}{title_suffix}{rst}", file=stream)
 
     for r in range(height):
         val = max_val - r * (max_val - min_val) / (height - 1)
@@ -1181,12 +1211,12 @@ def draw_ascii_chart(
         row_str = "".join(grid[r])
         if use_color and color:
             row_str = f"{color}{row_str}{rst}"
-        print(f"  {label_str} {pipe} {row_str}")
+        print(f"  {label_str} {pipe} {row_str}", file=stream)
 
     # Put ticks at the start, 25%, middle, 75%, and end marks
     ticks_str = list(hline * width)
     if width > 1:
-        tick_char = "┼" if _supports_unicode(sys.stdout) else "+"
+        tick_char = "┼" if _supports_unicode(stream) else "+"
         ticks_str[0] = tick_char
         ticks_str[-1] = tick_char
         ticks_str[(width - 1) // 2] = tick_char
@@ -1194,7 +1224,7 @@ def draw_ascii_chart(
             ticks_str[(width - 1) // 4] = tick_char
             ticks_str[(3 * (width - 1)) // 4] = tick_char
     axis_line = "".join(ticks_str)
-    print(f"  {' ' * 10} {corner}{axis_line}")
+    print(f"  {' ' * 10} {corner}{axis_line}", file=stream)
 
     from pubrun.status import _format_elapsed
 
@@ -1281,21 +1311,30 @@ def draw_ascii_chart(
 
     prefix1 = "  Timeline".ljust(13) + ": "
     prefix2 = "  Elapsed".ljust(13) + ": "
-    print(f"{prefix1}{row1_vals}")
-    print(f"{prefix2}{row2_vals}")
+    print(f"{prefix1}{row1_vals}", file=stream)
+    print(f"{prefix2}{row2_vals}", file=stream)
 
 
-def print_resources_report(manifest_path: str, average: bool = False, last: Optional[str] = None, metric: str = "all", width: Optional[int] = None) -> None:
+def print_resources_report(
+    manifest_path: str,
+    average: bool = False,
+    last: Optional[str] = None,
+    metric: str = "all",
+    width: Optional[int] = None,
+    *,
+    out: Optional[TextIO] = None,
+) -> None:
     """Print a diagnostic resources report with ASCII utilization graphs over time."""
+    stream = out if out is not None else sys.stdout
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
-    except FileNotFoundError:
-        _print_error(f"Could not find manifest file at '{manifest_path}'.")
-        sys.exit(1)
-    except json.JSONDecodeError:
-        _print_error(f"The manifest file at '{manifest_path}' is corrupt or contains invalid JSON.")
-        sys.exit(1)
+    except FileNotFoundError as e:
+        raise DiagnosticsError(f"Could not find manifest file at '{manifest_path}'.") from e
+    except json.JSONDecodeError as e:
+        raise DiagnosticsError(
+            f"The manifest file at '{manifest_path}' is corrupt or contains invalid JSON."
+        ) from e
 
     # Hydrate!
     manifest, warnings = hydrate_manifest(manifest_path, manifest)
@@ -1327,22 +1366,22 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
             out_color = Colors.YELLOW
 
     if use_color:
-        if _supports_unicode(sys.stdout):
-            print(f"\n{cyan}{bold}┌─────────────────────────────────────────────────┐{rst}")
-            print(f"{cyan}{bold}│               RESOURCE MONITORING               │{rst}")
-            print(f"{cyan}{bold}└─────────────────────────────────────────────────┘{rst}")
+        if _supports_unicode(stream):
+            print(f"\n{cyan}{bold}┌─────────────────────────────────────────────────┐{rst}", file=stream)
+            print(f"{cyan}{bold}│               RESOURCE MONITORING               │{rst}", file=stream)
+            print(f"{cyan}{bold}└─────────────────────────────────────────────────┘{rst}", file=stream)
         else:
-            print(f"\n{cyan}{bold}+-------------------------------------------------+{rst}")
-            print(f"{cyan}{bold}|               RESOURCE MONITORING               |{rst}")
-            print(f"{cyan}{bold}+-------------------------------------------------+{rst}")
+            print(f"\n{cyan}{bold}+-------------------------------------------------+{rst}", file=stream)
+            print(f"{cyan}{bold}|               RESOURCE MONITORING               |{rst}", file=stream)
+            print(f"{cyan}{bold}+-------------------------------------------------+{rst}", file=stream)
     else:
-        print(f"\n=================================================")
-        print(f"               RESOURCE MONITORING               ")
-        print(f"=================================================")
+        print(f"\n=================================================", file=stream)
+        print(f"               RESOURCE MONITORING               ", file=stream)
+        print(f"=================================================", file=stream)
 
-    print(f"{cyan}Run ID{rst}      : {run.get('run_id')}")
-    print(f"{cyan}Script{rst}      : {script_name}")
-    print(f"{cyan}Status{rst}      : {out_color}{outcome}{rst}")
+    print(f"{cyan}Run ID{rst}      : {run.get('run_id')}", file=stream)
+    print(f"{cyan}Script{rst}      : {script_name}", file=stream)
+    print(f"{cyan}Status{rst}      : {out_color}{outcome}{rst}", file=stream)
 
     peak_rss = resources.get("peak_rss_bytes")
     peak_cpu = resources.get("peak_cpu_percent")
@@ -1386,14 +1425,14 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
     if metric in ("mem", "all"):
         line = _bytes_stat_line(series["rss"], peak_rss)
         if line:
-            print(f"{cyan}RSS (main){rst}   : {line}")
+            print(f"{cyan}RSS (main){rst}   : {line}", file=stream)
         if end_rss:
-            print(f"{cyan}End RSS{rst}      : {_fmt_bytes(end_rss)}")
+            print(f"{cyan}End RSS{rst}      : {_fmt_bytes(end_rss)}", file=stream)
 
     if metric in ("cpu", "all"):
         line = _cpu_stat_line(series["cpu"], peak_cpu)
         if line:
-            print(f"{cyan}CPU (main){rst}   : {line}")
+            print(f"{cyan}CPU (main){rst}   : {line}", file=stream)
 
     # Comprehensive resource view (only for `pubrun res`; cpu/mem stay single-metric).
     # Each field is rendered only when present, so older manifests just show less.
@@ -1402,10 +1441,10 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
         # is never misled into thinking the main-process numbers are the whole tree.
         tree_line = _bytes_stat_line(series["tree_rss"], resources.get("peak_tree_rss_bytes"))
         if tree_line:
-            print(f"{cyan}RSS (tree){rst}   : {tree_line}")
+            print(f"{cyan}RSS (tree){rst}   : {tree_line}", file=stream)
         tree_cpu_line = _cpu_stat_line(series["tree_cpu"], resources.get("peak_tree_cpu_percent"))
         if tree_cpu_line:
-            print(f"{cyan}CPU (tree){rst}   : {tree_cpu_line} {yellow}(% of one core; may exceed 100%){rst}")
+            print(f"{cyan}CPU (tree){rst}   : {tree_cpu_line} {yellow}(% of one core; may exceed 100%){rst}", file=stream)
 
         # System memory (free/available) at start and worst point.
         sysmem = resources.get("system_memory")
@@ -1416,10 +1455,10 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
             total = start.get("total_bytes")
             if avail is not None and total:
                 print(f"{cyan}System RAM{rst}   : {_fmt_bytes(avail)} available of "
-                      f"{_fmt_bytes(total)} at start")
+                      f"{_fmt_bytes(total)} at start", file=stream)
             worst_avail = worst.get("available_bytes")
             if worst_avail is not None:
-                print(f"{cyan}Min Avail RAM{rst}: {_fmt_bytes(worst_avail)} (lowest during run)")
+                print(f"{cyan}Min Avail RAM{rst}: {_fmt_bytes(worst_avail)} (lowest during run)", file=stream)
 
         # Load average (start / max 1-min).
         load = resources.get("load_average")
@@ -1432,14 +1471,14 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
             if max_l is not None:
                 parts.append(f"{max_l:.2f} peak (1-min)")
             if parts:
-                print(f"{cyan}Load Average{rst} : {', '.join(parts)}")
+                print(f"{cyan}Load Average{rst} : {', '.join(parts)}", file=stream)
 
         # Node iowait (labeled node-wide / indicative only).
         iowait = resources.get("system_iowait_pct")
         if isinstance(iowait, dict):
             mx = iowait.get("max")
             if mx is not None:
-                print(f"{cyan}Node iowait{rst}  : {mx}% peak {yellow}(node-wide, indicative only){rst}")
+                print(f"{cyan}Node iowait{rst}  : {mx}% peak {yellow}(node-wide, indicative only){rst}", file=stream)
 
         # Per-process I/O byte volume (this run), from /proc/self/io.
         io = resources.get("io_counters")
@@ -1451,13 +1490,13 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
             wc = delta.get("wchar")
             if rb is not None or wb is not None:
                 print(f"{cyan}Disk I/O{rst}     : read {_fmt_bytes(rb or 0)}, "
-                      f"wrote {_fmt_bytes(wb or 0)} (storage layer)")
+                      f"wrote {_fmt_bytes(wb or 0)} (storage layer)", file=stream)
             if rc is not None or wc is not None:
                 print(f"{cyan}Logical I/O{rst}  : read {_fmt_bytes(rc or 0)}, "
-                      f"wrote {_fmt_bytes(wc or 0)} (incl. cache)")
+                      f"wrote {_fmt_bytes(wc or 0)} (incl. cache)", file=stream)
 
     if not _events_path.exists():
-        print(f"\n{yellow}No events.jsonl file found. Cannot generate utilization graphs.{rst}\n")
+        print(f"\n{yellow}No events.jsonl file found. Cannot generate utilization graphs.{rst}\n", file=stream)
         return
 
     # Reuse the series already read for the summary above (single read of events.jsonl).
@@ -1471,7 +1510,7 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
     rss_values = _tree_rss if plot_tree else list(series["rss"])
     cpu_values = list(series["cpu"])
     if not timestamps:
-        print(f"\n{yellow}No resource samples found in events.jsonl.{rst}\n")
+        print(f"\n{yellow}No resource samples found in events.jsonl.{rst}\n", file=stream)
         return
 
     last_seconds = None
@@ -1479,8 +1518,7 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
         try:
             last_seconds = parse_duration(last)
         except ValueError as e:
-            _print_error(f"Invalid duration for --last: {e}")
-            sys.exit(1)
+            raise DiagnosticsError(f"Invalid duration for --last: {e}") from e
 
     if last_seconds is not None and timestamps:
         cutoff_time = timestamps[-1] - last_seconds
@@ -1497,20 +1535,20 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
         cpu_values = filtered_cpu
 
     if not rss_values:
-        print(f"\n{yellow}No resource samples found in events.jsonl.{rst}\n")
+        print(f"\n{yellow}No resource samples found in events.jsonl.{rst}\n", file=stream)
         return
 
     if len(rss_values) < 2:
-        print(f"\nOnly one resource sample recorded:")
+        print(f"\nOnly one resource sample recorded:", file=stream)
         if metric in ("mem", "all"):
             if rss_values[0] >= 1024**3:
                 single_rss = f"{rss_values[0] / (1024**3):.2f} GB"
             else:
                 single_rss = f"{rss_values[0] / (1024**2):.2f} MB"
-            print(f"  Memory: {single_rss}")
+            print(f"  Memory: {single_rss}", file=stream)
         if metric in ("cpu", "all"):
-            print(f"  CPU   : {cpu_values[0]}%")
-        print()
+            print(f"  CPU   : {cpu_values[0]}%", file=stream)
+        print(file=stream)
         return
 
     # Get terminal width for dynamic sizing
@@ -1539,7 +1577,8 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
             width=chart_width,
             color=Colors.YELLOW if use_color else "",
             use_color=use_color,
-            average=average
+            average=average,
+            out=stream,
         )
 
     # Plot Memory (Green theme)
@@ -1567,6 +1606,7 @@ def print_resources_report(manifest_path: str, average: bool = False, last: Opti
             width=chart_width,
             color=Colors.GREEN if use_color else "",
             use_color=use_color,
-            average=average
+            average=average,
+            out=stream,
         )
-    print()
+    print(file=stream)

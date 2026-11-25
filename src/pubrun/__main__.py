@@ -7,7 +7,7 @@ import time
 import tempfile
 import subprocess
 from pathlib import Path
-from typing import List, NoReturn, Optional
+from typing import List, NoReturn, Optional, Set, Tuple
 
 from pubrun import __version__
 
@@ -733,8 +733,8 @@ def _run_resources(
     width: Optional[int] = None,
 ) -> None:
     """Print resource monitoring graphs for a recorded run."""
+    from pubrun.report.diagnostics import DiagnosticsError, print_resources_report
     try:
-        from pubrun.report.diagnostics import print_resources_report
         manifest_path = _get_manifest_path(
             run_dir,
             filter_str=filter_str,
@@ -752,6 +752,9 @@ def _run_resources(
     except FileNotFoundError as e:
         _print_error(str(e))
         sys.exit(1)
+    except DiagnosticsError as e:
+        _print_error(e.message)
+        sys.exit(e.exit_code)
     except Exception as e:
         _print_error(f"Failed to generate resources report: {e}")
         sys.exit(1)
@@ -889,8 +892,8 @@ def _run_show_config(mode: str, run_selector: Optional[str] = None, show_all: bo
 
 def _run_report(run_dir: str, depth: str, section: Optional[str] = None, utc: bool = False) -> None:
     """Print a human-readable diagnostic report for a recorded run."""
+    from pubrun.report.diagnostics import DiagnosticsError, print_report
     try:
-        from pubrun.report.diagnostics import print_report
         try:
             manifest_path = _get_manifest_path(run_dir)
             print_report(manifest_path, depth, section, utc=utc)
@@ -1026,6 +1029,10 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None, utc: bo
             print("See 'pubrun status' to view all active or crashed runs.", file=sys.stderr)
 
         sys.exit(1)
+
+    except DiagnosticsError as e:
+        _print_error(e.message)
+        sys.exit(e.exit_code)
 
     except Exception as e:
         _print_error(f"Failed to generate diagnostic report: {e}")
@@ -2664,14 +2671,80 @@ def _add_run_filter_args(parser: argparse.ArgumentParser, include_limit: bool = 
         parser.add_argument("-n", "--limit", type=int, default=None, metavar="LIMIT", help="Limit the number of runs to consider.")
 
 
-def main() -> None:
-    """CLI entrypoint for the ``pubrun`` command."""
-    prog_name = Path(sys.argv[0]).name if sys.argv[0] else "pubrun"
+def _preprocess_argv(argv: List[str], subcommands: Set[str]) -> Tuple[List[str], bool]:
+    """Return (rewritten argv, no_color_present) without mutating the input."""
+    argv = list(argv)
+
+    # Handle global --no-color flag regardless of position
+    # But do not strip it if it is part of the command run by 'pubrun run'
+    run_idx = -1
+    for idx, arg in enumerate(argv[1:], start=1):
+        if arg in subcommands:
+            if arg == "run":
+                run_idx = idx
+            break
+
+    no_color_present = False
+    if run_idx != -1:
+        if "--no-color" in argv[:run_idx]:
+            no_color_present = True
+            argv = [arg for i, arg in enumerate(argv) if i >= run_idx or arg != "--no-color"]
+    else:
+        if "--no-color" in argv:
+            no_color_present = True
+            argv = [arg for arg in argv if arg != "--no-color"]
+
+    # Support placing run ID / prefix / path before the subcommand
+    # (e.g. `pubrun 16528343 cpu` -> `pubrun cpu 16528343`)
+    if (len(argv) > 2 and argv[1] not in subcommands and argv[1] != "help"
+            and not argv[1].startswith("-")):
+        for idx in range(2, len(argv)):
+            if argv[idx] in subcommands:
+                cmd = argv.pop(idx)
+                argv.insert(1, cmd)
+                break
+
+    # Translate 'help' and subcommand translations
+    if len(argv) > 1:
+        if argv[1] == "help":
+            if len(argv) > 2 and argv[2] in subcommands:
+                argv = [argv[0], argv[2], "--help"]
+            else:
+                argv = [argv[0], "--help"]
+        elif argv[1] in subcommands and len(argv) > 2 and argv[2] == "help":
+            argv = [argv[0], argv[1], "--help"]
+
+    return argv, no_color_present
+
+
+def _apply_global_flags(args: argparse.Namespace, no_color_present: bool) -> None:
+    """Apply global CLI side effects (NO_COLOR env and UTC display mode) after parsing."""
+    if no_color_present:
+        setattr(args, "no_color", True)
+    if getattr(args, "no_color", False):
+        os.environ["NO_COLOR"] = "1"
+
+    # Timestamp display timezone: local by default, UTC when --utc is given
+    # (status/show). Timestamps are always stored as UTC epochs. (IPD EC-17.)
+    if getattr(args, "utc", False):
+        from pubrun.status import set_display_utc
+        set_display_utc(True)
+
+
+def main(argv: Optional[List[str]] = None) -> None:
+    """CLI entrypoint for the ``pubrun`` command.
+
+    Args:
+        argv: Full argument vector including the program name (defaults to ``sys.argv``).
+    """
+    argv = list(sys.argv if argv is None else argv)
+    prog_name = Path(argv[0]).name if argv and argv[0] else "pubrun"
     if prog_name not in ("pubrun", "pbr"):
         prog_name = "pubrun"
 
     # Primary commands (excluding aliases) for clean error messages.
     _PRIMARY_COMMANDS: list = []
+    _argv_for_errors: List[str] = []
 
     class _SubcommandAwareArgumentParser(argparse.ArgumentParser):
         def error(self, message: str) -> NoReturn:
@@ -2681,7 +2754,7 @@ def main() -> None:
                 if isinstance(act, argparse._SubParsersAction)
             ]
             if subparsers_actions:
-                for arg in sys.argv[1:]:
+                for arg in _argv_for_errors[1:]:
                     if arg in subparsers_actions[0].choices:
                         subcommand = arg
                         break
@@ -3124,61 +3197,16 @@ def main() -> None:
     # command can never be missing from the argv preprocessing below.
     subcommands = set(subparsers.choices.keys())
 
-    # Handle global --no-color flag regardless of position
-    # But do not strip it if it is part of the command run by 'pubrun run'
-    run_idx = -1
-    for idx, arg in enumerate(sys.argv[1:], start=1):
-        if arg in subcommands:
-            if arg == "run":
-                run_idx = idx
-            break
-
-    no_color_present = False
-    if run_idx != -1:
-        if "--no-color" in sys.argv[:run_idx]:
-            no_color_present = True
-            sys.argv = [arg for i, arg in enumerate(sys.argv) if i >= run_idx or arg != "--no-color"]
-    else:
-        if "--no-color" in sys.argv:
-            no_color_present = True
-            sys.argv = [arg for arg in sys.argv if arg != "--no-color"]
-
-    # Support placing run ID / prefix / path before the subcommand
-    # (e.g. `pubrun 16528343 cpu` -> `pubrun cpu 16528343`)
-    if (len(sys.argv) > 2 and sys.argv[1] not in subcommands and sys.argv[1] != "help"
-            and not sys.argv[1].startswith("-")):
-        for idx in range(2, len(sys.argv)):
-            if sys.argv[idx] in subcommands:
-                cmd = sys.argv.pop(idx)
-                sys.argv.insert(1, cmd)
-                break
-
-    # Translate 'help' and subcommand translations
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "help":
-            if len(sys.argv) > 2 and sys.argv[2] in subcommands:
-                sys.argv = [sys.argv[0], sys.argv[2], "--help"]
-            else:
-                sys.argv = [sys.argv[0], "--help"]
-        elif sys.argv[1] in subcommands and len(sys.argv) > 2 and sys.argv[2] == "help":
-            sys.argv = [sys.argv[0], sys.argv[1], "--help"]
+    argv, no_color_present = _preprocess_argv(argv, subcommands)
 
     # Easter egg
-    if len(sys.argv) >= 2 and prog_name == "pbr" and sys.argv[1] == "me":
+    if len(argv) >= 2 and prog_name == "pbr" and argv[1] == "me":
         print("ASAP")
         sys.exit(0)
 
-    args = parser.parse_args()
-    if no_color_present:
-        setattr(args, "no_color", True)
-    if getattr(args, "no_color", False):
-        os.environ["NO_COLOR"] = "1"
-
-    # Timestamp display timezone: local by default, UTC when --utc is given
-    # (status/show). Timestamps are always stored as UTC epochs. (IPD EC-17.)
-    if getattr(args, "utc", False):
-        from pubrun.status import set_display_utc
-        set_display_utc(True)
+    _argv_for_errors[:] = argv
+    args = parser.parse_args(argv[1:])
+    _apply_global_flags(args, no_color_present)
 
     # `pubrun show config` family (positional grammar), intercepted BEFORE run resolution so
     # the keyword `config` is not mistaken for a run selector. Three forms:
