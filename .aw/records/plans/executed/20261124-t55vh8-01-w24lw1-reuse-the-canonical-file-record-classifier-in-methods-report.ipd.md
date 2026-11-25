@@ -6,7 +6,7 @@
 - Scope: Move the canonical classifier and its two helpers unchanged from `src/pubrun/report/reproducibility.py` into a new standard-library-only module `src/pubrun/report/file_evidence.py`. Make `reproducibility.py` and `methods.py` import the classifier from that module, and delete the copy in `methods.py`. Add behavior tests to `tests/test_reports.py` and a `CHANGELOG.md` entry. The `pubrun inspect` display badge in `src/pubrun/report/diagnostics.py` is out of scope (carrier `unf79v`).
 - Scope-Paths: src/pubrun/report/file_evidence.py, src/pubrun/report/reproducibility.py, src/pubrun/report/methods.py, tests/test_reports.py, CHANGELOG.md
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Methods reports count a data-file record as content-verified only when it carries a non-empty digest
@@ -19,12 +19,12 @@
 - Highest E allocated: 05
 - Author: opencode
 - Id: w24lw1
-- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: w24lw1 verified (set t55vh8, attempt 1).
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-25 to-review (aw set): graduated from backlog item t55vh8 into a review-ready plan
