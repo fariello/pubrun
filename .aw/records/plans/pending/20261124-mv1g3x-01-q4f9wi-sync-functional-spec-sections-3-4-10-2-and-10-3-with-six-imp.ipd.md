@@ -6,7 +6,9 @@
 - Scope: Edit `docs/functional_spec.md` sections "3.4 Import Modes", "10.2 Configuration Discovery", and "10.3 Supported Environment Variables" so that they match `src/pubrun/_modes.py`, `src/pubrun/_config_boot.py`, `src/pubrun/config.py`, and `src/pubrun/_bootstrap.py`. No other section or file changes.
 - Scope-Paths: docs/functional_spec.md
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: standard
 - Short-Description: Sync docs/functional_spec.md sections 3.4, 10.2, and 10.3 with six import modes, XDG_CONFIG_HOME, and boot env vars
 - Work-Kind: followup
 - Priority: low
@@ -21,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003 fixed; review record `.aw/records/reviews/20261124-mv1g3x-01-q4f9wi-sync-functional-spec-sections-3-4-10-2-and-10-3-with-six-imp.review.md`.
 - 2026-11-25 to-review (opencode): graduated from backlog item `mv1g3x` into a review-ready plan.
 - 2026-11-25 draft (opencode): created.
 
@@ -59,7 +62,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ## Findings
 
-Measured at authoring on Linux at `HEAD` `aa2cbc9`.
+Measured at authoring on Linux at `HEAD` `aa2cbc9` (and verified at review against `HEAD` `663c2ea`).
 
 ### Stale statements
 
@@ -73,7 +76,7 @@ Measured at authoring on Linux at `HEAD` `aa2cbc9`.
 
 ### Which component reads each environment variable
 
-The flowchart shows the two consumers. The boot resolver and the conflict-policy check run at `import pubrun` time. `resolve_config` builds the merged configuration that a run writes to `config.resolved.json`. Only `XDG_CONFIG_HOME` and `APPDATA` reach both consumers, because both consumers locate the user home config file.
+The flowchart shows the consumers. The boot resolver runs during import-mode resolution, and the conflict-policy check runs lazily when two imports request conflicting modes. `resolve_config` builds the merged configuration that a run writes to `config.resolved.json`. Only `XDG_CONFIG_HOME` and `APPDATA` reach both boot-time and `resolve_config` paths, because both locate the user home config file.
 
 ```mermaid
 flowchart LR
@@ -90,7 +93,7 @@ flowchart LR
 
 ### Runtime probe
 
-The probe runs the real functions with a controlled environment. Run it from the repository root. It creates the scratch directory `.mv1g3x_probe` and removes it at the end.
+The probe runs the real functions with a controlled environment. At authoring it ran from the repository root in a scratch directory `.mv1g3x_probe` (removed at the end):
 
 ```sh
 mkdir -p .mv1g3x_probe
@@ -191,7 +194,7 @@ P11 selected: noauto run active: False
    ```markdown
    An empty or whitespace-only `XDG_CONFIG_HOME` or `APPDATA` is treated as unset. On Windows, when `APPDATA` is unset, the user home config follows the `XDG_CONFIG_HOME` rule. The boot resolver (Section 3.2) uses the same user home config path.
 
-   `PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and `PUBRUN_IMPORT_CONFLICT` are not part of this merge. The boot resolver reads them at `import pubrun` time (Sections 3.2 and 3.3), so they do not change the values recorded in `config.resolved.json`.
+   `PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and `PUBRUN_IMPORT_CONFLICT` are not part of this merge. The boot sequence reads them during import-mode resolution and conflict handling (Sections 3.2 and 3.3), so they do not change the values recorded in `config.resolved.json`.
    ```
 
 3. **Section 10.3 Supported Environment Variables (E-03).** Replace the whole table with:
@@ -229,17 +232,57 @@ P11 selected: noauto run active: False
 ## Required tests / validation
 
 - `git diff -- docs/functional_spec.md` shows changes only inside sections 3.4, 10.2, and 10.3, and each changed line matches "Proposed changes".
-- `grep -n 'five namespaced' docs/functional_spec.md` prints nothing, and `grep -c 'The library supports six import modes' docs/functional_spec.md` prints `1`.
-- `git diff -U0 -- docs/functional_spec.md | grep '^+[^+]' | grep -c '[—–]'` prints `0`.
-- The mode-name cross-check and the environment-variable cross-check below each print `OK`. Run them from the repository root. Before E-03 is performed, the first check fails with `AssertionError: []` and the second prints the four missing variable names; that was the result at authoring.
+- Section 3.4 text check (must print `old=0 new=1` and exit `0`):
+  `python3 -c "import pathlib, sys; t = pathlib.Path('docs/functional_spec.md').read_text(encoding='utf-8'); o = t.count('five namespaced'); n = t.count('The library supports six import modes'); print(f'old={o} new={n}'); sys.exit(0 if (o == 0 and n == 1) else 1)"`
+- Before committing `docs/functional_spec.md`, run the working-tree dash check (must assert at least one added line and exit `0` with `dashes=0`):
+  `python3 -c "import subprocess, sys; lines = [l for l in subprocess.check_output(['git', 'diff', '-U0', '--', 'docs/functional_spec.md'], text=True).splitlines() if l.startswith('+') and not l.startswith('+++')]; assert lines, 'no added docs/functional_spec.md lines in working tree'; bad = [l for l in lines if '\u2014' in l or '\u2013' in l]; print(f'added_lines={len(lines)} dashes={len(bad)}'); sys.exit(1 if bad else 0)"`
+- Fail-closed mode-name and environment-variable cross-checks (each prints `OK` and exits `0` only when zero items are missing):
 
   ```sh
   # Mode-name cross-check: the PUBRUN_IMPORT_MODE row names every mode in VALID_MODES.
-  PYTHONPATH=src python3 -c "from pubrun._modes import VALID_MODES; t=open('docs/functional_spec.md').read(); row=[l for l in t.splitlines() if l.startswith('| \`PUBRUN_IMPORT_MODE\` |')]; assert len(row)==1, row; missing=[m for m in VALID_MODES if '\`%s\`' % m not in row[0]]; print('OK' if not missing else missing)"
+  PYTHONPATH=src python3 -c "import pathlib, sys; from pubrun._modes import VALID_MODES; t = pathlib.Path('docs/functional_spec.md').read_text(encoding='utf-8'); rows = [l for l in t.splitlines() if l.startswith('| \`PUBRUN_IMPORT_MODE\` |')]; assert len(rows) == 1, rows; missing = sorted(m for m in VALID_MODES if f'\`{m}\`' not in rows[0]); assert not missing, f'missing modes: {missing}'; print('OK')"
   # Environment-variable cross-check: section 10.3 has a row for each of the seven variables.
-  python3 -c "t=open('docs/functional_spec.md').read(); s=t[t.index('### 10.3'):t.index('### 10.4')]; need=['PUBRUN_IMPORT_MODE','PUBRUN_PROFILE','PUBRUN_AUTO_START','PUBRUN_META_REF','PUBRUN_IMPORT_CONFLICT','XDG_CONFIG_HOME','APPDATA']; missing=[v for v in need if '| \`%s\` |' % v not in s]; print('OK' if not missing else missing)"
+  python3 -c "import pathlib; t = pathlib.Path('docs/functional_spec.md').read_text(encoding='utf-8'); s = t[t.index('### 10.3'):t.index('### 10.4')]; need = ['PUBRUN_IMPORT_MODE', 'PUBRUN_PROFILE', 'PUBRUN_AUTO_START', 'PUBRUN_META_REF', 'PUBRUN_IMPORT_CONFLICT', 'XDG_CONFIG_HOME', 'APPDATA']; missing = [v for v in need if f'| \`{v}\` |' not in s]; assert not missing, f'missing vars: {missing}'; print('OK')"
   ```
-- The Findings runtime probe prints the same P1 to P10 lines as at authoring, the second probe prints the same P11 line, and the scratch directory `.mv1g3x_probe` no longer exists afterwards. The code paths that produce the observations are `src/pubrun/_modes.py::VALID_MODES`, `src/pubrun/config.py::get_global_config_dir`, `src/pubrun/_config_boot.py::_global_config_dir`, `src/pubrun/_config_boot.py::resolve_import_mode`, `src/pubrun/config.py::resolve_config`, and `src/pubrun/_bootstrap.py::_resolve_conflict_policy`.
+
+- Isolated runtime probe (runs outside the repository working tree in `tempfile.TemporaryDirectory()`, leaving no untracked files behind) prints the same P1 to P10 lines as Findings, and the second probe prints the same P11 line. The code paths that produce the observations are `src/pubrun/_modes.py::VALID_MODES`, `src/pubrun/config.py::get_global_config_dir`, `src/pubrun/_config_boot.py::_global_config_dir`, `src/pubrun/_config_boot.py::resolve_import_mode`, `src/pubrun/config.py::resolve_config`, `src/pubrun/_bootstrap.py::_resolve_conflict_policy`, and `src/pubrun/noauto.py` via `src/pubrun/_bootstrap.py::select_mode`:
+
+  ```sh
+  env -u PUBRUN_AUTO_START -u PUBRUN_IMPORT_CONFLICT -u XDG_CONFIG_HOME -u APPDATA HOME=/nonexistent-mv1g3x PUBRUN_IMPORT_MODE=minimal python3 - <<'EOF'
+  import os, sys, tempfile
+  sys.path.insert(0, os.path.abspath("src"))
+  orig = os.getcwd()
+  with tempfile.TemporaryDirectory() as td:
+      os.chdir(td)
+      try:
+          from pubrun import config as c, _config_boot as b, _bootstrap as bs
+          from pubrun._modes import VALID_MODES
+          def dirs():
+              return "%s | %s" % (c.get_global_config_dir(), b._global_config_dir())
+          print("P1 modes:", len(VALID_MODES), sorted(VALID_MODES))
+          print("P2 XDG unset:", dirs())
+          os.environ["XDG_CONFIG_HOME"] = "/xdg-probe"; print("P3 XDG set:", dirs())
+          os.environ["XDG_CONFIG_HOME"] = "   "; print("P4 XDG blank:", dirs())
+          os.environ["XDG_CONFIG_HOME"] = "/xdg-probe"
+          real = sys.platform; sys.platform = "win32"
+          os.environ["APPDATA"] = "C:/AppData-probe"; print("P5 win32, APPDATA set:", dirs())
+          os.environ["APPDATA"] = " "; print("P6 win32, APPDATA blank:", dirs())
+          sys.platform = real; del os.environ["APPDATA"]; del os.environ["XDG_CONFIG_HOME"]
+          for m in (" FULL ", "bogus"):
+              os.environ["PUBRUN_IMPORT_MODE"] = m; print("P7 PUBRUN_IMPORT_MODE=%r:" % m, b.resolve_import_mode())
+          os.environ["PUBRUN_IMPORT_MODE"] = ""; os.environ["PUBRUN_AUTO_START"] = " Off "
+          print("P8 PUBRUN_AUTO_START=' Off ':", b.resolve_import_mode())
+          os.environ["PUBRUN_IMPORT_MODE"] = "noconsole"; os.environ["PUBRUN_IMPORT_CONFLICT"] = "error"
+          cfg = c.resolve_config()
+          print("P9 resolve_config:", cfg["core"]["auto_start"], cfg["imports"]["mode"], cfg["imports"]["on_conflict"])
+          for v in (" ERROR ", "bogus"):
+              bs._conflict_policy = None; os.environ["PUBRUN_IMPORT_CONFLICT"] = v
+              print("P10 PUBRUN_IMPORT_CONFLICT=%r:" % v, bs._resolve_conflict_policy())
+      finally:
+          os.chdir(orig)
+  EOF
+  ```
+
 - `python3 -m pytest tests/test_import_modes.py tests/test_config_capture_modes.py tests/test_full_mode.py --no-cov -q` passes. These suites cover import-mode selection, the environment variables, and config-directory resolution. The run shows that the documented behavior is unchanged and tested.
 - `python3 scripts/sanitize_paths.py --check --all` exits `0`.
 
@@ -269,17 +312,17 @@ P11 selected: noauto run active: False
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
 - [ ] V-01 validates E-01
-  - Required evidence: (1) Paste the section 3.4 hunks of `git diff -- docs/functional_spec.md`: one removed line ("five namespaced") and the added lines from "Proposed changes" items 1a and 1b, with no other changed line in section 3.4. (2) Paste the output of `grep -n 'five namespaced' docs/functional_spec.md` (empty) and `grep -c 'The library supports six import modes' docs/functional_spec.md` (`1`). (3) Paste the P1, P7, and P8 lines of the Findings runtime probe, produced by `src/pubrun/_modes.py::VALID_MODES` and `src/pubrun/_config_boot.py::resolve_import_mode`, and state that `.mv1g3x_probe` was removed.
+  - Required evidence: (1) Paste the section 3.4 hunks of `git diff -- docs/functional_spec.md`: one removed line ("five namespaced") and the added lines from "Proposed changes" items 1a and 1b, with no other changed line in section 3.4. (2) Paste the output and exit status `0` of the section 3.4 text check in "Required tests / validation" (`old=0 new=1`). (3) Paste the P1, P7, and P8 lines of the isolated runtime probe in "Required tests / validation", produced by `src/pubrun/_modes.py::VALID_MODES` and `src/pubrun/_config_boot.py::resolve_import_mode`, and confirm `git status --short` shows no untracked probe files.
   - Observed evidence:
   - Result: pending
 
 - [ ] V-02 validates E-02
-  - Required evidence: (1) Paste the section 10.2 hunks of `git diff -- docs/functional_spec.md`, showing that rows 2 and 5 and the two new paragraphs match "Proposed changes" items 2a and 2b, with no other changed line in section 10.2. (2) Paste the P2 to P6 and P9 lines of the Findings runtime probe, produced by `src/pubrun/config.py::get_global_config_dir`, `src/pubrun/_config_boot.py::_global_config_dir`, and `src/pubrun/config.py::resolve_config`. (3) Paste the output of `git diff -U0 -- docs/functional_spec.md | grep '^+[^+]' | grep -c '[—–]'`, which must be `0`.
+  - Required evidence: (1) Paste the section 10.2 hunks of `git diff -- docs/functional_spec.md`, showing that rows 2 and 5 and the two new paragraphs match "Proposed changes" items 2a and 2b, with no other changed line in section 10.2. (2) Paste the P2 to P6 and P9 lines of the isolated runtime probe in "Required tests / validation", produced by `src/pubrun/config.py::get_global_config_dir`, `src/pubrun/_config_boot.py::_global_config_dir`, and `src/pubrun/config.py::resolve_config`. (3) Paste the output and exit status `0` of the working-tree dash check command in "Required tests / validation", showing `added_lines>=1` and `dashes=0`.
   - Observed evidence:
   - Result: pending
 
 - [ ] V-03 validates E-03
-  - Required evidence: (1) Paste the section 10.3 hunk of `git diff -- docs/functional_spec.md`, showing that the new table matches "Proposed changes" item 3 and that the `PUBRUN_PROFILE` and `PUBRUN_META_REF` rows are unchanged. (2) Paste the outputs of the mode-name cross-check and the environment-variable cross-check from "Required tests / validation", both `OK`. (3) Paste the P10 lines of the Findings runtime probe, produced by `src/pubrun/_bootstrap.py::_resolve_conflict_policy`, and the P11 line of the second probe, produced by `src/pubrun/noauto.py` through `src/pubrun/_bootstrap.py::select_mode`. (4) Paste the summary line of `python3 -m pytest tests/test_import_modes.py tests/test_config_capture_modes.py tests/test_full_mode.py --no-cov -q`. (5) Paste the exit status of `python3 scripts/sanitize_paths.py --check --all`, which must be `0`.
+  - Required evidence: (1) Paste the section 10.3 hunk of `git diff -- docs/functional_spec.md`, showing that the new table matches "Proposed changes" item 3 and that the `PUBRUN_PROFILE` and `PUBRUN_META_REF` rows are unchanged. (2) Paste the outputs and exit status `0` of both fail-closed cross-checks in "Required tests / validation", both `OK`. (3) Paste the P10 lines of the isolated runtime probe, produced by `src/pubrun/_bootstrap.py::_resolve_conflict_policy`, and the P11 line of the second probe in Findings, produced by `src/pubrun/noauto.py` through `src/pubrun/_bootstrap.py::select_mode`. (4) Paste the summary line of `python3 -m pytest tests/test_import_modes.py tests/test_config_capture_modes.py tests/test_full_mode.py --no-cov -q`. (5) Paste the exit status of `python3 scripts/sanitize_paths.py --check --all`, which must be `0`.
   - Observed evidence:
   - Result: pending
 
@@ -290,7 +333,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 
 Execution contract:
 1. Precondition: wait for human approval (`- Status: approved`) with no unresolved `Blocking: yes` open question before you change any file. This plan has no blocking open questions.
-2. Scope declaration: the expected modified file is the `- Scope-Paths:` entry (`docs/functional_spec.md`). If execution requires an out-of-scope file, justify it with `--scope-reason` at finalization. The runtime probe writes only into the scratch directory `.mv1g3x_probe`; delete it and do not commit it.
+2. Scope declaration: the expected modified file is the `- Scope-Paths:` entry (`docs/functional_spec.md`). If execution requires an out-of-scope file, justify it with `--scope-reason` at finalization; if a declared file needs no edit, acknowledge it with `--scope-ack`. The isolated runtime probe runs inside a temporary directory outside the repository working tree so it leaves no untracked files behind.
 3. Validation honesty: you MUST run each required validation command and paste its actual output into the matching `V-*` `Observed evidence:` field. Do not mark a `V-*` item `pass` without output captured from that run.
 4. Commit discipline: commit only the paths you changed with `aw commit q4f9wi -- <paths>`. Do not use `git add -A` or raw `git commit`. Do not push without an explicit human instruction.
 5. Lifecycle transition: finalize this plan with `aw ipd finalize q4f9wi`, never with a hand-written `git mv` to `.aw/records/plans/executed/`. Inside a runner lane (`aw oc run` or `aw agy run`), the runner finalizes after the turn. Outside a runner, the executor runs `aw ipd finalize q4f9wi` after every `E-*` item is `performed`, every `V-*` item is `pass`, and `aw ipd lint --phase pre-transition` reports `conforming`.
