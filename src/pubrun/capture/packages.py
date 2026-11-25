@@ -1614,8 +1614,10 @@ def merge_package_snapshots(
     startup = startup_data if isinstance(startup_data, dict) else {}
     final = final_data if isinstance(final_data, dict) else {}
 
-    startup_cs = startup.get("capture_state") if isinstance(startup.get("capture_state"), dict) else {}
-    final_cs = final.get("capture_state") if isinstance(final.get("capture_state"), dict) else {}
+    _startup_cs_raw = startup.get("capture_state")
+    _final_cs_raw = final.get("capture_state")
+    startup_cs: Dict[str, Any] = _startup_cs_raw if isinstance(_startup_cs_raw, dict) else {}
+    final_cs: Dict[str, Any] = _final_cs_raw if isinstance(_final_cs_raw, dict) else {}
     startup_status = startup_cs.get("status")
     final_status = final_cs.get("status")
 

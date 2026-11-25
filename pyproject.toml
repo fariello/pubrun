@@ -118,11 +118,6 @@ ignore_missing_imports = true
 module = [
     "pubrun.analysis.diff",
     "pubrun.analysis.render",
-    "pubrun.capture.console",
-    "pubrun.capture.file_io",
-    "pubrun.capture.filesystem",
-    "pubrun.capture.packages",
-    "pubrun.capture.resources",
     "pubrun.config",
     "pubrun.core",
     "pubrun.events",

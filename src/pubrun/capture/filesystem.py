@@ -18,7 +18,7 @@ import sys
 import time
 import logging
 import threading
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, cast
 
 logger = logging.getLogger("pubrun")
 
@@ -408,7 +408,7 @@ def probe_paths_live(fs_data: Dict[str, Any], wait_budget_s: float = 5.0) -> Dic
             if not mp:
                 continue
             if mp not in probes:
-                probes[mp] = probe_filesystem_live(entry.get("path", mp), wait_budget_s)
+                probes[mp] = probe_filesystem_live(cast(str, entry.get("path", mp)), wait_budget_s)
         # Attach results back to each path entry.
         for label, entry in fs_data.items():
             if label == "capture_state" or not isinstance(entry, dict):

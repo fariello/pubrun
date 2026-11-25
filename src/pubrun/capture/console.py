@@ -93,7 +93,7 @@ class TqdmSafeTee:
     def __init__(self, original_stream: TextIO, log_file: Optional[TextIO], timestamped: bool = False) -> None:
         """Initialize the tee with the original stream and an optional log file."""
         self.original_stream = original_stream
-        self.log_file = log_file
+        self.log_file: Optional[TextIO] = log_file
         self.timestamped = timestamped
         self.line_count = 0
         self._current_buffer = ""
@@ -266,10 +266,10 @@ class ConsoleInterceptor:
         self.run_dir = run_dir
         self.mode = mode
         self._config: Optional[Dict[str, Any]] = config
-        self.stdout_log = None
-        self.stderr_log = None
-        self.stdout_tee = None
-        self.stderr_tee = None
+        self.stdout_log: Optional[TextIO] = None
+        self.stderr_log: Optional[TextIO] = None
+        self.stdout_tee: Optional[TqdmSafeTee] = None
+        self.stderr_tee: Optional[TqdmSafeTee] = None
 
         # Save original streams for safe teardown later
         self.original_stdout = sys.stdout
