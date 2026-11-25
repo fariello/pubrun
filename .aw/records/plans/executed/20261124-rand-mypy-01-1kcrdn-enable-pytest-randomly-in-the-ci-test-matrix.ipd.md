@@ -5,8 +5,9 @@
 - Concern: Testing rigor: CI runs every test in one fixed order, so a test that only passes because an earlier test left state behind is never caught.
 - Scope: The four `pytest` commands in `.github/workflows/ci.yml` (the two steps of the 21-job `test` matrix, the `no-tui` job, and the `extra-suites` job), the explanatory comment above `addopts` in `pyproject.toml`, the contributor documentation (`CONTRIBUTING.md`, `CHANGELOG.md`), and the stale roadmap note in `TODO.md`.
 - Scope-Paths: .github/workflows/ci.yml, pyproject.toml, CONTRIBUTING.md, CHANGELOG.md, TODO.md
+- Scope-Exceeded: src/pubrun/capture/liveness.py (Modified by executed sibling plan juoqy2 commit c16fee2, not by 1kcrdn picked up by commit-cohesion heuristic due to shared ci.yml/CHANGELOG/CONTRIBUTING); src/pubrun/capture/resources.py (Modified by executed sibling plan juoqy2 commit c16fee2, not by 1kcrdn picked up by commit-cohesion heuristic due to shared ci.yml/CHANGELOG/CONTRIBUTING); src/pubrun/capture/subprocesses.py (Modified by executed sibling plan juoqy2 commit c16fee2, not by 1kcrdn picked up by commit-cohesion heuristic due to shared ci.yml/CHANGELOG/CONTRIBUTING); src/pubrun/capture/system_metrics.py (Modified by executed sibling plan juoqy2 commit c16fee2, not by 1kcrdn picked up by commit-cohesion heuristic due to shared ci.yml/CHANGELOG/CONTRIBUTING); tests/test_platform_type_guards.py (Modified by executed sibling plan juoqy2 commit c16fee2, not by 1kcrdn picked up by commit-cohesion heuristic due to shared ci.yml/CHANGELOG/CONTRIBUTING)
 - Item-Dependencies: executed:m66tfv
-- Status: approved
+- Status: executed
 - Attended: required
 - Readiness: go-pending-approval
 - Review-Depth: standard
@@ -19,12 +20,12 @@
 - Highest E allocated: 04
 - Author: uri/its_direct/pt3-claude-opus-5.5-1m-us
 - Id: 1kcrdn
-- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 executed (Antigravity): All E-01..E-04 performed and V-01..V-04 passed including 25/25 green CI run 45665551186 [Scope reconciliation - out-of-scope src/pubrun/capture/liveness.py: Modified by executed sibling plan juoqy2 (commit c16fee2), not by 1kcrdn; picked up by commit-cohesion heuristic due to shared ci.yml/CHANGELOG/CONTRIBUTING; out-of-scope src/pubrun/capture/resources.py: Modified by executed sibling plan juoqy2 (commit c16fee2), not by 1kcrdn; picked up by commit-cohesion heuristic due to shared ci.yml/CHANGELOG/CONTRIBUTING; out-of-scope src/pubrun/capture/subprocesses.py: Modified by executed sibling plan juoqy2 (commit c16fee2), not by 1kcrdn; picked up by commit-cohesion heuristic due to shared ci.yml/CHANGELOG/CONTRIBUTING; out-of-scope src/pubrun/capture/system_metrics.py: Modified by executed sibling plan juoqy2 (commit c16fee2), not by 1kcrdn; picked up by commit-cohesion heuristic due to shared ci.yml/CHANGELOG/CONTRIBUTING; out-of-scope tests/test_platform_type_guards.py: Modified by executed sibling plan juoqy2 (commit c16fee2), not by 1kcrdn; picked up by commit-cohesion heuristic due to shared ci.yml/CHANGELOG/CONTRIBUTING] [Scope attribution - 3 changed path(s) OUTSIDE Scope-Paths were DISREGARDED as not attributable to this execution (evidence: commit-cohesion), so no --scope-reason was demanded for them: src/pubrun/tracker.py, tests/test_cli.py, tests/test_conftest_isolation.py]
 - 2026-11-25 attended (aw run): marked `Attended: required` from the agent's needs-attended proposal: Completing E-04 and V-04 parts (2) and (3) requires a human to submit the pull request targeting main at https://github.com/fariello/pubrun/pull/new/ci/1kcrdn-pytest-randomly (or grant Pull requests: Read and write to the gh token, or push main) and then verify all 25 GitHub Actions jobs.
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
