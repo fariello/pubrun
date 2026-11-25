@@ -1,5 +1,5 @@
 - Id: qqwebg
-- Status: graduated
+- Status: done
 - Graduated-To: rand-mypy
 - Set: test-audit
 - Work-Kind: chore
@@ -10,6 +10,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-25 done (aw set): Set rand-mypy (srs7bs and all 6 children) executed and validated
 - 2026-11-25 graduated (aw set): Salvaged Set rand-mypy (srs7bs + 6 children) from preserved lane aw/lane/qqwebg after agent-workflows check.scope-paths TODO.md false positive
 - 2026-11-23 created (aw backlog): Enable pytest-randomly across CI matrix and clear remaining legacy mypy errors (deferred from /assess-testing T-19)
 
