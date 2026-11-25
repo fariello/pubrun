@@ -86,11 +86,10 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 2: Gate the platforms in CI
 
-- [ ] E-04 Extend the `typecheck` job in `.github/workflows/ci.yml` (added by executed plan `gzc672` E-04): after its `Run mypy` step (`run: mypy`), add two steps, `mypy --platform win32` and `mypy --platform darwin`, each with a `name:` that states the platform (for example `Type-check (Windows platform)` and `Type-check (macOS platform)`). Add no `continue-on-error`. Change no other job. Then document them: in `CONTRIBUTING.md#Development setup`, in the `mypy` paragraph, add the two commands to the code block and update the Linux-only wording to say that CI runs all three platform checks (`mypy`, `mypy --platform win32`, and `mypy --platform darwin`). In `CHANGELOG.md` `## [Unreleased]`, extend the `### Changed` entry that child `0uxy76` added (or add one) to say that CI also type-checks the Windows and macOS code paths. Follow `AGENTS.md#Agent execution contract`: no em or en dashes in the added prose. Finally, ask the human to trigger `.github/workflows/ci.yml` by pushing to `main` or opening a pull request targeting `main` (per `AGENTS.md#Matrix-validation discipline` and the never-push rule); if no push or pull request is authorized yet (for example in an unattended runner lane), record all local evidence, mark E-04 and V-04 `blocked` with that reason, and leave the plan in `pending/`.
+- [x] E-04 Extend the `typecheck` job in `.github/workflows/ci.yml` (added by executed plan `gzc672` E-04): after its `Run mypy` step (`run: mypy`), add two steps, `mypy --platform win32` and `mypy --platform darwin`, each with a `name:` that states the platform (for example `Type-check (Windows platform)` and `Type-check (macOS platform)`). Add no `continue-on-error`. Change no other job. Then document them: in `CONTRIBUTING.md#Development setup`, in the `mypy` paragraph, add the two commands to the code block and update the Linux-only wording to say that CI runs all three platform checks (`mypy`, `mypy --platform win32`, and `mypy --platform darwin`). In `CHANGELOG.md` `## [Unreleased]`, extend the `### Changed` entry that child `0uxy76` added (or add one) to say that CI also type-checks the Windows and macOS code paths. Follow `AGENTS.md#Agent execution contract`: no em or en dashes in the added prose. Finally, ask the human to trigger `.github/workflows/ci.yml` by pushing to `main` or opening a pull request targeting `main` (per `AGENTS.md#Matrix-validation discipline` and the never-push rule); if no push or pull request is authorized yet (for example in an unattended runner lane), record all local evidence, mark E-04 and V-04 `blocked` with that reason, and leave the plan in `pending/`.
   - Depends on: E-03
   - Expected outcome: `python3 -c "import yaml; j=yaml.safe_load(open('.github/workflows/ci.yml'))['jobs']['typecheck']; print('continue-on-error:', j.get('continue-on-error'), [s.get('continue-on-error') for s in j['steps']]); print([s.get('run') for s in j['steps'] if 'run' in s])"` shows no `continue-on-error` and lists `mypy`, `mypy --platform win32`, and `mypy --platform darwin`; each of the three commands, run locally after deleting `.mypy_cache/` with `--no-incremental`, prints `Success: no issues found in <N> source files` (`58` at review; re-derive at execution time if modules were added) and exits 0.
-  - Execution state: blocked
-  - Execution note: Blocked awaiting a human-authorized push to main or pull request targeting main to observe the GitHub Actions run of .github/workflows/ci.yml (V-04 item 6). All local edits and local checks (V-04 items 1-5) are complete.
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -412,7 +411,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     ```
   - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: (1) Pasted `git diff .github/workflows/ci.yml CONTRIBUTING.md CHANGELOG.md`. (2) Pasted output of the `yaml.safe_load` command from E-04 confirming no `continue-on-error` and listing `mypy`, `mypy --platform win32`, and `mypy --platform darwin`. (3) Pasted output of the three-platform `mypy --no-incremental` loop from "Required tests / validation" with three `Success: no issues found in <N> source files` lines (`58` at review; re-derive at execution time) and `exit=0` each. (4) Pasted output of `python3 -c 'import subprocess, sys; res = [(p, len(a), sum("\u2013" in l or "\u2014" in l for l in a)) for p in ("CONTRIBUTING.md", "CHANGELOG.md") for a in [[l[1:] for l in subprocess.check_output(["git", "diff", "-U0", "--", p], text=True).splitlines() if l.startswith("+") and not l.startswith("+++")]]]; print(res); sys.exit(0 if all(n > 0 and d == 0 for _, n, d in res) else 1)'` exiting 0 with positive added-line counts and zero en/em dashes for both files. (5) Pasted last line and `exit=0` of the combined 6-file pytest command and `python3 scripts/sanitize_paths.py --check --all` exiting 0. (6) After a human-authorized push to `main` or pull request targeting `main`, the CI run URL, the `typecheck` job log lines for all three `mypy` steps showing `Success: no issues found in <N> source files`, and the cross-platform `test` matrix conclusion (`success`); if no push or pull request is authorized yet, mark E-04 and V-04 `blocked` with that reason and keep the plan in `pending/`. This observation is produced by the GitHub Actions run of the workflow E-04 edits.
   - Observed evidence:
     (1) `git diff .github/workflows/ci.yml CONTRIBUTING.md CHANGELOG.md`:
@@ -490,8 +489,46 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     v04_pytest exit=0
     sanitize exit=0
     ```
-    (6) Blocked: no push to `main` or pull request targeting `main` is authorized in this unattended runner lane (`AGENTS.md#Agent execution contract` forbids pushing without an explicit human instruction, and `AGENTS.md#Matrix-validation discipline` requires observing the GitHub Actions run of `.github/workflows/ci.yml` before moving the plan to `executed/`). E-04 and V-04 stay `blocked` and the plan stays in `pending/` until a human authorizes a push or pull request and records the CI run URL, `typecheck` step outputs, and `test` matrix conclusion.
-  - Result: blocked
+    (6) GitHub Actions CI run of `.github/workflows/ci.yml` on PR branch `aw/lane/juoqy2` (commit `c16fee2`, rebased on `c4149a1`):
+    - Run URL: `https://github.com/fariello/pubrun/actions/runs/45665550857` (conclusion: `success`, 25/25 jobs green).
+    - `typecheck` job (`139424731566`, `mypy 2.4.1`, Python 3.12) step outputs:
+      ```text
+      ##[group]Run mypy
+      Success: no issues found in 59 source files
+      ##[group]Run mypy --platform win32
+      Success: no issues found in 59 source files
+      ##[group]Run mypy --platform darwin
+      Success: no issues found in 59 source files
+      ```
+    - All 25 CI jobs concluded `success`:
+      ```text
+      extra-suites	success
+      no-tui	success
+      packaging	success
+      typecheck	success
+      test (ubuntu-24.04, 3.8)	success
+      test (ubuntu-24.04, 3.9)	success
+      test (ubuntu-latest, 3.10)	success
+      test (ubuntu-latest, 3.11)	success
+      test (ubuntu-latest, 3.12)	success
+      test (ubuntu-latest, 3.13)	success
+      test (ubuntu-latest, 3.14)	success
+      test (macos-latest, 3.8)	success
+      test (macos-latest, 3.9)	success
+      test (macos-latest, 3.10)	success
+      test (macos-latest, 3.11)	success
+      test (macos-latest, 3.12)	success
+      test (macos-latest, 3.13)	success
+      test (macos-latest, 3.14)	success
+      test (windows-latest, 3.8)	success
+      test (windows-latest, 3.9)	success
+      test (windows-latest, 3.10)	success
+      test (windows-latest, 3.11)	success
+      test (windows-latest, 3.12)	success
+      test (windows-latest, 3.13)	success
+      test (windows-latest, 3.14)	success
+      ```
+  - Result: pass
 
 ## Approval and execution gate
 
