@@ -6,7 +6,9 @@
 - Scope: Refactor `src/pubrun/__main__.py::main` so it accepts an optional argv list and never rewrites `sys.argv`, with its argv preprocessing extracted into a pure function. Refactor `src/pubrun/report/diagnostics.py::print_report`, `::print_resources_report`, and their print helpers so they write to an optional output stream and raise a typed `DiagnosticsError` instead of calling `sys.exit(1)`. Keep every CLI output, error message, and exit code byte-identical. Add in-process seam tests in two new test files and one `CHANGELOG.md` entry.
 - Scope-Paths: src/pubrun/__main__.py, src/pubrun/report/diagnostics.py, tests/test_cli_seams.py, tests/test_diagnostics_seams.py, CHANGELOG.md
 - Item-Dependencies: executed:ic6z4s
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: standard
 - Short-Description: Let main() take an argv list and let the diagnostics reports take an output stream and raise a typed error, so tests can drive them in-process
 - Work-Kind: chore
 - Priority: low
@@ -21,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-25 to-review (aw set): status set to to-review
 - 2026-11-25 to-review (opencode): graduated from backlog item `riulkx` into a review-ready plan.
 - 2026-11-25 draft (opencode): created.
@@ -42,19 +45,19 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - [ ] E-01 In `src/pubrun/__main__.py`, add the module-level pure function `_preprocess_argv(argv, subcommands)` and make `main()` take an optional argv list that it copies and never assigns back to `sys.argv`.
   - Depends on: none
-  - Expected outcome: (1) `_preprocess_argv(argv: List[str], subcommands: Set[str]) -> Tuple[List[str], bool]` returns a new list and whether `--no-color` was stripped, and does not mutate its input. Its body is the current block from the comment "Handle global --no-color flag regardless of position" through the `help` translation, moved unchanged except that it reads and writes a local list instead of `sys.argv`. (2) `main(argv: Optional[List[str]] = None) -> None` starts with `argv = list(sys.argv if argv is None else argv)`, derives `prog_name` from `argv[0]`, and calls `parser.parse_args(argv[1:])`. (3) `_SubcommandAwareArgumentParser.error` finds the subcommand by scanning the preprocessed argv (passed to the parser class, for example through a closure variable assigned before `parse_args`) instead of `sys.argv[1:]`. (4) The `pbr me` easter egg reads the preprocessed list. (5) No statement in `main()` assigns `sys.argv`. The `NO_COLOR` and `--utc` side effects are covered by E-02.
+  - Expected outcome: (1) `_preprocess_argv(argv: List[str], subcommands: Set[str]) -> Tuple[List[str], bool]` returns a new list and whether `--no-color` was stripped, and does not mutate its input. Its body is the current block from the comment "Handle global --no-color flag regardless of position" through the `help` translation, moved unchanged except that it reads and writes a local list instead of `sys.argv`. (2) `main(argv: Optional[List[str]] = None) -> None` starts with `argv = list(sys.argv if argv is None else argv)`, derives `prog_name = Path(argv[0]).name if argv and argv[0] else "pubrun"` (handling empty `argv=[]` without `IndexError`), and calls `parser.parse_args(argv[1:])`. (3) `_SubcommandAwareArgumentParser.error` finds the subcommand by scanning the preprocessed argv (shared through a closure list populated before `parse_args`) instead of `sys.argv[1:]`. (4) The `pbr me` easter egg reads the preprocessed list. (5) No statement in `main()` assigns or mutates `sys.argv`. The `NO_COLOR` and `--utc` side effects are covered by E-02.
   - Execution state: pending
 
 - [ ] E-02 In `src/pubrun/__main__.py`, move the two global side effects that `main()` applies after parsing into one helper, `_apply_global_flags(args, no_color_present)`, and call it from `main()` at the same point.
   - Depends on: E-01
-  - Expected outcome: `_apply_global_flags` sets `args.no_color = True` when `no_color_present` is true, sets `os.environ["NO_COLOR"] = "1"` when `args.no_color` is true, and calls `pubrun.status.set_display_utc(True)` when `args.utc` is true, exactly as the inline code does now (the inline block starting `if no_color_present:` is removed). The `NO_COLOR` environment write stays, because the `run` subcommand passes `os.environ` to the child process and `src/pubrun/report/output.py` and `src/pubrun/status.py` read `NO_COLOR` at print time.
+  - Expected outcome: `_apply_global_flags` sets `args.no_color = True` when `no_color_present` is true, sets `os.environ["NO_COLOR"] = "1"` when `args.no_color` is true, and calls `src/pubrun/status.py::set_display_utc(True)` when `args.utc` is true, exactly as the inline code does now (the inline block starting `if no_color_present:` is removed). The `NO_COLOR` environment write stays, because the `run` subcommand passes `os.environ` to the child process and `src/pubrun/report/output.py::_use_color` and `src/pubrun/status.py` read `NO_COLOR` at print time.
   - Execution state: pending
 
 ### Task group 2: Diagnostics renderers
 
 - [ ] E-03 In `src/pubrun/report/diagnostics.py`, add the exception class `DiagnosticsError(Exception)` and make `print_report` and `print_resources_report` raise it instead of printing an error and calling `sys.exit(1)`.
   - Depends on: none
-  - Expected outcome: (1) `DiagnosticsError(message: str, exit_code: int = 1)` stores `message` and `exit_code` as attributes, and `str(err)` returns `message`. (2) Each of the seven `_print_error(...)` plus `sys.exit(1)` pairs in `print_report` (missing manifest, corrupt manifest, unreadable stdout log, unreadable stderr log) and `print_resources_report` (missing manifest, corrupt manifest, invalid `--last`) becomes `raise DiagnosticsError(<same message text>)`, raised from the original exception with `from`. (3) `src/pubrun/report/diagnostics.py` contains no `sys.exit` call. (4) The module `_print_error` helper stays, because the CLI wrappers in E-05 print through the same `pubrun.report.output.error` path.
+  - Expected outcome: (1) `DiagnosticsError(message: str, exit_code: int = 1)` stores `message` and `exit_code` as attributes, and `str(err)` returns `message`. (2) Each of the seven `_print_error(...)` plus `sys.exit(1)` pairs in `print_report` (missing manifest, corrupt manifest, unreadable stdout log, unreadable stderr log) and `print_resources_report` (missing manifest, corrupt manifest, invalid `--last`) becomes `raise DiagnosticsError(<same message text>)`, raised from the original exception with `from`. (3) `src/pubrun/report/diagnostics.py` contains no `sys.exit` call. (4) The module helper `src/pubrun/report/diagnostics.py::_print_error` stays for backward compatibility (it is no longer called inside `diagnostics.py`; the CLI wrappers in E-05 call `src/pubrun/__main__.py::_print_error`, which uses the same `src/pubrun/report/output.py::error` path).
   - Execution state: pending
 
 - [ ] E-04 In `src/pubrun/report/diagnostics.py`, add a keyword-only `out: Optional[TextIO] = None` parameter to `print_report`, `print_resources_report`, `draw_ascii_chart`, `_print_packages_block`, and `_print_data_files_block`, and route every report `print(...)` and every `_supports_unicode(sys.stdout)` call through that stream.
@@ -64,7 +67,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - [ ] E-05 In `src/pubrun/__main__.py`, make `_run_report` and `_run_resources` catch `DiagnosticsError`, print its message with `_print_error`, and exit with its `exit_code`.
   - Depends on: E-03
-  - Expected outcome: Each wrapper gains an `except DiagnosticsError as e: _print_error(e.message); sys.exit(e.exit_code)` clause placed before its generic `except Exception` clause. Without it, the generic clause would print "Failed to generate diagnostic report: ..." or "Failed to generate resources report: ..." in front of the message, which changes the stderr text that `tests/test_cli_negative_paths.py::TestDiagnosticsNegativePaths` checks. In `_run_report`, the clause is on the outer `try`, so it also covers `print_report` calls reached through the inner `try` that handles `RunInProgressOrCrashedError`.
+  - Expected outcome: Each wrapper places its lazy `from pubrun.report.diagnostics import DiagnosticsError, ...` import immediately before `try:` (keeping the import lazy while guaranteeing `DiagnosticsError` is bound before `except DiagnosticsError:` runs) and adds an `except DiagnosticsError as e: _print_error(e.message); sys.exit(e.exit_code)` clause placed before its generic `except Exception` clause. Without it, the generic clause would print "Failed to generate diagnostic report: ..." or "Failed to generate resources report: ..." in front of the message, which changes the stderr text that `tests/test_cli_negative_paths.py::TestDiagnosticsNegativePaths` checks. In `_run_report`, the clause is on the outer `try`, so it also covers `print_report` calls reached through the inner `try` that handles `RunInProgressOrCrashedError`.
   - Execution state: pending
 
 ### Task group 3: Seam tests and changelog
@@ -86,11 +89,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ## Project conventions discovered (Step 0)
 
-- Test outcomes, not code structure (`AGENTS.md` "Agent execution contract"): tests call functions or drive the CLI and assert on output, exit codes, and side effects. They must not read production source with `inspect`, `ast`, regex, or substring search. V-items below may use `grep` on the diff as review evidence; that is not a test.
+- Test outcomes, not code structure (`AGENTS.md#Agent execution contract`): tests call functions or drive the CLI and assert on output, exit codes, and side effects. They must not read production source with `inspect`, `ast`, regex, or substring search. V-items below may use `grep` on the diff as review evidence; that is not a test.
 - `pyproject.toml` `[project.scripts]` maps `pubrun` and `pbr` to `pubrun.__main__:main`. A console script calls the target with no arguments, so `main` must keep working with no argument.
 - `tests/conftest.py::pubrun_state_isolation` (autouse) snapshots and restores `os.environ`, `sys.exit`, `sys.stdout`, and `sys.stderr`, and resets `pubrun.status._DISPLAY_UTC` to `False` after every test. In-process tests that set `NO_COLOR` or `--utc` therefore do not leak into later tests.
 - `tests/test_cli.py::run_pubrun` runs the CLI in a subprocess with this checkout's `src` on `PYTHONPATH`. In-process callers (for example `tests/test_cli_negative_paths.py::TestTopLevelCliInProcess`, `tests/test_cli_diff_bugs.py::_call_main`, and `tests/test_cli.py::TestCliResourcesAliases`) monkeypatch `sys.argv` and call `main()`. Both styles must keep passing unchanged.
-- `pyproject.toml` `[tool.mypy]` keeps a ratchet list under the comment "Legacy type-check ratchet: this list may only shrink, never grow." `pubrun.report.diagnostics` is on it (4 known errors, measured at authoring by removing it from a scratch copy of the config). `pubrun.__main__` is not on it, so `mypy` checks `src/pubrun/__main__.py` strictly, and `mypy` currently reports "Success: no issues found in 58 source files".
+- `pyproject.toml` `[tool.mypy]` keeps a ratchet list under the comment "Legacy type-check ratchet: this list may only shrink, never grow." `pubrun.report.diagnostics` is currently on it (4 known errors, measured at authoring by removing it from a scratch copy of the config; sibling pending plan `qe6dad` removes it). `pubrun.__main__` is not on it, so `mypy` checks `src/pubrun/__main__.py` strictly, and `mypy` currently reports "Success: no issues found in 58 source files". Keep all annotations added to `src/pubrun/report/diagnostics.py` mypy-clean so `mypy` also passes if `qe6dad` executes before this plan.
 - `pyproject.toml` `[tool.pytest.ini_options]` sets `addopts = "-p no:randomly"`, and CI runs `pytest tests/ -v` plus a coverage job with `--cov-fail-under=78` (`.github/workflows/ci.yml`). Targeted local runs pass `--no-cov`.
 - `src/pubrun/__main__.py` imports `List, NoReturn, Optional` from `typing`. `src/pubrun/report/diagnostics.py` starts with `from __future__ import annotations` and imports `Optional, Dict, Any, List, Tuple`. The code must run on Python 3.8 (`requires-python = ">=3.8"`), so use `typing.List`/`Tuple`/`Set`/`TextIO`, not built-in generics, in any annotation evaluated at runtime.
 - `CHANGELOG.md` `## [Unreleased]` already has `### Added`, `### Changed`, and `### Fixed` subsections.
@@ -161,7 +164,7 @@ flowchart TD
        return argv, no_color_present
    ```
 
-   In `main()`, replace the block with `argv, no_color_present = _preprocess_argv(argv, subcommands)`. Before `parser.parse_args(argv[1:])`, store the preprocessed list where `_SubcommandAwareArgumentParser.error` can read it (for example a one-element list `_argv_for_errors` defined next to `_PRIMARY_COMMANDS` and assigned before parsing). A subparser's `error` runs on the subparser instance, which is also built from `_SubcommandAwareArgumentParser` through `parser_class`, so the closure must be shared. Add `Set` and `Tuple` to the `typing` import. Update the `main` docstring to say what `argv` means: the full argument vector including the program name, defaulting to `sys.argv`.
+   In `main()`, derive `prog_name = Path(argv[0]).name if argv and argv[0] else "pubrun"` so an empty `argv=[]` does not raise `IndexError`, and replace the preprocessing block with `argv, no_color_present = _preprocess_argv(argv, subcommands)`. Before `parser.parse_args(argv[1:])`, store the preprocessed list where `_SubcommandAwareArgumentParser.error` can read it (for example a closure list `_argv_for_errors: List[str] = []` defined next to `_PRIMARY_COMMANDS` and populated with `_argv_for_errors[:] = argv` before parsing, so `error` scans `_argv_for_errors[1:]`). A subparser's `error` runs on the subparser instance, which is also built from `_SubcommandAwareArgumentParser` through `parser_class`, so the closure must be shared. Add `Set` and `Tuple` to the `typing` import. Update the `main` docstring to say what `argv` means: the full argument vector including the program name, defaulting to `sys.argv`.
 2. **`_apply_global_flags` (E-02).** A module-level helper above `main()` that holds the current inline `no_color_present`, `NO_COLOR`, and `--utc` code. `main()` calls it immediately after `parse_args`, so the order relative to the `show config` interception and the dispatch chain does not change.
 3. **`DiagnosticsError` (E-03).** Define it near `_print_error` in `src/pubrun/report/diagnostics.py`:
 
@@ -175,7 +178,7 @@ flowchart TD
    ```
 
    Replace each pair in the "Findings" table with `raise DiagnosticsError(<same f-string>) from <caught exception>`. The message strings must be copied character for character.
-4. **`out` stream (E-04) and the CLI catch (E-05).** In each of the five printing functions, add `*, out: Optional[TextIO] = None` after the existing parameters (for `draw_ascii_chart`, `_print_packages_block`, which already has a keyword-only `leading_newline`, and `_print_data_files_block`, add `out` to the keyword-only group), resolve `stream` at the top of the body, and add `file=stream` to every `print`. Import `TextIO` from `typing`. In `src/pubrun/__main__.py`, import `DiagnosticsError` inside each wrapper next to the existing `from pubrun.report.diagnostics import ...` line (the module is imported lazily there today and must stay lazy) and add the `except DiagnosticsError` clause before `except Exception`.
+4. **`out` stream (E-04) and the CLI catch (E-05).** In each of the five printing functions, add `*, out: Optional[TextIO] = None` after the existing parameters (for `draw_ascii_chart`, `_print_packages_block`, which already has a keyword-only `leading_newline`, and `_print_data_files_block`, add `out` to the keyword-only group), resolve `stream` at the top of the body, and add `file=stream` to every `print`. Import `TextIO` from `typing`. In `src/pubrun/__main__.py::_run_report` and `::_run_resources`, place the lazy `from pubrun.report.diagnostics import DiagnosticsError, ...` import immediately before `try:` (keeping the import lazy inside the wrapper while guaranteeing `DiagnosticsError` is bound before `except DiagnosticsError:` runs) and add the `except DiagnosticsError` clause before `except Exception`.
 5. **`tests/test_cli_seams.py` (E-06).** No subprocess; every test calls functions in-process. Use `tmp_path`, `monkeypatch.chdir(tmp_path)`, and `monkeypatch.setenv("PUBRUN_AUTO_START", "false")`, and write manifests with a local helper shaped like `tests/test_cli_negative_paths.py::_good_manifest`.
    - `TestPreprocessArgv`, using `subcommands = {"status", "run", "show", "cpu"}`. Each case asserts the exact returned list and flag, and that the input list is unchanged afterwards:
      - `["pubrun", "--no-color", "status"]` gives `(["pubrun", "status"], True)`.
@@ -188,7 +191,7 @@ flowchart TD
      - `["pubrun"]` gives `(["pubrun"], False)`.
    - `TestMainArgv`:
      - `test_main_argv_does_not_touch_sys_argv`: set `sys.argv` to a sentinel list with `monkeypatch`, call `main(["pubrun", "--no-color", "status", "--dir", str(runs)])`, and assert `sys.argv` is the same object with the same content, and the captured stdout contains the run id.
-     - `test_main_without_argv_reads_sys_argv`: monkeypatch `sys.argv = ["pubrun", "status", "--dir", str(runs)]`, call `main()`, and assert the run id is in stdout and `sys.argv` is unchanged.
+     - `test_main_without_argv_reads_sys_argv`: monkeypatch `sys.argv = ["pubrun", "--no-color", "status", "--dir", str(runs)]`, call `main()`, and assert the run id is in stdout and `sys.argv` is unchanged (including `--no-color` still present, proving the no-argument path copies `sys.argv` before preprocessing).
      - `test_main_argv_unknown_command_exits_2`: `main(["pubrun", "bogus"])` raises `SystemExit` with code 2 and stderr contains "unknown command 'bogus' (choose from: init,".
      - `test_main_argv_subcommand_error_uses_argv`: `main(["pubrun", "status", "--bogus"])` with `sys.argv` monkeypatched to `["pubrun"]` raises `SystemExit` code 2, and stderr contains "pubrun status: error: unrecognized arguments: --bogus". This proves `error` reads the passed list, not `sys.argv`.
      - `test_main_argv_prog_name_pbr`: `main(["/x/pbr", "--help"])` exits 0 and stdout starts with "usage: pbr ".
@@ -204,7 +207,7 @@ flowchart TD
      - `test_print_resources_report_writes_only_to_out`: "RESOURCE MONITORING" and "CPU Utilization History" are in `buf`, and stdout is empty.
      - `test_out_default_is_current_stdout`: with `capsys`, `print_report(path, "basic")` with no `out` writes "PUBRUN DIAGNOSTICS" to `capsys.readouterr().out`. This guards the call-time resolution of `sys.stdout`.
      - `test_ascii_stream_gets_ascii_glyphs`: with `NO_COLOR` unset (`monkeypatch.delenv`), `out = io.TextIOWrapper(io.BytesIO(), encoding="ascii")`. `print_report(path, "basic", out=out)` and `print_resources_report(path, out=out)` complete without `UnicodeEncodeError`; after `out.flush()`, the bytes decode as ASCII and contain "+-------------------------------------------------+". A `utf-8` wrapper given the same calls contains "┌".
-   - `TestDiagnosticsError`, one test per row of the "Findings" table: each asserts `pytest.raises(DiagnosticsError)`, the exact `str(err)` text with the real path, `err.exit_code == 1`, and that nothing was written to stdout. The unreadable-log cases make `stdout.log` (or `stderr.log`) a directory, so `open` raises `IsADirectoryError` on POSIX or `PermissionError` on Windows; assert only the "Failed to read stdout log: " prefix. The invalid `--last` case uses `last="bogus"` and asserts the prefix "Invalid duration for --last: ".
+   - `TestDiagnosticsError`, one test per row of the "Findings" table: each passes `out=io.StringIO()` (so `print_resources_report(..., last="bogus", out=buf)`, which renders the header and summary before parsing `last`, writes nothing to `sys.stdout`), asserts `pytest.raises(DiagnosticsError)`, asserts `err.exit_code == 1`, and asserts both `capsys.readouterr().out == ""` and `capsys.readouterr().err == ""` (nothing written to `sys.stdout` or `sys.stderr`). The four manifest cases assert the exact `str(err)` text with the real path. The unreadable-log cases make `stdout.log` (or `stderr.log`) a directory, so `open` raises `IsADirectoryError` on POSIX or `PermissionError` on Windows, and assert the `"Failed to read stdout log: "` or `"Failed to read stderr log: "` prefix. The invalid `--last` case uses `last="bogus"` and asserts the `"Invalid duration for --last: "` prefix.
 7. **`CHANGELOG.md` (E-08).** Example wording: "**Testable entry points.** `pubrun.__main__.main()` now accepts an optional argument list, and `print_report` and `print_resources_report` in `pubrun.report.diagnostics` accept an `out` stream and raise `DiagnosticsError` instead of exiting the process. Command-line output and exit codes are unchanged."
 
 ## Deferred / out of scope (with reason)
@@ -217,7 +220,7 @@ flowchart TD
   - Carrier: qqwebg
 - Migrating existing tests that monkeypatch `sys.argv` (for example `tests/test_cli_negative_paths.py::TestTopLevelCliInProcess`) to `main(argv)`. They keep passing unchanged, and leaving them as they are is what proves the no-argument path still works.
   - Carrier-Declined: rewriting passing tests adds churn without new coverage.
-- Running the new tests on the GitHub Actions matrix (3 OS x Python 3.8 to 3.14). `AGENTS.md` "Matrix-validation discipline" applies to import and CLI entry paths, which this plan changes. A push needs an explicit human instruction, so this plan validates on Linux only and V-06 records which OS and Python version ran.
+- Running the new tests on the GitHub Actions matrix (3 OS x Python 3.8 to 3.14). `AGENTS.md#Matrix-validation discipline` applies to import and CLI entry paths, which this plan changes. A push needs an explicit human instruction, so this plan validates on Linux only and V-06 records which OS and Python version ran.
   - Carrier-Declined: a push needs explicit human authorization, so no plan can carry it; GitHub Actions runs the matrix automatically on the next push or pull request to `main`.
 
 ## Scope check
@@ -230,7 +233,7 @@ flowchart TD
 - `python3 -m pytest tests/test_cli_seams.py tests/test_diagnostics_seams.py --no-cov -q -v` passes, including every test named in "Proposed changes" items 5 and 6.
 - `python3 -m pytest tests/test_cli.py tests/test_cli_negative_paths.py tests/test_cli_diff_bugs.py tests/test_reports.py tests/test_show_sections.py tests/test_timing_consumers.py tests/test_env_capture.py tests/test_edge_cases.py tests/test_new_features.py --no-cov -q` passes. These suites call `main()` through `sys.argv` and call the diagnostics reports without `out`, so they prove the old call styles still work.
 - The full suite (`aw suite --no-cache`) has no failure that also passes on unmodified `HEAD`.
-- `mypy` (configured in `pyproject.toml`) prints "Success: no issues found", with `pyproject.toml` unchanged.
+- `mypy` (configured in `pyproject.toml`) exits 0 and prints `Success: no issues found in <N> source files` (`58` at review; re-derive at execution time), with `pyproject.toml` unchanged. Keep new annotations in `src/pubrun/report/diagnostics.py` mypy-clean so this passes even if sibling plan `qe6dad` has already removed `pubrun.report.diagnostics` from `[tool.mypy.overrides]`.
 - CLI byte parity: the parity script below, run from the repository root, prints `IDENTICAL`. It runs 30 command lines against an exported copy of `HEAD` and against the working tree, and compares stdout, stderr, and exit code for each. It strips the work and source directory paths and the `size`/`mtime`/`ctime`/`sha256` lines of the `--info` script block, which differ between two source trees. At authoring, two runs against `HEAD` and one against an unchanged working tree were `IDENTICAL`, so any difference after the change is caused by the change.
 - Mutation checks, each restored afterwards with `git diff --stat` matching the intended edit:
   - In `_run_report`, delete the `except DiagnosticsError` clause. `python3 -m pytest tests/test_cli_seams.py -k DiagnosticsErrorAtCli --no-cov -q` must fail, because stderr gains "Failed to generate".
@@ -260,13 +263,14 @@ cat > "$work/runs/pubrun-aaaa1111/events.jsonl" <<'JSON'
 JSON
 printf 'epoch 1\nepoch 2\n' > "$work/runs/pubrun-aaaa1111/stdout.log"
 printf '{bad' > "$work/bad/manifest.json"
-export PYTHONPATH="$2" PUBRUN_AUTO_START=false NO_COLOR= TZ=UTC COLUMNS=100
+unset NO_COLOR
+export PYTHONPATH="$2" PUBRUN_AUTO_START=false TZ=UTC COLUMNS=100
 i=0
 while IFS= read -r line; do
   i=$((i + 1))
   n=$(printf '%02d' "$i")
   printf '%s\n' "$line" > "$out/$n.cmd"
-  (cd "$work" && eval "${PY:-python} -m pubrun $line" > "$out/$n.out" 2> "$out/$n.err"; echo $? > "$out/$n.rc")
+  (cd "$work" && eval "${PY:-python3} -m pubrun $line" > "$out/$n.out" 2> "$out/$n.err"; echo $? > "$out/$n.rc")
 done <<'CMDS'
 --help
 --no-color --info
@@ -295,8 +299,8 @@ cpu aaaa1111 --last 1m
 mem aaaa1111
 res aaaa1111 --last bogus
 res bad
---no-color run -- python -c "import os,sys; print(sys.argv[1:], os.environ.get('NO_COLOR'))" --no-color
-run -- python -c "import os; print(os.environ.get('NO_COLOR'))"
+--no-color run -- python3 -c "import os,sys; print(sys.argv[1:], os.environ.get('NO_COLOR'))" --no-color
+run -- python3 -c "import os; print(os.environ.get('NO_COLOR'))"
 show config
 CMDS
 sed -i -E -e "s#$work#<WORK>#g" -e "s#$2#<SRC>#g" -e '/"(size|mtime|ctime|sha256)":/d' "$out"/*.out "$out"/*.err
@@ -343,7 +347,7 @@ At authoring the exit codes were `01=0 02=0 03=0 04=0 05=0 06=2 07=2 08=2 09=0 .
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
 - [ ] V-01 validates E-01
-  - Required evidence: (1) Paste `git diff -- src/pubrun/__main__.py` restricted to `_preprocess_argv` and the start of `main()` (through `parse_args`), and name the lines that satisfy E-01 outcomes 1 to 5. (2) Paste the output of `sed -n '/^def main/,$p' src/pubrun/__main__.py | grep -n 'sys.argv ='`, which must print nothing. (3) Paste the `TestPreprocessArgv` and `TestMainArgv` result lines from the V-06 run, each `PASSED`.
+  - Required evidence: (1) Paste `git diff -- src/pubrun/__main__.py` restricted to `_preprocess_argv` and the start of `main()` (through `parse_args`), and name the lines that satisfy E-01 outcomes 1 to 5. (2) Paste the output of `sed -n '/^def main/,$p' src/pubrun/__main__.py | grep -n 'sys\.argv'`, showing only the initial fallback copy `argv = list(sys.argv if argv is None else argv)` (and docstring mention, if any), with zero assignments, zero `.pop`/`.insert` mutations, and zero reads inside `_SubcommandAwareArgumentParser.error`. (3) Paste the `TestPreprocessArgv` and `TestMainArgv` result lines from the V-06 run, each `PASSED`.
   - Observed evidence:
   - Result: pending
 
@@ -358,7 +362,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
   - Result: pending
 
 - [ ] V-04 validates E-04
-  - Required evidence: (1) Paste the output of `grep -c '_supports_unicode(sys.stdout)' src/pubrun/report/diagnostics.py`, which must print `0`. (2) Paste the output of `grep -nE '(^|[^_.a-zA-Z])print\(' src/pubrun/report/diagnostics.py | grep -v 'file=stream'`; for each line it prints, paste the full multi-line `print(...)` call from the file and show that its closing line passes `file=stream`. (3) Paste the signature lines of the five changed functions (for example with `grep -n -A2 '^def print_report\|^def print_resources_report\|^def draw_ascii_chart\|^def _print_packages_block\|^def _print_data_files_block' src/pubrun/report/diagnostics.py`), showing `out` is keyword-only and the earlier parameters are unchanged. (4) Paste every `TestOutStream` result line from the V-07 run, each `PASSED`. (5) Paste the failing summary line of the `print_report` mutation check from "Required tests / validation", then `git diff --stat` after restoring.
+  - Required evidence: (1) Paste the output of `grep -c '_supports_unicode(sys.stdout)' src/pubrun/report/diagnostics.py`, which must print `0`. (2) Paste the output of `grep -nE '(^|[^_.a-zA-Z])print\(' src/pubrun/report/diagnostics.py | grep -v 'file=stream'`; for each line it prints, paste the full multi-line `print(...)` call from the file and show that its closing line passes `file=stream`. (3) Paste the signature lines of the five changed functions (for example with `grep -n -A12 '^def print_report\|^def print_resources_report\|^def draw_ascii_chart\|^def _print_packages_block\|^def _print_data_files_block' src/pubrun/report/diagnostics.py`), showing `out` is keyword-only and the earlier parameters are unchanged. (4) Paste every `TestOutStream` result line from the V-07 run, each `PASSED`. (5) Paste the failing summary line of the `print_report` mutation check from "Required tests / validation", then `git diff --stat` after restoring.
   - Observed evidence:
   - Result: pending
 
@@ -368,7 +372,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
   - Result: pending
 
 - [ ] V-06 validates E-06
-  - Required evidence: (1) Paste the `python3 -m pytest tests/test_cli_seams.py tests/test_diagnostics_seams.py --no-cov -q -v` result lines for every test named in "Proposed changes" items 5 and 6, each `PASSED`, and its summary line. (2) Paste the summary line of the nine-file related-suites run from "Required tests / validation". (3) Paste the full-suite (`aw suite --no-cache`) summary line, and for any failure paste the same test's result on unmodified `HEAD`. (4) Paste the `mypy` output line, which must be "Success: no issues found in 58 source files" (or the new file count, with no error), and `git diff --stat -- pyproject.toml`, which must be empty. (5) Paste the parity commands' output from "Required tests / validation": the `IDENTICAL` line and the exit-code list, which must match the authoring list. (6) Paste the failing summary line of the `parse_args()` mutation check, then `git diff --stat` after restoring. (7) State which OS and Python version ran the tests, and that the CI matrix was not run.
+  - Required evidence: (1) Paste the `python3 -m pytest tests/test_cli_seams.py tests/test_diagnostics_seams.py --no-cov -q -v` result lines for every test named in "Proposed changes" items 5 and 6, each `PASSED`, and its summary line. (2) Paste the summary line of the nine-file related-suites run from "Required tests / validation". (3) Paste the full-suite (`aw suite --no-cache`) summary line, and for any failure paste the same test's result on unmodified `HEAD`. (4) Paste the `mypy; echo "exit=$?"` output showing `Success: no issues found in <N> source files` (`58` at review; re-derive at execution time) and `exit=0`, and `git diff --stat -- pyproject.toml`, which must be empty. (5) Paste the parity commands' output from "Required tests / validation": the `IDENTICAL` line and the exit-code list, which must match the authoring list. (6) Paste the failing summary line of the `parse_args()` mutation check, then `git diff --stat` after restoring. (7) State which OS and Python version ran the tests, and that the CI matrix was not run.
   - Observed evidence:
   - Result: pending
 
@@ -393,4 +397,4 @@ Execution contract:
 2. Scope declaration: the expected modified files are the `- Scope-Paths:` entries (`src/pubrun/__main__.py`, `src/pubrun/report/diagnostics.py`, `tests/test_cli_seams.py`, `tests/test_diagnostics_seams.py`, `CHANGELOG.md`). If execution requires an out-of-scope file, justify it with `--scope-reason` at finalization. If a declared file needs no edit, acknowledge it with `--scope-ack`. The mutation checks edit `src/pubrun/__main__.py` and `src/pubrun/report/diagnostics.py` only temporarily; restore them and do not commit the mutations. The parity script and its outputs live under gitignored `tmp/` and are deleted afterwards.
 3. Validation honesty: you MUST run each required validation command and paste its actual output into the matching `V-*` `Observed evidence:` field. Do not mark a `V-*` item `pass` without output captured from that run.
 4. Commit discipline: commit only the paths you changed with `aw commit mvbbny -- <paths>`. Do not use `git add -A` or raw `git commit`. Do not push without an explicit human instruction.
-5. Lifecycle transition: finalize this plan with `aw ipd finalize mvbbny`, never with a hand-written `git mv` to `.aw/records/plans/executed/`. Inside a runner lane (`aw oc run` or `aw agy run`), the runner finalizes after the turn. Outside a runner, the executor runs `aw ipd finalize mvbbny` after every `E-*` item is `performed`, every `V-*` item is `pass`, and `aw ipd lint --phase pre-transition` reports `conforming`.
+5. Lifecycle transition: inside a runner lane (`aw oc run` or `aw agy run`), the runner owns finalization once every `E-*` item is `performed` and every `V-*` item is `pass`. Outside a runner, after every `E-*` item is `performed`, every `V-*` item is `pass`, and `aw ipd lint --phase pre-transition` reports `conforming`, finalize this plan with `aw ipd finalize mvbbny` (never with a hand-written `git mv` to `.aw/records/plans/executed/`).
