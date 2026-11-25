@@ -6,7 +6,7 @@
 - Scope: The six import-mode modules (`src/pubrun/auto.py`, `full.py`, `minimal.py`, `noauto.py`, `noconsole.py`, `nopatch.py`), `src/pubrun/_bootstrap.py`, and their removal from the `ignore_errors` module list in `pyproject.toml`.
 - Scope-Paths: src/pubrun/auto.py, src/pubrun/full.py, src/pubrun/minimal.py, src/pubrun/noauto.py, src/pubrun/noconsole.py, src/pubrun/nopatch.py, src/pubrun/_bootstrap.py, pyproject.toml
 - Item-Dependencies: executed:gzc672, executed:m66tfv
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix mypy errors in the six import-mode modules and _bootstrap.py and take them off the ignore_errors list
@@ -18,12 +18,12 @@
 - Highest E allocated: 03
 - Author: uri/its_direct/pt3-claude-opus-5.5-1m-us
 - Id: f5yisk
-- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: f5yisk verified (set rand-mypy, attempt 1).
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-24 to-review (aw set): authored from backlog qqwebg
@@ -55,7 +55,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Fix the type errors
 
-- [ ] E-01 In each of `src/pubrun/auto.py`, `full.py`, `minimal.py`, `noauto.py`, `noconsole.py`, and `nopatch.py`, make the same three-line change in the block under the `# Populate the parent pubrun namespace` comment block:
+- [x] E-01 In each of `src/pubrun/auto.py`, `full.py`, `minimal.py`, `noauto.py`, `noconsole.py`, and `nopatch.py`, make the same three-line change in the block under the `# Populate the parent pubrun namespace` comment block:
   - Replace the line `import pubrun as _pkg  # noqa: E402` with these three lines:
     ```python
     from typing import Any as _Any  # noqa: E402
@@ -67,22 +67,22 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   The import is aliased to `_Any` and deleted at the end so that the mode module gains no new public `Any` attribute. `mypy` reports `Cannot assign to a type` on `_pkg.phase = phase`, `_pkg.paused = paused`, and `_pkg.tracked_run = tracked_run`, because `phase`, `paused`, and `tracked_run` are classes in `pubrun`'s namespace; typing the alias as `Any` tells `mypy` that the rebinding is intended.
   - Depends on: none
   - Expected outcome: Each of the six files shows exactly this diff. Importing each `pubrun.<mode>` module in an isolated temporary working directory with `PYTHONPATH` pointing at this checkout's `src/` resolves `m.__file__` inside this checkout's `src/`, prints `[]` for `[n for n in ('_pkg', '_pkg_module', '_Any') if hasattr(m, n)]`, and leaves no run directory in the checkout.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 In `src/pubrun/_bootstrap.py`, add `from types import FrameType` after `import warnings`, and annotate the first assignment of `frame` in two functions as `Optional[FrameType]`:
+- [x] E-02 In `src/pubrun/_bootstrap.py`, add `from types import FrameType` after `import warnings`, and annotate the first assignment of `frame` in two functions as `Optional[FrameType]`:
   - `src/pubrun/_bootstrap.py::_get_caller_info`: `frame = sys._getframe(2)  # skip _get_caller_info and select_mode` becomes `frame: Optional[FrameType] = sys._getframe(2)  # skip _get_caller_info and select_mode`.
   - `src/pubrun/_bootstrap.py::is_mode_submodule_import_in_progress`: `frame = sys._getframe(1)` becomes `frame: Optional[FrameType] = sys._getframe(1)`.
   `Optional` is already imported from `typing`. Both loops already test `if frame is None: break` before they use `frame`, and `frame = frame.f_back` can return `None`, which `mypy` rejects for a variable it inferred as `FrameType`.
   - Depends on: none
   - Expected outcome: The diff of `_bootstrap.py` is one import line and two annotations.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Ratchet the type check
 
-- [ ] E-03 In `pyproject.toml`, delete these seven entries from the `module` list of the `[[tool.mypy.overrides]]` block that sets `ignore_errors = true` (added by plan `gzc672` E-03): `pubrun._bootstrap`, `pubrun.auto`, `pubrun.full`, `pubrun.minimal`, `pubrun.noauto`, `pubrun.noconsole`, `pubrun.nopatch`. Keep the remaining entries sorted and keep the comment that says the list may only shrink. Change nothing else in `pyproject.toml`.
+- [x] E-03 In `pyproject.toml`, delete these seven entries from the `module` list of the `[[tool.mypy.overrides]]` block that sets `ignore_errors = true` (added by plan `gzc672` E-03): `pubrun._bootstrap`, `pubrun.auto`, `pubrun.full`, `pubrun.minimal`, `pubrun.noauto`, `pubrun.noconsole`, `pubrun.nopatch`. Keep the remaining entries sorted and keep the comment that says the list may only shrink. Change nothing else in `pyproject.toml`.
   - Depends on: E-01, E-02
   - Expected outcome: `mypy` (from the repository root, after deleting `.mypy_cache/`) prints `Success: no issues found in <N> source files` (`58` at review; re-derive at execution time if modules were added) and exits 0, and the override list no longer names any of the seven modules.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -148,20 +148,279 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: (1) Pasted `git diff` of the six mode modules, each showing only the three-line import replacement and the `del` change. (2) Pasted output of `python3 -c 'import os, subprocess, sys, tempfile; from pathlib import Path; repo_src = str(Path("src").resolve()); env = {**os.environ, "PYTHONPATH": repo_src}; [sys.exit(r.returncode) if r.returncode else print(m, r.stdout.strip()) for m in ("auto", "full", "minimal", "noauto", "noconsole", "nopatch") for td in [tempfile.TemporaryDirectory()] for r in [subprocess.run([sys.executable, "-c", f"import os, pathlib, pubrun.{m} as mod; assert os.path.commonpath([str(pathlib.Path(mod.__file__).resolve()), {repo_src!r}]) == {repo_src!r}, mod.__file__; leaked = [n for n in (\"_pkg\", \"_pkg_module\", \"_Any\") if hasattr(mod, n)]; print(leaked); assert not leaked"], cwd=td.name, env=env, capture_output=True, text=True)] if (td.cleanup() or True)]'` printing `[]` for all six with exit 0 and leaving `git status --short` free of untracked `runs/` files. (3) The last line of `python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py tests/test_capture_isolation.py tests/test_config_capture_modes.py tests/test_report_subpackage_integrity.py tests/test_profile_deprecation.py -q` showing all passed with exit 0.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff src/pubrun/auto.py src/pubrun/full.py src/pubrun/minimal.py src/pubrun/noauto.py src/pubrun/noconsole.py src/pubrun/nopatch.py`:
+    ```diff
+    diff --git a/src/pubrun/auto.py b/src/pubrun/auto.py
+    index 65fd3d7..3cf8011 100644
+    --- a/src/pubrun/auto.py
+    +++ b/src/pubrun/auto.py
+    @@ -50,7 +50,9 @@ _execute_boot_sequence(selected_by="pubrun.auto")
+     del _execute_boot_sequence, _behavior
 
-- [ ] V-02 validates E-02
+     # Populate the parent pubrun namespace
+    -import pubrun as _pkg  # noqa: E402
+    +from typing import Any as _Any  # noqa: E402
+    +import pubrun as _pkg_module  # noqa: E402
+    +_pkg: _Any = _pkg_module
+     _pkg.start = start
+     _pkg.stop = stop
+     _pkg.annotate = annotate
+    @@ -75,4 +77,4 @@ _pkg.register_output = register_output
+     _pkg.subprocess = subprocess
+     _pkg.popen = popen
+     _pkg._run_lock = _run_lock
+    -del _pkg
+    +del _pkg, _pkg_module, _Any
+    diff --git a/src/pubrun/full.py b/src/pubrun/full.py
+    index 1bf727d..0245b6d 100644
+    --- a/src/pubrun/full.py
+    +++ b/src/pubrun/full.py
+    @@ -55,7 +55,9 @@ _execute_boot_sequence(selected_by="pubrun.full")
+     del _execute_boot_sequence, _behavior
+
+     # Populate the parent pubrun namespace
+    -import pubrun as _pkg  # noqa: E402
+    +from typing import Any as _Any  # noqa: E402
+    +import pubrun as _pkg_module  # noqa: E402
+    +_pkg: _Any = _pkg_module
+     _pkg.start = start
+     _pkg.stop = stop
+     _pkg.annotate = annotate
+    @@ -80,4 +82,4 @@ _pkg.register_output = register_output
+     _pkg.subprocess = subprocess
+     _pkg.popen = popen
+     _pkg._run_lock = _run_lock
+    -del _pkg
+    +del _pkg, _pkg_module, _Any
+    diff --git a/src/pubrun/minimal.py b/src/pubrun/minimal.py
+    index 5b94297..67c3b0c 100644
+    --- a/src/pubrun/minimal.py
+    +++ b/src/pubrun/minimal.py
+    @@ -48,7 +48,9 @@ _boot(selected_by="pubrun.minimal")
+     del _boot, _behavior
+
+     # Populate the parent pubrun namespace
+    -import pubrun as _pkg  # noqa: E402
+    +from typing import Any as _Any  # noqa: E402
+    +import pubrun as _pkg_module  # noqa: E402
+    +_pkg: _Any = _pkg_module
+     _pkg.start = start
+     _pkg.stop = stop
+     _pkg.annotate = annotate
+    @@ -73,4 +75,4 @@ _pkg.register_output = register_output
+     _pkg.subprocess = subprocess
+     _pkg.popen = popen
+     _pkg._run_lock = _run_lock
+    -del _pkg
+    +del _pkg, _pkg_module, _Any
+    diff --git a/src/pubrun/noauto.py b/src/pubrun/noauto.py
+    index f57b2c0..9eda6a0 100644
+    --- a/src/pubrun/noauto.py
+    +++ b/src/pubrun/noauto.py
+    @@ -51,7 +51,9 @@ del _boot, _behavior
+
+     # Populate the parent pubrun namespace so `from pubrun import X` works
+     # after `import pubrun.noauto`. This is needed because __init__.py deferred.
+    -import pubrun as _pkg  # noqa: E402
+    +from typing import Any as _Any  # noqa: E402
+    +import pubrun as _pkg_module  # noqa: E402
+    +_pkg: _Any = _pkg_module
+     _pkg.start = start
+     _pkg.stop = stop
+     _pkg.annotate = annotate
+    @@ -76,4 +78,4 @@ _pkg.register_output = register_output
+     _pkg.subprocess = subprocess
+     _pkg.popen = popen
+     _pkg._run_lock = _run_lock
+    -del _pkg
+    +del _pkg, _pkg_module, _Any
+    diff --git a/src/pubrun/noconsole.py b/src/pubrun/noconsole.py
+    index 1e68d31..cbf554d 100644
+    --- a/src/pubrun/noconsole.py
+    +++ b/src/pubrun/noconsole.py
+    @@ -43,7 +43,9 @@ _boot(selected_by="pubrun.noconsole")
+     del _boot, _behavior
+
+     # Populate the parent pubrun namespace
+    -import pubrun as _pkg  # noqa: E402
+    +from typing import Any as _Any  # noqa: E402
+    +import pubrun as _pkg_module  # noqa: E402
+    +_pkg: _Any = _pkg_module
+     _pkg.start = start
+     _pkg.stop = stop
+     _pkg.annotate = annotate
+    @@ -68,4 +70,4 @@ _pkg.register_output = register_output
+     _pkg.subprocess = subprocess
+     _pkg.popen = popen
+     _pkg._run_lock = _run_lock
+    -del _pkg
+    +del _pkg, _pkg_module, _Any
+    diff --git a/src/pubrun/nopatch.py b/src/pubrun/nopatch.py
+    index 7e245bb..2517c50 100644
+    --- a/src/pubrun/nopatch.py
+    +++ b/src/pubrun/nopatch.py
+    @@ -45,7 +45,9 @@ _boot(selected_by="pubrun.nopatch")
+     del _boot, _behavior
+
+     # Populate the parent pubrun namespace
+    -import pubrun as _pkg  # noqa: E402
+    +from typing import Any as _Any  # noqa: E402
+    +import pubrun as _pkg_module  # noqa: E402
+    +_pkg: _Any = _pkg_module
+     _pkg.start = start
+     _pkg.stop = stop
+     _pkg.annotate = annotate
+    @@ -70,4 +72,4 @@ _pkg.register_output = register_output
+     _pkg.subprocess = subprocess
+     _pkg.popen = popen
+     _pkg._run_lock = _run_lock
+    -del _pkg
+    +del _pkg, _pkg_module, _Any
+    ```
+    (2) Isolated import check and `git status --short`:
+    ```text
+    auto []
+    full []
+    minimal []
+    noauto []
+    noconsole []
+    nopatch []
+    exit=0
+    ```
+    `git status --short` (no untracked `runs/` files):
+    ```text
+     M pyproject.toml
+     M src/pubrun/_bootstrap.py
+     M src/pubrun/auto.py
+     M src/pubrun/full.py
+     M src/pubrun/minimal.py
+     M src/pubrun/noauto.py
+     M src/pubrun/noconsole.py
+     M src/pubrun/nopatch.py
+    ```
+    (3) `python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py tests/test_capture_isolation.py tests/test_config_capture_modes.py tests/test_report_subpackage_integrity.py tests/test_profile_deprecation.py -q`:
+    ```text
+    242 passed in 45.77s
+    exit=0
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Pasted `git diff src/pubrun/_bootstrap.py` showing the `from types import FrameType` line and the two `frame: Optional[FrameType]` annotations and nothing else; and the last line of `python3 -m pytest tests/test_import_modes.py -q` showing all passed.
   - Observed evidence:
-  - Result: pending
+    `git diff src/pubrun/_bootstrap.py`:
+    ```diff
+    diff --git a/src/pubrun/_bootstrap.py b/src/pubrun/_bootstrap.py
+    index 8e7d006..e7dab7d 100644
+    --- a/src/pubrun/_bootstrap.py
+    +++ b/src/pubrun/_bootstrap.py
+    @@ -11,6 +11,7 @@ import sys
+     import time
+     import threading
+     import warnings
+    +from types import FrameType
+     from typing import Any, Dict, List, Optional, Tuple
 
-- [ ] V-03 validates E-03
+     from pubrun._modes import MODES, get_mode_behavior
+    @@ -149,7 +150,7 @@ def _get_caller_info(selected_by: str) -> Optional[Dict[str, Any]]:
+         """Capture minimal caller info for provenance. Best-effort."""
+         try:
+             # Walk up the stack to find the first non-pubrun, non-importlib frame
+    -        frame = sys._getframe(2)  # skip _get_caller_info and select_mode
+    +        frame: Optional[FrameType] = sys._getframe(2)  # skip _get_caller_info and select_mode
+             for _ in range(10):
+                 if frame is None:
+                     break
+    @@ -319,7 +320,7 @@ def is_mode_submodule_import_in_progress() -> bool:
+         try:
+             # Walk up the call stack looking for importlib._bootstrap._find_and_load
+             # which will have the module name as a local variable or argument.
+    -        frame = sys._getframe(1)
+    +        frame: Optional[FrameType] = sys._getframe(1)
+             for _ in range(20):
+                 if frame is None:
+                     break
+    ```
+    `python3 -m pytest tests/test_import_modes.py -q`:
+    ```text
+    89 passed in 21.83s
+    exit=0
+    ```
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: (1) Pasted `git diff pyproject.toml` showing only the seven deleted list entries. (2) Pasted output of `rm -rf .mypy_cache && mypy; echo "exit=$?"` showing `Success: no issues found in <N> source files` (`58` at review; re-derive at execution time) and `exit=0`. (3) Pasted output of the two `mypy --no-incremental` mutation checks in "Required tests / validation", each showing an `error:` line for the mutated file and `exit=1`, followed by `git diff --stat src/pubrun` showing only the E-01 and E-02 files (mutations restored). (4) `python3 scripts/sanitize_paths.py --check --all` exiting 0.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff pyproject.toml`:
+    ```diff
+    diff --git a/pyproject.toml b/pyproject.toml
+    index 6499a7f..c17569a 100644
+    --- a/pyproject.toml
+    +++ b/pyproject.toml
+    @@ -116,10 +116,8 @@ ignore_missing_imports = true
+     # Legacy type-check ratchet: this list may only shrink, never grow.
+     # Remove each module as its existing errors are fixed (backlog item qqwebg).
+     module = [
+    -    "pubrun._bootstrap",
+         "pubrun.analysis.diff",
+         "pubrun.analysis.render",
+    -    "pubrun.auto",
+         "pubrun.capture.console",
+         "pubrun.capture.file_io",
+         "pubrun.capture.filesystem",
+    @@ -128,11 +126,6 @@ module = [
+         "pubrun.config",
+         "pubrun.core",
+         "pubrun.events",
+    -    "pubrun.full",
+    -    "pubrun.minimal",
+    -    "pubrun.noauto",
+    -    "pubrun.noconsole",
+    -    "pubrun.nopatch",
+         "pubrun.report.diagnostics",
+         "pubrun.status",
+         "pubrun.tracker",
+    ```
+    (2) `rm -rf .mypy_cache && mypy; echo "exit=$?"`:
+    ```text
+    Success: no issues found in 58 source files
+    exit=0
+    ```
+    (3) Mutation checks (`mypy --no-incremental`) and `git diff --stat src/pubrun`:
+    ```text
+    --- mutation: src/pubrun/noauto.py ---
+    src/pubrun/noauto.py:83: error: Incompatible types in assignment (expression has type "str", variable has type "int")  [assignment]
+    Found 1 error in 1 file (checked 58 source files)
+    exit=1
+    --- mutation: src/pubrun/_bootstrap.py ---
+    src/pubrun/_bootstrap.py:336: error: Incompatible types in assignment (expression has type "str", variable has type "int")  [assignment]
+    Found 1 error in 1 file (checked 58 source files)
+    exit=1
+    ```
+    `git diff --stat src/pubrun`:
+    ```text
+     src/pubrun/_bootstrap.py | 5 +++--
+     src/pubrun/auto.py       | 6 ++++--
+     src/pubrun/full.py       | 6 ++++--
+     src/pubrun/minimal.py    | 6 ++++--
+     src/pubrun/noauto.py     | 6 ++++--
+     src/pubrun/noconsole.py  | 6 ++++--
+     src/pubrun/nopatch.py    | 6 ++++--
+     7 files changed, 27 insertions(+), 14 deletions(-)
+    ```
+    Post-mutation `rm -rf .mypy_cache && mypy; echo "exit=$?"`:
+    ```text
+    Success: no issues found in 58 source files
+    exit=0
+    ```
+    (4) `python3 scripts/sanitize_paths.py --check --all`:
+    ```text
+    exit=0
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 
