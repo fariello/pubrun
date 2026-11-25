@@ -115,8 +115,11 @@ flowchart TD
 ## Deferred / out of scope (with reason)
 
 - Updating `src/pubrun/__main__.py` (`--info` display and `run` subcommand `description`), `src/pubrun/_config_boot.py` module docstring, or `docs/functional_spec.md` Section 3.3 / 3.4. None of those are requested by backlog item `aqb2bu`, and Sections 3.4 and 11.13 already document the launch-time `pubrun run --mode` override.
+  - Carrier-Declined: Deliberate non-goal for backlog item aqb2bu; Sections 3.4 and 11.13 already document the override.
 - Adding a `CHANGELOG.md` entry. Plan `lhwy0t` already added the `### Fixed` changelog entry for `PUBRUN_RUN_MODE_OVERRIDE`, and this followup changes only documentation reference tables with no runtime behavior change.
+  - Carrier-Declined: Already covered by executed plan lhwy0t; no runtime behavior changes.
 - Adding `XDG_CONFIG_HOME`, `APPDATA`, or `PUBRUN_DEBUG` rows to `docs/configuration.md` (`## Environment Variables`). Those variables are outside the scope of backlog item `aqb2bu`.
+  - Carrier: pqcx6o
 
 ## Scope check
 
