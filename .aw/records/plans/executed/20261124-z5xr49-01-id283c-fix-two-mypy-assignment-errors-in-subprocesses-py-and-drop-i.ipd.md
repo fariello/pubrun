@@ -6,7 +6,7 @@
 - Scope: Resolve the two `[assignment]` mypy errors in `src/pubrun/capture/subprocesses.py` (`SubprocessSpy.install._drain` and `SubprocessSpy.finalize_all`) introduced by commit `edc6343` (`focjwv`), and remove `"pubrun.capture.subprocesses"` from the `[tool.mypy.overrides]` `ignore_errors = true` list in `pyproject.toml`.
 - Scope-Paths: src/pubrun/capture/subprocesses.py, pyproject.toml
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Short-Description: Fix 2 mypy assignment errors in subprocesses.py and remove it from pyproject.toml ignore_errors
@@ -19,12 +19,12 @@
 - Highest E allocated: 02
 - Author: Antigravity
 - Id: id283c
-- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: id283c verified (set z5xr49, attempt 1).
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-25 to-review (Antigravity): graduated from backlog item `z5xr49` into a review-ready plan.
