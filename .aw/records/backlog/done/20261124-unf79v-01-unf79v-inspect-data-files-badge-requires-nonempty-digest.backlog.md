@@ -1,5 +1,5 @@
 - Id: unf79v
-- Status: graduated
+- Status: done
 - Graduated-To: unf79v
 - Set: unf79v
 - Work-Kind: bug
@@ -11,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-25 done (aw backlog): closed by aw agy run: IPD l2s67v executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261124-unf79v-01-l2s67v-require-a-non-empty-digest-before-inspect-data-files-labels.ipd.md); evidence .aw/records/plans/executed/20261124-unf79v-01-l2s67v-require-a-non-empty-digest-before-inspect-data-files-labels.ipd.md
 - 2026-11-25 graduated (aw set): Graduated to review-ready IPD l2s67v (Set: unf79v)
 - 2026-11-25 created (aw backlog): Require a non-empty digest before the inspect Data Files block labels a record verified
 
