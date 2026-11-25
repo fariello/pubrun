@@ -87,7 +87,7 @@ For `PUBRUN_AUTO_START`, `"1"`, `"true"`, `"yes"`, and `"on"` enable auto-start 
 
 ### 3.4 Import Modes
 
-The library supports five namespaced import modes via submodule imports:
+The library supports six import modes. A script selects a mode with a submodule import:
 
 ```python
 import pubrun                    # Default: auto mode
@@ -107,6 +107,8 @@ import pubrun.full as pubrun     # Auto-start, all hooks, and FORCE the console 
 | `nopatch` | `true` | `false` | `false` | `true` | `false` | Start tracking, but skip subprocess and console monkey-patching. Signal handlers remain active. |
 | `noconsole` | `true` | `true` | `false` | `true` | `false` | Start tracking, patch subprocesses and signals, but skip stdout/stderr console wrapping. |
 | `minimal` | `false` | `false` | `false` | `false` | `false` | Load API only. No auto-start, no patches, no signal hooks. |
+
+The `PUBRUN_IMPORT_MODE` environment variable and the `[imports].mode` config key accept the same six mode names (see Section 10.3). Matching ignores case and surrounding whitespace. An unrecognized name is ignored, and the boot resolver continues with the next source.
 
 These flags express what each mode **permits**, not what is active. Two layers gate
 actual capture:
@@ -367,21 +369,29 @@ Supported locations, applied in precedence order (lowest to highest):
 | Priority | Source | Path |
 |---|---|---|
 | 1 (lowest) | Built-in defaults | `default.toml` (shipped with the library) |
-| 2 | User home config | `~/.config/pubrun/config.toml` (or `%APPDATA%/pubrun/config.toml` on Windows) |
+| 2 | User home config | `$XDG_CONFIG_HOME/pubrun/config.toml`, else `~/.config/pubrun/config.toml` (`%APPDATA%/pubrun/config.toml` on Windows when `APPDATA` is set) |
 | 3 | Local deep config | `./.config/pubrun/config.toml` |
 | 4 | Local root config | `./.pubrun.toml` |
-| 5 | Environment variables | `PUBRUN_PROFILE`, `PUBRUN_AUTO_START`, `PUBRUN_META_REF` |
+| 5 | Environment variables | `PUBRUN_PROFILE`, `PUBRUN_META_REF` |
 | 6 (highest) | API overrides | `pubrun.start(profile="deep")` |
 
 When both `.pubrun.toml` and `.config/pubrun/config.toml` exist in the same directory, `.pubrun.toml` takes precedence (it is applied last).
+
+An empty or whitespace-only `XDG_CONFIG_HOME` or `APPDATA` is treated as unset. On Windows, when `APPDATA` is unset, the user home config follows the `XDG_CONFIG_HOME` rule. The boot resolver (Section 3.2) uses the same user home config path.
+
+`PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and `PUBRUN_IMPORT_CONFLICT` are not part of this merge. The boot sequence reads them during import-mode resolution and conflict handling (Sections 3.2 and 3.3), so they do not change the values recorded in `config.resolved.json`.
 
 ### 10.3 Supported Environment Variables
 
 | Variable | Effect |
 |---|---|
+| `PUBRUN_IMPORT_MODE` | Selects the import mode: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Overrides `PUBRUN_AUTO_START` and `[imports].mode`. A submodule import such as `import pubrun.noauto` takes precedence over it (Section 3.4). Matching ignores case and surrounding whitespace; any other value is ignored. `pubrun run --mode` sets it in the child process (Section 11.13). Consumed in the boot sequence (not in `resolve_config`). |
 | `PUBRUN_PROFILE` | Overrides `[core].profile`. Consumed in `resolve_config()` between local config and API overrides. |
-| `PUBRUN_AUTO_START` | Overrides `[core].auto_start`. Consumed in the boot sequence (not in `resolve_config`). |
+| `PUBRUN_AUTO_START` | Overrides `[core].auto_start`. `"1"`, `"true"`, `"yes"`, and `"on"` select `auto` mode; `"0"`, `"false"`, `"no"`, and `"off"` select `noauto` mode (Section 3.3). Used only when `PUBRUN_IMPORT_MODE` is unset or invalid. Consumed in the boot sequence (not in `resolve_config`). |
 | `PUBRUN_META_REF` | Sets `[core].meta_ref`. Consumed in `resolve_config()` between local config and API overrides. |
+| `PUBRUN_IMPORT_CONFLICT` | Overrides `[imports].on_conflict`: `ignore`, `warn`, or `error`. Matching ignores case and surrounding whitespace; any other value is ignored. Applies when two imports request different modes. Consumed in the boot sequence (not in `resolve_config`). |
+| `XDG_CONFIG_HOME` | Base directory of the user home config (Section 10.2) when not on Windows, or on Windows when `APPDATA` is unset. Empty or whitespace-only means unset, and the base directory is then `~/.config`. Read by both the boot sequence and `resolve_config()`. |
+| `APPDATA` | Windows only. Base directory of the user home config when set. Empty or whitespace-only means unset. Read by both the boot sequence and `resolve_config()`. |
 
 ### 10.4 Configuration Contents
 
