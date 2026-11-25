@@ -389,7 +389,7 @@ def read_resource_series(events_path) -> Dict[str, Any]:
     ``tree_rss``, ``tree_cpu`` (present only when captured). Shared by the ``res``/``report``
     summary, the ASCII charts, and the TUI. Never raises; returns empty lists on any error.
     """
-    out = {"timestamps": [], "rss": [], "cpu": [], "tree_rss": [], "tree_cpu": []}
+    out: Dict[str, List[Any]] = {"timestamps": [], "rss": [], "cpu": [], "tree_rss": [], "tree_cpu": []}
     try:
         with open(events_path, "r", encoding="utf-8") as ef:
             for line in ef:
@@ -801,6 +801,7 @@ def print_report(
     timing_sem = classify_timing_semantics(timing)
     workload_val = _as_float(timing.get("workload_seconds"))
     elapsed_raw = _as_float(timing.get("elapsed_seconds"))
+    elapsed_val: Optional[float]
     if timing_sem.get("elapsed_basis") == "session" and elapsed_raw is not None:
         elapsed_val = elapsed_raw
     else:
@@ -1144,7 +1145,7 @@ def draw_ascii_chart(
         total_time = t_end - t_start
 
         # Initialize bins
-        bins = [[] for _ in range(width)]
+        bins: List[List[Any]] = [[] for _ in range(width)]
         for i in range(n):
             t = timestamps[i]
             if total_time > 0:
@@ -1254,7 +1255,7 @@ def draw_ascii_chart(
         tick_indices.append(width - 1)
 
     # Greedy placement of elapsed labels
-    placed = {}  # maps idx -> (start_col, end_col, lbl_str)
+    placed: Dict[int, Tuple[int, int, str]] = {}  # maps idx -> (start_col, end_col, lbl_str)
 
     # Priority order: End tick, Start tick, Middle tick, then the rest
     priority_order = []

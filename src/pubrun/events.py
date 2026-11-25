@@ -2,7 +2,7 @@ import json
 import logging
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TextIO
 from pathlib import Path
 
 from pubrun.capture.signals import finalization_lock
@@ -45,6 +45,7 @@ class EventStream:
         # Critical events still get immediate flush for crash safety.
         self._flush_interval = config.get("events", {}).get("flush_interval_events", 100)
         self._buffer: List[str] = []
+        self._file: Optional[TextIO] = None
 
         try:
             # We keep the handle open in append mode for rapid high-frequency writes

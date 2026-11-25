@@ -114,7 +114,7 @@ def load_local_config(start_dir: Optional[Path] = None) -> Optional[Dict[str, An
     if start_dir is None:
         start_dir = Path.cwd()
 
-    merged = {}
+    merged: Dict[str, Any] = {}
 
     # Base local configuration standard targeting explicit ecosystems
     deep_path = start_dir / ".config" / "pubrun" / "config.toml"
