@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/capture/console.py`, `file_io.py`, `filesystem.py`, `packages.py`, `resources.py`, `subprocesses.py`; a new `tests/test_capture_mypy_guarded_paths.py`; and the removal of all six capture modules from the `ignore_errors` module list in `pyproject.toml`.
 - Scope-Paths: src/pubrun/capture/console.py, src/pubrun/capture/file_io.py, src/pubrun/capture/filesystem.py, src/pubrun/capture/packages.py, src/pubrun/capture/resources.py, src/pubrun/capture/subprocesses.py, tests/test_capture_mypy_guarded_paths.py, pyproject.toml
 - Item-Dependencies: executed:gzc672, executed:m66tfv
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix mypy errors in the capture subpackage and take those modules off the ignore_errors list
@@ -18,12 +18,12 @@
 - Highest E allocated: 05
 - Author: uri/its_direct/pt3-claude-opus-5.5-1m-us
 - Id: k6fs5k
-- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: k6fs5k verified (set rand-mypy, attempt 1). [Scope reconciliation - in-scope-unmodified src/pubrun/capture/subprocesses.py: declared-but-unmodified (auto-acknowledged by aw agy run)]
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-24 to-review (aw set): authored from backlog qqwebg
