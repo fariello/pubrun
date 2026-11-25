@@ -6,7 +6,9 @@
 - Scope: In `src/pubrun/_config_boot.py`, replace the `mode_name is one of:` line of the `resolve_import_mode` docstring with a two-line sentence that lists the six valid import modes. No code, other docstring line, or other file changes.
 - Scope-Paths: src/pubrun/_config_boot.py
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: simple
 - Short-Description: List the six valid import modes in the resolve_import_mode docstring
 - Work-Kind: followup
 - Priority: low
@@ -21,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003 fixed; review record `.aw/records/reviews/20261124-m8buxe-01-wtpyx0-correct-the-mode-name-list-in-the-resolve-import-mode-docstr.review.md`.
 - 2026-11-25 to-review (opencode): graduated from backlog item `m8buxe` into a review-ready plan.
 - 2026-11-25 draft (opencode): created.
 
@@ -43,14 +46,14 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - `src/pubrun/_modes.py` is the single source of truth for import modes. `MODES` maps each mode name to its behavior flags, and `VALID_MODES = frozenset(MODES.keys())`. `resolve_import_mode` accepts a mode from `PUBRUN_IMPORT_MODE` or `[imports].mode` only when the value is in `VALID_MODES`.
 - Docstrings in `src/pubrun/_config_boot.py` use Google style (`Returns:`) and indent a continuation line by four extra spaces, as the existing `source is one of:` entry does.
-- The same stale-list defect was fixed once before: `CHANGELOG.md` records "Removed a stale `pubrun.quiet` reference in the `noauto` docstring (the mode is `noconsole`)." That fix did not reach `resolve_import_mode`.
+- Commit `6bd3284` renamed the legacy `quiet` mode to `minimal`. A similar stale `pubrun.quiet` mention in the `noauto` docstring (where `noconsole` belonged) was fixed earlier (`CHANGELOG.md`: "Removed a stale `pubrun.quiet` reference in the `noauto` docstring (the mode is `noconsole`)."), but that fix did not reach `resolve_import_mode`.
 - The executed plan `.aw/records/plans/executed/20260705-1828-01-full-capture-mode.md` added `full` by extending `MODES` and states that `resolve_import_mode` needs no extra registration. It did not update this docstring, which is how `"full"` came to be missing.
 - `AGENTS.md` "Agent execution contract" exempts code comments from the dash rule. The new docstring text still uses no em or en dashes, so it matches the surrounding lines.
 - Cite code by SYMBOL (`module.function`) or by a quoted content string, with a line number only appended to one of those and never alone: an offset expires before this plan executes (advisory `IPD-C801`).
 
 ## Findings
 
-Measured at authoring on Linux at `HEAD` `79ae65d`.
+Measured at authoring on Linux at `HEAD` `79ae65d` (and verified at review against `HEAD` `04896ca`).
 
 The current `Returns:` section of `src/pubrun/_config_boot.py::resolve_import_mode`, printed with `PYTHONPATH=src python3 -c "import pubrun._config_boot as m; print(m.resolve_import_mode.__doc__)"`:
 
@@ -98,7 +101,7 @@ The function returns each of the six valid modes. It rejects `quiet` and falls b
 | `full` | yes | yes | no |
 | `quiet` | no | no | yes |
 
-`src/pubrun/_config_boot.py` has pre-existing `ruff check` findings (for example `F401` for the unused `get_mode_behavior` import and `FA100` on the `typing` annotations). This plan does not fix them, and validation therefore checks only that the edit adds no finding.
+`src/pubrun/_config_boot.py` has pre-existing `ruff check` findings (19 at authoring and review, for example `F401` for the unused `get_mode_behavior` import and `FA100` on the `typing` annotations). This plan does not fix them, and validation therefore checks only that the edit adds no finding.
 
 No diagram is included. The change affects one docstring sentence of one function, which is a single entity with no process (technical writing standard, requirement 12(c)).
 
@@ -150,10 +153,35 @@ No diagram is included. The change affects one docstring sentence of one functio
 
 - `git diff -- src/pubrun/_config_boot.py` shows exactly one removed line and two added lines, all inside the `resolve_import_mode` docstring, with the added lines identical to "Proposed changes" item 1.
 - `PYTHONPATH=src python3 -c "import pubrun._config_boot as m; print(m.resolve_import_mode.__doc__)"` prints a `Returns:` section that matches "Proposed changes" item 1.
-- `grep -c '"quiet"' src/pubrun/_config_boot.py` prints `0`.
-- `git diff -U0 -- src/pubrun/_config_boot.py | grep '^+[^+]' | grep -cP '[\x{2013}\x{2014}]'` prints `0`.
-- `ruff check src/pubrun/_config_boot.py` reports the same number of findings after the edit as before it (19 at authoring). Record both counts.
-- A runtime check confirms the documented list: run the Findings probe again and observe the same seven output lines. The code path that produces the observation is `src/pubrun/_config_boot.py::resolve_import_mode`, step 1, validated against `src/pubrun/_modes.py::VALID_MODES`.
+- Confirm `"quiet"` no longer appears in `src/pubrun/_config_boot.py` (must print `quiet_count=0` and exit `0`):
+  `python3 -c "import pathlib, sys; text = pathlib.Path('src/pubrun/_config_boot.py').read_text(encoding='utf-8'); n = text.count('\"quiet\"'); print(f'quiet_count={n}'); sys.exit(1 if n else 0)"`
+- Before committing `src/pubrun/_config_boot.py`, run the portable working-tree dash check (must assert at least one added line and exit `0` with `dashes=0`):
+  `python3 -c "import subprocess, sys; lines = [l for l in subprocess.check_output(['git', 'diff', '-U0', '--', 'src/pubrun/_config_boot.py'], text=True).splitlines() if l.startswith('+') and not l.startswith('+++')]; assert lines, 'no added lines in working tree'; bad = [l for l in lines if '\u2014' in l or '\u2013' in l]; print(f'added_lines={len(lines)} dashes={len(bad)}'); sys.exit(1 if bad else 0)"`
+- Compare `ruff check` findings before and after the edit (both commands exit `1` while pre-existing findings remain, and their `Found N errors.` counts must match; 19 at authoring and review):
+  - Baseline from `HEAD`: `git show HEAD:src/pubrun/_config_boot.py | ruff check --stdin-filename src/pubrun/_config_boot.py -`
+  - Post-edit working tree: `ruff check src/pubrun/_config_boot.py`
+- A config-isolated runtime check confirms the documented list without reading any user or repo config file. Run the probe below (inside an empty temporary working directory with isolated `XDG_CONFIG_HOME` / `APPDATA`) and observe the seven output lines matching Findings (`auto` through `full` from `env:PUBRUN_IMPORT_MODE`, and `quiet` falling back to `('auto', 'default')`). The code path that produces the observation is `src/pubrun/_config_boot.py::resolve_import_mode`, step 1, validated against `src/pubrun/_modes.py::VALID_MODES`:
+
+  ```sh
+  python3 -c "
+  import os, sys, tempfile
+  sys.path.insert(0, os.path.abspath('src'))
+  from pubrun._config_boot import resolve_import_mode
+  orig = os.getcwd()
+  with tempfile.TemporaryDirectory() as td:
+      os.chdir(td)
+      try:
+          os.environ['XDG_CONFIG_HOME'] = td
+          os.environ['APPDATA'] = td
+          os.environ['PUBRUN_AUTO_START'] = ''
+          for m in ('auto', 'noauto', 'nopatch', 'noconsole', 'minimal', 'full', 'quiet'):
+              os.environ['PUBRUN_IMPORT_MODE'] = m
+              print(m, resolve_import_mode())
+      finally:
+          os.chdir(orig)
+  "
+  ```
+
 - `python3 -m pytest tests/test_import_modes.py tests/test_config_capture_modes.py --no-cov -q` passes. These suites call `resolve_import_mode` and show that the docstring edit leaves its behavior unchanged.
 - `python3 scripts/sanitize_paths.py --check --all` exits 0.
 
@@ -170,14 +198,14 @@ No diagram is included. The change affects one docstring sentence of one functio
 - Blocking: no
 - Status: resolved
 - Owner: plan author
-- Resolution or deferral rationale: Name it. The list drifted from `MODES` in two ways: the `full` plan (`.aw/records/plans/executed/20260705-1828-01-full-capture-mode.md`) added a mode to `MODES` without updating this docstring, and the docstring still names `quiet`, which `CHANGELOG.md` identifies as a stale name for `noconsole`. Naming `MODES` points a reader at the authoritative definition. The six names stay listed so that a reader does not need to open another file.
+- Resolution or deferral rationale: Name it. The list drifted from `MODES` in two ways: the `full` plan (`.aw/records/plans/executed/20260705-1828-01-full-capture-mode.md`) added a mode to `MODES` without updating this docstring, and the docstring still names `quiet`, which commit `6bd3284` renamed to `minimal` (and which also survived once as a stale reference in the `noauto` docstring, noted in `CHANGELOG.md`). Naming `MODES` points a reader at the authoritative definition. The six names stay listed so that a reader does not need to open another file.
 
 ## Validation and cross-check (verify before reporting done)
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
 - [ ] V-01 validates E-01
-  - Required evidence: (1) Paste `git diff -- src/pubrun/_config_boot.py`, showing one removed and two added lines inside the `resolve_import_mode` docstring, with the added lines identical to "Proposed changes" item 1. (2) Paste the output of `PYTHONPATH=src python3 -c "import pubrun._config_boot as m; print(m.resolve_import_mode.__doc__)"`, whose `Returns:` section matches "Proposed changes" item 1. (3) Paste the output of `grep -c '"quiet"' src/pubrun/_config_boot.py`, which must be `0`. (4) Paste the output of `git diff -U0 -- src/pubrun/_config_boot.py | grep '^+[^+]' | grep -cP '[\x{2013}\x{2014}]'`, which must be `0`. (5) Paste the `Found N errors.` line of `ruff check src/pubrun/_config_boot.py` from before and after the edit; the two counts must be equal. (6) Paste the seven output lines of the Findings probe, produced by `src/pubrun/_config_boot.py::resolve_import_mode` against `src/pubrun/_modes.py::VALID_MODES`, identical to the Findings output. (7) Paste the summary line of `python3 -m pytest tests/test_import_modes.py tests/test_config_capture_modes.py --no-cov -q`. (8) Paste the exit status of `python3 scripts/sanitize_paths.py --check --all`, which must be `0`.
+  - Required evidence: (1) Paste `git diff -- src/pubrun/_config_boot.py`, showing one removed and two added lines inside the `resolve_import_mode` docstring, with the added lines identical to "Proposed changes" item 1. (2) Paste the output of `PYTHONPATH=src python3 -c "import pubrun._config_boot as m; print(m.resolve_import_mode.__doc__)"`, whose `Returns:` section matches "Proposed changes" item 1. (3) Paste the output and exit status `0` of the `"quiet"` check command in "Required tests / validation", showing `quiet_count=0`. (4) Paste the output and exit status `0` of the portable working-tree dash check command in "Required tests / validation", showing `added_lines=2 dashes=0`. (5) Paste the `Found N errors.` line of both the `HEAD` stdin baseline (`git show HEAD:src/pubrun/_config_boot.py | ruff check --stdin-filename src/pubrun/_config_boot.py -`) and post-edit `ruff check src/pubrun/_config_boot.py`; the two counts must be equal. (6) Paste the seven output lines of the config-isolated runtime probe in "Required tests / validation", produced by `src/pubrun/_config_boot.py::resolve_import_mode` against `src/pubrun/_modes.py::VALID_MODES`, matching the Findings output. (7) Paste the summary line of `python3 -m pytest tests/test_import_modes.py tests/test_config_capture_modes.py --no-cov -q`. (8) Paste the exit status of `python3 scripts/sanitize_paths.py --check --all`, which must be `0`.
   - Observed evidence:
   - Result: pending
 
@@ -188,7 +216,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 
 Execution contract:
 1. Precondition: wait for human approval (`- Status: approved`) with no unresolved `Blocking: yes` open question before you change any file. This plan has no blocking open questions.
-2. Scope declaration: the expected modified file is the `- Scope-Paths:` entry (`src/pubrun/_config_boot.py`). If execution requires an out-of-scope file, justify it with `--scope-reason` at finalization.
+2. Scope declaration: the expected modified file is the `- Scope-Paths:` entry (`src/pubrun/_config_boot.py`). If execution requires an out-of-scope file, justify it with `--scope-reason` at finalization; if a declared file needs no edit, acknowledge it with `--scope-ack`.
 3. Validation honesty: you MUST run each required validation command and paste its actual output into the `V-01` `Observed evidence:` field. Do not mark `V-01` `pass` without output captured from that run.
 4. Commit discipline: commit only the paths you changed with `aw commit wtpyx0 -- <paths>`. Do not use `git add -A` or raw `git commit`. Do not push without an explicit human instruction.
 5. Lifecycle transition: finalize this plan with `aw ipd finalize wtpyx0`, never with a hand-written `git mv` to `.aw/records/plans/executed/`. Inside a runner lane (`aw oc run` or `aw agy run`), the runner finalizes after the turn. Outside a runner, the executor runs `aw ipd finalize wtpyx0` after `E-01` is `performed`, `V-01` is `pass`, and `aw ipd lint --phase pre-transition` reports `conforming`.
