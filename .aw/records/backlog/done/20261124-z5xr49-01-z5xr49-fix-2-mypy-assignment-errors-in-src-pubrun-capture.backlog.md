@@ -1,5 +1,5 @@
 - Id: z5xr49
-- Status: graduated
+- Status: done
 - Graduated-To: z5xr49
 - Set: z5xr49
 - Work-Kind: bug
@@ -11,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-25 done (aw backlog): closed by aw agy run: IPD id283c executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261124-z5xr49-01-id283c-fix-two-mypy-assignment-errors-in-subprocesses-py-and-drop-i.ipd.md); evidence .aw/records/plans/executed/20261124-z5xr49-01-id283c-fix-two-mypy-assignment-errors-in-subprocesses-py-and-drop-i.ipd.md
 - 2026-11-25 graduated (aw set): Graduated to review-ready IPD id283c (Set: z5xr49)
 - 2026-11-24 created (aw backlog): Fix 2 mypy assignment errors in src/pubrun/capture/subprocesses.py introduced by focjwv and remove module from ignore_errors ratchet
 
