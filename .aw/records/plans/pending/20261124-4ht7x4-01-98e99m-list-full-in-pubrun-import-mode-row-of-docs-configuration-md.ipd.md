@@ -6,7 +6,9 @@
 - Scope: Add `full` to the `PUBRUN_IMPORT_MODE` row of the `## Environment Variables` table in `docs/configuration.md` so all six valid import modes from `src/pubrun/_modes.py::VALID_MODES` are listed.
 - Scope-Paths: docs/configuration.md
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: simple
 - Short-Description: Add missing full import mode to the PUBRUN_IMPORT_MODE row in docs/configuration.md
 - Work-Kind: followup
 - Priority: low
@@ -21,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-25 to-review (Antigravity): graduated from backlog item `4ht7x4` into a review-ready plan.
 - 2026-11-25 draft (Antigravity): created.
 
@@ -36,7 +39,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - [ ] E-01 Update the `PUBRUN_IMPORT_MODE` row in `docs/configuration.md#Environment Variables` so it lists all six valid import modes (`auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, and `full`) without modifying any other row or introducing em or en dashes.
   - Depends on: none
-  - Expected outcome: The `PUBRUN_IMPORT_MODE` row reads `| \`PUBRUN_IMPORT_MODE\` | Canonical import mode: \`auto\`, \`noauto\`, \`nopatch\`, \`noconsole\`, \`minimal\`, or \`full\`. Takes highest precedence. |` (no other row in `docs/configuration.md` changes, and the edited line contains zero em or en dashes).
+  - Expected outcome: The `PUBRUN_IMPORT_MODE` row reads ``| `PUBRUN_IMPORT_MODE` | Canonical import mode: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Takes highest precedence. |`` (no other row in `docs/configuration.md` changes, and the edited line contains zero em or en dashes).
   - Execution state: pending
 
 ## Project conventions discovered (Step 0)
@@ -44,7 +47,8 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 - Cite code by SYMBOL (`path::Name`) or by a quoted content string, with a line number only appended to one of those and never alone (`IPD-C801`).
 - `src/pubrun/_modes.py::VALID_MODES` defines six modes: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, `full`.
 - `src/pubrun/_config_boot.py::resolve_import_mode` validates `PUBRUN_IMPORT_MODE` against `VALID_MODES` and accepts `full` (returning `('full', 'env:PUBRUN_IMPORT_MODE')`).
-- `docs/configuration.md#Environment Variables` currently reads `| \`PUBRUN_IMPORT_MODE\` | Canonical import mode: \`auto\`, \`noauto\`, \`nopatch\`, \`noconsole\`, or \`minimal\`. Takes highest precedence. |`.
+- Importing `pubrun._config_boot` executes `src/pubrun/__init__.py`, which runs `_execute_boot_sequence()` because `pubrun._config_boot` is not in `src/pubrun/_bootstrap.py::is_mode_submodule_import_in_progress`'s `_MODE_SUBMODULES`. Set `PUBRUN_AUTO_START=false` before importing `pubrun._config_boot` and set `os.environ["PUBRUN_IMPORT_MODE"] = "full"` afterward so validation creates no `runs/` directory in the working tree.
+- `docs/configuration.md#Environment Variables` currently reads ``| `PUBRUN_IMPORT_MODE` | Canonical import mode: `auto`, `noauto`, `nopatch`, `noconsole`, or `minimal`. Takes highest precedence. |``.
 - Agent execution contract: user-facing documentation (`docs/configuration.md`) must contain zero em or en dashes in authored or edited prose.
 
 ## Findings
@@ -57,7 +61,7 @@ The `PUBRUN_IMPORT_MODE` row in `docs/configuration.md#Environment Variables` om
 
 ## Deferred / out of scope (with reason)
 
-- Resolving whether `pubrun run --mode` overrides an in-code `import pubrun.<mode>` (the "Takes highest precedence" semantics): tracked separately by backlog item `oubh58`.
+- Precedence between launch-time `pubrun run --mode` and explicit in-code `import pubrun.<mode>` (and any change to the `"Takes highest precedence."` phrasing): tracked separately by backlog item `oubh58` (graduated to plan `lhwy0t`); backlog item `4ht7x4` is scoped strictly to adding `full` to the mode list in the `PUBRUN_IMPORT_MODE` row.
   - Carrier: oubh58
 
 ## Scope check
@@ -67,8 +71,11 @@ The `PUBRUN_IMPORT_MODE` row in `docs/configuration.md#Environment Variables` om
 
 ## Required tests / validation
 
-- Run a one-line runtime check confirming `PUBRUN_IMPORT_MODE=full` resolves via `pubrun._config_boot.resolve_import_mode` to `('full', 'env:PUBRUN_IMPORT_MODE')` and that every name in `pubrun._modes.VALID_MODES` appears in the `PUBRUN_IMPORT_MODE` row of `docs/configuration.md`.
-- Confirm zero em or en dashes in the added diff line.
+- Run a side-effect-free runtime and documentation parity check confirming `src/pubrun/_config_boot.py::resolve_import_mode` resolves `PUBRUN_IMPORT_MODE=full` to `('full', 'env:PUBRUN_IMPORT_MODE')`, the `PUBRUN_IMPORT_MODE` row in `docs/configuration.md` matches uniquely and lists every backticked mode in `src/pubrun/_modes.py::VALID_MODES`, and the edited row contains zero em or en dashes (without creating a `runs/` directory):
+
+  ```sh
+  PUBRUN_AUTO_START=false PYTHONPATH=src python3 -c 'import os, pathlib; from pubrun._config_boot import resolve_import_mode; from pubrun._modes import VALID_MODES; os.environ["PUBRUN_IMPORT_MODE"] = "full"; res = resolve_import_mode(); assert res == ("full", "env:PUBRUN_IMPORT_MODE"), res; rows = [l for l in pathlib.Path("docs/configuration.md").read_text(encoding="utf-8").splitlines() if l.startswith("| `PUBRUN_IMPORT_MODE` |")]; assert len(rows) == 1, rows; missing = [m for m in sorted(VALID_MODES) if f"`{m}`" not in rows[0]]; assert not missing, missing; assert not any(c in rows[0] for c in "\u2014\u2013"), rows[0]; print("OK:", res, sorted(VALID_MODES))'
+  ```
 - Run `python3 scripts/sanitize_paths.py --check --all` and confirm exit code 0.
 
 ## Spec / documentation sync
@@ -84,7 +91,7 @@ None.
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
 - [ ] V-01 validates E-01
-  - Required evidence: Paste `git diff docs/configuration.md` showing only the `PUBRUN_IMPORT_MODE` row updated to include all six modes (`auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, `full`) with zero em or en dashes; paste output of a Python check confirming `PUBRUN_IMPORT_MODE=full` resolves to `('full', 'env:PUBRUN_IMPORT_MODE')` via `src/pubrun/_config_boot.py::resolve_import_mode` and every mode in `src/pubrun/_modes.py::VALID_MODES` appears in the row; and paste `python3 scripts/sanitize_paths.py --check --all` exiting 0.
+  - Required evidence: Paste `git diff docs/configuration.md` showing only the `PUBRUN_IMPORT_MODE` row updated to include all six modes (`auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, `full`) with zero em or en dashes; paste output of the side-effect-free `PUBRUN_AUTO_START=false PYTHONPATH=src python3 -c ...` check from `Required tests / validation` confirming `src/pubrun/_config_boot.py::resolve_import_mode` returns `('full', 'env:PUBRUN_IMPORT_MODE')`, every mode in `src/pubrun/_modes.py::VALID_MODES` appears in the `PUBRUN_IMPORT_MODE` row, and zero em or en dashes appear in the row (printing `OK: ...` with exit 0 and leaving no untracked `runs/` files); and paste `python3 scripts/sanitize_paths.py --check --all` exiting 0.
   - Observed evidence:
   - Result: pending
 
