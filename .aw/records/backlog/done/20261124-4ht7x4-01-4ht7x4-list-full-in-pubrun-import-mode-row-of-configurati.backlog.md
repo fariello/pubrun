@@ -1,5 +1,5 @@
 - Id: 4ht7x4
-- Status: graduated
+- Status: done
 - Graduated-To: 4ht7x4
 - Set: 4ht7x4
 - Work-Kind: followup
@@ -10,6 +10,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-25 done (aw backlog): closed by aw agy run: IPD 98e99m executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261124-4ht7x4-01-98e99m-list-full-in-pubrun-import-mode-row-of-docs-configuration-md.ipd.md); evidence .aw/records/plans/executed/20261124-4ht7x4-01-98e99m-list-full-in-pubrun-import-mode-row-of-docs-configuration-md.ipd.md
 - 2026-11-25 graduated (aw set): Graduated to review-ready IPD 98e99m (Set: 4ht7x4)
 - 2026-11-25 created (aw backlog): List full in the PUBRUN_IMPORT_MODE row of the docs/configuration.md Environment Variables table
 
