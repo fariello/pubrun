@@ -18,6 +18,12 @@ Run the test suite before opening a pull request:
 python -m pytest
 ```
 
+GitHub Actions CI runs every test suite in random order with `pytest-randomly`, while local and `tox` runs stay in fixed order. Each CI job log prints its seed in the `pytest` header as `Using --randomly-seed=<N>`. To reproduce a CI test order locally, pass that seed on the command line:
+
+```bash
+python -m pytest -p randomly --randomly-seed=<N>
+```
+
 To measure test coverage locally, pass the coverage flags explicitly (the GitHub Actions CI `ubuntu-latest` Python 3.12 job fails if total coverage drops below 78%):
 
 ```bash

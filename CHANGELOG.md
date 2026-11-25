@@ -65,6 +65,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pass/fail receipt. Archival/aggregation is a later, separately gated phase.
 
 ### Changed
+- **CI test suites now run in random order with `pytest-randomly`.** Every `pytest` command in
+  `.github/workflows/ci.yml` now passes `-p randomly` without a fixed seed, so each CI job exercises
+  a different test order and prints its seed in the `pytest` header (`Using --randomly-seed=<N>`).
+  Reproduce a CI test order locally with `python -m pytest -p randomly --randomly-seed=<N>`. Local
+  and `tox` runs keep the fixed default order through `addopts = "-p no:randomly"` in
+  `pyproject.toml`.
 - **Full-package static type checking with `mypy`.** Static type checking with `mypy` now checks
   every module of the `pubrun` package on Linux. The per-module `ignore_errors` exemption list has
   been removed from `pyproject.toml`.

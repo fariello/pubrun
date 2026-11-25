@@ -35,10 +35,10 @@ jobs:
         run: pip install -e ".[dev,tui]"
       - name: Run tests
         if: ${{ !(matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12') }}
-        run: pytest tests/ -v
+        run: pytest tests/ -v -p randomly
       - name: Run tests with coverage gate
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
-        run: pytest tests/ -v --cov=src --cov-report=term-missing --cov-fail-under=78
+        run: pytest tests/ -v -p randomly --cov=src --cov-report=term-missing --cov-fail-under=78
 
   extra-suites:
     runs-on: ubuntu-latest
@@ -51,7 +51,7 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]" pyyaml
       - name: Run script and benchmark contract tests
-        run: pytest .github/scripts/ benchmarks/test_share_safety.py benchmarks/test_pull_submissions.py benchmarks/test_benchmarks.py -v
+        run: pytest .github/scripts/ benchmarks/test_share_safety.py benchmarks/test_pull_submissions.py benchmarks/test_benchmarks.py -v -p randomly
 
   no-tui:
     runs-on: ubuntu-latest
@@ -64,7 +64,7 @@ jobs:
       - name: Install package without tui extra
         run: pip install -e ".[dev]"
       - name: Run tests
-        run: pytest tests/ -v
+        run: pytest tests/ -v -p randomly
 
   packaging:
     runs-on: ubuntu-latest

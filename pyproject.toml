@@ -80,10 +80,10 @@ path = "hatch_build.py"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-# `pytest-randomly` is a dev dependency for LOCAL adverse-order testing (opt in with `-p randomly`);
-# it is deliberately DISABLED by default so CI and normal runs stay deterministic. Enabling
-# randomized order in CI is a separate, later step (see the flaky-test-hardening IPD, OQ1=C):
-# it would surface additional latent order-coupling that must be worked through first.
+# `pytest-randomly` stays disabled by default so local and `tox` runs are deterministic.
+# CI passes `-p randomly` to every `pytest` command in `.github/workflows/ci.yml`, and a later
+# `-p randomly` on the command line overrides this setting. Reproduce a CI test order locally
+# with `-p randomly --randomly-seed=<N>` using the seed printed in the job log.
 addopts = "-p no:randomly"
 markers = [
     "slow: runs the benchmark harness or another multi-subprocess workload (deselect with -m 'not slow')",
