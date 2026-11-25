@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/analysis/diff.py`, `src/pubrun/analysis/render.py`, `src/pubrun/config.py`, `src/pubrun/status.py`, `src/pubrun/events.py`, `src/pubrun/report/diagnostics.py`, a new `tests/test_status_clean_table.py`, and the removal of the six modules from the `ignore_errors` module list in `pyproject.toml`.
 - Scope-Paths: src/pubrun/analysis/diff.py, src/pubrun/analysis/render.py, src/pubrun/config.py, src/pubrun/status.py, src/pubrun/events.py, src/pubrun/report/diagnostics.py, tests/test_status_clean_table.py, pyproject.toml
 - Item-Dependencies: executed:gzc672, executed:m66tfv
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix mypy errors in analysis/diff, analysis/render, config, status, events, and report/diagnostics and take them off the ignore_errors list
@@ -18,12 +18,12 @@
 - Highest E allocated: 05
 - Author: uri/its_direct/pt3-claude-opus-5.5-1m-us
 - Id: qe6dad
-- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: qe6dad verified (set rand-mypy, attempt 1).
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-24 to-review (aw set): authored from backlog qqwebg
