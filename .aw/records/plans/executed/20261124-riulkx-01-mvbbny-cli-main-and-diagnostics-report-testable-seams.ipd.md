@@ -6,7 +6,7 @@
 - Scope: Refactor `src/pubrun/__main__.py::main` so it accepts an optional argv list and never rewrites `sys.argv`, with its argv preprocessing extracted into a pure function. Refactor `src/pubrun/report/diagnostics.py::print_report`, `::print_resources_report`, and their print helpers so they write to an optional output stream and raise a typed `DiagnosticsError` instead of calling `sys.exit(1)`. Keep every CLI output, error message, and exit code byte-identical. Add in-process seam tests in two new test files and one `CHANGELOG.md` entry.
 - Scope-Paths: src/pubrun/__main__.py, src/pubrun/report/diagnostics.py, tests/test_cli_seams.py, tests/test_diagnostics_seams.py, CHANGELOG.md
 - Item-Dependencies: executed:ic6z4s
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Let main() take an argv list and let the diagnostics reports take an output stream and raise a typed error, so tests can drive them in-process
@@ -18,12 +18,12 @@
 - Highest E allocated: 08
 - Author: opencode
 - Id: mvbbny
-- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: mvbbny verified (set riulkx, attempt 2). [Scope attribution - 22 changed path(s) OUTSIDE Scope-Paths were DISREGARDED as not attributable to this execution (evidence: run-record-exact), so no --scope-reason was demanded for them: .aw/records/backlog/graduated/20261124-mv1g3x-01-mv1g3x-sync-docs-functional-spec-md-sections-3-4-10-2-and.backlog.md, .aw/records/backlog/graduated/20261124-o9c3gr-01-o9c3gr-use-monkeypatch-in-tests-test-tui-py-test-tui-miss.backlog.md, .aw/records/backlog/graduated/20261124-t55vh8-01-t55vh8-reuse-canonical-classify-file-record-in-methods-py.backlog.md, .aw/records/backlog/graduated/20261124-z5xr49-01-z5xr49-fix-2-mypy-assignment-errors-in-src-pubrun-capture.backlog.md, .aw/records/backlog/open/20261124-ln0vci-01-ln0vci-document-sys-argv-in-the-lock-file-section-of-docs.backlog.md (... and 17 more; see disregarded_no_evidence_paths in the finalize evidence)]
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-25 to-review (aw set): status set to to-review
