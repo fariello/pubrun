@@ -124,6 +124,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **`pubrun inspect` and `pubrun show` Data Files badges now require a non-empty digest value before
+  labeling a file `verified`.** Previously, the Data Files summary and detail views labeled a
+  `data_files` record `verified` whenever `hash_status` was `completed` or `evidence_strength` was
+  `verified_content`, even when no digest value was recorded. Display classification now delegates
+  to the shared file-evidence classifier, so digestless records render as `metadata-only` (or
+  `path-only` when `evidence_strength` is `path_only`), and legacy records carrying only an `md5`
+  digest render as `verified` with a sanitized `md5:<prefix>` digest.
 - **Methods reports no longer count a file record without a digest value as independently
   verified.** The file-provenance sentence in `methods.md`, `methods.tex`, and `pubrun methods`
   counted a `data_files` record as verified when its `hash_status` was `completed` or its

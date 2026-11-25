@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
+from pubrun.report.file_evidence import _classify_file_record
 from pubrun.report.utils import hydrate_manifest, hydrate_manifest_with_report
 
 # The section names `pubrun show <run> <section>` accepts as a bare trailing token.
@@ -121,48 +122,12 @@ def _iter_data_file_entries(data_files: Any) -> List[Tuple[str, Dict[str, Any]]]
 
 def _classify_file_record_display(rec: Dict[str, Any]) -> str:
     """Classify a ``data_files`` record into its authoritative textual badge name."""
-    hash_status = rec.get("hash_status")
-    evidence_strength = rec.get("evidence_strength")
-    evidence_source = rec.get("evidence_source")
-    caller_digest = rec.get("caller_digest")
-
-    if hash_status == "file_changed" or rec.get("change_detected") is True:
-        return "changed"
-    if (
-        hash_status == "failed"
-        or rec.get("hash_status_detail") == "caller_digest_mismatch"
-        or (isinstance(caller_digest, dict) and caller_digest.get("verified") is False)
-    ):
-        return "failed"
-    if hash_status == "unavailable":
-        return "unavailable"
-    if hash_status == "over_budget":
+    category = _classify_file_record(rec)
+    if category == "over_budget":
         return "over-budget"
-    if hash_status == "completed" or evidence_strength == "verified_content":
-        return "verified"
-    if (
-        hash_status == "asserted"
-        or evidence_strength == "asserted_content"
-        or evidence_source == "asserted"
-    ):
-        return "asserted"
-    if hash_status == "pending":
-        return "pending"
-    if hash_status == "disabled" or evidence_strength in ("metadata_only", "path_only"):
-        return "path-only" if evidence_strength == "path_only" else "metadata-only"
-    if hash_status is None and evidence_strength is None and evidence_source is None:
-        digest = rec.get("digest")
-        has_digest = (
-            isinstance(digest, dict)
-            and isinstance(digest.get("value"), str)
-            and bool(digest["value"].strip())
-        ) or (isinstance(rec.get("sha256"), str) and bool(rec["sha256"].strip()))
-        return "verified" if has_digest else "metadata-only"
-    if evidence_strength == "unavailable":
-        return "unavailable"
-    if evidence_strength == "changed_unverified":
-        return "changed"
-    return "metadata-only"
+    if category == "identified_only":
+        return "path-only" if rec.get("evidence_strength") == "path_only" else "metadata-only"
+    return category
 
 
 def _extract_display_digest(rec: Dict[str, Any], badge: str) -> Optional[str]:
@@ -182,6 +147,11 @@ def _extract_display_digest(rec: Dict[str, Any], badge: str) -> Optional[str]:
             val = _sanitize_inline(raw_sha, max_len=128)
             if val:
                 return f"sha256:{val[:12]}"
+        raw_md5 = rec.get("md5")
+        if isinstance(raw_md5, str) and raw_md5.strip():
+            val = _sanitize_inline(raw_md5, max_len=128)
+            if val:
+                return f"md5:{val[:12]}"
         return None
 
     if badge == "asserted":
