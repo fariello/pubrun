@@ -6,7 +6,7 @@
 - Scope: Update `tests/test_tui.py::test_tui_missing_dependencies_prints_notice` to remove `sys.modules["pubrun.tui.app"]` via pytest's `monkeypatch` fixture so the original module object is restored on teardown, and add a behavioral check confirming `sys.modules["pubrun.tui.app"]` identity is preserved across `tests/test_tui.py` and `tests/test_tui_widgets.py`.
 - Scope-Paths: tests/test_tui.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Short-Description: Restore sys.modules['pubrun.tui.app'] via monkeypatch in test_tui_missing_dependencies_prints_notice
@@ -19,11 +19,13 @@
 - Highest E allocated: 02
 - Author: Antigravity
 - Id: lv41re
+- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-25 to-review (Antigravity): graduated from backlog item `o9c3gr` into a review-ready plan.
 - 2026-11-25 draft (Antigravity): created.

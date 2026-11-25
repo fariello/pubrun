@@ -6,7 +6,7 @@
 - Scope: In `schemas/manifest.schema.json`, declare `patch_subprocesses`, `patch_console`, `signal_hooks`, and `force_console` as booleans under `properties.pubrun_imports.properties.selected_behavior`, add a description, and close the object with `additionalProperties: false`. Add schema conformance tests for real manifests written under every import mode, plus accept and reject tests for the subschema, to `tests/test_manifest_schema.py`. Add one `CHANGELOG.md` entry.
 - Scope-Paths: schemas/manifest.schema.json, tests/test_manifest_schema.py, CHANGELOG.md
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Declare patch_subprocesses, patch_console, signal_hooks, and force_console under pubrun_imports.selected_behavior in schemas/manifest.schema.json
@@ -18,11 +18,13 @@
 - Highest E allocated: 03
 - Author: opencode
 - Id: 4r4ymv
+- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006 fixed; review record `.aw/records/reviews/20261124-31kpnv-01-4r4ymv-declare-all-selected-behavior-keys-in-the-manifest-schema.review.md`.
 - 2026-11-25 to-review (opencode): graduated from backlog item `31kpnv` into a review-ready plan.
 - 2026-11-25 draft (opencode): created.

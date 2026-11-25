@@ -6,7 +6,7 @@
 - Scope: Derive `src/pubrun/report/diagnostics.py::_classify_file_record_display` from the shared canonical classifier `src/pubrun/report/file_evidence.py::_classify_file_record` (introduced by `w24lw1`) so a `data_files` record without a non-empty digest value (`digest.value`, `sha256`, or `md5`) is never labeled `verified` in `pubrun inspect`, add behavioral tests in `tests/test_reports.py`, and add a `CHANGELOG.md` entry.
 - Scope-Paths: src/pubrun/report/diagnostics.py, tests/test_reports.py, CHANGELOG.md
 - Item-Dependencies: executed:w24lw1
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Derive inspect Data Files display badges from shared file_evidence classifier so digestless records are not labeled verified
@@ -19,11 +19,13 @@
 - Highest E allocated: 03
 - Author: Antigravity
 - Id: l2s67v
+- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-25 to-review (Antigravity): graduated from backlog item `unf79v` into a review-ready plan.
 - 2026-11-25 draft (Antigravity): created.

@@ -6,7 +6,7 @@
 - Scope: In `src/pubrun/_bootstrap.py`, replace the `mode: One of ...` line of the `select_mode` docstring with a two-line entry that lists the six valid import modes. No code, other docstring line, or other file changes.
 - Scope-Paths: src/pubrun/_bootstrap.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Short-Description: List the six valid import modes in the select_mode docstring
@@ -18,11 +18,13 @@
 - Highest E allocated: 01
 - Author: opencode
 - Id: wvrmqu
+- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-25 to-review (opencode): graduated from backlog item `szf342` into a review-ready plan.
 - 2026-11-25 draft (opencode): created.

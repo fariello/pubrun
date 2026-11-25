@@ -6,7 +6,7 @@
 - Scope: The six import-mode modules (`src/pubrun/auto.py`, `full.py`, `minimal.py`, `noauto.py`, `noconsole.py`, `nopatch.py`), `src/pubrun/_bootstrap.py`, and their removal from the `ignore_errors` module list in `pyproject.toml`.
 - Scope-Paths: src/pubrun/auto.py, src/pubrun/full.py, src/pubrun/minimal.py, src/pubrun/noauto.py, src/pubrun/noconsole.py, src/pubrun/nopatch.py, src/pubrun/_bootstrap.py, pyproject.toml
 - Item-Dependencies: executed:gzc672, executed:m66tfv
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix mypy errors in the six import-mode modules and _bootstrap.py and take them off the ignore_errors list
@@ -18,11 +18,13 @@
 - Highest E allocated: 03
 - Author: uri/its_direct/pt3-claude-opus-5.5-1m-us
 - Id: f5yisk
+- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-24 to-review (aw set): authored from backlog qqwebg
 - 2026-11-24 draft (uri/its_direct/pt3-claude-opus-5.5-1m-us): created.

@@ -6,7 +6,7 @@
 - Scope: Refactor `src/pubrun/__main__.py::main` so it accepts an optional argv list and never rewrites `sys.argv`, with its argv preprocessing extracted into a pure function. Refactor `src/pubrun/report/diagnostics.py::print_report`, `::print_resources_report`, and their print helpers so they write to an optional output stream and raise a typed `DiagnosticsError` instead of calling `sys.exit(1)`. Keep every CLI output, error message, and exit code byte-identical. Add in-process seam tests in two new test files and one `CHANGELOG.md` entry.
 - Scope-Paths: src/pubrun/__main__.py, src/pubrun/report/diagnostics.py, tests/test_cli_seams.py, tests/test_diagnostics_seams.py, CHANGELOG.md
 - Item-Dependencies: executed:ic6z4s
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Let main() take an argv list and let the diagnostics reports take an output stream and raise a typed error, so tests can drive them in-process
@@ -18,11 +18,13 @@
 - Highest E allocated: 08
 - Author: opencode
 - Id: mvbbny
+- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-25 to-review (aw set): status set to to-review
 - 2026-11-25 to-review (opencode): graduated from backlog item `riulkx` into a review-ready plan.

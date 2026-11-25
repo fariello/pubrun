@@ -6,7 +6,7 @@
 - Scope: `src/pubrun/core.py`, `src/pubrun/tracker.py`, a new `tests/test_tracker_console_migration.py`, the deletion of the then-empty `ignore_errors` override block in `pyproject.toml`, and the contributor documentation (`CONTRIBUTING.md`, `CHANGELOG.md`).
 - Scope-Paths: src/pubrun/core.py, src/pubrun/tracker.py, tests/test_tracker_console_migration.py, pyproject.toml, CONTRIBUTING.md, CHANGELOG.md
 - Item-Dependencies: executed:gzc672, executed:m66tfv, executed:f5yisk, executed:qe6dad, executed:k6fs5k
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix mypy errors in core.py and tracker.py, delete the empty ignore_errors override, and update contributor docs
@@ -18,11 +18,13 @@
 - Highest E allocated: 05
 - Author: uri/its_direct/pt3-claude-opus-5.5-1m-us
 - Id: 0uxy76
+- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-24 to-review (aw set): authored from backlog qqwebg
 - 2026-11-24 draft (uri/its_direct/pt3-claude-opus-5.5-1m-us): created.

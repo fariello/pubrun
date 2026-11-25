@@ -6,7 +6,7 @@
 - Scope: Coordination of six child plans: `1kcrdn` (random test order in CI), `f5yisk`, `qe6dad`, `k6fs5k`, `0uxy76` (clear the legacy `mypy` errors module group by module group and delete the override), and `juoqy2` (type-check the Windows and macOS platform branches in CI). This orchestrator changes no product code, tests, CI configuration, or documentation.
 - Scope-Paths: .aw/records/plans/pending/20261124-rand-mypy-00-srs7bs-randomized-ci-test-order-and-legacy-mypy-burn-down.ipd.md
 - Item-Dependencies: executed:1kcrdn, executed:f5yisk, executed:qe6dad, executed:k6fs5k, executed:0uxy76, executed:juoqy2
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: orchestrator
 - Coverage: pass
@@ -21,11 +21,13 @@
 - Highest E allocated: 06
 - Author: uri/its_direct/pt3-claude-opus-5.5-1m-us
 - Id: srs7bs
+- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 coverage pass (aw oc run): fingerprint 14f4d52a68ec, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-24 to-review (aw set): authored from backlog qqwebg; 6 children

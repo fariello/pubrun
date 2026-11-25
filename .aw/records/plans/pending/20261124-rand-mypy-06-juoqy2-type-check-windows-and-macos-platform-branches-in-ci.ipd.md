@@ -6,7 +6,7 @@
 - Scope: Platform guards in `src/pubrun/capture/liveness.py`, `resources.py`, `system_metrics.py`, and `subprocesses.py`; a new `tests/test_platform_type_guards.py`; two more `mypy` steps in the `typecheck` job of `.github/workflows/ci.yml`; and the contributor documentation (`CONTRIBUTING.md`, `CHANGELOG.md`).
 - Scope-Paths: src/pubrun/capture/liveness.py, src/pubrun/capture/resources.py, src/pubrun/capture/system_metrics.py, src/pubrun/capture/subprocesses.py, tests/test_platform_type_guards.py, .github/workflows/ci.yml, CONTRIBUTING.md, CHANGELOG.md
 - Item-Dependencies: executed:gzc672, executed:m66tfv, executed:k6fs5k, executed:0uxy76
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix POSIX-only mypy errors reported under --platform win32 and add win32 and darwin mypy runs to the typecheck job
@@ -18,11 +18,13 @@
 - Highest E allocated: 04
 - Author: uri/its_direct/pt3-claude-opus-5.5-1m-us
 - Id: juoqy2
+- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-24 to-review (aw set): authored from backlog qqwebg
 - 2026-11-24 draft (uri/its_direct/pt3-claude-opus-5.5-1m-us): created.
