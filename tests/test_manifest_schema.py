@@ -16,10 +16,14 @@ zero-runtime-dependency); the tests skip cleanly if it is unavailable.
 """
 import copy
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from pubrun._modes import MODES, get_mode_behavior
 
 jsonschema = pytest.importorskip("jsonschema")
 
@@ -819,3 +823,78 @@ def test_populated_determinism_and_artifacts_sections_conform(tmp_path):
     negative_artifact_size["artifacts"][0]["size_bytes"] = -1
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(negative_artifact_size, schema)
+
+
+def _selected_behavior_subschema(schema):
+    """Extract a standalone schema for `properties.pubrun_imports.properties.selected_behavior`."""
+    props = schema.get("properties", {})
+    assert "pubrun_imports" in props, "pubrun_imports missing from schema properties"
+    import_props = props["pubrun_imports"].get("properties", {})
+    assert "selected_behavior" in import_props, (
+        "selected_behavior missing from pubrun_imports properties"
+    )
+    return dict(import_props["selected_behavior"])
+
+
+@pytest.mark.parametrize("mode", sorted(MODES))
+def test_import_mode_manifest_selected_behavior_conforms(tmp_path, mode):
+    """Every import mode in MODES writes its exact selected_behavior dict and validates."""
+    script = (
+        "import importlib, sys\n"
+        "mode = sys.argv[1]\n"
+        "mod = importlib.import_module(f'pubrun.{mode}')\n"
+        "run = mod.get_current_run()\n"
+        "if run is None:\n"
+        "    run = mod.start()\n"
+        "run_dir = str(run.run_dir)\n"
+        "mod.stop()\n"
+        "print(run_dir)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, mode],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(tmp_path),
+        env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+    )
+    assert result.returncode == 0, f"mode={mode} subprocess failed: {result.stderr}"
+    stdout_lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert stdout_lines, f"mode={mode} produced no run_dir on stdout: {result.stderr}"
+    run_dir = Path(stdout_lines[-1])
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["pubrun_imports"]["selected_mode"] == mode
+    assert manifest["pubrun_imports"]["selected_behavior"] == get_mode_behavior(mode)
+    jsonschema.validate(manifest, _schema())
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(None, id="null"),
+        pytest.param({"auto_start": True, "global_hooks": True}, id="legacy-two-keys"),
+        pytest.param({}, id="empty-object"),
+    ],
+)
+def test_selected_behavior_schema_accepts_null_legacy_and_partial_shapes(value):
+    """selected_behavior accepts null, pre-2026-06-20 two-key dicts, and empty dicts."""
+    jsonschema.validate(value, _selected_behavior_subschema(_schema()))
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        pytest.param({"auto_start": "yes"}, id="string-auto_start"),
+        pytest.param({"global_hooks": "yes"}, id="string-global_hooks"),
+        pytest.param({"patch_subprocesses": "yes"}, id="string-patch_subprocesses"),
+        pytest.param({"patch_console": "yes"}, id="string-patch_console"),
+        pytest.param({"signal_hooks": "yes"}, id="string-signal_hooks"),
+        pytest.param({"force_console": "yes"}, id="string-force_console"),
+        pytest.param({"force_console": 1}, id="int-force_console"),
+        pytest.param({"auto_start": True, "bogus_flag": True}, id="undeclared-bogus_flag"),
+    ],
+)
+def test_selected_behavior_schema_rejects_bad_values(bad_value):
+    """selected_behavior rejects non-boolean values and undeclared flags."""
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(bad_value, _selected_behavior_subschema(_schema()))
