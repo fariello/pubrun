@@ -6,7 +6,7 @@
 - Scope: In `src/pubrun/_bootstrap.py`, replace the `mode: One of ...` line of the `select_mode` docstring with a two-line entry that lists the six valid import modes. No code, other docstring line, or other file changes.
 - Scope-Paths: src/pubrun/_bootstrap.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Short-Description: List the six valid import modes in the select_mode docstring
@@ -18,12 +18,12 @@
 - Highest E allocated: 01
 - Author: opencode
 - Id: wvrmqu
-- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: wvrmqu verified (set szf342, attempt 1).
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-25 to-review (opencode): graduated from backlog item `szf342` into a review-ready plan.
@@ -39,10 +39,10 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Docstring
 
-- [ ] E-01 In `src/pubrun/_bootstrap.py`, in the `Args:` section of the `select_mode` docstring, replace the line `mode: One of "auto", "noauto", "nopatch", "minimal".` with the two lines given in "Proposed changes" item 1.
+- [x] E-01 In `src/pubrun/_bootstrap.py`, in the `Args:` section of the `select_mode` docstring, replace the line `mode: One of "auto", "noauto", "nopatch", "minimal".` with the two lines given in "Proposed changes" item 1.
   - Depends on: none
   - Expected outcome: (1) The `mode` entry of the `Args:` section reads exactly as shown in "Proposed changes" item 1. (2) The `selected_by` and `source` entries, the summary line, and the `Returns:` section are unchanged. (3) No executable line of `src/pubrun/_bootstrap.py` changes, and no other line of the file changes.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -199,10 +199,61 @@ No diagram is included. The change affects one docstring entry of one function, 
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: (1) Paste `git diff -- src/pubrun/_bootstrap.py`, showing one removed and two added lines inside the `select_mode` docstring, with the added lines identical to "Proposed changes" item 1. (2) Paste the output of `PYTHONPATH=src python3 -c "import pubrun._bootstrap as m; print(m.select_mode.__doc__)"`, whose `Args:` section matches "Proposed changes" item 1. (3) Paste the output of `grep -c '"noconsole", "minimal", or "full"' src/pubrun/_bootstrap.py`, which must be `1`. (4) Paste the output of the portable `python3 -c` docstring check from "Required tests / validation", which must print `OK: six modes listed, 0 en/em dashes` and exit 0. (5) Paste the `Found N errors.` line of `git show HEAD:src/pubrun/_bootstrap.py | ruff check --stdin-filename src/pubrun/_bootstrap.py -` (baseline) and `ruff check src/pubrun/_bootstrap.py` (after edit); the two counts must be equal. (6) Paste the six output lines of the Findings probe, produced by `src/pubrun/_bootstrap.py::select_mode` through `src/pubrun/_modes.py::get_mode_behavior`, identical to the Findings output. (7) Paste the summary line of `python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py --no-cov -q`. (8) Paste the exit status of `python3 scripts/sanitize_paths.py --check --all`, which must be `0`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: All eight checks passed against `src/pubrun/_bootstrap.py` (diff +2/-1 inside `select_mode` docstring; docstring `Args:` matches Proposed changes item 1; `grep -c` = 1; portable dash/mode check exit 0; `ruff check` 22 errors baseline vs 22 errors after edit; Findings probe 6/6 True; pytest 110 passed in 34.84s; `sanitize_paths.py --check --all` exit 0). Full captured outputs:
+    - Note on baseline: Commit `441c353` (`lhwy0t`) had already updated the authoring-time four-mode line to list the six modes without naming `pubrun._modes.MODES` and added the `PUBRUN_RUN_MODE_OVERRIDE` paragraph above `Args:`. Replacing that single line with the two lines from "Proposed changes" item 1 preserves the `PUBRUN_RUN_MODE_OVERRIDE` paragraph and satisfies `OQ-01` and `E-01`.
+    - (1) `git diff -- src/pubrun/_bootstrap.py`:
+      ```diff
+      diff --git a/src/pubrun/_bootstrap.py b/src/pubrun/_bootstrap.py
+      index 8e7d006..da035ab 100644
+      --- a/src/pubrun/_bootstrap.py
+      +++ b/src/pubrun/_bootstrap.py
+      @@ -180,7 +180,8 @@ def select_mode(mode: str, selected_by: str, source: str) -> Dict[str, bool]:
+           imports and subsequent in-code mode requests do not trigger conflicts.
+
+           Args:
+      -        mode: One of "auto", "noauto", "nopatch", "noconsole", "minimal", "full".
+      +        mode: One of the keys of ``pubrun._modes.MODES``: "auto", "noauto",
+      +            "nopatch", "noconsole", "minimal", or "full".
+               selected_by: Identifier for who selected this mode (e.g., "pubrun",
+                   "pubrun.noauto", "env:PUBRUN_IMPORT_MODE").
+               source: Where the selection came from (e.g., "default", "config",
+      ```
+    - (2) `PYTHONPATH=src python3 -c "import pubrun._bootstrap as m; print(m.select_mode.__doc__)"`:
+      ```text
+      Select an import mode. First call wins; later calls detect conflicts.
+
+      When ``PUBRUN_RUN_MODE_OVERRIDE`` names a valid mode in ``MODES``, that
+      launch-time CLI override takes precedence over explicit in-code submodule
+      imports and subsequent in-code mode requests do not trigger conflicts.
+
+      Args:
+          mode: One of the keys of ``pubrun._modes.MODES``: "auto", "noauto",
+              "nopatch", "noconsole", "minimal", or "full".
+          selected_by: Identifier for who selected this mode (e.g., "pubrun",
+              "pubrun.noauto", "env:PUBRUN_IMPORT_MODE").
+          source: Where the selection came from (e.g., "default", "config",
+              "env:PUBRUN_IMPORT_MODE").
+
+      Returns:
+          The effective behavior dict (e.g., {"auto_start": bool, ...}).
+      ```
+    - (3) `grep -c '"noconsole", "minimal", or "full"' src/pubrun/_bootstrap.py`: `1`
+    - (4) Portable docstring check: `OK: six modes listed, 0 en/em dashes` (exit 0)
+    - (5) `ruff check` baseline (`git show HEAD:src/pubrun/_bootstrap.py | ruff check --stdin-filename src/pubrun/_bootstrap.py -`): `Found 22 errors.` After edit (`ruff check src/pubrun/_bootstrap.py`): `Found 22 errors.` (equal counts; 0 findings added)
+    - (6) Findings probe (`src/pubrun/_bootstrap.py::select_mode` via `src/pubrun/_modes.py::get_mode_behavior`):
+      ```text
+      auto auto True
+      noauto noauto True
+      nopatch nopatch True
+      noconsole noconsole True
+      minimal minimal True
+      full full True
+      ```
+    - (7) `python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py --no-cov -q`: `110 passed in 34.84s` (exit 0)
+    - (8) `python3 scripts/sanitize_paths.py --check --all`: exit `0`
+  - Result: pass
 
 ## Approval and execution gate
 
