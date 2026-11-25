@@ -39,10 +39,10 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Documentation
 
-- [ ] E-01 In `docs/manifest.md`, under heading `` ## Lock File (`.pubrun.lock`) ``, add the `sys_argv` table row immediately after the `argv` row and add the `"sys_argv"` line to the Lock File JSON example immediately after the `"argv"` line, using the exact text in "Proposed changes" items 1 and 2.
+- [x] E-01 In `docs/manifest.md`, under heading `` ## Lock File (`.pubrun.lock`) ``, add the `sys_argv` table row immediately after the `argv` row and add the `"sys_argv"` line to the Lock File JSON example immediately after the `"argv"` line, using the exact text in "Proposed changes" items 1 and 2.
   - Depends on: none
   - Expected outcome: (1) The Lock File table contains the `sys_argv` row from "Proposed changes" item 1 immediately after `argv` and before `import_mode`. (2) The Lock File JSON example parses as valid JSON, places `"sys_argv"` immediately after `"argv"` and before `"import_mode"`, and matches "Proposed changes" item 2 verbatim. (3) No other line in `docs/manifest.md` changes.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -185,10 +185,48 @@ No diagram is included. The plan edits one section of one document to record one
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: (1) Paste `git diff -- docs/manifest.md` showing zero removed lines and two added lines under `` ## Lock File (`.pubrun.lock`) `` matching "Proposed changes" items 1 and 2 verbatim. (2) Paste the output of ``grep -n '^| `sys_argv` |' docs/manifest.md`` showing one line matching "Proposed changes" item 1. (3) Paste the output and exit status `0` of the Lock File JSON example validation command in "Required tests / validation" item 3, printing all eleven keys in order. (4) Paste the output and exit status `0` of the working-tree dash check command in "Required tests / validation" item 4, showing `added_lines=2 dashes=0`. (5) Paste the output and exit status `0` of the isolated temporary-directory runtime probe in "Required tests / validation" item 5 (code path `src/pubrun/tracker.py::Run._write_lock_file` via `Run.__init__` and `Run._bootstrap_engines`), showing `sys_argv: ['train.py', '--epochs', '100', '--token=[REDACTED]']`, and paste `git status --short` confirming no untracked probe files exist in the repository. (6) Paste the summary line and exit status `0` of `python3 -m pytest tests/test_status.py tests/test_status_bugs.py --no-cov -q`. (7) Paste the exit status `0` of `python3 scripts/sanitize_paths.py --check --all`.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- docs/manifest.md` (exit status `0`):
+    ```diff
+    diff --git a/docs/manifest.md b/docs/manifest.md
+    index 5f9f244..0a5e475 100644
+    --- a/docs/manifest.md
+    +++ b/docs/manifest.md
+    @@ -618,6 +618,7 @@ While a run is active, a `.pubrun.lock` JSON file exists in the run directory. I
+     | `git_commit` | string \| null | Git commit hash at start, or `null` if not in a repo. |
+     | `cwd` | string | Working directory of the process. |
+     | `argv` | list[string] | Command-line arguments (excluding `sys.argv[0]`). Sensitive values are redacted. |
+    +| `sys_argv` | list[string] | Full `sys.argv` list (including `sys.argv[0]`). Sensitive values are redacted. Used when reconstructing invocation commands from a lock file (for example during crashed-run closeout or `pubrun rerun`). |
+     | `import_mode` | string \| null | The active import mode (`"auto"`, `"noauto"`, `"nopatch"`, `"noconsole"`, `"minimal"`, or `"full"`). |
+     | `import_selected_by` | string \| null | Who selected the mode (e.g., `"pubrun"`, `"pubrun.noauto"`). |
+
+    @@ -632,6 +633,7 @@ While a run is active, a `.pubrun.lock` JSON file exists in the run directory. I
+       "git_commit": "3df16cf",
+       "cwd": "/home/user/project",
+       "argv": ["--epochs", "100", "--lr", "0.001"],
+    +  "sys_argv": ["train.py", "--epochs", "100", "--lr", "0.001"],
+       "import_mode": "auto",
+       "import_selected_by": "pubrun"
+     }
+    ```
+    (2) ``grep -n '^| `sys_argv` |' docs/manifest.md`` (exit status `0`):
+    `621:| `sys_argv` | list[string] | Full `sys.argv` list (including `sys.argv[0]`). Sensitive values are redacted. Used when reconstructing invocation commands from a lock file (for example during crashed-run closeout or `pubrun rerun`). |`
+    (3) Lock File JSON example validation (exit status `0`):
+    `lock_example_keys: ['pid', 'started_at_utc', 'script', 'run_id', 'hostname', 'git_commit', 'cwd', 'argv', 'sys_argv', 'import_mode', 'import_selected_by']`
+    (4) Working-tree dash check (exit status `0`):
+    `added_lines=2 dashes=0`
+    (5) Isolated temporary-directory runtime probe (`src/pubrun/tracker.py::Run._write_lock_file` via `Run.__init__` and `Run._bootstrap_engines`, exit status `0`):
+    ```text
+    keys: ['pid', 'started_at_utc', 'script', 'run_id', 'hostname', 'git_commit', 'cwd', 'argv', 'sys_argv', 'import_mode', 'import_selected_by']
+    argv: ['--epochs', '100', '--token=[REDACTED]']
+    sys_argv: ['train.py', '--epochs', '100', '--token=[REDACTED]']
+    ```
+    `git status --short` (exit status `0`): ` M docs/manifest.md` (no untracked probe files in the repository).
+    (6) `python3 -m pytest tests/test_status.py tests/test_status_bugs.py --no-cov -q` (exit status `0`): `129 passed in 6.19s`.
+    (7) `python3 scripts/sanitize_paths.py --check --all`: exit status `0`.
+  - Result: pass
 
 ## Approval and execution gate
 
