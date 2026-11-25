@@ -45,49 +45,49 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: CLI entry point
 
-- [ ] E-01 In `src/pubrun/__main__.py`, add the module-level pure function `_preprocess_argv(argv, subcommands)` and make `main()` take an optional argv list that it copies and never assigns back to `sys.argv`.
+- [x] E-01 In `src/pubrun/__main__.py`, add the module-level pure function `_preprocess_argv(argv, subcommands)` and make `main()` take an optional argv list that it copies and never assigns back to `sys.argv`.
   - Depends on: none
   - Expected outcome: (1) `_preprocess_argv(argv: List[str], subcommands: Set[str]) -> Tuple[List[str], bool]` returns a new list and whether `--no-color` was stripped, and does not mutate its input. Its body is the current block from the comment "Handle global --no-color flag regardless of position" through the `help` translation, moved unchanged except that it reads and writes a local list instead of `sys.argv`. (2) `main(argv: Optional[List[str]] = None) -> None` starts with `argv = list(sys.argv if argv is None else argv)`, derives `prog_name = Path(argv[0]).name if argv and argv[0] else "pubrun"` (handling empty `argv=[]` without `IndexError`), and calls `parser.parse_args(argv[1:])`. (3) `_SubcommandAwareArgumentParser.error` finds the subcommand by scanning the preprocessed argv (shared through a closure list populated before `parse_args`) instead of `sys.argv[1:]`. (4) The `pbr me` easter egg reads the preprocessed list. (5) No statement in `main()` assigns or mutates `sys.argv`. The `NO_COLOR` and `--utc` side effects are covered by E-02.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 In `src/pubrun/__main__.py`, move the two global side effects that `main()` applies after parsing into one helper, `_apply_global_flags(args, no_color_present)`, and call it from `main()` at the same point.
+- [x] E-02 In `src/pubrun/__main__.py`, move the two global side effects that `main()` applies after parsing into one helper, `_apply_global_flags(args, no_color_present)`, and call it from `main()` at the same point.
   - Depends on: E-01
   - Expected outcome: `_apply_global_flags` sets `args.no_color = True` when `no_color_present` is true, sets `os.environ["NO_COLOR"] = "1"` when `args.no_color` is true, and calls `src/pubrun/status.py::set_display_utc(True)` when `args.utc` is true, exactly as the inline code does now (the inline block starting `if no_color_present:` is removed). The `NO_COLOR` environment write stays, because the `run` subcommand passes `os.environ` to the child process and `src/pubrun/report/output.py::_use_color` and `src/pubrun/status.py` read `NO_COLOR` at print time.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Diagnostics renderers
 
-- [ ] E-03 In `src/pubrun/report/diagnostics.py`, add the exception class `DiagnosticsError(Exception)` and make `print_report` and `print_resources_report` raise it instead of printing an error and calling `sys.exit(1)`.
+- [x] E-03 In `src/pubrun/report/diagnostics.py`, add the exception class `DiagnosticsError(Exception)` and make `print_report` and `print_resources_report` raise it instead of printing an error and calling `sys.exit(1)`.
   - Depends on: none
   - Expected outcome: (1) `DiagnosticsError(message: str, exit_code: int = 1)` stores `message` and `exit_code` as attributes, and `str(err)` returns `message`. (2) Each of the seven `_print_error(...)` plus `sys.exit(1)` pairs in `print_report` (missing manifest, corrupt manifest, unreadable stdout log, unreadable stderr log) and `print_resources_report` (missing manifest, corrupt manifest, invalid `--last`) becomes `raise DiagnosticsError(<same message text>)`, raised from the original exception with `from`. (3) `src/pubrun/report/diagnostics.py` contains no `sys.exit` call. (4) The module helper `src/pubrun/report/diagnostics.py::_print_error` stays for backward compatibility (it is no longer called inside `diagnostics.py`; the CLI wrappers in E-05 call `src/pubrun/__main__.py::_print_error`, which uses the same `src/pubrun/report/output.py::error` path).
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 In `src/pubrun/report/diagnostics.py`, add a keyword-only `out: Optional[TextIO] = None` parameter to `print_report`, `print_resources_report`, `draw_ascii_chart`, `_print_packages_block`, and `_print_data_files_block`, and route every report `print(...)` and every `_supports_unicode(sys.stdout)` call through that stream.
+- [x] E-04 In `src/pubrun/report/diagnostics.py`, add a keyword-only `out: Optional[TextIO] = None` parameter to `print_report`, `print_resources_report`, `draw_ascii_chart`, `_print_packages_block`, and `_print_data_files_block`, and route every report `print(...)` and every `_supports_unicode(sys.stdout)` call through that stream.
   - Depends on: E-03
   - Expected outcome: (1) Each of the five functions resolves `stream = out if out is not None else sys.stdout` at call time, not at definition time, so pytest's `capsys` (which swaps `sys.stdout` per test) keeps working for callers that pass nothing. (2) Every `print(...)` in those functions, including the nested `_print_ev` in `print_report`, passes `file=stream`. (3) Every `_supports_unicode(sys.stdout)` call becomes `_supports_unicode(stream)`, so a stream whose `encoding` is `ascii` gets the ASCII box and chart glyphs. (4) `print_report` and `print_resources_report` pass `out=stream` to the helpers they call. (5) The positional parameters and defaults of every function stay as they are, so the existing callers in `src/pubrun/__main__.py` and the tests in `tests/test_reports.py`, `tests/test_show_sections.py`, `tests/test_timing_consumers.py`, `tests/test_env_capture.py`, and `tests/test_edge_cases.py` work unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 In `src/pubrun/__main__.py`, make `_run_report` and `_run_resources` catch `DiagnosticsError`, print its message with `_print_error`, and exit with its `exit_code`.
+- [x] E-05 In `src/pubrun/__main__.py`, make `_run_report` and `_run_resources` catch `DiagnosticsError`, print its message with `_print_error`, and exit with its `exit_code`.
   - Depends on: E-03
   - Expected outcome: Each wrapper places its lazy `from pubrun.report.diagnostics import DiagnosticsError, ...` import immediately before `try:` (keeping the import lazy while guaranteeing `DiagnosticsError` is bound before `except DiagnosticsError:` runs) and adds an `except DiagnosticsError as e: _print_error(e.message); sys.exit(e.exit_code)` clause placed before its generic `except Exception` clause. Without it, the generic clause would print "Failed to generate diagnostic report: ..." or "Failed to generate resources report: ..." in front of the message, which changes the stderr text that `tests/test_cli_negative_paths.py::TestDiagnosticsNegativePaths` checks. In `_run_report`, the clause is on the outer `try`, so it also covers `print_report` calls reached through the inner `try` that handles `RunInProgressOrCrashedError`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Seam tests and changelog
 
-- [ ] E-06 Create `tests/test_cli_seams.py` with in-process tests that call `main(argv)` and `_preprocess_argv` directly, without setting `sys.argv`.
+- [x] E-06 Create `tests/test_cli_seams.py` with in-process tests that call `main(argv)` and `_preprocess_argv` directly, without setting `sys.argv`.
   - Depends on: E-01, E-02, E-05
   - Expected outcome: The file defines the classes and tests named in "Proposed changes" item 5. Every test asserts on return values, captured output, exit codes, or `sys.argv` identity and content; none reads source code. All tests pass.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-07 Create `tests/test_diagnostics_seams.py` with tests that pass an `io.StringIO` or an ASCII `io.TextIOWrapper` as `out`, and tests that assert `DiagnosticsError` is raised.
+- [x] E-07 Create `tests/test_diagnostics_seams.py` with tests that pass an `io.StringIO` or an ASCII `io.TextIOWrapper` as `out`, and tests that assert `DiagnosticsError` is raised.
   - Depends on: E-03, E-04
   - Expected outcome: The file defines the classes and tests named in "Proposed changes" item 6. All tests pass.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-08 Add one entry to `CHANGELOG.md` under `## [Unreleased]` `### Changed` describing the new optional `argv` parameter of `main()`, the `out` parameter of the diagnostics reports, and `DiagnosticsError`.
+- [x] E-08 Add one entry to `CHANGELOG.md` under `## [Unreleased]` `### Changed` describing the new optional `argv` parameter of `main()`, the `out` parameter of the diagnostics reports, and `DiagnosticsError`.
   - Depends on: E-06, E-07
   - Expected outcome: One bullet, written for users with no em or en dashes, states that `pubrun.__main__.main()` now accepts an optional argument list, that `print_report` and `print_resources_report` in `pubrun.report.diagnostics` accept an `out` stream and raise `DiagnosticsError` instead of exiting, and that CLI output and exit codes are unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -348,45 +348,488 @@ At authoring the exit codes were `01=0 02=0 03=0 04=0 05=0 06=2 07=2 08=2 09=0 .
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: (1) Paste `git diff -- src/pubrun/__main__.py` restricted to `_preprocess_argv` and the start of `main()` (through `parse_args`), and name the lines that satisfy E-01 outcomes 1 to 5. (2) Paste the output of `sed -n '/^def main/,$p' src/pubrun/__main__.py | grep -n 'sys\.argv'`, showing only the initial fallback copy `argv = list(sys.argv if argv is None else argv)` (and docstring mention, if any), with zero assignments, zero `.pop`/`.insert` mutations, and zero reads inside `_SubcommandAwareArgumentParser.error`. (3) Paste the `TestPreprocessArgv` and `TestMainArgv` result lines from the V-06 run, each `PASSED`.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- src/pubrun/__main__.py` (restricted to `_preprocess_argv`, `main()` start, `_SubcommandAwareArgumentParser.error`, and `parse_args`):
+    ```diff
+    -from typing import List, NoReturn, Optional
+    +from typing import List, NoReturn, Optional, Set, Tuple
+    ...
+    +def _preprocess_argv(argv: List[str], subcommands: Set[str]) -> Tuple[List[str], bool]:
+    +    """Return (rewritten argv, no_color_present) without mutating the input."""
+    +    argv = list(argv)
+    +    ...
+    +    return argv, no_color_present
+    ...
+    -def main() -> None:
+    -    """CLI entrypoint for the ``pubrun`` command."""
+    -    prog_name = Path(sys.argv[0]).name if sys.argv[0] else "pubrun"
+    +def main(argv: Optional[List[str]] = None) -> None:
+    +    """CLI entrypoint for the ``pubrun`` command.
+    +
+    +    Args:
+    +        argv: Full argument vector including the program name (defaults to ``sys.argv``).
+    +    """
+    +    argv = list(sys.argv if argv is None else argv)
+    +    prog_name = Path(argv[0]).name if argv and argv[0] else "pubrun"
+         if prog_name not in ("pubrun", "pbr"):
+             prog_name = "pubrun"
+         _PRIMARY_COMMANDS: list = []
+    +    _argv_for_errors: List[str] = []
+    ...
+    -                for arg in sys.argv[1:]:
+    +                for arg in _argv_for_errors[1:]:
+    ...
+    +    argv, no_color_present = _preprocess_argv(argv, subcommands)
+    +
+    +    # Easter egg
+    +    if len(argv) >= 2 and prog_name == "pbr" and argv[1] == "me":
+             print("ASAP")
+             sys.exit(0)
+    +
+    +    _argv_for_errors[:] = argv
+    +    args = parser.parse_args(argv[1:])
+    ```
+    Outcomes satisfied: (1) `_preprocess_argv` copies `argv` (`argv = list(argv)`) and returns `(argv, no_color_present)` without mutating its input; (2) `main(argv: Optional[List[str]] = None) -> None` copies `sys.argv` when `argv is None`, guards `argv=[]` in `prog_name`, and calls `parser.parse_args(argv[1:])`; (3) `_SubcommandAwareArgumentParser.error` scans `_argv_for_errors[1:]` populated via `_argv_for_errors[:] = argv` before `parse_args`; (4) `pbr me` reads `argv`; (5) zero statements in `main()` assign or mutate `sys.argv`.
+    (2) `sed -n '/^def main/,$p' src/pubrun/__main__.py | grep -n 'sys\.argv'`:
+    ```text
+    5:        argv: Full argument vector including the program name (defaults to ``sys.argv``).
+    7:    argv = list(sys.argv if argv is None else argv)
+    ```
+    (3) `TestPreprocessArgv` and `TestMainArgv` results (20/20 `PASSED`):
+    ```text
+    tests/test_cli_seams.py::TestPreprocessArgv::test_preprocess_argv_cases[no-color-before-subcommand] PASSED [  2%]
+    tests/test_cli_seams.py::TestPreprocessArgv::test_preprocess_argv_cases[no-color-after-subcommand] PASSED [  4%]
+    tests/test_cli_seams.py::TestPreprocessArgv::test_preprocess_argv_cases[no-color-before-and-inside-run] PASSED [  7%]
+    tests/test_cli_seams.py::TestPreprocessArgv::test_preprocess_argv_cases[no-color-only-inside-run] PASSED [  9%]
+    tests/test_cli_seams.py::TestPreprocessArgv::test_preprocess_argv_cases[leading-run-id-before-subcommand] PASSED [ 11%]
+    tests/test_cli_seams.py::TestPreprocessArgv::test_preprocess_argv_cases[no-color-and-leading-run-id] PASSED [ 14%]
+    tests/test_cli_seams.py::TestPreprocessArgv::test_preprocess_argv_cases[help-before-known-subcommand] PASSED [ 16%]
+    tests/test_cli_seams.py::TestPreprocessArgv::test_preprocess_argv_cases[help-before-unknown-subcommand] PASSED [ 19%]
+    tests/test_cli_seams.py::TestPreprocessArgv::test_preprocess_argv_cases[bare-help] PASSED [ 21%]
+    tests/test_cli_seams.py::TestPreprocessArgv::test_preprocess_argv_cases[help-after-subcommand] PASSED [ 23%]
+    tests/test_cli_seams.py::TestPreprocessArgv::test_preprocess_argv_cases[prog-only] PASSED [ 26%]
+    tests/test_cli_seams.py::TestMainArgv::test_main_argv_does_not_touch_sys_argv PASSED [ 28%]
+    tests/test_cli_seams.py::TestMainArgv::test_main_without_argv_reads_sys_argv PASSED [ 30%]
+    tests/test_cli_seams.py::TestMainArgv::test_main_argv_unknown_command_exits_2 PASSED [ 33%]
+    tests/test_cli_seams.py::TestMainArgv::test_main_argv_subcommand_error_uses_argv PASSED [ 35%]
+    tests/test_cli_seams.py::TestMainArgv::test_main_argv_prog_name_pbr PASSED [ 38%]
+    tests/test_cli_seams.py::TestMainArgv::test_main_argv_pbr_me PASSED      [ 40%]
+    tests/test_cli_seams.py::TestMainArgv::test_main_argv_help_translation PASSED [ 42%]
+    tests/test_cli_seams.py::TestMainArgv::test_main_argv_utc_flag PASSED    [ 45%]
+    tests/test_cli_seams.py::TestMainArgv::test_main_argv_empty_list_prints_help PASSED [ 47%]
+    ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: (1) Paste `git diff -- src/pubrun/__main__.py` restricted to `_apply_global_flags` and its call site, showing the removed inline block that started `if no_color_present:`. (2) Paste the three `TestApplyGlobalFlags` result lines and `test_main_argv_utc_flag` from the V-06 run, each `PASSED`. (3) Paste `cat tmp/cli-seams-golden/after/28.out tmp/cli-seams-golden/after/29.out` from the V-06 parity run, which must print `['--no-color'] 1` and then `None`, showing the `run` child still receives `NO_COLOR` only when `--no-color` is given.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- src/pubrun/__main__.py` (`_apply_global_flags` and its call site):
+    ```diff
+    +def _apply_global_flags(args: argparse.Namespace, no_color_present: bool) -> None:
+    +    """Apply global CLI side effects (NO_COLOR env and UTC display mode) after parsing."""
+    +    if no_color_present:
+    +        setattr(args, "no_color", True)
+    +    if getattr(args, "no_color", False):
+    +        os.environ["NO_COLOR"] = "1"
+    +
+    +    # Timestamp display timezone: local by default, UTC when --utc is given
+    +    # (status/show). Timestamps are always stored as UTC epochs. (IPD EC-17.)
+    +    if getattr(args, "utc", False):
+    +        from pubrun.status import set_display_utc
+    +        set_display_utc(True)
+    ...
+    -    args = parser.parse_args()
+    -    if no_color_present:
+    -        setattr(args, "no_color", True)
+    -    if getattr(args, "no_color", False):
+    -        os.environ["NO_COLOR"] = "1"
+    -
+    -    # Timestamp display timezone: local by default, UTC when --utc is given
+    -    # (status/show). Timestamps are always stored as UTC epochs. (IPD EC-17.)
+    -    if getattr(args, "utc", False):
+    -        from pubrun.status import set_display_utc
+    -        set_display_utc(True)
+    +    _argv_for_errors[:] = argv
+    +    args = parser.parse_args(argv[1:])
+    +    _apply_global_flags(args, no_color_present)
+    ```
+    (2) `TestApplyGlobalFlags` and `test_main_argv_utc_flag` results:
+    ```text
+    tests/test_cli_seams.py::TestMainArgv::test_main_argv_utc_flag PASSED    [ 45%]
+    tests/test_cli_seams.py::TestApplyGlobalFlags::test_no_color_present_sets_env_and_namespace_flag PASSED [ 50%]
+    tests/test_cli_seams.py::TestApplyGlobalFlags::test_utc_flag_enables_display_utc PASSED [ 52%]
+    tests/test_cli_seams.py::TestApplyGlobalFlags::test_false_flags_leave_no_color_unset PASSED [ 54%]
+    ```
+    (3) `cat tmp/cli-seams-golden/after/28.out tmp/cli-seams-golden/after/29.out`:
+    ```text
+    ['--no-color'] 1
+    None
+    ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: (1) Paste `git diff -- src/pubrun/report/diagnostics.py` restricted to `DiagnosticsError` and the seven `raise` sites, and for each row of the "Findings" error table name the `raise` line that replaces it. (2) Paste the output of `grep -c 'sys.exit' src/pubrun/report/diagnostics.py`, which must print `0`. (3) Paste every `TestDiagnosticsError` result line from the V-07 run, each `PASSED`.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- src/pubrun/report/diagnostics.py` (`DiagnosticsError` and the 7 `raise` sites):
+    ```diff
+    +class DiagnosticsError(Exception):
+    +    """A diagnostics report could not be produced; the CLI prints ``message`` and exits."""
+    +
+    +    def __init__(self, message: str, exit_code: int = 1) -> None:
+    +        super().__init__(message)
+    +        self.message = message
+    +        self.exit_code = exit_code
+    ...
+    # print_report: missing manifest (row 1) and corrupt manifest (row 2)
+    -    except FileNotFoundError:
+    -        _print_error(f"Could not find manifest file at '{manifest_path}'.")
+    -        sys.exit(1)
+    -    except json.JSONDecodeError:
+    -        _print_error(f"The manifest file at '{manifest_path}' is corrupt or contains invalid JSON.")
+    -        sys.exit(1)
+    +    except FileNotFoundError as e:
+    +        raise DiagnosticsError(f"Could not find manifest file at '{manifest_path}'.") from e
+    +    except json.JSONDecodeError as e:
+    +        raise DiagnosticsError(
+    +            f"The manifest file at '{manifest_path}' is corrupt or contains invalid JSON."
+    +        ) from e
+    ...
+    # print_report (section == "logs"): unreadable stdout.log (row 3) and stderr.log (row 4)
+    -                _print_error(f"Failed to read stdout log: {e}")
+    -                sys.exit(1)
+    +                raise DiagnosticsError(f"Failed to read stdout log: {e}") from e
+    ...
+    -                _print_error(f"Failed to read stderr log: {e}")
+    -                sys.exit(1)
+    +                raise DiagnosticsError(f"Failed to read stderr log: {e}") from e
+    ...
+    # print_resources_report: missing manifest (row 5) and corrupt manifest (row 6)
+    -    except FileNotFoundError:
+    -        _print_error(f"Could not find manifest file at '{manifest_path}'.")
+    -        sys.exit(1)
+    -    except json.JSONDecodeError:
+    -        _print_error(f"The manifest file at '{manifest_path}' is corrupt or contains invalid JSON.")
+    -        sys.exit(1)
+    +    except FileNotFoundError as e:
+    +        raise DiagnosticsError(f"Could not find manifest file at '{manifest_path}'.") from e
+    +    except json.JSONDecodeError as e:
+    +        raise DiagnosticsError(
+    +            f"The manifest file at '{manifest_path}' is corrupt or contains invalid JSON."
+    +        ) from e
+    ...
+    # print_resources_report: invalid --last (row 7)
+    -            _print_error(f"Invalid duration for --last: {e}")
+    -            sys.exit(1)
+    +            raise DiagnosticsError(f"Invalid duration for --last: {e}") from e
+    ```
+    (2) `grep -c 'sys.exit' src/pubrun/report/diagnostics.py`: `0`
+    (3) `TestDiagnosticsError` results (7/7 `PASSED`):
+    ```text
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_report_missing_manifest PASSED [ 85%]
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_report_corrupt_manifest PASSED [ 88%]
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_report_unreadable_stdout_log PASSED [ 90%]
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_report_unreadable_stderr_log PASSED [ 92%]
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_resources_report_missing_manifest PASSED [ 95%]
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_resources_report_corrupt_manifest PASSED [ 97%]
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_resources_report_invalid_last PASSED [100%]
+    ```
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: (1) Paste the output of `grep -c '_supports_unicode(sys.stdout)' src/pubrun/report/diagnostics.py`, which must print `0`. (2) Paste the output of `grep -nE '(^|[^_.a-zA-Z])print\(' src/pubrun/report/diagnostics.py | grep -v 'file=stream'`; for each line it prints, paste the full multi-line `print(...)` call from the file and show that its closing line passes `file=stream`. (3) Paste the signature lines of the five changed functions (for example with `grep -n -A12 '^def print_report\|^def print_resources_report\|^def draw_ascii_chart\|^def _print_packages_block\|^def _print_data_files_block' src/pubrun/report/diagnostics.py`), showing `out` is keyword-only and the earlier parameters are unchanged. (4) Paste every `TestOutStream` result line from the V-07 run, each `PASSED`. (5) Paste the failing summary line of the `print_report` mutation check from "Required tests / validation", then `git diff --stat` after restoring.
   - Observed evidence:
-  - Result: pending
+    (1) `grep -c '_supports_unicode(sys.stdout)' src/pubrun/report/diagnostics.py`: `0`
+    (2) `grep -nE '(^|[^_.a-zA-Z])print\(' src/pubrun/report/diagnostics.py | grep -v 'file=stream'` printed 7 multi-line calls, each passing `file=stream` on its closing line:
+    ```text
+    821:    print(
+    838:        print(
+    989:            print(
+    995:            print(
+    1457:                print(f"{cyan}System RAM{rst}   : {_fmt_bytes(avail)} available of "
+    1492:                print(f"{cyan}Disk I/O{rst}     : read {_fmt_bytes(rb or 0)}, "
+    1495:                print(f"{cyan}Logical I/O{rst}  : read {_fmt_bytes(rc or 0)}, "
+    ```
+    Full multi-line calls:
+    ```python
+    # lines 821-825
+    print(
+        f"{cyan}Timing Scope{rst} : tracked interval "
+        "(start() to stop(), not full application lifetime when imported late)",
+        file=stream,
+    )
+    # lines 838-842
+    print(
+        f"{cyan}Background hardware{rst} : "
+        f"{_format_duration_detail(bg_hardware)} (overlaps workload)",
+        file=stream,
+    )
+    # lines 989-993
+    print(
+        f"  Inherited from parent snapshot: {inherited_str} "
+        "(script mtime alone does not prove dependencies matched).",
+        file=stream,
+    )
+    # lines 995-999
+    print(
+        f"  {cyan}Preflight{rst}   : Run `pubrun inspect --preflight` to compare "
+        "recorded requirements against this environment.",
+        file=stream,
+    )
+    # lines 1457-1458
+    print(f"{cyan}System RAM{rst}   : {_fmt_bytes(avail)} available of "
+          f"{_fmt_bytes(total)} at start", file=stream)
+    # lines 1492-1493
+    print(f"{cyan}Disk I/O{rst}     : read {_fmt_bytes(rb or 0)}, "
+          f"wrote {_fmt_bytes(wb or 0)} (storage layer)", file=stream)
+    # lines 1495-1496
+    print(f"{cyan}Logical I/O{rst}  : read {_fmt_bytes(rc or 0)}, "
+          f"wrote {_fmt_bytes(wc or 0)} (incl. cache)", file=stream)
+    ```
+    (3) Signatures (`grep -n -A12` on the five functions):
+    ```text
+    257:def _print_data_files_block(
+    258-    manifest: Dict[str, Any],
+    259-    use_color: bool,
+    260-    *,
+    261-    out: Optional[TextIO] = None,
+    262-) -> None:
+    500:def _print_packages_block(
+    501-    manifest: Dict[str, Any],
+    502-    use_color: bool,
+    503-    *,
+    504-    leading_newline: bool = False,
+    505-    out: Optional[TextIO] = None,
+    506-) -> None:
+    569:def print_report(
+    570-    manifest_path: str,
+    571-    depth: str = "standard",
+    572-    section: Optional[str] = None,
+    573-    utc: bool = False,
+    574-    *,
+    575-    out: Optional[TextIO] = None,
+    576-) -> None:
+    1112:def draw_ascii_chart(
+    1113-    data: list[float],
+    1114-    timestamps: list[float],
+    1115-    title: str,
+    1116-    unit: str,
+    1117-    height: int = 8,
+    1118-    width: int = 50,
+    1119-    color: str = "",
+    1120-    use_color: bool = True,
+    1121-    average: bool = False,
+    1122-    *,
+    1123-    out: Optional[TextIO] = None,
+    1124-) -> None:
+    1318:def print_resources_report(
+    1319-    manifest_path: str,
+    1320-    average: bool = False,
+    1321-    last: Optional[str] = None,
+    1322-    metric: str = "all",
+    1323-    width: Optional[int] = None,
+    1324-    *,
+    1325-    out: Optional[TextIO] = None,
+    1326-) -> None:
+    ```
+    (4) `TestOutStream` results (9/9 `PASSED`):
+    ```text
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_report_writes_only_to_out[basic] PASSED [ 64%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_report_writes_only_to_out[standard] PASSED [ 66%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_report_writes_only_to_out[deep] PASSED [ 69%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_report_sections_write_to_out[logs-epoch 1] PASSED [ 71%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_report_sections_write_to_out[env-[ Environment Variables ]] PASSED [ 73%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_report_sections_write_to_out[packages-[ Packages ]] PASSED [ 76%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_resources_report_writes_only_to_out PASSED [ 78%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_out_default_is_current_stdout PASSED [ 80%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_ascii_stream_gets_ascii_glyphs PASSED [ 83%]
+    ```
+    (5) `print_report` mutation check (`stream = sys.stdout`):
+    ```text
+    FAILED tests/test_diagnostics_seams.py::TestOutStream::test_print_report_writes_only_to_out[basic]
+    FAILED tests/test_diagnostics_seams.py::TestOutStream::test_print_report_writes_only_to_out[standard]
+    FAILED tests/test_diagnostics_seams.py::TestOutStream::test_print_report_writes_only_to_out[deep]
+    3 failed, 1 passed, 12 deselected in 0.18s
+    ```
+    `git diff --stat` after restore:
+    ```text
+     CHANGELOG.md                     |   4 +
+     src/pubrun/__main__.py           | 142 +++++++++------
+     src/pubrun/report/diagnostics.py | 372 ++++++++++++++++++++++-----------------
+     3 files changed, 295 insertions(+), 223 deletions(-)
+    ```
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: (1) Paste `git diff -- src/pubrun/__main__.py` restricted to `_run_report` and `_run_resources`, showing each `except DiagnosticsError` clause placed before `except Exception`. (2) Paste every `TestDiagnosticsErrorAtCli` result line from the V-06 run, each `PASSED`. (3) Paste `cat tmp/cli-seams-golden/after/20.err tmp/cli-seams-golden/after/26.err tmp/cli-seams-golden/after/27.err` from the V-06 parity run, which must print the corrupt-manifest and invalid `--last` messages with no "Failed to generate" prefix. (4) Paste the failing summary line of the `_run_report` mutation check, then `git diff --stat` after restoring.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- src/pubrun/__main__.py` (`_run_resources` and `_run_report`):
+    ```diff
+     def _run_resources(...):
+         """Print resource monitoring graphs for a recorded run."""
+    +    from pubrun.report.diagnostics import DiagnosticsError, print_resources_report
+         try:
+    -        from pubrun.report.diagnostics import print_resources_report
+             ...
+         except FileNotFoundError as e:
+             _print_error(str(e))
+             sys.exit(1)
+    +    except DiagnosticsError as e:
+    +        _print_error(e.message)
+    +        sys.exit(e.exit_code)
+         except Exception as e:
+             _print_error(f"Failed to generate resources report: {e}")
+             sys.exit(1)
+     ...
+     def _run_report(run_dir: str, depth: str, section: Optional[str] = None, utc: bool = False) -> None:
+         """Print a human-readable diagnostic report for a recorded run."""
+    +    from pubrun.report.diagnostics import DiagnosticsError, print_report
+         try:
+    -        from pubrun.report.diagnostics import print_report
+             ...
+             sys.exit(1)
+
+    +    except DiagnosticsError as e:
+    +        _print_error(e.message)
+    +        sys.exit(e.exit_code)
+    +
+         except Exception as e:
+             _print_error(f"Failed to generate diagnostic report: {e}")
+             sys.exit(1)
+    ```
+    (2) `TestDiagnosticsErrorAtCli` results (3/3 `PASSED`):
+    ```text
+    tests/test_cli_seams.py::TestDiagnosticsErrorAtCli::test_show_corrupt_manifest_prints_exact_error PASSED [ 57%]
+    tests/test_cli_seams.py::TestDiagnosticsErrorAtCli::test_res_corrupt_manifest_prints_exact_error PASSED [ 59%]
+    tests/test_cli_seams.py::TestDiagnosticsErrorAtCli::test_res_invalid_last_prints_exact_error PASSED [ 61%]
+    ```
+    (3) `cat tmp/cli-seams-golden/after/20.err tmp/cli-seams-golden/after/26.err tmp/cli-seams-golden/after/27.err`:
+    ```text
+    [ERROR] The manifest file at 'bad/manifest.json' is corrupt or contains invalid JSON.
+    [ERROR] Invalid duration for --last: could not convert string to float: 'bogu'
+    [ERROR] The manifest file at 'bad/manifest.json' is corrupt or contains invalid JSON.
+    ```
+    (4) `_run_report` mutation check (deleted `except DiagnosticsError` clause):
+    ```text
+    FAILED tests/test_cli_seams.py::TestDiagnosticsErrorAtCli::test_show_corrupt_manifest_prints_exact_error
+    1 failed, 2 passed, 23 deselected in 0.27s
+    ```
+    `git diff --stat` after restore:
+    ```text
+     CHANGELOG.md                     |   4 +
+     src/pubrun/__main__.py           | 142 +++++++++------
+     src/pubrun/report/diagnostics.py | 372 ++++++++++++++++++++++-----------------
+     3 files changed, 295 insertions(+), 223 deletions(-)
+    ```
+  - Result: pass
 
 - [ ] V-06 validates E-06
   - Required evidence: (1) Paste the `python3 -m pytest tests/test_cli_seams.py tests/test_diagnostics_seams.py --no-cov -q -v` result lines for every test named in "Proposed changes" items 5 and 6, each `PASSED`, and its summary line. (2) Paste the summary line of the nine-file related-suites run from "Required tests / validation". (3) Paste the full-suite (`aw suite --no-cache`) summary line, and for any failure paste the same test's result on unmodified `HEAD`. (4) Paste the `mypy; echo "exit=$?"` output showing `Success: no issues found in <N> source files` (`58` at review; re-derive at execution time) and `exit=0`, and `git diff --stat -- pyproject.toml`, which must be empty. (5) Paste the parity commands' output from "Required tests / validation": the `IDENTICAL` line and the exit-code list, which must match the authoring list. (6) Paste the failing summary line of the `parse_args()` mutation check, then `git diff --stat` after restoring. (7) State which OS and Python version ran the tests, and that the CI matrix was not run.
   - Observed evidence:
-  - Result: pending
+    (1) `python3 -m pytest tests/test_cli_seams.py tests/test_diagnostics_seams.py --no-cov -v`: all 42 tests `PASSED` (every test line pasted across V-01, V-02, V-03, V-04, V-05, V-07); summary: `42 passed in 0.49s` (with `-q -v`: `42 passed in 0.73s`).
+    (2) Nine-file related-suites run: `367 passed in 48.30s` (exit 0).
+    (3) Full suite (`aw suite --no-cache`): `2209 passed in 149.72s (0:02:29)` (exit 0, zero failures).
+    (4) `mypy; echo "exit=$?"`:
+    ```text
+    Success: no issues found in 58 source files
+    exit=0
+    ```
+    `git diff --stat -- pyproject.toml`: empty.
+    (5) CLI parity script (`tmp/cli-seams-golden.sh` against `git archive HEAD src` at `26185bc` vs working tree):
+    Exit codes (exact match to authoring list):
+    ```text
+    01=0 02=0 03=0 04=0 05=0 06=2 07=2 08=2 09=0 10=0 11=0 12=0 13=0 14=0 15=0 16=0 17=0 18=0 19=0 20=1 21=1 22=0 23=0 24=0 25=0 26=1 27=1 28=0 29=0 30=0
+    ```
+    `diff -ru tmp/cli-seams-golden/before tmp/cli-seams-golden/after` was identical on 29 of 30 commands (all 30 stderr files and all 30 exit codes identical), and did NOT print `IDENTICAL` solely because command `02` (`--no-color --info`) calls `_show_info()` -> `get_invocation({})`, which reads `sys.argv`:
+    ```diff
+    diff -ru tmp/cli-seams-golden/before/02.out tmp/cli-seams-golden/after/02.out
+    @@ -15,10 +15,11 @@
+       "invocation": {
+         "argv": [
+           "<SRC>/pubrun/__main__.py",
+    +      "--no-color",
+           "--info"
+         ],
+    -    "command_line": "<SRC>/pubrun/__main__.py --info",
+    -    "rerun_command": "cd <WORK> && python <SRC>/pubrun/__main__.py --info",
+    +    "command_line": "<SRC>/pubrun/__main__.py --no-color --info",
+    +    "rerun_command": "cd <WORK> && python <SRC>/pubrun/__main__.py --no-color --info",
+    ```
+    On unmodified `HEAD`, `main()` mutated `sys.argv` globally to delete `"--no-color"`, causing `get_invocation({})` to omit `"--no-color"` from `invocation.argv`, `command_line`, and `rerun_command`. Because E-01 forbids mutating `sys.argv`, `get_invocation({})` now reports the actual process `sys.argv`. Raised as a human decision (`q-info-no-color-parity`) rather than weakening V-06 or re-introducing the inaccuracy.
+    (6) `parse_args()` mutation check:
+    ```text
+    FAILED tests/test_cli_seams.py::TestMainArgv::test_main_argv_does_not_touch_sys_argv
+    FAILED tests/test_cli_seams.py::TestMainArgv::test_main_argv_unknown_command_exits_2
+    FAILED tests/test_cli_seams.py::TestMainArgv::test_main_argv_subcommand_error_uses_argv
+    FAILED tests/test_cli_seams.py::TestMainArgv::test_main_argv_prog_name_pbr - ...
+    FAILED tests/test_cli_seams.py::TestMainArgv::test_main_argv_help_translation
+    FAILED tests/test_cli_seams.py::TestMainArgv::test_main_argv_utc_flag - Syste...
+    FAILED tests/test_cli_seams.py::TestMainArgv::test_main_argv_empty_list_prints_help
+    7 failed, 2 passed, 17 deselected in 1.71s
+    ```
+    `git diff --stat` after restore:
+    ```text
+     CHANGELOG.md                     |   4 +
+     src/pubrun/__main__.py           | 142 +++++++++------
+     src/pubrun/report/diagnostics.py | 372 ++++++++++++++++++++++-----------------
+     3 files changed, 295 insertions(+), 223 deletions(-)
+    ```
+    (7) Ran on Linux 6.8.0-151-generic x86_64 with Python 3.14.6. The GitHub Actions CI matrix was not run (no push).
+  - Result: blocked
 
-- [ ] V-07 validates E-07
+- [x] V-07 validates E-07
   - Required evidence: (1) Paste the `tests/test_diagnostics_seams.py` result lines from the V-06 run, every one `PASSED`, including `test_ascii_stream_gets_ascii_glyphs` and `test_out_default_is_current_stdout`. (2) Paste the output of `python3 -m pytest tests/test_diagnostics_seams.py --no-cov -q -p no:cacheprovider` run a second time, with the same pass count, showing the file does not depend on test order or cache state.
   - Observed evidence:
-  - Result: pending
+    (1) `tests/test_diagnostics_seams.py` results (16/16 `PASSED`):
+    ```text
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_report_writes_only_to_out[basic] PASSED [ 64%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_report_writes_only_to_out[standard] PASSED [ 66%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_report_writes_only_to_out[deep] PASSED [ 69%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_report_sections_write_to_out[logs-epoch 1] PASSED [ 71%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_report_sections_write_to_out[env-[ Environment Variables ]] PASSED [ 73%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_report_sections_write_to_out[packages-[ Packages ]] PASSED [ 76%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_print_resources_report_writes_only_to_out PASSED [ 78%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_out_default_is_current_stdout PASSED [ 80%]
+    tests/test_diagnostics_seams.py::TestOutStream::test_ascii_stream_gets_ascii_glyphs PASSED [ 83%]
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_report_missing_manifest PASSED [ 85%]
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_report_corrupt_manifest PASSED [ 88%]
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_report_unreadable_stdout_log PASSED [ 90%]
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_report_unreadable_stderr_log PASSED [ 92%]
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_resources_report_missing_manifest PASSED [ 95%]
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_resources_report_corrupt_manifest PASSED [ 97%]
+    tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_resources_report_invalid_last PASSED [100%]
+    ```
+    (2) Second run (`python3 -m pytest tests/test_diagnostics_seams.py --no-cov -q -p no:cacheprovider`):
+    ```text
+    ................                                                         [100%]
+    16 passed in 0.14s
+    ```
+  - Result: pass
 
-- [ ] V-08 validates E-08
+- [x] V-08 validates E-08
   - Required evidence: (1) Paste `git diff -- CHANGELOG.md`, showing one bullet under `## [Unreleased]` `### Changed`. (2) Paste the output of `git diff -U0 -- CHANGELOG.md | grep '^+[^+]' | grep -c '[—–]'`, which must print `0`. (3) Paste the output and exit code of `python3 scripts/sanitize_paths.py --check --all`, which must be 0. (4) Paste `git status --short`, showing only the five Scope-Paths changed and no `tmp/` content tracked.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- CHANGELOG.md`:
+    ```diff
+     ### Changed
+    +- **Testable entry points.** `pubrun.__main__.main()` now accepts an optional argument list without
+    +  modifying `sys.argv`, and `print_report` and `print_resources_report` in
+    +  `pubrun.report.diagnostics` accept a keyword-only `out` stream and raise `DiagnosticsError`
+    +  instead of exiting the process. Command-line output and exit codes are unchanged.
+     - **Static type checking (`mypy`) repaired and gated in CI.** Fixed the duplicate-module import in
+    ```
+    (2) `git diff -U0 -- CHANGELOG.md | grep '^+[^+]' | grep -c '[—–]'`: `0`
+    (3) `python3 scripts/sanitize_paths.py --check --all`: (no output), `exit=0`.
+    (4) `git status --short` (before updating this plan's evidence):
+    ```text
+     M CHANGELOG.md
+     M src/pubrun/__main__.py
+     M src/pubrun/report/diagnostics.py
+    ?? tests/test_cli_seams.py
+    ?? tests/test_diagnostics_seams.py
+    ```
+  - Result: pass
 
 
 ## Approval and execution gate
