@@ -180,7 +180,8 @@ def select_mode(mode: str, selected_by: str, source: str) -> Dict[str, bool]:
     imports and subsequent in-code mode requests do not trigger conflicts.
 
     Args:
-        mode: One of "auto", "noauto", "nopatch", "noconsole", "minimal", "full".
+        mode: One of the keys of ``pubrun._modes.MODES``: "auto", "noauto",
+            "nopatch", "noconsole", "minimal", or "full".
         selected_by: Identifier for who selected this mode (e.g., "pubrun",
             "pubrun.noauto", "env:PUBRUN_IMPORT_MODE").
         source: Where the selection came from (e.g., "default", "config",
