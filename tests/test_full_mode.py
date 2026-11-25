@@ -93,7 +93,12 @@ print("CONSOLE_STATUS=" + str(status))
         result = subprocess.run(
             [PYTHON, "-c", script], capture_output=True, text=True, timeout=30,
             cwd=str(tmp_path),
-            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+            env={
+                **os.environ,
+                "PUBRUN_IMPORT_MODE": "",
+                "PUBRUN_AUTO_START": "",
+                "PUBRUN_RUN_MODE_OVERRIDE": "",
+            },
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         # No existing mode wraps the console with default config; and after stop() the
@@ -129,7 +134,12 @@ print("FINAL_STATUS=" + str(c1.get("capture_state", {}).get("status")))
         result = subprocess.run(
             [PYTHON, "-c", script], capture_output=True, text=True, timeout=30,
             cwd=str(tmp_path),
-            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+            env={
+                **os.environ,
+                "PUBRUN_IMPORT_MODE": "",
+                "PUBRUN_AUTO_START": "",
+                "PUBRUN_RUN_MODE_OVERRIDE": "",
+            },
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         # Startup: self-describing, not empty.
@@ -205,7 +215,12 @@ except Exception:
 """
         result = subprocess.run(
             [PYTHON, "-c", script], capture_output=True, text=True, timeout=20,
-            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+            env={
+                **os.environ,
+                "PUBRUN_IMPORT_MODE": "",
+                "PUBRUN_AUTO_START": "",
+                "PUBRUN_RUN_MODE_OVERRIDE": "",
+            },
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         data = json.loads(result.stdout.strip().splitlines()[-1])
@@ -232,7 +247,12 @@ print("CAPTURED=" + str(captured))
         result = subprocess.run(
             [PYTHON, "-c", script], capture_output=True, text=True, timeout=30,
             cwd=str(tmp_path),
-            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+            env={
+                **os.environ,
+                "PUBRUN_IMPORT_MODE": "",
+                "PUBRUN_AUTO_START": "",
+                "PUBRUN_RUN_MODE_OVERRIDE": "",
+            },
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         # The load-bearing invariant: `full` mode actually teed console output to stdout.log.
@@ -251,7 +271,12 @@ if pubrun.get_current_run():
 """
         result = subprocess.run(
             [PYTHON, "-c", script], capture_output=True, text=True, timeout=20,
-            env={**os.environ, "PUBRUN_IMPORT_MODE": "full", "PUBRUN_AUTO_START": ""},
+            env={
+                **os.environ,
+                "PUBRUN_IMPORT_MODE": "full",
+                "PUBRUN_AUTO_START": "",
+                "PUBRUN_RUN_MODE_OVERRIDE": "",
+            },
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "SELECTED=full" in result.stdout, f"stdout: {result.stdout}"
@@ -269,7 +294,54 @@ if pubrun.get_current_run():
         result = subprocess.run(
             [PYTHON, "-m", "pubrun", "run", "--mode", "full", "--", PYTHON, str(workload)],
             capture_output=True, text=True, timeout=40, cwd=str(tmp_path),
-            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""},
+            env={
+                **os.environ,
+                "PUBRUN_IMPORT_MODE": "",
+                "PUBRUN_AUTO_START": "",
+                "PUBRUN_RUN_MODE_OVERRIDE": "",
+            },
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "EFFECTIVE=standard" in result.stdout, f"stdout: {result.stdout}"
+
+    def test_run_mode_full_overrides_explicit_pubrun_minimal(self, tmp_path):
+        workload = tmp_path / "w_minimal.py"
+        workload.write_text(
+            "import glob, json\n"
+            "import pubrun.minimal as pubrun\n"
+            "from pubrun._bootstrap import get_import_metadata\n"
+            "print('SENTINEL_FULL_OVERRIDES_MINIMAL')\n"
+            "r = pubrun.get_current_run()\n"
+            "assert r is not None, 'pubrun run --mode full must auto-start over pubrun.minimal'\n"
+            "rd = str(r.run_dir)\n"
+            "pubrun.stop()\n"
+            "m = json.load(open(rd + '/manifest.json'))\n"
+            "logs = glob.glob(rd + '/stdout.log')\n"
+            "captured = bool(logs) and 'SENTINEL_FULL_OVERRIDES_MINIMAL' in open(logs[0]).read()\n"
+            "meta = get_import_metadata()\n"
+            "print(json.dumps({\n"
+            "    'effective': m['console']['capture_mode'],\n"
+            "    'captured': captured,\n"
+            "    'selected_mode': meta['selected_mode'],\n"
+            "    'selected_by': meta['selected_by'],\n"
+            "    'selected_source': meta['selected_source'],\n"
+            "}))\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--mode", "full", "--", PYTHON, str(workload)],
+            capture_output=True, text=True, timeout=40, cwd=str(tmp_path),
+            env={
+                **os.environ,
+                "PUBRUN_IMPORT_MODE": "",
+                "PUBRUN_AUTO_START": "",
+                "PUBRUN_RUN_MODE_OVERRIDE": "",
+            },
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["effective"] == "standard"
+        assert data["captured"] is True
+        assert data["selected_mode"] == "full"
+        assert data["selected_by"] == "cli:pubrun run --mode"
+        assert data["selected_source"] == "cli:pubrun run --mode"

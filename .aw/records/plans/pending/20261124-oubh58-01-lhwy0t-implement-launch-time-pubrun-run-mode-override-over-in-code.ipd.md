@@ -40,27 +40,27 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Launch-time CLI override in __main__.py and _bootstrap.py
 
-- [ ] E-01 In `src/pubrun/__main__.py` (`args.command == "run"` branch), set `PUBRUN_RUN_MODE_OVERRIDE` to `args.mode` in `child_env` alongside `PUBRUN_IMPORT_MODE` (preserving existing `PUBRUN_IMPORT_MODE` behavior for backward compatibility and existing tests).
+- [x] E-01 In `src/pubrun/__main__.py` (`args.command == "run"` branch), set `PUBRUN_RUN_MODE_OVERRIDE` to `args.mode` in `child_env` alongside `PUBRUN_IMPORT_MODE` (preserving existing `PUBRUN_IMPORT_MODE` behavior for backward compatibility and existing tests).
   - Depends on: none
   - Expected outcome: Running `pubrun run --mode <mode> -- <command>` spawns the child process with both `PUBRUN_IMPORT_MODE=<mode>` and `PUBRUN_RUN_MODE_OVERRIDE=<mode>` set in `child_env`, and invalid or unset override values are ignored downstream.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 In `src/pubrun/_bootstrap.py::select_mode`, check `os.environ.get("PUBRUN_RUN_MODE_OVERRIDE", "").strip().lower()` against `MODES` when `_selected_mode is None`, apply the CLI launch-time override before any submodule's requested mode, and treat subsequent in-code mode requests under an active `"cli:pubrun run --mode"` selection as non-conflicting overridden requests.
+- [x] E-02 In `src/pubrun/_bootstrap.py::select_mode`, check `os.environ.get("PUBRUN_RUN_MODE_OVERRIDE", "").strip().lower()` against `MODES` when `_selected_mode is None`, apply the CLI launch-time override before any submodule's requested mode, and treat subsequent in-code mode requests under an active `"cli:pubrun run --mode"` selection as non-conflicting overridden requests.
   - Depends on: E-01
   - Expected outcome: When `_selected_mode is None` and `PUBRUN_RUN_MODE_OVERRIDE` names a valid mode in `MODES`, `select_mode(mode, selected_by, source)` computes `cli_behavior = get_mode_behavior(cli_mode)` (distinct from the caller's `behavior = get_mode_behavior(mode)`), selects `cli_mode` with `_selected_behavior = cli_behavior`, `_selected_by = "cli:pubrun run --mode"`, and `_selected_source = "cli:pubrun run --mode"`, appends the winning CLI request (`requested_mode: cli_mode`, `selected_by: "cli:pubrun run --mode"`, `effective_behavior: cli_behavior`, `selected: True`, `conflict: False`) to `_requests`, and when `mode != cli_mode` also appends the overridden caller request (`requested_mode: mode`, `selected_by: selected_by`, `effective_behavior: behavior`, `selected: False`, `conflict: False`) without warning or raising under `[imports].on_conflict`, returning `cli_behavior`. When `_selected_mode is not None` and `_selected_source == "cli:pubrun run --mode"`, any subsequent `select_mode` call records `selected: False, conflict: False` (respecting `_max_requests`) and returns `_selected_behavior` without warning or raising under `[imports].on_conflict` (so `import pubrun` followed by `import pubrun.full`, or multiple differing submodule imports under `pubrun run --mode`, never spuriously trigger a conflict error). When `PUBRUN_RUN_MODE_OVERRIDE` is unset or invalid, existing behavior is unchanged (plain `PUBRUN_IMPORT_MODE` still loses to explicit `import pubrun.<mode>`). `os` is imported cleanly (`import os`) and all edited lines are type-annotated for Python 3.8+ and `mypy`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: End-to-end verification tests, changelog, and doc sync
 
-- [ ] E-03 Add end-to-end subprocess and unit tests in `tests/test_import_modes.py` and `tests/test_full_mode.py` verifying launch-time `pubrun run --mode` overrides across submodule imports, invalid override fallback, subsequent non-conflicting imports under a CLI override, and ordinary `PUBRUN_IMPORT_MODE` yielding to explicit submodule imports, and isolate existing test helpers from `PUBRUN_RUN_MODE_OVERRIDE`.
+- [x] E-03 Add end-to-end subprocess and unit tests in `tests/test_import_modes.py` and `tests/test_full_mode.py` verifying launch-time `pubrun run --mode` overrides across submodule imports, invalid override fallback, subsequent non-conflicting imports under a CLI override, and ordinary `PUBRUN_IMPORT_MODE` yielding to explicit submodule imports, and isolate existing test helpers from `PUBRUN_RUN_MODE_OVERRIDE`.
   - Depends on: E-01, E-02
   - Expected outcome: Tests drive real `python -m pubrun run --mode <X> -- python -c ...` child processes and unit-level `select_mode` calls asserting: (a) `pubrun run --mode nopatch` sets both `PUBRUN_IMPORT_MODE=nopatch` and `PUBRUN_RUN_MODE_OVERRIDE=nopatch` in child env; (b) `pubrun run --mode minimal` overrides `import pubrun.full` (`selected_mode == "minimal"`, `get_current_run() is None`, `selected_source == "cli:pubrun run --mode"`, `selected_by == "cli:pubrun run --mode"`); (c) `pubrun run --mode full` overrides `import pubrun.minimal` (`selected_mode == "full"`, run auto-starts and wraps console); (d) `pubrun run --mode noconsole` overrides `import pubrun.full` (`patch_console is False`); (e) plain `PUBRUN_IMPORT_MODE=minimal` without `PUBRUN_RUN_MODE_OVERRIDE` still allows `import pubrun.full` to win (`selected_mode == "full"`); (f) invalid `PUBRUN_RUN_MODE_OVERRIDE=bogus` is ignored and allows `import pubrun.full` to win; and (g) `PUBRUN_IMPORT_CONFLICT=error` neither warns nor raises when `pubrun run --mode minimal` overrides `import pubrun.full`, including when `import pubrun` precedes `import pubrun.full` (or two differing submodule imports run in the same overridden process). `tests/test_import_modes.py::clean_bootstrap` strips `PUBRUN_RUN_MODE_OVERRIDE` via `monkeypatch.delenv("PUBRUN_RUN_MODE_OVERRIDE", raising=False)`, and every existing child-env sanitization site in `tests/test_import_modes.py` (including `test_default_auto_starts`, `TestHookSuppression`, `test_legacy_auto_start_false_still_works`, `TestModeAliasApiParity._clean_env`, `TestModeModuleBackgroundCapture._env`) and `tests/test_full_mode.py` strips `PUBRUN_RUN_MODE_OVERRIDE` alongside `PUBRUN_IMPORT_MODE`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Synchronize `CHANGELOG.md`, `docs/manifest.md`, `docs/cli.md`, and `docs/functional_spec.md` with the launch-time override behavior, new `"cli:pubrun run --mode"` manifest provenance values, and `PUBRUN_RUN_MODE_OVERRIDE` mechanism, with zero em or en dashes in all added or edited lines.
+- [x] E-04 Synchronize `CHANGELOG.md`, `docs/manifest.md`, `docs/cli.md`, and `docs/functional_spec.md` with the launch-time override behavior, new `"cli:pubrun run --mode"` manifest provenance values, and `PUBRUN_RUN_MODE_OVERRIDE` mechanism, with zero em or en dashes in all added or edited lines.
   - Depends on: E-02
   - Expected outcome: (1) `CHANGELOG.md` under `## [Unreleased]` -> the top-most `### Fixed` subsection carries one clear user-facing bullet documenting that `pubrun run --mode <mode>` now overrides explicit in-code `import pubrun.<mode>` imports as documented; (2) `docs/manifest.md` (``## `pubrun_imports` ``, `selected_by` and `selected_source` rows) documents `"cli:pubrun run --mode"`; (3) `docs/cli.md` (the `run` command section) and `docs/functional_spec.md#11.13 Import Mode Wrapper (run)` note that `pubrun run --mode` sets `PUBRUN_RUN_MODE_OVERRIDE` alongside `PUBRUN_IMPORT_MODE` so the launch-time mode overrides explicit in-code `import pubrun.<mode>` imports; and (4) zero em or en dashes appear in any added diff line across all four files.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -126,25 +126,226 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Paste `git diff src/pubrun/__main__.py` showing `PUBRUN_RUN_MODE_OVERRIDE` set alongside `PUBRUN_IMPORT_MODE` in the `args.command == "run"` branch, plus output of `python3 -m pytest tests/test_import_modes.py -k "run" -v` passing and `python3 -m mypy` exiting 0.
   - Observed evidence:
-  - Result: pending
+    - `git diff src/pubrun/__main__.py`:
+      ```diff
+      diff --git a/src/pubrun/__main__.py b/src/pubrun/__main__.py
+      index 5588dba..99b64e1 100644
+      --- a/src/pubrun/__main__.py
+      +++ b/src/pubrun/__main__.py
+      @@ -3445,10 +3445,14 @@ def main() -> None:
+               if not cmd_args:
+                   _print_error("No command specified. Usage: pubrun run --mode minimal -- python script.py")
+                   sys.exit(1)
+      -        # Spawn child process with PUBRUN_IMPORT_MODE set
+      +        # Spawn child process with PUBRUN_IMPORT_MODE and launch-time override set
+               import subprocess as _sp
+               import signal as _signal
+      -        child_env = {**os.environ, "PUBRUN_IMPORT_MODE": args.mode}
+      +        child_env = {
+      +            **os.environ,
+      +            "PUBRUN_IMPORT_MODE": args.mode,
+      +            "PUBRUN_RUN_MODE_OVERRIDE": args.mode,
+      +        }
+      ```
+    - `python3 -m pytest tests/test_import_modes.py -k "run" -v` (exit 0): `collected 89 items / 52 deselected / 37 selected` -> `37 passed, 52 deselected in 12.83s` (including `TestPubrunRunCommand::test_run_sets_import_mode_env_var PASSED`, `test_run_mode_minimal_overrides_explicit_pubrun_full PASSED`, `test_run_mode_noconsole_overrides_explicit_pubrun_full PASSED`, `test_plain_pubrun_import_mode_loses_to_explicit_pubrun_full PASSED`, `test_invalid_run_mode_override_ignored_for_explicit_pubrun_full PASSED`, and all 3 `test_run_mode_override_no_conflict_under_error_policy` cases PASSED).
+    - `python3 -m mypy` (exit 0): `Success: no issues found in 58 source files`.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Paste `git diff src/pubrun/_bootstrap.py` showing `PUBRUN_RUN_MODE_OVERRIDE` handling in `select_mode` (both `_selected_mode is None` with `cli_behavior = get_mode_behavior(cli_mode)` and subsequent calls when `_selected_source == "cli:pubrun run --mode"`), paste output of `python3 -m pytest tests/test_import_modes.py -k "Bootstrap or Conflict" -v` passing, and paste output of `python3 -m mypy` exiting 0 (noting whether `pubrun._bootstrap` remains in `pyproject.toml`'s `ignore_errors` list).
   - Observed evidence:
-  - Result: pending
+    - `git diff src/pubrun/_bootstrap.py`:
+      ```diff
+      diff --git a/src/pubrun/_bootstrap.py b/src/pubrun/_bootstrap.py
+      index f09024c..8e7d006 100644
+      --- a/src/pubrun/_bootstrap.py
+      +++ b/src/pubrun/_bootstrap.py
+      @@ -6,6 +6,7 @@ conflicts when multiple imports request different modes.
 
-- [ ] V-03 validates E-03
+       It is intentionally free of heavy imports and side effects.
+       """
+      +import os
+       import sys
+       import time
+       import threading
+      @@ -125,7 +126,6 @@ def _resolve_conflict_policy() -> str:
+           if _conflict_policy is not None:
+               return _conflict_policy
+
+      -    import os
+           # Check env first
+           env_policy = os.environ.get("PUBRUN_IMPORT_CONFLICT", "").strip().lower()
+           if env_policy in ("ignore", "warn", "error"):
+      @@ -169,11 +169,18 @@ def _get_caller_info(selected_by: str) -> Optional[Dict[str, Any]]:
+           return None
+
+
+      +_CLI_RUN_MODE_SOURCE = "cli:pubrun run --mode"
+      +
+      +
+       def select_mode(mode: str, selected_by: str, source: str) -> Dict[str, bool]:
+           """Select an import mode. First call wins; later calls detect conflicts.
+
+      +    When ``PUBRUN_RUN_MODE_OVERRIDE`` names a valid mode in ``MODES``, that
+      +    launch-time CLI override takes precedence over explicit in-code submodule
+      +    imports and subsequent in-code mode requests do not trigger conflicts.
+      +
+           Args:
+      -        mode: One of "auto", "noauto", "nopatch", "minimal".
+      +        mode: One of "auto", "noauto", "nopatch", "noconsole", "minimal", "full".
+      @@ -190,6 +197,44 @@ def select_mode(mode: str, selected_by: str, source: str) -> Dict[str, bool]:
+
+           with _lock:
+               if _selected_mode is None:
+      +            cli_mode = os.environ.get("PUBRUN_RUN_MODE_OVERRIDE", "").strip().lower()
+      +            if cli_mode in MODES:
+      +                cli_behavior = get_mode_behavior(cli_mode)
+      +                _selected_mode = cli_mode
+      +                _selected_behavior = cli_behavior
+      +                _selected_by = _CLI_RUN_MODE_SOURCE
+      +                _selected_source = _CLI_RUN_MODE_SOURCE
+      +                _selected_at_utc = now
+      +
+      +                cli_request: Dict[str, Any] = {
+      +                    "timestamp_utc": now,
+      +                    "requested_mode": cli_mode,
+      +                    "selected_by": _CLI_RUN_MODE_SOURCE,
+      +                    "effective_behavior": cli_behavior,
+      +                    "selected": True,
+      +                    "conflict": False,
+      +                    "core_loaded_at_request": _core_loaded,
+      +                }
+      +                _requests.append(cli_request)
+      +
+      +                if mode != cli_mode:
+      +                    overridden_request: Dict[str, Any] = {
+      +                        "timestamp_utc": now,
+      +                        "requested_mode": mode,
+      +                        "selected_by": selected_by,
+      +                        "effective_behavior": behavior,
+      +                        "selected": False,
+      +                        "conflict": False,
+      +                        "core_loaded_at_request": _core_loaded,
+      +                    }
+      +                    caller = _get_caller_info(selected_by)
+      +                    if caller:
+      +                        overridden_request["caller"] = caller
+      +                    if len(_requests) < _max_requests:
+      +                        _requests.append(overridden_request)
+      +
+      +                return cli_behavior
+      @@ -213,10 +258,14 @@ def select_mode(mode: str, selected_by: str, source: str) -> Dict[str, bool]:
+
+                   return behavior
+
+      -        # Subsequent selection — check for conflict
+      -        is_conflict = (behavior != _selected_behavior)
+      +        # Subsequent selection — check for conflict unless CLI override is active
+      +        is_conflict = (
+      +            False
+      +            if _selected_source == _CLI_RUN_MODE_SOURCE
+      +            else (behavior != _selected_behavior)
+      +        )
+      ```
+    - `python3 -m pytest tests/test_import_modes.py -k "Bootstrap or Conflict" -v` (exit 0): `collected 89 items / 70 deselected / 19 selected` -> `19 passed, 70 deselected in 1.18s`.
+    - `python3 -m mypy` (exit 0): `Success: no issues found in 58 source files` (note: `pubrun._bootstrap` remains listed under `pyproject.toml` `[[tool.mypy.overrides]]` `ignore_errors = true`).
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: Paste actual output of `python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py tests/test_manifest_schema.py -v` showing all new launch-time override tests (both env vars set by `pubrun run --mode`, `minimal` over `full`, `full` over `minimal`, `noconsole` over `full`, plain `PUBRUN_IMPORT_MODE` losing to `import pubrun.full`, invalid `PUBRUN_RUN_MODE_OVERRIDE=bogus` ignored, and `PUBRUN_IMPORT_CONFLICT=error` non-conflict on first and subsequent overridden imports) and existing tests passing with zero failures.
   - Observed evidence:
-  - Result: pending
+    - `python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py tests/test_manifest_schema.py -v` (exit 0):
+      ```text
+      collected 151 items
+      ...
+      tests/test_import_modes.py::TestConflictDetection::test_cli_run_mode_override_wins_without_conflict PASSED [ 22%]
+      tests/test_import_modes.py::TestConflictDetection::test_cli_run_mode_override_matching_mode_records_one_request PASSED [ 23%]
+      tests/test_import_modes.py::TestConflictDetection::test_cli_run_mode_override_subsequent_calls_non_conflicting_and_capped PASSED [ 23%]
+      tests/test_import_modes.py::TestConflictDetection::test_cli_run_mode_override_invalid_value_ignored PASSED [ 24%]
+      tests/test_import_modes.py::TestPubrunRunCommand::test_run_sets_import_mode_env_var PASSED [ 29%]
+      tests/test_import_modes.py::TestPubrunRunCommand::test_run_mode_minimal_overrides_explicit_pubrun_full PASSED [ 30%]
+      tests/test_import_modes.py::TestPubrunRunCommand::test_run_mode_noconsole_overrides_explicit_pubrun_full PASSED [ 31%]
+      tests/test_import_modes.py::TestPubrunRunCommand::test_plain_pubrun_import_mode_loses_to_explicit_pubrun_full PASSED [ 31%]
+      tests/test_import_modes.py::TestPubrunRunCommand::test_invalid_run_mode_override_ignored_for_explicit_pubrun_full PASSED [ 32%]
+      tests/test_import_modes.py::TestPubrunRunCommand::test_run_mode_override_no_conflict_under_error_policy[import pubrun.full as pubrun] PASSED [ 33%]
+      tests/test_import_modes.py::TestPubrunRunCommand::test_run_mode_override_no_conflict_under_error_policy[import pubrun\nimport pubrun.full\nimport pubrun.noconsole] PASSED [ 33%]
+      tests/test_import_modes.py::TestPubrunRunCommand::test_run_mode_override_no_conflict_under_error_policy[import pubrun.full\nimport pubrun.nopatch] PASSED [ 34%]
+      ...
+      tests/test_full_mode.py::TestFullModeBehavior::test_run_mode_full_overrides_explicit_pubrun_minimal PASSED [ 72%]
+      ...
+      ============================= 151 passed in 38.06s =============================
+      ```
+    - Full test suite `aw suite` (exit 0): `2150 passed in 183.29s (0:03:03)`.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Paste `git diff CHANGELOG.md docs/manifest.md docs/cli.md docs/functional_spec.md` showing the new `### Fixed` bullet under `## [Unreleased]`, `"cli:pubrun run --mode"` in `docs/manifest.md`, and `PUBRUN_RUN_MODE_OVERRIDE` documented in `docs/cli.md` and `docs/functional_spec.md`; paste output of a portable exit-0 Python check confirming zero em or en dashes (`\u2014`, `\u2013`) in all added (`+`) diff lines across those four files (e.g., `python3 -c 'import subprocess; diff = subprocess.check_output(["git", "diff", "--", "CHANGELOG.md", "docs/manifest.md", "docs/cli.md", "docs/functional_spec.md"], text=True); added = [l for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++")]; assert added, "empty diff"; bad = [l for l in added if "\u2014" in l or "\u2013" in l]; assert not bad, bad; print("OK added lines:", len(added))'`); and paste `python3 scripts/sanitize_paths.py --check --all` exiting 0.
   - Observed evidence:
-  - Result: pending
+    - `git diff CHANGELOG.md docs/manifest.md docs/cli.md docs/functional_spec.md`:
+      ````diff
+      diff --git a/CHANGELOG.md b/CHANGELOG.md
+      index 4e90349..e3b3161 100644
+      --- a/CHANGELOG.md
+      +++ b/CHANGELOG.md
+      @@ -118,6 +118,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+         the deep pages, never the README front door.
+
+       ### Fixed
+      +- **`pubrun run --mode <mode>` now overrides explicit in-code `import pubrun.<mode>` imports.**
+      +  Previously, `pubrun run --mode <mode>` set only `PUBRUN_IMPORT_MODE`, so an explicit submodule
+      +  import such as `import pubrun.full` took precedence over the launch-time CLI flag. The wrapper
+      +  now also sets `PUBRUN_RUN_MODE_OVERRIDE`, which takes precedence ahead of explicit submodule
+      +  imports, records `"cli:pubrun run --mode"` as the manifest import-mode provenance, and avoids
+      +  spurious import-mode conflicts under `[imports].on_conflict = "error"`. Setting
+      +  `PUBRUN_IMPORT_MODE` directly without `PUBRUN_RUN_MODE_OVERRIDE` still yields to explicit
+      +  in-code submodule imports.
+       - **A SIGTERM or SIGHUP no longer hangs the process when it arrives while pubrun holds an internal lock.**
+      diff --git a/docs/cli.md b/docs/cli.md
+      index fc9311c..c7d3cbb 100644
+      --- a/docs/cli.md
+      +++ b/docs/cli.md
+      @@ -730,7 +730,7 @@ pubrun mem [RUN_DIR] [--average] [-l LAST] [-w WIDTH] [run filters]
+
+       ### `run` — Import Mode Wrapper
+
+      -Spawns a child process with `PUBRUN_IMPORT_MODE` set in the environment. Useful for CI pipelines, shell scripts, Slurm submissions, and any case where you want to control pubrun behavior without modifying source code.
+      +Spawns a child process with `PUBRUN_RUN_MODE_OVERRIDE` and `PUBRUN_IMPORT_MODE` set in the environment so the launch-time `--mode` value overrides explicit in-code `import pubrun.<mode>` imports. Setting `PUBRUN_IMPORT_MODE` alone without `PUBRUN_RUN_MODE_OVERRIDE` still yields to explicit submodule imports. Useful for CI pipelines, shell scripts, Slurm submissions, and any case where you want to control pubrun behavior without modifying source code.
+      diff --git a/docs/functional_spec.md b/docs/functional_spec.md
+      index a171ddf..7adf0d9 100644
+      --- a/docs/functional_spec.md
+      +++ b/docs/functional_spec.md
+      @@ -542,13 +542,13 @@ pubrun clean [--dir PATH] [--older-than AGE] [--status STATUS] [-y|--yes] [--dry
+
+       ### 11.13 Import Mode Wrapper (`run`)
+
+      -Spawns a child process with `PUBRUN_IMPORT_MODE` set in the environment.
+      +Spawns a child process with `PUBRUN_RUN_MODE_OVERRIDE` and `PUBRUN_IMPORT_MODE` set in the environment.
+
+       ```
+       pubrun run [--mode MODE] -- COMMAND [ARGS...]
+       ```
+
+      -- Sets `PUBRUN_IMPORT_MODE` in the child process environment.
+      +- Sets `PUBRUN_RUN_MODE_OVERRIDE` alongside `PUBRUN_IMPORT_MODE` in the child process environment so the launch-time mode overrides explicit in-code `import pubrun.<mode>` imports (while plain `PUBRUN_IMPORT_MODE` still yields to explicit submodule imports).
+      diff --git a/docs/manifest.md b/docs/manifest.md
+      index 74e723d..5f9f244 100644
+      --- a/docs/manifest.md
+      +++ b/docs/manifest.md
+      @@ -526,8 +526,8 @@ Import-mode provenance metadata. Records how pubrun was imported, which mode was
+       |---|---|---|
+       | `selected_mode` | string \| null | The effective import mode: `"auto"`, `"noauto"`, `"nopatch"`, `"noconsole"`, `"minimal"`, or `"full"`. |
+       | `selected_behavior` | object \| null | Effective behavior flags: `{"auto_start": bool, "global_hooks": bool, "patch_subprocesses": bool, "patch_console": bool, "signal_hooks": bool}`. Includes `"force_console": true` only for `"full"`. |
+      -| `selected_by` | string \| null | Who selected the mode (for example `"pubrun"` or `"pubrun.<mode>"`, such as `"pubrun.noauto"` or `"pubrun.minimal"`). |
+      -| `selected_source` | string \| null | Where the selection came from: `"default"`, `"explicit"` (a `pubrun.<mode>` import), `"env:PUBRUN_IMPORT_MODE"`, `"env:PUBRUN_AUTO_START"`, `"config:[imports].mode"`, or `"config:[core].auto_start"`. |
+      +| `selected_by` | string \| null | Who selected the mode (for example `"pubrun"`, `"pubrun.<mode>"` such as `"pubrun.noauto"` or `"pubrun.minimal"`, or `"cli:pubrun run --mode"`). |
+      +| `selected_source` | string \| null | Where the selection came from: `"cli:pubrun run --mode"`, `"default"`, `"explicit"` (a `pubrun.<mode>` import), `"env:PUBRUN_IMPORT_MODE"`, `"env:PUBRUN_AUTO_START"`, `"config:[imports].mode"`, or `"config:[core].auto_start"`. |
+      ````
+    - Dash check on added diff lines (exit 0): `OK added lines: 13`.
+    - `python3 scripts/sanitize_paths.py --check --all` (exit 0): clean, zero findings.
+  - Result: pass
 
 ## Approval and execution gate
 

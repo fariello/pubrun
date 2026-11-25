@@ -118,6 +118,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **`pubrun run --mode <mode>` now overrides explicit in-code `import pubrun.<mode>` imports.**
+  Previously, `pubrun run --mode <mode>` set only `PUBRUN_IMPORT_MODE`, so an explicit submodule
+  import such as `import pubrun.full` took precedence over the launch-time CLI flag. The wrapper
+  now also sets `PUBRUN_RUN_MODE_OVERRIDE`, which takes precedence ahead of explicit submodule
+  imports, records `"cli:pubrun run --mode"` as the manifest import-mode provenance, and avoids
+  spurious import-mode conflicts under `[imports].on_conflict = "error"`. Setting
+  `PUBRUN_IMPORT_MODE` directly without `PUBRUN_RUN_MODE_OVERRIDE` still yields to explicit
+  in-code submodule imports.
 - **A SIGTERM or SIGHUP no longer hangs the process when it arrives while pubrun holds an internal lock.**
   Previously, a lethal signal arriving while pubrun was recording a file, an error, a subprocess, an
   event, or a resource sample (or while the background hardware thread was refreshing the manifest)

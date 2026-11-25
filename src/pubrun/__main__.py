@@ -3445,10 +3445,14 @@ def main() -> None:
         if not cmd_args:
             _print_error("No command specified. Usage: pubrun run --mode minimal -- python script.py")
             sys.exit(1)
-        # Spawn child process with PUBRUN_IMPORT_MODE set
+        # Spawn child process with PUBRUN_IMPORT_MODE and launch-time override set
         import subprocess as _sp
         import signal as _signal
-        child_env = {**os.environ, "PUBRUN_IMPORT_MODE": args.mode}
+        child_env = {
+            **os.environ,
+            "PUBRUN_IMPORT_MODE": args.mode,
+            "PUBRUN_RUN_MODE_OVERRIDE": args.mode,
+        }
         child_proc = None
         try:
             child_proc = _sp.Popen(cmd_args, env=child_env)

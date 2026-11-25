@@ -6,6 +6,7 @@ conflicts when multiple imports request different modes.
 
 It is intentionally free of heavy imports and side effects.
 """
+import os
 import sys
 import time
 import threading
@@ -125,7 +126,6 @@ def _resolve_conflict_policy() -> str:
     if _conflict_policy is not None:
         return _conflict_policy
 
-    import os
     # Check env first
     env_policy = os.environ.get("PUBRUN_IMPORT_CONFLICT", "").strip().lower()
     if env_policy in ("ignore", "warn", "error"):
@@ -169,11 +169,18 @@ def _get_caller_info(selected_by: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+_CLI_RUN_MODE_SOURCE = "cli:pubrun run --mode"
+
+
 def select_mode(mode: str, selected_by: str, source: str) -> Dict[str, bool]:
     """Select an import mode. First call wins; later calls detect conflicts.
 
+    When ``PUBRUN_RUN_MODE_OVERRIDE`` names a valid mode in ``MODES``, that
+    launch-time CLI override takes precedence over explicit in-code submodule
+    imports and subsequent in-code mode requests do not trigger conflicts.
+
     Args:
-        mode: One of "auto", "noauto", "nopatch", "minimal".
+        mode: One of "auto", "noauto", "nopatch", "noconsole", "minimal", "full".
         selected_by: Identifier for who selected this mode (e.g., "pubrun",
             "pubrun.noauto", "env:PUBRUN_IMPORT_MODE").
         source: Where the selection came from (e.g., "default", "config",
@@ -190,6 +197,44 @@ def select_mode(mode: str, selected_by: str, source: str) -> Dict[str, bool]:
 
     with _lock:
         if _selected_mode is None:
+            cli_mode = os.environ.get("PUBRUN_RUN_MODE_OVERRIDE", "").strip().lower()
+            if cli_mode in MODES:
+                cli_behavior = get_mode_behavior(cli_mode)
+                _selected_mode = cli_mode
+                _selected_behavior = cli_behavior
+                _selected_by = _CLI_RUN_MODE_SOURCE
+                _selected_source = _CLI_RUN_MODE_SOURCE
+                _selected_at_utc = now
+
+                cli_request: Dict[str, Any] = {
+                    "timestamp_utc": now,
+                    "requested_mode": cli_mode,
+                    "selected_by": _CLI_RUN_MODE_SOURCE,
+                    "effective_behavior": cli_behavior,
+                    "selected": True,
+                    "conflict": False,
+                    "core_loaded_at_request": _core_loaded,
+                }
+                _requests.append(cli_request)
+
+                if mode != cli_mode:
+                    overridden_request: Dict[str, Any] = {
+                        "timestamp_utc": now,
+                        "requested_mode": mode,
+                        "selected_by": selected_by,
+                        "effective_behavior": behavior,
+                        "selected": False,
+                        "conflict": False,
+                        "core_loaded_at_request": _core_loaded,
+                    }
+                    caller = _get_caller_info(selected_by)
+                    if caller:
+                        overridden_request["caller"] = caller
+                    if len(_requests) < _max_requests:
+                        _requests.append(overridden_request)
+
+                return cli_behavior
+
             # First selection — this wins
             _selected_mode = mode
             _selected_behavior = behavior
@@ -197,7 +242,7 @@ def select_mode(mode: str, selected_by: str, source: str) -> Dict[str, bool]:
             _selected_source = source
             _selected_at_utc = now
 
-            request = {
+            request: Dict[str, Any] = {
                 "timestamp_utc": now,
                 "requested_mode": mode,
                 "selected_by": selected_by,
@@ -213,10 +258,14 @@ def select_mode(mode: str, selected_by: str, source: str) -> Dict[str, bool]:
 
             return behavior
 
-        # Subsequent selection — check for conflict
-        is_conflict = (behavior != _selected_behavior)
+        # Subsequent selection — check for conflict unless CLI override is active
+        is_conflict = (
+            False
+            if _selected_source == _CLI_RUN_MODE_SOURCE
+            else (behavior != _selected_behavior)
+        )
 
-        request = {
+        subsequent_request: Dict[str, Any] = {
             "timestamp_utc": now,
             "requested_mode": mode,
             "selected_by": selected_by,
@@ -227,10 +276,10 @@ def select_mode(mode: str, selected_by: str, source: str) -> Dict[str, bool]:
         }
         caller = _get_caller_info(selected_by)
         if caller:
-            request["caller"] = caller
+            subsequent_request["caller"] = caller
 
         if len(_requests) < _max_requests:
-            _requests.append(request)
+            _requests.append(subsequent_request)
 
         if is_conflict:
             policy = _resolve_conflict_policy()

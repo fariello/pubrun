@@ -526,8 +526,8 @@ Import-mode provenance metadata. Records how pubrun was imported, which mode was
 |---|---|---|
 | `selected_mode` | string \| null | The effective import mode: `"auto"`, `"noauto"`, `"nopatch"`, `"noconsole"`, `"minimal"`, or `"full"`. |
 | `selected_behavior` | object \| null | Effective behavior flags: `{"auto_start": bool, "global_hooks": bool, "patch_subprocesses": bool, "patch_console": bool, "signal_hooks": bool}`. Includes `"force_console": true` only for `"full"`. |
-| `selected_by` | string \| null | Who selected the mode (for example `"pubrun"` or `"pubrun.<mode>"`, such as `"pubrun.noauto"` or `"pubrun.minimal"`). |
-| `selected_source` | string \| null | Where the selection came from: `"default"`, `"explicit"` (a `pubrun.<mode>` import), `"env:PUBRUN_IMPORT_MODE"`, `"env:PUBRUN_AUTO_START"`, `"config:[imports].mode"`, or `"config:[core].auto_start"`. |
+| `selected_by` | string \| null | Who selected the mode (for example `"pubrun"`, `"pubrun.<mode>"` such as `"pubrun.noauto"` or `"pubrun.minimal"`, or `"cli:pubrun run --mode"`). |
+| `selected_source` | string \| null | Where the selection came from: `"cli:pubrun run --mode"`, `"default"`, `"explicit"` (a `pubrun.<mode>` import), `"env:PUBRUN_IMPORT_MODE"`, `"env:PUBRUN_AUTO_START"`, `"config:[imports].mode"`, or `"config:[core].auto_start"`. |
 | `selected_at_utc` | float \| null | Timestamp when the mode was selected. |
 | `core_loaded` | bool | Whether `pubrun.core` was loaded (irreversible work started). |
 | `conflict_policy` | string \| null | The active conflict policy: `null` until a conflicting import-mode request occurs, then `"warn"`, `"error"`, or `"ignore"`. |

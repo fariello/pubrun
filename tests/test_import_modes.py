@@ -206,6 +206,7 @@ class TestBootSequenceIntegration:
 import os, sys, json
 os.chdir({str(tmp_path)!r})
 os.environ.pop('PUBRUN_IMPORT_MODE', None)
+os.environ.pop('PUBRUN_RUN_MODE_OVERRIDE', None)
 os.environ['PUBRUN_AUTO_START'] = 'true'
 for mod in list(sys.modules.keys()):
     if 'pubrun' in mod:
@@ -219,7 +220,7 @@ if run:
         result = subprocess.run(
             [PYTHON, "-c", script],
             capture_output=True, text=True, timeout=15,
-            env={**os.environ, "PUBRUN_AUTO_START": "true"}
+            env={**os.environ, "PUBRUN_AUTO_START": "true", "PUBRUN_RUN_MODE_OVERRIDE": ""}
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         data = json.loads(result.stdout.strip())
@@ -231,8 +232,9 @@ if run:
 # =============================================================================
 
 @pytest.fixture(autouse=False)
-def clean_bootstrap():
+def clean_bootstrap(monkeypatch):
     """Reset bootstrap state before and after each test that uses it."""
+    monkeypatch.delenv("PUBRUN_RUN_MODE_OVERRIDE", raising=False)
     reset_state()
     yield
     reset_state()
@@ -377,6 +379,82 @@ class TestConflictDetection:
         meta = get_import_metadata()
         assert len(meta["requests"]) <= 50
 
+    def test_cli_run_mode_override_wins_without_conflict(self, clean_bootstrap, monkeypatch):
+        monkeypatch.setenv("PUBRUN_RUN_MODE_OVERRIDE", "minimal")
+        monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "error")
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            behavior = select_mode("full", "pubrun.full", "explicit")
+        assert len(w) == 0
+        assert behavior == get_mode_behavior("minimal")
+        assert get_selected_mode() == "minimal"
+        assert get_selected_behavior() == get_mode_behavior("minimal")
+        meta = get_import_metadata()
+        assert meta["selected_mode"] == "minimal"
+        assert meta["selected_by"] == "cli:pubrun run --mode"
+        assert meta["selected_source"] == "cli:pubrun run --mode"
+        assert meta["conflicts_detected"] == 0
+        assert len(meta["requests"]) == 2
+        assert meta["requests"][0]["requested_mode"] == "minimal"
+        assert meta["requests"][0]["selected_by"] == "cli:pubrun run --mode"
+        assert meta["requests"][0]["effective_behavior"] == get_mode_behavior("minimal")
+        assert meta["requests"][0]["selected"] is True
+        assert meta["requests"][0]["conflict"] is False
+        assert meta["requests"][1]["requested_mode"] == "full"
+        assert meta["requests"][1]["selected_by"] == "pubrun.full"
+        assert meta["requests"][1]["effective_behavior"] == get_mode_behavior("full")
+        assert meta["requests"][1]["selected"] is False
+        assert meta["requests"][1]["conflict"] is False
+
+    def test_cli_run_mode_override_matching_mode_records_one_request(
+        self, clean_bootstrap, monkeypatch
+    ):
+        monkeypatch.setenv("PUBRUN_RUN_MODE_OVERRIDE", "minimal")
+        behavior = select_mode("minimal", "pubrun", "env:PUBRUN_IMPORT_MODE")
+        assert behavior == get_mode_behavior("minimal")
+        meta = get_import_metadata()
+        assert meta["selected_by"] == "cli:pubrun run --mode"
+        assert meta["selected_source"] == "cli:pubrun run --mode"
+        assert len(meta["requests"]) == 1
+        assert meta["requests"][0]["selected"] is True
+        assert meta["requests"][0]["conflict"] is False
+
+    def test_cli_run_mode_override_subsequent_calls_non_conflicting_and_capped(
+        self, clean_bootstrap, monkeypatch
+    ):
+        monkeypatch.setenv("PUBRUN_RUN_MODE_OVERRIDE", "minimal")
+        monkeypatch.setenv("PUBRUN_IMPORT_CONFLICT", "error")
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            first = select_mode("minimal", "pubrun", "env:PUBRUN_IMPORT_MODE")
+            second = select_mode("full", "pubrun.full", "explicit")
+            third = select_mode("noconsole", "pubrun.noconsole", "explicit")
+            for i in range(60):
+                select_mode("auto", f"caller_{i}", "explicit")
+        assert len(w) == 0
+        expected = get_mode_behavior("minimal")
+        assert first == expected
+        assert second == expected
+        assert third == expected
+        meta = get_import_metadata()
+        assert meta["conflicts_detected"] == 0
+        assert len(meta["requests"]) <= 50
+        assert meta["requests"][1]["requested_mode"] == "full"
+        assert meta["requests"][1]["selected"] is False
+        assert meta["requests"][1]["conflict"] is False
+        assert meta["requests"][2]["requested_mode"] == "noconsole"
+        assert meta["requests"][2]["selected"] is False
+        assert meta["requests"][2]["conflict"] is False
+
+    def test_cli_run_mode_override_invalid_value_ignored(self, clean_bootstrap, monkeypatch):
+        monkeypatch.setenv("PUBRUN_RUN_MODE_OVERRIDE", "bogus")
+        behavior = select_mode("full", "pubrun.full", "explicit")
+        assert behavior == get_mode_behavior("full")
+        meta = get_import_metadata()
+        assert meta["selected_mode"] == "full"
+        assert meta["selected_by"] == "pubrun.full"
+        assert meta["selected_source"] == "explicit"
+
 
 class TestImportMetadataInManifest:
     """Tests for pubrun_imports section in manifest and lock file."""
@@ -481,14 +559,182 @@ class TestPubrunRunCommand:
         assert result.returncode == 42
 
     def test_run_sets_import_mode_env_var(self):
-        """P3-R1: pubrun run --mode X actually sets PUBRUN_IMPORT_MODE=X in child."""
+        """P3-R1: pubrun run --mode X sets PUBRUN_IMPORT_MODE=X and PUBRUN_RUN_MODE_OVERRIDE=X in child."""
         result = subprocess.run(
-            [PYTHON, "-m", "pubrun", "run", "--mode", "nopatch", "--",
-             PYTHON, "-c", "import os; print(os.environ.get('PUBRUN_IMPORT_MODE', ''))"],
-            capture_output=True, text=True, timeout=10
+            [
+                PYTHON, "-m", "pubrun", "run", "--mode", "nopatch", "--",
+                PYTHON, "-c",
+                "import json, os; print(json.dumps({"
+                "'import_mode': os.environ.get('PUBRUN_IMPORT_MODE', ''), "
+                "'override': os.environ.get('PUBRUN_RUN_MODE_OVERRIDE', '')}))",
+            ],
+            capture_output=True, text=True, timeout=10,
         )
-        assert result.returncode == 0
-        assert result.stdout.strip() == "nopatch"
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip())
+        assert data["import_mode"] == "nopatch"
+        assert data["override"] == "nopatch"
+
+    def test_run_mode_minimal_overrides_explicit_pubrun_full(self, tmp_path):
+        script = (
+            "import json\n"
+            "import pubrun.full as pubrun\n"
+            "from pubrun._bootstrap import get_import_metadata\n"
+            "meta = get_import_metadata()\n"
+            "print(json.dumps({\n"
+            "    'active': pubrun.get_current_run() is not None,\n"
+            "    'selected_mode': meta['selected_mode'],\n"
+            "    'selected_by': meta['selected_by'],\n"
+            "    'selected_source': meta['selected_source'],\n"
+            "    'conflicts_detected': meta['conflicts_detected'],\n"
+            "}))\n"
+        )
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--mode", "minimal", "--", PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=20, cwd=str(tmp_path),
+            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_RUN_MODE_OVERRIDE": ""},
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["active"] is False
+        assert data["selected_mode"] == "minimal"
+        assert data["selected_by"] == "cli:pubrun run --mode"
+        assert data["selected_source"] == "cli:pubrun run --mode"
+        assert data["conflicts_detected"] == 0
+
+    def test_run_mode_noconsole_overrides_explicit_pubrun_full(self, tmp_path):
+        script = (
+            "import json\n"
+            "import pubrun.full as pubrun\n"
+            "from pubrun._bootstrap import get_import_metadata, get_selected_behavior\n"
+            "run = pubrun.get_current_run()\n"
+            "rd = str(run.run_dir) if run is not None else None\n"
+            "if run is not None:\n"
+            "    pubrun.stop()\n"
+            "console_mode = json.load(open(rd + '/manifest.json'))['console']['capture_mode'] if rd else None\n"
+            "meta = get_import_metadata()\n"
+            "beh = get_selected_behavior() or {}\n"
+            "print(json.dumps({\n"
+            "    'active': run is not None,\n"
+            "    'selected_mode': meta['selected_mode'],\n"
+            "    'selected_source': meta['selected_source'],\n"
+            "    'patch_console': beh.get('patch_console'),\n"
+            "    'console_mode': console_mode,\n"
+            "}))\n"
+        )
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--mode", "noconsole", "--", PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=25, cwd=str(tmp_path),
+            env={**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_RUN_MODE_OVERRIDE": ""},
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["active"] is True
+        assert data["selected_mode"] == "noconsole"
+        assert data["selected_source"] == "cli:pubrun run --mode"
+        assert data["patch_console"] is False
+        assert data["console_mode"] == "off"
+
+    def test_plain_pubrun_import_mode_loses_to_explicit_pubrun_full(self, tmp_path):
+        script = (
+            "import json\n"
+            "import pubrun.full as pubrun\n"
+            "from pubrun._bootstrap import get_import_metadata\n"
+            "run = pubrun.get_current_run()\n"
+            "if run is not None:\n"
+            "    pubrun.stop()\n"
+            "meta = get_import_metadata()\n"
+            "print(json.dumps({\n"
+            "    'active': run is not None,\n"
+            "    'selected_mode': meta['selected_mode'],\n"
+            "    'selected_source': meta['selected_source'],\n"
+            "}))\n"
+        )
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=25, cwd=str(tmp_path),
+            env={
+                **os.environ,
+                "PUBRUN_IMPORT_MODE": "minimal",
+                "PUBRUN_RUN_MODE_OVERRIDE": "",
+            },
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["active"] is True
+        assert data["selected_mode"] == "full"
+        assert data["selected_source"] == "explicit"
+
+    def test_invalid_run_mode_override_ignored_for_explicit_pubrun_full(self, tmp_path):
+        script = (
+            "import json\n"
+            "import pubrun.full as pubrun\n"
+            "from pubrun._bootstrap import get_import_metadata\n"
+            "run = pubrun.get_current_run()\n"
+            "if run is not None:\n"
+            "    pubrun.stop()\n"
+            "meta = get_import_metadata()\n"
+            "print(json.dumps({\n"
+            "    'active': run is not None,\n"
+            "    'selected_mode': meta['selected_mode'],\n"
+            "    'selected_source': meta['selected_source'],\n"
+            "}))\n"
+        )
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=25, cwd=str(tmp_path),
+            env={
+                **os.environ,
+                "PUBRUN_IMPORT_MODE": "",
+                "PUBRUN_RUN_MODE_OVERRIDE": "bogus",
+            },
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["active"] is True
+        assert data["selected_mode"] == "full"
+        assert data["selected_source"] == "explicit"
+
+    @pytest.mark.parametrize(
+        "import_block",
+        [
+            "import pubrun.full as pubrun",
+            "import pubrun\nimport pubrun.full\nimport pubrun.noconsole",
+            "import pubrun.full\nimport pubrun.nopatch",
+        ],
+    )
+    def test_run_mode_override_no_conflict_under_error_policy(self, import_block, tmp_path):
+        script = (
+            "import json, warnings\n"
+            "with warnings.catch_warnings(record=True) as w:\n"
+            "    warnings.simplefilter('always')\n"
+            + "\n".join(f"    {line}" for line in import_block.splitlines())
+            + "\n"
+            "from pubrun._bootstrap import get_import_metadata\n"
+            "meta = get_import_metadata()\n"
+            "print(json.dumps({\n"
+            "    'warnings': [str(x.message) for x in w],\n"
+            "    'selected_mode': meta['selected_mode'],\n"
+            "    'selected_source': meta['selected_source'],\n"
+            "    'conflicts_detected': meta['conflicts_detected'],\n"
+            "}))\n"
+        )
+        result = subprocess.run(
+            [PYTHON, "-m", "pubrun", "run", "--mode", "minimal", "--", PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=25, cwd=str(tmp_path),
+            env={
+                **os.environ,
+                "PUBRUN_IMPORT_MODE": "",
+                "PUBRUN_RUN_MODE_OVERRIDE": "",
+                "PUBRUN_IMPORT_CONFLICT": "error",
+            },
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["warnings"] == []
+        assert data["selected_mode"] == "minimal"
+        assert data["selected_source"] == "cli:pubrun run --mode"
+        assert data["conflicts_detected"] == 0
 
     def test_run_no_command_exits_1(self):
         result = subprocess.run(
@@ -544,6 +790,7 @@ class TestHookSuppression:
         script = f"""
 import os, sys, json, subprocess
 os.chdir({str(tmp_path)!r})
+os.environ.pop('PUBRUN_RUN_MODE_OVERRIDE', None)
 os.environ['PUBRUN_IMPORT_MODE'] = 'nopatch'
 # Clear cached modules
 for mod in list(sys.modules.keys()):
@@ -568,6 +815,7 @@ pubrun.stop()
         script = f"""
 import os, sys, json
 os.chdir({str(tmp_path)!r})
+os.environ.pop('PUBRUN_RUN_MODE_OVERRIDE', None)
 os.environ['PUBRUN_IMPORT_MODE'] = 'nopatch'
 for mod in list(sys.modules.keys()):
     if 'pubrun' in mod:
@@ -591,6 +839,7 @@ pubrun.stop()
         script = f"""
 import os, sys, json
 os.chdir({str(tmp_path)!r})
+os.environ.pop('PUBRUN_RUN_MODE_OVERRIDE', None)
 os.environ['PUBRUN_IMPORT_MODE'] = 'nopatch'
 for mod in list(sys.modules.keys()):
     if 'pubrun' in mod:
@@ -614,6 +863,7 @@ pubrun.stop()
         script = f"""
 import os, sys, json
 os.chdir({str(tmp_path)!r})
+os.environ.pop('PUBRUN_RUN_MODE_OVERRIDE', None)
 os.environ['PUBRUN_IMPORT_MODE'] = 'minimal'
 for mod in list(sys.modules.keys()):
     if 'pubrun' in mod:
@@ -641,6 +891,7 @@ print(json.dumps({{
         script = f"""
 import os, sys, json
 os.chdir({str(tmp_path)!r})
+os.environ.pop('PUBRUN_RUN_MODE_OVERRIDE', None)
 os.environ['PUBRUN_IMPORT_MODE'] = 'auto'
 for mod in list(sys.modules.keys()):
     if 'pubrun' in mod:
@@ -791,7 +1042,12 @@ print(json.dumps({{"active": run is not None}}))
         result = subprocess.run(
             [PYTHON, "-c", script],
             capture_output=True, text=True, timeout=15,
-            env={**os.environ, "PUBRUN_AUTO_START": "false", "PUBRUN_IMPORT_MODE": ""}
+            env={
+                **os.environ,
+                "PUBRUN_AUTO_START": "false",
+                "PUBRUN_IMPORT_MODE": "",
+                "PUBRUN_RUN_MODE_OVERRIDE": "",
+            }
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         data = json.loads(result.stdout.strip())
@@ -822,7 +1078,12 @@ class TestModeAliasApiParity:
 
     @staticmethod
     def _clean_env():
-        env = {**os.environ, "PUBRUN_IMPORT_MODE": "", "PUBRUN_AUTO_START": ""}
+        env = {
+            **os.environ,
+            "PUBRUN_IMPORT_MODE": "",
+            "PUBRUN_AUTO_START": "",
+            "PUBRUN_RUN_MODE_OVERRIDE": "",
+        }
         src_dir = pathlib.Path(__file__).resolve().parents[1] / "src"
         if src_dir.is_dir():
             existing = env.get("PYTHONPATH", "")
@@ -1032,7 +1293,7 @@ class TestModeModuleBackgroundCapture:
     def _env():
         env = {
             k: v for k, v in os.environ.items()
-            if k not in ("PUBRUN_IMPORT_MODE", "PUBRUN_AUTO_START")
+            if k not in ("PUBRUN_IMPORT_MODE", "PUBRUN_AUTO_START", "PUBRUN_RUN_MODE_OVERRIDE")
         }
         src_dir = pathlib.Path(__file__).resolve().parents[1] / "src"
         existing = env.get("PYTHONPATH", "")

@@ -542,13 +542,13 @@ pubrun clean [--dir PATH] [--older-than AGE] [--status STATUS] [-y|--yes] [--dry
 
 ### 11.13 Import Mode Wrapper (`run`)
 
-Spawns a child process with `PUBRUN_IMPORT_MODE` set in the environment.
+Spawns a child process with `PUBRUN_RUN_MODE_OVERRIDE` and `PUBRUN_IMPORT_MODE` set in the environment.
 
 ```
 pubrun run [--mode MODE] -- COMMAND [ARGS...]
 ```
 
-- Sets `PUBRUN_IMPORT_MODE` in the child process environment.
+- Sets `PUBRUN_RUN_MODE_OVERRIDE` alongside `PUBRUN_IMPORT_MODE` in the child process environment so the launch-time mode overrides explicit in-code `import pubrun.<mode>` imports (while plain `PUBRUN_IMPORT_MODE` still yields to explicit submodule imports).
 - Returns the child process exit code.
 - Does not create a run in the wrapper process itself.
 - The double dash (`--`) separates pubrun wrapper options from the target command.
