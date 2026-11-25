@@ -78,11 +78,10 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 2: Prove the randomized order on the full CI matrix
 
-- [ ] E-04 Run the local random-order checks named in "Required tests / validation" and record their output. Then ask the human to trigger `.github/workflows/ci.yml` by pushing to `main` or opening a pull request targeting `main` (`.github/workflows/ci.yml` runs only on `push` to `main` or `pull_request` targeting `main`, and pushing needs an explicit human instruction under the `AGENTS.md` agent execution contract). Record the conclusion of every CI job in that workflow run. If no push or pull request is authorized yet (for example in an unattended runner lane), record the local results, mark E-04 and V-04 `blocked` with that reason, and leave the plan in `pending/`. If any CI job fails on an order dependence, reproduce it locally with the job's seed, record the seed and the failing test, and stop: the fix is a new corrective plan, not an edit to this one.
+- [x] E-04 Run the local random-order checks named in "Required tests / validation" and record their output. Then ask the human to trigger `.github/workflows/ci.yml` by pushing to `main` or opening a pull request targeting `main` (`.github/workflows/ci.yml` runs only on `push` to `main` or `pull_request` targeting `main`, and pushing needs an explicit human instruction under the `AGENTS.md` agent execution contract). Record the conclusion of every CI job in that workflow run. If no push or pull request is authorized yet (for example in an unattended runner lane), record the local results, mark E-04 and V-04 `blocked` with that reason, and leave the plan in `pending/`. If any CI job fails on an order dependence, reproduce it locally with the job's seed, record the seed and the failing test, and stop: the fix is a new corrective plan, not an edit to this one.
   - Depends on: E-01, E-02, E-03
   - Expected outcome: Local runs exit 0 under three seeds plus the extra suites, each printing a `Using --randomly-seed=` header; and in the GitHub Actions run, all 25 jobs (`21 test` matrix jobs, `no-tui`, `extra-suites`, `packaging`, and `typecheck`) conclude `success`, with every `pytest` job printing a `Using --randomly-seed=` header in its log.
-  - Execution state: blocked
-  - Execution note: All four local randomized pytest runs passed (three `tests/` seeds with 2138 passed each, plus extra-suites with 90 passed and 3 skipped). Remote GitHub Actions CI validation of `.github/workflows/ci.yml` is blocked in this unattended runner lane because pushing to `main` or opening a pull request targeting `main` requires explicit human authorization.
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -312,7 +311,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     ```
   - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: (1) For each of the four local runs in "Required tests / validation" (the three `tests/` seeds and the extra suites), the pasted `Using --randomly-seed=` header line from the session header, the final pytest summary line, and `exit=0`. (2) After a human-authorized push to `main` or pull request targeting `main`, the GitHub Actions run URL and a pasted list (for example from `gh run view <id> --json jobs --jq '.jobs[] | [.name, .conclusion] | @tsv'`) showing all 25 jobs (the 21 `test` matrix jobs, `extra-suites`, `no-tui`, `packaging`, and `typecheck`) with conclusion `success`. (3) Pasted `Using --randomly-seed=` lines copied from CI logs (`gh run view <id> --log --job <job-id> | grep "Using --randomly-seed"`) covering all four edited CI commands: one Windows `test` job, one macOS `test` job, the `ubuntu-latest` Python 3.12 coverage-gate `test` job, `no-tui`, and `extra-suites`. If no push to `main` or pull request targeting `main` is authorized yet, mark this item `blocked` with that reason and keep the plan in `pending/`. The CI observation is produced by the commands E-01 edits.
   - Observed evidence:
     (1) Local randomized runs completed on Python 3.14.6, `pytest` 8.2.2, `pytest-randomly` 4.1.0, Linux:
@@ -340,8 +339,43 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
       ================== 90 passed, 3 skipped in 426.69s (0:07:06) ===================
       exit=0
       ```
-    (2) and (3) Blocked: this run is an unattended runner lane (`run-20261125T045452Z-2919714`) with no human authorization to push to `main` or open a pull request targeting `main` to trigger `.github/workflows/ci.yml`. Per E-04 and the `AGENTS.md` agent execution contract (never push without explicit human instruction), E-04 and V-04 are marked `blocked` and the plan remains in `pending/` until an attended session authorizes the push or pull request and records the 25-job CI run URL, job conclusions, and CI log `Using --randomly-seed=` lines.
-  - Result: blocked
+    (2) Human-authorized pull request targeting `main` (`ci/1kcrdn-pytest-randomly`, rebased onto `c4149a1`) ran `.github/workflows/ci.yml` at `https://github.com/fariello/pubrun/actions/runs/45665551186` (conclusion: `success`, 25/25 jobs green after one failed-job rerun of a transient macOS 3.10 SIGTERM test timeout):
+    ```text
+    no-tui	success
+    extra-suites	success
+    packaging	success
+    typecheck	success
+    test (ubuntu-24.04, 3.8)	success
+    test (ubuntu-24.04, 3.9)	success
+    test (ubuntu-latest, 3.10)	success
+    test (ubuntu-latest, 3.11)	success
+    test (ubuntu-latest, 3.12)	success
+    test (ubuntu-latest, 3.13)	success
+    test (ubuntu-latest, 3.14)	success
+    test (macos-latest, 3.8)	success
+    test (macos-latest, 3.9)	success
+    test (macos-latest, 3.10)	success
+    test (macos-latest, 3.11)	success
+    test (macos-latest, 3.12)	success
+    test (macos-latest, 3.13)	success
+    test (macos-latest, 3.14)	success
+    test (windows-latest, 3.8)	success
+    test (windows-latest, 3.9)	success
+    test (windows-latest, 3.10)	success
+    test (windows-latest, 3.11)	success
+    test (windows-latest, 3.12)	success
+    test (windows-latest, 3.13)	success
+    test (windows-latest, 3.14)	success
+    ```
+    (3) `Using --randomly-seed=` header lines captured from CI run `45665551186` covering all four edited CI commands:
+    ```text
+    test (windows-latest, 3.12) (job 139424635924): 2026-11-25T17:48:13.2001826Z Using --randomly-seed=1370511731
+    test (macos-latest, 3.12) (job 139424636828): 2026-11-25T18:13:38.4359660Z Using --randomly-seed=3713378198
+    test (ubuntu-latest, 3.12) (job 139424689943): 2026-11-25T17:46:36.1765149Z Using --randomly-seed=2571527921
+    no-tui (job 139424633908): 2026-11-25T17:42:57.0383171Z Using --randomly-seed=1378900357
+    extra-suites (job 139424634261): 2026-11-25T17:41:43.9845540Z Using --randomly-seed=3044598279
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 
