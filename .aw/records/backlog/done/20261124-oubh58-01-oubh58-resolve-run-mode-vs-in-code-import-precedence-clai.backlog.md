@@ -1,5 +1,5 @@
 - Id: oubh58
-- Status: graduated
+- Status: done
 - Graduated-To: oubh58
 - Set: oubh58
 - Work-Kind: bug
@@ -11,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-25 done (aw backlog): closed by aw agy run: IPD lhwy0t executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261124-oubh58-01-lhwy0t-implement-launch-time-pubrun-run-mode-override-over-in-code.ipd.md); evidence .aw/records/plans/executed/20261124-oubh58-01-lhwy0t-implement-launch-time-pubrun-run-mode-override-over-in-code.ipd.md
 - 2026-11-25 graduated (aw set): Graduated to review-ready IPD lhwy0t (Set: oubh58) per /askme decision
 - 2026-11-25 decision (the user via /askme): Implement the launch-time override so `pubrun run --mode <mode>` overrides an in-code `import pubrun.<mode>` import. No reason was given.
 - 2026-11-25 created (aw backlog): Resolve the false claim that pubrun run --mode overrides an in-code import pubrun.<mode>
