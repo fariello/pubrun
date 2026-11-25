@@ -80,35 +80,35 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Child plan execution confirmation
 
-- [ ] E-01 CONFIRM 1kcrdn REACHED executed
+- [x] E-01 CONFIRM 1kcrdn REACHED executed
   - Depends on: none
   - Expected outcome: `.aw/records/plans/executed/20261124-rand-mypy-01-1kcrdn-enable-pytest-randomly-in-the-ci-test-matrix.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 CONFIRM f5yisk REACHED executed
+- [x] E-02 CONFIRM f5yisk REACHED executed
   - Depends on: none
   - Expected outcome: `.aw/records/plans/executed/20261124-rand-mypy-02-f5yisk-clear-mypy-errors-in-import-mode-shims-and-bootstrap.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 CONFIRM qe6dad REACHED executed
+- [x] E-03 CONFIRM qe6dad REACHED executed
   - Depends on: none
   - Expected outcome: `.aw/records/plans/executed/20261124-rand-mypy-03-qe6dad-clear-mypy-errors-in-analysis-report-config-status-and-event.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 CONFIRM k6fs5k REACHED executed
+- [x] E-04 CONFIRM k6fs5k REACHED executed
   - Depends on: none
   - Expected outcome: `.aw/records/plans/executed/20261124-rand-mypy-04-k6fs5k-clear-mypy-errors-in-capture-modules.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 CONFIRM 0uxy76 REACHED executed
+- [x] E-05 CONFIRM 0uxy76 REACHED executed
   - Depends on: E-02, E-03, E-04
   - Expected outcome: `.aw/records/plans/executed/20261124-rand-mypy-05-0uxy76-clear-mypy-errors-in-core-and-tracker-and-retire-the-ignore.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-06 CONFIRM juoqy2 REACHED executed
+- [x] E-06 CONFIRM juoqy2 REACHED executed
   - Depends on: E-04, E-05
   - Expected outcome: `.aw/records/plans/executed/20261124-rand-mypy-06-juoqy2-type-check-windows-and-macos-platform-branches-in-ci.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Child IPDs, sequence, and dependencies
 
@@ -172,35 +172,59 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Confirm `.aw/records/plans/executed/20261124-rand-mypy-01-1kcrdn-enable-pytest-randomly-in-the-ci-test-matrix.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`, and paste the output of `aw ipd lint --phase post-transition` on that file showing exit 0 and `conforming`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    -    ✓  executed     plan        20261124-rand-mypy-01-1kcrdn  [low]  conforming
+    exit=0
+    ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Confirm `.aw/records/plans/executed/20261124-rand-mypy-02-f5yisk-clear-mypy-errors-in-import-mode-shims-and-bootstrap.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`, and paste the output of `aw ipd lint --phase post-transition` on that file showing exit 0 and `conforming`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    -    ✓  executed     plan        20261124-rand-mypy-02-f5yisk  [low]  conforming
+    exit=0
+    ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Confirm `.aw/records/plans/executed/20261124-rand-mypy-03-qe6dad-clear-mypy-errors-in-analysis-report-config-status-and-event.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`, and paste the output of `aw ipd lint --phase post-transition` on that file showing exit 0 and `conforming`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    -    ✓  executed     plan        20261124-rand-mypy-03-qe6dad  [low]  conforming
+    exit=0
+    ```
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Confirm `.aw/records/plans/executed/20261124-rand-mypy-04-k6fs5k-clear-mypy-errors-in-capture-modules.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`, and paste the output of `aw ipd lint --phase post-transition` on that file showing exit 0 and `conforming`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    -    ✓  executed     plan        20261124-rand-mypy-04-k6fs5k  [low]  conforming
+    exit=0
+    ```
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Confirm `.aw/records/plans/executed/20261124-rand-mypy-05-0uxy76-clear-mypy-errors-in-core-and-tracker-and-retire-the-ignore.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`, and paste the output of `aw ipd lint --phase post-transition` on that file showing exit 0 and `conforming`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    -    ✓  executed     plan        20261124-rand-mypy-05-0uxy76  [low]  conforming
+    exit=0
+    ```
+  - Result: pass
 
-- [ ] V-06 validates E-06
+- [x] V-06 validates E-06
   - Required evidence: Confirm `.aw/records/plans/executed/20261124-rand-mypy-06-juoqy2-type-check-windows-and-macos-platform-branches-in-ci.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`, and paste the output of `aw ipd lint --phase post-transition` on that file showing exit 0 and `conforming`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    -    ✓  executed     plan        20261124-rand-mypy-06-juoqy2  [low]  conforming
+    exit=0
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 
