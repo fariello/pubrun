@@ -6,7 +6,7 @@
 - Scope: In `src/pubrun/_config_boot.py`, replace the `mode_name is one of:` line of the `resolve_import_mode` docstring with a two-line sentence that lists the six valid import modes. No code, other docstring line, or other file changes.
 - Scope-Paths: src/pubrun/_config_boot.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Short-Description: List the six valid import modes in the resolve_import_mode docstring
@@ -18,12 +18,12 @@
 - Highest E allocated: 01
 - Author: opencode
 - Id: wtpyx0
-- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: wtpyx0 verified (set m8buxe, attempt 1).
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003 fixed; review record `.aw/records/reviews/20261124-m8buxe-01-wtpyx0-correct-the-mode-name-list-in-the-resolve-import-mode-docstr.review.md`.
 - 2026-11-25 to-review (opencode): graduated from backlog item `m8buxe` into a review-ready plan.
