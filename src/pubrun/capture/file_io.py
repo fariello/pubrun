@@ -65,7 +65,7 @@ _fallback_data_files_lock = threading.Lock()
 
 def _readlink_normalized(path: Union[str, os.PathLike]) -> str:
     """Return ``os.readlink(path)``, stripping Windows ``\\\\?\\`` drive prefixes."""
-    target = os.readlink(path)
+    target = os.readlink(os.fspath(path))
     if (
         os.name == "nt"
         and len(target) >= 6
@@ -761,7 +761,7 @@ def hash_file_checked(
             ):
                 if budget is not None:
                     budget.record_outcome("file_changed")
-                details = (
+                details: Dict[str, Any] = (
                     start_id.diff_details(end_id)
                     if end_id is not None
                     else {"reasons": ["fstat_unavailable_after_read"], "before": start_id.to_dict()}
@@ -2429,7 +2429,7 @@ class ProvenanceFileProxy:
             ):
                 stream_ready = True
 
-        if stream_ready:
+        if stream_ready and self._stream_hasher is not None:
             over_reason = budget.check_stream_progress(
                 self._stream_bytes, self._stream_elapsed
             )

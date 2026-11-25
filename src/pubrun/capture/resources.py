@@ -3,7 +3,7 @@ import sys
 import time
 import threading
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 from pubrun.capture.signals import finalization_lock, in_signal_finalization
 
@@ -282,12 +282,12 @@ class ResourceWatcher(threading.Thread):
         self.peak_tree_rss_bytes = 0
         self.end_tree_rss_bytes = 0
         self.peak_tree_cpu_percent = 0.0
-        self._last_times = None
-        self._last_clock = None
+        self._last_times: Optional[Any] = None
+        self._last_clock: Optional[float] = None
         # Tree CPU is computed from the delta of summed CPU-TIME (jiffies) over the wall
         # interval — NOT a sum of per-process instantaneous cpu_percent.
-        self._last_tree_jiffies = None
-        self._last_tree_clock = None
+        self._last_tree_jiffies: Optional[int] = None
+        self._last_tree_clock: Optional[float] = None
         self._clk_tck = 0
         try:
             self._clk_tck = os.sysconf("SC_CLK_TCK")
@@ -302,17 +302,17 @@ class ResourceWatcher(threading.Thread):
         # System-wide dynamic metrics (available RAM, load average, node iowait).
         # We track the "worst" observed point (min available RAM, max load) plus the
         # start and last samples, mirroring the peak/end shape used for RSS/CPU.
-        self._sysmem_start = None
-        self._sysmem_last = None
-        self._sysmem_min_available = None  # tuple carrying the sample at min available
-        self._load_start = None
-        self._load_last = None
-        self._load_max_1min = None
-        self._iowait_prev_raw = None       # last /proc/stat (iowait, total) sample
-        self._iowait_pct_last = None
-        self._iowait_pct_max = None
-        self._proc_io_start = None          # /proc/self/io cumulative counters at start
-        self._proc_io_last = None
+        self._sysmem_start: Optional[Dict[str, int]] = None
+        self._sysmem_last: Optional[Dict[str, int]] = None
+        self._sysmem_min_available: Optional[Dict[str, int]] = None  # tuple carrying the sample at min available
+        self._load_start: Optional[Dict[str, float]] = None
+        self._load_last: Optional[Dict[str, float]] = None
+        self._load_max_1min: Optional[float] = None
+        self._iowait_prev_raw: Optional[Tuple[int, int]] = None       # last /proc/stat (iowait, total) sample
+        self._iowait_pct_last: Optional[float] = None
+        self._iowait_pct_max: Optional[float] = None
+        self._proc_io_start: Optional[Dict[str, int]] = None          # /proc/self/io cumulative counters at start
+        self._proc_io_last: Optional[Dict[str, int]] = None
         if self._system_metrics:
             self._capture_system_start()
 
