@@ -84,6 +84,8 @@ def _decode_wait_status(status: Any) -> Any:
         except ValueError:
             return status
     # Python 3.8 fallback.
+    if sys.platform == "win32":
+        return status
     try:
         if os.WIFEXITED(status):
             return os.WEXITSTATUS(status)

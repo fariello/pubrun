@@ -66,8 +66,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - **Full-package static type checking with `mypy`.** Static type checking with `mypy` now checks
-  every module of the `pubrun` package on Linux. The per-module `ignore_errors` exemption list has
-  been removed from `pyproject.toml`.
+  every module of the `pubrun` package on Linux, and the CI `typecheck` job also runs
+  `mypy --platform win32` and `mypy --platform darwin` to check the Windows and macOS code paths.
+  The per-module `ignore_errors` exemption list has been removed from `pyproject.toml`.
 - **Testable entry points.** `pubrun.__main__.main()` now accepts an optional argument list without
   modifying `sys.argv`, and `print_report` and `print_resources_report` in
   `pubrun.report.diagnostics` accept a keyword-only `out` stream and raise `DiagnosticsError`

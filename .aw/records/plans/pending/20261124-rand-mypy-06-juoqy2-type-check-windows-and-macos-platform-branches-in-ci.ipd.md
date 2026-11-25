@@ -55,7 +55,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Fix the Windows-only errors
 
-- [ ] E-01 Route the five `os.sysconf` calls through a module-level helper in `src/pubrun/capture/liveness.py` and `src/pubrun/capture/resources.py`. In each file, add this function after the module-level constants that follow the imports (`src/pubrun/capture/liveness.py::_PLATFORM` after `_PLATFORM = sys.platform`; `src/pubrun/capture/resources.py::logger` after `logger = logging.getLogger("pubrun")`):
+- [x] E-01 Route the five `os.sysconf` calls through a module-level helper in `src/pubrun/capture/liveness.py` and `src/pubrun/capture/resources.py`. In each file, add this function after the module-level constants that follow the imports (`src/pubrun/capture/liveness.py::_PLATFORM` after `_PLATFORM = sys.platform`; `src/pubrun/capture/resources.py::logger` after `logger = logging.getLogger("pubrun")`):
   ```python
   def _sysconf(name: str) -> int:
       """Return ``os.sysconf(name)``; raises ``AttributeError`` where ``os.sysconf`` is absent (Windows)."""
@@ -64,17 +64,17 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   Then replace `os.sysconf(` with `_sysconf(` in `src/pubrun/capture/liveness.py::_get_start_time_linux`, `src/pubrun/capture/liveness.py::_get_cpu_linux`, `src/pubrun/capture/resources.py::_get_rss_linux`, `src/pubrun/capture/resources.py::_get_tree_rss_linux`, and `src/pubrun/capture/resources.py::ResourceWatcher.__init__` (the `self._clk_tck = os.sysconf("SC_CLK_TCK")` line). The three `resources.py` call sites already catch `AttributeError` or `Exception`, and the two `liveness.py` functions are dispatched only when `_PLATFORM == "linux"` (their `try` blocks catch `(OSError, IndexError, ValueError)` and `ZeroDivisionError`); where `os.sysconf` is absent, `getattr(os, "sysconf")` raises the same `AttributeError` that `os.sysconf` raised, so runtime behavior is unchanged at all five sites. The attribute is looked up at call time, so `tests/test_liveness.py::TestLivenessPlatformBranches.test_linux_start_time_nested_parens_and_missing_btime`'s `monkeypatch.setattr(liveness.os, "sysconf", ...)` keeps working.
   - Depends on: none
   - Expected outcome: `grep -n "os.sysconf" src/pubrun/capture/liveness.py src/pubrun/capture/resources.py` finds only the line inside each `_sysconf` docstring. `python3 -m pytest tests/test_liveness.py tests/test_resources.py -q` passes.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Add early returns that `mypy` recognizes as platform checks:
+- [x] E-02 Add early returns that `mypy` recognizes as platform checks:
   - `src/pubrun/capture/system_metrics.py::get_load_average`: insert `if sys.platform == "win32":` / `return None` as the first statement after the docstring. On Windows `os.getloadavg` does not exist, so the existing `except (OSError, AttributeError)` already returned `None`; the guard returns the same value without the failed call and its debug log line.
   - `src/pubrun/capture/subprocesses.py::_decode_wait_status`: insert `if sys.platform == "win32":` / `return status` immediately after the comment `# Python 3.8 fallback.` and before its `try:`. That point is reachable only when `os.name == "posix"`, which is never true on Windows, so the guard changes no result.
   - `sys` is already imported in both modules.
   - Depends on: none
   - Expected outcome: The diff of the two files is the two guards. `python3 -m pytest tests/test_env_capture.py tests/test_capture_engine_bugs.py tests/test_platform_capture_seams.py -q` passes.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Create `tests/test_platform_type_guards.py` (using Python 3.8-compatible syntax) with these behavioral tests (7 test cases):
+- [x] E-03 Create `tests/test_platform_type_guards.py` (using Python 3.8-compatible syntax) with these behavioral tests (7 test cases):
   - `test_get_load_average_is_none_on_windows_without_calling_getloadavg`: monkeypatches `sys.platform` to `"win32"` and `os.getloadavg` to a function that records each call and returns `(1.0, 2.0, 3.0)` (`raising=False`); asserts `system_metrics.get_load_average()` is `None` and the recorder saw no call.
   - `test_decode_wait_status_returns_raw_status_on_windows`: monkeypatches `sys.platform` to `"win32"` and deletes `os.waitstatus_to_exitcode` (`raising=False`) so the Python 3.8 fallback is reached on POSIX; asserts `subprocesses._decode_wait_status(256) == 256` (the fallback would decode it to `1`).
   - `test_sysconf_helper_raises_attribute_error_without_os_sysconf`, parametrized over `liveness` and `resources`: deletes `os.sysconf` (`raising=False`) and asserts `module._sysconf("SC_CLK_TCK")` raises `AttributeError` matching `"module 'os' has no attribute 'sysconf'"`.
@@ -82,14 +82,15 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - `test_resource_watcher_clock_ticks_zero_without_os_sysconf`: deletes `os.sysconf` (`raising=False`) and asserts `resources.ResourceWatcher(run_tracker=None, interval_seconds=1.0, system_metrics=False)._clk_tck == 0`.
   - Depends on: E-01, E-02
   - Expected outcome: All 7 pass on Linux, macOS, and Windows (each test sets the platform state it needs with `raising=False`), pass in 3 consecutive runs under `-p randomly`, and removing either guard of E-02 fails its test (V-03).
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Gate the platforms in CI
 
 - [ ] E-04 Extend the `typecheck` job in `.github/workflows/ci.yml` (added by executed plan `gzc672` E-04): after its `Run mypy` step (`run: mypy`), add two steps, `mypy --platform win32` and `mypy --platform darwin`, each with a `name:` that states the platform (for example `Type-check (Windows platform)` and `Type-check (macOS platform)`). Add no `continue-on-error`. Change no other job. Then document them: in `CONTRIBUTING.md#Development setup`, in the `mypy` paragraph, add the two commands to the code block and update the Linux-only wording to say that CI runs all three platform checks (`mypy`, `mypy --platform win32`, and `mypy --platform darwin`). In `CHANGELOG.md` `## [Unreleased]`, extend the `### Changed` entry that child `0uxy76` added (or add one) to say that CI also type-checks the Windows and macOS code paths. Follow `AGENTS.md#Agent execution contract`: no em or en dashes in the added prose. Finally, ask the human to trigger `.github/workflows/ci.yml` by pushing to `main` or opening a pull request targeting `main` (per `AGENTS.md#Matrix-validation discipline` and the never-push rule); if no push or pull request is authorized yet (for example in an unattended runner lane), record all local evidence, mark E-04 and V-04 `blocked` with that reason, and leave the plan in `pending/`.
   - Depends on: E-03
   - Expected outcome: `python3 -c "import yaml; j=yaml.safe_load(open('.github/workflows/ci.yml'))['jobs']['typecheck']; print('continue-on-error:', j.get('continue-on-error'), [s.get('continue-on-error') for s in j['steps']]); print([s.get('run') for s in j['steps'] if 'run' in s])"` shows no `continue-on-error` and lists `mypy`, `mypy --platform win32`, and `mypy --platform darwin`; each of the three commands, run locally after deleting `.mypy_cache/` with `--no-incremental`, prints `Success: no issues found in <N> source files` (`58` at review; re-derive at execution time if modules were added) and exits 0.
-  - Execution state: pending
+  - Execution state: blocked
+  - Execution note: Blocked awaiting a human-authorized push to main or pull request targeting main to observe the GitHub Actions run of .github/workflows/ci.yml (V-04 item 6). All local edits and local checks (V-04 items 1-5) are complete.
 
 ## Project conventions discovered (Step 0)
 
@@ -160,25 +161,337 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `git diff src/pubrun/capture/liveness.py src/pubrun/capture/resources.py` showing the two helpers and the five replaced calls and nothing else; pasted `grep -n "os.sysconf" src/pubrun/capture/liveness.py src/pubrun/capture/resources.py` showing only the docstring lines; and the last line of `python3 -m pytest tests/test_liveness.py tests/test_resources.py -q` showing all passed.
   - Observed evidence:
-  - Result: pending
+    `git diff src/pubrun/capture/liveness.py src/pubrun/capture/resources.py`:
+    ```diff
+    diff --git a/src/pubrun/capture/liveness.py b/src/pubrun/capture/liveness.py
+    index 389853f..2ac016f 100644
+    --- a/src/pubrun/capture/liveness.py
+    +++ b/src/pubrun/capture/liveness.py
+    @@ -15,6 +15,11 @@ from typing import Optional, Tuple
+     _PLATFORM = sys.platform  # 'linux', 'darwin', 'win32'
 
-- [ ] V-02 validates E-02
+
+    +def _sysconf(name: str) -> int:
+    +    """Return ``os.sysconf(name)``; raises ``AttributeError`` where ``os.sysconf`` is absent (Windows)."""
+    +    return int(getattr(os, "sysconf")(name))
+    +
+    +
+     # --------------------------------------------------------------------------
+     # PID liveness
+     # --------------------------------------------------------------------------
+    @@ -313,7 +318,7 @@ def _get_start_time_linux(pid: int) -> Optional[float]:
+             fields = stat_line[right_paren + 2:].split()
+             # Field index 19 (0-based after comm) = starttime in clock ticks
+             starttime_ticks = int(fields[19])
+    -        clock_ticks = os.sysconf("SC_CLK_TCK")
+    +        clock_ticks = _sysconf("SC_CLK_TCK")
+
+             # Get system boot time
+             with open("/proc/stat", "r") as f:
+    @@ -356,7 +361,7 @@ def _get_cpu_linux(pid: int) -> Optional[float]:
+             stime = int(fields[12])
+             starttime_ticks = int(fields[19])
+
+    -        clock_ticks = os.sysconf("SC_CLK_TCK")
+    +        clock_ticks = _sysconf("SC_CLK_TCK")
+             total_cpu_seconds = (utime + stime) / clock_ticks
+
+             # Elapsed time since process start
+    diff --git a/src/pubrun/capture/resources.py b/src/pubrun/capture/resources.py
+    index 04de990..93ac105 100644
+    --- a/src/pubrun/capture/resources.py
+    +++ b/src/pubrun/capture/resources.py
+    @@ -9,6 +9,11 @@ from pubrun.capture.signals import finalization_lock, in_signal_finalization
+
+     logger = logging.getLogger("pubrun")
+
+    +
+    +def _sysconf(name: str) -> int:
+    +    """Return ``os.sysconf(name)``; raises ``AttributeError`` where ``os.sysconf`` is absent (Windows)."""
+    +    return int(getattr(os, "sysconf")(name))
+    +
+     # _get_rss_windows uses GetProcessMemoryInfo through ctypes first and falls back to wmic.
+
+     # Per-poll timeout (seconds) for the macOS/Windows sampling subprocesses
+    @@ -93,7 +98,7 @@ def _get_rss_linux() -> int:
+                 # Second column in statm is Resident Set Size in pages
+                 pages = int(f.read().split()[1])
+                 # SC_PAGE_SIZE maps to physical RAM bytes
+    -            return pages * os.sysconf("SC_PAGE_SIZE")
+    +            return pages * _sysconf("SC_PAGE_SIZE")
+         except Exception as e:
+             logger.debug(f"pubrun failed Linux RSS poll: {e}")
+             return -1  # unreadable (distinct from a legitimate 0); see EC-12
+    @@ -159,7 +164,7 @@ def _get_tree_rss_linux() -> int:
+                 try:
+                     with open(f'/proc/{p}/statm', 'r') as f:
+                         pages = int(f.read().split()[1])
+    -                    total_rss += pages * os.sysconf("SC_PAGE_SIZE")
+    +                    total_rss += pages * _sysconf("SC_PAGE_SIZE")
+                 except (OSError, IndexError, ValueError):
+                     continue
+                 # Find children of this process (forked from any of its threads)
+    @@ -290,7 +295,7 @@ class ResourceWatcher(threading.Thread):
+             self._last_tree_clock: Optional[float] = None
+             self._clk_tck = 0
+             try:
+    -            self._clk_tck = os.sysconf("SC_CLK_TCK")
+    +            self._clk_tck = _sysconf("SC_CLK_TCK")
+             except (ValueError, OSError, AttributeError):
+                 self._clk_tck = 0
+             self._sys_plat = sys.platform
+    ```
+    `grep -n "os.sysconf" src/pubrun/capture/liveness.py src/pubrun/capture/resources.py`:
+    ```text
+    src/pubrun/capture/liveness.py:19:    """Return ``os.sysconf(name)``; raises ``AttributeError`` where ``os.sysconf`` is absent (Windows)."""
+    src/pubrun/capture/resources.py:14:    """Return ``os.sysconf(name)``; raises ``AttributeError`` where ``os.sysconf`` is absent (Windows)."""
+    ```
+    `python3 -m pytest tests/test_liveness.py tests/test_resources.py -q`:
+    ```text
+    39 passed in 0.75s
+    exit=0
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Pasted `git diff src/pubrun/capture/system_metrics.py src/pubrun/capture/subprocesses.py` showing only the two guards; and the last line of `python3 -m pytest tests/test_env_capture.py tests/test_capture_engine_bugs.py tests/test_platform_capture_seams.py -q` showing all passed.
   - Observed evidence:
-  - Result: pending
+    `git diff src/pubrun/capture/system_metrics.py src/pubrun/capture/subprocesses.py`:
+    ```diff
+    diff --git a/src/pubrun/capture/subprocesses.py b/src/pubrun/capture/subprocesses.py
+    index d3564e7..77f5e45 100644
+    --- a/src/pubrun/capture/subprocesses.py
+    +++ b/src/pubrun/capture/subprocesses.py
+    @@ -84,6 +84,8 @@ def _decode_wait_status(status: Any) -> Any:
+             except ValueError:
+                 return status
+         # Python 3.8 fallback.
+    +    if sys.platform == "win32":
+    +        return status
+         try:
+             if os.WIFEXITED(status):
+                 return os.WEXITSTATUS(status)
+    diff --git a/src/pubrun/capture/system_metrics.py b/src/pubrun/capture/system_metrics.py
+    index d1897c4..3d147dc 100644
+    --- a/src/pubrun/capture/system_metrics.py
+    +++ b/src/pubrun/capture/system_metrics.py
+    @@ -45,6 +45,8 @@ def get_system_memory(path: str = "/proc/meminfo") -> Optional[Dict[str, int]]:
 
-- [ ] V-03 validates E-03
+     def get_load_average() -> Optional[Dict[str, float]]:
+         """1/5/15-minute load averages via os.getloadavg(). None if unavailable."""
+    +    if sys.platform == "win32":
+    +        return None
+         try:
+             one, five, fifteen = os.getloadavg()
+             return {"1min": one, "5min": five, "15min": fifteen}
+    ```
+    `python3 -m pytest tests/test_env_capture.py tests/test_capture_engine_bugs.py tests/test_platform_capture_seams.py -q`:
+    ```text
+    98 passed in 1.62s
+    exit=0
+    ```
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: (1) Pasted content of `tests/test_platform_type_guards.py`. (2) Pasted output of the 3-run `-p randomly` loop from "Required tests / validation", every iteration exiting 0 with `7 passed`. (3) Pasted output of the two mutation checks in "Required tests / validation", each showing the `mypy --platform win32 --no-incremental` `error:` line for the mutated file with `exit=1` and the named `FAILED` test, then `git diff --stat src/pubrun` after the last restore showing only E-01 and E-02 files.
   - Observed evidence:
-  - Result: pending
+    (1) `tests/test_platform_type_guards.py`:
+    ```python
+    """Behavioral tests for cross-platform mypy guards and the _sysconf helpers."""
+    import os
+    import sys
+    from typing import Any, List, Tuple
+
+    import pytest
+
+    from pubrun.capture import liveness, resources, subprocesses, system_metrics
+
+
+    def test_get_load_average_is_none_on_windows_without_calling_getloadavg(
+        monkeypatch: Any,
+    ) -> None:
+        calls: List[int] = []
+
+        def fake_getloadavg() -> Tuple[float, float, float]:
+            calls.append(1)
+            return (1.0, 2.0, 3.0)
+
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(os, "getloadavg", fake_getloadavg, raising=False)
+
+        assert system_metrics.get_load_average() is None
+        assert calls == []
+
+
+    def test_decode_wait_status_returns_raw_status_on_windows(monkeypatch: Any) -> None:
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.delattr(os, "waitstatus_to_exitcode", raising=False)
+
+        assert subprocesses._decode_wait_status(256) == 256
+
+
+    @pytest.mark.parametrize("module", [liveness, resources], ids=["liveness", "resources"])
+    def test_sysconf_helper_raises_attribute_error_without_os_sysconf(
+        monkeypatch: Any, module: Any
+    ) -> None:
+        monkeypatch.delattr(os, "sysconf", raising=False)
+
+        with pytest.raises(AttributeError, match="module 'os' has no attribute 'sysconf'"):
+            module._sysconf("SC_CLK_TCK")
+
+
+    @pytest.mark.parametrize("module", [liveness, resources], ids=["liveness", "resources"])
+    def test_sysconf_helper_returns_int_from_os_sysconf(
+        monkeypatch: Any, module: Any
+    ) -> None:
+        def fake_sysconf(name: str) -> int:
+            assert name == "SC_PAGE_SIZE"
+            return 4096
+
+        monkeypatch.setattr(os, "sysconf", fake_sysconf, raising=False)
+
+        result = module._sysconf("SC_PAGE_SIZE")
+        assert result == 4096
+        assert type(result) is int
+
+
+    def test_resource_watcher_clock_ticks_zero_without_os_sysconf(monkeypatch: Any) -> None:
+        monkeypatch.delattr(os, "sysconf", raising=False)
+
+        watcher = resources.ResourceWatcher(
+            run_tracker=None,
+            interval_seconds=1.0,
+            system_metrics=False,
+        )
+        assert watcher._clk_tck == 0
+    ```
+    (2) 3-run `-p randomly` loop (`for i in 1 2 3; do python3 -m pytest tests/test_platform_type_guards.py -q -p randomly && echo "run $i ok" || exit 1; done`):
+    ```text
+    .......                                                                  [100%]
+    7 passed in 0.16s
+    run 1 ok
+    .......                                                                  [100%]
+    7 passed in 0.16s
+    run 2 ok
+    .......                                                                  [100%]
+    7 passed in 0.22s
+    run 3 ok
+    ```
+    (3) Mutation checks:
+    Mutation 1 (delete E-02 guard in `src/pubrun/capture/system_metrics.py::get_load_average`):
+    ```text
+    src/pubrun/capture/system_metrics.py:49: error: Module has no attribute "getloadavg"  [attr-defined]
+    Found 1 error in 1 file (checked 59 source files)
+    exit=1
+    FAILED tests/test_platform_type_guards.py::test_get_load_average_is_none_on_windows_without_calling_getloadavg
+    1 failed, 6 passed in 0.18s
+    pytest exit=1
+    ```
+    Mutation 2 (delete E-02 guard in `src/pubrun/capture/subprocesses.py::_decode_wait_status`):
+    ```text
+    src/pubrun/capture/subprocesses.py:88: error: Module has no attribute "WIFEXITED"  [attr-defined]
+    src/pubrun/capture/subprocesses.py:89: error: Module has no attribute "WEXITSTATUS"  [attr-defined]
+    src/pubrun/capture/subprocesses.py:90: error: Module has no attribute "WIFSIGNALED"  [attr-defined]
+    src/pubrun/capture/subprocesses.py:91: error: Module has no attribute "WTERMSIG"  [attr-defined]
+    Found 4 errors in 1 file (checked 59 source files)
+    exit=1
+    FAILED tests/test_platform_type_guards.py::test_decode_wait_status_returns_raw_status_on_windows
+    1 failed, 6 passed in 0.16s
+    pytest exit=1
+    ```
+    `git diff --stat src/pubrun` after restore:
+    ```text
+     src/pubrun/capture/liveness.py       |  9 +++++++--
+     src/pubrun/capture/resources.py      | 11 ++++++++---
+     src/pubrun/capture/subprocesses.py   |  2 ++
+     src/pubrun/capture/system_metrics.py |  2 ++
+     4 files changed, 19 insertions(+), 5 deletions(-)
+    ```
+  - Result: pass
 
 - [ ] V-04 validates E-04
   - Required evidence: (1) Pasted `git diff .github/workflows/ci.yml CONTRIBUTING.md CHANGELOG.md`. (2) Pasted output of the `yaml.safe_load` command from E-04 confirming no `continue-on-error` and listing `mypy`, `mypy --platform win32`, and `mypy --platform darwin`. (3) Pasted output of the three-platform `mypy --no-incremental` loop from "Required tests / validation" with three `Success: no issues found in <N> source files` lines (`58` at review; re-derive at execution time) and `exit=0` each. (4) Pasted output of `python3 -c 'import subprocess, sys; res = [(p, len(a), sum("\u2013" in l or "\u2014" in l for l in a)) for p in ("CONTRIBUTING.md", "CHANGELOG.md") for a in [[l[1:] for l in subprocess.check_output(["git", "diff", "-U0", "--", p], text=True).splitlines() if l.startswith("+") and not l.startswith("+++")]]]; print(res); sys.exit(0 if all(n > 0 and d == 0 for _, n, d in res) else 1)'` exiting 0 with positive added-line counts and zero en/em dashes for both files. (5) Pasted last line and `exit=0` of the combined 6-file pytest command and `python3 scripts/sanitize_paths.py --check --all` exiting 0. (6) After a human-authorized push to `main` or pull request targeting `main`, the CI run URL, the `typecheck` job log lines for all three `mypy` steps showing `Success: no issues found in <N> source files`, and the cross-platform `test` matrix conclusion (`success`); if no push or pull request is authorized yet, mark E-04 and V-04 `blocked` with that reason and keep the plan in `pending/`. This observation is produced by the GitHub Actions run of the workflow E-04 edits.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff .github/workflows/ci.yml CONTRIBUTING.md CHANGELOG.md`:
+    ~~~~diff
+    diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+    index b5b7ce6..31e4b63 100644
+    --- a/.github/workflows/ci.yml
+    +++ b/.github/workflows/ci.yml
+    @@ -151,3 +151,7 @@ jobs:
+             run: mypy --version
+           - name: Run mypy
+             run: mypy
+    +      - name: Type-check (Windows platform)
+    +        run: mypy --platform win32
+    +      - name: Type-check (macOS platform)
+    +        run: mypy --platform darwin
+    diff --git a/CHANGELOG.md b/CHANGELOG.md
+    index 9814e62..7b90f42 100644
+    --- a/CHANGELOG.md
+    +++ b/CHANGELOG.md
+    @@ -66,8 +66,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+     ### Changed
+     - **Full-package static type checking with `mypy`.** Static type checking with `mypy` now checks
+    -  every module of the `pubrun` package on Linux. The per-module `ignore_errors` exemption list has
+    -  been removed from `pyproject.toml`.
+    +  every module of the `pubrun` package on Linux, and the CI `typecheck` job also runs
+    +  `mypy --platform win32` and `mypy --platform darwin` to check the Windows and macOS code paths.
+    +  The per-module `ignore_errors` exemption list has been removed from `pyproject.toml`.
+     - **Testable entry points.** `pubrun.__main__.main()` now accepts an optional argument list without
+       modifying `sys.argv`, and `print_report` and `print_resources_report` in
+       `pubrun.report.diagnostics` accept a keyword-only `out` stream and raise `DiagnosticsError`
+    diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+    index 3e4b964..120d39b 100644
+    --- a/CONTRIBUTING.md
+    +++ b/CONTRIBUTING.md
+    @@ -30,11 +30,13 @@ To run the intake-script and benchmark contract suites that live outside `tests/
+     python -m pytest .github/scripts/ benchmarks/test_share_safety.py benchmarks/test_pull_submissions.py benchmarks/test_benchmarks.py
+     ```
+
+    -Run static type checks locally before opening a pull request. The GitHub Actions CI `typecheck` job runs the same check on Linux and fails on a type error in any module of the package:
+    +Run static type checks locally before opening a pull request. The GitHub Actions CI `typecheck` job runs all three platform checks (`mypy`, `mypy --platform win32`, and `mypy --platform darwin`) and fails on a type error in any module of the package:
+
+     ```bash
+     python -m pip install -e ".[dev,tui]"
+     mypy
+    +mypy --platform win32
+    +mypy --platform darwin
+     ```
+
+     ### Local hooks and path hygiene
+    ~~~~
+    (2) `yaml.safe_load` check:
+    ```text
+    continue-on-error: None [None, None, None, None, None, None, None]
+    ['pip install -e ".[dev,tui]"', 'mypy --version', 'mypy', 'mypy --platform win32', 'mypy --platform darwin']
+    ```
+    (3) Three-platform `mypy --no-incremental` loop (59 source files at current HEAD):
+    ```text
+    Success: no issues found in 59 source files
+    linux exit=0
+    Success: no issues found in 59 source files
+    win32 exit=0
+    Success: no issues found in 59 source files
+    darwin exit=0
+    ```
+    (4) Dash check on `CONTRIBUTING.md` and `CHANGELOG.md`:
+    ```text
+    [('CONTRIBUTING.md', 3, 0), ('CHANGELOG.md', 3, 0)]
+    dash exit=0
+    ```
+    (5) Combined 6-file pytest command and `scripts/sanitize_paths.py --check --all`:
+    ```text
+    144 passed in 2.27s
+    v04_pytest exit=0
+    sanitize exit=0
+    ```
+    (6) Blocked: no push to `main` or pull request targeting `main` is authorized in this unattended runner lane (`AGENTS.md#Agent execution contract` forbids pushing without an explicit human instruction, and `AGENTS.md#Matrix-validation discipline` requires observing the GitHub Actions run of `.github/workflows/ci.yml` before moving the plan to `executed/`). E-04 and V-04 stay `blocked` and the plan stays in `pending/` until a human authorizes a push or pull request and records the CI run URL, `typecheck` step outputs, and `test` matrix conclusion.
+  - Result: blocked
 
 ## Approval and execution gate
 

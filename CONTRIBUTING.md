@@ -30,11 +30,13 @@ To run the intake-script and benchmark contract suites that live outside `tests/
 python -m pytest .github/scripts/ benchmarks/test_share_safety.py benchmarks/test_pull_submissions.py benchmarks/test_benchmarks.py
 ```
 
-Run static type checks locally before opening a pull request. The GitHub Actions CI `typecheck` job runs the same check on Linux and fails on a type error in any module of the package:
+Run static type checks locally before opening a pull request. The GitHub Actions CI `typecheck` job runs all three platform checks (`mypy`, `mypy --platform win32`, and `mypy --platform darwin`) and fails on a type error in any module of the package:
 
 ```bash
 python -m pip install -e ".[dev,tui]"
 mypy
+mypy --platform win32
+mypy --platform darwin
 ```
 
 ### Local hooks and path hygiene

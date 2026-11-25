@@ -45,6 +45,8 @@ def get_system_memory(path: str = "/proc/meminfo") -> Optional[Dict[str, int]]:
 
 def get_load_average() -> Optional[Dict[str, float]]:
     """1/5/15-minute load averages via os.getloadavg(). None if unavailable."""
+    if sys.platform == "win32":
+        return None
     try:
         one, five, fifteen = os.getloadavg()
         return {"1min": one, "5min": five, "15min": fifteen}

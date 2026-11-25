@@ -151,3 +151,7 @@ jobs:
         run: mypy --version
       - name: Run mypy
         run: mypy
+      - name: Type-check (Windows platform)
+        run: mypy --platform win32
+      - name: Type-check (macOS platform)
+        run: mypy --platform darwin

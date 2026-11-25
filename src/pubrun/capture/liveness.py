@@ -15,6 +15,11 @@ from typing import Optional, Tuple
 _PLATFORM = sys.platform  # 'linux', 'darwin', 'win32'
 
 
+def _sysconf(name: str) -> int:
+    """Return ``os.sysconf(name)``; raises ``AttributeError`` where ``os.sysconf`` is absent (Windows)."""
+    return int(getattr(os, "sysconf")(name))
+
+
 # --------------------------------------------------------------------------
 # PID liveness
 # --------------------------------------------------------------------------
@@ -313,7 +318,7 @@ def _get_start_time_linux(pid: int) -> Optional[float]:
         fields = stat_line[right_paren + 2:].split()
         # Field index 19 (0-based after comm) = starttime in clock ticks
         starttime_ticks = int(fields[19])
-        clock_ticks = os.sysconf("SC_CLK_TCK")
+        clock_ticks = _sysconf("SC_CLK_TCK")
 
         # Get system boot time
         with open("/proc/stat", "r") as f:
@@ -356,7 +361,7 @@ def _get_cpu_linux(pid: int) -> Optional[float]:
         stime = int(fields[12])
         starttime_ticks = int(fields[19])
 
-        clock_ticks = os.sysconf("SC_CLK_TCK")
+        clock_ticks = _sysconf("SC_CLK_TCK")
         total_cpu_seconds = (utime + stime) / clock_ticks
 
         # Elapsed time since process start

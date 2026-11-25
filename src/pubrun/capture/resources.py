@@ -9,6 +9,11 @@ from pubrun.capture.signals import finalization_lock, in_signal_finalization
 
 logger = logging.getLogger("pubrun")
 
+
+def _sysconf(name: str) -> int:
+    """Return ``os.sysconf(name)``; raises ``AttributeError`` where ``os.sysconf`` is absent (Windows)."""
+    return int(getattr(os, "sysconf")(name))
+
 # _get_rss_windows uses GetProcessMemoryInfo through ctypes first and falls back to wmic.
 
 # Per-poll timeout (seconds) for the macOS/Windows sampling subprocesses
@@ -93,7 +98,7 @@ def _get_rss_linux() -> int:
             # Second column in statm is Resident Set Size in pages
             pages = int(f.read().split()[1])
             # SC_PAGE_SIZE maps to physical RAM bytes
-            return pages * os.sysconf("SC_PAGE_SIZE")
+            return pages * _sysconf("SC_PAGE_SIZE")
     except Exception as e:
         logger.debug(f"pubrun failed Linux RSS poll: {e}")
         return -1  # unreadable (distinct from a legitimate 0); see EC-12
@@ -159,7 +164,7 @@ def _get_tree_rss_linux() -> int:
             try:
                 with open(f'/proc/{p}/statm', 'r') as f:
                     pages = int(f.read().split()[1])
-                    total_rss += pages * os.sysconf("SC_PAGE_SIZE")
+                    total_rss += pages * _sysconf("SC_PAGE_SIZE")
             except (OSError, IndexError, ValueError):
                 continue
             # Find children of this process (forked from any of its threads)
@@ -290,7 +295,7 @@ class ResourceWatcher(threading.Thread):
         self._last_tree_clock: Optional[float] = None
         self._clk_tck = 0
         try:
-            self._clk_tck = os.sysconf("SC_CLK_TCK")
+            self._clk_tck = _sysconf("SC_CLK_TCK")
         except (ValueError, OSError, AttributeError):
             self._clk_tck = 0
         self._sys_plat = sys.platform
