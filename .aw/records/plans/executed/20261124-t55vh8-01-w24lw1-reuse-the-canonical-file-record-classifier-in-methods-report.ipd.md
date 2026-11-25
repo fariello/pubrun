@@ -6,7 +6,7 @@
 - Scope: Move the canonical classifier and its two helpers unchanged from `src/pubrun/report/reproducibility.py` into a new standard-library-only module `src/pubrun/report/file_evidence.py`. Make `reproducibility.py` and `methods.py` import the classifier from that module, and delete the copy in `methods.py`. Add behavior tests to `tests/test_reports.py` and a `CHANGELOG.md` entry. The `pubrun inspect` display badge in `src/pubrun/report/diagnostics.py` is out of scope (carrier `unf79v`).
 - Scope-Paths: src/pubrun/report/file_evidence.py, src/pubrun/report/reproducibility.py, src/pubrun/report/methods.py, tests/test_reports.py, CHANGELOG.md
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Methods reports count a data-file record as content-verified only when it carries a non-empty digest
@@ -19,12 +19,12 @@
 - Highest E allocated: 05
 - Author: opencode
 - Id: w24lw1
-- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: w24lw1 verified (set t55vh8, attempt 1).
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-25 to-review (aw set): graduated from backlog item t55vh8 into a review-ready plan
@@ -40,32 +40,32 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Shared classifier
 
-- [ ] E-01 Create `src/pubrun/report/file_evidence.py` that contains the three functions `_is_caller_digest_mismatch`, `_has_nonempty_digest_value`, and `_classify_file_record`, copied from `src/pubrun/report/reproducibility.py` as described in "Proposed changes" item 1.
+- [x] E-01 Create `src/pubrun/report/file_evidence.py` that contains the three functions `_is_caller_digest_mismatch`, `_has_nonempty_digest_value`, and `_classify_file_record`, copied from `src/pubrun/report/reproducibility.py` as described in "Proposed changes" item 1.
   - Depends on: none
   - Expected outcome: (1) The new file starts with a module docstring, then `from typing import Any, Dict`, then the three functions. (2) Each function body and docstring is identical to its current text in `reproducibility.py`. (3) The file imports nothing except `typing`, so importing it loads none of the report-only modules `pubrun.report.reproducibility`, `pubrun.report.utils`, and `pubrun.report.checks`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 In `src/pubrun/report/reproducibility.py`, delete the definitions of `_is_caller_digest_mismatch`, `_has_nonempty_digest_value`, and `_classify_file_record`, and import `_classify_file_record` and `_is_caller_digest_mismatch` from `pubrun.report.file_evidence`.
+- [x] E-02 In `src/pubrun/report/reproducibility.py`, delete the definitions of `_is_caller_digest_mismatch`, `_has_nonempty_digest_value`, and `_classify_file_record`, and import `_classify_file_record` and `_is_caller_digest_mismatch` from `pubrun.report.file_evidence`.
   - Depends on: E-01
   - Expected outcome: (1) `reproducibility.py` contains `from pubrun.report.file_evidence import _classify_file_record, _is_caller_digest_mismatch`, placed after the existing `from pubrun.report.utils import ...` line. (2) No `def` of the three names remains in `reproducibility.py`. (3) The callers inside `reproducibility.py::_assess_inputs_outputs` are unchanged and resolve to the imported functions. (4) No other line of the file changes.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 In `src/pubrun/report/methods.py`, delete the local `_classify_file_record` function and import `_classify_file_record` from `pubrun.report.file_evidence`.
+- [x] E-03 In `src/pubrun/report/methods.py`, delete the local `_classify_file_record` function and import `_classify_file_record` from `pubrun.report.file_evidence`.
   - Depends on: E-01
   - Expected outcome: (1) `methods.py` contains `from pubrun.report.file_evidence import _classify_file_record` with the other `pubrun.report` imports at the top of the file. (2) The local `def _classify_file_record` is gone. (3) `_summarize_manifest_data_files` is unchanged and calls the imported function. (4) `methods.py` does not import `pubrun.report.reproducibility`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Tests and changelog
 
-- [ ] E-04 Add the three behavior tests described in "Proposed changes" item 4 to the `TestMethodsFileProvenanceDistinction` class in `tests/test_reports.py`.
+- [x] E-04 Add the three behavior tests described in "Proposed changes" item 4 to the `TestMethodsFileProvenanceDistinction` class in `tests/test_reports.py`.
   - Depends on: E-03
   - Expected outcome: (1) `test_digestless_completed_records_are_not_counted_verified` asserts the exact file-provenance sentence of the single-run Markdown and LaTeX reports and of the `generate_report_multi` aggregate note. (2) `test_shared_classifier_requires_nonempty_digest` is parametrized over the 14 records of the "Findings" table and asserts the "canonical" column. (3) `test_run_stop_writes_verified_methods_without_loading_reproducibility` runs a child Python process and asserts its output. (4) The three tests pass with E-01 to E-03 applied. When the `methods.py` change of E-03 is reverted, the first test and the cases for rows 1, 2, 3, and 6 of the second test fail.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Add one bullet to `CHANGELOG.md` under `## [Unreleased]`, `### Fixed`, with the wording in "Proposed changes" item 5.
+- [x] E-05 Add one bullet to `CHANGELOG.md` under `## [Unreleased]`, `### Fixed`, with the wording in "Proposed changes" item 5.
   - Depends on: E-03
   - Expected outcome: (1) The bullet is the first entry under the `### Fixed` heading of `## [Unreleased]`. (2) It says that methods reports no longer count a record without a digest value as verified. (3) It contains no em or en dash.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -294,30 +294,306 @@ flowchart TD
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: (1) Paste `git status --short -- src/pubrun/report/file_evidence.py` showing the new file, and paste the file's first 10 lines. (2) Paste the output of `diff <(git show HEAD:src/pubrun/report/reproducibility.py | sed -n '/^def _is_caller_digest_mismatch/,/^    return "identified_only"$/p') <(sed -n '/^def _is_caller_digest_mismatch/,/^    return "identified_only"$/p' src/pubrun/report/file_evidence.py)`, which must be empty, and its exit status `0`. Run this before you commit, while `HEAD` still holds the original `reproducibility.py`; after a commit, replace `HEAD` with the parent of your first commit for this plan. (3) Paste the output of `PYTHONPATH=src python3 -c "import sys, pubrun.report.file_evidence, pubrun.report.methods; print([m for m in ('pubrun.report.reproducibility', 'pubrun.report.utils', 'pubrun.report.checks') if m in sys.modules])"`, which must be `[]`.
   - Observed evidence:
-  - Result: pending
+    (1) `git status --short -- src/pubrun/report/file_evidence.py` and `head -n 10 src/pubrun/report/file_evidence.py`:
+    ```text
+    ?? src/pubrun/report/file_evidence.py
+    """Classify recorded ``data_files`` records by evidence strength and hashing outcome.
 
-- [ ] V-02 validates E-02
+    This module is the single definition shared by the reproducibility assessment and the
+    methods report. It imports only the standard library, so the runtime capture path
+    (which writes ``methods.md`` when a run stops) can use it.
+    """
+
+    from typing import Any, Dict
+
+
+    ```
+    (2) `diff <(git show HEAD:src/pubrun/report/reproducibility.py | sed -n '/^def _is_caller_digest_mismatch/,/^    return "identified_only"$/p') <(sed -n '/^def _is_caller_digest_mismatch/,/^    return "identified_only"$/p' src/pubrun/report/file_evidence.py)` (run before commit, against `HEAD` `afbc4f9`): empty output, `diff_exit=0`.
+    (3) `PYTHONPATH=src python3 -c "import sys, pubrun.report.file_evidence, pubrun.report.methods; print([m for m in ('pubrun.report.reproducibility', 'pubrun.report.utils', 'pubrun.report.checks') if m in sys.modules])"`:
+    ```text
+    []
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: (1) Paste `git diff -- src/pubrun/report/reproducibility.py`, showing only the added `from pubrun.report.file_evidence import ...` line and the deleted three definitions. (2) Paste the output of `grep -cE '^def (_is_caller_digest_mismatch|_has_nonempty_digest_value|_classify_file_record)\(' src/pubrun/report/reproducibility.py || true`, which must be `0`. (3) Paste the summary line of `python3 -m pytest tests/test_reproducibility_assessment.py tests/test_report_checks_bugs.py tests/test_report_subpackage_integrity.py --no-cov -q`, which must show no failures.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- src/pubrun/report/reproducibility.py`:
+    ```diff
+    diff --git a/src/pubrun/report/reproducibility.py b/src/pubrun/report/reproducibility.py
+    index 1c37a97..b58d08f 100644
+    --- a/src/pubrun/report/reproducibility.py
+    +++ b/src/pubrun/report/reproducibility.py
+    @@ -25,6 +25,7 @@ from pathlib import Path
+     from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-- [ ] V-03 validates E-03
+     from pubrun.report.utils import HYDRABLE_SECTIONS, HydrationReport
+    +from pubrun.report.file_evidence import _classify_file_record, _is_caller_digest_mismatch
+
+     # Severity levels (textual, authoritative; color is optional reinforcement only).
+     INFO = "info"
+    @@ -863,67 +864,6 @@ def _record_is_asserted(rec: Dict[str, Any]) -> bool:
+         return isinstance(caller_digest, dict) and bool(caller_digest.get("value")) and not has_observed_digest
+
+
+    -def _is_caller_digest_mismatch(rec: Dict[str, Any]) -> bool:
+    -    """Return True when a record indicates a verified caller digest mismatched content."""
+    -    if rec.get("hash_status_detail") == "caller_digest_mismatch":
+    -        return True
+    -    caller_digest = rec.get("caller_digest")
+    -    if isinstance(caller_digest, dict) and caller_digest.get("verified") is False:
+    -        return True
+    -    return False
+    -
+    -
+    -def _has_nonempty_digest_value(rec: Dict[str, Any]) -> bool:
+    -    """Return True when a record carries a non-empty digest, sha256, or md5 value."""
+    -    digest = rec.get("digest")
+    -    if isinstance(digest, dict):
+    -        val = digest.get("value")
+    -        if isinstance(val, str) and val.strip():
+    -            return True
+    -    sha256 = rec.get("sha256")
+    -    if isinstance(sha256, str) and sha256.strip():
+    -        return True
+    -    md5 = rec.get("md5")
+    -    if isinstance(md5, str) and md5.strip():
+    -        return True
+    -    return False
+    -
+    -
+    -def _classify_file_record(rec: Dict[str, Any]) -> str:
+    -    """Classify a single ``data_files`` record by evidence strength and hashing outcome."""
+    -    hash_status = rec.get("hash_status")
+    -    evidence_strength = rec.get("evidence_strength")
+    -    evidence_source = rec.get("evidence_source")
+    -
+    -    if hash_status == "file_changed" or rec.get("change_detected") is True:
+    -        return "changed"
+    -    if hash_status == "failed" or _is_caller_digest_mismatch(rec):
+    -        return "failed"
+    -    if hash_status == "unavailable":
+    -        return "unavailable"
+    -    if hash_status == "over_budget":
+    -        return "over_budget"
+    -    if hash_status == "completed" or evidence_strength == "verified_content":
+    -        return "verified" if _has_nonempty_digest_value(rec) else "identified_only"
+    -    if (
+    -        hash_status == "asserted"
+    -        or evidence_strength == "asserted_content"
+    -        or evidence_source == "asserted"
+    -    ):
+    -        return "asserted"
+    -    if hash_status == "pending":
+    -        return "pending"
+    -    if hash_status == "disabled" or evidence_strength in ("metadata_only", "path_only"):
+    -        return "identified_only"
+    -    if hash_status is None and evidence_strength is None and evidence_source is None:
+    -        return "verified" if _has_nonempty_digest_value(rec) else "identified_only"
+    -    if evidence_strength == "unavailable":
+    -        return "unavailable"
+    -    if evidence_strength == "changed_unverified":
+    -        return "changed"
+    -    return "identified_only"
+    -
+    -
+     def _assess_inputs_outputs(
+         manifest: Dict[str, Any],
+     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    ```
+    (2) `grep -cE '^def (_is_caller_digest_mismatch|_has_nonempty_digest_value|_classify_file_record)\(' src/pubrun/report/reproducibility.py || true`:
+    ```text
+    0
+    ```
+    (3) `python3 -m pytest tests/test_reproducibility_assessment.py tests/test_report_checks_bugs.py tests/test_report_subpackage_integrity.py --no-cov -q`:
+    ```text
+    82 passed in 7.22s
+    ```
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: (1) Paste `git diff -- src/pubrun/report/methods.py`, showing the added import and the deleted local function and nothing else. (2) Paste the output of `grep -c 'reproducibility' src/pubrun/report/methods.py`, which must equal the count at `HEAD` (`1`, a comment in `generate_report`), and of `grep -c '^def _classify_file_record' src/pubrun/report/methods.py || true`, which must be `0`. (3) Paste the three lines printed by the "Report text today" probe in "Findings", produced by `src/pubrun/report/methods.py::generate_report` and `::generate_report_multi` through `::_summarize_manifest_data_files`; they must equal the three "after" lines in "Findings".
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- src/pubrun/report/methods.py`:
+    ```diff
+    diff --git a/src/pubrun/report/methods.py b/src/pubrun/report/methods.py
+    index dad2e12..011f235 100644
+    --- a/src/pubrun/report/methods.py
+    +++ b/src/pubrun/report/methods.py
+    @@ -2,6 +2,7 @@ import math
+     from typing import Dict, Any, List, Optional
+     from pubrun.capture.packages import normalize_package_name
+     from pubrun.report.templates import MARKDOWN_TEMPLATE, LATEX_TEMPLATE, HIGHLIGHT_PACKAGES
+    +from pubrun.report.file_evidence import _classify_file_record
 
-- [ ] V-04 validates E-04
+     _NORMALIZED_HIGHLIGHTS = {normalize_package_name(n) for n in HIGHLIGHT_PACKAGES}
+
+    @@ -39,52 +40,6 @@ def _escape_latex(text: str) -> str:
+         return text.replace("_", "\\_").replace("%", "\\%")
+
+
+    -def _classify_file_record(rec: Dict[str, Any]) -> str:
+    -    """Classify a single ``data_files`` record using canonical evidence precedence."""
+    -    hash_status = rec.get("hash_status")
+    -    evidence_strength = rec.get("evidence_strength")
+    -    evidence_source = rec.get("evidence_source")
+    -    caller_digest = rec.get("caller_digest")
+    -
+    -    if hash_status == "file_changed" or rec.get("change_detected") is True:
+    -        return "changed"
+    -    if (
+    -        hash_status == "failed"
+    -        or rec.get("hash_status_detail") == "caller_digest_mismatch"
+    -        or (isinstance(caller_digest, dict) and caller_digest.get("verified") is False)
+    -    ):
+    -        return "failed"
+    -    if hash_status == "unavailable":
+    -        return "unavailable"
+    -    if hash_status == "over_budget":
+    -        return "over_budget"
+    -    if hash_status == "completed" or evidence_strength == "verified_content":
+    -        return "verified"
+    -    if (
+    -        hash_status == "asserted"
+    -        or evidence_strength == "asserted_content"
+    -        or evidence_source == "asserted"
+    -    ):
+    -        return "asserted"
+    -    if hash_status == "pending":
+    -        return "pending"
+    -    if hash_status == "disabled" or evidence_strength in ("metadata_only", "path_only"):
+    -        return "identified_only"
+    -    if hash_status is None and evidence_strength is None and evidence_source is None:
+    -        digest = rec.get("digest")
+    -        has_digest = (
+    -            isinstance(digest, dict)
+    -            and isinstance(digest.get("value"), str)
+    -            and bool(digest["value"].strip())
+    -        ) or (isinstance(rec.get("sha256"), str) and bool(rec["sha256"].strip()))
+    -        return "verified" if has_digest else "identified_only"
+    -    if evidence_strength == "unavailable":
+    -        return "unavailable"
+    -    if evidence_strength == "changed_unverified":
+    -        return "changed"
+    -    return "identified_only"
+    -
+    -
+     def _summarize_manifest_data_files(manifest: Any) -> Dict[str, int]:
+         """Summarize ``data_files`` evidence counts for a single manifest."""
+         counts: Dict[str, int] = {
+    ```
+    (2) `grep -c 'reproducibility' src/pubrun/report/methods.py` -> `1`; `grep -c '^def _classify_file_record' src/pubrun/report/methods.py || true` -> `0`.
+    (3) "Report text today" probe output:
+    ```text
+    Data file provenance tracked 4 file records (1 with independently verified content digest, 3 recorded by path or stat metadata only).
+    Data file provenance tracked 4 file records (1 with independently verified content digest, 3 recorded by path or stat metadata only).
+    data file provenance across 2 of 2 runs tracked 8 file records (2 with independently verified content digests, 6 recorded by path or stat metadata only).
+    ```
+  - Result: pass
+
+- [x] V-04 validates E-04
   - Required evidence: (1) Paste every result line and the summary of `python3 -m pytest tests/test_reports.py --no-cov -q -v -k "digestless or shared_classifier or run_stop_writes"`: 16 lines, each `PASSED`. The child-process test observes `methods.md` written by `src/pubrun/writer.py::ArtifactWriter.write_artifacts` during `pubrun.stop()` in the process that the test starts (E-04). (2) Paste the failing test names and the summary line of the mutation check in "Required tests / validation", then `git diff --stat -- src/pubrun/report/methods.py` after re-applying and deleting `tmp/w24lw1-methods.patch`. (3) Paste the summary line of `python3 -m pytest tests/test_reports.py tests/test_methods_multi.py tests/test_reproducibility_assessment.py tests/test_report_subpackage_integrity.py tests/test_report_checks_bugs.py tests/test_cli.py --no-cov -q`. (4) Paste the summary line of `aw suite --no-cache` (or `python3 -m pytest -q` if `aw suite` is unavailable); for any failure, paste the same test's result on unmodified `HEAD`. (5) Paste the summary line of the offline Python 3.9 `uv run` command in "Required tests / validation", or the reason it could not run offline plus `python3 -m py_compile src/pubrun/report/file_evidence.py` exiting 0. (6) Paste `mypy; echo "exit=$?"` output showing `Success: no issues found in <N> source files` (`59` at review; re-derive at execution time) and `exit=0`. (7) Paste the output of `ruff check --select F src/pubrun/report/file_evidence.py src/pubrun/report/reproducibility.py src/pubrun/report/methods.py tests/test_reports.py` (showing no new findings; at most the pre-existing `F401` on `pathlib.Path`), and the `Found N errors.` line of `ruff check src/pubrun/report/file_evidence.py src/pubrun/report/reproducibility.py src/pubrun/report/methods.py` with `N` at most 275. (8) State the operating system and the Python versions that ran the tests, and that the CI matrix was not run.
   - Observed evidence:
-  - Result: pending
+    (1) `python3 -m pytest tests/test_reports.py --no-cov -q -v -k "digestless or shared_classifier or run_stop_writes"` gave `16 passed, 57 deselected in 1.63s` (with `-q -v` canceling verbosity to dot output in pytest 8.2.2); re-running with `-v` (`python3 -m pytest tests/test_reports.py --no-cov -v -k "digestless or shared_classifier or run_stop_writes"`) printed all 16 `PASSED` lines:
+    ```text
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_digestless_completed_records_are_not_counted_verified PASSED [  6%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec0-identified_only] PASSED [ 12%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec1-identified_only] PASSED [ 18%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec2-identified_only] PASSED [ 25%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec3-verified] PASSED [ 31%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec4-verified] PASSED [ 37%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec5-verified] PASSED [ 43%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec6-identified_only] PASSED [ 50%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec7-asserted] PASSED [ 56%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec8-changed] PASSED [ 62%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec9-failed] PASSED [ 68%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec10-over_budget] PASSED [ 75%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec11-pending] PASSED [ 81%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec12-identified_only] PASSED [ 87%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec13-unavailable] PASSED [ 93%]
+    tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_run_stop_writes_verified_methods_without_loading_reproducibility PASSED [100%]
 
-- [ ] V-05 validates E-05
+    ====================== 16 passed, 57 deselected in 1.91s =======================
+    ```
+    (2) Mutation check (with `src/pubrun/report/methods.py` temporarily reverted via `tmp/w24lw1-methods.patch`):
+    ```text
+    FAILED tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_digestless_completed_records_are_not_counted_verified
+    FAILED tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec0-identified_only]
+    FAILED tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec1-identified_only]
+    FAILED tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec2-identified_only]
+    FAILED tests/test_reports.py::TestMethodsFileProvenanceDistinction::test_shared_classifier_requires_nonempty_digest[rec5-verified]
+    5 failed, 11 passed, 57 deselected in 1.86s
+    ```
+    After re-applying and deleting `tmp/w24lw1-methods.patch`, `git diff --stat -- src/pubrun/report/methods.py`:
+    ```text
+     src/pubrun/report/methods.py | 47 +-------------------------------------------
+     1 file changed, 1 insertion(+), 46 deletions(-)
+    ```
+    (3) `python3 -m pytest tests/test_reports.py tests/test_methods_multi.py tests/test_reproducibility_assessment.py tests/test_report_subpackage_integrity.py tests/test_report_checks_bugs.py tests/test_cli.py --no-cov -q`:
+    ```text
+    273 passed in 68.09s (0:01:08)
+    ```
+    (4) `aw suite --no-cache`:
+    ```text
+    ======================= 2184 passed in 141.97s (0:02:21) =======================
+    ```
+    (5) `uv run --offline --no-project --python 3.9 --with pytest --with tomli python -m pytest -p no:randomly -p no:cacheprovider -q tests/test_reports.py tests/test_report_subpackage_integrity.py tests/test_reproducibility_assessment.py tests/test_methods_multi.py`:
+    ```text
+    119 passed in 9.01s
+    ```
+    Also ran `python3 -m py_compile src/pubrun/report/file_evidence.py`: `py_compile_exit=0`.
+    (6) `mypy; echo "exit=$?"`:
+    ```text
+    Success: no issues found in 59 source files
+    exit=0
+    ```
+    (7) `ruff check --select F src/pubrun/report/file_evidence.py src/pubrun/report/reproducibility.py src/pubrun/report/methods.py tests/test_reports.py`:
+    ```text
+    F401 [*] `pathlib.Path` imported but unused
+      --> tests/test_reports.py:8:21
+    Found 1 error.
+    ```
+    (Only the pre-existing `F401` on `pathlib.Path`; zero new findings.)
+    `ruff check src/pubrun/report/file_evidence.py src/pubrun/report/reproducibility.py src/pubrun/report/methods.py`:
+    ```text
+    Found 275 errors.
+    ```
+    (8) Operating system: Linux 6.8.0-151-generic x86_64. Python versions tested: Python 3.14.6 (primary venv, full suite and all targeted checks) and Python 3.9.25 (offline `uv` compatibility suite). The GitHub Actions CI matrix (3 operating systems x Python 3.8 to 3.14) was not run in this local lane turn.
+  - Result: pass
+
+- [x] V-05 validates E-05
   - Required evidence: (1) Paste `git diff -- CHANGELOG.md`, showing one added bullet as the first entry under `### Fixed` of `## [Unreleased]`. (2) Paste the output of the portable `python3 -c` dash check from "Required tests / validation", which must print `OK: ... 0 en/em dashes` and exit 0. (3) Paste the exit status of `python3 scripts/sanitize_paths.py --check --all`, which must be `0`.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- CHANGELOG.md`:
+    ```diff
+    diff --git a/CHANGELOG.md b/CHANGELOG.md
+    index 0cb2621..f448708 100644
+    --- a/CHANGELOG.md
+    +++ b/CHANGELOG.md
+    @@ -118,6 +118,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+       the deep pages, never the README front door.
+
+     ### Fixed
+    +- **Methods reports no longer count a file record without a digest value as independently
+    +  verified.** The file-provenance sentence in `methods.md`, `methods.tex`, and `pubrun methods`
+    +  counted a `data_files` record as verified when its `hash_status` was `completed` or its
+    +  `evidence_strength` was `verified_content`, even if the record held no digest value. The methods
+    +  report now uses the same classifier as the `pubrun inspect` reproducibility findings: such a
+    +  record is counted as recorded by path or stat metadata only, and a legacy record with only an
+    +  `md5` value is counted as verified.
+     - **`pubrun run --mode <mode>` now overrides explicit in-code `import pubrun.<mode>` imports.**
+       Previously, `pubrun run --mode <mode>` set only `PUBRUN_IMPORT_MODE`, so an explicit submodule
+       import such as `import pubrun.full` took precedence over the launch-time CLI flag. The wrapper
+    ```
+    (2) Dash check output:
+    ```text
+    OK: 7 added line(s), 0 en/em dashes
+    ```
+    (3) `python3 scripts/sanitize_paths.py --check --all`: `sanitize_exit=0`.
+  - Result: pass
 
 ## Approval and execution gate
 

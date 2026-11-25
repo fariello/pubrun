@@ -118,6 +118,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the deep pages, never the README front door.
 
 ### Fixed
+- **Methods reports no longer count a file record without a digest value as independently
+  verified.** The file-provenance sentence in `methods.md`, `methods.tex`, and `pubrun methods`
+  counted a `data_files` record as verified when its `hash_status` was `completed` or its
+  `evidence_strength` was `verified_content`, even if the record held no digest value. The methods
+  report now uses the same classifier as the `pubrun inspect` reproducibility findings: such a
+  record is counted as recorded by path or stat metadata only, and a legacy record with only an
+  `md5` value is counted as verified.
 - **`pubrun run --mode <mode>` now overrides explicit in-code `import pubrun.<mode>` imports.**
   Previously, `pubrun run --mode <mode>` set only `PUBRUN_IMPORT_MODE`, so an explicit submodule
   import such as `import pubrun.full` took precedence over the launch-time CLI flag. The wrapper
