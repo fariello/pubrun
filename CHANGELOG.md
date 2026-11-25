@@ -126,6 +126,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   spurious import-mode conflicts under `[imports].on_conflict = "error"`. Setting
   `PUBRUN_IMPORT_MODE` directly without `PUBRUN_RUN_MODE_OVERRIDE` still yields to explicit
   in-code submodule imports.
+- **Manifest schema now declares every import-mode behavior flag.** `pubrun_imports.selected_behavior`
+  in `schemas/manifest.schema.json` now declares `patch_subprocesses`, `patch_console`,
+  `signal_hooks`, and `force_console` as booleans alongside `auto_start` and `global_hooks`, and
+  rejects undeclared flags. Previously the schema checked only two of the six flags pubrun can
+  write. Manifests that pubrun writes are unchanged, and older manifests with only `auto_start` and
+  `global_hooks` still validate.
 - **A SIGTERM or SIGHUP no longer hangs the process when it arrives while pubrun holds an internal lock.**
   Previously, a lethal signal arriving while pubrun was recording a file, an error, a subprocess, an
   event, or a resource sample (or while the background hardware thread was refreshing the manifest)
