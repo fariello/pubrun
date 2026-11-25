@@ -11,6 +11,7 @@ import sys
 import time
 import threading
 import warnings
+from types import FrameType
 from typing import Any, Dict, List, Optional, Tuple
 
 from pubrun._modes import MODES, get_mode_behavior
@@ -149,7 +150,7 @@ def _get_caller_info(selected_by: str) -> Optional[Dict[str, Any]]:
     """Capture minimal caller info for provenance. Best-effort."""
     try:
         # Walk up the stack to find the first non-pubrun, non-importlib frame
-        frame = sys._getframe(2)  # skip _get_caller_info and select_mode
+        frame: Optional[FrameType] = sys._getframe(2)  # skip _get_caller_info and select_mode
         for _ in range(10):
             if frame is None:
                 break
@@ -319,7 +320,7 @@ def is_mode_submodule_import_in_progress() -> bool:
     try:
         # Walk up the call stack looking for importlib._bootstrap._find_and_load
         # which will have the module name as a local variable or argument.
-        frame = sys._getframe(1)
+        frame: Optional[FrameType] = sys._getframe(1)
         for _ in range(20):
             if frame is None:
                 break

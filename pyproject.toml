@@ -116,10 +116,8 @@ ignore_missing_imports = true
 # Legacy type-check ratchet: this list may only shrink, never grow.
 # Remove each module as its existing errors are fixed (backlog item qqwebg).
 module = [
-    "pubrun._bootstrap",
     "pubrun.analysis.diff",
     "pubrun.analysis.render",
-    "pubrun.auto",
     "pubrun.capture.console",
     "pubrun.capture.file_io",
     "pubrun.capture.filesystem",
@@ -128,11 +126,6 @@ module = [
     "pubrun.config",
     "pubrun.core",
     "pubrun.events",
-    "pubrun.full",
-    "pubrun.minimal",
-    "pubrun.noauto",
-    "pubrun.noconsole",
-    "pubrun.nopatch",
     "pubrun.report.diagnostics",
     "pubrun.status",
     "pubrun.tracker",

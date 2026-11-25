@@ -55,7 +55,9 @@ _execute_boot_sequence(selected_by="pubrun.full")
 del _execute_boot_sequence, _behavior
 
 # Populate the parent pubrun namespace
-import pubrun as _pkg  # noqa: E402
+from typing import Any as _Any  # noqa: E402
+import pubrun as _pkg_module  # noqa: E402
+_pkg: _Any = _pkg_module
 _pkg.start = start
 _pkg.stop = stop
 _pkg.annotate = annotate
@@ -80,4 +82,4 @@ _pkg.register_output = register_output
 _pkg.subprocess = subprocess
 _pkg.popen = popen
 _pkg._run_lock = _run_lock
-del _pkg
+del _pkg, _pkg_module, _Any
