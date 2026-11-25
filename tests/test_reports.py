@@ -991,3 +991,167 @@ class TestMethodsFileProvenanceDistinction:
         )
         assert result.returncode == 0, f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         assert result.stdout.strip() == "OK"
+
+
+class TestDiagnosticsDataFilesDisplay:
+    """Behavioral tests for diagnostics Data Files display classification and rendering."""
+
+    @pytest.mark.parametrize(
+        "rec, expected",
+        [
+            ({"hash_status": "completed"}, "metadata-only"),
+            ({"evidence_strength": "verified_content"}, "metadata-only"),
+            ({"evidence_strength": "verified_content", "digest": {"value": "   "}}, "metadata-only"),
+            ({"hash_status": "completed", "sha256": ""}, "metadata-only"),
+            ({"hash_status": "completed", "md5": "  "}, "metadata-only"),
+            ({"hash_status": "completed", "evidence_strength": "path_only"}, "path-only"),
+            (
+                {
+                    "hash_status": "completed",
+                    "sha256": None,
+                    "digest": {"algorithm": "sha512", "value": "1234567890abcdef" * 8},
+                },
+                "verified",
+            ),
+            ({"hash_status": "completed", "sha256": "a" * 64}, "verified"),
+            ({"hash_status": "completed", "md5": "b" * 32}, "verified"),
+            ({"md5": "c" * 32}, "verified"),
+            ({"hash_status": "disabled", "evidence_strength": "path_only"}, "path-only"),
+            ({"hash_status": "disabled", "evidence_strength": "metadata_only"}, "metadata-only"),
+            ({}, "metadata-only"),
+            ({"hash_status": "over_budget"}, "over-budget"),
+            ({"hash_status": "asserted"}, "asserted"),
+            ({"evidence_strength": "asserted_content"}, "asserted"),
+            ({"evidence_source": "asserted"}, "asserted"),
+            ({"hash_status": "file_changed"}, "changed"),
+            ({"change_detected": True}, "changed"),
+            ({"evidence_strength": "changed_unverified"}, "changed"),
+            ({"hash_status": "failed"}, "failed"),
+            ({"hash_status_detail": "caller_digest_mismatch"}, "failed"),
+            (
+                {
+                    "hash_status": "completed",
+                    "sha256": "a" * 64,
+                    "caller_digest": {"algorithm": "sha256", "value": "b" * 64, "verified": False},
+                },
+                "failed",
+            ),
+            ({"hash_status": "unavailable"}, "unavailable"),
+            ({"evidence_strength": "unavailable"}, "unavailable"),
+            ({"hash_status": "pending"}, "pending"),
+        ],
+    )
+    def test_classify_file_record_display_badges(self, rec, expected):
+        from pubrun.report.diagnostics import _classify_file_record_display
+
+        assert _classify_file_record_display(rec) == expected
+
+    def test_extract_display_digest_supports_digest_sha256_and_sanitized_md5(self):
+        from pubrun.report.diagnostics import _extract_display_digest
+
+        assert (
+            _extract_display_digest(
+                {"digest": {"algorithm": "sha512", "value": "1234567890abcdef" * 8}, "sha256": "f" * 64, "md5": "e" * 32},
+                "verified",
+            )
+            == "sha512:1234567890ab"
+        )
+        assert (
+            _extract_display_digest({"sha256": "abcdef0123456789" * 4, "md5": "e" * 32}, "verified")
+            == "sha256:abcdef012345"
+        )
+        assert (
+            _extract_display_digest({"md5": "0123456789abcdef0123456789abcdef"}, "verified")
+            == "md5:0123456789ab"
+        )
+        assert (
+            _extract_display_digest({"md5": "\x1b[31m9876543210fe\n\tdcba\x1b[0m"}, "verified")
+            == "md5:9876543210fe"
+        )
+        assert _extract_display_digest({"md5": "   "}, "verified") is None
+        assert _extract_display_digest({"md5": "0123456789abcdef" * 2}, "metadata-only") is None
+        assert _extract_display_digest({"sha256": "a" * 64}, "failed") is None
+
+    def test_summarize_and_print_data_files_block_require_nonempty_digest(self):
+        import io
+        from pubrun.report.diagnostics import _print_data_files_block, _summarize_data_files
+
+        manifest = {
+            "data_files": {
+                "inputs": [
+                    {"path": "data/no_digest.csv", "hash_status": "completed"},
+                    {
+                        "path": "data/blank_digest.csv",
+                        "evidence_strength": "verified_content",
+                        "digest": {"algorithm": "sha256", "value": "   "},
+                    },
+                    {
+                        "path": "data/digest_ok.csv",
+                        "hash_status": "completed",
+                        "digest": {"algorithm": "sha512", "value": "1111222233334444" * 8},
+                    },
+                    {
+                        "path": "data/sha256_ok.csv",
+                        "hash_status": "completed",
+                        "sha256": "aaaabbbbccccdddd" * 4,
+                    },
+                    {
+                        "path": "data/legacy_md5.csv",
+                        "md5": "\x1b[32mdeadbeef1234\x1b[0m567890abcdef123456",
+                    },
+                    {"path": "data/path_only.csv", "hash_status": "disabled", "evidence_strength": "path_only"},
+                    {"path": "data/huge.bin", "hash_status": "over_budget"},
+                    {
+                        "path": "data/asserted.parquet",
+                        "hash_status": "asserted",
+                        "caller_digest": {"algorithm": "sha256", "value": "5555666677778888" * 4, "verified": None},
+                    },
+                    {"path": "data/missing.csv", "hash_status": "unavailable"},
+                    {
+                        "path": "data/mismatch.csv",
+                        "hash_status": "completed",
+                        "sha256": "9999000011112222" * 4,
+                        "caller_digest": {"algorithm": "sha256", "value": "0000111122223333" * 4, "verified": False},
+                    },
+                ],
+                "outputs": [
+                    {"path": "out/pending.pt", "hash_status": "pending"},
+                ],
+                "mixed": [
+                    {"path": "work/state.db", "hash_status": "file_changed", "change_detected": True},
+                ],
+            }
+        }
+
+        counts = _summarize_data_files(manifest["data_files"])
+        assert counts == {
+            "total": 12,
+            "verified": 3,
+            "asserted": 1,
+            "identified_only": 3,
+            "over_budget": 1,
+            "changed": 1,
+            "failed_or_unavailable": 2,
+            "pending": 1,
+        }
+
+        buf = io.StringIO()
+        _print_data_files_block(manifest, use_color=False, out=buf)
+        rendered = buf.getvalue()
+
+        assert "\x1b[" not in rendered
+        assert "[metadata-only] data/no_digest.csv" in rendered
+        assert "[verified] data/no_digest.csv" not in rendered
+        assert "[metadata-only] data/blank_digest.csv" in rendered
+        assert "[verified] data/blank_digest.csv" not in rendered
+        assert "[verified] data/digest_ok.csv (input) sha512:111122223333" in rendered
+        assert "[verified] data/sha256_ok.csv (input) sha256:aaaabbbbcccc" in rendered
+        assert "[verified] data/legacy_md5.csv (input) md5:deadbeef1234" in rendered
+        assert "[path-only] data/path_only.csv" in rendered
+        assert "[over-budget] data/huge.bin" in rendered
+        assert "[asserted] data/asserted.parquet (input) sha256:555566667777" in rendered
+        assert "[unavailable] data/missing.csv" in rendered
+        assert "[failed] data/mismatch.csv" in rendered
+        assert "999900001111" not in rendered
+        assert "[pending] out/pending.pt" in rendered
+        assert "[changed] work/state.db" in rendered
