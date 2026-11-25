@@ -6,7 +6,9 @@
 - Scope: In `src/pubrun/_bootstrap.py`, replace the `mode: One of ...` line of the `select_mode` docstring with a two-line entry that lists the six valid import modes. No code, other docstring line, or other file changes.
 - Scope-Paths: src/pubrun/_bootstrap.py
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: simple
 - Short-Description: List the six valid import modes in the select_mode docstring
 - Work-Kind: followup
 - Priority: low
@@ -21,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-25 to-review (opencode): graduated from backlog item `szf342` into a review-ready plan.
 - 2026-11-25 draft (opencode): created.
 
@@ -45,7 +48,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 - Docstrings in `src/pubrun/_bootstrap.py` use Google style (`Args:`, `Returns:`) and indent a continuation line by four extra spaces, as the existing `selected_by:` and `source:` entries do.
 - The sibling plan `wtpyx0` (`.aw/records/plans/pending/20261124-m8buxe-01-wtpyx0-correct-the-mode-name-list-in-the-resolve-import-mode-docstr.ipd.md`, from backlog item `m8buxe`) fixes the same stale list in `src/pubrun/_config_boot.py::resolve_import_mode`. It names this backlog item (`szf342`) as the carrier for the `select_mode` docstring. This plan uses the same wording pattern, so the two docstrings read alike. The two plans edit different files and do not depend on each other.
 - The executed plan `.aw/records/plans/executed/20260705-1828-01-full-capture-mode.md` added `full` by extending `MODES`. It did not update this docstring, which is one way the list became stale.
-- `AGENTS.md` "Agent execution contract" exempts code comments from the dash rule. The new docstring text still uses no em or en dashes, so it matches the surrounding lines.
+- `AGENTS.md#Agent execution contract` exempts code comments from the dash rule. The new docstring text still uses no em or en dashes, so it matches the surrounding lines.
 - Cite code by SYMBOL (`module.function`) or by a quoted content string, with a line number only appended to one of those and never alone: an offset expires before this plan executes (advisory `IPD-C801`).
 
 ## Findings
@@ -154,7 +157,7 @@ No diagram is included. The change affects one docstring entry of one function, 
   - Carrier-Declined: no backlog item requests documenting the fallback on `select_mode`, and adding it would change the docstring's contract beyond the requested list correction.
 - Fixing the pre-existing `ruff check` findings in `src/pubrun/_bootstrap.py`. They are unrelated to the docstring.
   - Carrier-Declined: lint cleanup of this module is not requested by any backlog item, and mixing it into a docstring fix would widen the reviewed diff.
-- Adding a test that asserts the docstring text. `AGENTS.md` "Agent execution contract" forbids tests that pin docstring text.
+- Adding a test that asserts the docstring text. `AGENTS.md#Agent execution contract` forbids tests that pin docstring text.
   - Carrier-Declined: a docstring-pinning test is prohibited by the repository's testing rule.
 - A `CHANGELOG.md` entry. The change corrects an internal docstring and changes no behavior.
   - Carrier-Declined: an internal docstring correction changes no user-visible behavior, so it does not meet the changelog's bar.
@@ -169,8 +172,8 @@ No diagram is included. The change affects one docstring entry of one function, 
 - `git diff -- src/pubrun/_bootstrap.py` shows exactly one removed line and two added lines, all inside the `select_mode` docstring, with the added lines identical to "Proposed changes" item 1.
 - `PYTHONPATH=src python3 -c "import pubrun._bootstrap as m; print(m.select_mode.__doc__)"` prints an `Args:` section that matches "Proposed changes" item 1.
 - `grep -c '"noconsole", "minimal", or "full"' src/pubrun/_bootstrap.py` prints `1`.
-- `git diff -U0 -- src/pubrun/_bootstrap.py | grep '^+[^+]' | grep -cP '[\x{2013}\x{2014}]'` prints `0`.
-- `ruff check src/pubrun/_bootstrap.py` reports the same number of findings after the edit as before it (19 at authoring). Record both counts.
+- `PYTHONPATH=src python3 -c 'import pubrun._bootstrap as m; doc = m.select_mode.__doc__ or ""; assert "\"noconsole\", \"minimal\", or \"full\"" in doc; assert "\u2013" not in doc and "\u2014" not in doc; print("OK: six modes listed, 0 en/em dashes")'` prints `OK: six modes listed, 0 en/em dashes` and exits 0.
+- `ruff check src/pubrun/_bootstrap.py` reports the same number of findings after the edit as the `HEAD` baseline (`git show HEAD:src/pubrun/_bootstrap.py | ruff check --stdin-filename src/pubrun/_bootstrap.py -`; 19 at authoring/review). Record both counts.
 - A runtime check confirms the documented list: run the Findings probe again and observe the same six output lines. The code path that produces the observation is `src/pubrun/_bootstrap.py::select_mode`, which calls `src/pubrun/_modes.py::get_mode_behavior`.
 - `python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py --no-cov -q` passes. These suites call `select_mode` or import the mode submodules, and they show that the docstring edit leaves behavior unchanged.
 - `python3 scripts/sanitize_paths.py --check --all` exits 0.
@@ -195,7 +198,7 @@ No diagram is included. The change affects one docstring entry of one function, 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
 - [ ] V-01 validates E-01
-  - Required evidence: (1) Paste `git diff -- src/pubrun/_bootstrap.py`, showing one removed and two added lines inside the `select_mode` docstring, with the added lines identical to "Proposed changes" item 1. (2) Paste the output of `PYTHONPATH=src python3 -c "import pubrun._bootstrap as m; print(m.select_mode.__doc__)"`, whose `Args:` section matches "Proposed changes" item 1. (3) Paste the output of `grep -c '"noconsole", "minimal", or "full"' src/pubrun/_bootstrap.py`, which must be `1`. (4) Paste the output of `git diff -U0 -- src/pubrun/_bootstrap.py | grep '^+[^+]' | grep -cP '[\x{2013}\x{2014}]'`, which must be `0`. (5) Paste the `Found N errors.` line of `ruff check src/pubrun/_bootstrap.py` from before and after the edit; the two counts must be equal. (6) Paste the six output lines of the Findings probe, produced by `src/pubrun/_bootstrap.py::select_mode` through `src/pubrun/_modes.py::get_mode_behavior`, identical to the Findings output. (7) Paste the summary line of `python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py --no-cov -q`. (8) Paste the exit status of `python3 scripts/sanitize_paths.py --check --all`, which must be `0`.
+  - Required evidence: (1) Paste `git diff -- src/pubrun/_bootstrap.py`, showing one removed and two added lines inside the `select_mode` docstring, with the added lines identical to "Proposed changes" item 1. (2) Paste the output of `PYTHONPATH=src python3 -c "import pubrun._bootstrap as m; print(m.select_mode.__doc__)"`, whose `Args:` section matches "Proposed changes" item 1. (3) Paste the output of `grep -c '"noconsole", "minimal", or "full"' src/pubrun/_bootstrap.py`, which must be `1`. (4) Paste the output of the portable `python3 -c` docstring check from "Required tests / validation", which must print `OK: six modes listed, 0 en/em dashes` and exit 0. (5) Paste the `Found N errors.` line of `git show HEAD:src/pubrun/_bootstrap.py | ruff check --stdin-filename src/pubrun/_bootstrap.py -` (baseline) and `ruff check src/pubrun/_bootstrap.py` (after edit); the two counts must be equal. (6) Paste the six output lines of the Findings probe, produced by `src/pubrun/_bootstrap.py::select_mode` through `src/pubrun/_modes.py::get_mode_behavior`, identical to the Findings output. (7) Paste the summary line of `python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py --no-cov -q`. (8) Paste the exit status of `python3 scripts/sanitize_paths.py --check --all`, which must be `0`.
   - Observed evidence:
   - Result: pending
 
@@ -206,7 +209,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 
 Execution contract:
 1. Precondition: wait for human approval (`- Status: approved`) with no unresolved `Blocking: yes` open question before you change any file. This plan has no blocking open questions.
-2. Scope declaration: the expected modified file is the `- Scope-Paths:` entry (`src/pubrun/_bootstrap.py`). If execution requires an out-of-scope file, justify it with `--scope-reason` at finalization.
+2. Scope declaration: the expected modified file is the `- Scope-Paths:` entry (`src/pubrun/_bootstrap.py`). If execution requires an out-of-scope file, justify it with `--scope-reason` at finalization. If a declared file needs no edit, acknowledge it with `--scope-ack`.
 3. Validation honesty: you MUST run each required validation command and paste its actual output into the `V-01` `Observed evidence:` field. Do not mark `V-01` `pass` without output captured from that run.
 4. Commit discipline: commit only the paths you changed with `aw commit wvrmqu -- <paths>`. Do not use `git add -A` or raw `git commit`. Do not push without an explicit human instruction.
-5. Lifecycle transition: finalize this plan with `aw ipd finalize wvrmqu`, never with a hand-written `git mv` to `.aw/records/plans/executed/`. Inside a runner lane (`aw oc run` or `aw agy run`), the runner finalizes after the turn. Outside a runner, the executor runs `aw ipd finalize wvrmqu` after `E-01` is `performed`, `V-01` is `pass`, and `aw ipd lint --phase pre-transition` reports `conforming`.
+5. Lifecycle transition: inside a runner lane (`aw oc run` or `aw agy run`), the runner owns finalization once `E-01` is `performed` and `V-01` is `pass`. Outside a runner, after `E-01` is `performed`, `V-01` is `pass`, and `aw ipd lint --phase pre-transition` reports `conforming`, finalize this plan with `aw ipd finalize wvrmqu` (never with a hand-written `git mv` to `.aw/records/plans/executed/`).
