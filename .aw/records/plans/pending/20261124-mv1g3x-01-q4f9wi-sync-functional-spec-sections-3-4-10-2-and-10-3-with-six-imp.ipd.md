@@ -39,20 +39,20 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Documentation (`docs/functional_spec.md`)
 
-- [ ] E-01 In `docs/functional_spec.md#3.4 Import Modes`, apply "Proposed changes" item 1: change the mode count from five to six, and add the paragraph about name-based mode selection after the mode table.
+- [x] E-01 In `docs/functional_spec.md#3.4 Import Modes`, apply "Proposed changes" item 1: change the mode count from five to six, and add the paragraph about name-based mode selection after the mode table.
   - Depends on: none
   - Expected outcome: (1) The line "The library supports five namespaced import modes via submodule imports:" is replaced by the line in "Proposed changes" item 1a. (2) The paragraph in "Proposed changes" item 1b appears directly after the mode table and before the paragraph that starts "These flags express what each mode **permits**". (3) The Python code block, the mode table, and every other line of section 3.4 are unchanged, including the sentence "Only the launch-time `pubrun run --mode <mode>` overrides the in-code import." (see "Deferred / out of scope").
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 In `docs/functional_spec.md#10.2 Configuration Discovery`, apply "Proposed changes" item 2: replace table rows 2 and 5, and add two paragraphs after the existing paragraph that follows the table.
+- [x] E-02 In `docs/functional_spec.md#10.2 Configuration Discovery`, apply "Proposed changes" item 2: replace table rows 2 and 5, and add two paragraphs after the existing paragraph that follows the table.
   - Depends on: none
   - Expected outcome: (1) Table row 2 (User home config) and table row 5 (Environment variables) read exactly as in "Proposed changes" item 2a. (2) The two paragraphs in "Proposed changes" item 2b appear after the paragraph that starts "When both `.pubrun.toml` and `.config/pubrun/config.toml` exist". (3) The introductory line, the other four table rows, and that existing paragraph are unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 In `docs/functional_spec.md#10.3 Supported Environment Variables`, apply "Proposed changes" item 3: replace the three-row table with the seven-row table.
+- [x] E-03 In `docs/functional_spec.md#10.3 Supported Environment Variables`, apply "Proposed changes" item 3: replace the three-row table with the seven-row table.
   - Depends on: none
   - Expected outcome: (1) The table in section 10.3 is identical to the table in "Proposed changes" item 3. (2) The `PUBRUN_PROFILE` and `PUBRUN_META_REF` rows keep their current text. (3) No line outside section 10.3 changes as part of this item.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -313,20 +313,106 @@ P11 selected: noauto run active: False
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: (1) Paste the section 3.4 hunks of `git diff -- docs/functional_spec.md`: one removed line ("five namespaced") and the added lines from "Proposed changes" items 1a and 1b, with no other changed line in section 3.4. (2) Paste the output and exit status `0` of the section 3.4 text check in "Required tests / validation" (`old=0 new=1`). (3) Paste the P1, P7, and P8 lines of the isolated runtime probe in "Required tests / validation", produced by `src/pubrun/_modes.py::VALID_MODES` and `src/pubrun/_config_boot.py::resolve_import_mode`, and confirm `git status --short` shows no untracked probe files.
   - Observed evidence:
-  - Result: pending
+    - (1) Section 3.4 hunks of `git diff -- docs/functional_spec.md`:
+      ~~~diff
+      @@ -87,7 +87,7 @@ For `PUBRUN_AUTO_START`, `"1"`, `"true"`, `"yes"`, and `"on"` enable auto-start
 
-- [ ] V-02 validates E-02
+       ### 3.4 Import Modes
+
+      -The library supports five namespaced import modes via submodule imports:
+      +The library supports six import modes. A script selects a mode with a submodule import:
+
+       ```python
+       import pubrun                    # Default: auto mode
+      @@ -108,6 +108,8 @@ import pubrun.full as pubrun     # Auto-start, all hooks, and FORCE the console
+       | `noconsole` | `true` | `true` | `false` | `true` | `false` | Start tracking, patch subprocesses and signals, but skip stdout/stderr console wrapping. |
+       | `minimal` | `false` | `false` | `false` | `false` | `false` | Load API only. No auto-start, no patches, no signal hooks. |
+
+      +The `PUBRUN_IMPORT_MODE` environment variable and the `[imports].mode` config key accept the same six mode names (see Section 10.3). Matching ignores case and surrounding whitespace. An unrecognized name is ignored, and the boot resolver continues with the next source.
+      +
+       These flags express what each mode **permits**, not what is active. Two layers gate
+       actual capture:
+      ~~~
+    - (2) Section 3.4 text check: `old=0 new=1` (exit `0`).
+    - (3) Isolated runtime probe (`src/pubrun/_modes.py::VALID_MODES` and `src/pubrun/_config_boot.py::resolve_import_mode`):
+      ```text
+      P1 modes: 6 ['auto', 'full', 'minimal', 'noauto', 'noconsole', 'nopatch']
+      P7 PUBRUN_IMPORT_MODE=' FULL ': ('full', 'env:PUBRUN_IMPORT_MODE')
+      P7 PUBRUN_IMPORT_MODE='bogus': ('auto', 'default')
+      P8 PUBRUN_AUTO_START=' Off ': ('noauto', 'env:PUBRUN_AUTO_START')
+      ```
+      `git status --short` output right after the probe: ` M docs/functional_spec.md` (zero untracked probe files).
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: (1) Paste the section 10.2 hunks of `git diff -- docs/functional_spec.md`, showing that rows 2 and 5 and the two new paragraphs match "Proposed changes" items 2a and 2b, with no other changed line in section 10.2. (2) Paste the P2 to P6 and P9 lines of the isolated runtime probe in "Required tests / validation", produced by `src/pubrun/config.py::get_global_config_dir`, `src/pubrun/_config_boot.py::_global_config_dir`, and `src/pubrun/config.py::resolve_config`. (3) Paste the output and exit status `0` of the working-tree dash check command in "Required tests / validation", showing `added_lines>=1` and `dashes=0`.
   - Observed evidence:
-  - Result: pending
+    - (1) Section 10.2 hunk of `git diff -- docs/functional_spec.md`:
+      ```diff
+      @@ -367,21 +369,29 @@ Supported locations, applied in precedence order (lowest to highest):
+       | Priority | Source | Path |
+       |---|---|---|
+       | 1 (lowest) | Built-in defaults | `default.toml` (shipped with the library) |
+      -| 2 | User home config | `~/.config/pubrun/config.toml` (or `%APPDATA%/pubrun/config.toml` on Windows) |
+      +| 2 | User home config | `$XDG_CONFIG_HOME/pubrun/config.toml`, else `~/.config/pubrun/config.toml` (`%APPDATA%/pubrun/config.toml` on Windows when `APPDATA` is set) |
+       | 3 | Local deep config | `./.config/pubrun/config.toml` |
+       | 4 | Local root config | `./.pubrun.toml` |
+      -| 5 | Environment variables | `PUBRUN_PROFILE`, `PUBRUN_AUTO_START`, `PUBRUN_META_REF` |
+      +| 5 | Environment variables | `PUBRUN_PROFILE`, `PUBRUN_META_REF` |
+       | 6 (highest) | API overrides | `pubrun.start(profile="deep")` |
 
-- [ ] V-03 validates E-03
+       When both `.pubrun.toml` and `.config/pubrun/config.toml` exist in the same directory, `.pubrun.toml` takes precedence (it is applied last).
+
+      +An empty or whitespace-only `XDG_CONFIG_HOME` or `APPDATA` is treated as unset. On Windows, when `APPDATA` is unset, the user home config follows the `XDG_CONFIG_HOME` rule. The boot resolver (Section 3.2) uses the same user home config path.
+      +
+      +`PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and `PUBRUN_IMPORT_CONFLICT` are not part of this merge. The boot sequence reads them during import-mode resolution and conflict handling (Sections 3.2 and 3.3), so they do not change the values recorded in `config.resolved.json`.
+      +
+      ```
+    - (2) Isolated runtime probe (`src/pubrun/config.py::get_global_config_dir`, `src/pubrun/_config_boot.py::_global_config_dir`, `src/pubrun/config.py::resolve_config`):
+      ```text
+      P2 XDG unset: /nonexistent-mv1g3x/.config/pubrun | /nonexistent-mv1g3x/.config/pubrun
+      P3 XDG set: /xdg-probe/pubrun | /xdg-probe/pubrun
+      P4 XDG blank: /nonexistent-mv1g3x/.config/pubrun | /nonexistent-mv1g3x/.config/pubrun
+      P5 win32, APPDATA set: C:/AppData-probe/pubrun | C:/AppData-probe/pubrun
+      P6 win32, APPDATA blank: /xdg-probe/pubrun | /xdg-probe/pubrun
+      P9 resolve_config: True auto warn
+      ```
+    - (3) Working-tree dash check: `added_lines=14 dashes=0` (exit `0`).
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: (1) Paste the section 10.3 hunk of `git diff -- docs/functional_spec.md`, showing that the new table matches "Proposed changes" item 3 and that the `PUBRUN_PROFILE` and `PUBRUN_META_REF` rows are unchanged. (2) Paste the outputs and exit status `0` of both fail-closed cross-checks in "Required tests / validation", both `OK`. (3) Paste the P10 lines of the isolated runtime probe, produced by `src/pubrun/_bootstrap.py::_resolve_conflict_policy`, and the P11 line of the second probe in Findings, produced by `src/pubrun/noauto.py` through `src/pubrun/_bootstrap.py::select_mode`. (4) Paste the summary line of `python3 -m pytest tests/test_import_modes.py tests/test_config_capture_modes.py tests/test_full_mode.py --no-cov -q`. (5) Paste the exit status of `python3 scripts/sanitize_paths.py --check --all`, which must be `0`.
   - Observed evidence:
-  - Result: pending
+    - (1) Section 10.3 hunk of `git diff -- docs/functional_spec.md`:
+      ```diff
+       ### 10.3 Supported Environment Variables
+
+       | Variable | Effect |
+       |---|---|
+      +| `PUBRUN_IMPORT_MODE` | Selects the import mode: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Overrides `PUBRUN_AUTO_START` and `[imports].mode`. A submodule import such as `import pubrun.noauto` takes precedence over it (Section 3.4). Matching ignores case and surrounding whitespace; any other value is ignored. `pubrun run --mode` sets it in the child process (Section 11.13). Consumed in the boot sequence (not in `resolve_config`). |
+       | `PUBRUN_PROFILE` | Overrides `[core].profile`. Consumed in `resolve_config()` between local config and API overrides. |
+      -| `PUBRUN_AUTO_START` | Overrides `[core].auto_start`. Consumed in the boot sequence (not in `resolve_config`). |
+      +| `PUBRUN_AUTO_START` | Overrides `[core].auto_start`. `"1"`, `"true"`, `"yes"`, and `"on"` select `auto` mode; `"0"`, `"false"`, `"no"`, and `"off"` select `noauto` mode (Section 3.3). Used only when `PUBRUN_IMPORT_MODE` is unset or invalid. Consumed in the boot sequence (not in `resolve_config`). |
+       | `PUBRUN_META_REF` | Sets `[core].meta_ref`. Consumed in `resolve_config()` between local config and API overrides. |
+      +| `PUBRUN_IMPORT_CONFLICT` | Overrides `[imports].on_conflict`: `ignore`, `warn`, or `error`. Matching ignores case and surrounding whitespace; any other value is ignored. Applies when two imports request different modes. Consumed in the boot sequence (not in `resolve_config`). |
+      +| `XDG_CONFIG_HOME` | Base directory of the user home config (Section 10.2) when not on Windows, or on Windows when `APPDATA` is unset. Empty or whitespace-only means unset, and the base directory is then `~/.config`. Read by both the boot sequence and `resolve_config()`. |
+      +| `APPDATA` | Windows only. Base directory of the user home config when set. Empty or whitespace-only means unset. Read by both the boot sequence and `resolve_config()`. |
+      ```
+    - (2) Fail-closed cross-checks:
+      - Mode-name cross-check: `OK` (exit `0`)
+      - Environment-variable cross-check: `OK` (exit `0`)
+    - (3) Probes (`src/pubrun/_bootstrap.py::_resolve_conflict_policy`, `src/pubrun/noauto.py` via `src/pubrun/_bootstrap.py::select_mode`):
+      ```text
+      P10 PUBRUN_IMPORT_CONFLICT=' ERROR ': error
+      P10 PUBRUN_IMPORT_CONFLICT='bogus': warn
+      P11 selected: noauto run active: False
+      ```
+    - (4) `python3 -m pytest tests/test_import_modes.py tests/test_config_capture_modes.py tests/test_full_mode.py --no-cov -q`: `186 passed in 28.75s` (exit `0`).
+    - (5) `python3 scripts/sanitize_paths.py --check --all`: exit `0`.
+  - Result: pass
 
 ## Approval and execution gate
 
