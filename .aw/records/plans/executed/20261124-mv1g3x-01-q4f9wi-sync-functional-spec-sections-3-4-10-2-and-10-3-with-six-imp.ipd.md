@@ -5,8 +5,9 @@
 - Concern: Three sections of `docs/functional_spec.md` disagree with the code. Section 3.4 says pubrun has five import modes, but `src/pubrun/_modes.py::MODES` defines six. Section 10.2 omits `XDG_CONFIG_HOME` from the user home config path and lists `PUBRUN_AUTO_START` as an input to the configuration merge, which it is not. Section 10.3 omits the boot-time environment variables `PUBRUN_IMPORT_MODE` and `PUBRUN_IMPORT_CONFLICT`, and the directory variables `XDG_CONFIG_HOME` and `APPDATA`.
 - Scope: Edit `docs/functional_spec.md` sections "3.4 Import Modes", "10.2 Configuration Discovery", and "10.3 Supported Environment Variables" so that they match `src/pubrun/_modes.py`, `src/pubrun/_config_boot.py`, `src/pubrun/config.py`, and `src/pubrun/_bootstrap.py`. No other section or file changes.
 - Scope-Paths: docs/functional_spec.md
+- Scope-Exceeded: .aw/records/backlog/open/20261125-aqb2bu-01-aqb2bu-document-pubrun-run-mode-override-in-functional-sp.backlog.md (Filed required defect-report backlog carrier aqb2bu for PUBRUN_RUN_MODE_OVERRIDE missing from docs/functional_spec.md sections 10.2 and 10.3 and docs/configuration.md)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Sync docs/functional_spec.md sections 3.4, 10.2, and 10.3 with six import modes, XDG_CONFIG_HOME, and boot env vars
@@ -18,12 +19,12 @@
 - Highest E allocated: 03
 - Author: opencode
 - Id: q4f9wi
-- Approval: 2026-11-25, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-25 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: q4f9wi verified (set mv1g3x, attempt 1). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261125-aqb2bu-01-aqb2bu-document-pubrun-run-mode-override-in-functional-sp.backlog.md: Filed required defect-report backlog carrier aqb2bu for PUBRUN_RUN_MODE_OVERRIDE missing from docs/functional_spec.md sections 10.2 and 10.3 and docs/configuration.md]
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003 fixed; review record `.aw/records/reviews/20261124-mv1g3x-01-q4f9wi-sync-functional-spec-sections-3-4-10-2-and-10-3-with-six-imp.review.md`.
 - 2026-11-25 to-review (opencode): graduated from backlog item `mv1g3x` into a review-ready plan.
