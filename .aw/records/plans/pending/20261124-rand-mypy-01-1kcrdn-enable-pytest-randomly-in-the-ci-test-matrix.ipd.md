@@ -7,6 +7,7 @@
 - Scope-Paths: .github/workflows/ci.yml, pyproject.toml, CONTRIBUTING.md, CHANGELOG.md, TODO.md
 - Item-Dependencies: executed:m66tfv
 - Status: approved
+- Attended: required
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Run the 21 CI matrix test jobs in a randomized, reproducible order
@@ -24,6 +25,7 @@
 
 ## Workflow history
 
+- 2026-11-25 attended (aw run): marked `Attended: required` from the agent's needs-attended proposal: Completing E-04 and V-04 parts (2) and (3) requires a human to submit the pull request targeting main at https://github.com/fariello/pubrun/pull/new/ci/1kcrdn-pytest-randomly (or grant Pull requests: Read and write to the gh token, or push main) and then verify all 25 GitHub Actions jobs.
 - 2026-11-25 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-24 to-review (aw set): authored from backlog qqwebg
