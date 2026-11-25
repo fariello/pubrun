@@ -221,9 +221,9 @@ class SubprocessSpy:
                         break
                     rc = getattr(proc, "returncode", None)
                     if rc is not None:
-                        rec = getattr(proc, "_pubrun_rec", None)
-                        if rec is not None:
-                            _complete_record(rec, rc, time.time(), time.perf_counter())
+                        proc_rec: Optional[Dict[str, Any]] = getattr(proc, "_pubrun_rec", None)
+                        if proc_rec is not None:
+                            _complete_record(proc_rec, rc, time.time(), time.perf_counter())
                     else:
                         still_running.append(proc)
                 if still_running and state["active"]:
@@ -625,15 +625,15 @@ class SubprocessSpy:
                         proc = pending_running.popleft()
                     except IndexError:
                         break
-                    rec = getattr(proc, "_pubrun_rec", None)
+                    proc_rec: Optional[Dict[str, Any]] = getattr(proc, "_pubrun_rec", None)
                     if (
-                        rec is not None
-                        and rec.get("exit_code") is None
-                        and "ended_at_utc" not in rec
-                        and id(rec) not in seen_rec_ids
+                        proc_rec is not None
+                        and proc_rec.get("exit_code") is None
+                        and "ended_at_utc" not in proc_rec
+                        and id(proc_rec) not in seen_rec_ids
                     ):
-                        live_procs.append((rec, proc))
-                        seen_rec_ids.add(id(rec))
+                        live_procs.append((proc_rec, proc))
+                        seen_rec_ids.add(id(proc_rec))
 
             # Phase 3: Poll each live Popen once outside _lock.
             prev_poll = state["prev_popen_poll"]
