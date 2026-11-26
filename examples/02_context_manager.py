@@ -4,15 +4,14 @@
 Verifies that tracked_run() scopes tracking to the with-block.
 """
 import os
-os.environ["PUBRUN_AUTO_START"] = "false"
 import json
-import pubrun
+import pubrun.noauto as pubrun
 
 
 def main() -> None:
     print("Testing 02_context_manager...")
     run_dir = None
-    with pubrun.tracked_run(profile="minimal") as active_run:
+    with pubrun.tracked_run() as active_run:
         tracker = getattr(active_run, "run_tracker", None)
         run_dir = getattr(tracker, "run_dir", getattr(tracker, "_run_dir", None))
         assert run_dir is not None, "Run directory not accessible inside context."

@@ -4,14 +4,13 @@
 Verifies that annotate() writes structured events to events.jsonl.
 """
 import os
-os.environ["PUBRUN_AUTO_START"] = "false"
 import json
-import pubrun
+import pubrun.noauto as pubrun
 
 
 def main() -> None:
     print("Testing 04_annotate_events...")
-    tracker = pubrun.start(profile="minimal")
+    tracker = pubrun.start()
     run_dir = getattr(tracker, "run_dir", getattr(tracker, "_run_dir", None))
 
     pubrun.annotate("Matrix Instantiated", dimensions="1024x1024", simulated_device="cpu")

@@ -4,17 +4,15 @@
 Creates a run, then invokes `pubrun methods --format markdown` via subprocess
 and verifies the output contains expected methodology text.
 """
-import os
-os.environ["PUBRUN_AUTO_START"] = "false"
 import subprocess
 import sys
-import pubrun
+import pubrun.noauto as pubrun
 
 
 def main() -> None:
     print("Testing 09_cli_methods...")
 
-    tracker = pubrun.start(profile="minimal")
+    tracker = pubrun.start()
     tracker.stop()
 
     cmd = [sys.executable, "-m", "pubrun", "methods", "--format", "markdown"]

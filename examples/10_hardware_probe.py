@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Test 10: Hardware capture with deep profile.
+"""Test 10: Hardware capture with deep hardware depth.
 
-Creates a deep-profile run that allocates memory, then verifies the manifest
-contains hardware data (cpu, memory).
+Creates a run with capture={"hardware": {"depth": "deep"}} that allocates
+memory, then verifies the manifest contains hardware data (cpu, memory).
 """
 import os
-os.environ["PUBRUN_AUTO_START"] = "false"
 import json
-import pubrun
+import pubrun.noauto as pubrun
 
 
 def main() -> None:

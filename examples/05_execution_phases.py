@@ -6,10 +6,9 @@ that each phase_end event carries a monotonic duration, and that the finalized
 manifest separates the tracked workload from pubrun's own capture overhead.
 """
 import os
-os.environ["PUBRUN_AUTO_START"] = "false"
 import json
 import time
-import pubrun
+import pubrun.noauto as pubrun
 
 
 def _is_duration(value: object) -> bool:
@@ -18,7 +17,7 @@ def _is_duration(value: object) -> bool:
 
 def main() -> None:
     print("Testing 05_execution_phases...")
-    tracker = pubrun.start(profile="minimal")
+    tracker = pubrun.start()
     run_dir = getattr(tracker, "run_dir", getattr(tracker, "_run_dir", None))
 
     with pubrun.phase("Dataset Initialization"):

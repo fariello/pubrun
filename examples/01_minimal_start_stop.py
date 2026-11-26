@@ -4,14 +4,13 @@
 Verifies manual initialization, tracking, and manifest generation.
 """
 import os
-os.environ["PUBRUN_AUTO_START"] = "false"
 import json
-import pubrun
+import pubrun.noauto as pubrun
 
 
 def main() -> None:
     print("Testing 01_minimal_start_stop...")
-    tracker = pubrun.start(profile="minimal")
+    tracker = pubrun.start()
 
     run_dir = getattr(tracker, "run_dir", getattr(tracker, "_run_dir", None))
     assert run_dir is not None, "Run directory not created."

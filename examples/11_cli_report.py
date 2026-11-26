@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
-"""Test 11: CLI report generation.
+"""Test 11: CLI diagnostic output via `pubrun show`.
 
-Creates a run and invokes `pubrun report` via subprocess, then verifies
-the output contains expected diagnostic headers and fields.
+Creates a run and invokes `pubrun show` via subprocess (`pubrun report`
+remains a hidden legacy alias), then verifies the output contains expected
+diagnostic headers and fields.
 """
-import os
-os.environ["PUBRUN_AUTO_START"] = "false"
 import subprocess
 import sys
-import pubrun
+import pubrun.noauto as pubrun
 
 
 def main() -> None:
     print("Testing 11_cli_report...")
 
-    tracker = pubrun.start(profile="standard")
+    tracker = pubrun.start()
     tracker.stop()
 
-    cmd = [sys.executable, "-m", "pubrun", "report"]
+    cmd = [sys.executable, "-m", "pubrun", "show"]
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     output = result.stdout.strip()

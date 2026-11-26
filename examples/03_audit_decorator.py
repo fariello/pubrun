@@ -4,20 +4,19 @@
 Verifies that the decorator tracks both successful and failing functions.
 """
 import os
-os.environ["PUBRUN_AUTO_START"] = "false"
 import json
-import pubrun
+import pubrun.noauto as pubrun
 from pubrun.tracker import get_current_run
 
 
-@pubrun.audit_run(profile="minimal")
+@pubrun.audit_run()
 def success_task() -> str:
     """Return the run directory path."""
     tracker = get_current_run()
     return getattr(tracker, "run_dir", getattr(tracker, "_run_dir", None))
 
 
-@pubrun.audit_run(profile="minimal")
+@pubrun.audit_run()
 def failing_task() -> None:
     """Raise an exception to test failure recording."""
     tracker = get_current_run()
