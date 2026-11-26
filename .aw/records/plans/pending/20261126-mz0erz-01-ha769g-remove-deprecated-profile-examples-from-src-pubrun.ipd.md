@@ -6,7 +6,7 @@
 - Scope: Public module docstring examples in `src/pubrun/__init__.py`, public API docstring examples (`start`, `audit_run`, `tracked_run`) in `src/pubrun/core.py`, and configuration header comments (`Resolution Order` and `[capture]` banner) in `src/pubrun/resources/default.toml`.
 - Scope-Paths: src/pubrun/__init__.py, src/pubrun/core.py, src/pubrun/resources/default.toml
 - Item-Dependencies: none
-- Status: reviewed
+- Status: auto-approved
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Short-Description: Replace deprecated profile= and PUBRUN_PROFILE examples in src/pubrun/__init__.py, src/pubrun/core.py, and src/pubrun/resources/default.toml with non-deprecated overrides
@@ -23,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-26 auto-approved (aw agy run --full-auto): auto-approved by --full-auto: review readiness cleared (not human approval)
 - 2026-11-26 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002; review record `.aw/records/reviews/20261126-mz0erz-01-ha769g-remove-deprecated-profile-examples-from-src-pubrun.review.md`.
 - 2026-11-26 to-review (aw set): Authored review-ready plan from backlog item mz0erz
 - 2026-11-26 draft (Antigravity): created.
