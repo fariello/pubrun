@@ -12,7 +12,7 @@
 
 | Priority | Source | Example |
 |---|---|---|
-| 1 (highest) | API overrides | `pubrun.start(profile="deep")` |
+| 1 (highest) | API overrides | `pubrun.start(output_dir="./my_runs")` |
 | 2 | Environment variables | `PUBRUN_AUTO_START=false` |
 | 3 | Local project config | `./.pubrun.toml` and/or `./.config/pubrun/config.toml` |
 | 4 | User home config | `$XDG_CONFIG_HOME/pubrun/config.toml`, else `~/.config/pubrun/config.toml` (`%APPDATA%/pubrun/config.toml` on Windows); an empty `XDG_CONFIG_HOME` or `APPDATA` is treated as unset |
@@ -38,7 +38,7 @@ pubrun --create-config .pubrun.toml       # Write to specific path
 ### Viewing the Default Configuration
 
 ```bash
-pubrun --show-config
+pubrun show default config
 ```
 
 ---
@@ -55,6 +55,7 @@ Core behaviors governing run initialization and storage.
 | `output_dir` | string | `""` | Base directory for run output. Empty string defaults to `./runs/` in the current working directory. |
 | `auto_start` | bool | `true` | If `true`, `import pubrun` automatically starts a trace. If `false`, you must call `pubrun.start()` explicitly. Equivalent to `[imports].mode = "noauto"` when set to `false`. |
 | `artifact_durability` | string | `"fsync"` | Explicit disk-synchronization policy for `manifest.json` and `config.resolved.json`, separate from atomic visibility. Valid values: `"fsync"` (default), `"finalize"`, `"atomic"`, `"strict"`. Invalid values log one warning per distinct value and fall back to `"fsync"`. See [Artifact durability policy](#artifact-durability-policy) below. |
+| `meta_ref` | string | *(none)* | Path to a parent `meta.json` snapshot for HPC hydration. Also set by `PUBRUN_META_REF` or `pubrun.start(meta_ref=...)`. |
 
 #### Artifact durability policy
 
@@ -80,10 +81,10 @@ Controls import-time behavior. These settings determine what happens when `impor
 |---|---|---|---|
 | `mode` | string | `"auto"` | Import behavior preset: `"auto"` (start tracking on import), `"full"` (start tracking and force console capture on — the opposite of `"noconsole"`), `"noauto"` (load API only, start manually), `"nopatch"` (start tracking but skip global hooks), `"noconsole"` (start tracking, skip console wrapping), `"minimal"` (load API only, no hooks). An in-code `import pubrun.<mode>` overrides this key and any env var; only `pubrun run --mode` overrides the in-code import. |
 | `on_conflict` | string | `"warn"` | What to do if a later import requests a different mode: `"ignore"`, `"warn"`, or `"error"`. |
-| `record_provenance` | bool | `true` | Record import-mode provenance (caller file, line) in the manifest. |
-| `provenance_depth` | int | `3` | Number of external caller frames to capture for diagnostics. |
-| `provenance_path_mode` | string | `"relative"` | How paths appear in provenance: `"absolute"`, `"relative"`, `"basename"`, or `"redacted"`. |
-| `max_requests` | int | `50` | Maximum import-mode requests to retain in metadata. |
+| `record_provenance` | bool | `true` | **Reserved (currently without effect).** Intended to toggle import-mode provenance recording. Regardless of this setting, `pubrun` always records the caller's file name exactly as Python reports it (often an absolute path), its line number, and its function name. |
+| `provenance_depth` | int | `3` | **Reserved (currently without effect).** Intended to set the number of external caller frames captured for diagnostics. |
+| `provenance_path_mode` | string | `"relative"` | **Reserved (currently without effect).** Intended to control how caller paths appear in provenance (`"absolute"`, `"relative"`, `"basename"`, or `"redacted"`). Regardless of this setting, `pubrun` records the caller's file name exactly as Python reports it (often an absolute path), its line number, and its function name. |
+| `max_requests` | int | `50` | **Reserved (currently without effect).** Intended to configure the maximum number of import-mode requests retained in metadata. Currently, at most 50 requests are kept (hard-coded). |
 
 > [!NOTE]
 > You can also use namespaced imports as an alternative to config:
@@ -104,8 +105,8 @@ Controls interception and logging of stdout/stderr.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `capture_mode` | string | `"off"` | `"off"` — no capture (default, zero-footprint); `"basic"` — tee stdout/stderr to text files; `"standard"` — tee with timestamps on each line; `"deep"` — reserved for future structured capture (currently same as standard). |
-| `non_tty_mode` | string | `"inherit"` | Override capture behavior when stdout is not a TTY (piped/redirected): `"inherit"` (use capture_mode as-is), `"off"`, or `"basic"`. |
-| `jupyter_mode` | string | `"off"` | Override capture behavior when running inside Jupyter/IPython. Default `"off"` auto-disables capture in notebooks. Set to `"standard"` to force capture in Jupyter. |
+| `non_tty_mode` | string | `"inherit"` | Override capture behavior when stdout is not a TTY (piped or redirected): `"inherit"` (use the base mode as-is), `"off"`, or `"basic"`. Applies only when the base capture mode is not `"off"` (that is, `capture_mode` is not `"off"`, or `import pubrun.full` forces the base mode to `"standard"`). |
+| `jupyter_mode` | string | `"off"` | Override capture behavior when running inside Jupyter/IPython. Default `"off"` auto-disables capture in notebooks; set to `"standard"` to keep capture active in Jupyter. Applies only when the base capture mode is not `"off"` (that is, `capture_mode` is not `"off"`, or `import pubrun.full` forces the base mode to `"standard"`). |
 
 ### `[events]`
 
@@ -116,7 +117,7 @@ Controls the real-time `events.jsonl` stream.
 | `enabled` | bool | `true` | Whether to write events (phases, annotations) to `events.jsonl`. |
 | `max_tracked_events` | int | `1000000` | Maximum number of regular events written per run. When exhausted, non-critical events are silently dropped. Critical events (annotations, phases) bypass this limit up to a secondary cap of 10x this value (minimum 10,000). |
 | `flush_interval_events` | int | `100` | Number of non-critical events to buffer before flushing to disk. Higher values improve throughput but increase data-loss window on hard crashes. Critical events (annotations, phases) always flush immediately regardless. |
-| `on_inactive_annotate` | string | `"ignore"` | Behavior when `annotate()` is called with no active run: `"ignore"`, `"warn"`, or `"error"`. |
+| `on_inactive_annotate` | string | `"ignore"` | Behavior when an active-run API function is called with no active run: `"ignore"`, `"warn"`, or `"error"`. Applies to `annotate()`, `phase()`, `report()`, `artifact()`, `register_file()`, `register_input()`, and `register_output()`. |
 
 ### `[redaction]`
 
@@ -143,7 +144,7 @@ Security policies for preventing secret leakage into manifest files.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `mode` | string | `"filtered"` | `"allowlist"` — only permitted vars; `"filtered"` — all vars with secret redaction; `"full"` — raw dump (unsafe). |
+| `mode` | string | `"filtered"` | `"off"`: suppress the section (`capture_state.status = "suppressed"`); `"allowlist"`: capture only variables matching `allowlist`; `"filtered"`: capture all variables; `"full"`: capture all variables. `"filtered"`, `"full"`, and `"allowlist"` all pass values through the secret redaction controlled by `[redaction].env_enabled`, so `"full"` and `"filtered"` currently produce the same values. |
 | `depth` | string | `"standard"` | Capture depth for this category. `"off"` suppresses the section (`capture_state.status = "suppressed"`) without reading the environment. |
 | `allowlist` | list | `[]` | Variable names captured when `mode = "allowlist"`. Each entry is an exact name or a case-sensitive shell-style glob matched with `fnmatch.fnmatchcase` (for example `["PATH", "SLURM_*"]`). An empty or missing list captures no variables. Secret redaction from `[redaction]` still applies to matched variables, so `SLURM_API_TOKEN` matched by `SLURM_*` is still redacted. Ignored in other modes. |
 
@@ -152,7 +153,7 @@ Security policies for preventing secret leakage into manifest files.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `mode` | string | `"imported-only"` | `"off"`: disable package capture (the `packages` section records `capture_state.status = "suppressed"` and omits `mode`). `"imported-only"`: resolve modules loaded in `sys.modules` to their installed distributions. `"imported-transitive"`: imported distributions plus the recursive, cycle-safe closure of their declared dependencies whose Python Enhancement Proposal (PEP) 508 markers apply; optional extras of imported distributions are not guessed, and extras a parent requests (`pkg[extra]`) are followed. `"top-level-installed"`: installed distributions that no other installed distribution requires. `"full-environment"`: every installed distribution in the environment. All modes read metadata through `importlib.metadata` (offline, no subprocesses). |
-| `depth` | string | `"standard"` | Capture depth for this category. |
+| `depth` | string | `"standard"` | **Reserved (currently without effect).** Use `mode` above to control package capture. |
 
 When `mode` is not `"off"`, `pubrun` captures packages twice: a startup snapshot while the run initializes (so a crashed run still records what was loaded), and a refresh at finalization that is merged with the startup snapshot so imports made during the run are recorded too. No global import hook is installed, so a module imported after startup and removed from `sys.modules` before finalization is not observed; the manifest states this in `packages.coverage_notes`. See [Manifest: `packages`](manifest.md#packages) for the recorded fields and [Performance](performance.md#package-capture-startup-and-finalization-overhead-single-machine-local-measurements) for measured cost.
 
@@ -161,7 +162,7 @@ When `mode` is not `"off"`, `pubrun` captures packages twice: a startup snapshot
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `true` | Whether to intercept `subprocess.Popen` and `os.system` calls. |
-| `depth` | string | `"basic"` | Capture depth for this category. |
+| `depth` | string | `"basic"` | **Reserved (currently without effect).** Use `enabled` above to control subprocess capture. |
 | `max_tracked_commands` | int | `5000` | Stop recording after this many subprocesses to prevent OOM. |
 
 ### `[capture.process]`
@@ -204,10 +205,10 @@ When `mode` is not `"off"`, `pubrun` captures packages twice: a startup snapshot
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `depth` | string | `"basic"` | Capture depth for hardware introspection. |
-| `capture_gpu_clock_speed` | bool | `false` | Query GPU clock speeds (requires NVML; slow). |
-| `capture_gpu_fp_precision` | bool | `false` | Query GPU floating-point precision support. |
-| `capture_cpu_clock_speed` | bool | `false` | Query CPU clock speeds (reads `/proc`). |
-| `capture_cpu_fp_precision` | bool | `false` | Query CPU floating-point precision support. |
+| `capture_gpu_clock_speed` | bool | `false` | Add `clocks.max.sm` to the `nvidia-smi` query to record maximum GPU SM clock speeds (does not use NVML). |
+| `capture_gpu_fp_precision` | bool | `false` | **Reserved (currently without effect).** Intended to query GPU floating-point precision support. |
+| `capture_cpu_clock_speed` | bool | `false` | **Reserved (currently without effect).** Intended to query CPU clock speeds. |
+| `capture_cpu_fp_precision` | bool | `false` | **Reserved (currently without effect).** Intended to query CPU floating-point precision support. |
 | `timeout` | int | `10` | Per-command timeout (seconds) for hardware-inspection subprocesses (`nvidia-smi`, `system_profiler`, `sysctl`, `wmic`). Bounds a hung tool (e.g. a wedged GPU driver) so it cannot orphan the background hardware thread. |
 | `total_timeout` | number | `10` | Total monotonic wall-clock budget (seconds) across all hardware-inspection subprocess probes in a single capture (defaults to `timeout` if omitted or invalid; accepts finite non-negative numbers). Once the budget expires, remaining subprocess probes are skipped; if any probe timed out or the budget expired, `capture_state.status` is recorded as `"timeout"` if zero probed fields succeeded (`cpu.model`, `memory_total_bytes`, and `gpus` are all absent or empty) or `"partial"` if at least one probed field succeeded. |
 
@@ -216,11 +217,11 @@ When `mode` is not `"off"`, `pubrun` captures packages twice: a startup snapshot
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `depth` | string | `"standard"` | Capture depth for background resource monitoring. |
-| `scope` | string | `"process"` | What RSS to measure: `"process"` (main process only) or `"tree"` (sum resident memory across the whole process tree — parent plus all descendant processes). Tree mode is useful for multiprocessing/Dask/Ray workloads where the main process is a thin orchestrator. **Affects memory (RSS) only** — CPU is always measured for the current process (via `os.times()`, which includes already-reaped children). Tree RSS is captured on **Linux and macOS**; Windows falls back to process scope. When enabled, adds `peak_tree_rss_bytes`/`end_tree_rss_bytes` to the manifest and `tree_rss_bytes` to each `resource_sample` event. |
+| `scope` | string | `"process"` | What process scope to measure: `"process"` (main process only) or `"tree"` (main process plus all descendant processes). Tree mode is useful for multiprocessing, Dask, and Ray workloads where the main process is a thin orchestrator. On Linux and macOS, `scope = "tree"` adds tree RSS (`peak_tree_rss_bytes` and `end_tree_rss_bytes` in the manifest, and `tree_rss_bytes` per `resource_sample` event). On Linux only, `scope = "tree"` also adds tree CPU (`peak_tree_cpu_percent` in the manifest and `tree_cpu_percent` per `resource_sample` event). Main-process CPU counts only the main process's own user and system time and excludes children. Windows records no tree values. |
 | `sample_interval_seconds` | int | `15` | How often the background thread samples CPU/memory. |
 | `max_consecutive_failures` | int | `3` | Kill the background thread after this many consecutive **unreadable** polls (errors/timeouts). A legitimate reading of 0 does not count, so a transient blip cannot permanently disable telemetry. |
 | `poll_timeout` | int | `3` | Per-poll timeout (seconds) for the macOS/Windows sampling subprocesses (`ps`/`wmic`). Bounds a hung tool so it cannot orphan the sampling thread. |
-| `system_metrics` | bool | `true` | Also sample **system-wide** dynamic metrics alongside per-process RSS/CPU: available memory, load average, and (Linux only) node iowait. These make post-hoc I/O / contention diagnosis possible (e.g. "was this run starved for RAM or on a busy node?"). Cheap (single `/proc` reads) and only sampled when the watcher is running (`depth != "off"`). Adds `system_memory`/`load_average`/`system_iowait_pct` to the `resources` manifest section. Note: `system_iowait_pct` is **node-wide, indicative only** (not run-scoped). Set `false` to omit. |
+| `system_metrics` | bool | `true` | Also sample **system-wide** dynamic metrics and per-process I/O counters alongside per-process RSS/CPU: available memory, load average, and (Linux only) node iowait and cumulative I/O bytes from `/proc/self/io`. These make post-hoc I/O and contention diagnosis possible (for example whether a run was starved for RAM or on a busy node). Cheap (single `/proc` reads) and only sampled when the watcher is running (`depth != "off"`). Adds `system_memory`, `load_average`, `system_iowait_pct`, and (Linux only) `io_counters` to the `resources` manifest section. Note: `system_iowait_pct` is **node-wide, indicative only** (not run-scoped). Set `false` to omit. |
 
 #### Enabling process-tree memory capture
 
@@ -249,9 +250,10 @@ pubrun.start(capture={"resources": {"scope": "tree"}})
 pubrun.stop()
 ```
 
-The `pubrun.start(profile=..., output_dir=...)` shorthand only flattens the top-level
-`[core]` keys; every `[capture.*]` setting must be passed as the nested dict shown
-above.
+`pubrun.start()` flattens only four `[core]` shortcut keys: `profile`, `output_dir`,
+`auto_start`, and `meta_ref`. Other `[core]` keys such as `artifact_durability` must be
+passed as `core={"artifact_durability": ...}`, and every `[capture.*]` setting must be
+passed as the nested dict shown above.
 
 ### `[capture.file_io]`
 
@@ -290,19 +292,19 @@ When enabled, each `pubrun.phase("name")` block saves a `profile-<name>.prof` fi
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `true` | Install non-intrusive signal handlers (`SIGINT`, `SIGTERM`, `SIGHUP`, `SIGUSR1`, `SIGUSR2`, `SIGBREAK` where available) that record received signals and the process exit code. Handlers chain to any pre-existing handlers without disrupting the importing script. Disable to skip the `"signals"` manifest section entirely. |
+| `enabled` | bool | `true` | Install non-intrusive signal handlers (`SIGINT`, `SIGTERM`, `SIGHUP`, `SIGPIPE`, `SIGUSR1`, `SIGUSR2`, `SIGBREAK` where available) that record received signals and the process exit code. Handlers chain to any pre-existing handlers without disrupting the importing script. Disable to skip the `"signals"` manifest section entirely. |
 
 ### `[capture.determinism]`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `depth` | string | `"off"` | Track/lock pseudorandom seeds (Python `random`, numpy). Currently off by default. |
+| `depth` | string | `"off"` | **Reserved (currently without effect).** Intended to track or lock pseudorandom seeds (Python `random`, numpy). |
 
 ---
 
 ### `[report]`
 
-Controls for `pubrun report` and `pubrun methods` manifest hydration.
+Controls `meta_ref` parent-snapshot hydration in every command and API that hydrates a manifest: `show`/`report`, `methods`, `inspect`, `rerun --preflight`, `diff`, `res`/`cpu`/`mem`, `ui`, and the `pubrun.diff()` API.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -321,7 +323,7 @@ Controls for `pubrun report` and `pubrun methods` manifest hydration.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `format` | string | `"markdown"` | Default output format for `pubrun methods`: `"markdown"` or `"latex"`. |
+| `format` | string | `"markdown"` | Output format for the `methods.md` or `methods.tex` file written when a run finalizes (`"markdown"` or `"latex"`). The `pubrun methods` CLI command does not read this key and defaults to `markdown` unless `--format latex` is passed. |
 
 ### `[diff]`
 
@@ -332,25 +334,26 @@ nothing**:
 - **`ignore_basic`** — hides everything `--standard` hides, PLUS the high-volume, low-signal
   sections (`process`, `hardware`, `resources`, `environment`, `subprocesses`, `packages`) so
   `--basic` shows only the user-facing changes (script/argv, python, git, config).
-- **`ignore_standard`** — hides volatile / always-different fields: timestamps (`*_utc`), run
-  ids, PIDs, per-run absolute paths (`filesystem.*.path`/`mount_point`, `capture.run_dir`),
-  and import-request timestamps. Keeps meaningful signals like `fstype`/`is_network`. At
-  `--standard`, list-valued sections (subprocesses, packages) are **summarized** (counts +
-  identities) rather than diffed element-by-element.
+- **`ignore_standard`**: hides volatile or always-different fields, including timestamps
+  (`*_utc`), run ids, PIDs, per-run absolute paths (`filesystem.*.path`/`mount_point`,
+  `capture.run_dir`), and import-request timestamps, while keeping meaningful signals such as
+  `fstype` and `is_network`. At `--standard`, `subprocesses` is **summarized** (count and
+  command identities) rather than diffed element-by-element, while `packages` is compared per
+  package name at every depth that shows it (`--standard` and `--deep`).
 - **`ignore_deep`** — empty; `--deep` compares everything, element by element.
 
 The authoritative default lists live in the shipped `default.toml` `[diff]` section (they are
 long); override any of them in your `.pubrun.toml`.
 
-| Key | Type | Description |
-|---|---|---|
-| `ignore_basic` | list | Keys ignored at `--basic` depth (see above; the largest list). |
-| `ignore_standard` | list | Keys ignored at `--standard` depth (see above). |
-| `ignore_deep` | list | Keys ignored at `--deep` depth — `[]` by default. |
-| `show_same` | bool (`false`) | Show unchanged values in diff output. |
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `ignore_basic` | list | see `default.toml` | Keys ignored at `--basic` depth (see above; the largest list). |
+| `ignore_standard` | list | see `default.toml` | Keys ignored at `--standard` depth (see above). |
+| `ignore_deep` | list | `[]` | Keys ignored at `--deep` depth. |
+| `show_same` | bool | `false` | Show unchanged values in diff output. |
 | `export_format` | string | `"txt"` | Output format for `--export`: `"txt"` or `"json"`. |
 | `wrap` | bool | `true` | Wrap long strings instead of truncating with ellipsis. |
-| `max_string_length` | int | `300` | Maximum characters per value before wrapping/truncation. |
+| `max_string_length` | int | `300` | Maximum characters per value before wrapping or truncation. |
 
 ---
 
@@ -364,6 +367,8 @@ long); override any of them in your `.pubrun.toml`.
 | `PUBRUN_AUTO_START` | Legacy alias for import mode. `"1"`, `"true"`, `"yes"`, or `"on"` maps to `auto`; `"0"`, `"false"`, `"no"`, or `"off"` maps to `noauto` (case-insensitive). Other values are ignored. |
 | `PUBRUN_META_REF` | Path to a parent `meta.json` for HPC hydration. Child runs will reference this. |
 | `PUBRUN_IMPORT_CONFLICT` | Override `[imports].on_conflict`. Set to `"ignore"`, `"warn"`, or `"error"`. |
+| `PUBRUN_DEBUG` | Any non-empty value shows `[DEBUG]` CLI diagnostic lines. |
+| `NO_COLOR` | Any non-empty value disables ANSI color output across CLI commands. Passing `--no-color` sets this variable internally. |
 
 ---
 

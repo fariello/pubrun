@@ -4,6 +4,12 @@
 
 The `pubrun` CLI is accessible via `pubrun <command>`, `pbr <command>` (a convenient shorthand alias), or `python -m pubrun <command>`. It provides a family of subcommands for setup, post-execution analysis, diagnostics, and benchmarking, plus top-level diagnostic flags. Run `pubrun -h` for the authoritative command list (shown alphabetically).
 
+**Help, shorthand, and global flags:**
+- `pubrun help [CMD]` and `pubrun <CMD> help` print top-level or subcommand help.
+- Bare `pubrun` (with no subcommand or flag) prints top-level help followed by the number of runs found in the output directory.
+- **Selector-first shorthand:** you can place a run selector (index, run-id prefix, or path) before the subcommand, for example `pubrun 1 cpu` (rewritten to `pubrun cpu 1`).
+- **Global `--no-color`:** accepted in any position on the command line (sets `NO_COLOR=1` internally). When placed after `pubrun run`, `--no-color` is not consumed by `pubrun` and is passed through to the child command instead.
+
 ### Output conventions
 
 pubrun status lines use a consistent set of prefixes so output is easy to scan and grep:
@@ -17,21 +23,32 @@ pubrun status lines use a consistent set of prefixes so output is easy to scan a
 | `[DEBUG]` | debug detail (light blue) — silent unless `PUBRUN_DEBUG` is set |
 | `[FAIL ]` | a failed built-in self-test (`--run-tests`) (red) |
 
-Color is optional reinforcement only: the textual label is authoritative, colors are never
-dimmed, and all color is suppressed when `NO_COLOR` is set, `--no-color` is passed, or output
-is not a terminal. If you parse pubrun output in a script, match on the level word (e.g.
-`WARN`), not the exact bracketing.
+Color is optional reinforcement only, and the textual label is authoritative. The status-line
+prefixes (`[INFO ]`, `[ OK  ]`, `[WARN ]`, `[ERROR]`, `[DEBUG]`, `[FAIL ]`), `self-check`, and
+`inspect` disable color when `NO_COLOR` is set, `--no-color` is passed, or the output stream is
+not a terminal. By contrast, `show`, `status`, `res`/`cpu`/`mem`, and `diff` check only
+`NO_COLOR` and `--no-color` (not whether stdout is a terminal), and parts of the `status`
+summary, `show` report, and `diff` output use dim text. Pass `--no-color` or set `NO_COLOR=1`
+when piping or redirecting output from those commands. If you parse pubrun output in a script,
+match on the level word (for example `WARN`), not the exact bracketing.
 
 ### Selecting a run
 
 Every command that takes a run (`show`/`report`, `res`/`cpu`/`mem`, `methods`, `inspect`,
-`rerun`, `diff`, `status`) accepts the run argument in three interchangeable forms:
+`rerun`, `diff`, `status`, and `combined`) accepts run selectors from the forms below:
 
 | Form | Example | Meaning |
 |---|---|---|
-| **Recency index** | `pubrun show 1` | `1` = most recent run, `2` = second most recent, … (1-based). A bare positive integer (≤ 999). |
+| **Recency index** | `pubrun show 1` | `1` = most recent run, `2` = second most recent, and so on (1-based). A bare positive integer (<= 999). |
 | **Run id / prefix** | `pubrun show 8b9dc889` | The full run id or a unique leading prefix. |
-| **Directory path** | `pubrun show ./runs/pubrun-…` | A run directory (or its `manifest.json`). |
+| **Directory-name substring** | `pubrun show train-20260509` | A unique substring of the run directory name. |
+| **Directory path** | `pubrun show ./runs/pubrun-20260509` | A run directory or its `manifest.json` path (not accepted by `status` or `combined`). |
+
+`status` and `combined` accept only a recency index, a run-id prefix, or a unique substring of
+the run directory name, searched within `--dir` or the configured output directory. They do not
+accept an arbitrary directory path or a `manifest.json` path. `show`/`report`, `res`/`cpu`/`mem`,
+`methods`, `inspect`, `rerun`, and `diff` accept those three selector forms and also accept a
+run directory path or a `manifest.json` path directly.
 
 The recency index counts within the current output directory (or the one given by `--dir`
 where that flag exists). `pubrun status` shows the index in its leading `#` column, so the
@@ -41,6 +58,23 @@ matching run (equivalent to `1`).
 A run id being a bare small integer is effectively impossible (ids are timestamp+hash), so the
 recency index never collides in practice; in the vanishing case it would, pubrun refuses to
 guess and asks you to pass the full id or the directory path.
+
+### Standard run filters
+
+Commands that scan or select runs share a common set of run-filter flags:
+
+| Flag | Description |
+|---|---|
+| `-f QUERY`, `--filter QUERY` | Include only runs whose script name, arguments, or run id contain `QUERY`. |
+| `-F QUERY`, `--not-filter QUERY` | Exclude runs whose script name, arguments, or run id contain `QUERY`. |
+| `-s STATUS`, `--status STATUS` | Include only runs with one of the comma-separated statuses (for example `completed,failed`). |
+| `-S STATUS`, `--not-status STATUS` | Exclude runs with one of the comma-separated statuses. |
+| `--older-than AGE` | Include only runs older than `AGE` (for example `7d`, `24h`, `30m`, `90s`, or `30` for 30 days). |
+| `--exit-code CODE` | Include only runs whose exit code equals the integer `CODE`. |
+| `-n N`, `--limit N` | Limit selection to the `N` most recent matching runs. |
+
+`-n`/`--limit` is accepted only by `clean`, `combined`, `methods`, `show`/`report`, and `status`.
+It is not accepted by `inspect`, `diff`, `rerun`, or `res`/`cpu`/`mem`.
 
 ---
 
@@ -239,7 +273,7 @@ after a successful assessment, whatever it found.
 
 **Parent snapshots (`meta_ref`):** when the manifest names a parent `meta.json`, `inspect`
 fills sections the child did not capture (hardware, process, python, packages, environment,
-git) from the parent, in memory only; `manifest.json` is never modified. Inherited sections
+git, host) from the parent, in memory only; `manifest.json` is never modified. Inherited sections
 are reported as `inherited`, not `observed`. The Parent Metadata category reports whether the
 snapshot was missing, blocked by the `[report]` path policy, invalid, older than one day,
 newer than the child run, or inconsistent with what the child observed directly (for example
@@ -377,7 +411,7 @@ pubrun bench --submit-file res.redacted.json           # contribute a previously
 Interactively delete old run directories. Lists candidates with their age and size, then prompts for confirmation before removal.
 
 ```bash
-pubrun clean [--dir PATH] [--older-than AGE] [--status STATUS] [-y|--yes] [--dry-run]
+pubrun clean [--dir PATH] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE] [-n N] [-y|--yes] [--dry-run]
 ```
 
 **Options:**
@@ -386,7 +420,8 @@ pubrun clean [--dir PATH] [--older-than AGE] [--status STATUS] [-y|--yes] [--dry
 |---|---|
 | `--dir PATH` | Override the output directory to scan |
 | `--older-than AGE` | Only consider runs older than AGE (e.g. `7d`, `24h`, `30m`, `90s`, `30` for 30 days). Units are `d` (days), `h` (hours), `m` (minutes), and `s` (seconds); a bare number means days. An invalid, empty, or negative AGE is an error and deletes nothing |
-| `--status STATUS` | Comma-separated status filter (e.g. `completed,failed`). Default: all non-running statuses |
+| `-s`, `--status STATUS` | Comma-separated status filter (e.g. `completed,failed`). Without `--status`, `clean` selects all non-running runs (`completed`, `failed`, `interrupted`, `broken pipe`, `crashed`, and `ghost`) |
+| `-f`/`--filter`, `-F`/`--not-filter`, `-S`/`--not-status`, `--exit-code`, `-n`/`--limit` | See [Standard run filters](#standard-run-filters) |
 | `-y`, `--yes` | Skip confirmation prompt (non-interactive mode) |
 | `--dry-run` | Show what would be deleted without actually deleting |
 
@@ -397,7 +432,7 @@ Running processes are never deleted, even if explicitly included in `--status`.
 **Example:**
 ```bash
 pubrun clean                              # Interactive: list and confirm
-pubrun clean --older-than 7d --yes        # Non-interactive: delete completed runs > 7 days
+pubrun clean --older-than 7d --yes        # Non-interactive: delete every non-running run older than 7 days
 pubrun clean --status crashed,ghost --yes # Delete all crashed/ghost runs
 pubrun clean --dry-run                    # Preview without deleting
 ```
@@ -409,7 +444,7 @@ pubrun clean --dry-run                    # Preview without deleting
 Post-execution command that chronologically interleaves stdout and stderr logs from one or more runs using the log-line timestamps written in `standard` or `deep` console mode.
 
 ```bash
-pubrun combined [RUN_ID ...] [--dir PATH] [--output FILE] [-y|--yes] [--force] [-f|--filter QUERY]
+pubrun combined [RUN_ID ...] [--dir PATH] [--output FILE] [-y|--yes] [--force] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE] [-n N]
 ```
 
 **Options:**
@@ -420,7 +455,7 @@ pubrun combined [RUN_ID ...] [--dir PATH] [--output FILE] [-y|--yes] [--force] [
 | `--output FILE` | Write combined logs to this file instead of stdout |
 | `-y`, `--yes` | Skip confirmation prompt for files > 250 MB |
 | `--force` | Force execution for files > 500 MB |
-| `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code` | Standard run filters (select which runs to combine when no run IDs are given) |
+| `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`, `-n`/`--limit` | See [Standard run filters](#standard-run-filters) (select which runs to combine when no run IDs are given) |
 
 > **Changed in 1.4.0:** `combined -f` now means `--filter` (consistent with every other command). The force flag is now `--force` (long form only). Previously `-f` meant `--force`.
 
@@ -442,14 +477,14 @@ Generates a structural comparison between two execution traces, filtering volati
 (timestamps, PIDs, per-run absolute paths) so the *meaningful* differences stand out.
 
 ```bash
-pubrun diff RUN_DIR_A RUN_DIR_B [OPTIONS]
+pubrun diff [RUN_DIR_A [RUN_DIR_B]] [OPTIONS]
 ```
 
 **Depth levels** — each level is nested: `--basic` hides the most, `--deep` hides nothing.
 
 | Flag | What it shows |
 |---|---|
-| `--basic` | The user-facing, high-signal differences only: script/argv, packages, python, git, user config. Hides volatile fields and the high-volume sections (subprocesses, packages-as-list, environment, hardware, resources). A single `argv` change is reported once (not also as `command_line`/`rerun_command`, which are derived from it). |
+| `--basic` | The user-facing, high-signal differences only: script/argv, python, git, user config. Hides volatile fields and the high-volume sections (process, hardware, resources, environment, subprocesses, packages). A single `argv` change is reported once (not also as `command_line`/`rerun_command`, which are derived from it). |
 | `--standard` (default) | The above plus hardware/resource changes and **summarized** list sections — e.g. `subprocesses.count: 300 → 302` and `subprocesses.by_command.bash: +2`, rather than thousands of per-process leaf lines. |
 | `--deep` | No filtering; every field, every subprocess element, and the derived `command_line`/`rerun_command` are compared. |
 
@@ -465,9 +500,13 @@ pubrun diff RUN_DIR_A RUN_DIR_B [OPTIONS]
 | `--export [txt\|json]` | Export flattened key-value output for external diff tools (e.g., `meld`, VS Code) |
 | `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code` | Standard run filters. When run directories are omitted, the auto-selected pair is drawn from the runs matching these filters (with no filters, from all runs — the historical behavior) |
 
-When no run directories are given, `diff` compares the two most recent runs in the
-(optionally filtered) set. If a filter matches fewer than two runs, `diff` reports a clear
-error and exits non-zero rather than silently ignoring the filter.
+**Run arguments:** `diff` accepts zero, one, or two run arguments:
+- **Zero arguments:** compares the two most recent runs with a `manifest.json` (drawn from runs matching the standard run filters when given).
+- **One argument:** compares that run with the most recent other run that has a `manifest.json` (matching the standard run filters when given).
+- **Two arguments:** compares `RUN_DIR_A` and `RUN_DIR_B`.
+- **More than two arguments:** arguments after the second are ignored.
+
+If a filter matches fewer than two runs (or no other run when one argument is given), `diff` reports a clear error and exits non-zero rather than silently ignoring the filter.
 
 > **Changed in 1.4.0:** `--basic` and `--standard` are now genuinely concise — they no longer
 > explode subprocess-heavy runs into thousands of lines, and they hide per-run volatile paths
@@ -520,7 +559,7 @@ pubrun methods [RUN_DIR] [--format markdown|latex] [--all] [-n N] [-f/-F/-s/-S .
 **Aggregating many runs (`--all`):** for a study run many times (sweeps, seeds, folds), `pubrun methods --all` aggregates the whole matching set into **one** representative paragraph plus a variance note listing only the fields that differ across runs (OS, CPU, RAM, Python, git commit, pubrun version, packages). If the runs are environment-homogeneous, the output reads like the single-run paragraph with "across N runs" added.
 
 - Bound/curate the set with the shared run filters: `-n N` (most-recent N), `-f`/`-F` (include/exclude by script/args/**run-id**), `-s`/`-S` (by status). A differing git commit across the set is *disclosed as variance*, never an error.
-- A very large or divergent set prints a suggestion to stderr, **clearly marked as not part of the methods section** (so it can never be pasted into a paper); it respects `NO_COLOR`.
+- When more than 25 runs are aggregated (the built-in threshold) or when at least one matching run had an unreadable or missing manifest and was skipped, `pubrun methods --all` prints a note to stderr, **clearly marked as not part of the methods section** (so it cannot be pasted into a paper). This note respects `NO_COLOR`.
 - **Note the difference from `show`:** bare `pubrun show` (no run dir, filter, or `-n`) reports only the single most recent run, and `pubrun show` with run filters or `-n` prints a *separate report per matching run*; `pubrun methods` stays single-run unless you pass `--all`, and then produces *one aggregated paragraph*. This is deliberate: a methods section is a single publication artifact, so aggregation is opt-in.
 
 **Examples:**
@@ -537,18 +576,23 @@ pubrun methods --all -n 20 -s completed      # aggregate the 20 most-recent comp
 Renders a human-readable diagnostic summary of one or more runs, including timing, hardware, dependencies, codebase drift, and an event timeline.
 
 ```bash
-pubrun show [RUN_DIR ...] [--basic|--standard|--deep] [--utc]
+pubrun show [RUN_DIR] [logs|env|packages] [--basic|--standard|--deep] [--utc] [run filters] [-n N]
+pubrun show config [--all] | show run config [<id>] [--all] | show default config
 ```
 
-**Alias:** `report` (backward-compatible) — `report` accepts the same flags, including `--utc`.
+**Alias:** `report` (hidden backward-compatible alias). `report` accepts the same depth flags (`--basic`, `--standard`, `--deep`), `--utc`, [Standard run filters](#standard-run-filters), and `-n`/`--limit`, as well as `logs`/`env`/`packages` section extracts. It does not accept `--all` and has no third positional argument, so `pubrun report run config <id>` is not accepted.
 
-- Pass multiple directories to evaluate them sequentially.
-- With no run directory, filter, or `-n`/`--limit`, `pubrun show` reports the single most recent run.
-  Passing any run filter (`-f`, `-F`, `-s`, `-S`, `--older-than`, `--exit-code`) prints a separate
-  report for every matching run, and `-n N` limits that to the N most recent matches.
+- With no `RUN_DIR`, run filter, or `-n`/`--limit`, `pubrun show` reports the single most recent run.
+  When `RUN_DIR` is omitted, passing any run filter (`-f`, `-F`, `-s`, `-S`, `--older-than`, `--exit-code`)
+  or `-n`/`--limit` prints a separate report for every matching run (up to `N` most recent matches when
+  `-n N` is given). `RUN_DIR` must be omitted for filters or `-n` to select several runs.
+- **Section extracts (`logs`, `env`, `packages`):** pass `logs`, `env`, or `packages` after `RUN_DIR` to
+  print only that section (captured console logs, environment variables, or recorded packages). A bare
+  section name in the `RUN_DIR` position (for example `pubrun show env`) selects the most recent matching
+  run and prints that section.
 - If the manifest references a `meta_ref`, the parent context is hydrated automatically.
-- Timestamps display in **local time** by default; pass `--utc` for UTC. They are shown in a
-  compact `YYYY-MM-DD HH:MM:SS` form.
+- Timestamps display in **local time** by default; pass `--utc` for UTC. Both local and `--utc`
+  timestamps use the compact `YYYY-MM-DD HH:MM:SS` form without a trailing `Z` suffix.
 - The **event timeline** shows all events when there are ≤ 20; above that, it shows the
   oldest 10 and newest 10 with a `... [ N events truncated ] ...` marker between them.
 
@@ -604,7 +648,7 @@ A run whose id genuinely starts with one of these words must be selected by its 
 Extracts the exact shell command needed to re-execute a recorded run.
 
 ```bash
-pubrun rerun [RUN_DIR] [--preflight [--strict] [--fail-on {warn,mismatch,unknown}] [--json]]
+pubrun rerun [RUN_DIR] [--preflight [--strict] [--fail-on {warn,mismatch,unknown}] [--json]] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE]
 ```
 
 Prints the `rerun_command` from the manifest to stdout. Internal log messages go to stderr, so this is safe for piping:
@@ -619,11 +663,12 @@ pubrun never runs the recorded command itself. It only prints it.
 
 | Flag | Description |
 |---|---|
-| `RUN_DIR` | Run to read. Defaults to the most recent matching run (standard run selectors also apply). |
+| `RUN_DIR` | Run to read. Defaults to the most recent matching run. |
 | `--preflight` | Before printing the command, run the same read-only, offline preflight comparison as `pubrun inspect --preflight`. Diagnostics go to stderr. |
 | `--strict` | Requires `--preflight`. If the strict threshold triggers, exit `1` and print nothing to stdout. The threshold is `warn` unless `--fail-on` is given. |
 | `--fail-on {warn,mismatch,unknown}` | Requires `--preflight`. Set the strict threshold; implies `--strict`. Thresholds are the same as for [`inspect`](#inspect--post-hoc-run-diagnosis). |
 | `--json` | Requires `--preflight`. Print one JSON object to stdout instead of the bare command. |
+| `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code` | See [Standard run filters](#standard-run-filters) (select which run to read when `RUN_DIR` is omitted; `-n`/`--limit` is not accepted). |
 
 **Behavior:**
 
@@ -758,10 +803,10 @@ The wrapper returns the child process exit code. It does not create a run in the
 
 ### `status` — Run Monitoring
 
-Lists all runs in the output directory with their current status, or inspects a specific run in detail. Classifies runs as completed, failed, interrupted, running, crashed, or ghost via lock-file PID liveness checks.
+Lists all runs in the output directory with their current status, or inspects a specific run in detail. Classifies runs as completed, failed, interrupted, broken pipe, running, crashed, or ghost via lock-file PID liveness checks. When a crashed run still has a `.pubrun.lock` file (its process is no longer alive), `pubrun status` closes it out by writing or updating `manifest.json` and removing `.pubrun.lock`, so this command can modify run directories.
 
 ```bash
-pubrun status [RUN_ID] [--dir PATH] [-v|--verbose] [--utc]
+pubrun status [RUN_ID] [--dir PATH] [-v|--verbose] [--utc] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE] [-n N]
 ```
 
 **Modes:**
@@ -778,7 +823,8 @@ pubrun status [RUN_ID] [--dir PATH] [-v|--verbose] [--utc]
 |---|---|
 | `--dir PATH` | Override the output directory to scan (default: configured `output_dir` or `./runs`) |
 | `-v`, `--verbose` | Show detailed information for each run in the listing |
-| `--utc` | Display timestamps in UTC (with a `Z` suffix) instead of the default local time. Timestamps are always stored as UTC epochs; this only affects display. Also available on `pubrun show`. |
+| `--utc` | Display timestamps in UTC (`YYYY-MM-DD HH:MM` with a trailing `Z` suffix) instead of local time. Timestamps are always stored as UTC epochs; this only affects display. Also available on `pubrun show` (which omits the `Z` suffix). |
+| `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`, `-n`/`--limit` | See [Standard run filters](#standard-run-filters). |
 
 **Status Values:**
 
@@ -816,7 +862,7 @@ For running processes, the inspect view also shows live RSS memory and CPU usage
 
 ### `ui` — Interactive Dashboard
 
-Launches the terminal user interface (TUI) dashboard to browse, inspect, and manage run records interactively. Tabs include Run Details, Console Logs, **Resources** (CPU/memory usage), Semantic Diff, Actions, and Settings.
+Launches the terminal user interface (TUI) dashboard to browse, inspect, and manage run records interactively. Tabs are `Run Details`, `Console Logs`, `Resources` (CPU/memory usage), `Semantic Diff`, `Actions & Citations`, and `TUI Settings`.
 
 Requires the optional TUI extra: `pip install "pubrun[tui]"`.
 
@@ -891,7 +937,7 @@ pubrun --show-config
 
 ### `--info`
 
-Displays system capabilities, pubrun version, and environment details.
+Prints an import-mode diagnostic block (the active mode, its behavior flags `auto_start`, `global_hooks`, `patch_subprocesses`, `patch_console`, and `signal_hooks`, and any `PUBRUN_IMPORT_MODE` environment override), followed by invocation details and hardware probe output as JSON. Use `pubrun --version` for the installed version and `pubrun show config` for the resolved configuration.
 
 ```bash
 pubrun --info
@@ -914,6 +960,12 @@ pubrun --run-tests
 | `0` | Success |
 | `1` | Error (missing manifest, invalid path, config already exists, etc.), or a triggered `--strict` / `--fail-on` threshold |
 | `2` | Invalid command-line arguments or an unsupported flag combination, for example `pubrun rerun --strict` without `--preflight` |
+| child exit code | For `pubrun run`, returns the child process's exit code directly |
+| `127` | For `pubrun run`, the child command could not be executed (not found or permission denied) |
+| `128+N` | For `pubrun run`, the child process was terminated by signal `N` (for example `143` for `SIGTERM`, signal 15) |
+| `130` | For `pubrun run`, interrupted by `Ctrl+C` (`KeyboardInterrupt`) |
+
+`pubrun bench` returns the benchmark harness's nonzero exit code directly; it does not apply the `127`, `128+N`, or `130` exit-code mappings used by `pubrun run`.
 
 ---
 
