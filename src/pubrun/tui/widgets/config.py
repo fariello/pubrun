@@ -102,8 +102,6 @@ class ConfigPanel(Vertical):
     def compose(self) -> ComposeResult:
         with VerticalScroll(classes="panel-card"):
             yield Label("CORE SETTINGS", classes="panel-card-title")
-            yield Label("Profile Mode (deprecated; no effect — use capture.* keys):", classes="info-label")
-            yield Select(_SELECT_OPTIONS["cfg-profile"], id="cfg-profile")
 
             yield Label("Base Output Directory (e.g. ./runs/):", classes="info-label")
             yield Input(id="cfg-output-dir", placeholder="Default: ./runs/")
@@ -152,7 +150,12 @@ class ConfigPanel(Vertical):
 
         # Core
         core = self.config_data.get("core", {})
-        self._set_select("cfg-profile", "core.profile", core.get("profile", "default"))
+        profile_val = core.get("profile")
+        if profile_val is not None and profile_val not in ("default", ""):
+            self.app.notify(
+                f"Deprecated core.profile={profile_val!r} has no effect; configure capture.* keys instead.",
+                severity="warning",
+            )
         self.query_one("#cfg-output-dir", Input).value = core.get("output_dir") or ""
         self.query_one("#cfg-auto-start", Checkbox).value = core.get("auto_start", True)
 
@@ -183,11 +186,7 @@ class ConfigPanel(Vertical):
         # 1. Fetch current local configurations to avoid overwriting unrelated settings
         local_conf = load_local_config() or {}
 
-        # 2. Update section values
-        profile_val = self.query_one("#cfg-profile", Select).value
-        if not _is_select_empty(profile_val):
-            local_conf.setdefault("core", {})["profile"] = profile_val
-
+        # 2. Update section values (do not write deprecated inert core.profile)
         local_conf.setdefault("core", {})["output_dir"] = self.query_one("#cfg-output-dir", Input).value
         local_conf.setdefault("core", {})["auto_start"] = self.query_one("#cfg-auto-start", Checkbox).value
 

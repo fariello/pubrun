@@ -36,8 +36,8 @@ REDACTED = "<redacted>"
 # The scan runs over the JSON-serialized document, where a single backslash is escaped to
 # two, so the Windows pattern tolerates one-or-more backslashes (\\+) between segments.
 _HOME_PATH_RE = re.compile(
-    r"(?:/home|/Users)/[A-Za-z0-9._-]+"          # POSIX: /home/<x> or /Users/<x>
-    r"|[A-Za-z]:\\+[Uu]sers\\+[^\\\"]+"           # Windows: C:\Users\<x> (escaped or not)
+    r"(?:/home|/Users)/[A-Za-z0-9._-]+"            # POSIX: /home/<x> or /Users/<x>
+    r"|[A-Za-z]:(?:\\+|/)[Uu]sers(?:\\+|/)[^/\\\"]+"  # Windows: C:\Users\<x> or C:/Users/<x>
 )
 
 # Dotted paths (into the result dict) whose leaf value MUST equal the redaction marker when
@@ -87,6 +87,27 @@ def check_share_safe(result: Dict[str, Any]) -> Tuple[bool, List[str]]:
         if not isinstance(val, str) or val != REDACTED:
             # Report the field, never the raw value (do not echo a potential leak).
             reasons.append(f"field `{dotted}` is not redacted (must equal \"{REDACTED}\")")
+
+    # List-typed sensitive paths (machine.python.sys_path)
+    sys_path_val = _get(result, "machine.python.sys_path")
+    if isinstance(sys_path_val, list):
+        for entry in sys_path_val:
+            if entry is not None and (not isinstance(entry, str) or entry != REDACTED):
+                reasons.append(f"field `machine.python.sys_path` contains an unredacted entry (must equal \"{REDACTED}\")")
+                break
+
+    # Filesystem path / mount_point fields anywhere under machine.filesystem
+    fs_val = _get(result, "machine.filesystem")
+    if isinstance(fs_val, dict):
+        def _check_fs(obj: Any, prefix: str) -> None:
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    if k in ("path", "mount_point") and v is not None:
+                        if not isinstance(v, str) or v != REDACTED:
+                            reasons.append(f"field `{prefix}.{k}` is not redacted (must equal \"{REDACTED}\")")
+                    elif isinstance(v, dict):
+                        _check_fs(v, f"{prefix}.{k}")
+        _check_fs(fs_val, "machine.filesystem")
 
     # Whole-document scan for home/user-profile paths. Serialize once.
     import json as _json

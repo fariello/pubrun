@@ -147,8 +147,8 @@ def test_resource_watcher_join(tmp_path, monkeypatch):
 
 def test_cpu_poll_excludes_reaped_children(monkeypatch):
     """CPU% for the main process must NOT jump when a batch of subprocesses is
-    reaped (children_user/children_system spike). Regression for the observed
-    5233% spike. (uri-ai-info run 31c039d0)"""
+    reaped (children_user/children_system spike). Regression for an observed
+    5233% spike."""
     import os as _os
     from pubrun.capture.resources import ResourceWatcher
 

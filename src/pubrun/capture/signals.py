@@ -121,7 +121,12 @@ def _finalize_active_run() -> None:
     try:
         from pubrun.tracker import get_current_run
         run = get_current_run()
-        if run and hasattr(run, "writer") and run.writer:
+        if (
+            run
+            and getattr(run, "pid", None) == os.getpid()
+            and hasattr(run, "writer")
+            and run.writer
+        ):
             run.writer.write_artifacts()
     except Exception:
         pass  # Best-effort: never crash during signal handling
@@ -465,6 +470,8 @@ class SignalExitCapture:
         _self = self
 
         def _sys_exit(*args: Any) -> Any:
+            if len(args) > 1:
+                return prev_exit(*args)
             if _self._active and threading.current_thread() is threading.main_thread():
                 try:
                     status = args[0] if args else None

@@ -163,9 +163,10 @@ def _install_health_findings() -> List[Dict[str, Any]]:
     # and skips the file so a user's script never breaks), so parse each config file it
     # would load explicitly here; otherwise a broken file passes self-check silently.
     findings.extend(_config_file_findings())
+    resolved_cfg: Optional[Dict[str, Any]] = None
     try:
         from pubrun.config import resolve_config
-        resolve_config()
+        resolved_cfg = resolve_config()
     except Exception as e:
         findings.append(_finding(
             WARN, "config_invalid",
@@ -174,7 +175,11 @@ def _install_health_findings() -> List[Dict[str, Any]]:
 
     # Output dir writability.
     try:
-        base = _live_paths().get("output_dir", "")
+        if resolved_cfg is not None:
+            raw_out = resolved_cfg.get("core", {}).get("output_dir", "")
+            base = raw_out or os.path.join(os.getcwd(), "runs")
+        else:
+            base = _live_paths().get("output_dir", "")
         if base:
             base = os.path.abspath(base)
             parent = base if os.path.isdir(base) else os.path.dirname(base)

@@ -614,10 +614,78 @@ def _crash_invocation_argv(lock_data: Dict[str, Any]) -> List[str]:
     return argv
 
 
+def can_safely_auto_close_crashed_run(
+    run_dir: Path, lock_data: Optional[Dict[str, Any]]
+) -> bool:
+    """Return True only when a crashed run can be safely auto-closed on disk.
+
+    Refuses to auto-close when:
+    - ``.pubrun.lock`` is missing or unreadable (e.g. concurrent startup write),
+    - the lock belongs to a different host (cannot verify remote PID liveness;
+      protects long-running >48h HPC compute-node jobs), or
+    - the recorded local PID is still alive for this run.
+    """
+    lock_path = run_dir / Run.LOCK_FILENAME
+    if not lock_path.exists() or lock_path.is_symlink():
+        return False
+
+    disk_lock: Any = None
+    try:
+        with open(lock_path, "r", encoding="utf-8") as f:
+            disk_lock = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    if not isinstance(disk_lock, dict):
+        return False
+
+    hostname = disk_lock.get("hostname")
+    if isinstance(hostname, str) and hostname and hostname != get_hostname():
+        return False
+
+    pid = _as_int(disk_lock.get("pid"))
+    started_at = _as_float(disk_lock.get("started_at_utc"))
+    script = disk_lock.get("script")
+    if not pid or pid <= 0 or started_at is None:
+        return False
+
+    return not is_same_process(
+        pid,
+        started_at,
+        expected_script=script if isinstance(script, str) else None,
+    )
+
+
 def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) -> None:
     """Close out a crashed run by updating/writing manifest.json and removing the lock file."""
     manifest_path = run_dir / "manifest.json"
     lock_path = run_dir / Run.LOCK_FILENAME
+
+    # TOCTOU re-check: if a live local process still owns the lock, never touch
+    # its lock or manifest.
+    if lock_path.exists():
+        try:
+            with open(lock_path, "r", encoding="utf-8") as f:
+                disk_lock = json.load(f)
+            if isinstance(disk_lock, dict):
+                l_host = disk_lock.get("hostname")
+                l_pid = _as_int(disk_lock.get("pid"))
+                l_start = _as_float(disk_lock.get("started_at_utc"))
+                l_script = disk_lock.get("script")
+                if (
+                    (not l_host or l_host == get_hostname())
+                    and l_pid
+                    and l_pid > 0
+                    and l_start is not None
+                    and is_same_process(
+                        l_pid,
+                        l_start,
+                        expected_script=l_script if isinstance(l_script, str) else None,
+                    )
+                ):
+                    return
+        except (OSError, json.JSONDecodeError):
+            pass
 
     lock_data = lock_data or {}
     started_at = lock_data.get("started_at_utc")
@@ -632,15 +700,46 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
         except Exception:
             pass
 
+    # If the lock vanished and the manifest already carries a finalized terminal
+    # outcome, the run completed between scan and closeout -- do not overwrite it.
+    if not lock_path.exists() and manifest:
+        existing_outcome = (
+            manifest.get("status", {}).get("outcome")
+            if isinstance(manifest.get("status"), dict)
+            else None
+        )
+        if existing_outcome in ("completed", "failed", "interrupted", "ghost"):
+            return
+
     if not manifest:
-        # Compile what we can into a fallback manifest
+        # Compile what we can into a schema-valid fallback manifest
         lock_hostname = lock_data.get("hostname")
         fallback_hostname = lock_hostname if isinstance(lock_hostname, str) and lock_hostname else None
+        raw_run_id = lock_data.get("run_id")
+        if isinstance(raw_run_id, str) and raw_run_id:
+            fallback_run_id = raw_run_id
+        else:
+            parts = run_dir.name.split("-")
+            if len(parts) >= 5 and parts[0] == "pubrun" and parts[-1]:
+                fallback_run_id = parts[-1]
+            else:
+                fallback_run_id = "unknown"
+        fallback_started_at = _as_float(started_at)
+        if fallback_started_at is None:
+            for probe in (lock_path, run_dir):
+                try:
+                    if probe.exists():
+                        fallback_started_at = float(probe.stat().st_mtime)
+                        break
+                except OSError:
+                    pass
+        if fallback_started_at is None:
+            fallback_started_at = time.time()
         manifest = {
             "schema_version": "1.0",
             "manifest_type": "pubrun-manifest",
             "run": {
-                "run_id": lock_data.get("run_id"),
+                "run_id": fallback_run_id,
                 "capture_state": {"status": "partial"},
             },
             "status": {
@@ -648,7 +747,7 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
                 "capture_state": {"status": "complete"},
             },
             "timing": {
-                "started_at_utc": started_at,
+                "started_at_utc": fallback_started_at,
                 "ended_at_utc": None,
                 "elapsed_seconds": None,
                 "duration_clock": None,
@@ -713,8 +812,8 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
         manifest["timing"] = timing
 
     try:
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, indent=2)
+        from pubrun.writer import _atomic_json_write
+        _atomic_json_write(manifest_path, manifest, durability="fsync")
         if lock_path.exists():
             lock_path.unlink()
         from pubrun.report import output as _out
@@ -749,7 +848,7 @@ def scan_runs(output_dir: Optional[str] = None) -> List[RunInfo]:
 
     runs: List[RunInfo] = []
     for entry in base.iterdir():
-        if entry.is_dir() and entry.name.startswith("pubrun-"):
+        if not entry.is_symlink() and entry.is_dir() and entry.name.startswith("pubrun-"):
             try:
                 runs.append(RunInfo(entry))
             except Exception:
@@ -1543,10 +1642,38 @@ def clean_runs(
     total_size = sum(_dir_size(r.run_dir) for r in to_delete)
     print(f"\nDeleting {len(to_delete)} run(s) ({_format_bytes(total_size)})...")
 
+    # Resolve base output directory for symlink / parent-confinement checks before deletion.
+    if output_dir:
+        _clean_base = Path(output_dir)
+    else:
+        _cfg = resolve_config()
+        _base_str = _cfg.get("core", {}).get("output_dir", "")
+        _clean_base = Path(_base_str) if _base_str else Path.cwd() / "runs"
+    _clean_base_resolved = _clean_base.resolve()
+
     # Delete
     deleted = 0
     for r in to_delete:
         try:
+            if r.run_dir.is_symlink() or not r.run_dir.is_dir():
+                print(
+                    f"  Skipped {r.run_dir.name}: not a regular directory.",
+                    file=sys.stderr,
+                )
+                continue
+            if r.run_dir.resolve().parent != _clean_base_resolved:
+                print(
+                    f"  Skipped {r.run_dir.name}: path escapes output directory.",
+                    file=sys.stderr,
+                )
+                continue
+            lock_path = r.run_dir / Run.LOCK_FILENAME
+            if lock_path.exists() and not can_safely_auto_close_crashed_run(r.run_dir, r.lock_data):
+                print(
+                    f"  Skipped {r.run_dir.name}: lock is active, unreadable, or belongs to a remote host.",
+                    file=sys.stderr,
+                )
+                continue
             shutil.rmtree(r.run_dir)
             deleted += 1
         except OSError as e:

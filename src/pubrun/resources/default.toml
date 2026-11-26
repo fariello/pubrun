@@ -302,8 +302,8 @@ timeout = 10
 # calls in a single capture. Bounds worst-case background hardware work.
 total_timeout = 10
 
-# Advanced flags for ML reproducibility. These require slow system calls
-# (NVML queries, /proc reads) and are opt-in even when depth is "deep".
+# Advanced flags for ML reproducibility. These require additional system calls
+# (nvidia-smi / sysfs / /proc reads) and are opt-in even when depth is "deep".
 capture_gpu_clock_speed = false
 capture_gpu_fp_precision = false
 capture_cpu_clock_speed = false
@@ -444,7 +444,7 @@ format = "markdown"
 
 [report]
 # -----------------------------------------------------------------------------
-# Controls for pubrun report / methods hydration behavior.
+# Controls for pubrun show / inspect / methods meta_ref hydration behavior.
 # -----------------------------------------------------------------------------
 
 # When hydrating a manifest via meta_ref, reject paths that resolve outside

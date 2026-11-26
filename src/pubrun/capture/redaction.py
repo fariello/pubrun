@@ -85,7 +85,7 @@ def redact_value(value: str, config: Optional[Dict[str, Any]] = None) -> Dict[st
         return {
             "representation": "hashed",
             "hash_algorithm": "sha256",
-            "hash_value": hashlib.sha256(value.encode("utf-8")).hexdigest()
+            "hash_value": hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
         }
     return {"representation": "redacted"}
 
@@ -246,7 +246,30 @@ def redact_argv(argv: list, config: Optional[Dict[str, Any]] = None) -> list:
                 redact_next = True
                 continue
 
-        arg_str = _redact_value_string_heuristics(arg_str, config)
+        # Heuristic 3: non-flag KEY=VALUE (e.g. env DB_PASSWORD=x, Hydra api_key=x)
+        if "=" in arg_str and not any(ch.isspace() for ch in arg_str.split("=", 1)[0]):
+            parts = arg_str.split("=", 1)
+            key_part, val_part = parts[0], parts[1]
+            if re.match(r"^[A-Za-z_][A-Za-z0-9_.-]*$", key_part):
+                if pattern.search(key_part):
+                    result.append(f"{key_part}=[REDACTED]")
+                    continue
+                redacted_val = _redact_value_string_heuristics(val_part, config)
+                result.append(f"{key_part}={redacted_val}")
+                continue
+
+        if any(ch.isspace() for ch in arg_str):
+            def _replace_kv(match: re.Match) -> str:
+                key = match.group("key")
+                if pattern.search(key.lstrip("-")):
+                    return f"{match.group('prefix')}{key}{match.group('sep')}[REDACTED]"
+                return match.group(0)
+
+            arg_str = _redact_value_string_heuristics(arg_str, config)
+            arg_str = _DIAG_KV_EQ_RE.sub(_replace_kv, arg_str)
+            arg_str = _redact_flag_space_values(arg_str, pattern)
+        else:
+            arg_str = _redact_value_string_heuristics(arg_str, config)
         result.append(arg_str)
 
     return result
@@ -254,7 +277,7 @@ def redact_argv(argv: list, config: Optional[Dict[str, Any]] = None) -> list:
 
 # Pre-compiled patterns for bounded diagnostic error-message redaction.
 _DIAG_URI_USERPASS_RE = re.compile(
-    r"([a-zA-Z0-9+.-]+)://([^\s/:@]+):([^\s/@]+)@([^\s/]+)"
+    r"([a-zA-Z0-9+.-]+)://([^\s/:@]*):([^\s/@]+)@([^\s/]+)"
 )
 _DIAG_URI_TOKEN_RE = re.compile(
     r"([a-zA-Z0-9+.-]+)://([^\s/:@]+)@([^\s/]+)"

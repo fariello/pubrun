@@ -193,9 +193,13 @@ def _is_meta_ref_allowed(meta_path: Path, manifest_dir: Path) -> bool:
     except ValueError:
         pass
 
-    # Check against the explicit allowlist
+    # Check against the explicit allowlist (fail closed on non-list/tuple)
     allowed_dirs = report_cfg.get("meta_ref_allowed_dirs", [])
+    if not isinstance(allowed_dirs, (list, tuple)):
+        return False
     for allowed in allowed_dirs:
+        if not isinstance(allowed, str) or not allowed.strip():
+            continue
         allowed_path = Path(allowed).resolve()
         try:
             resolved_meta.relative_to(allowed_path)

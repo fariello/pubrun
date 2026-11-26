@@ -4,6 +4,8 @@ Actions and Citations panel for managing runs (deleting, archiving, and methods 
 
 from __future__ import annotations
 import json
+import re
+import shlex
 import shutil
 import zipfile
 import subprocess
@@ -18,7 +20,12 @@ from textual.widgets import Static, Button, Label, RichLog, Input, Checkbox
 from textual.screen import ModalScreen
 from rich.text import Text
 
-from pubrun.status import RunInfo, clean_runs, STATUS_RUNNING
+from pubrun.status import (
+    RunInfo,
+    clean_runs,
+    can_safely_auto_close_crashed_run,
+    STATUS_RUNNING,
+)
 from pubrun.report.diagnostics import format_redacted_rerun_advisory
 from pubrun.report.methods import generate_report
 from pubrun.report.utils import hydrate_manifest
@@ -164,11 +171,22 @@ class ActionsPanel(Vertical):
             raw_cmd = inv.get("rerun_command") if isinstance(inv, dict) else None
             rerun_cmd = raw_cmd if isinstance(raw_cmd, str) and raw_cmd else "-"
         elif run_info.lock_data:
-            # Reconstruct rerun if locked
-            argv = run_info.lock_data.get("argv", [])
-            script = run_info.lock_data.get("script", "")
-            cwd = run_info.lock_data.get("cwd", "")
-            rerun_cmd = f"cd {cwd} && python {script} " + " ".join(argv)
+            # Reconstruct shell-safe rerun command if locked
+            raw_argv = run_info.lock_data.get("argv", [])
+            argv = [str(a) for a in raw_argv] if isinstance(raw_argv, list) else []
+            script = str(run_info.lock_data.get("script") or "")
+            cwd = str(run_info.lock_data.get("cwd") or "")
+            cmd_tokens = ["python"] + ([script] if script else []) + argv
+            if sys.platform == "win32":
+                py_cmd = subprocess.list2cmdline(cmd_tokens)
+                rerun_cmd = (
+                    f"cd /d {subprocess.list2cmdline([cwd])} && {py_cmd}"
+                    if cwd
+                    else py_cmd
+                )
+            else:
+                py_cmd = shlex.join(cmd_tokens)
+                rerun_cmd = f"cd {shlex.quote(cwd)} && {py_cmd}" if cwd else py_cmd
 
         self.rerun_command = None if rerun_cmd == "-" else rerun_cmd
         rerun_lbl.update(Text(rerun_cmd))
@@ -260,25 +278,48 @@ class ActionsPanel(Vertical):
 
         runs_dir = r.run_dir.parent
         archive_dir = runs_dir / "archive"
-        zip_path = archive_dir / f"{r.run_id or r.run_dir.name}.zip"
+        raw_stem = str(r.run_id or r.run_dir.name)
+        safe_stem = re.sub(r"[^A-Za-z0-9._-]", "_", raw_stem).strip("._") or "run"
+        zip_path = archive_dir / f"{safe_stem}.zip"
 
         try:
             archive_dir.mkdir(exist_ok=True)
-            # Zip original folder
+            resolved_archive = archive_dir.resolve()
+            resolved_zip = zip_path.resolve()
+            if resolved_zip.parent != resolved_archive:
+                raise ValueError(f"Archive path escapes archive directory: {zip_path.name}")
+            resolved_run_dir = r.run_dir.resolve()
+            # Zip original folder (skipping symlinks and any path escaping run_dir)
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zip_f:
                 for file_p in r.run_dir.rglob("*"):
-                    if file_p.is_file():
-                        zip_f.write(file_p, file_p.relative_to(r.run_dir))
+                    if file_p.is_symlink() or not file_p.is_file():
+                        continue
+                    try:
+                        file_p.resolve().relative_to(resolved_run_dir)
+                    except ValueError:
+                        continue
+                    zip_f.write(file_p, file_p.relative_to(r.run_dir))
 
             self.app.notify(f"Created archive: {zip_path.name}", severity="information")
 
             # Check if deleting raw
             delete_raw = self.query_one("#check-delete-raw", Checkbox).value
             if delete_raw:
-                shutil.rmtree(r.run_dir)
-                self.app.notify("Deleted original uncompressed directory.", severity="information")
-                # Post refresh to main app
-                self.app.post_message(_refresh_sidebar_message(self.app))
+                lock_path = r.run_dir / ".pubrun.lock"
+                if (
+                    r.status == STATUS_RUNNING
+                    or r.run_dir.is_symlink()
+                    or (lock_path.exists() and not can_safely_auto_close_crashed_run(r.run_dir, r.lock_data))
+                ):
+                    self.app.notify(
+                        "Archive created; skipped deleting raw directory because the run is active or has a remote/unverified lock.",
+                        severity="warning",
+                    )
+                else:
+                    shutil.rmtree(r.run_dir)
+                    self.app.notify("Deleted original uncompressed directory.", severity="information")
+                    # Post refresh to main app
+                    self.app.post_message(_refresh_sidebar_message(self.app))
 
         except Exception as e:
             self.app.notify(f"Archive failed: {e}", severity="error")

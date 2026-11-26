@@ -127,7 +127,7 @@ _CORE_MANIFEST_SECTIONS: Tuple[str, ...] = (
 )
 
 _NON_COMPLETED_OUTCOMES = frozenset(
-    ("running", "failed", "interrupted", "partial", "ghost", "unknown")
+    ("running", "failed", "interrupted", "crashed", "partial", "ghost", "unknown")
 )
 
 _CATEGORY_STATUS_LABELS: Dict[str, Tuple[str, str]] = {
@@ -1179,6 +1179,11 @@ def _assess_capture_completeness(
     if isinstance(status_sec, dict):
         outcome = status_sec.get("outcome")
         if isinstance(outcome, str) and outcome in _NON_COMPLETED_OUTCOMES:
+            exit_code_val = status_sec.get("exit_code")
+            if exit_code_val is None:
+                sig_sec = manifest.get("signals")
+                if isinstance(sig_sec, dict):
+                    exit_code_val = sig_sec.get("exit_code")
             findings.append(
                 _make_finding(
                     WARN,
@@ -1190,7 +1195,7 @@ def _assess_capture_completeness(
                     impact="material",
                     details={
                         "outcome": outcome,
-                        "exit_code": status_sec.get("exit_code"),
+                        "exit_code": exit_code_val,
                     },
                 )
             )
@@ -1543,7 +1548,7 @@ def _assess_parent_metadata(
         ):
             suggestion_map = {
                 "missing": "Restore or locate the parent `meta.json` snapshot referenced by `meta_ref`, or re-run with direct capture enabled.",
-                "blocked_by_policy": "Configure `[report].meta_ref_allowed_dirs` or `[report].allow_external_meta_ref = true` if this external parent snapshot is trusted.",
+                "blocked_by_policy": "Configure `[report].meta_ref_allowed_dirs` or `[report].allow_external_meta_ref = true` in `.pubrun.toml` if this external parent snapshot is trusted.",
                 "invalid_extension": "Ensure `meta_ref` points to a `.json` snapshot produced by `pubrun meta`.",
                 "invalid_json": "Verify that the parent `meta.json` file is intact and valid JSON.",
                 "invalid_type": "Verify that `meta_ref` points to a valid `pubrun-meta-snapshot` JSON object.",

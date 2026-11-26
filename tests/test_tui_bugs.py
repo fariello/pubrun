@@ -279,7 +279,7 @@ class TestConfigPanel:
             app = PubrunTUIApp(output_dir=str(tmp_path / "runs"))
             async with app.run_test() as pilot:
                 panel = app.query_one("#config-view", ConfigPanel)
-                for wid in ("#cfg-profile", "#cfg-console-mode", "#cfg-redact-repr"):
+                for wid in ("#cfg-console-mode", "#cfg-redact-repr"):
                     panel.query_one(wid, Select).value = _SELECT_EMPTY_VALUE
                 await pilot.pause()
                 panel.save_settings()
@@ -327,7 +327,7 @@ class TestConfigPanel:
             async with app.run_test() as pilot:
                 await pilot.pause()
                 panel = app.query_one("#config-view", ConfigPanel)
-                assert panel.query_one("#cfg-profile", Select).value == _SELECT_EMPTY_VALUE
+                assert len(panel.query("#cfg-profile")) == 0
                 assert panel.query_one("#cfg-redact-repr", Select).value == _SELECT_EMPTY_VALUE
                 assert panel.query_one("#cfg-console-mode", Select).value == "off"
                 warnings = [m for m, s in notes if s == "warning"]

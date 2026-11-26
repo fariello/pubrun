@@ -114,7 +114,10 @@ def _get_manifest_path(
             runs_dir = Path("runs")
 
         if not runs_dir.exists() or not runs_dir.is_dir():
-            _print_error(f"No --run directory provided and '{runs_dir}' directory not found.")
+            _print_error(
+                f"No run specified and '{runs_dir}' directory not found. "
+                "Run a tracked script first or pass a run path/ID (use 'pubrun status' to list runs)."
+            )
             sys.exit(1)
 
         from pubrun.status import scan_runs, filter_runs
@@ -340,8 +343,21 @@ def _assess_cli_run(
 
 def _format_rerun_cmd_for_platform(rerun_cmd: str) -> str:
     """Apply platform-specific formatting for printed rerun commands."""
-    if sys.platform == "win32" and "&& python " in rerun_cmd:
-        return rerun_cmd.replace(" && python ", "\npython ").replace("'", '"')
+    if sys.platform == "win32" and " && python " in rerun_cmd:
+        import shlex
+        import subprocess
+        cd_part, py_part = rerun_cmd.split(" && ", 1)
+        try:
+            cd_tokens = shlex.split(cd_part, posix=True)
+            py_tokens = shlex.split(py_part, posix=True)
+            if len(cd_tokens) == 2 and cd_tokens[0] == "cd":
+                cd_line = f"cd /d {subprocess.list2cmdline([cd_tokens[1]])}"
+            else:
+                cd_line = subprocess.list2cmdline(cd_tokens)
+            py_line = subprocess.list2cmdline(py_tokens)
+            return f"{cd_line}\n{py_line}"
+        except ValueError:
+            return rerun_cmd.replace(" && python ", "\npython ")
     return rerun_cmd
 
 
@@ -850,11 +866,18 @@ def _run_show_config(mode: str, run_selector: Optional[str] = None, show_all: bo
                 _print_error(f"Could not locate the most recent run: {e}")
                 sys.exit(1)
 
-        cfg_path = Path(run_path) / "config.resolved.json"
+        run_path_obj = Path(run_path)
+        if not run_path_obj.exists():
+            _print_error(
+                f"Run path '{run_path}' does not exist. Use 'pubrun status' to list available runs."
+            )
+            sys.exit(1)
+
+        cfg_path = run_path_obj / "config.resolved.json"
         if not cfg_path.exists():
             # Ghost run (never wrote a run dir/config) or otherwise absent.
             _print_error(
-                f"Run '{Path(run_path).name}' has no recorded config "
+                f"Run '{run_path_obj.name}' has no recorded config "
                 f"(config.resolved.json not found; likely a ghost run that could not write to disk)."
             )
             sys.exit(1)
@@ -972,8 +995,12 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None, utc: bo
                 print(f"Status: {bold}{yellow}STILL RUNNING{rst}\n", file=sys.stderr)
             else:
                 print(f"Status: {bold}{red}CRASHED{rst}\n", file=sys.stderr)
-                from pubrun.status import close_out_crashed_run
-                close_out_crashed_run(run_dir_path, run_info.lock_data)
+                from pubrun.status import (
+                    can_safely_auto_close_crashed_run,
+                    close_out_crashed_run,
+                )
+                if can_safely_auto_close_crashed_run(run_dir_path, run_info.lock_data):
+                    close_out_crashed_run(run_dir_path, run_info.lock_data)
 
         # Tail error logs (last 10 lines)
         log_file = None
@@ -2248,6 +2275,7 @@ def _run_status(
         render_verbose_list,
         scan_runs,
         filter_runs,
+        can_safely_auto_close_crashed_run,
         close_out_crashed_run,
     )
 
@@ -2260,9 +2288,11 @@ def _run_status(
             _emit_ambiguous_selector(e)
             sys.exit(1)
         if run_info is None:
-            _print_error(f"No run found matching '{run_id}'.")
+            _print_error(f"No run found matching '{run_id}'. Use 'pubrun status' to list available runs.")
             sys.exit(1)
-        if run_info.status == "crashed" and (run_info.run_dir / ".pubrun.lock").exists():
+        if run_info.status == "crashed" and can_safely_auto_close_crashed_run(
+            run_info.run_dir, run_info.lock_data
+        ):
             close_out_crashed_run(run_info.run_dir, run_info.lock_data)
         print(render_inspect(run_info))
     else:
@@ -2284,7 +2314,9 @@ def _run_status(
             sys.exit(1)
 
         for r in runs:
-            if r.status == "crashed" and (r.run_dir / ".pubrun.lock").exists():
+            if r.status == "crashed" and can_safely_auto_close_crashed_run(
+                r.run_dir, r.lock_data
+            ):
                 close_out_crashed_run(r.run_dir, r.lock_data)
 
         if verbose:
@@ -2539,8 +2571,8 @@ def _show_info() -> None:
     print("--- [ Invocation Details ] ---")
     data = {"invocation": get_invocation({}), "hardware": get_hardware({})}
     print(json.dumps(data, indent=2))
-    print("\nIf GPU logs are missing here, your active Python environment")
-    print("may not have permission to query `nvidia-smi` or NVML.")
+    print("\nIf GPU details are missing here, your active Python environment")
+    print("may not have `nvidia-smi` on PATH or permission to query GPU devices.")
 
 
 def _run_tests() -> None:
@@ -3184,11 +3216,11 @@ def main(argv: Optional[List[str]] = None) -> None:
     # Deprecated: hidden from --help (SUPPRESS) but still functional; emits a stderr
     # deprecation notice at runtime pointing to `pubrun show default config`.
     parser.add_argument("--show-config", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--info", action="store_true", help="Display runtime diagnostics: Python version, pubrun version, import mode, invocation, and hardware/capture capabilities. (To see resolved configuration, use `pubrun show config`.)")
+    parser.add_argument("--info", action="store_true", help="Display import mode, invocation, and hardware/capture diagnostics. (Use `--version` for version and `pubrun show config` for resolved configuration.)")
     parser.add_argument("--run-tests", action="store_true", help="Run the built-in test suite and a mock end-to-end script.")
 
     # UX-01: Build the primary commands list (excluding aliases) for clean errors.
-    _known_aliases = {"tui", "gui"}
+    _known_aliases = {"tui", "gui", "report", "resources"}
     _PRIMARY_COMMANDS.extend(
         name for name in subparsers.choices if name not in _known_aliases
     )
@@ -3482,6 +3514,8 @@ def main(argv: Optional[List[str]] = None) -> None:
             "PUBRUN_RUN_MODE_OVERRIDE": args.mode,
         }
         child_proc = None
+        prev_sigterm = None
+        sigterm_installed = False
         try:
             child_proc = _sp.Popen(cmd_args, env=child_env)
 
@@ -3490,21 +3524,44 @@ def main(argv: Optional[List[str]] = None) -> None:
                 if child_proc and child_proc.poll() is None:
                     child_proc.terminate()
             if hasattr(_signal, "SIGTERM"):
-                _signal.signal(_signal.SIGTERM, _forward_sigterm)
+                try:
+                    prev_sigterm = _signal.getsignal(_signal.SIGTERM)
+                    _signal.signal(_signal.SIGTERM, _forward_sigterm)
+                    sigterm_installed = True
+                except ValueError:
+                    pass  # Not on main thread
 
             rc = child_proc.wait()
             # Translate negative returncode (signal death) to 128+N (P2-B4)
             if rc < 0:
                 sys.exit(128 + abs(rc))
             sys.exit(rc)
-        except (FileNotFoundError, PermissionError) as e:
+        except FileNotFoundError as e:
             _print_error(f"Cannot execute command: {e}")
             sys.exit(127)
+        except (PermissionError, IsADirectoryError) as e:
+            _print_error(f"Cannot execute command: {e}")
+            sys.exit(126)
         except KeyboardInterrupt:
             if child_proc and child_proc.poll() is None:
-                child_proc.terminate()
-                child_proc.wait()
+                # Give the child a brief grace window to finish SIGINT finalization
+                # before sending SIGTERM.
+                try:
+                    child_proc.wait(timeout=3.0)
+                except _sp.TimeoutExpired:
+                    child_proc.terminate()
+                    try:
+                        child_proc.wait(timeout=5.0)
+                    except _sp.TimeoutExpired:
+                        child_proc.kill()
+                        child_proc.wait()
             sys.exit(130)
+        finally:
+            if sigterm_installed and prev_sigterm is not None:
+                try:
+                    _signal.signal(_signal.SIGTERM, prev_sigterm)
+                except (ValueError, OSError):
+                    pass
 
     elif args.command == "init":
         dest = getattr(args, "dest", ".pubrun.toml")

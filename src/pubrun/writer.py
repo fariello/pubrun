@@ -262,6 +262,8 @@ class ArtifactWriter:
         Catches all exceptions and returns True when ``manifest.json`` was written
         successfully (or was already written for a finalized run), False otherwise.
         """
+        if getattr(self.run, "pid", os.getpid()) != os.getpid():
+            return False
         if self._artifacts_written and getattr(self.run, "_finalized", False):
             return True
 

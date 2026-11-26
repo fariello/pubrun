@@ -4,6 +4,8 @@ import threading
 from typing import TextIO, Dict, Any, Optional
 from pathlib import Path
 
+from pubrun.capture.signals import finalization_lock
+
 logger = logging.getLogger("pubrun")
 
 # Per-thread console-recording pause gate (ref-counted). When depth > 0 on the
@@ -90,6 +92,8 @@ class TqdmSafeTee:
     Strips carriage-return (``\r``) redraws so progress bars don't
     inflate the log file.
     """
+    _MAX_BUFFER_CHARS = 65536
+
     def __init__(self, original_stream: TextIO, log_file: Optional[TextIO], timestamped: bool = False) -> None:
         """Initialize the tee with the original stream and an optional log file."""
         self.original_stream = original_stream
@@ -164,7 +168,9 @@ class TqdmSafeTee:
         if not data:
             return ret
 
-        with self._lock:
+        with finalization_lock(self._lock, 0.25) as acquired:
+            if not acquired:
+                return ret
             log_file = self.log_file
             if not log_file or getattr(log_file, "closed", False):
                 return ret
@@ -205,6 +211,13 @@ class TqdmSafeTee:
                             self._current_buffer = ""
                         else:
                             self._current_buffer += line
+                            if len(self._current_buffer) >= self._MAX_BUFFER_CHARS:
+                                if ts:
+                                    log_file.write(ts + self._current_buffer + '\n')
+                                else:
+                                    log_file.write(self._current_buffer + '\n')
+                                self.line_count += 1
+                                self._current_buffer = ""
             except Exception as e:
                 self._handle_log_error(e)
 
@@ -222,7 +235,9 @@ class TqdmSafeTee:
         # pending buffer into the log (the passthrough flush above still ran).
         if _tee_paused():
             return
-        with self._lock:
+        with finalization_lock(self._lock, 0.25) as acquired:
+            if not acquired:
+                return
             log_file = self.log_file
             if log_file and not getattr(log_file, "closed", False):
                 try:
@@ -376,6 +391,77 @@ class ConsoleInterceptor:
 
         return lines_out, lines_err, out_failed, err_failed
 
+    def suspend_for_migration(self) -> bool:
+        """Safely disable owned faulthandler, flush/detach tees, and close log fds before moving run_dir.
+
+        Returns True if owned faulthandler was active and should be re-enabled on resume.
+        """
+        was_faulthandler = False
+        if self._faulthandler_owned:
+            try:
+                import faulthandler
+                faulthandler.disable()
+                was_faulthandler = True
+            except Exception:
+                pass
+            finally:
+                self._faulthandler_owned = False
+
+        for tee, log_attr in ((self.stdout_tee, "stdout_log"), (self.stderr_tee, "stderr_log")):
+            if tee is not None:
+                with finalization_lock(tee._lock, 0.25) as acquired:
+                    if acquired:
+                        try:
+                            tee.flush()
+                        except Exception:
+                            pass
+                    tee.log_file = None
+            log_handle = getattr(self, log_attr, None)
+            if log_handle is not None:
+                try:
+                    log_handle.flush()
+                    log_handle.close()
+                except Exception:
+                    pass
+                setattr(self, log_attr, None)
+
+        return was_faulthandler
+
+    def resume_after_migration(self, new_dir: Path, *, reenable_faulthandler: bool = False) -> None:
+        """Update run_dir, reopen console logs in append mode, reattach tees, and optionally re-enable faulthandler."""
+        self.run_dir = new_dir
+        if self.mode == "off":
+            return
+        try:
+            self.stdout_log = open(
+                new_dir / "stdout.log", "a", encoding="utf-8", errors="backslashreplace"
+            )
+            if self.stdout_tee is not None:
+                with finalization_lock(self.stdout_tee._lock, 0.25):
+                    self.stdout_tee.log_file = self.stdout_log
+
+            self.stderr_log = open(
+                new_dir / "stderr.log", "a", encoding="utf-8", errors="backslashreplace"
+            )
+            if self.stderr_tee is not None:
+                with finalization_lock(self.stderr_tee._lock, 0.25):
+                    self.stderr_tee.log_file = self.stderr_log
+
+            if reenable_faulthandler and self.stderr_log is not None:
+                try:
+                    import faulthandler
+                    faulthandler.enable(file=self.stderr_log)
+                    self._faulthandler_owned = True
+                except Exception:
+                    self._faulthandler_owned = False
+        except Exception as reopen_err:
+            logger.debug("Failed to reopen console logs after migration: %s", reopen_err)
+
+    def migrate_directory(self, new_dir: Path) -> None:
+        """Suspend, update target directory, and resume console logging in one step."""
+        was_fh = self.suspend_for_migration()
+        self.resume_after_migration(new_dir, reenable_faulthandler=was_fh)
+
     def start(self) -> bool:
         """Replace sys.stdout and sys.stderr with tee proxies transactionally.
 
@@ -394,8 +480,12 @@ class ConsoleInterceptor:
         self.original_stderr = sys.stderr
 
         try:
-            self.stdout_log = open(self.run_dir / "stdout.log", "w", encoding="utf-8")
-            self.stderr_log = open(self.run_dir / "stderr.log", "w", encoding="utf-8")
+            self.stdout_log = open(
+                self.run_dir / "stdout.log", "w", encoding="utf-8", errors="backslashreplace"
+            )
+            self.stderr_log = open(
+                self.run_dir / "stderr.log", "w", encoding="utf-8", errors="backslashreplace"
+            )
 
             timestamped = self.mode in {"standard", "deep"}
 

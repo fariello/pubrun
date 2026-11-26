@@ -40,16 +40,23 @@ RESULTS_DIR="$PUBRUN_REPO/benchmarks/results"
 mkdir -p "$RESULTS_DIR"
 NODE="$(hostname)"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
-OUT="$RESULTS_DIR/${NODE}-${STAMP}.json"
+PUBRUN_UNREDACTED="${PUBRUN_UNREDACTED:-}"
+ANON_ID="$(printf '%s' "$NODE" | "$PUBRUN_PY" -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.read().encode()).hexdigest()[:8])' 2>/dev/null || echo 'node')"
+REDACTED_OUT="${PUBRUN_REDACTED_OUT:-$RESULTS_DIR/pubrun-bench-${ANON_ID}-${STAMP}.redacted.json}"
+UNREDACTED_OUT="$RESULTS_DIR/${NODE}-${STAMP}.unredacted.json"
 if ! "$PUBRUN_PY" -c "import pubrun" 2>/dev/null; then
     export PYTHONPATH="$PUBRUN_REPO/src${PYTHONPATH:+:$PYTHONPATH}"
     "$PUBRUN_PY" -c "import pubrun" 2>/dev/null || {
         echo "ERROR: 'pubrun' not importable with $PUBRUN_PY; run '$PUBRUN_PY -m pip install -e $PUBRUN_REPO'." >&2
         exit 1; }
 fi
+HARNESS_OUT_ARGS=(--redacted-out "$REDACTED_OUT")
+if [ -n "$PUBRUN_UNREDACTED" ]; then
+    HARNESS_OUT_ARGS+=(--out "$UNREDACTED_OUT")
+fi
 # shellcheck disable=SC2086
-"$PUBRUN_PY" benchmarks/harness.py --out "$OUT" $PUBRUN_BENCH_ARGS
-echo "Done. Result: $OUT"
+"$PUBRUN_PY" benchmarks/harness.py "${HARNESS_OUT_ARGS[@]}" $PUBRUN_BENCH_ARGS
+echo "Done. Redacted result: $REDACTED_OUT"
 EOF
 )"
 

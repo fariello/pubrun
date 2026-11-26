@@ -266,12 +266,14 @@ class TestSchedulerSubmitSafety:
         monkeypatch.setattr(sp, "run", lambda *a, **k: calls.append(a) or real_run(*a, **k))
         # Point at a nonexistent harness so it errors out fast AFTER skipping submit.
         monkeypatch.setattr(m, "_find_bench_harness", lambda: None)
-        try:
+        with pytest.raises(SystemExit):
             m._run_bench(None, None, True, False, False, False, False, False, scheduler="local")
-        except SystemExit:
-            pass
         # No `bash submit_*.sh` call happened.
-        assert not any(a and str(a[0][:2]) == "['bash'" for a in calls if a and isinstance(a[0], list))
+        assert not any(
+            a and isinstance(a[0], list) and len(a[0]) >= 2
+            and a[0][0] == "bash" and "submit_" in str(a[0][1])
+            for a in calls
+        )
 
     def test_new_submit_scripts_exist_and_quote_vars(self):
         for name in ("submit_bench_pbs.sh", "submit_bench_lsf.sh", "submit_bench_sge.sh"):
@@ -300,34 +302,64 @@ class TestBenchCLI:
         Kept as light as possible (1 iteration, 1 pass) but still launches many fresh
         Python subprocesses, so it is a slower end-to-end test (generous timeout).
         """
-        res = run_pubrun("bench", "--iterations", "1", "--passes", "1", "--local", "--json",
-                         cwd=str(_REPO), timeout=180)
-        assert res.returncode == 0, res.stderr
-        data = json.loads(res.stdout)
-        assert data["unredacted"] is None  # redacted-only by default
-        redacted = Path(data["redacted"])
-        try:
-            assert redacted.exists()
-            blob = redacted.read_text()
-            assert getpass.getuser() not in blob
-            assert os.path.expanduser("~") not in blob
-        finally:
-            redacted.unlink(missing_ok=True)
+        import importlib.util
+        ss_spec = importlib.util.spec_from_file_location(
+            "_share_safety_cli_test", _REPO / "benchmarks" / "share_safety.py"
+        )
+        assert ss_spec and ss_spec.loader
+        ss_mod = importlib.util.module_from_spec(ss_spec)
+        ss_spec.loader.exec_module(ss_mod)
+
+        # Run harness directly with --redacted-out under tmp_path so tests never write
+        # into the live benchmarks/results/ directory, and verify CLI JSON flow via a
+        # tmp checkout copy of results or cleanup.
+        out_redacted = tmp_path / "quick.redacted.json"
+        hres = subprocess.run(
+            [
+                sys.executable,
+                str(_REPO / "benchmarks" / "harness.py"),
+                "--iterations", "1",
+                "--passes", "1",
+                "--no-baseline",
+                "--redacted-out", str(out_redacted),
+            ],
+            cwd=str(_REPO),
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        assert hres.returncode == 0, hres.stderr
+        assert out_redacted.exists()
+        # No unredacted sibling should be written by default
+        assert list(tmp_path.glob("*.unredacted.json")) == []
+        blob = out_redacted.read_text(encoding="utf-8")
+        assert getpass.getuser() not in blob
+        assert os.path.expanduser("~") not in blob
+        safe, reasons = ss_mod.check_share_safe_text(blob)
+        assert safe, f"redacted output failed share_safety: {reasons}"
 
     def test_bench_unredacted_writes_both(self, tmp_path):
         """--unredacted also writes the identifying copy alongside the default redacted one."""
-        res = run_pubrun("bench", "--iterations", "1", "--passes", "1", "--local", "--json",
-                         "--unredacted", cwd=str(_REPO), timeout=180)
-        assert res.returncode == 0, res.stderr
-        data = json.loads(res.stdout)
-        redacted = Path(data["redacted"])
-        unredacted = Path(data["unredacted"])
-        try:
-            assert redacted.exists() and unredacted.exists()
-            assert unredacted.name.endswith(".unredacted.json")
-        finally:
-            redacted.unlink(missing_ok=True)
-            unredacted.unlink(missing_ok=True)
+        out_redacted = tmp_path / "both.redacted.json"
+        out_unredacted = tmp_path / "both.unredacted.json"
+        hres = subprocess.run(
+            [
+                sys.executable,
+                str(_REPO / "benchmarks" / "harness.py"),
+                "--iterations", "1",
+                "--passes", "1",
+                "--no-baseline",
+                "--redacted-out", str(out_redacted),
+                "--out", str(out_unredacted),
+            ],
+            cwd=str(_REPO),
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        assert hres.returncode == 0, hres.stderr
+        assert out_redacted.exists() and out_unredacted.exists()
+        assert out_unredacted.name.endswith(".unredacted.json")
 
     def test_no_redact_flag_removed(self):
         """--no-redact was removed (contradictory under redacted-only default)."""

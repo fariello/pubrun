@@ -36,10 +36,14 @@ mkdir -p "$RESULTS_DIR"
 
 NODE="${SLURMD_NODENAME:-$(hostname)}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
+PUBRUN_UNREDACTED="${PUBRUN_UNREDACTED:-}"
+# Derive an opaque short hash for the default share-safe filename so raw cluster
+# node names do not leak via the filename itself.
+ANON_ID="$(printf '%s' "$NODE" | "$PUBRUN_PY" -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.read().encode()).hexdigest()[:8])' 2>/dev/null || echo 'node')"
 # Redacted-only by default (matches `pubrun bench`): always write a share-safe redacted file;
 # write the identifying unredacted copy only when PUBRUN_UNREDACTED is set. A caller (pubrun
 # bench submit-and-wait) may pin PUBRUN_REDACTED_OUT so it can find the result deterministically.
-REDACTED_OUT="${PUBRUN_REDACTED_OUT:-$RESULTS_DIR/pubrun-bench-${NODE}-${STAMP}.redacted.json}"
+REDACTED_OUT="${PUBRUN_REDACTED_OUT:-$RESULTS_DIR/pubrun-bench-${ANON_ID}-${STAMP}.redacted.json}"
 UNREDACTED_OUT="$RESULTS_DIR/${NODE}-${STAMP}.unredacted.json"
 
 echo "=== pubrun benchmark ==="

@@ -453,15 +453,20 @@ except KeyboardInterrupt:
             text=True,
             cwd=tmp_path,
         )
+        try:
+            assert proc.stdout is not None
+            run_dir_str = proc.stdout.readline().strip()
+            assert run_dir_str, "Subprocess failed to print run directory"
+            run_dir = Path(run_dir_str)
 
-        run_dir_str = proc.stdout.readline().strip()
-        assert run_dir_str, "Subprocess failed to print run directory"
-        run_dir = Path(run_dir_str)
+            proc.send_signal(signal.SIGTERM)
 
-        proc.send_signal(signal.SIGTERM)
-
-        # Wait for exit
-        proc.wait(timeout=5)
+            # Wait for exit
+            proc.wait(timeout=15)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
 
         manifest_path = run_dir / "manifest.json"
         assert manifest_path.exists(), "manifest.json was not created on SIGTERM!"

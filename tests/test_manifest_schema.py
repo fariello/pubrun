@@ -898,3 +898,104 @@ def test_selected_behavior_schema_rejects_bad_values(bad_value):
     """selected_behavior rejects non-boolean values and undeclared flags."""
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(bad_value, _selected_behavior_subschema(_schema()))
+
+
+def test_hashed_redaction_and_nested_hash_both_conform_to_schema(tmp_path, monkeypatch):
+    """Runtime hashed redaction (hash_algorithm/hash_value) and nested hash both validate."""
+    from pubrun.analysis.diff import _normalize_manifest
+    from pubrun.capture.redaction import redact_value
+
+    manifest = _make_manifest(tmp_path)
+    hashed_val = redact_value("super_secret_token", {"redaction": {"representation": "hashed"}})
+    nested_val = {
+        "representation": "hashed",
+        "hash": {"algorithm": "sha256", "value": "a" * 64},
+    }
+    manifest["environment"]["variables"] = [
+        {"name": "API_TOKEN", "value": hashed_val, "source": "process"},
+        {"name": "LEGACY_TOKEN", "value": nested_val, "source": "process"},
+    ]
+    jsonschema.validate(manifest, _schema())
+
+    flat = _normalize_manifest(manifest, [], depth="deep")
+    assert flat["environment.API_TOKEN"].startswith("[HASHED:sha256:")
+    assert flat["environment.LEGACY_TOKEN"] == f"[HASHED:sha256:{'a' * 64}]"
+
+
+def test_crashed_closeout_existing_and_fallback_conform_and_trigger_inspect_warn(tmp_path):
+    """Both existing-manifest and fallback crashed closeouts conform and warn in reproducibility."""
+    from pubrun.status import close_out_crashed_run
+    from pubrun.report.reproducibility import assess_manifest_reproducibility
+
+    # 1. Existing manifest updated to crashed
+    run_dir1 = tmp_path / "pubrun-train-20261126T000000Z-999999-crsh0001"
+    run_dir1.mkdir()
+    src_run = tmp_path / "src_run"
+    src_run.mkdir()
+    base_manifest = _make_manifest(src_run)
+    base_manifest["status"] = {"outcome": "running", "capture_state": {"status": "complete"}}
+    (run_dir1 / "manifest.json").write_text(json.dumps(base_manifest), encoding="utf-8")
+    (run_dir1 / ".pubrun.lock").write_text(
+        json.dumps({"pid": 999999, "started_at_utc": 1700000000.0, "run_id": "crsh0001"}),
+        encoding="utf-8",
+    )
+    close_out_crashed_run(run_dir1, {"pid": 999999, "started_at_utc": 1700000000.0, "run_id": "crsh0001"})
+    m1 = json.loads((run_dir1 / "manifest.json").read_text(encoding="utf-8"))
+    assert m1["status"]["outcome"] == "crashed"
+    jsonschema.validate(m1, _schema())
+
+    # Crashed outcome triggers run_outcome_incomplete WARN and falls back to signals.exit_code
+    m1["signals"] = {"signals_received": [], "exit_code": 137, "capture_state": {"status": "complete"}}
+    report = assess_manifest_reproducibility(m1)
+    incomplete = [f for f in report["findings"] if f["code"] == "run_outcome_incomplete"]
+    assert len(incomplete) == 1
+    assert incomplete[0]["details"]["outcome"] == "crashed"
+    assert incomplete[0]["details"]["exit_code"] == 137
+
+    # 2. Fallback manifest with missing lock_data fields derives run_id and started_at_utc
+    run_dir2 = tmp_path / "pubrun-train-20261126T000000Z-999998-crsh0002"
+    run_dir2.mkdir()
+    close_out_crashed_run(run_dir2, {})
+    m2 = json.loads((run_dir2 / "manifest.json").read_text(encoding="utf-8"))
+    assert m2["run"]["run_id"] == "crsh0002"
+    assert isinstance(m2["timing"]["started_at_utc"], float)
+    jsonschema.validate(m2, _schema())
+
+
+def test_large_script_sha256_skipped_and_early_ghost_and_resources_conform(tmp_path, monkeypatch):
+    """Scripts >1 MiB (sha256_skipped), early ghost full manifest, and system_memory/io_counters conform."""
+    from pubrun.tracker import Run
+
+    manifest = _make_manifest(tmp_path)
+    manifest["invocation"]["script"] = {
+        "path": str(tmp_path / "big.py"),
+        "real_path": str(tmp_path / "big.py"),
+        "basename": "big.py",
+        "size": 2_000_000,
+        "mtime": 1700000000.0,
+        "sha256_skipped": "file exceeds 1MB",
+    }
+    manifest["resources"] = {
+        "peak_rss_bytes": 1024 * 1024,
+        "system_memory": {
+            "total_bytes": 8 * 1024**3,
+            "min_available_bytes": 4 * 1024**3,
+        },
+        "io_counters": {
+            "first": {"read_bytes": 0, "write_bytes": 0},
+            "last": {"read_bytes": 4096, "write_bytes": 2048},
+            "delta": {"read_bytes": 4096, "write_bytes": 2048},
+        },
+        "capture_state": {"status": "complete"},
+    }
+    jsonschema.validate(manifest, _schema())
+
+    # Early ghost mode (mkdir fails before bootstrap) emits full schema-valid manifest dict
+    monkeypatch.setattr(os, "mkdir", lambda *a, **k: (_ for _ in ()).throw(PermissionError("ro")))
+    ghost = Run(overrides={"core": {"output_dir": str(tmp_path / "ro_runs")}})
+    try:
+        assert ghost._outcome == "ghost"
+        ghost_dict = ghost.to_manifest_dict()
+        jsonschema.validate(ghost_dict, _schema())
+    finally:
+        ghost.stop()

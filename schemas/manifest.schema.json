@@ -360,6 +360,14 @@
                 "value": {},
                 "hash": {
                     "$ref": "#/$defs/hash_record"
+                },
+                "hash_algorithm": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "hash_value": {
+                    "type": "string",
+                    "minLength": 1
                 }
             }
         },
@@ -622,6 +630,12 @@
                                 "null"
                             ]
                         },
+                        "sha256_skipped": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
                         "size": {
                             "type": [
                                 "integer",
@@ -785,6 +799,7 @@
                         "completed",
                         "failed",
                         "interrupted",
+                        "crashed",
                         "partial",
                         "unknown",
                         "ghost"

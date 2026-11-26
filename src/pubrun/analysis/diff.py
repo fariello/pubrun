@@ -62,6 +62,9 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str], depth: str
                 if rep == "hashed":
                     hv = val.get("hash_value")
                     algo = val.get("hash_algorithm")
+                    if not hv and isinstance(val.get("hash"), dict):
+                        hv = val["hash"].get("value")
+                        algo = val["hash"].get("algorithm")
                     if hv and algo:
                         val = f"[HASHED:{algo}:{hv}]"
                     elif hv:

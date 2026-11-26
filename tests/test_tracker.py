@@ -165,6 +165,7 @@ class TestMergeAndMigrate:
         run._merge_and_migrate({"core": {"output_dir": str(new_output)}})
 
         # File should exist in new location
+        assert run.run_dir.parent == new_output
         migrated_file = run.run_dir / "test_artifact.txt"
         assert migrated_file.exists()
         assert migrated_file.read_text(encoding="utf-8") == "hello"

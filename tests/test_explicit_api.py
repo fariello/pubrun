@@ -291,31 +291,41 @@ def test_explicit_subprocess_popen_wait_communicate_poll_timeout_and_failure(
     tracker = pubrun.start(console={"capture_mode": "off"}, capture={"resources": {"depth": "off"}})
     try:
         # 1. wait(timeout) raising TimeoutExpired must not log prematurely; final wait logs once.
-        p_wait = pubrun.subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.15)"])
-        with pytest.raises(std_subprocess.TimeoutExpired):
-            p_wait.wait(timeout=0.01)
-        assert len(getattr(tracker, "manual_subprocess_records", [])) == 0
+        p_wait = pubrun.subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.5)"])
+        try:
+            with pytest.raises(std_subprocess.TimeoutExpired):
+                p_wait.wait(timeout=0.01)
+            assert len(getattr(tracker, "manual_subprocess_records", [])) == 0
 
-        clock.advance(0.40)
-        clock.jump_wall(-7200.0)
-        assert p_wait.wait() == 0
-        assert len(tracker.manual_subprocess_records) == 1
+            clock.advance(0.40)
+            clock.jump_wall(-7200.0)
+            assert p_wait.wait(timeout=10) == 0
+            assert len(tracker.manual_subprocess_records) == 1
+        finally:
+            if p_wait.poll() is None:
+                p_wait.kill()
+                p_wait.wait()
 
         # 2. communicate(timeout) raising TimeoutExpired must not log prematurely.
         p_comm = pubrun.subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(0.15); print('comm_done')"],
+            [sys.executable, "-c", "import time; time.sleep(0.5); print('comm_done')"],
             stdout=std_subprocess.PIPE,
             text=True,
         )
-        with pytest.raises(std_subprocess.TimeoutExpired):
-            p_comm.communicate(timeout=0.01)
-        assert len(tracker.manual_subprocess_records) == 1
+        try:
+            with pytest.raises(std_subprocess.TimeoutExpired):
+                p_comm.communicate(timeout=0.01)
+            assert len(tracker.manual_subprocess_records) == 1
 
-        clock.advance(0.25)
-        clock.jump_wall(-7200.0)
-        stdout, _ = p_comm.communicate()
-        assert "comm_done" in stdout
-        assert len(tracker.manual_subprocess_records) == 2
+            clock.advance(0.25)
+            clock.jump_wall(-7200.0)
+            stdout, _ = p_comm.communicate(timeout=10)
+            assert "comm_done" in stdout
+            assert len(tracker.manual_subprocess_records) == 2
+        finally:
+            if p_comm.poll() is None:
+                p_comm.kill()
+                p_comm.wait()
 
         # 3. poll() logs once when process completes.
         p_poll = pubrun.subprocess.Popen([sys.executable, "-c", "pass"])

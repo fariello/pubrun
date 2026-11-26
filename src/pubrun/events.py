@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import threading
 import time
 from typing import Any, Dict, List, Optional, TextIO
@@ -24,6 +25,7 @@ class EventStream:
             config: Resolved pubrun config. If None, resolves internally.
         """
         self.stream_path = run_dir / "events.jsonl"
+        self._pid = os.getpid()
         self._lock = threading.Lock()
         self._event_count = 0
 
@@ -70,7 +72,7 @@ class EventStream:
             name: Optional semantic label.
             payload: Optional key-value data attached to the event.
         """
-        if self._file is None:
+        if self._file is None or os.getpid() != self._pid:
             return
 
         # Critical lifecycle events bypass the throttle threshold so they are
@@ -141,6 +143,10 @@ class EventStream:
 
     def close(self) -> None:
         """Flush and close the event stream file. Safe to call multiple times."""
+        if os.getpid() != self._pid:
+            self._file = None
+            self._buffer = []
+            return
         with finalization_lock(self._lock, 0.25) as acquired:
             if not acquired:
                 return

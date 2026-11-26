@@ -17,6 +17,7 @@ import os
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from pubrun.tracker import Run, get_current_run
@@ -701,6 +702,25 @@ import subprocess as _subprocess
 from pathlib import Path
 import builtins
 
+def _resolve_within_run_dir(run_dir: Path, rel_name: str) -> Path:
+    """Resolve a user-supplied filename strictly inside ``run_dir``.
+
+    Rejects absolute paths, ``..`` traversal, and symlink escapes outside
+    ``run_dir``.
+    """
+    if not isinstance(rel_name, str) or not rel_name or Path(rel_name).is_absolute():
+        raise ValueError(f"Path must be relative to run directory: {rel_name!r}")
+    base = run_dir.resolve()
+    dest = (base / rel_name).resolve()
+    try:
+        dest.relative_to(base)
+    except ValueError as exc:
+        raise ValueError(f"Path escapes run directory: {rel_name!r}") from exc
+    if dest == base:
+        raise ValueError(f"Path must name a file inside run directory: {rel_name!r}")
+    return dest
+
+
 def report(name: str, data: Any) -> None:
     """Save a custom structured report to the run directory.
 
@@ -726,8 +746,8 @@ def report(name: str, data: Any) -> None:
             content = str(data)
             summary = {"preview": content[:100]}
 
-        # Write file safely
-        dest = run.run_dir / filename
+        # Write file safely within run_dir
+        dest = _resolve_within_run_dir(run.run_dir, filename)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
 
@@ -748,7 +768,7 @@ def artifact(filename: str, content: Any) -> None:
         return
 
     try:
-        dest = run.run_dir / filename
+        dest = _resolve_within_run_dir(run.run_dir, filename)
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         if isinstance(content, bytes):
@@ -829,7 +849,7 @@ def print(*args: Any, **kwargs: Any) -> None:
             else:
                 log_msg = msg
 
-            with builtins.open(log_path, "a", encoding="utf-8") as f:
+            with builtins.open(log_path, "a", encoding="utf-8", errors="backslashreplace") as f:
                 f.write(log_msg)
         except Exception as e:
             logging.getLogger("pubrun").warning(f"pubrun.print: failed to write to stdout.log: {e}")

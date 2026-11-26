@@ -194,6 +194,22 @@ def _num(value):
     return None
 
 
+def _sanitize_csv_cell(value):
+    """Neutralize spreadsheet formula injection on untrusted string cells."""
+    if isinstance(value, str) and value and value[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
+def _sanitize_md_cell(value) -> str:
+    """Sanitize untrusted values before interpolating into Markdown tables/lists."""
+    s = str(value)
+    s = "".join(" " if (ord(ch) < 32 or ord(ch) == 127) else ch for ch in s)
+    for src, dst in (("\\", "\\\\"), ("|", "\\|"), ("`", "\\`"), ("[", "\\["), ("]", "\\]"), ("<", "&lt;"), (">", "&gt;")):
+        s = s.replace(src, dst)
+    return s.strip()
+
+
 def write_csv(rows: list[dict], path: Path) -> None:
     if not rows:
         return
@@ -202,7 +218,8 @@ def write_csv(rows: list[dict], path: Path) -> None:
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
-        w.writerows(rows)
+        for row in rows:
+            w.writerow({k: _sanitize_csv_cell(v) for k, v in row.items()})
 
 
 def write_markdown(rows: list[dict], path: Path) -> None:
@@ -210,7 +227,7 @@ def write_markdown(rows: list[dict], path: Path) -> None:
     machines = sorted({str(r["machine"]) for r in rows})
     lines.append(f"Machines aggregated: {len(machines)}")
     for mlabel in machines:
-        lines.append(f"- `{mlabel}`")
+        lines.append(f"- `{_sanitize_md_cell(mlabel)}`")
     lines.append("")
     lines.append("Overhead is median wall time relative to the group baseline "
                  "(a fresh Python process with no pubrun / no features).")
@@ -219,10 +236,10 @@ def write_markdown(rows: list[dict], path: Path) -> None:
     lines.append("|---|---|---|---:|---:|---|---:|---:|")
     for r in sorted(rows, key=lambda x: (str(x["machine"]), str(x["group"]), str(x["scenario"]))):
         lines.append(
-            f"| {r['machine']} | {r['group']} | {r['scenario']} | "
-            f"{r['median_ms']} | {r['p95_ms']} | {r['vs_baseline'] or '-'} | "
-            f"{'-' if r['overhead_ms'] is None else r['overhead_ms']} | "
-            f"{'-' if r['overhead_pct'] is None else r['overhead_pct']} |"
+            f"| {_sanitize_md_cell(r['machine'])} | {_sanitize_md_cell(r['group'])} | {_sanitize_md_cell(r['scenario'])} | "
+            f"{_sanitize_md_cell(r['median_ms'])} | {_sanitize_md_cell(r['p95_ms'])} | {_sanitize_md_cell(r['vs_baseline'] or '-')} | "
+            f"{'-' if r['overhead_ms'] is None else _sanitize_md_cell(r['overhead_ms'])} | "
+            f"{'-' if r['overhead_pct'] is None else _sanitize_md_cell(r['overhead_pct'])} |"
         )
     lines.append("")
     path.parent.mkdir(parents=True, exist_ok=True)

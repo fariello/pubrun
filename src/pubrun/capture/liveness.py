@@ -9,7 +9,7 @@ import platform
 import subprocess
 import sys
 import time
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 
 _PLATFORM = sys.platform  # 'linux', 'darwin', 'win32'
@@ -162,13 +162,13 @@ def _check_command_linux(pid: int, expected_script: str) -> Optional[bool]:
     if _script_is_generic(expected_script):
         return None
     try:
-        with open(f"/proc/{pid}/cmdline", "r", encoding="utf-8") as f:
+        with open(f"/proc/{pid}/cmdline", "r", encoding="utf-8", errors="replace") as f:
             cmdline = f.read()
         if not cmdline:
             return None
         parts = cmdline.split("\x00")
         return _match_script_in_tokens(expected_script, parts)
-    except OSError:
+    except (OSError, ValueError):
         return None
 
 
@@ -459,6 +459,38 @@ def _get_cpu_macos(pid: int) -> Optional[float]:
 # Windows implementations (ctypes / wmic)
 # ==========================================================================
 
+def _get_win_kernel32() -> Any:
+    """Return a kernel32 DLL handle with explicit argtypes/restype on Windows."""
+    import ctypes
+    import ctypes.wintypes
+
+    if hasattr(ctypes, "WinDLL"):
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+        kernel32.OpenProcess.argtypes = [
+            ctypes.wintypes.DWORD,
+            ctypes.wintypes.BOOL,
+            ctypes.wintypes.DWORD,
+        ]
+        kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
+        kernel32.GetExitCodeProcess.argtypes = [
+            ctypes.wintypes.HANDLE,
+            ctypes.POINTER(ctypes.wintypes.DWORD),
+        ]
+        kernel32.GetExitCodeProcess.restype = ctypes.wintypes.BOOL
+        kernel32.GetProcessTimes.argtypes = [
+            ctypes.wintypes.HANDLE,
+            ctypes.POINTER(ctypes.wintypes.FILETIME),
+            ctypes.POINTER(ctypes.wintypes.FILETIME),
+            ctypes.POINTER(ctypes.wintypes.FILETIME),
+            ctypes.POINTER(ctypes.wintypes.FILETIME),
+        ]
+        kernel32.GetProcessTimes.restype = ctypes.wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+        kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
+        return kernel32
+    return ctypes.windll.kernel32  # type: ignore[attr-defined]
+
+
 def _is_pid_alive_windows(pid: int) -> bool:
     """Check PID liveness on Windows using kernel32.OpenProcess."""
     # A Windows process id is a DWORD (0 .. 2**32-1). An absurd PID from a corrupt dir name
@@ -473,14 +505,14 @@ def _is_pid_alive_windows(pid: int) -> bool:
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         STILL_ACTIVE = 259
 
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32 = _get_win_kernel32()
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if not handle:
             return False
         try:
             exit_code = ctypes.wintypes.DWORD()
             if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-                return exit_code.value == STILL_ACTIVE
+                return bool(exit_code.value == STILL_ACTIVE)
             return False
         finally:
             kernel32.CloseHandle(handle)
@@ -492,13 +524,15 @@ def _is_pid_alive_windows(pid: int) -> bool:
 
 def _get_start_time_windows(pid: int) -> Optional[float]:
     """Get process creation time on Windows via kernel32.GetProcessTimes."""
+    if pid <= 0 or pid > 0xFFFFFFFF:
+        return None
     try:
         import ctypes
         import ctypes.wintypes
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32 = _get_win_kernel32()
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if not handle:
             return None
@@ -525,12 +559,61 @@ def _get_start_time_windows(pid: int) -> Optional[float]:
             return posix_us
         finally:
             kernel32.CloseHandle(handle)
-    except (OSError, AttributeError, ValueError):
+    except Exception:
         return None
 
 
 def _get_rss_windows(pid: int) -> Optional[int]:
-    """Get working set size via wmic."""
+    """Get working set size via GetProcessMemoryInfo (falling back to wmic)."""
+    if pid <= 0 or pid > 0xFFFFFFFF:
+        return None
+    try:
+        import ctypes
+        import ctypes.wintypes
+
+        class _PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("cb", ctypes.wintypes.DWORD),
+                ("PageFaultCount", ctypes.wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        PROCESS_VM_READ = 0x0010
+        kernel32 = _get_win_kernel32()
+        handle = kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, False, pid
+        )
+        if not handle:
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if handle:
+            try:
+                get_mem = getattr(kernel32, "K32GetProcessMemoryInfo", None)
+                if get_mem is None:
+                    psapi = ctypes.WinDLL("psapi", use_last_error=True)  # type: ignore[attr-defined]
+                    get_mem = psapi.GetProcessMemoryInfo
+                get_mem.argtypes = [
+                    ctypes.wintypes.HANDLE,
+                    ctypes.POINTER(_PROCESS_MEMORY_COUNTERS),
+                    ctypes.wintypes.DWORD,
+                ]
+                get_mem.restype = ctypes.wintypes.BOOL
+                counters = _PROCESS_MEMORY_COUNTERS()
+                counters.cb = ctypes.sizeof(counters)
+                if get_mem(handle, ctypes.byref(counters), counters.cb):
+                    return int(counters.WorkingSetSize)
+            finally:
+                kernel32.CloseHandle(handle)
+    except Exception:
+        pass
+
     try:
         result = subprocess.run(
             ["wmic", "process", "where", f"ProcessId={pid}", "get", "WorkingSetSize"],
@@ -548,17 +631,18 @@ def _get_rss_windows(pid: int) -> Optional[int]:
 
 
 def _get_cpu_windows(pid: int) -> Optional[float]:
-    """Estimate CPU% on Windows via wmic or ctypes.
+    """Estimate CPU% on Windows via kernel32.GetProcessTimes.
 
-    Uses a two-sample approach with a brief sleep for accuracy.
     Falls back to None if unavailable.
     """
+    if pid <= 0 or pid > 0xFFFFFFFF:
+        return None
     try:
         import ctypes
         import ctypes.wintypes
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32 = _get_win_kernel32()
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if not handle:
             return None
@@ -595,7 +679,7 @@ def _get_cpu_windows(pid: int) -> Optional[float]:
             return (total_cpu_seconds / elapsed) * 100.0
         finally:
             kernel32.CloseHandle(handle)
-    except (OSError, AttributeError, ValueError, ZeroDivisionError):
+    except Exception:
         return None
 
 

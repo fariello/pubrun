@@ -984,11 +984,15 @@ def print_report(
         try:
             with open(cfg_path, "r", encoding="utf-8") as cf:
                 cfg = _as_dict(json.load(cf))
-            print(f"\n{blue}[ Overridden Configurations ]{rst}", file=stream)
-            print(f"  {cyan}Profile{rst}: {_as_dict(cfg.get('core')).get('profile')}", file=stream)
+            print(f"\n{blue}[ Resolved Configuration Highlights ]{rst}", file=stream)
+            cfg_core = _as_dict(cfg.get("core"))
             cfg_cap = _as_dict(cfg.get("capture"))
+            print(f"  {cyan}Output Dir{rst}: {cfg_core.get('output_dir') or './runs'}", file=stream)
             print(f"  {cyan}Inputs Mode{rst}: {_as_dict(cfg_cap.get('inputs')).get('enabled')}", file=stream)
             print(f"  {cyan}Packages Mode{rst}: {_as_dict(cfg_cap.get('packages')).get('mode')}", file=stream)
+            prof = cfg_core.get("profile")
+            if prof and prof != "default":
+                print(f"  {cyan}Profile (deprecated){rst}: {prof}", file=stream)
         except Exception:
             pass
 

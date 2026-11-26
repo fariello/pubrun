@@ -665,6 +665,15 @@ def redact_result(result: dict):
         needles.append(getpass.getuser())
     except Exception:
         pass
+    try:
+        node = platform.node()
+        if node and node.lower() != "localhost":
+            needles.append(node)
+            short_node = node.split(".", 1)[0]
+            if short_node and len(short_node) >= 3 and short_node.lower() != "localhost":
+                needles.append(short_node)
+    except Exception:
+        pass
     # Longest first so a home path containing the username is scrubbed whole.
     needles = sorted({n for n in needles if n}, key=len, reverse=True)
     scrubbed = _scrub_pii_substrings(redacted, needles)

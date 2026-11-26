@@ -79,6 +79,70 @@ def get_current_run() -> Optional["Run"]:
     return _active_run
 
 
+def _after_fork_in_child() -> None:
+    """Disarm inherited parent Run state in a POSIX forked child process.
+
+    Prevents a forked child from deleting the live parent's ``.pubrun.lock``,
+    overwriting its ``manifest.json``, or flushing inherited buffers into the
+    parent's open log/event file descriptors.
+    """
+    global _active_run
+    run = _active_run
+    _active_run = None
+    if run is None:
+        return
+    try:
+        run._finalized = True
+        run.is_active = False
+        run._hardware_write_closed = True
+    except Exception:
+        pass
+    try:
+        writer = getattr(run, "writer", None)
+        if writer is not None:
+            writer._artifacts_written = True
+            if hasattr(writer, "unregister_atexit"):
+                writer.unregister_atexit()
+    except Exception:
+        pass
+    try:
+        sig = getattr(run, "signal_capture", None)
+        if sig is not None:
+            sig._active = False
+    except Exception:
+        pass
+    try:
+        ev = getattr(run, "event_stream", None)
+        if ev is not None:
+            ev._file = None
+            ev._buffer = []
+    except Exception:
+        pass
+    try:
+        interceptor = getattr(run, "console_interceptor", None)
+        if interceptor is not None:
+            if getattr(interceptor, "_faulthandler_owned", False):
+                try:
+                    import faulthandler
+                    faulthandler.disable()
+                except Exception:
+                    pass
+                interceptor._faulthandler_owned = False
+            if getattr(interceptor, "stdout_tee", None) is not None:
+                interceptor.stdout_tee.log_file = None
+            if getattr(interceptor, "stderr_tee", None) is not None:
+                interceptor.stderr_tee.log_file = None
+            interceptor.stdout_log = None
+            interceptor.stderr_log = None
+            interceptor._started = False
+    except Exception:
+        pass
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_after_fork_in_child)
+
+
 # Top-level ``start()`` keyword shortcuts that belong under ``[core]``; mirrors
 # the flattening in ``pubrun.config._resolve_layers``.
 _CORE_SHORTCUTS = frozenset({"profile", "output_dir", "auto_start", "meta_ref"})
@@ -225,17 +289,19 @@ class Run:
         dir_name = f"pubrun-{self.script_name}-{timestamp_str}-{self.pid}-{self.run_id}"
         self.run_dir = base_dir / dir_name
 
-        # Ensure directory is created safely with restrictive permissions.
-        # Set umask to prevent world-readable window between mkdir and chmod (P2-S1).
+        # Ensure directory is created safely with restrictive permissions without
+        # mutating process-wide umask (which races concurrent threads).
         try:
-            old_umask = None
-            if sys.platform != "win32":
-                old_umask = os.umask(0o077)  # Ensure dirs created as 0o700
+            self.run_dir.parent.mkdir(parents=True, exist_ok=True)
             try:
-                self.run_dir.mkdir(parents=True, exist_ok=True)
-            finally:
-                if old_umask is not None:
-                    os.umask(old_umask)
+                os.mkdir(self.run_dir, 0o700)
+            except FileExistsError:
+                pass
+            if sys.platform != "win32":
+                try:
+                    os.chmod(self.run_dir, 0o700)
+                except OSError:
+                    pass
         except Exception as e:
             # GHOST MODE: run directory cannot be created (e.g. read-only storage).
             # No hooks have been installed yet; enter ghost mode cleanly.
@@ -404,6 +470,25 @@ class Run:
         self.resource_watcher = None
         self.signal_capture = None
 
+        # Populate any uninitialized sections with schema-valid suppressed capture_state
+        # so to_manifest_dict() conforms even when ghost mode triggers before bootstrap.
+        suppressed: Dict[str, Any] = {"capture_state": {"status": "suppressed"}}
+        if not self.invocation_data:
+            self.invocation_data = {"argv": [], "capture_state": {"status": "suppressed"}}
+        for sec_attr in (
+            "console_data",
+            "process_data",
+            "python_data",
+            "packages_data",
+            "environment_data",
+            "git_data",
+            "hardware_data",
+            "host_data",
+            "filesystem_data",
+        ):
+            if not getattr(self, sec_attr, None):
+                setattr(self, sec_attr, dict(suppressed))
+
         safe_reason = " ".join(str(reason or "output directory unavailable").splitlines()).strip()
         if len(safe_reason) > 240:
             safe_reason = safe_reason[:237] + "..."
@@ -465,13 +550,15 @@ class Run:
                 "import_selected_by": _import_selected_by,
             }
             lock_path = self.run_dir / self.LOCK_FILENAME
-            with open(lock_path, "w", encoding="utf-8") as f:
-                json.dump(lock_data, f, indent=2)
+            from pubrun.writer import _atomic_json_write
+            _atomic_json_write(lock_path, lock_data, durability="atomic")
         except Exception:
             pass  # Best-effort: pubrun must never crash the host script.
 
     def _remove_lock_file(self) -> None:
         """Remove the lock file after finalization.  Best-effort."""
+        if os.getpid() != self.pid:
+            return
         try:
             lock_path = self.run_dir / self.LOCK_FILENAME
             if lock_path.exists():
@@ -865,21 +952,9 @@ class Run:
                 if event_stream is not None:
                     event_stream.close()
 
+                reenable_faulthandler = False
                 if interceptor is not None:
-                    if interceptor.stdout_log is not None:
-                        try:
-                            interceptor.stdout_log.flush()
-                            interceptor.stdout_log.close()
-                        except Exception:
-                            pass
-                        interceptor.stdout_log = None
-                    if interceptor.stderr_log is not None:
-                        try:
-                            interceptor.stderr_log.flush()
-                            interceptor.stderr_log.close()
-                        except Exception:
-                            pass
-                        interceptor.stderr_log = None
+                    reenable_faulthandler = interceptor.suspend_for_migration()
 
                 try:
                     import shutil
@@ -912,19 +987,9 @@ class Run:
                             )
 
                 if interceptor is not None:
-                    if interceptor.mode != "off":
-                        try:
-                            interceptor.stdout_log = open(new_dir / "stdout.log", "a", encoding="utf-8")
-                            if interceptor.stdout_tee:
-                                interceptor.stdout_tee.log_file = interceptor.stdout_log
-
-                            interceptor.stderr_log = open(new_dir / "stderr.log", "a", encoding="utf-8")
-                            if interceptor.stderr_tee:
-                                interceptor.stderr_tee.log_file = interceptor.stderr_log
-                        except Exception as reopen_err:
-                            logging.getLogger("pubrun").debug(
-                                "Failed to reopen console logs after migration: %s", reopen_err
-                            )
+                    interceptor.resume_after_migration(
+                        new_dir, reenable_faulthandler=reenable_faulthandler
+                    )
 
         was_spying = self._spying_subprocesses
         will_spy = merged.get("capture", {}).get("subprocesses", {}).get("enabled", False)
@@ -1104,6 +1169,9 @@ class Run:
         Every pre-teardown and teardown step runs independently so an error in
         one step never blocks subsequent cleanup or manifest writing.
         """
+        # Never let a POSIX forked child finalize or remove the parent's run artifacts.
+        if os.getpid() != self.pid:
+            return
         # Read workload-end anchor t2 before acquiring _run_lock (a background
         # hardware refresh may hold it across a durable manifest write), then set
         # the finalized latch under _run_lock before waiting on deferred hardware
