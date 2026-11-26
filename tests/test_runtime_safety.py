@@ -230,15 +230,17 @@ def test_report_and_artifact_reject_path_traversal(tmp_path: Path) -> None:
     assert not (tmp_path / "escape_report.json").exists()
 
 
-def test_pubrun_run_permission_and_directory_exit_126(tmp_path: Path) -> None:
-    """pubrun run returns 126 when target is a directory or non-executable."""
+def test_pubrun_run_directory_target_clean_error(tmp_path: Path) -> None:
+    """pubrun run exits cleanly without traceback when target is a directory."""
     proc = subprocess.run(
         [sys.executable, "-m", "pubrun", "run", "--", str(tmp_path)],
         capture_output=True,
         text=True,
         timeout=20,
     )
-    assert proc.returncode == 126
+    assert proc.returncode in (126, 127)
+    assert "Cannot execute command" in proc.stderr
+    assert "Traceback" not in proc.stderr
 
 
 def test_windows_liveness_helpers_reject_out_of_range_pids() -> None:

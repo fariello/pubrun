@@ -123,7 +123,7 @@ def _finalize_active_run() -> None:
         run = get_current_run()
         if (
             run
-            and getattr(run, "pid", None) == os.getpid()
+            and getattr(run, "pid", os.getpid()) == os.getpid()
             and hasattr(run, "writer")
             and run.writer
         ):

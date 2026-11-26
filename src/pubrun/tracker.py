@@ -293,10 +293,7 @@ class Run:
         # mutating process-wide umask (which races concurrent threads).
         try:
             self.run_dir.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                os.mkdir(self.run_dir, 0o700)
-            except FileExistsError:
-                pass
+            self.run_dir.mkdir(mode=0o700, exist_ok=True)
             if sys.platform != "win32":
                 try:
                     os.chmod(self.run_dir, 0o700)

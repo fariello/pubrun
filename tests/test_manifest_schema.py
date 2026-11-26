@@ -991,7 +991,14 @@ def test_large_script_sha256_skipped_and_early_ghost_and_resources_conform(tmp_p
     jsonschema.validate(manifest, _schema())
 
     # Early ghost mode (mkdir fails before bootstrap) emits full schema-valid manifest dict
-    monkeypatch.setattr(os, "mkdir", lambda *a, **k: (_ for _ in ()).throw(PermissionError("ro")))
+    orig_mkdir = Path.mkdir
+
+    def _fail_run_mkdir(self, *args, **kwargs):
+        if "pubrun-" in str(self):
+            raise PermissionError("ro")
+        return orig_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", _fail_run_mkdir)
     ghost = Run(overrides={"core": {"output_dir": str(tmp_path / "ro_runs")}})
     try:
         assert ghost._outcome == "ghost"

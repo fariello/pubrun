@@ -869,7 +869,8 @@ def _run_show_config(mode: str, run_selector: Optional[str] = None, show_all: bo
         run_path_obj = Path(run_path)
         if not run_path_obj.exists():
             _print_error(
-                f"Run path '{run_path}' does not exist. Use 'pubrun status' to list available runs."
+                f"Run '{run_path}' does not exist (no recorded config). "
+                "Use 'pubrun status' to list available runs."
             )
             sys.exit(1)
 
@@ -3536,10 +3537,10 @@ def main(argv: Optional[List[str]] = None) -> None:
             if rc < 0:
                 sys.exit(128 + abs(rc))
             sys.exit(rc)
-        except FileNotFoundError as e:
+        except (FileNotFoundError, PermissionError) as e:
             _print_error(f"Cannot execute command: {e}")
             sys.exit(127)
-        except (PermissionError, IsADirectoryError) as e:
+        except IsADirectoryError as e:
             _print_error(f"Cannot execute command: {e}")
             sys.exit(126)
         except KeyboardInterrupt:
