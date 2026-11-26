@@ -2,12 +2,12 @@
 
 # pubrun for provenance and reproducibility in scientific and ML work
 
-**When a result has to be defensible, "the run finished" is not the same as "the run is trustworthy."** In model development, drug discovery, genomics, and any analysis whose methodology must hold up later, the questions that matter are: exactly which code, inputs, dependencies, and environment produced this checkpoint or figure, and can you reproduce it or explain why two runs differ. pubrun answers those by capturing the full run context automatically, with no code change beyond `import pubrun`, so provenance is not an afterthought you reconstruct from memory months later.
+**When a result has to be defensible, "the run finished" is not the same as "the run is trustworthy."** In model development, drug discovery, genomics, and any analysis whose methodology must hold up later, the questions that matter are: exactly which code, inputs, dependencies, and environment produced this checkpoint or figure, and can you reproduce it or explain why two runs differ. With bare `import pubrun`, pubrun captures the code state, dependencies, runtime environment, and existing file paths discovered heuristically from `sys.argv` (`invocation.inputs`) automatically. When scripts read or write datasets through libraries such as pandas, NumPy, or h5py (or need observed file-I/O provenance and optional content digests), record them with `pubrun.open(...)` or `pubrun.register_input()`, `pubrun.register_output()`, and `pubrun.register_file()` (see `examples/12_external_file_provenance.py`).
 
 Why this is not optional in high-stakes work:
 
 - **Silent environment drift.** A dependency or driver changes and results shift with no record of what moved. pubrun captures the dependency graph and environment for every run, so a run-to-run `diff` shows exactly what changed.
-- **Unversioned inputs.** "Which data file produced this?" is unanswerable after the fact unless it was recorded at run time. pubrun records the invocation, inputs, and code state as the run happens.
+- **Unversioned inputs.** "Which data file produced this?" is unanswerable after the fact unless it was recorded at run time. Bare `import pubrun` records the invocation, code state, and CLI-argument file paths (`invocation.inputs`) automatically; adding `pubrun.open(...)` or `pubrun.register_input()`, `pubrun.register_output()`, and `pubrun.register_file()` records observed file-I/O provenance and optional content digests for library-loaded datasets (see `examples/12_external_file_provenance.py`).
 - **Confidently-wrong outputs.** A run that completes can still be untrustworthy. pubrun records exit status, logs, and resource usage alongside the inputs, so a result is traceable back to the conditions that produced it.
 
 `pubrun` is used in active Python-based computational research workflows. This page records current research use without claiming citation-based impact; published examples and citations are added here as they become available.
@@ -42,7 +42,8 @@ demonstrates the full round trip:
 
 It is exercised by `tests/test_example_minimal_research_workflow.py`, so it stays runnable as
 the code evolves. The `examples/` directory also holds focused single-feature scripts
-(`00_auto_start.py` through `11_cli_report.py`) plus a `verify_all.py` harness.
+(`00_auto_start.py` through `12_external_file_provenance.py`, all 13 numbered scripts) plus a
+`verify_all.py` harness.
 
 ## How to cite pubrun
 

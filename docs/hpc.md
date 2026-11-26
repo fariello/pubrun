@@ -45,13 +45,13 @@ pubrun inspect <run> -v           # full detail + suggestions
 pubrun inspect <run> --json       # machine-readable findings
 ```
 
-`inspect` records, when available (see [Configuration](configuration.md) →
-`[capture.resources].system_metrics`, on by default):
+During a run, `pubrun` records the `filesystem` section (backing filesystem types) and, when `[capture.resources].depth != "off"` and `[capture.resources].system_metrics = true` (the default; see [Configuration](configuration.md)), records `resources.system_memory`, `resources.load_average`, `resources.system_iowait_pct`, and `resources.io_counters` into `manifest.json`.
 
-- the **filesystem type** backing the run (flagging network filesystems),
-- system **available memory** and **load average** over the run,
-- a **node-wide iowait** hint (`system_iowait_pct`), *indicative only*; it reflects the
-  whole node, not just your run (Linux `/proc/stat` iowait is a system-wide counter).
+After a run:
+
+- **`pubrun inspect`** is read-only and evaluates recorded network filesystems, capture completeness, parent-snapshot checks, and optional `--preflight` checks.
+- **`pubrun res`** (alias `resources`) displays the recorded `system_memory`, `load_average`, `system_iowait_pct` (a node-wide Linux `/proc/stat` counter, indicative only; it reflects the whole node rather than only your run), and per-process `io_counters` alongside memory and CPU charts.
+- **`pubrun self-check`** inspects the live host for network filesystems, available memory, and load average.
 
 ### The "different system" banner
 
@@ -89,11 +89,27 @@ different-host banner, so prefer `--fail-on mismatch` for cross-node checks.
 
 ### Parent snapshots (`meta_ref`)
 
-In the parent and child workflow, a login-node job writes `pubrun meta --out meta.json` and
-array tasks set `PUBRUN_META_REF=meta.json` and switch off heavy capture. At report time,
-`inspect`, `show`, and the TUI fill the child's missing sections (hardware, process, python,
-packages, environment, git) from the parent snapshot, in memory only. They report those
-sections as `inherited`, which is weaker evidence than what the child observed itself.
+In the parent-child workflow, a setup step writes one shared parent snapshot to a cluster directory, configures the hydration allowlist, and points child tasks at that shared path while disabling heavy per-child capture:
+
+```bash
+# 1. Parent snapshot on shared storage (default depth: --deep)
+pubrun meta --out /shared/proj/meta.json
+
+# 2. Child tasks reference the shared path
+export PUBRUN_META_REF=/shared/proj/meta.json
+python train.py
+```
+
+Add the shared directory to `[report].meta_ref_allowed_dirs` in `.pubrun.toml` (or set `[report].allow_external_meta_ref = true` to permit any external `.json` path):
+
+```toml
+[report]
+meta_ref_allowed_dirs = ["/shared/proj"]
+```
+
+Relative `meta_ref` paths resolve against each child's run directory (`Path(manifest_path).parent`), not the current working directory. Before checking whether the file exists, `pubrun` checks the `.json` extension and directory policy; any path outside the run directory and configured allowlist is blocked by policy.
+
+At read time, `pubrun` fills missing or incomplete hydrable sections (`hardware`, `process`, `python`, `packages`, `environment`, `git`, `host`) from the parent snapshot in memory only, reporting inherited sections as weaker evidence than direct child capture. Note that `pubrun meta` writes 6 sections (`hardware`, `python`, `packages`, `git`, `environment`, `host`); it does not capture `process`. All hydrating callers use this same hydration path: `pubrun show` (and hidden alias `report`), `pubrun res` (`resources`, `cpu`, `mem`), `pubrun methods` (including `--all`), `pubrun inspect`, `pubrun rerun --preflight`, `pubrun diff`, Python `pubrun.diff()`, and the TUI (`pubrun ui`, `tui`, `gui`).
 
 The Parent Metadata category checks the snapshot before trusting it:
 
@@ -117,8 +133,10 @@ can capture more:
 
 - process-tree resources (`[capture.resources].scope = "tree"`) for multiprocessing/Dask/Ray,
 - subprocess tracking (`[capture.subprocesses].enabled = true`),
-- file-I/O provenance: pubrun does **not** patch `open()` globally, so record inputs/outputs
-  by calling `pubrun.open(...)` instead of `open(...)`.
+- file-I/O provenance: pubrun does **not** patch `open()` globally, so record inputs and
+  outputs by calling `pubrun.open(...)` instead of `open(...)`, or use
+  `pubrun.register_input()`, `pubrun.register_output()`, and `pubrun.register_file()` for
+  libraries (such as pandas, NumPy, or h5py) that do not use Python `open()`.
 
 Each suggestion comes with an honest performance note; see [Performance](performance.md).
 
@@ -128,16 +146,26 @@ The benchmark harness and scheduler submission scripts live under `benchmarks/` 
 `benchmarks/README.md`). Result JSONs capture filesystem type and scheduler allocation context
 so results are comparable across nodes.
 
-`pubrun bench` auto-detects the batch scheduler (**Slurm, PBS/Torque, LSF, or SGE/Grid
-Engine**, precedence Slurm > PBS > LSF > SGE) from environment variables and submit tools on
-`PATH`, and **offers** to submit to a compute node (never without confirmation). Because PBS
-and SGE both use `qsub`, an ambiguous environment is reported; pick one with
-`--scheduler pbs|sge`. The submit scripts (`submit_bench.sh`, `submit_bench_pbs.sh`,
-`submit_bench_lsf.sh`, `submit_bench_sge.sh`) submit to the default queue and let the scheduler
-place the job. Treat them as **starting points** and set your site's account/queue/walltime
-(only the Slurm path is exercised in CI). Typical flow on a locked-down compute node (no
-network / no `gh`): run the benchmark there, then submit the redacted result from the login
-node with `pubrun bench --submit-file <result>.redacted.json`.
+`pubrun bench` requires a source checkout (`git clone`), because `benchmarks/harness.py` is
+not shipped in the pip wheel. It auto-detects the batch scheduler (**Slurm, PBS/Torque,
+LSF, or SGE/Grid Engine**, precedence Slurm > PBS > LSF > SGE) from environment variables
+and submit tools on `PATH`, and **offers** to submit to a compute node (never without
+confirmation). Because PBS and SGE both use `qsub`, an ambiguous environment is reported;
+pick one with `--scheduler pbs|sge`.
+
+Scheduler placement differs by script: `benchmarks/submit_bench.sh` queries `sinfo` and
+pins the Slurm job to a random idle node via `--nodelist` when idle nodes are available
+(falling back to unpinned scheduler placement when none are idle), whereas
+`submit_bench_pbs.sh`, `submit_bench_lsf.sh`, and `submit_bench_sge.sh` submit to the
+default queue and let the scheduler place the job. Treat all submit scripts as **starting
+points** and set your site's account, queue, and walltime (only the Slurm path is exercised
+in CI).
+
+On a Slurm login node, `pubrun bench` runs a submit-and-wait flow that polls until the
+compute-node job completes or `--wait-timeout` expires (default about 1800s; `0` waits
+indefinitely). If the wait times out, or if you run on an air-gapped compute node (no
+network or no `gh`), finish on the login node with
+`pubrun bench --submit-file <result>.redacted.json`.
 
 Tip: `pubrun self-check` on a login node prints an informational nudge suggesting you run the
 benchmark on a compute node for representative numbers.

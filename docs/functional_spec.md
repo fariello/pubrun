@@ -2,7 +2,7 @@
 
 # pubrun Functional Specification
 
-> Status: v1.0.0
+> Status: Current (schema v1.0)
 > Purpose: Defines functional requirements aligned with implementation.
 > Audience: Developers and contributors.
 
@@ -81,7 +81,7 @@ When `auto_start = true` (the default), `import pubrun` automatically calls `sta
 - The `PUBRUN_AUTO_START` environment variable is set to `"0"`, `"false"`, `"no"`, or `"off"`.
 - The `PUBRUN_IMPORT_MODE` environment variable is set to `"noauto"` or `"minimal"`.
 - The `[imports].mode` config is set to `"noauto"` or `"minimal"`.
-- The process is running the `pubrun` CLI itself (detected by checking `sys.argv[0]`).
+- The process is running the `pubrun` CLI itself (`src/pubrun/core.py::_is_pubrun_cli_invocation`): `sys.argv[0]` basename is `pubrun`, `pubrun.exe`, `pbr`, or `pbr.exe`; `pubrun.__main__` is already imported in `sys.modules`; `__main__.__spec__.name` is `"pubrun"` or `"pubrun.__main__"`; or `python -m pubrun` is detected via `runpy` stack frames (`mod_name == "pubrun"` or starting with `"pubrun."`).
 
 For `PUBRUN_AUTO_START`, `"1"`, `"true"`, `"yes"`, and `"on"` enable auto-start (`auto` mode), and `"0"`, `"false"`, `"no"`, and `"off"` disable it (`noauto` mode). Matching ignores case and surrounding whitespace, and `[core].auto_start` accepts the same values (including TOML booleans `true` and `false`). Any other value is ignored and falls through to the next configuration source. `PUBRUN_IMPORT_MODE` takes precedence over `PUBRUN_AUTO_START` when set to a valid import mode.
 
@@ -144,7 +144,7 @@ The library MUST support explicit activation via:
 pubrun.start()                        # Manual start
 with pubrun.tracked_run():            # Context manager
     ...
-@pubrun.audit_run(profile="deep")     # Decorator
+@pubrun.audit_run(output_dir="./audit_runs")     # Decorator
 def my_func(): ...
 ```
 
@@ -212,16 +212,20 @@ Each category corresponds to a modular capture engine and a top-level manifest s
 | Process | `process` | `[capture.process]` | depth-based |
 | Host | `host` | `[capture.host]` | depth-based |
 | Python | `python` | `[capture.python]` | depth-based |
-| Packages | `packages` | `[capture.packages]` | `imported-only`, `imported-transitive`, `top-level-installed`, `full-environment` |
-| Environment | `environment` | `[capture.environment]` | `allowlist`, `filtered`, `full` |
+| Packages | `packages` | `[capture.packages]` | `off`, `imported-only`, `imported-transitive`, `top-level-installed`, `full-environment` |
+| Environment | `environment` | `[capture.environment]` | `off`, `allowlist`, `filtered`, `full` |
 | Git | `git` | `[capture.git]` | depth-based |
 | Hardware | `hardware` | `[capture.hardware]` | depth-based, explicit GPU/CPU flags |
+| Filesystem | `filesystem` | None | Always captured |
+| Data files | `data_files` | `[capture.file_io]` | `none`, `name`, `stat`, `realpath`, `hash` |
+| Import provenance | `pubrun_imports` | `[imports]` | Always captured |
+| Profiling | None (writes `profile-<phase>.prof` files and emits `profile_saved` events) | `[capture.profiling]` | `enabled`, `backend` |
 | Resources | `resources` | `[capture.resources]` | depth-based, background thread |
 | Signals | `signals` | `[capture.signals]` | `enabled = true/false` |
-| Errors | `errors` | — | Always captured |
-| Config | `config` | — | Always captured |
-| Capture metadata | `capture` | — | Always captured |
-| Status | `status` | — | Always captured |
+| Errors | `errors` | None | Always captured |
+| Config | `config` | None | Always captured |
+| Capture metadata | `capture` | None | Always captured |
+| Status | `status` | None | Always captured |
 
 ### 5.2 Configured but Not Yet Implemented
 
@@ -231,10 +235,11 @@ Each category corresponds to a modular capture engine and a top-level manifest s
 
 ### 5.3 Deferred (Future Work)
 
-The following categories are planned but have no code or config:
+The following category is planned but has no code or config:
 
-- **Extensions** — Framework plugin model for custom capture engines.
-- **Artifacts** — User-registered output file tracking.
+- **Extensions**: Framework plugin model for custom capture engines.
+
+File tracking is implemented via `data_files`, `pubrun.artifact()`, `pubrun.open()`, `pubrun.register_input()`, `pubrun.register_output()`, and `pubrun.register_file()`.
 
 Each category MUST be independently configurable.
 
@@ -242,20 +247,16 @@ Each category MUST be independently configurable.
 
 ## 6. Profiles
 
-Built-in profile values (set via `[core].profile`):
+`[core].profile` and `PUBRUN_PROFILE` are **deprecated and inert**. Accepted legacy values (`minimal`, `default`, `deep`) remain valid for backward compatibility so existing configurations and scripts do not break, but `profile` never controls capture depth.
 
-- `minimal`
-- `default`
-- `deep`
+When `[core].profile` (or `PUBRUN_PROFILE`) is set to any value other than `"default"`, `pubrun` records a `profile_deprecated` notice in `config.notices` (`src/pubrun/config.py::profile_deprecation_notice`) without raising or disrupting the host script.
 
-Profiles control the default capture depth across all categories. Individual categories may override the profile via per-category `depth` settings:
+To control capture behavior, configure per-category `depth` or `mode` settings under `[capture.*]`:
 
-- `off` — Category entirely disabled.
-- `basic` — Fast, lightweight capture.
-- `standard` — Comprehensive capture without significant overhead.
-- `deep` — Maximum information gathering (may include slow system calls).
-
-**Implementation note**: Profiles currently serve as a semantic hint. Per-category depth settings in `default.toml` define the actual capture behavior. The profile value is stored in the resolved config but does not programmatically map to specific depth combinations.
+- `off`: Category disabled.
+- `basic`: Fast, lightweight capture.
+- `standard`: Comprehensive capture without significant overhead.
+- `deep`: Maximum information gathering (may include slow system calls).
 
 ---
 
@@ -265,9 +266,13 @@ Optional JSONL event stream written to `events.jsonl`.
 
 ### 7.1 Implemented Event Types
 
-- `phase_start` — Emitted when entering a `pubrun.phase()` context.
+- `phase_start`: Emitted when entering a `pubrun.phase()` context.
 - `phase_end`: Emitted when exiting a `pubrun.phase()` context. The payload includes `elapsed_seconds` (nonnegative monotonic duration of the phase body, excluding optional profiler setup and profile dump I/O) and `duration_clock: "monotonic"`, plus `error` (the exception type name) if an exception occurred.
-- `annotation` — Emitted by `pubrun.annotate()`.
+- `annotation`: Emitted by `pubrun.annotate()`.
+- `resource_sample`: Emitted by `ResourceWatcher` (`src/pubrun/capture/resources.py::ResourceWatcher._update_metrics`) on each resource sample with `rss_bytes`, `cpu_percent`, and (when `scope = "tree"`) `tree_rss_bytes` and `tree_cpu_percent`.
+- `profile_saved`: Emitted when a profiled `pubrun.phase()` saves a `profile-<phase>.prof` file (`src/pubrun/core.py::phase._emit_profile_saved`).
+- `input_dataset`, `output_artifact`, and `mixed_dataset`: Emitted by `pubrun.open()` (`ProvenanceFileProxy`) and `pubrun.register_file()`, `pubrun.register_input()`, and `pubrun.register_output()` according to file role (`src/pubrun/capture/file_io.py::_event_type_for_role`).
+- `warning`: Emitted by `Run` (`src/pubrun/tracker.py`) on mid-run storage directory migration when a re-entrant `start(output_dir=...)` moves the run directory.
 
 ### 7.2 Event Record Format
 
@@ -318,11 +323,13 @@ Console capture MUST preserve normal console behavior. The user MUST see the sam
 
 Each manifest section MUST include a `capture_state` object recording the status:
 
-- `complete` — Data captured successfully.
-- `partial` — Some data captured, errors occurred.
-- `unavailable` — Data source not accessible (e.g., no git repo).
-- `suppressed` — Capture disabled by configuration or profile.
-- `failed` — Capture attempted but failed entirely.
+- `complete`: Data captured successfully.
+- `partial`: Some data captured, or errors occurred.
+- `unavailable`: Data source not accessible (e.g., no git repo).
+- `suppressed`: Capture disabled by configuration.
+- `failed`: Capture attempted but failed entirely.
+- `timeout`: Capture exceeded its configured time budget.
+- `pending`: Asynchronous capture started and not yet finalized (for example, background hardware inspection in a startup manifest).
 
 If a capture section partially fails, the host script MUST NOT crash.
 
@@ -372,8 +379,8 @@ Supported locations, applied in precedence order (lowest to highest):
 | 2 | User home config | `$XDG_CONFIG_HOME/pubrun/config.toml`, else `~/.config/pubrun/config.toml` (`%APPDATA%/pubrun/config.toml` on Windows when `APPDATA` is set) |
 | 3 | Local deep config | `./.config/pubrun/config.toml` |
 | 4 | Local root config | `./.pubrun.toml` |
-| 5 | Environment variables | `PUBRUN_PROFILE`, `PUBRUN_META_REF` |
-| 6 (highest) | API overrides | `pubrun.start(profile="deep")` |
+| 5 | Environment variables | `PUBRUN_PROFILE` (deprecated, inert), `PUBRUN_META_REF` |
+| 6 (highest) | API overrides | `pubrun.start(output_dir="./runs", console={"capture_mode": "standard"})` |
 
 When both `.pubrun.toml` and `.config/pubrun/config.toml` exist in the same directory, `.pubrun.toml` takes precedence (it is applied last).
 
@@ -387,18 +394,20 @@ An empty or whitespace-only `XDG_CONFIG_HOME` or `APPDATA` is treated as unset. 
 |---|---|
 | `PUBRUN_RUN_MODE_OVERRIDE` | Launch-time import-mode override: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Takes precedence over explicit in-code submodule imports (such as `import pubrun.full`), `PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and config files (`[imports].mode`, `[core].auto_start`). Records `"cli:pubrun run --mode"` as `selected_by` and `selected_source` in `manifest.json` and suppresses import-mode conflicts under `[imports].on_conflict` and `PUBRUN_IMPORT_CONFLICT` for overridden and subsequent imports. Matching ignores case and surrounding whitespace; any other value is ignored. `pubrun run --mode` sets it alongside `PUBRUN_IMPORT_MODE` in the child process (Section 11.13). Consumed in the boot sequence (`select_mode`, not in `resolve_config()`). |
 | `PUBRUN_IMPORT_MODE` | Selects the import mode: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Overrides `PUBRUN_AUTO_START` and config files (`[imports].mode`, `[core].auto_start`). `PUBRUN_RUN_MODE_OVERRIDE` and explicit submodule imports such as `import pubrun.noauto` take precedence over it (Section 3.4). Matching ignores case and surrounding whitespace; any other value is ignored. `pubrun run --mode` sets it alongside `PUBRUN_RUN_MODE_OVERRIDE` in the child process (Section 11.13). Consumed in the boot sequence (not in `resolve_config()`). |
-| `PUBRUN_PROFILE` | Overrides `[core].profile`. Consumed in `resolve_config()` between local config and API overrides. |
+| `PUBRUN_PROFILE` | Deprecated and inert. Sets `[core].profile` in `resolve_config()` between local config and API overrides, records a `profile_deprecated` notice in `config.notices` when set to any value other than `"default"`, and never controls capture depth. |
 | `PUBRUN_AUTO_START` | Overrides `[core].auto_start`. `"1"`, `"true"`, `"yes"`, and `"on"` select `auto` mode; `"0"`, `"false"`, `"no"`, and `"off"` select `noauto` mode (Section 3.3). Used only when `PUBRUN_IMPORT_MODE` is unset or invalid. Consumed in the boot sequence (not in `resolve_config`). |
 | `PUBRUN_META_REF` | Sets `[core].meta_ref`. Consumed in `resolve_config()` between local config and API overrides. |
 | `PUBRUN_IMPORT_CONFLICT` | Overrides `[imports].on_conflict`: `ignore`, `warn`, or `error`. Matching ignores case and surrounding whitespace; any other value is ignored. Applies when two imports request different modes. Consumed in the boot sequence (not in `resolve_config`). |
 | `XDG_CONFIG_HOME` | Base directory of the user home config (Section 10.2) when not on Windows, or on Windows when `APPDATA` is unset. Empty or whitespace-only means unset, and the base directory is then `~/.config`. Read by both the boot sequence and `resolve_config()`. |
 | `APPDATA` | Windows only. Base directory of the user home config when set. Empty or whitespace-only means unset. Read by both the boot sequence and `resolve_config()`. |
+| `NO_COLOR` | Disables ANSI color output in CLI, report, diff, and status renderers when set to a non-empty value. Read by CLI and report modules (not `resolve_config()`). |
+| `PUBRUN_DEBUG` | Enables `[DEBUG]` diagnostic output in CLI and report output helpers when set to a non-empty value (`src/pubrun/report/output.py::debug_enabled`). Not read by `resolve_config()`. |
 
 ### 10.4 Configuration Contents
 
 The configuration MUST support defaults for:
 
-- Profile / capture depth (`[core]`)
+- Deprecated compatibility key `[core].profile` (inert; actual capture depths are set under `[capture.*]`)
 - Output base directory (`[core]`)
 - Auto-start behavior (`[core]`)
 - Import mode and conflict policy (`[imports]`)
@@ -408,7 +417,8 @@ The configuration MUST support defaults for:
 - All capture category settings (`[capture.*]`)
 - Diff engine configuration (`[diff]`)
 - Methods format (`[methods]`)
-- Logging / summary behavior (`[logging]`)
+- Report and hydration policy (`[report]`: `allow_external_meta_ref`, `meta_ref_allowed_dirs`)
+- Logging (`[logging]`: `write_summary` is reserved and not yet implemented)
 
 ### 10.5 Configuration Format
 
@@ -426,7 +436,7 @@ Configuration layers are merged recursively. Dictionary values are deeply merged
 
 ## 11. CLI Tools
 
-The CLI is accessible via `pubrun <command>` or `python -m pubrun <command>`.
+The CLI is accessible via `pubrun <command>`, `pbr <command>` (console script alias), or `python -m pubrun <command>`.
 
 ### 11.1 Config Generation (`--create-config`)
 
@@ -440,15 +450,15 @@ Requirements:
 
 ### 11.2 Config Display (`--show-config`)
 
-Prints the complete default configuration to the terminal.
+Hidden (`argparse.SUPPRESS`) and deprecated diagnostic flag. At runtime, it emits a deprecation warning to stderr pointing to `pubrun show default config`, while continuing to print the raw `default.toml` text to stdout.
 
 ### 11.3 System Info (`--info`)
 
-Displays system capabilities, pubrun version, and environment details.
+Displays active import-mode flags (plus `PUBRUN_IMPORT_MODE` when set) and JSON for `invocation` and `hardware` (`src/pubrun/__main__.py::_show_info`). It does not print the `pubrun` version (use `--version`) or general environment variables.
 
 ### 11.4 Self-Test (`--run-tests`)
 
-Executes the built-in pytest test suite to verify the installation.
+Runs an embedded end-to-end mock script in a temporary directory to verify runtime capture and manifest generation (`src/pubrun/__main__.py::_run_tests`). When executed inside a source checkout (`tests/` and `tox.ini` present), it also runs `pytest tests/ -q`.
 
 ### 11.5 Global Context Generation (`meta`)
 
@@ -462,57 +472,71 @@ pubrun meta [--out PATH] [--basic|--standard|--deep]
 - If `--out` is omitted, defaults to `./runs/meta.json`.
 - Generates a JSON snapshot with `manifest_type = "pubrun-meta-snapshot"`.
 
-### 11.6 Run Diagnostics (`report`)
+### 11.6 Run Diagnostics (`show`)
 
-Compiles execution metrics into a human-readable diagnostic summary.
+Compiles execution metrics into a human-readable diagnostic summary, extracts specific run sections, or displays resolved configuration.
 
 ```
-pubrun report [RUN_DIR ...] [--basic|--standard|--deep]
+pubrun show [RUN_DIR] [logs|env|packages] [--basic|--standard|--deep] [--utc] [FILTERS]
+pubrun show config [--all]
+pubrun show default config
+pubrun show run config [RUN_ID] [--all]
 ```
 
-- Accepts multiple run directories; processes them sequentially with visual separation.
-- If no directory is given, auto-detects the most recent run in `./runs/`.
-- Supports parent-child manifest hydration: if the manifest has a `meta_ref`, the parent context is merged.
-- Detects environmental drift by comparing child script `mtime` against the parent snapshot timestamp.
+- Accepts an optional single `RUN_DIR` (or recency index, ID prefix, or path) and an optional section (`logs`, `env`, or `packages`); a bare section name without `RUN_DIR` applies to the selected run.
+- Supports filter-based multi-run display when `RUN_DIR` is omitted: `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`, and `-n`/`--limit`. With no `RUN_DIR`, filters, or `-n`, defaults to the single most recent run.
+- `--utc` formats displayed timestamps in UTC instead of local time.
+- Config subforms display the current resolved config (`show config`), shipped defaults (`show default config`), or a recorded run's resolved config (`show run config [RUN_ID]`); `--all` annotates every key with its source layer instead of only overridden keys.
+- Supports parent-child manifest hydration (Section 18) and detects script drift against the parent snapshot timestamp.
+- `report` remains a hidden compatibility alias for `show`, omitting `--all` and the optional third positional `RUN_ID` in `show run config <id>`.
 
 ### 11.7 Academic Methodology Exporter (`methods`)
 
 Compiles execution provenance into a publication-ready "Computational Methods" paragraph.
 
 ```
-pubrun methods [RUN_DIR] [--format markdown|latex]
+pubrun methods [RUN_DIR] [--format markdown|latex] [--all] [FILTERS]
 ```
 
 - Hydrates the manifest with any linked parent `meta.json` before generating output.
-- If `RUN_DIR` is omitted, auto-detects the most recent run.
-- Default format honors `[methods].format` from configuration.
+- If `RUN_DIR` is omitted, auto-detects the most recent matching run.
+- CLI `--format` defaults to `markdown`. The `[methods].format` configuration key controls only the auto-generated `methods.md` or `methods.tex` file written at run finalization (`src/pubrun/writer.py::ArtifactWriter.write_artifacts`).
+- `--all` aggregates all matching runs into one representative paragraph with a variance note where runs differ (cannot be combined with a positional `RUN_DIR`).
+- Supports the shared run-filter options: `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`, and `-n`/`--limit`.
 
 ### 11.8 Reproducibility Fetcher (`rerun`)
 
-Extracts the shell command needed to re-execute a recorded run.
+Extracts the shell command needed to re-execute a recorded run, with optional read-only offline preflight checks.
 
 ```
-pubrun rerun [RUN_DIR]
+pubrun rerun [RUN_DIR] [--preflight] [--strict] [--fail-on warn|mismatch|unknown] [--json] [FILTERS]
 ```
 
-- Reads `invocation.rerun_command` from the manifest and prints it to stdout.
-- Internal log messages go to stderr to support clean piping (`pubrun rerun | bash`).
+- Reads `invocation.rerun_command` from the manifest (or reconstructs it from `.pubrun.lock` when a run has no manifest yet) and prints it to stdout.
+- `--preflight` hydrates any linked parent `meta_ref` and runs a read-only offline comparison against the current environment without executing the command. In human mode, preflight diagnostics go to stderr so stdout stays clean for piping (`pubrun rerun --preflight | bash`).
+- `--strict`, `--fail-on {warn,mismatch,unknown}`, and `--json` all require `--preflight`. `--strict` (default threshold `warn`) or `--fail-on` exits 1 and suppresses stdout when the threshold triggers.
+- Supports shared run-filter options (`-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`; does not accept `-n`/`--limit`).
 
 ### 11.9 Semantic Differ (`diff`)
 
 Generates a structural comparison between two execution traces.
 
 ```
-pubrun diff RUN_DIR_A RUN_DIR_B [OPTIONS]
+pubrun diff [RUN_DIR_A] [RUN_DIR_B] [OPTIONS]
 ```
 
+- Accepts 0, 1, or 2+ positional run directories (extra arguments beyond two are ignored): 0 compares the last two matching runs, and 1 compares that run against the most recent other matching run.
+- Hydrates both manifests before comparing.
+
 Options:
-- `--basic` (default) / `--standard` / `--deep` — Controls filtering via `[diff].ignore_*` lists.
-- `--same` / `--no-same` — Show or hide unchanged values.
-- `--wrap` / `--no-wrap` — Wrap long strings or truncate with ellipsis.
-- `--max-length N` — Maximum character length before truncation.
-- `--no-color` — Disable ANSI color output.
-- `--export [txt|json]` — Export flattened output for external diff tools.
+- `--basic` / `--standard` (default) / `--deep`: Controls filtering via `[diff].ignore_*` lists.
+- `--same` / `--no-same`: Show or hide unchanged values.
+- `--wrap` / `--no-wrap`: Wrap long strings or truncate with ellipsis.
+- `--max-length N`: Maximum character length before truncation.
+- `--table`: Render a compact aligned table instead of the default git-style `+`/`-`/`~` lines.
+- `--no-color`: Disable ANSI color output.
+- `--export [txt|json]`: Export flattened output for external diff tools.
+- Shared run-filter options (`-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`; does not accept `-n`/`--limit`) narrow auto-selection when fewer than two positionals are given.
 
 Terminal output uses the built-in inline ANSI renderer with color, truncation, wrapping, and path-split diffs.
 
@@ -529,25 +553,28 @@ pubrun cite [--style apa|mla|chicago|bibtex]
 Lists all runs with their current status or inspects a specific run in detail.
 
 ```
-pubrun status [RUN_ID] [--dir PATH] [-v|--verbose]
+pubrun status [RUN_ID] [--dir PATH] [-v|--verbose] [--utc] [FILTERS]
 ```
 
 - Classifies runs as completed, failed, interrupted, broken pipe, running, crashed, or ghost via lock-file PID liveness checks and signal analysis.
 - Shows script name with command-line arguments when terminal width permits.
 - Verbose mode (`-v`) includes PID, hostname, RSS, CPU, events, and signals.
+- `--utc` displays timestamps in UTC instead of local time.
 - Inspect mode (`pubrun status <id>`) shows full detail for a single run.
+- Supports shared run-filter options: `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`, and `-n`/`--limit`.
 
 ### 11.12 Run Cleanup (`clean`)
 
 Interactively delete old run directories.
 
 ```
-pubrun clean [--dir PATH] [--older-than AGE] [--status STATUS] [-y|--yes] [--dry-run]
+pubrun clean [--dir PATH] [-y|--yes] [--dry-run] [FILTERS]
 ```
 
 - Lists candidates with age and size before prompting for confirmation.
 - Interactive mode: requires explicit selection by number, range (e.g. `1-3,5`), or `all`. Shows a confirmation table of selected runs before final `y/N` prompt. Nothing is deleted without explicit confirmation.
 - Running processes are never deleted regardless of filters.
+- Supports shared run-filter options: `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`, and `-n`/`--limit`.
 - `--older-than` accepts days (`7d`), hours (`24h`), minutes (`30m`), seconds (`90s`), or bare numbers (days). Invalid, empty, non-finite, or negative values are rejected with an error and no runs are deleted.
 - `--status` accepts comma-separated values (e.g. `completed,failed`). Default: all non-running.
 
@@ -571,14 +598,108 @@ Use cases: CI pipelines, shell scripts, Slurm submission scripts, and any case w
 Post-execution command that chronologically interleaves stdout and stderr logs from one or more runs.
 
 ```
-pubrun combined [RUN_IDS ...] [--dir PATH] [--output FILE] [-y|--yes] [-f|--force]
+pubrun combined [RUN_IDS ...] [--dir PATH] [--output FILE] [-y|--yes] [--force] [FILTERS]
 ```
 
-- Accepts one or more run IDs. If omitted, defaults to the most recent run in `./runs/`.
+- Accepts one or more run IDs. If omitted, selects matching runs (defaulting to the most recent run in `./runs/` when no filters are supplied).
 - Parses ISO 8601 timestamps written in standard/deep console modes to chronological order.
 - Prefixes each line with stream origin: `[stdout]` / `[stderr]` (and run ID if multiple runs).
-- Size thresholds: warns at 250 MB (skipped via `--yes`), aborts at 500 MB (overridden via `--force`).
+- Size thresholds: warns at 250 MB (skipped via `--yes`), aborts at 500 MB (overridden via `--force`; `-f` is `--filter QUERY`, not force).
+- Supports shared run-filter options: `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`, and `-n`/`--limit`.
 - If logs lack timestamps, falls back to sequential concatenation.
+
+### 11.15 Project Initialization (`init`)
+
+Bootstraps a project configuration file and prints getting-started guidance.
+
+```
+pubrun init [DEST]
+```
+
+- Writes the annotated default configuration to `DEST` (default `./.pubrun.toml`) and refuses to overwrite an existing file.
+- Prints next-step instructions for adding `import pubrun` and viewing runs with `pubrun status`.
+
+### 11.16 Post-Hoc Reproducibility Assessment (`inspect`)
+
+Evaluates a completed run's manifest (with parent `meta_ref` hydration) across structured reproducibility categories and runs optional offline preflight checks.
+
+```
+pubrun inspect [RUN_DIR] [-v|--show-suggestions] [--preflight] [--json] [--strict] [--fail-on warn|mismatch|unknown] [FILTERS]
+```
+
+- Read-only and offline: evaluates recorded network filesystems, capture completeness, parent-snapshot checks, and optional `--preflight` comparisons against the current host.
+- Prints a prominent banner when the inspecting host differs from the host where the run executed.
+- `--show-suggestions` (`-v`) prints per-category status, preflight checks, and per-finding remediation steps; `--json` emits the full structured assessment.
+- `--strict` (default threshold `warn`) and `--fail-on {warn,mismatch,unknown}` exit 1 when findings meet the threshold.
+- Supports shared run-filter options (`-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`; does not accept `-n`/`--limit`).
+
+### 11.17 Live Machine Health Check (`self-check`)
+
+Inspects the current machine for configuration, install, and filesystem pitfalls without modifying any files.
+
+```
+pubrun self-check [-v|--show-suggestions] [--json] [--strict] [-q|--quiet]
+```
+
+- Evaluates live host filesystems (flagging network mounts such as NFS/Lustre), available memory, load average, `pubrun` import location, config validity, output-directory writability, Git availability, and Python version.
+- `--show-suggestions` (`-v`) shows per-item detail and remedies; `--json` emits findings as JSON; `--strict` exits non-zero on any warning; `--quiet` (`-q`) prints only a one-line verdict.
+
+### 11.18 Overhead Benchmarks (`bench`)
+
+Front-end over the overhead benchmark harness under `benchmarks/` (requires a source checkout; `benchmarks/harness.py` is not shipped in the pip wheel).
+
+```
+pubrun bench [--quick|--full|--rigorous] [--no-baseline] [--iterations N] [--passes N] [--local|--submit] [--scheduler auto|slurm|pbs|lsf|sge|local] [-y|--yes] [--unredacted] [--json] [--contribute|--no-contribute] [--prepare-submission] [--submit-file FILE] [--wait-timeout SECONDS] [--no-submit] [--gh-repo OWNER/NAME]
+```
+
+- Runs locally by default or auto-detects HPC schedulers (Slurm, PBS, LSF, SGE) and offers to submit to a compute node (never submitting without confirmation unless `--submit` or `-y`/`--yes` is passed).
+- Writes only a redacted, share-safe result JSON by default (`--unredacted` also writes the identifying copy) and runs a share-safety check.
+- On Slurm login nodes, supports submit-and-wait polling controlled by `--wait-timeout` (default about 1800s; `0` waits indefinitely), and `--submit-file FILE` contributes an existing redacted result without running benchmarks.
+
+### 11.19 Resource Utilization Charts (`res`, `cpu`, `mem`)
+
+Renders resource utilization summaries and ASCII charts over a run's lifecycle (hydrating any linked parent `meta_ref`).
+
+```
+pubrun res [RUN_DIR] [--average] [-l|--last WINDOW] [-w|--width COLS] [FILTERS]
+pubrun cpu [RUN_DIR] [--average] [-l|--last WINDOW] [-w|--width COLS] [FILTERS]
+pubrun mem [RUN_DIR] [--average] [-l|--last WINDOW] [-w|--width COLS] [FILTERS]
+```
+
+- `res` (alias `resources`) renders both memory and CPU charts plus recorded `system_memory`, `load_average`, `system_iowait_pct` (node-wide, indicative only), and per-process `io_counters`.
+- `cpu` renders the CPU chart only; `mem` renders the memory chart only.
+- `--average` plots bucket means instead of maximums; `-l`/`--last` restricts the chart window (e.g., `10m`, `2h`, `30s`); `-w`/`--width` overrides chart width in columns.
+- Supports shared run-filter options (`-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`; does not accept `-n`/`--limit`).
+
+### 11.20 Interactive Dashboard (`ui`)
+
+Launches the interactive Textual terminal dashboard (aliases `tui`, `gui`).
+
+```
+pubrun ui [--dir PATH]
+```
+
+- Requires the optional `pubrun[tui]` extra (`textual` and `rich`); exits 1 with installation instructions when those dependencies are absent.
+- `--dir PATH` overrides the run directory to scan (default: configured `[core].output_dir` or `./runs`).
+
+### 11.21 Issue Reporting and Feedback (`report-bug`, `feedback`)
+
+Two distinct primary subcommands for reporting issues or sending feedback.
+
+```
+pubrun report-bug
+pubrun feedback
+```
+
+- Prints copy-ready environment diagnostics (`pubrun` version, Python version, platform, machine, processor, and system time) and opens the GitHub issue tracker URL (`https://github.com/fariello/pubrun/issues/new`) in the default browser (or prints the URL if no browser can be launched).
+
+### 11.22 Global CLI Options and Aliases
+
+- `--version`: Prints the `pubrun` version (with commit identifier when available), original author attribution, and Apache-2.0 `NOTICE` reminder, then exits.
+- `--no-color`: Disables ANSI color output globally by setting `NO_COLOR=1`. Accepted anywhere on the command line except after `pubrun run` (where arguments belong to the target command).
+- `help` translation: `pubrun help`, `pubrun help <command>`, and `pubrun <command> help` translate to `--help`.
+- Run-selector reordering: placing a run ID, prefix, or path before a subcommand (for example `pubrun 16528343 cpu`) is rewritten to `pubrun <command> <selector>`.
+- Console script alias: `pbr` invokes the same CLI entrypoint as `pubrun` and `python -m pubrun`.
 
 ---
 
@@ -587,8 +708,10 @@ pubrun combined [RUN_IDS ...] [--dir PATH] [--output FILE] [-y|--yes] [-f|--forc
 ### 12.1 Naming Convention
 
 ```
-<base_dir>/runs/pubrun-<script>-<timestamp>-<pid>-<run_id>/
+<output_dir>/pubrun-<script>-<timestamp>-<pid>-<run_id>/
 ```
+
+`<output_dir>` is `[core].output_dir` (defaulting to `./runs` when empty, per `src/pubrun/tracker.py::Run.__init__`).
 
 Example:
 ```
@@ -605,7 +728,7 @@ Example:
 
 Required: `manifest.json`, `config.resolved.json`.
 
-Optional: `stdout.log`, `stderr.log`, `events.jsonl`, `methods.md`/`methods.tex`.
+Optional: `stdout.log`, `stderr.log`, `events.jsonl`, `methods.md`/`methods.tex`, `profile-<phase>.prof` (when `[capture.profiling].enabled = true`), files written by `pubrun.report()` and `pubrun.artifact()`, and transient `.pubrun.lock` during active execution.
 
 ---
 
@@ -631,21 +754,21 @@ Replay is **advisory, not guaranteed**. Environment differences between the orig
 | `start(**overrides)` | Returns `Run` | Begins tracking. If a run is already active, increments `ref_count` and merges overrides (re-entrant). |
 | `stop()` | Returns `None` | Finalizes the active run. Decrements `ref_count`; only writes artifacts when count reaches zero. Safe to call with no active run. |
 | `get_current_run()` | Returns `Run \| None` | Returns the active singleton tracker, or `None`. |
-| `annotate(message, **kwargs)` | Returns `None` | Emits an `annotation` event. Behavior with no active run is configurable: `ignore` (default), `warn`, or `error`. |
-| `phase(name)` | Context manager | Emits `phase_start`/`phase_end` events; `phase_end` carries a monotonic `elapsed_seconds` and `duration_clock: "monotonic"`. Records error type in payload if an exception occurs. |
-| `paused()` | Context manager | Suspends *recording* (console tee + subprocess spy) on the calling thread for the block — output still prints, subprocesses still run, but are not recorded. Thread-local, ref-counted/nestable, resumes on exception. Does not pause `annotate()`/`phase()` or resource sampling. |
-| `tracked_run(**overrides)` | Context manager | Wraps `start()`/`stop()`. Sets outcome to `"failed"` on exception. |
-| `audit_run(**overrides)` | Decorator | Wraps a function in `start()`/`stop()`. Preserves return value. Sets outcome to `"failed"` on exception, then re-raises. |
-| `diff(a, b, ignores)` | Returns `dict` | Compares two run directories. Returns `{"added": ..., "removed": ..., "modified": ..., "same": ...}`. |
-| `report(name, data)` | Returns `None` | Writes a JSON (`dict`/`list`) or text report into the run directory and emits an annotation. |
-| `artifact(filename, content)` | Returns `None` | Writes a text or bytes file into the run directory (run-internal output) and emits an annotation. |
-| `print(*args, **kwargs)` | Returns `None` | Calls the builtin `print()` and appends the text to `stdout.log`, independently of console wrapping. |
+| `annotate(message=None, **kwargs)` | Returns `None` | Emits an `annotation` event (`message` is optional). When no run is active, `[events].on_inactive_annotate` (`ignore` default, `warn`, or `error`) governs behavior across all seven inactive-guarded functions: `annotate()`, `phase()`, `report()`, `artifact()`, `register_file()`, `register_input()`, and `register_output()` (`src/pubrun/core.py::_handle_inactive`). |
+| `phase(name)` | Context manager | Emits `phase_start`/`phase_end` events; `phase_end` carries a monotonic `elapsed_seconds` and `duration_clock: "monotonic"`. Records error type in payload if an exception occurs. Subject to `[events].on_inactive_annotate` when no run is active. |
+| `paused()` | Context manager | Suspends *recording* (console tee + subprocess spy) on the calling thread for the block: output still prints, subprocesses still run, but are not recorded. Thread-local, ref-counted/nestable, resumes on exception. Does not pause `annotate()`/`phase()` or resource sampling. |
+| `tracked_run(**overrides)` | Context manager | Wraps `start()`/`stop()`. Exit outcome (`_classify_exit_outcome`, `_stop_for_exit`): `KeyboardInterrupt` sets `"interrupted"`, `SystemExit(0)` or `SystemExit(None)` sets `"completed"`, and other exceptions or non-zero `SystemExit` set `"failed"`; `SystemExit` also records its exit code on signal capture. |
+| `audit_run(func=None, **overrides)` | Decorator | Wraps a function in `start()`/`stop()` and preserves return value. Applies the same exit-outcome rules as `tracked_run()` (`KeyboardInterrupt` -> `"interrupted"`, `SystemExit(0)` or `SystemExit(None)` -> `"completed"`, other exceptions or non-zero `SystemExit` -> `"failed"`, recording `SystemExit` exit code on signal capture), then re-raises. |
+| `diff(run_dir_a, run_dir_b, ignores=None)` | Returns `dict` | Compares two run directories after hydrating both manifests (`src/pubrun/core.py::diff`). `ignores` is optional and defaults to `[diff].ignore_standard` (or legacy `[diff].ignore` when `ignore_standard` is absent). Returns `{"added": ..., "removed": ..., "modified": ..., "same": ...}`. |
+| `report(name, data)` | Returns `None` | Writes a JSON (`dict`/`list`) or text report into the run directory and emits an annotation. Subject to `[events].on_inactive_annotate` when no run is active. |
+| `artifact(filename, content)` | Returns `None` | Writes a text or bytes file into the run directory (run-internal output) and emits an annotation. Subject to `[events].on_inactive_annotate` when no run is active. |
+| `print(*args, **kwargs)` | Returns `None` | Calls the builtin `print()` and appends the text to `stdout.log`, skipping direct append when `file=` is not `sys.stdout`, inside `pubrun.paused()`, or when the run's active console tee on `sys.stdout` already records stdout (`src/pubrun/core.py::_should_log_pubrun_print`). |
 | `open(file, mode="r", **kwargs)` | Returns a file object | Wraps `builtins.open()` for that one file and records a `data_files` entry at `[capture.file_io].level`. Never patches the global `open()`. At `hash`, a sequential binary read or write is hashed as it streams; otherwise the file is re-read at close. |
 | `subprocess.run(...)` / `subprocess.Popen(...)` | As `subprocess` | Explicit subprocess wrappers that record argv, timing, and exit code without the global spy. |
 | `popen(cmd, mode="r", bufsize=-1)` | As `os.popen` | Tracked `os.popen()` replacement. |
-| `register_file(path, role="input", *, label, digest, digest_algorithm, level, verify_digest, defer, metadata)` | Returns `dict \| None` | Records an external file read or written by other code (for example a library) into `data_files.inputs`, `outputs`, or `mixed`, without wrapping its I/O. A caller digest is recorded as asserted unless `verify_digest=True`. Outputs may be registered before they exist and are completed at finalization. Returns `None` with no active run or at level `none`. |
-| `register_input(path, ...)` | Returns `dict \| None` | `register_file(path, role="input", ...)`. |
-| `register_output(path, ..., defer=False)` | Returns `dict \| None` | `register_file(path, role="output", ...)`. |
+| `register_file(path, role="input", *, label, digest, digest_algorithm, level, verify_digest, defer, metadata)` | Returns `dict \| None` | Records an external file read or written by other code (for example a library) into `data_files.inputs`, `outputs`, or `mixed` without wrapping its I/O. Accepts `role="input" \| "output" \| "input_output"` (`"input_output"` records into `data_files.mixed`). A caller digest is recorded as asserted unless `verify_digest=True`. Outputs may be registered before they exist and are completed at finalization. Subject to `[events].on_inactive_annotate` when no run is active; returns `None` with no active run or at level `none`. |
+| `register_input(path, ...)` | Returns `dict \| None` | `register_file(path, role="input", ...)`. Subject to `[events].on_inactive_annotate` when no run is active. |
+| `register_output(path, ..., defer=False)` | Returns `dict \| None` | `register_file(path, role="output", ...)`. Subject to `[events].on_inactive_annotate` when no run is active. |
 
 ### 14.2 Re-Entrant Start Behavior
 
@@ -710,21 +833,30 @@ If `[redaction].argv_enabled = true`, subprocess argument values matching the se
 
 ### 16.2 Configuration
 
-- `scope` (default `"process"`): `"process"` monitors only the main process; `"tree"` sums RSS/CPU across the entire process tree (parent + all child processes).
-- `sample_interval_seconds` (default 15): How often the thread wakes to sample.
-- `max_consecutive_failures` (default 3): The thread self-terminates after this many consecutive read failures.
+- `scope` (default `"process"`): `"process"` monitors only the main process; `"tree"` sums RSS across the entire process tree on Linux and macOS (Windows falls back to process) and sums tree CPU on Linux only.
+- `sample_interval_seconds` (default `15`): How often the thread wakes to sample.
+- `max_consecutive_failures` (default `3`): The thread self-terminates after this many consecutive read failures.
+- `poll_timeout` (default `3`s): Per-poll timeout in seconds for macOS/Windows sampling subprocesses (`ps` and `wmic`).
+- `system_metrics` (default `true`): When enabled (and `[capture.resources].depth != "off"`), also samples host `system_memory`, `load_average`, Linux node-wide `system_iowait_pct`, and Linux per-process `io_counters`.
 
 ### 16.3 Platform Support
 
 | Platform | RSS Source (process) | RSS Source (tree) |
 |---|---|---|
-| Linux | `/proc/self/statm` | `/proc/<pid>/task/<pid>/children` recursive walk |
+| Linux | `/proc/self/statm` | `/proc/<pid>/task/<tid>/children` recursive walk across all threads (`_get_linux_child_pids`) |
 | macOS | `ps -o rss= -p <pid>` | `ps -eo pid,ppid,rss` with in-Python tree walk |
-| Windows | `wmic process get WorkingSetSize` | Not yet implemented (falls back to process) |
+| Windows | Win32 `K32GetProcessMemoryInfo` / `psapi.GetProcessMemoryInfo` via `ctypes`, with `wmic` subprocess fallback (`_get_rss_windows`) | Not yet implemented (falls back to process) |
+
+Tree CPU (`_poll_tree_cpu`) is Linux-only and computes percentage utilization from `/proc/<pid>/stat` cumulative jiffy deltas across the process tree.
 
 ### 16.4 Output
 
-The `resources` manifest section contains: `scope`, `peak_rss_bytes`, `end_rss_bytes`, `peak_cpu_percent`. When `scope = "tree"`, also includes `peak_tree_rss_bytes` and `end_tree_rss_bytes`.
+The `resources` manifest section contains: `scope`, `peak_rss_bytes`, `end_rss_bytes`, `peak_cpu_percent`, and `capture_state`. When `scope = "tree"`, it also includes `peak_tree_rss_bytes`, `end_tree_rss_bytes`, and `peak_tree_cpu_percent` (Linux-only, `% of one core`, `null` where unmeasured). When `system_metrics = true` and available on the host, it also includes:
+
+- `system_memory`: `start`, `last`, and `min_available` host memory snapshots.
+- `load_average`: `start`, `last`, and `max_1min` load averages.
+- `system_iowait_pct`: `last` and `max` Linux node-wide iowait percentages (indicative only).
+- `io_counters`: Linux `/proc/self/io` per-process `start`, `last`, and `delta` byte counters.
 
 ---
 
@@ -769,15 +901,16 @@ In large cluster deployments, child runs can skip heavy capture (packages, hardw
 
 ### 18.2 Workflow
 
-1. **Parent**: `pubrun meta --out ./shared/meta.json --deep`
-2. **Children**: `export PUBRUN_META_REF=meta.json && python script.py`
+1. **Parent**: `pubrun meta --out /shared/proj/meta.json --deep`
+2. **Allowlist configuration**: add `[report].meta_ref_allowed_dirs = ["/shared/proj"]` (or `[report].allow_external_meta_ref = true`) to `.pubrun.toml` (see Section 18.5).
+3. **Children**: `export PUBRUN_META_REF=/shared/proj/meta.json && python script.py`
 
 ### 18.3 Hydration Rules
 
-When `meta_ref` is set and a report/methods command is invoked:
+When `meta_ref` is set and any hydrating caller runs (`pubrun show` and hidden alias `report`, `pubrun res`/`resources`/`cpu`/`mem`, `pubrun methods` including `--all`, `pubrun inspect`, `pubrun rerun --preflight`, `pubrun diff`, Python `pubrun.diff()`, and the TUI `pubrun ui`/`tui`/`gui`):
 
-- The hydrator loads the referenced `meta.json`.
-- For each section in `[hardware, process, python, packages, environment, git]`: if the child section is missing or has `capture_state.status` in `[suppressed, off, unavailable, unknown, partial]`, it is replaced with the parent section.
+- The hydrator resolves `meta_ref` against `Path(manifest_path).parent`, checks the `.json` extension and directory policy (Section 18.5) before probing file existence, and loads the referenced `meta.json`.
+- For each of the 7 sections in `HYDRABLE_SECTIONS` (`[hardware, process, python, packages, environment, git, host]`): if the child section is missing or has `capture_state.status` in `[suppressed, off, unavailable, unknown, partial]`, it is replaced in memory with the parent section when present. Note that `pubrun meta` captures 6 sections (`hardware`, `python`, `packages`, `git`, `environment`, `host`); it does not capture `process`.
 - Hydrated sections are marked with `is_hydrated = true`.
 
 ### 18.4 Drift Detection
