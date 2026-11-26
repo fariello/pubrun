@@ -1,13 +1,14 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "pubrun"
-version = "1.3.1"
+version = "1.4.0"
 description = "A lightweight Python library for capturing execution context."
 readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [
     { name = "Gabriele Fariello", email = "gfariello@fariel.com" }
 ]
@@ -72,6 +73,21 @@ packages = ["src/pubrun"]
 exclude = ["src/pubrun/COMMIT", "src/pubrun/_build_meta.json"]
 
 [tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/schemas",
+    "/docs",
+    "/examples",
+    "/hatch_build.py",
+    "/pyproject.toml",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/NOTICE",
+    "/CITATION.cff",
+    "/tox.ini",
+]
 exclude = ["src/pubrun/COMMIT", "src/pubrun/_build_meta.json"]
 
 [tool.hatch.build.hooks.custom]

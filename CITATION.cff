@@ -2,7 +2,8 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it using the metadata below."
 title: "pubrun"
 abstract: >-
-  A tool for running and managing publication/experiment pipelines.
+  A lightweight, zero-dependency Python library for capturing execution
+  provenance and reproducibility metadata.
 type: software
 authors:
   - family-names: "Fariello"
@@ -13,8 +14,8 @@ authors:
 repository-code: "https://github.com/fariello/pubrun"
 url: "https://github.com/fariello/pubrun"
 license: Apache-2.0
-version: "1.3.1"
-date-released: "2026-06-24"
+version: "1.4.0"
+date-released: "2026-11-26"
 # Zenodo concept DOI (all versions; always resolves to the latest archived release).
 identifiers:
   - type: doi
