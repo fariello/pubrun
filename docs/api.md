@@ -201,7 +201,7 @@ Without an active run, `phase()` times nothing and writes no event. Entering the
 
 ### `pubrun.paused() → ContextManager`
 
-Suspend pubrun's **recording** for a block — useful when a section prints noisy
+Suspend pubrun's **recording** for a block - useful when a section prints noisy
 output or spawns helper processes you don't want in the record:
 
 ```python
@@ -216,19 +216,19 @@ resume_work()                # captured again
 Semantics:
 
 - **Mute, not unpatch.** Output still goes to your terminal and subprocesses
-  still run; only *recording* is suspended — the console tee stops writing to
+  still run; only *recording* is suspended - the console tee stops writing to
   `stdout.log`/`stderr.log` and the subprocess spy stops recording spawned
   processes for the duration of the block.
 - **Thread-local.** Only the calling thread's recording is suspended; other
   threads keep being captured. (There is one `sys.stdout`, so terminal output
-  still appears for all threads — only the recording decision is per-thread.)
+  still appears for all threads - only the recording decision is per-thread.)
 - **Nestable and exception-safe.** Nested `paused()` blocks compose; recording
   resumes only when the outermost block exits, and always resumes even if the
-  block raises (it is a context manager for exactly this reason — there is no
+  block raises (it is a context manager for exactly this reason - there is no
   bare `pause()`/`resume()`).
 - **Does NOT pause:** your explicit `annotate()`/`phase()` markers (they still
   fire) or background resource sampling (RAM/CPU are process-wide and still
-  counted — the noisy subprocess still used real memory).
+  counted - the noisy subprocess still used real memory).
 
 Safe in any import mode and even with no active run (a no-op on uninstalled
 engines).
@@ -338,18 +338,18 @@ These APIs are drop-in replacements for standard Python I/O functions that autom
 
 Drop-in replacement for `builtins.open()`. When a run is active, records provenance for the
 opened file in the manifest's `data_files` section. **pubrun never patches the global
-`open()`** — only files you route through `pubrun.open()` are recorded.
+`open()`** - only files you route through `pubrun.open()` are recorded.
 
 The detail recorded is controlled by `[capture.file_io].level` (progressive; each includes
 the ones before it):
 
 | Level | Records | Cost |
 |---|---|---|
-| `none` | nothing (behaves exactly like `builtins.open`) | — |
+| `none` | nothing (behaves exactly like `builtins.open`) | - |
 | `name` | the path as given | trivial |
 | `stat` **(default)** | + size, mtime, ctime (via `fstat` on the open fd) and the absolute path | ~free, incl. on NFS |
-| `realpath` | + the symlink-resolved canonical path | higher — walks every path component; **noticeably costlier on NFS/Lustre** |
-| `hash` | + SHA-256 of the file contents | highest — reads every byte |
+| `realpath` | + the symlink-resolved canonical path | higher - walks every path component; **noticeably costlier on NFS/Lustre** |
+| `hash` | + SHA-256 of the file contents | highest - reads every byte |
 
 ```python
 import pubrun
@@ -461,7 +461,7 @@ A runnable, dependency-free version is `examples/12_external_file_provenance.py`
 
 Drop-in replacement for `builtins.print()`. Calls the real `print()` AND appends the output to `stdout.log` in the run directory, **independently of console-stream wrapping**. It only needs an active run.
 
-This is the recommended way to capture output when the console tee is NOT active — any mode with `capture_mode = "off"` (the default), or the `noconsole`/`nopatch`/`minimal` modes. It records output without monkeypatching `sys.stdout`/`sys.stderr`, and is available via every import mode alias.
+This is the recommended way to capture output when the console tee is NOT active - any mode with `capture_mode = "off"` (the default), or the `noconsole`/`nopatch`/`minimal` modes. It records output without monkeypatching `sys.stdout`/`sys.stderr`, and is available via every import mode alias.
 
 ```python
 import pubrun.noconsole as pubrun   # streams are not wrapped

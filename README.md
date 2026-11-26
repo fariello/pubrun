@@ -363,7 +363,7 @@ pubrun ui --dir /path  # Scan a non-default output directory
 |---|---|
 | `--version` | Print the installed pubrun version and exit |
 | `--create-config` | Bootstrap a fully commented `.pubrun.toml` file |
-| `--info` | Display system capabilities and pubrun version |
+| `--info` | Display import mode, invocation, and hardware/capture diagnostics |
 | `--run-tests` | Execute the built-in self-test suite |
 
 > `--show-config` is **deprecated** (hidden from `--help`); it still prints the built-in defaults but use [`pubrun show default config`](#pubrun-show-config) instead.

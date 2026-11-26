@@ -20,7 +20,7 @@ pubrun status lines use a consistent set of prefixes so output is easy to scan a
 | `[ OK  ]` | success (green) |
 | `[WARN ]` | warning (yellow) |
 | `[ERROR]` | error (red) |
-| `[DEBUG]` | debug detail (light blue) — silent unless `PUBRUN_DEBUG` is set |
+| `[DEBUG]` | debug detail (light blue) - silent unless `PUBRUN_DEBUG` is set |
 | `[FAIL ]` | a failed built-in self-test (`--run-tests`) (red) |
 
 Color is optional reinforcement only, and the textual label is authoritative. The status-line
@@ -80,7 +80,7 @@ It is not accepted by `inspect`, `diff`, `rerun`, or `res`/`cpu`/`mem`.
 
 ## Commands
 
-### `init` — Project Initialization
+### `init`: Project Initialization
 
 Creates a `.pubrun.toml` configuration file and displays getting-started guidance.
 
@@ -104,11 +104,11 @@ After init, add `import pubrun` to your script to begin tracking.
 
 ---
 
-### `report-bug` / `feedback` — Report a Bug or Send Feedback
+### `report-bug` / `feedback`: Report a Bug or Send Feedback
 
 Two commands (same behavior): open the GitHub issue tracker in your default browser and
 print system-configuration telemetry to the console for easy copy-paste. `report-bug` is
-for bug reports / feature requests; `feedback` is for general feedback — both land as GitHub
+for bug reports / feature requests; `feedback` is for general feedback - both land as GitHub
 issues.
 
 ```bash
@@ -121,7 +121,7 @@ pubrun feedback
 
 ---
 
-### `cite` — Academic Citation
+### `cite`: Academic Citation
 
 Generates a formatted citation for crediting `pubrun` in academic publications. The
 citation includes the archived Zenodo **concept DOI** (`10.5281/zenodo.20801582`), which
@@ -138,7 +138,7 @@ pubrun cite --style bibtex
 
 ---
 
-### `self-check` — Environment / Install Diagnostics
+### `self-check`: Environment / Install Diagnostics
 
 Report-only checks of the **current machine** for pubrun performance/config pitfalls and
 install health. It flags network filesystems (NFS/Lustre/GPFS/CIFS) backing the pubrun
@@ -148,14 +148,14 @@ config errors. It never modifies anything.
 
 It also runs a short **live filesystem probe** (a `statvfs` capacity check in a background
 daemon thread, with a ~5s wait budget) and warns if a mount is **wedged/hung** or **slow to
-respond**. These warnings are framed honestly as a **system-wide** hazard — a mount that
+respond**. These warnings are framed honestly as a **system-wide** hazard - a mount that
 takes 34s to answer a capacity query will slow *any* script doing I/O there, not just pubrun.
 This probe runs only when you invoke `self-check` (or `bench`); it is **never** run by
 `import pubrun` or during a normal run, so it can never hang your host script.
 
 **By default it is itemized**: one line per check with its outcome (`[ OK  ]`/`[WARN ]`/
 `[INFO ]`) so you can see *what* was checked and how each did, plus a `N checks in 0.0Xs`
-timing footer — not just a bare "OK".
+timing footer - not just a bare "OK".
 
 ```bash
 pubrun self-check [--show-suggestions|-v] [--quiet|-q] [--json] [--strict]
@@ -167,14 +167,14 @@ pubrun self-check [--show-suggestions|-v] [--quiet|-q] [--json] [--strict]
 |---|---|
 | `--show-suggestions`, `-v` | Add per-item remediation detail beneath each WARN/INFO check. |
 | `--quiet`, `-q` | Print only a one-line verdict instead of the itemized per-check list. |
-| `--json` | Emit the full structured result — `checks` (every check + outcome), `findings`, and `elapsed_seconds`. |
+| `--json` | Emit the full structured result - `checks` (every check + outcome), `findings`, and `elapsed_seconds`. |
 | `--strict` | Exit non-zero if any warning fired (useful in CI / HPC job pre-checks). Keys on WARN only, so the HPC login-node `INFO` nudge does not trip it. |
 
 See [Research Use & HPC](hpc.md) for guidance on diagnosing slow runs on clusters.
 
 ---
 
-### `inspect` — Post-hoc Run Diagnosis
+### `inspect`: Post-hoc Run Diagnosis
 
 Report-only reproducibility assessment of a **completed run's** manifest. `inspect` reads
 the recorded manifest, first fills in sections from a parent snapshot when the manifest
@@ -281,11 +281,13 @@ hostname or Python version). A script modified after the parent snapshot is flag
 unchanged script modification time does not prove the dependencies matched. See
 [HPC](hpc.md#diagnosing-a-finished-run) and [Manifest](manifest.md#meta-snapshot).
 
-> **Honesty note:** pubrun does not patch `open()` or subprocess globally, so file-I/O and
-> subprocess provenance are recorded only when the script uses `pubrun.open()`, explicit
-> external file registration (`pubrun.register_input()`, `pubrun.register_output()`, or
-> `pubrun.register_file()`), or `pubrun.subprocess`. `inspect` does not claim a feature was
-> "off" when the manifest merely shows no records unless it can determine this definitively.
+> **Honesty note:** pubrun never patches builtin `open()` globally, so file-I/O provenance is
+> recorded only when the script uses `pubrun.open()` or explicit external file registration
+> (`pubrun.register_input()`, `pubrun.register_output()`, or `pubrun.register_file()`).
+> Subprocess patching is controlled by `[capture.subprocesses].enabled` and the active import mode
+> (`pubrun.nopatch` and `pubrun.minimal` skip global `subprocess` patching, in which case
+> `pubrun.subprocess` records calls explicitly). `inspect` does not claim a feature was "off" when
+> the manifest merely shows no records unless it can determine this definitively.
 
 **File-provenance findings:** `inspect` evaluates recorded `data_files` (`inputs`, `outputs`, and `mixed`) by evidence strength and hashing outcome:
 
@@ -304,7 +306,7 @@ pubrun inspect runs/pubrun-XYZ --preflight --json | jq '.preflight.status'
 
 ---
 
-### `bench` — Overhead Benchmark Runner
+### `bench`: Overhead Benchmark Runner
 
 Friendly front-end over the benchmark harness (`benchmarks/harness.py`). Runs the suite
 locally by default; on an HPC login node it detects the batch scheduler (**Slurm, PBS/Torque,
@@ -406,7 +408,7 @@ pubrun bench --submit-file res.redacted.json           # contribute a previously
 
 ---
 
-### `clean` — Run Cleanup
+### `clean`: Run Cleanup
 
 Interactively delete old run directories. Lists candidates with their age and size, then prompts for confirmation before removal.
 
@@ -439,7 +441,7 @@ pubrun clean --dry-run                    # Preview without deleting
 
 ---
 
-### `combined` — Log Interleaver
+### `combined`: Log Interleaver
 
 Post-execution command that chronologically interleaves stdout and stderr logs from one or more runs using the log-line timestamps written in `standard` or `deep` console mode.
 
@@ -471,7 +473,7 @@ pubrun combined a3f9 b2c1 --output all.log  # Combine multiple runs into a file
 
 ---
 
-### `diff` — Semantic Comparison
+### `diff`: Semantic Comparison
 
 Generates a structural comparison between two execution traces, filtering volatile noise
 (timestamps, PIDs, per-run absolute paths) so the *meaningful* differences stand out.
@@ -480,12 +482,12 @@ Generates a structural comparison between two execution traces, filtering volati
 pubrun diff [RUN_DIR_A [RUN_DIR_B]] [OPTIONS]
 ```
 
-**Depth levels** — each level is nested: `--basic` hides the most, `--deep` hides nothing.
+**Depth levels** - each level is nested: `--basic` hides the most, `--deep` hides nothing.
 
 | Flag | What it shows |
 |---|---|
 | `--basic` | The user-facing, high-signal differences only: script/argv, python, git, user config. Hides volatile fields and the high-volume sections (process, hardware, resources, environment, subprocesses, packages). A single `argv` change is reported once (not also as `command_line`/`rerun_command`, which are derived from it). |
-| `--standard` (default) | The above plus hardware/resource changes and **summarized** list sections — e.g. `subprocesses.count: 300 → 302` and `subprocesses.by_command.bash: +2`, rather than thousands of per-process leaf lines. |
+| `--standard` (default) | The above plus hardware/resource changes and **summarized** list sections - e.g. `subprocesses.count: 300 → 302` and `subprocesses.by_command.bash: +2`, rather than thousands of per-process leaf lines. |
 | `--deep` | No filtering; every field, every subprocess element, and the derived `command_line`/`rerun_command` are compared. |
 
 **Other options:**
@@ -498,7 +500,7 @@ pubrun diff [RUN_DIR_A [RUN_DIR_B]] [OPTIONS]
 | `--max-length N` | Maximum character length before truncation |
 | `--no-color` | Disable ANSI color output |
 | `--export [txt\|json]` | Export flattened key-value output for external diff tools (e.g., `meld`, VS Code) |
-| `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code` | Standard run filters. When run directories are omitted, the auto-selected pair is drawn from the runs matching these filters (with no filters, from all runs — the historical behavior) |
+| `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code` | Standard run filters. When run directories are omitted, the auto-selected pair is drawn from the runs matching these filters (with no filters, from all runs - the historical behavior) |
 
 **Run arguments:** `diff` accepts zero, one, or two run arguments:
 - **Zero arguments:** compares the two most recent runs with a `manifest.json` (drawn from runs matching the standard run filters when given).
@@ -508,7 +510,7 @@ pubrun diff [RUN_DIR_A [RUN_DIR_B]] [OPTIONS]
 
 If a filter matches fewer than two runs (or no other run when one argument is given), `diff` reports a clear error and exits non-zero rather than silently ignoring the filter.
 
-> **Changed in 1.4.0:** `--basic` and `--standard` are now genuinely concise — they no longer
+> **Changed in 1.4.0:** `--basic` and `--standard` are now genuinely concise - they no longer
 > explode subprocess-heavy runs into thousands of lines, and they hide per-run volatile paths
 > and the derived `command_line`/`rerun_command` (shown only at `--deep`). `--deep` output is
 > unchanged. If you parse diff output, use `--deep` for the full element-by-element detail.
@@ -522,7 +524,7 @@ pubrun diff A B --table            # compact aligned table view
 
 ---
 
-### `meta` — Global Environment Snapshot
+### `meta`: Global Environment Snapshot
 
 Generates a standalone `meta.json` snapshot of the current environment (hardware, packages, git, environment variables) without running any script. Designed for HPC parent-child hydration workflows.
 
@@ -544,7 +546,7 @@ pubrun meta --out ./shared/meta.json --deep
 
 ---
 
-### `methods` — Academic Methodology Writer
+### `methods`: Academic Methodology Writer
 
 Compiles a run's manifest into a publication-ready "Computational Methods" paragraph in Markdown or LaTeX.
 
@@ -571,7 +573,7 @@ pubrun methods --all -n 20 -s completed      # aggregate the 20 most-recent comp
 
 ---
 
-### `show` — Diagnostic Viewer
+### `show`: Diagnostic Viewer
 
 Renders a human-readable diagnostic summary of one or more runs, including timing, hardware, dependencies, codebase drift, and an event timeline.
 
@@ -612,7 +614,7 @@ dependencies), the next step, and the non-guarantee note. `show` never runs a pr
 comparison; the block points to `pubrun inspect --preflight` for that. The block is omitted
 from `--basic` and from section extracts (`logs`, `env`, `packages`).
 
-#### `show config` — inspect resolved configuration
+#### `show config`: inspect resolved configuration
 
 `show` also renders the resolved pubrun **configuration** for three distinct contexts, so you
 can see exactly what settings are (or were) in effect and how any ambiguity resolved:
@@ -643,7 +645,7 @@ A run whose id genuinely starts with one of these words must be selected by its 
 
 ---
 
-### `rerun` — Reproducibility Command
+### `rerun`: Reproducibility Command
 
 Extracts the exact shell command needed to re-execute a recorded run.
 
@@ -703,7 +705,7 @@ pubrun rerun runs/pubrun-XYZ --preflight --json                    # structured 
 
 ---
 
-### `res` — Resource Monitoring (comprehensive)
+### `res`: Resource Monitoring (comprehensive)
 
 > `resources` is a backward-compatible alias of `res` (`pubrun resources` behaves identically).
 
@@ -716,12 +718,12 @@ to the recorded peak:
 - **main-process** RSS (`RSS (main)`) and CPU% (`CPU (main)`), plus end RSS,
 - **process-tree** RSS (`RSS (tree)`) and CPU% (`CPU (tree)`) when the run used
   `[capture.resources].scope = "tree"`. Tree CPU is computed from summed CPU-time deltas
-  across the tree and is labeled *"% of one core"* — it may legitimately exceed 100% on
+  across the tree and is labeled *"% of one core"* - it may legitimately exceed 100% on
   multiple cores (it is not clamped). Tree CPU is Linux-only; where unmeasured it is omitted.
-- **system memory** — available RAM at start and the lowest point during the run,
+- **system memory**: available RAM at start and the lowest point during the run,
 - **load average** (start and 1-min peak),
-- **node iowait** (labeled *node-wide, indicative only* — a whole-node hint, not run-scoped),
-- **per-process I/O volume** — bytes read/written (storage layer and logical), from
+- **node iowait** (labeled *node-wide, indicative only* - a whole-node hint, not run-scoped),
+- **per-process I/O volume**: bytes read/written (storage layer and logical), from
   `/proc/self/io` (Linux).
 
 ```bash
@@ -740,7 +742,7 @@ pubrun res [RUN_DIR] [--average] [-l LAST] [-w WIDTH] [run filters]
 - `RUN_DIR` may be a recency index (`1` = most recent), an id prefix, or a path; if omitted,
   the most recent matching run is used.
 - Parses `resource_sample` events from `events.jsonl` to render utilization timelines.
-- Older runs (before these fields were captured) simply show fewer lines — no error.
+- Older runs (before these fields were captured) simply show fewer lines - no error.
 
 The `cpu` and `mem` commands show a single focused chart; `res` shows the full picture.
 
@@ -753,7 +755,7 @@ pubrun mem -w 120             # Memory chart, custom width
 
 ---
 
-### `cpu` — CPU Utilization Chart
+### `cpu`: CPU Utilization Chart
 
 Renders the CPU utilization history for a run. Standalone shortcut for the CPU portion of `res`; takes the same options (`--average`, `-l/--last`, `-w/--width`, and the standard run selectors).
 
@@ -763,7 +765,7 @@ pubrun cpu [RUN_DIR] [--average] [-l LAST] [-w WIDTH] [run filters]
 
 ---
 
-### `mem` — Memory Utilization Chart
+### `mem`: Memory Utilization Chart
 
 Renders the memory (RSS) utilization history for a run. Standalone shortcut for the memory portion of `res`; takes the same options (`--average`, `-l/--last`, `-w/--width`, and the standard run selectors).
 
@@ -773,7 +775,7 @@ pubrun mem [RUN_DIR] [--average] [-l LAST] [-w WIDTH] [run filters]
 
 ---
 
-### `run` — Import Mode Wrapper
+### `run`: Import Mode Wrapper
 
 Spawns a child process with `PUBRUN_RUN_MODE_OVERRIDE` and `PUBRUN_IMPORT_MODE` set in the environment so the launch-time `--mode` value overrides explicit in-code `import pubrun.<mode>` imports. Setting `PUBRUN_IMPORT_MODE` alone without `PUBRUN_RUN_MODE_OVERRIDE` still yields to explicit submodule imports. Useful for CI pipelines, shell scripts, Slurm submissions, and any case where you want to control pubrun behavior without modifying source code.
 
@@ -801,7 +803,7 @@ The wrapper returns the child process exit code. It does not create a run in the
 
 ---
 
-### `status` — Run Monitoring
+### `status`: Run Monitoring
 
 Lists all runs in the output directory with their current status, or inspects a specific run in detail. Classifies runs as completed, failed, interrupted, broken pipe, running, crashed, or ghost via lock-file PID liveness checks. When a crashed run still has a `.pubrun.lock` file (its process is no longer alive), `pubrun status` closes it out by writing or updating `manifest.json` and removing `.pubrun.lock`, so this command can modify run directories.
 
@@ -832,7 +834,7 @@ pubrun status [RUN_ID] [--dir PATH] [-v|--verbose] [--utc] [-f QUERY] [-F QUERY]
 |---|---|
 | `completed` | Run finished successfully (manifest exists, outcome is "completed") |
 | `failed` | Run finished with an error (manifest exists, outcome is "failed") |
-| `interrupted` | Run received a termination signal — SIGINT (Ctrl+C), SIGTERM, or SIGHUP |
+| `interrupted` | Run received a termination signal - SIGINT (Ctrl+C), SIGTERM, or SIGHUP |
 | `broken pipe` | Run completed but received SIGPIPE (downstream reader closed) |
 | `running` | Lock file exists and the process is still alive |
 | `crashed` | Lock file exists but the process is dead (killed without cleanup) |
@@ -860,7 +862,7 @@ For running processes, the inspect view also shows live RSS memory and CPU usage
 
 ---
 
-### `ui` — Interactive Dashboard
+### `ui`: Interactive Dashboard
 
 Launches the terminal user interface (TUI) dashboard to browse, inspect, and manage run records interactively. Tabs are `Run Details`, `Console Logs`, `Resources` (CPU/memory usage), `Semantic Diff`, `Actions & Citations`, and `TUI Settings`.
 
@@ -880,7 +882,7 @@ pubrun ui [--dir PATH]
 
 **Resources view:** selecting a run populates a **Resources** tab showing peak/avg/min for
 CPU and memory (main process, and the process tree when captured) plus a compact sparkline of
-each over the run's lifecycle — the same per-sample data `pubrun res` uses. Press `r` to jump
+each over the run's lifecycle - the same per-sample data `pubrun res` uses. Press `r` to jump
 to it. Runs with no resource samples (very short runs, or capture off) show a clear message.
 
 **Reproducibility view:** Run Details includes a `REPRODUCIBILITY & EVIDENCE` section with the

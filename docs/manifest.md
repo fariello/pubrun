@@ -118,7 +118,7 @@ When `sys.argv[0]` is not an existing file (for example `python -c`), `script` i
 | `mtime` | float | Last modification time (POSIX epoch float). |
 | `ctime` | float | Metadata change or creation time (POSIX epoch float). |
 | `sha256` | string | SHA-256 hash of the file contents, computed only for scripts up to 1,048,576 bytes. Omitted for larger scripts. |
-| `sha256_skipped` | string | Present only when the script exceeds 1,048,576 bytes, set to `"file exceeds 1MB"` instead of `sha256`. Not yet defined in `schemas/manifest.schema.json`. |
+| `sha256_skipped` | string | Present only when the script exceeds 1,048,576 bytes, set to `"file exceeds 1MB"` instead of `sha256`. |
 
 ---
 
@@ -196,9 +196,9 @@ Python runtime environment.
 | `base_prefix` | string | `sys.base_prefix`. Differs from `prefix` inside a virtual environment. |
 | `virtual_env` | string \| null | Literal string `"venv"` when Python runs in a virtual environment (`sys.prefix` differs from `sys.base_prefix`, or `sys.real_prefix` exists), else `null`; it never holds a path. Use `prefix` for the path, and `environment_kind` and `in_venv` for environment classification. |
 | `sys_path` | list[string] | The Python module search path. |
-| `environment_kind` | string | `"venv"`, `"conda"`, `"virtualenv"`, `"system"`, or `"frozen"` — a non-identifying classification (no path). |
+| `environment_kind` | string | `"venv"`, `"conda"`, `"virtualenv"`, `"system"`, or `"frozen"` - a non-identifying classification (no path). |
 | `in_venv` | bool | Whether `sys.prefix != sys.base_prefix` (PEP 405). |
-| `sys_path_len` | int | `len(sys.path)` — import time scales with it. |
+| `sys_path_len` | int | `len(sys.path)` - import time scales with it. |
 | `pyenv` | bool | Whether the interpreter appears pyenv-managed (orthogonal modifier). |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
@@ -403,7 +403,7 @@ Operating system and host identity.
 ## `filesystem`
 
 Filesystem type of run-relevant paths, so a later `pubrun inspect` can flag when a run
-lived on a slow **network filesystem** (NFS/Lustre/GPFS/CIFS) — a common cause of inflated
+lived on a slow **network filesystem** (NFS/Lustre/GPFS/CIFS) - a common cause of inflated
 I/O on HPC clusters. Classified by parsing `/proc/self/mountinfo` (preferred) or
 `/proc/mounts` (Linux), the `mount` table (macOS), or `GetVolumeInformationW` (Windows);
 **never** by `statvfs`/`df`/`stat` on the target, so it cannot hang on a wedged network
@@ -419,8 +419,8 @@ mount. Each entry keyed by path label (`output_dir`, `run_dir`, `tmpdir`):
 
 > **Live capacity/health metrics (`<label>.live`) do NOT appear in the normal run manifest.**
 > The blocking `statvfs` probe that produces free-space/inode/read-only data and the
-> hung/slow status is **diagnostic-only** — it runs solely for `pubrun bench` and
-> `pubrun self-check`, never during a tracked run — so those fields surface only in the
+> hung/slow status is **diagnostic-only** - it runs solely for `pubrun bench` and
+> `pubrun self-check`, never during a tracked run - so those fields surface only in the
 > benchmark result JSON and `self-check` output, keeping the always-on capture path
 > non-blocking.
 
@@ -438,10 +438,10 @@ Runtime resource utilization, sampled by a background thread.
 | `peak_cpu_percent` | float \| null | Peak CPU utilization percentage, or `null` when no positive sample was taken. |
 | `peak_tree_rss_bytes` | int \| null | Peak RSS summed across the process tree (only when `scope = "tree"`). |
 | `end_tree_rss_bytes` | int \| null | Tree RSS at finalization (only when `scope = "tree"`). |
-| `peak_tree_cpu_percent` | float \| null | Peak CPU% summed across the process tree (only when `scope = "tree"`; Linux-only). Computed from summed CPU-time deltas over the sample interval — **"% of one core"**, so it may exceed 100% on multiple cores (not clamped). `null` where unmeasured. Per-sample `tree_cpu_percent` is also emitted to `events.jsonl` for avg/min/max. |
+| `peak_tree_cpu_percent` | float \| null | Peak CPU% summed across the process tree (only when `scope = "tree"`; Linux-only). Computed from summed CPU-time deltas over the sample interval - **"% of one core"**, so it may exceed 100% on multiple cores (not clamped). `null` where unmeasured. Per-sample `tree_cpu_percent` is also emitted to `events.jsonl` for avg/min/max. |
 | `system_memory` | object \| absent | System-wide memory (Linux), present when `[capture.resources].system_metrics = true`. `{"start": {...}, "last": {...}, "min_available": {...}}`, each with `total_bytes`/`available_bytes`/`free_bytes`/`cached_bytes`. |
 | `load_average` | object \| absent | `{"start": {...}, "last": {...}, "max_1min": float}`, each of start/last being `{"1min","5min","15min"}`. |
-| `system_iowait_pct` | object \| absent | `{"last": float, "max": float}`. **NODE-WIDE, indicative only** — `/proc/stat` iowait is a system-wide counter, not run-scoped, and is unreliable on shared/multi-core nodes. A hint that the *node* was I/O-bound, not a per-run measurement. |
+| `system_iowait_pct` | object \| absent | `{"last": float, "max": float}`. **NODE-WIDE, indicative only** - `/proc/stat` iowait is a system-wide counter, not run-scoped, and is unreliable on shared/multi-core nodes. A hint that the *node* was I/O-bound, not a per-run measurement. |
 | `io_counters` | object \| absent | Per-**process** cumulative I/O byte counters from Linux `/proc/self/io`, present when `system_metrics` is on. `{"start": {...}, "last": {...}, "delta": {...}}` with `rchar`/`wchar` (bytes through read()/write(), incl. cache) and `read_bytes`/`write_bytes` (bytes to/from storage). The `delta` is this run's I/O volume. Linux-only; omitted elsewhere. |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
@@ -565,11 +565,11 @@ Run outcome.
 
 | Field | Type | Description |
 |---|---|---|
-| `outcome` | string | Values written by `pubrun`: `"running"` (startup and in-progress manifests), `"completed"`, `"failed"`, `"interrupted"`, and `"ghost"`. `pubrun status` and `pubrun show` also write `"crashed"` into an existing run directory when they find a stale lock file; `"crashed"` is not yet in the schema enum. `"partial"` and `"unknown"` are in the schema enum, but `pubrun` never writes them; readers display `"unknown"` when the field is missing. See [`pubrun.stop()`](api.md#pubrunstop) for the outcome classification rules. |
+| `outcome` | string | Values written by `pubrun`: `"running"` (startup and in-progress manifests), `"completed"`, `"failed"`, `"interrupted"`, `"crashed"`, and `"ghost"`. `pubrun status` and `pubrun show` write `"crashed"` into a run directory when they close out a confirmed dead local lock file. `"partial"` and `"unknown"` are in the schema enum, though `pubrun` does not write them directly; readers display `"unknown"` when the field is missing. See [`pubrun.stop()`](api.md#pubrunstop) for the outcome classification rules. |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
 > [!NOTE]
-> `pubrun status` displays a `broken pipe` status (yellow) for runs that completed but received SIGPIPE. This is a **display-level classification only** — the manifest outcome remains `"completed"` and the exit code is unchanged. Check the `signals.signals_received` array for the raw SIGPIPE record.
+> `pubrun status` displays a `broken pipe` status (yellow) for runs that completed but received SIGPIPE. This is a **display-level classification only** - the manifest outcome remains `"completed"` and the exit code is unchanged. Check the `signals.signals_received` array for the raw SIGPIPE record.
 
 ---
 
@@ -585,12 +585,12 @@ Every manifest section includes a `capture_state` object indicating the status o
 | `detail` | string | Optional single-line diagnostic context. For `"failed"` sections and capture errors, `detail` is bounded to at most 240 characters and redacted via `format_safe_error_detail()`. |
 | `warnings` | list[string] | Optional list of non-fatal warning strings associated with the section. |
 
-- `complete` — Data captured successfully.
-- `partial` — Some data captured, but errors occurred.
-- `unavailable` — The data source was not accessible (e.g., no git repo).
-- `suppressed` — Capture was disabled by configuration (a `capture.*` `depth`/`mode` set to `off`).
-- `failed` — Capture attempted but failed entirely.
-- `pending` — Transient: the section is captured asynchronously by the background hardware thread and had not completed when the manifest was written. Seen in the **startup manifest** (written at `start()`) and therefore in a run that **crashed before finalizing** — the `hardware`/`host`/`filesystem` sections are `pending` until the thread fills them in. A normally-finalized manifest never leaves a section `pending`.
+- `complete`: Data captured successfully.
+- `partial`: Some data captured, but errors occurred.
+- `unavailable`: The data source was not accessible (e.g., no git repo).
+- `suppressed`: Capture was disabled by configuration (a `capture.*` `depth`/`mode` set to `off`).
+- `failed`: Capture attempted but failed entirely.
+- `pending`: Transient: the section is captured asynchronously by the background hardware thread and had not completed when the manifest was written. Seen in the **startup manifest** (written at `start()`) and therefore in a run that **crashed before finalizing** - the `hardware`/`host`/`filesystem` sections are `pending` until the thread fills them in. A normally-finalized manifest never leaves a section `pending`.
 - `timeout`: The capture's external tool did not respond within its configured timeout or total budget (e.g. `git` on a slow/large repository, or a hung GPU query). Distinct from `unavailable` so a slow repo is never mislabeled as "not a git repository". See `[capture.git].timeout`, `[capture.git].total_timeout`, `[capture.hardware].timeout`, and `[capture.hardware].total_timeout`.
 
 ### Redacted Values
@@ -617,7 +617,7 @@ Sensitive values use a standard `redacted_value` object:
 {"representation": "unavailable"}
 ```
 
-`schemas/manifest.schema.json` (`$defs.redacted_value`) also allows `"suppressed"`, which `pubrun` never writes, and describes a hashed value as `{"representation": "hashed", "hash": {"algorithm": "...", "value": "..."}}` with `additionalProperties: false`. A hashed value written by the current code (`hash_algorithm` and `hash_value`) therefore does not validate against the schema. Reconciling the schema and runtime format is deferred to a separate schema-contract update.
+`schemas/manifest.schema.json` (`$defs.redacted_value`) also allows `"suppressed"` and accepts both the flat runtime hashed representation (`hash_algorithm` and `hash_value`) and the nested `hash: {"algorithm": "...", "value": "..."}` object for interoperability.
 
 ---
 

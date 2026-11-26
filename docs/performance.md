@@ -16,8 +16,8 @@ pass) and every pass is recorded, so startup/filesystem caching effects are
 visible; the reported numbers use the last (warmest) pass. "Overhead" is the
 median of a scenario minus its group baseline:
 
-- **startup** — vs a bare `python noop.py` (no `pubrun` import).
-- **feature** — vs `feature-baseline`; `feature-none` (pubrun active, everything
+- **startup**: vs a bare `python noop.py` (no `pubrun` import).
+- **feature**: vs `feature-baseline`; `feature-none` (pubrun active, everything
   off) isolates pubrun's fixed startup cost, so a single feature's *marginal*
   cost is its delta above `feature-none`.
 - **hotpath**: explicit per-call paths vs their unwrapped builtin: file
@@ -50,7 +50,7 @@ PBS/LSF/SGE template scripts `benchmarks/submit_bench_{pbs,lsf,sge}.sh` currentl
 Schema `/5` is a compact, non-redundant reshape of `/4` with **zero analytical data loss**:
 static per-scenario descriptors live once in a top-level `scenario_defs` map; each pass keeps
 only what varies (`timings`/`failures`/`skipped` maps keyed by scenario name); raw per-iteration
-timings are retained (rounded to 6 decimal places — the one deliberate, sub-signal lossy step)
+timings are retained (rounded to 6 decimal places - the one deliberate, sub-signal lossy step)
 grouped by pass; and the derived stats (`median_s`/`p95_s`/`stdev_s`/…) are **not stored** but
 recomputed on read from the raw timings. Both `generated_utc` and `generated_local` (local time
 with UTC offset) are recorded. The redacted copy is written small enough to fit GitHub's ~65 KB

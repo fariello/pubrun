@@ -109,9 +109,9 @@ Events are optional, structured JSONL records written to `events.jsonl`. Each ev
   - `resource_sample` (`src/pubrun/capture/resources.py`)
   - `input_dataset`, `output_artifact`, and `mixed_dataset` (`src/pubrun/capture/file_io.py`)
   - `warning` (storage migration in `src/pubrun/tracker.py`)
-- `timestamp_utc` — POSIX epoch float
-- `name` — Human-readable label
-- `payload` — Optional key-value data
+- `timestamp_utc`: POSIX epoch float
+- `name`: Human-readable label
+- `payload`: Optional key-value data
 
 A `phase_end` event's payload carries `elapsed_seconds` (a nonnegative monotonic duration of the phase body) and `duration_clock: "monotonic"`, plus `error` when the body raised. The duration excludes optional phase profiler setup and profile dump I/O.
 
@@ -147,9 +147,9 @@ Durations (`timing.*_seconds`, `phase_end` `elapsed_seconds`, and subprocess `el
 
 The manifest distinguishes between:
 
-- **Observed** — directly read from the system (e.g., `os.uname()`, `sys.version`)
+- **Observed**: directly read from the system (e.g., `os.uname()`, `sys.version`)
 - **Derived**: computed from observed data (e.g., `workload_seconds` as the difference of two in-memory monotonic clock readings, or a crashed-run `elapsed_seconds` estimated from wall-clock values and labeled `crashed_estimate`)
-- **Inferred** — heuristically determined (e.g., input file detection from `sys.argv`)
+- **Inferred**: heuristically determined (e.g., input file detection from `sys.argv`)
 
 ## 10. Capture Categories
 
@@ -175,10 +175,10 @@ Each capture category is a modular sub-engine responsible for one section of the
 
 ## 11. Progressive Depth Model
 
-- `off` — Category entirely disabled.
-- `basic` — Fast, lightweight capture. Skips expensive system calls.
-- `standard` — Default. Comprehensive capture without significant overhead.
-- `deep` — Maximum information gathering. May include slow system calls (e.g., GPU clock speed queries).
+- `off`: Category entirely disabled.
+- `basic`: Fast, lightweight capture. Skips expensive system calls.
+- `standard`: Default. Comprehensive capture without significant overhead.
+- `deep`: Maximum information gathering. May include slow system calls (e.g., GPU clock speed queries).
 
 ## 12. Console Capture Model
 
@@ -276,7 +276,7 @@ See [API Reference: API Summary](api.md#api-summary) for signatures and inactive
 
 ## 17. Schema Extensibility
 
-The manifest schema is versioned (`schema_version: "1.0"`). New sections can be added without breaking existing consumers. The `capture_state` pattern ensures forward compatibility — unknown sections can be skipped safely.
+The manifest schema is versioned (`schema_version: "1.0"`). New sections can be added without breaking existing consumers. The `capture_state` pattern ensures forward compatibility - unknown sections can be skipped safely.
 
 ## 18. Failure Model
 
@@ -320,16 +320,16 @@ pubrun is not:
 The execution engine is divided into these key systems:
 
 - **Import Mode Router** (`__init__.py`): Target-aware package initializer that detects mode submodule imports, defers core loading when appropriate, and resolves `pubrun.__commit__` lazily via PEP 562 `__getattr__` (version-checked build metadata for installed wheels with zero `git` spawns; bounded ownership-verified live `HEAD` lookup for verified source checkouts).
-- **Bootstrap State** (`_bootstrap.py`) — Singleton tracking selected import mode, conflict detection, and provenance metadata.
+- **Bootstrap State** (`_bootstrap.py`): Singleton tracking selected import mode, conflict detection, and provenance metadata.
 - **Boot Config Resolver** (`_config_boot.py`): Lightweight import-mode resolver that reads environment variables and searches the three boot config files (`./.pubrun.toml`, `./.config/pubrun/config.toml`, and the user config `config.toml`), parsing each at most once without importing `pubrun.config`.
-- **Mode Definitions** (`_modes.py`) — Six import presets (auto, full, noauto, nopatch, noconsole, minimal) with behavior flags.
-- **Core API** (`core.py`) — Public API implementation (start, stop, annotate, phase, diff, audit_run, tracked_run) and boot sequence logic.
-- **Configuration Resolver** (`config.py`) — Merges and applies settings from API > env vars > local config > user config > defaults.
+- **Mode Definitions** (`_modes.py`): Six import presets (auto, full, noauto, nopatch, noconsole, minimal) with behavior flags.
+- **Core API** (`core.py`): Public API implementation (start, stop, annotate, phase, diff, audit_run, tracked_run) and boot sequence logic.
+- **Configuration Resolver** (`config.py`): Merges and applies settings from API > env vars > local config > user config > defaults.
 - **Capture Engine** (`tracker.py`): Orchestrates failure-isolated data collection routines, keeps Git and script source-state capture synchronous before user code runs under `[capture.git].total_timeout`, runs hardware/host/filesystem synchronously without a background thread when `capture.hardware.depth == "off"` (or in a bounded `pubrun-hw` thread under `[capture.hardware].total_timeout` with coalesced refresh), and syncs `config.resolved.json` on mid-run `_merge_and_migrate()` changes.
-- **Event Streamer** (`events.py`) — Writes structured execution events to `events.jsonl` with throttling.
-- **Console Manager** (`capture/console.py`) — Tee-style wrapper around standard streams with tqdm-safe carriage return squashing. Includes `resolve_console_mode()` for context-aware mode selection (Jupyter detection, non-TTY override).
-- **Resource Tree Walker** (`capture/resources.py`) — Background resource sampling with optional process-tree scope (`_get_tree_rss_linux`, `_get_tree_rss_darwin`).
-- **Phase Profiler** (`core.py` phase hooks) — Optional cProfile/yappi integration that profiles `pubrun.phase()` blocks and saves per-phase `.prof` files.
+- **Event Streamer** (`events.py`): Writes structured execution events to `events.jsonl` with throttling.
+- **Console Manager** (`capture/console.py`): Tee-style wrapper around standard streams with tqdm-safe carriage return squashing. Includes `resolve_console_mode()` for context-aware mode selection (Jupyter detection, non-TTY override).
+- **Resource Tree Walker** (`capture/resources.py`): Background resource sampling with optional process-tree scope (`_get_tree_rss_linux`, `_get_tree_rss_darwin`).
+- **Phase Profiler** (`core.py` phase hooks): Optional cProfile/yappi integration that profiles `pubrun.phase()` blocks and saves per-phase `.prof` files.
 - **Artifact Writer** (`writer.py`): Creates the run directory, enforces atomic visibility via unique temporary files and `os.replace()`, applies `[core].artifact_durability`, coalesces unchanged `config.resolved.json` writes by SHA-256 digest and durability rank, and guards finalized artifacts with `_artifacts_written`.
 - **Import Mode Submodules** (`auto.py`, `full.py`, `minimal.py`, `noauto.py`, `noconsole.py`, `nopatch.py`): Namespaced entry points that select an import preset before loading `pubrun.core`.
 - **CLI Entry Point** (`__main__.py`): Parses command-line arguments and dispatches every `pubrun` subcommand.
@@ -347,17 +347,30 @@ The execution engine is divided into these key systems:
 - **Resource Chart Renderers** (`pubrun res`, `pubrun cpu`, `pubrun mem`): Render CPU and memory utilization charts over a run's lifecycle (`resources` is an alias of `res`).
 - **Citation Generator** (`pubrun cite`): Prints formatted academic citations for `pubrun`.
 - **Issue and Feedback Helpers** (`pubrun report-bug`, `pubrun feedback`): Print environment diagnostics and open links for bug reports or general feedback.
-- **Methods Generator** (`pubrun methods`) — Compiles manifest data into prose methodology paragraphs.
-- **Global Context Snapshotter** (`pubrun meta`) — Generates standalone environment snapshots for HPC hydration.
-- **Diff Semantic Analyzer** (`pubrun diff`) — Generates side-by-side structural comparisons with configurable depth filtering.
-- **Reproducibility Extractor** (`pubrun rerun`) — Extracts cross-platform replay commands from historical manifests.
-- **Run Monitor** (`pubrun status`) — Lists and inspects runs with live PID liveness checking, signal detection, and resource usage queries.
-- **Run Cleanup** (`pubrun clean`) — Interactive deletion of old run directories with safety constraints and explicit confirmation.
-- **Import Mode Wrapper** (`pubrun run`) — Spawns child processes with `PUBRUN_IMPORT_MODE` set for external workflow integration.
+- **Methods Generator** (`pubrun methods`): Compiles manifest data into prose methodology paragraphs.
+- **Global Context Snapshotter** (`pubrun meta`): Generates standalone environment snapshots for HPC hydration.
+- **Diff Semantic Analyzer** (`pubrun diff`): Generates side-by-side structural comparisons with configurable depth filtering.
+- **Reproducibility Extractor** (`pubrun rerun`): Extracts cross-platform replay commands from historical manifests.
+- **Run Monitor** (`pubrun status`): Lists and inspects runs with live PID liveness checking, signal detection, and resource usage queries.
+- **Run Cleanup** (`pubrun clean`): Interactive deletion of old run directories with safety constraints and explicit confirmation.
+- **Import Mode Wrapper** (`pubrun run`): Spawns child processes with `PUBRUN_IMPORT_MODE` set for external workflow integration.
 
-## 22. Summary
+## 22. Guiding Principles and Design Decisions
 
-pubrun is a low-friction provenance layer for Python execution. It captures what you ran, where you ran it, and what changed — so you can prove it, reproduce it, or publish it without thinking twice.
+New contributors and maintainers can orient quickly from six principles that govern `pubrun`:
+
+1. **Fail open for the host script**: capture failures, storage errors, and signal races must never crash or alter the user's program. Capture engines run in isolated guards, and unusable output directories degrade cleanly to ghost mode.
+2. **Zero required dependencies on Python 3.11+**: the core library stays stdlib-only on Python 3.11+ (using `tomli` only on Python 3.8-3.10; see [tomli Dependency Decision](design/tomli-dependency-decision.md)). Optional features (`tui`, `bench`) remain extras.
+3. **Opt-in over silent magic for file I/O**: `pubrun` never monkeypatches builtin `open()` globally. File provenance is explicit via `pubrun.open()` or `register_*()` (see [File I/O Provenance Evaluation](design/file-io-provenance-evaluation.md)).
+4. **Honest provenance and bounded diagnostics**: consumers distinguish `"complete"`, `"partial"`, `"failed"`, `"timeout"`, `"unavailable"`, and `"suppressed"`, never claiming verified provenance without observed evidence.
+5. **Privacy and redaction by default**: secrets in environment variables, argv, lock files, and diagnostic messages are redacted before writing to disk, and benchmark exports default to share-safe redacted JSON only.
+6. **Bounded latency and resources**: external tools (`git`, hardware queries, resource polls) enforce per-command and total timeouts, and high-frequency streams (`events.jsonl`, subprocesses, console tee buffers) enforce explicit bounds.
+
+For deliberately declined features (such as automatic RNG seed locking and `summary.txt` generation), see [Removed from Roadmap](../TODO.md#removed-from-roadmap).
+
+## 23. Summary
+
+pubrun is a low-friction provenance layer for Python execution. It captures what you ran, where you ran it, and what changed, so you can prove it, reproduce it, or publish it without thinking twice.
 
 ---
 

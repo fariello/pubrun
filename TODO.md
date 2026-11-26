@@ -8,11 +8,12 @@ Known issues and deferred improvements for future releases.
 
 ### Yank prior releases from PyPI after 1.4.0 is live
 
-pubrun <= 1.3.0 was published under **BSD-3-Clause** before the project relicensed to
-**Apache-2.0**, and earlier releases (`v1.0.0`-`v1.3.0`) also carried erroneous
-placeholder citation metadata introduced by automated tooling. When the clean Apache-2.0
-**1.4.0** release is published to PyPI, **yank every prior release (`0.1.1`-`1.3.0`)** so
-new installs resolve to `1.4.0` while existing pinned installs keep working.
+pubrun <= 1.3.0 was published to PyPI under **BSD-3-Clause** before the project relicensed to
+**Apache-2.0** (`v1.3.1` was tagged locally only and never published to PyPI), and earlier
+releases (`v1.0.0`-`v1.3.0`) also carried erroneous placeholder citation metadata introduced by
+automated tooling. When the clean Apache-2.0 **1.4.0** release is published to PyPI, **yank every
+prior PyPI release (`0.1.1`-`1.3.0`)** so new installs resolve to `1.4.0` while existing pinned
+installs keep working.
 
 Steps (maintainer / operator, gated inside `release-review` Section 9):
 1. Publish the clean Apache-2.0 `1.4.0` release to PyPI first (never leave the package with
@@ -26,19 +27,15 @@ Steps (maintainer / operator, gated inside `release-review` Section 9):
 
 ---
 
-## Deferred ideas (need their own design pass / IPD)
+## Deferred ideas
 
-### Full repo-wide em/en-dash sweep
+### Historical CHANGELOG em/en-dash cleanup
 
-`AGENTS.md` forbids em/en dashes in authored Markdown, but many docs and CHANGELOG entries
-predate that rule and still contain them (`CHANGELOG.md` has ~50 dash lines; several
-`docs/*.md` files too). `README.md`, `CONTRIBUTING.md`, `docs/research-use.md`, and
-`docs/hpc.md` are clean, but a repo-wide sweep is still outstanding, ideally with a
-scripted, reviewable transform plus a follow-up grep gate and a pre-commit or CI check to
-prevent regressions. Deferred from the sanitizer and adoption-and-signal IPDs. Needs its
-own IPD.
+All user-facing files under `docs/` and top-level docs (`README.md`, `CONTRIBUTING.md`) are free
+of Unicode em/en dashes. Historical entries in `CHANGELOG.md` predating that convention still
+contain some em/en dashes and can be normalized in a future cleanup pass if desired.
 
-### Runs directory index for fast `pubrun status` (PERF-09)
+### Runs directory index for fast `pubrun status`
 
 When a user accumulates 500+ runs, `pubrun status` gets slow because it reads and parses
 `manifest.json` (or `.pubrun.lock`) from every single run directory. A lightweight index
@@ -76,7 +73,7 @@ but documented as "not yet implemented / reserved."
 **Removed.** A human-readable glance file was planned but is superseded by:
 
 - `pubrun status <run-id>`: shows the same information interactively.
-- `pubrun report --basic`: produces a full diagnostic summary.
+- `pubrun show --basic`: produces a concise diagnostic summary.
 - `manifest.json`: machine-readable and more complete.
 
 Writing a redundant text file to every run directory adds disk I/O, increases the

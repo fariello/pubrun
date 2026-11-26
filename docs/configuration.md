@@ -2,7 +2,7 @@
 
 # pubrun Configuration Reference
 
-`pubrun` uses a hierarchical TOML configuration system. Every setting has a sensible default — you only need a config file if you want to change something.
+`pubrun` uses a hierarchical TOML configuration system. Every setting has a sensible default - you only need a config file if you want to change something.
 
 ---
 
@@ -51,7 +51,7 @@ Core behaviors governing run initialization and storage.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `profile` | string | `"default"` | **Deprecated and inert.** Accepts `"minimal"`/`"default"`/`"deep"` but has **no effect** — `profile` never controlled capture depth and is not wired to any capture engine. Setting it to a non-default value records a deprecation notice in the run manifest (surfaced by `pubrun status`/`inspect`/`show`). To control capture depth, set the specific `capture.*` keys (e.g. `[capture.hardware].depth`, `[capture.packages].mode`). |
+| `profile` | string | `"default"` | **Deprecated and inert.** Accepts `"minimal"`/`"default"`/`"deep"` but has **no effect** - `profile` never controlled capture depth and is not wired to any capture engine. Setting it to a non-default value records a deprecation notice in the run manifest (surfaced by `pubrun status`/`inspect`/`show`). To control capture depth, set the specific `capture.*` keys (e.g. `[capture.hardware].depth`, `[capture.packages].mode`). |
 | `output_dir` | string | `""` | Base directory for run output. Empty string defaults to `./runs/` in the current working directory. |
 | `auto_start` | bool | `true` | If `true`, `import pubrun` automatically starts a trace. If `false`, you must call `pubrun.start()` explicitly. Equivalent to `[imports].mode = "noauto"` when set to `false`. |
 | `artifact_durability` | string | `"fsync"` | Explicit disk-synchronization policy for `manifest.json` and `config.resolved.json`, separate from atomic visibility. Valid values: `"fsync"` (default), `"finalize"`, `"atomic"`, `"strict"`. Invalid values log one warning per distinct value and fall back to `"fsync"`. See [Artifact durability policy](#artifact-durability-policy) below. |
@@ -79,7 +79,7 @@ Controls import-time behavior. These settings determine what happens when `impor
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `mode` | string | `"auto"` | Import behavior preset: `"auto"` (start tracking on import), `"full"` (start tracking and force console capture on — the opposite of `"noconsole"`), `"noauto"` (load API only, start manually), `"nopatch"` (start tracking but skip global hooks), `"noconsole"` (start tracking, skip console wrapping), `"minimal"` (load API only, no hooks). An in-code `import pubrun.<mode>` overrides this key and any env var; only `pubrun run --mode` overrides the in-code import. |
+| `mode` | string | `"auto"` | Import behavior preset: `"auto"` (start tracking on import), `"full"` (start tracking and force console capture on - the opposite of `"noconsole"`), `"noauto"` (load API only, start manually), `"nopatch"` (start tracking but skip global hooks), `"noconsole"` (start tracking, skip console wrapping), `"minimal"` (load API only, no hooks). An in-code `import pubrun.<mode>` overrides this key and any env var; only `pubrun run --mode` overrides the in-code import. |
 | `on_conflict` | string | `"warn"` | What to do if a later import requests a different mode: `"ignore"`, `"warn"`, or `"error"`. |
 | `record_provenance` | bool | `true` | **Reserved (currently without effect).** Intended to toggle import-mode provenance recording. Regardless of this setting, `pubrun` always records the caller's file name exactly as Python reports it (often an absolute path), its line number, and its function name. |
 | `provenance_depth` | int | `3` | **Reserved (currently without effect).** Intended to set the number of external caller frames captured for diagnostics. |
@@ -104,7 +104,7 @@ Controls interception and logging of stdout/stderr.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `capture_mode` | string | `"off"` | `"off"` — no capture (default, zero-footprint); `"basic"` — tee stdout/stderr to text files; `"standard"` — tee with timestamps on each line; `"deep"` — reserved for future structured capture (currently same as standard). |
+| `capture_mode` | string | `"off"` | `"off"` - no capture (default, zero-footprint); `"basic"` - tee stdout/stderr to text files; `"standard"` - tee with timestamps on each line; `"deep"` - reserved for future structured capture (currently same as standard). |
 | `non_tty_mode` | string | `"inherit"` | Override capture behavior when stdout is not a TTY (piped or redirected): `"inherit"` (use the base mode as-is), `"off"`, or `"basic"`. Applies only when the base capture mode is not `"off"` (that is, `capture_mode` is not `"off"`, or `import pubrun.full` forces the base mode to `"standard"`). |
 | `jupyter_mode` | string | `"off"` | Override capture behavior when running inside Jupyter/IPython. Default `"off"` auto-disables capture in notebooks; set to `"standard"` to keep capture active in Jupyter. Applies only when the base capture mode is not `"off"` (that is, `capture_mode` is not `"off"`, or `import pubrun.full` forces the base mode to `"standard"`). |
 
@@ -226,10 +226,10 @@ When `mode` is not `"off"`, `pubrun` captures packages twice: a startup snapshot
 #### Enabling process-tree memory capture
 
 `scope` is a nested key, so set it in a config file or pass it as a nested dict to the
-API (there is no environment-variable shortcut for nested `capture.*` keys — only
+API (there is no environment-variable shortcut for nested `capture.*` keys - only
 `PUBRUN_PROFILE`, `PUBRUN_META_REF`, and the import-mode variables are wired to env).
 
-**For a whole project** — add to the project's `.pubrun.toml` (or
+**For a whole project** - add to the project's `.pubrun.toml` (or
 `.config/pubrun/config.toml`):
 
 ```toml
@@ -237,10 +237,10 @@ API (there is no environment-variable shortcut for nested `capture.*` keys — o
 scope = "tree"
 ```
 
-**For your user account (all projects)** — the same stanza in
+**For your user account (all projects)** - the same stanza in
 `~/.config/pubrun/config.toml`.
 
-**For a single script (via the API)** — pass the nested section to `start()`:
+**For a single script (via the API)** - pass the nested section to `start()`:
 
 ```python
 import pubrun.noauto as pubrun
@@ -284,7 +284,7 @@ Phase-scoped profiling (opt-in). When enabled, `pubrun.phase()` blocks are profi
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `false` | Master switch for profiling. Must be explicitly enabled. |
-| `backend` | string | `"cprofile"` | `"cprofile"` — stdlib cProfile (zero dependencies, ~30-50% overhead within phase); `"yappi"` — requires `pip install yappi` (~10-20% overhead). If the selected backend is unavailable, logs a warning and skips. |
+| `backend` | string | `"cprofile"` | `"cprofile"` - stdlib cProfile (zero dependencies, ~30-50% overhead within phase); `"yappi"` - requires `pip install yappi` (~10-20% overhead). If the selected backend is unavailable, logs a warning and skips. |
 
 When enabled, each `pubrun.phase("name")` block saves a `profile-<name>.prof` file (pstats-compatible) to the run directory. Load with `snakeviz`, `pstats`, or `flameprof`.
 
@@ -328,10 +328,10 @@ Controls `meta_ref` parent-snapshot hydration in every command and API that hydr
 ### `[diff]`
 
 Configuration for the `pubrun diff` engine. The three ignore lists control how much each
-depth level hides; they are nested by intent — **`--basic` hides the most, `--deep` hides
+depth level hides; they are nested by intent - **`--basic` hides the most, `--deep` hides
 nothing**:
 
-- **`ignore_basic`** — hides everything `--standard` hides, PLUS the high-volume, low-signal
+- **`ignore_basic`**: hides everything `--standard` hides, PLUS the high-volume, low-signal
   sections (`process`, `hardware`, `resources`, `environment`, `subprocesses`, `packages`) so
   `--basic` shows only the user-facing changes (script/argv, python, git, config).
 - **`ignore_standard`**: hides volatile or always-different fields, including timestamps
@@ -340,7 +340,7 @@ nothing**:
   `fstype` and `is_network`. At `--standard`, `subprocesses` is **summarized** (count and
   command identities) rather than diffed element-by-element, while `packages` is compared per
   package name at every depth that shows it (`--standard` and `--deep`).
-- **`ignore_deep`** — empty; `--deep` compares everything, element by element.
+- **`ignore_deep`**: empty; `--deep` compares everything, element by element.
 
 The authoritative default lists live in the shipped `default.toml` `[diff]` section (they are
 long); override any of them in your `.pubrun.toml`.

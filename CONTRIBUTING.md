@@ -1,6 +1,6 @@
 # Contributing to pubrun
 
-Thank you for your interest in contributing to `pubrun`. Contributions are welcome, including bug reports, documentation improvements, examples, tests, and code changes.
+Thank you for your interest in contributing to `pubrun`. Contributions are welcome, including bug reports, documentation improvements, examples, tests, and code changes. Before making design changes, review [Guiding Principles and Design Decisions](docs/architecture.md#22-guiding-principles-and-design-decisions).
 
 ## Development setup
 

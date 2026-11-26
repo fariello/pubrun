@@ -113,8 +113,8 @@ The `PUBRUN_IMPORT_MODE` environment variable and the `[imports].mode` config ke
 These flags express what each mode **permits**, not what is active. Two layers gate
 actual capture:
 
-1. **The mode flag** (above) — whether the hook is permitted at all.
-2. **Per-feature config** — whether the permitted hook is turned on.
+1. **The mode flag** (above) - whether the hook is permitted at all.
+2. **Per-feature config** - whether the permitted hook is turned on.
 
 The most important consequence: `patch_console = true` in `auto`/`noauto` only *permits*
 the console tee; it does **not** wrap stdout/stderr by default, because
@@ -126,7 +126,7 @@ the console tee; it does **not** wrap stdout/stderr by default, because
 The exception is `force_console` (only `full`): it does not merely *permit* the tee, it
 **forces** it on regardless of `capture_mode` (subject only to the Jupyter/non-TTY
 safety guards). An in-code `import pubrun.<mode>` is thus an absolute imperative that
-overrides env/config for the scope it dictates — `full` forces console on even against
+overrides env/config for the scope it dictates - `full` forces console on even against
 `capture_mode = "off"`, and `noconsole` forces it off even against `"standard"`. Only
 the launch-time `pubrun run --mode <mode>` overrides the in-code import.
 
@@ -154,8 +154,8 @@ def my_func(): ...
 
 Each run MUST produce:
 
-- `manifest.json` — The canonical structured metadata record. Schema version `"1.0"`.
-- `config.resolved.json` — The fully resolved configuration used for the run.
+- `manifest.json`: The canonical structured metadata record. Schema version `"1.0"`.
+- `config.resolved.json`: The fully resolved configuration used for the run.
 
 The manifest MUST be usable without requiring event replay. It MUST strictly adhere to the JSON Schema defined in `schemas/manifest.schema.json`.
 
@@ -189,10 +189,10 @@ See [Manifest Reference](manifest.md#timing) for the full field table.
 
 Depending on configuration, a run may also produce:
 
-- `stdout.log` — Captured standard output (if console capture enabled)
-- `stderr.log` — Captured standard error (if console capture enabled)
-- `events.jsonl` — Structured event stream (if events enabled)
-- `methods.md` or `methods.tex` — Auto-generated methodology paragraph
+- `stdout.log`: Captured standard output (if console capture enabled)
+- `stderr.log`: Captured standard error (if console capture enabled)
+- `events.jsonl`: Structured event stream (if events enabled)
+- `methods.md` or `methods.tex` - Auto-generated methodology paragraph
 
 ---
 
@@ -204,8 +204,8 @@ Each category corresponds to a modular capture engine and a top-level manifest s
 
 | Category | Manifest Key | Config Section | Modes / Depth |
 |---|---|---|---|
-| Run identity | `run` | — | Always captured |
-| Timing | `timing` | — | Always captured |
+| Run identity | `run` | - | Always captured |
+| Timing | `timing` | - | Always captured |
 | Invocation | `invocation` | `[capture.inputs]` | `enabled`, `compute_md5` |
 | Console | `console` | `[console]` | `off`, `basic`, `standard`, `deep` |
 | Subprocesses | `subprocesses` | `[capture.subprocesses]` | `enabled = true/false` |
@@ -291,7 +291,7 @@ Optional JSONL event stream written to `events.jsonl`.
 
 Events are subject to a configurable budget (`max_tracked_events`, default 1,000,000). When the budget is exhausted, non-critical events are silently dropped.
 
-**Critical events** (`phase_start`, `phase_end`, `annotation`) bypass the regular throttle. However, to prevent unbounded disk writes from scripts calling `annotate()` in tight loops, critical events are subject to a secondary cap of 10x `max_tracked_events` (minimum 10,000). Once this secondary cap is reached, all events — including critical ones — are dropped.
+**Critical events** (`phase_start`, `phase_end`, `annotation`) bypass the regular throttle. However, to prevent unbounded disk writes from scripts calling `annotate()` in tight loops, critical events are subject to a secondary cap of 10x `max_tracked_events` (minimum 10,000). Once this secondary cap is reached, all events - including critical ones - are dropped.
 
 ### 7.4 Thread Safety
 
@@ -309,7 +309,7 @@ Produces: `stdout.log` and `stderr.log`.
 
 ### 8.1 Carriage Return Squashing
 
-The tee implementation detects carriage return (`\r`) sequences — common in progress bars (tqdm, rich) — and squashes redraws, keeping only the final state of each line. This prevents log files from growing to gigabytes during long training loops.
+The tee implementation detects carriage return (`\r`) sequences - common in progress bars (tqdm, rich) - and squashes redraws, keeping only the final state of each line. This prevents log files from growing to gigabytes during long training loops.
 
 ### 8.2 Behavioral Guarantee
 
@@ -422,7 +422,7 @@ The configuration MUST support defaults for:
 
 ### 10.5 Configuration Format
 
-TOML is the required format, leveraging Python 3.11+ `tomllib` (with `tomli` fallback for Python 3.8–3.10).
+TOML is the required format, leveraging Python 3.11+ `tomllib` (with `tomli` fallback for Python 3.8-3.10).
 
 ### 10.6 Configuration Logging
 
@@ -736,8 +736,8 @@ Optional: `stdout.log`, `stderr.log`, `events.jsonl`, `methods.md`/`methods.tex`
 
 The manifest MUST support:
 
-- `pubrun diff` — Semantic comparison between two run manifests.
-- `pubrun rerun` — Extraction of the exact replay command.
+- `pubrun diff`: Semantic comparison between two run manifests.
+- `pubrun rerun`: Extraction of the exact replay command.
 
 To support this, the manifest MUST include structured and normalized information about: command line, working directory, Python executable, package versions, environment hints, git state, and output locations.
 
@@ -781,8 +781,8 @@ If `start()` is called while a run is already active:
 
 The following APIs are planned but not implemented:
 
-- `register_metadata()` — Inject structured metadata into the manifest.
-- `register_seed()` — Record pseudorandom seeds for determinism tracking.
+- `register_metadata()`: Inject structured metadata into the manifest.
+- `register_seed()`: Record pseudorandom seeds for determinism tracking.
 
 The previously planned `register_artifact()` is retired and will not be added: use
 `pubrun.artifact()` to write a file into the run directory, and
