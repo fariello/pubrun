@@ -1,5 +1,15 @@
 # File-I/O provenance — Phase 0 evaluation
 
+> **Outcome as of 2026-11-25**
+>
+> - Recommendation 1 shipped as `resources.io_counters` (Linux `/proc/self/io`, implemented in `src/pubrun/capture/system_metrics.py::get_proc_io`).
+> - Recommendation 2 shipped as `pubrun.open()` with `ProvenanceFileProxy` (now in `src/pubrun/capture/file_io.py`) and `pubrun.register_file()`, `pubrun.register_input()`, and `pubrun.register_output()`. The `[capture.file_io].level` progression is `none < name < stat < realpath < hash`, with default `stat`.
+> - The "Proposed config knob" section below is superseded: its `level = "none"` default, level order, and `mode` and `exclude` keys were not shipped. The shipped keys under `[capture.file_io]` are `level`, `max_hash_bytes`, `max_total_hash_bytes`, `max_total_hash_seconds`, and `hash_algorithm`.
+> - The proxy correctness gaps listed in Mechanism A were addressed: `ProvenanceFileProxy` now intercepts `read1`, `readinto`, `readinto1`, and `seek`, and text-mode hashes are computed from the on-disk bytes.
+> - Recommendation 3 (`sys.addaudithook`) is not implemented, and the Recommendation 4 rejection stands.
+> - The `core.py` line references in this record describe the code as of 2026-07-06.
+> - For current behavior, see [API Reference](../api.md), [Manifest Reference](../manifest.md), and [Configuration Reference](../configuration.md).
+
 - Date: 2026-07-06
 - Status: **Phase 0 (evaluation only — NO code).** This document is the deliverable of
   Gate 1 of IPD `20260706-open-interception-evaluation.md`. It analyzes options and makes a
@@ -29,7 +39,7 @@ KISS; honest docs.**
 - `/proc/self/io` exists on Linux and cheaply reports `rchar`/`wchar`/`read_bytes`/
   `write_bytes`/`syscr`/`syscw` (verified) — a coarse, zero-interception I/O-volume signal.
 - pubrun already runs light background daemon threads (resource watcher, 15s;
-  `pubrun-hw`), and `pause()` mutes capture via a **thread-local depth counter**
+  `pubrun-hw`), and `pubrun.paused()` mutes capture via a **thread-local depth counter**
   (`_spy_local` in `capture/subprocesses.py:10-34`) — the established muting pattern.
 
 ## The two questions are separable
@@ -97,7 +107,7 @@ h5py/torch because they call the real builtin.
 change their code.
 
 **Key constraints (verified):**
-- **Not removable** (`no sys.removeaudithook`). So "opt-in / muted by `pause()`" MUST be
+- **Not removable** (`no sys.removeaudithook`). So "opt-in / muted by `pubrun.paused()`" MUST be
   implemented by **gating inside the hook** (check a config flag + the thread-local pause
   depth per event), never by add/remove. If enabled, the hook is installed once at run start
   and self-suppresses when disabled/paused. This also means: if the feature is OFF, we must

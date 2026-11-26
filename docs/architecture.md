@@ -2,7 +2,7 @@
 
 # pubrun Architecture
 
-> Status: v1.0.0
+> Status: Current (schema v1.0)
 > Purpose: Defines architectural principles and constraints for pubrun.
 > Audience: Developers and contributors.
 
@@ -86,9 +86,12 @@ The manifest is the canonical record for every run. Its top-level structure:
   "config": {},
   "hardware": {},
   "host": {},
+  "filesystem": {},
   "resources": {},
   "capture": {},
   "signals": {},
+  "pubrun_imports": {},
+  "data_files": {},
   "status": {}
 }
 ```
@@ -99,14 +102,20 @@ See [Manifest Reference](manifest.md) for field-level details.
 
 Events are optional, structured JSONL records written to `events.jsonl`. Each event contains:
 
-- `type` — `annotation`, `phase_start`, `phase_end`
+- `type`: event kind:
+  - `annotation` (`pubrun.annotate()`, also emitted by `pubrun.report()` and `pubrun.artifact()`)
+  - `phase_start` and `phase_end` (`pubrun.phase()`)
+  - `profile_saved` (phase profiling)
+  - `resource_sample` (`src/pubrun/capture/resources.py`)
+  - `input_dataset`, `output_artifact`, and `mixed_dataset` (`src/pubrun/capture/file_io.py`)
+  - `warning` (storage migration in `src/pubrun/tracker.py`)
 - `timestamp_utc` — POSIX epoch float
 - `name` — Human-readable label
 - `payload` — Optional key-value data
 
 A `phase_end` event's payload carries `elapsed_seconds` (a nonnegative monotonic duration of the phase body) and `duration_clock: "monotonic"`, plus `error` when the body raised. The duration excludes optional phase profiler setup and profile dump I/O.
 
-Events are subject to throttling via `max_tracked_events` to prevent runaway disk usage.
+The critical types `phase_start`, `phase_end`, and `annotation` are written and flushed immediately and are capped separately at `max(10000, 10 * max_tracked_events)`. Other types are buffered, flushed every `[events].flush_interval_events` events (default 100), and dropped once `[events].max_tracked_events` is reached.
 
 ## 7. Immutable vs Mutable
 
@@ -148,18 +157,21 @@ Each capture category is a modular sub-engine responsible for one section of the
 
 | Category | Manifest Key | Configurable Modes |
 |---|---|---|
-| Environment | `environment` | `allowlist`, `filtered`, `full` |
-| Packages | `packages` | `imported-only`, `imported-transitive`, `top-level-installed`, `full-environment` |
+| Environment | `environment` | `off`, `allowlist`, `filtered`, `full` |
+| Packages | `packages` | `off`, `imported-only`, `imported-transitive`, `top-level-installed`, `full-environment` |
 | Subprocesses | `subprocesses` | `enabled = true/false` |
 | Console | `console` | `off`, `basic`, `standard`, `deep` |
 | Git | `git` | depth-based |
 | Hardware | `hardware` | depth-based |
 | Host | `host` | depth-based |
+| Filesystem | `filesystem` | none (classified alongside hardware and host capture) |
 | Process | `process` | depth-based |
 | Python | `python` | depth-based |
 | Resources | `resources` | depth-based |
 | Signals | `signals` | `enabled = true/false` |
 | Inputs | `invocation.inputs` | `enabled = true/false` |
+| File I/O | `data_files` | `[capture.file_io].level`: `none`, `name`, `stat` (default), `realpath`, `hash` |
+| Profiling | none (writes `profile-<phase>.prof` files and `profile_saved` events) | `[capture.profiling].enabled` with backend `cprofile` or `yappi` |
 
 ## 11. Progressive Depth Model
 
@@ -187,8 +199,10 @@ The `TqdmSafeTee` implementation squashes carriage-return redraws (common with p
 Each run gets its own uniquely named directory:
 
 ```
-<base_dir>/runs/pubrun-<script>-<timestamp>-<pid>-<run_id>/
+<output_dir>/pubrun-<script>-<timestamp>-<pid>-<run_id>/
 ```
+
+`<output_dir>` is `[core].output_dir`, or `./runs` under the current directory when that key is empty (the default).
 
 Example:
 ```
@@ -198,10 +212,14 @@ Example:
 Contents:
 - `manifest.json` (required)
 - `config.resolved.json` (required)
+- `.pubrun.lock` (present while the run is active; removed on normal finalization)
 - `stdout.log` (if console capture enabled)
 - `stderr.log` (if console capture enabled)
 - `events.jsonl` (if event stream enabled)
 - `methods.md` or `methods.tex` (if methods generation enabled)
+- `profile-<phase>.prof` (one per profiled phase, with the phase name reduced to `[A-Za-z0-9_-]`)
+- `<name>.json` or `<name>.txt` (written by `pubrun.report()`)
+- Files written by `pubrun.artifact()`
 
 ## 14. Race Safety and Durability
 
@@ -238,9 +256,23 @@ Core primitives exposed at module level:
 | `get_current_run()` | Access the active `Run` instance. |
 | `annotate()` | Inject custom key-value events. |
 | `phase()` | Context manager for timing named phases. |
+| `paused()` | Context manager that suspends recording in the calling thread. |
+| `report()` | Save a structured JSON or text report into the run directory. |
+| `artifact()` | Save a raw text or binary file into the run directory. |
+| `print()` | Drop-in `print()` replacement that also appends to `stdout.log`. |
+| `open()` | Drop-in `open()` replacement with file provenance tracking. |
+| `register_file()` | Record provenance for an external file with an explicit role. |
+| `register_input()` | Convenience wrapper for `register_file(..., role="input")`. |
+| `register_output()` | Convenience wrapper for `register_file(..., role="output")`. |
+| `subprocess` | Explicit tracked subprocess wrappers (`subprocess.run()` and `subprocess.Popen()`). |
+| `popen()` | Drop-in `os.popen()` replacement with provenance tracking. |
 | `tracked_run()` | Context manager for full run lifecycle. |
 | `audit_run()` | Decorator for full run lifecycle. |
 | `diff()` | Compare two run directories. |
+| `__version__` | Installed `pubrun` package version string. |
+| `__commit__` | Commit SHA of the running `pubrun` build, resolved lazily on first access. |
+
+See [API Reference: API Summary](api.md#api-summary) for signatures and inactive-run behavior.
 
 ## 17. Schema Extensibility
 
@@ -263,8 +295,8 @@ The system must:
 ### Bounded Redacted Diagnostics, Independent Cleanup, and Consumer Honesty
 
 - **Bounded redacted error records:** Capture and cleanup exceptions pass through `format_safe_error_detail()` (single-line, sensitive values redacted, 240-character cap, `traceback = null`, falling back to default patterns and then `type(exc).__name__`). `Run` retains up to `MAX_CAPTURE_ERRORS = 50` entries in `errors.records` under `_errors_lock`; additional errors increment the omitted counter and set `errors.capture_state.status = "partial"`. Runtime warnings in `Run`, `EventStream`, and `ArtifactWriter` are emitted at most once per `(section, stage)` or failure episode, outside internal locks.
-- **Independent cleanup and hook ownership:** `_finalize_state()` and `_rollback_owned_hooks()` isolate every pre-teardown and teardown step independently, separating `SubprocessSpy.finalize_all()` and record snapshotting from `SubprocessSpy.uninstall(owner=...)`. Process-global hooks (`sys.stdout`, `sys.stderr`, `faulthandler`, signal handlers, `sys.excepthook`, `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `subprocess.Popen.poll`, `subprocess.Popen.__del__`, `os.system`) use identity-guarded restoration and passive passthrough so later third-party wrappers are never clobbered.
-- **Honest consumers:** `pubrun report`, `pubrun inspect`, `pubrun methods`, and `pubrun status` tolerate failed, `null`, or malformed section fields without crashing. They surface failed sections and deduplicated `capture-error` findings explicitly (distinct from `"suppressed"`) and disclose partial provenance instead of claiming complete capture or standard-library-only dependencies.
+- **Independent cleanup and hook ownership:** `_finalize_state()` and `_rollback_owned_hooks()` isolate every pre-teardown and teardown step independently, separating `SubprocessSpy.finalize_all()` and record snapshotting from `SubprocessSpy.uninstall(owner=...)`. Process-global hooks (`sys.stdout`, `sys.stderr`, `faulthandler`, signal handlers, `sys.excepthook`, `sys.exit`, `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `subprocess.Popen.poll`, `subprocess.Popen.__del__`, `os.system`) use identity-guarded restoration and passive passthrough so later third-party wrappers are never clobbered.
+- **Honest consumers:** `pubrun show` (and its hidden alias `report`), `pubrun inspect`, `pubrun methods`, and `pubrun status` tolerate failed, `null`, or malformed section fields without crashing. They surface failed sections and deduplicated `capture-error` findings explicitly (distinct from `"suppressed"`) and disclose partial provenance instead of claiming complete capture or standard-library-only dependencies.
 
 ## 19. Redaction Model
 
@@ -299,7 +331,22 @@ The execution engine is divided into these key systems:
 - **Resource Tree Walker** (`capture/resources.py`) — Background resource sampling with optional process-tree scope (`_get_tree_rss_linux`, `_get_tree_rss_darwin`).
 - **Phase Profiler** (`core.py` phase hooks) — Optional cProfile/yappi integration that profiles `pubrun.phase()` blocks and saves per-phase `.prof` files.
 - **Artifact Writer** (`writer.py`): Creates the run directory, enforces atomic visibility via unique temporary files and `os.replace()`, applies `[core].artifact_durability`, coalesces unchanged `config.resolved.json` writes by SHA-256 digest and durability rank, and guards finalized artifacts with `_artifacts_written`.
-- **Diagnostics Analyzer** (`pubrun report`) — Evaluates and renders execution metrics from manifests.
+- **Import Mode Submodules** (`auto.py`, `full.py`, `minimal.py`, `noauto.py`, `noconsole.py`, `nopatch.py`): Namespaced entry points that select an import preset before loading `pubrun.core`.
+- **CLI Entry Point** (`__main__.py`): Parses command-line arguments and dispatches every `pubrun` subcommand.
+- **Run Status and Lock Manager** (`status.py`): Inspects live processes via lock files and closes out crashed runs.
+- **Diff Engine Package** (`analysis/`): Implements structural manifest diffing and normalization rules.
+- **Reporting and Assessment Package** (`report/`): Implements post-hoc diagnostics, reproducibility checks, hydration, methods rendering, and meta snapshots.
+- **Interactive Dashboard Package** (`tui/`): Implements the optional Textual terminal user interface.
+- **Diagnostics Analyzer** (`pubrun show`, with hidden alias `report`): Evaluates and renders execution metrics from manifests.
+- **Reproducibility Inspector** (`pubrun inspect`): Assesses a completed run's reproducibility evidence and runs optional offline preflight checks.
+- **Environment Self-Check** (`pubrun self-check`): Checks the current machine for configuration, filesystem, and installation pitfalls.
+- **Overhead Benchmark Runner** (`pubrun bench`): Runs the overhead benchmark suite and detects HPC schedulers.
+- **Interactive Dashboard** (`pubrun ui`, with aliases `tui` and `gui`): Launches the interactive Textual dashboard.
+- **Project Initializer** (`pubrun init`): Creates an annotated `.pubrun.toml` configuration file in the current project.
+- **Log Interleaver** (`pubrun combined`): Interleaves `stdout.log` and `stderr.log` chronologically across one or more runs.
+- **Resource Chart Renderers** (`pubrun res`, `pubrun cpu`, `pubrun mem`): Render CPU and memory utilization charts over a run's lifecycle (`resources` is an alias of `res`).
+- **Citation Generator** (`pubrun cite`): Prints formatted academic citations for `pubrun`.
+- **Issue and Feedback Helpers** (`pubrun report-bug`, `pubrun feedback`): Print environment diagnostics and open links for bug reports or general feedback.
 - **Methods Generator** (`pubrun methods`) — Compiles manifest data into prose methodology paragraphs.
 - **Global Context Snapshotter** (`pubrun meta`) — Generates standalone environment snapshots for HPC hydration.
 - **Diff Semantic Analyzer** (`pubrun diff`) — Generates side-by-side structural comparisons with configurable depth filtering.

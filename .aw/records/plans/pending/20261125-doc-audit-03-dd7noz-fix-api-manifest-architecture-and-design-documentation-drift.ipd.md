@@ -42,7 +42,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 Invariant for every E-item in this plan: do not add, remove, or change any Markdown heading line (`#` to `######`) in the five Scope-Paths files, except that E-02 removes ``## `profiling` `` from `docs/manifest.md` and E-07 adds ``### `hardware.gpus[]` ``. Inbound links depend on current anchors (`README.md` links `api.md#pubrunpaused--contextmanager`; other docs link `manifest.md#meta-snapshot`, `manifest.md#packages`, and `manifest.md#timing`), and the H1 and section headings of both `docs/design/` files contain em dashes that must stay. Write no em or en dash (`\u2013`, `\u2014`) on any added line. When you rewrite a non-heading line that already contains one, replace the dash too, because the dash check reads every added line.
 
-- [ ] E-01 Fix the examples, the `assess_run()` claim, and the inactive-run policy in `docs/api.md` (with no em or en dashes in added or edited lines):
+- [x] E-01 Fix the examples, the `assess_run()` claim, and the inactive-run policy in `docs/api.md` (with no em or en dashes in added or edited lines):
   - Replace every `profile=` example. `core.profile` has no effect and is deprecated; a non-default value only records a `profile_deprecated` entry in the manifest's `config.notices` (`src/pubrun/config.py::profile_deprecation_notice`, recorded by `src/pubrun/tracker.py`; it is never raised). Line 75 becomes `pubrun.start(output_dir="./custom_storage", console={"capture_mode": "standard"})`. In the `**Override syntax:**` block (lines 85 to 87), keep the `output_dir="./runs"` line and replace the two `profile` lines with `pubrun.start(core={"output_dir": "./runs"})` (explicit nested form) and `pubrun.start(capture={"file_io": {"level": "hash"}})` (any other section, nested). Line 256 becomes `@audit_run(console={"capture_mode": "standard"})`.
   - In the `Flat shortcuts:` sentence (line 95), keep the four names (`_CORE_SHORTCUTS` in `src/pubrun/config.py::_resolve_layers`) and state that `profile` is accepted only for compatibility, changes nothing, and records the `profile_deprecated` notice. Rewrite the precedence note (line 98) with `output_dir`: `start(core={"output_dir": "./a"}, output_dir="./b")` results in `output_dir = "./b"`.
   - Replace lines 539 to 541 ("The CLI additionally merges ..."). State that `assess_run()` itself reports the five `file_provenance_*` codes (`file_provenance_changed`, `file_provenance_hash_failed`, `file_provenance_over_budget`, `file_provenance_asserted_only`, `file_provenance_unverified_paths`) in the `inputs_outputs` category (`src/pubrun/report/reproducibility.py::assess_manifest_reproducibility`), and that `pubrun inspect --json` calls the same function (`src/pubrun/__main__.py::_assess_cli_run`), so both return the same findings for the same inputs.
@@ -52,9 +52,9 @@ Invariant for every E-item in this plan: do not add, remove, or change any Markd
   - In `## API Summary`, change the `phase(name)` row (line 562) to `Yes (configurable)` and the three `register_*` rows (lines 567 to 569) to ``Yes (configurable; returns `None`)``.
   - Depends on: none
   - Expected outcome: `docs/api.md` teaches no deprecated `profile` usage, states that `assess_run()` and `pubrun inspect --json` report the same `file_provenance_*` findings, and describes the inactive-run policy for every function that obeys it.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-06 Fix the outcome rules, exports, summary rows, threading table, and hook table in `docs/api.md` (with no em or en dashes in added or edited lines):
+- [x] E-06 Fix the outcome rules, exports, summary rows, threading table, and hook table in `docs/api.md` (with no em or en dashes in added or edited lines):
   - Replace the outcome list under `### pubrun.stop()` (lines 111 to 115) with the rules the code applies. Review confirmed each rule with a probe run (see `## Required tests / validation`):
     - An explicit `pubrun.stop()` records `"completed"`, even when called inside an `except` block, unless the run is already `"failed"` or `"ghost"`; those outcomes are kept (`src/pubrun/tracker.py::Run.stop` with its default `outcome="completed"`).
     - `tracked_run()` and `audit_run()` classify the exception leaving the block or call (`src/pubrun/core.py::_classify_exit_outcome`): none, `SystemExit(0)`, or `SystemExit(None)` gives `"completed"`; `KeyboardInterrupt` gives `"interrupted"`; any other exception or non-zero `SystemExit`, including `SystemExit(True)`, gives `"failed"`.
@@ -69,11 +69,11 @@ Invariant for every E-item in this plan: do not add, remove, or change any Markd
   - In `### Third-Party Hook Ownership Rules`, add a `sys.exit` (`SignalExitCapture`) row. Install: wraps the current `sys.exit` and chains to it; it records the exit code and `SystemExit` only on the main thread, and recording never changes how the process exits (`src/pubrun/capture/signals.py::SignalExitCapture._install_sys_exit`). Teardown: restores the previous `sys.exit` only when `sys.exit` is still pubrun's wrapper (`_restore_sys_exit`).
   - Depends on: E-01
   - Expected outcome: The outcome rules in `docs/api.md` match the explicit-stop, wrapper, and interpreter-exit paths; bare `@audit_run` is documented; the summary covers all 20 exports with correct signatures; and the threading and hook tables include `paused()` and `sys.exit`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Fix `docs/manifest.md`
 
-- [ ] E-02 Fix the high-severity contract errors in `docs/manifest.md` (with no em or en dashes in added or edited lines):
+- [x] E-02 Fix the high-severity contract errors in `docs/manifest.md` (with no em or en dashes in added or edited lines):
   - Delete the ``## `profiling` `` section (heading, intro, table, and its trailing `---`, lines 492 to 503). In `## Top-Level Fields`, after the table, add a note: phase profiling (`[capture.profiling].enabled`) adds no key to `manifest.json`; each profiled phase writes `profile-<phase>.prof` in the run directory and emits a `profile_saved` event with the file name in `events.jsonl` (`src/pubrun/core.py::phase`). Nothing links to `#profiling`.
   - Rewrite `### Redacted Values` (lines 586 to 605):
     - Replace the hashed example with what `src/pubrun/capture/redaction.py::redact_value` writes when `[redaction].representation = "hashed"`: `{"representation": "hashed", "hash_algorithm": "sha256", "hash_value": "<64 hex characters>"}`.
@@ -87,9 +87,9 @@ Invariant for every E-item in this plan: do not add, remove, or change any Markd
     - Link to the outcome rules in `docs/api.md` (`api.md#pubrunstop`) instead of repeating them.
   - Depends on: none
   - Expected outcome: `docs/manifest.md` has no phantom section and describes `redacted_value`, `python.virtual_env`, and `status.outcome` as the code writes them, naming each schema divergence.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Fix the `capture`, `invocation.script`, `console`, and Meta Snapshot sections in `docs/manifest.md` (with no em or en dashes in added or edited lines):
+- [x] E-03 Fix the `capture`, `invocation.script`, `console`, and Meta Snapshot sections in `docs/manifest.md` (with no em or en dashes in added or edited lines):
   - `capture.console_capture_mode` (line 514): it records the configured `[console].capture_mode` (default `"off"`), read before import-mode forcing (`full`, `noconsole`) and the Jupyter and non-TTY guards (`src/pubrun/tracker.py::Run.to_manifest_dict`). The mode actually used is `console.capture_mode`.
   - `### invocation.script` (lines 104 to 114), per `src/pubrun/capture/invocation.py`:
     - `path` is `sys.argv[0]` as given, so it can be relative.
@@ -106,9 +106,9 @@ Invariant for every E-item in this plan: do not add, remove, or change any Markd
     - In the intro sentence naming the commands that hydrate, list every caller of `hydrate_manifest` or `hydrate_manifest_with_report`: `pubrun show` (and its hidden alias `report`), `inspect`, `methods`, `rerun`, `diff`, `res`/`cpu`/`mem`, the TUI, and `pubrun.diff()`.
   - Depends on: E-02
   - Expected outcome: The `capture`, `invocation.script`, `console`, and Meta Snapshot descriptions match what the code writes and reads.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-07 Fix field typing, nullability, GPU records, and reserved keys in `docs/manifest.md` (with no em or en dashes in added or edited lines):
+- [x] E-07 Fix field typing, nullability, GPU records, and reserved keys in `docs/manifest.md` (with no em or en dashes in added or edited lines):
   - `subprocesses[].cwd` (line 148): type `string | null`. The global spy records the `cwd=` argument passed to `subprocess.Popen` (else `null`) and `null` for `os.system` (`src/pubrun/capture/subprocesses.py`); the explicit `pubrun.subprocess` and `pubrun.popen` wrappers omit the key. Leave the Lock File `cwd` row (line 619) unchanged.
   - Add a ``### `hardware.gpus[]` `` table directly after ``### `hardware.cpu` ``, per `src/pubrun/capture/hardware.py`:
     - `vendor`: `"NVIDIA"` from `nvidia-smi`, `"Generic"` from Windows WMI, `"Apple / Generic"` from macOS `system_profiler`.
@@ -125,11 +125,11 @@ Invariant for every E-item in this plan: do not add, remove, or change any Markd
   - In `## Top-Level Fields`, add a note that the schema also defines `artifacts`, `determinism`, and `extensions`, which pubrun does not write (`[capture.determinism]` is not yet implemented, `src/pubrun/resources/default.toml`), and that every key pubrun writes has its own section below.
   - Depends on: E-03
   - Expected outcome: Field types, nullability, GPU record keys, and reserved top-level keys in `docs/manifest.md` match `src/pubrun/` and `schemas/manifest.schema.json`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Fix `docs/architecture.md` and `docs/design/`
 
-- [ ] E-04 Update the header and Sections 5, 6, 10, and 13 of `docs/architecture.md` (with no em or en dashes in added or edited lines):
+- [x] E-04 Update the header and Sections 5, 6, 10, and 13 of `docs/architecture.md` (with no em or en dashes in added or edited lines):
   - Change line 5 from `> Status: v1.0.0` to `> Status: Current (schema v1.0)`, the wording sibling plan `wjsccu` uses for `docs/functional_spec.md`.
   - Section 5 skeleton: add `"filesystem": {}` after `"host"`, and `"pubrun_imports": {}` and `"data_files": {}` after `"signals"`, matching the key order of `src/pubrun/tracker.py::Run.to_manifest_dict`.
   - Section 6: rewrite the `type` bullet (it contains an em dash) to list the nine event types and their sources:
@@ -156,9 +156,9 @@ Invariant for every E-item in this plan: do not add, remove, or change any Markd
       - Files written by `pubrun.artifact()`.
   - Depends on: none
   - Expected outcome: The header, manifest skeleton, event model, capture categories, and run directory model in `docs/architecture.md` match the code.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-08 Update Sections 16, 18, and 21 of `docs/architecture.md` (with no em or en dashes in added or edited lines):
+- [x] E-08 Update Sections 16, 18, and 21 of `docs/architecture.md` (with no em or en dashes in added or edited lines):
   - Section 16: add rows for the twelve exports the table lacks: `paused()`, `report()`, `artifact()`, `print()`, `open()`, `register_file()`, `register_input()`, `register_output()`, `subprocess`, `popen()`, `__version__`, and `__commit__`. After the table, add a sentence linking `api.md#api-summary` for signatures and inactive-run behavior.
   - Section 18:
     - Add `sys.exit` to the hook list in the `Independent cleanup and hook ownership` bullet (line 266).
@@ -175,9 +175,9 @@ Invariant for every E-item in this plan: do not add, remove, or change any Markd
     - Add bullets for the CLI commands the section lacks, writing each as `` `pubrun <command>` `` so the coverage check finds it: `pubrun inspect`, `pubrun self-check`, `pubrun bench`, `pubrun ui`, `pubrun init`, `pubrun combined`, `pubrun res`, `pubrun cpu`, `pubrun mem`, `pubrun cite`, `pubrun report-bug`, and `pubrun feedback`. This is the full `python -m pubrun --help` command list minus the commands Section 21 already names.
   - Depends on: E-04
   - Expected outcome: Sections 16, 18, and 21 of `docs/architecture.md` list every export, every global hook, every top-level module and package, and every CLI command.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Update the two design records under `docs/design/` (with no em or en dashes in added or edited lines). These are dated historical records: add an outcome banner and correct only stale references, and do not rewrite the H1, other headings, the analysis, or the `- Status:` line.
+- [x] E-05 Update the two design records under `docs/design/` (with no em or en dashes in added or edited lines). These are dated historical records: add an outcome banner and correct only stale references, and do not rewrite the H1, other headings, the analysis, or the `- Status:` line.
   - `docs/design/file-io-provenance-evaluation.md`:
     - Add a blockquote banner directly below the H1, headed `Outcome as of 2026-11-25`:
       - Recommendation 1 shipped as `resources.io_counters` (Linux `/proc/self/io`, `src/pubrun/capture/system_metrics.py::get_proc_io`).
@@ -198,7 +198,7 @@ Invariant for every E-item in this plan: do not add, remove, or change any Markd
     - Replace `README.md:9`, `README.md:19` (lines 98 and 99, which contain an en dash) with the current locations: footnote `[^1]`, the note under `## Installation`, and the "Zero runtime dependencies" bullet under `## Built to be Trustworthy`.
   - Depends on: none
   - Expected outcome: Readers of `docs/design/` see what shipped and what remains deferred, and every symbol reference resolves to current code.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -407,7 +407,7 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `git diff -- docs/api.md` hunks for lines 75, 85 to 98, and 256 (no `profile` example; `profile` marked deprecated with the `profile_deprecated` notice), the replacement of lines 539 to 541, the `phase()` inactive sentence, the seven-function sentence in `## 3. Custom Annotations`, the `register_file` return-value bullet, and the four API Summary rows. Pasted inactive-policy probe output `phase=RuntimeError register_file=RuntimeError register_input=RuntimeError register_output=RuntimeError` (code path `src/pubrun/core.py::_handle_inactive`). Pasted output of the command below showing `exit=1`:
 
     ```sh
@@ -415,9 +415,70 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     ```
 
   - Observed evidence:
-  - Result: pending
+    - `git diff -- docs/api.md` (E-01 hunks):
+      ```diff
+      @@ -72,7 +72,7 @@
+      -tracker = pubrun.start(profile="deep", output_dir="./custom_storage")
+      +tracker = pubrun.start(output_dir="./custom_storage", console={"capture_mode": "standard"})
+      @@ -82,9 +82,9 @@
+      -pubrun.start(profile="deep")                    # Equivalent to core={"profile": "deep"}
+      -pubrun.start(output_dir="./runs")               # Equivalent to core={"output_dir": "./runs"}
+      -pubrun.start(core={"profile": "deep"})          # Explicit nested form also works
+      +pubrun.start(output_dir="./runs")                      # Equivalent to core={"output_dir": "./runs"}
+      +pubrun.start(core={"output_dir": "./runs"})            # Explicit nested form also works
+      +pubrun.start(capture={"file_io": {"level": "hash"}})   # Any other section uses a nested dict
+      @@ -92,10 +92,10 @@
+      -Flat shortcuts: `profile`, `output_dir`, `auto_start`, `meta_ref`. All other overrides use nested dicts matching the TOML structure (e.g., `console={"capture_mode": "off"}`).
+      +Flat shortcuts: `output_dir`, `auto_start`, `meta_ref`, and `profile`. `profile` is accepted only for compatibility, changes nothing, and records a `profile_deprecated` entry in the manifest's `config.notices` when set to a non-default value (it is never raised). All other overrides use nested dicts matching the TOML structure (for example `console={"capture_mode": "off"}`).
+      -> If both flat and nested forms are passed for the same key, the flat shortcut wins: `start(core={"profile": "minimal"}, profile="deep")` results in `profile = "deep"`.
+      +> If both flat and nested forms are passed for the same key, the flat shortcut wins: `start(core={"output_dir": "./a"}, output_dir="./b")` results in `output_dir = "./b"`.
+      @@ -169,6 +170,8 @@
+      +Despite its name, `on_inactive_annotate` governs all seven functions that handle inactive calls: `annotate()`, `phase()`, `report()`, `artifact()`, `register_file()`, `register_input()`, and `register_output()`.
+      @@ -194,7 +197,7 @@
+      -Phase calls are safe to use even without an active run — they become silent no-ops.
+      +Without an active run, `phase()` times nothing and writes no event. Entering the block follows `[events].on_inactive_annotate`: `"ignore"` (default) does nothing, `"warn"` logs a warning, and `"error"` raises `RuntimeError`.
+      @@ -253,12 +256,19 @@
+      -@audit_run(profile="basic")
+      +@audit_run(console={"capture_mode": "standard"})
+      @@ -410,9 +420,11 @@
+      -*   **Return value**: the recorded provenance dict, or `None` when no run is active or
+      -    the effective level is `"none"`. Invalid arguments raise `ValueError`/`TypeError`
+      -    even without an active run.
+      +*   **Return value**: the recorded provenance dict, or `None` when the effective level is
+      +    `"none"` or when no run is active under `"ignore"` or `"warn"`. A call without an active
+      +    run follows `[events].on_inactive_annotate`, so `"warn"` logs a warning before returning
+      +    `None` and `"error"` raises `RuntimeError` instead of returning `None`. Invalid arguments
+      +    raise `ValueError`/`TypeError` even without an active run.
+      @@ -536,9 +549,11 @@
+      -The CLI additionally merges canonical `file_provenance_*` finding codes into the
+      -`inputs_outputs` category, so `pubrun inspect --json` can list file-provenance findings that a
+      -direct `assess_run()` call does not.
+      +`assess_run()` itself reports the five `file_provenance_*` finding codes
+      +(`file_provenance_changed`, `file_provenance_hash_failed`, `file_provenance_over_budget`,
+      +`file_provenance_asserted_only`, and `file_provenance_unverified_paths`) in the
+      +`inputs_outputs` category. `pubrun inspect --json` calls the same assessment function, so
+      +both return the same findings for the same inputs.
+      @@ -559,21 +574,24 @@
+      -| `phase(name)` | Time a named code region | Yes (silent no-op) |
+      +| `phase(name)` | Time a named code region | Yes (configurable) |
+      -| `register_file(path, role, ...)` | Record an external file read or written elsewhere | Yes (returns `None`) |
+      -| `register_input(path, ...)` | `register_file` with `role="input"` | Yes (returns `None`) |
+      -| `register_output(path, ...)` | `register_file` with `role="output"` | Yes (returns `None`) |
+      +| `register_file(path, role, ...)` | Record an external file read or written elsewhere | Yes (configurable; returns `None`) |
+      +| `register_input(path, ...)` | `register_file` with `role="input"` | Yes (configurable; returns `None`) |
+      +| `register_output(path, ...)` | `register_file` with `role="output"` | Yes (configurable; returns `None`) |
+      ```
+    - Inactive-policy probe (`src/pubrun/core.py::_handle_inactive`):
+      ```text
+      phase=RuntimeError register_file=RuntimeError register_input=RuntimeError register_output=RuntimeError
+      ```
+    - V-01 grep check:
+      ```text
+      exit=1
+      ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `git diff -- docs/manifest.md` hunks for the removed ``## `profiling` `` section and the new profiling note in `## Top-Level Fields`, `### Redacted Values` (the `hash_algorithm`/`hash_value` example, `unavailable`, `suppressed` as schema-only, and the schema-divergence statement), `python.virtual_env`, and `status.outcome` (`running` and `crashed` written; `partial` and `unknown` schema-only). Pasted output of `PYTHONPATH=src PUBRUN_IMPORT_MODE=noauto python3 -c "from pubrun.capture.redaction import redact_value; print(sorted(redact_value('x', {'redaction': {'representation': 'hashed'}})))"` showing `['hash_algorithm', 'hash_value', 'representation']` (code path `src/pubrun/capture/redaction.py::redact_value`). Pasted output of the command below showing `exit=1`:
 
     ```sh
@@ -425,9 +486,55 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     ```
 
   - Observed evidence:
-  - Result: pending
+    - `git diff -- docs/manifest.md` (E-02 hunks):
+      ```diff
+      @@ -16,6 +16,10 @@
+      +Phase profiling (`[capture.profiling].enabled`) adds no top-level key to `manifest.json`. Each profiled phase writes `profile-<phase>.prof` in the run directory and emits a `profile_saved` event with the file name in `events.jsonl`.
+      @@ -183,7 +194,7 @@
+      -| `virtual_env` | string \| null | Path to the active virtual environment, or `null`. |
+      +| `virtual_env` | string \| null | Literal string `"venv"` when Python runs in a virtual environment (`sys.prefix` differs from `sys.base_prefix`, or `sys.real_prefix` exists), else `null`; it never holds a path. Use `prefix` for the path, and `environment_kind` and `in_venv` for environment classification. |
+      @@ -489,19 +512,6 @@
+      -## `profiling`
+      -
+      -Phase-scoped profiling metadata (only present when `[capture.profiling].enabled = true`).
+      -
+      -| Field | Type | Description |
+      -|---|---|---|
+      -| `enabled` | bool | Whether profiling was active for this run. |
+      -| `backend` | string | `"cprofile"` or `"yappi"`. |
+      -| `profiles` | list[object] | Per-phase profile records: `{"phase": "name", "path": "profile-name.prof"}`. |
+      -| `capture_state` | object | See [Capture State](#capture-state). |
+      -
+      ----
+      @@ -555,7 +565,7 @@
+      -| `outcome` | string | `"completed"`, `"failed"`, `"interrupted"`, `"ghost"`, or `"unknown"`. `"interrupted"` indicates the run received a termination signal (SIGINT, SIGTERM, or SIGHUP). |
+      +| `outcome` | string | Values written by `pubrun`: `"running"` (startup and in-progress manifests), `"completed"`, `"failed"`, `"interrupted"`, and `"ghost"`. `pubrun status` and `pubrun show` also write `"crashed"` into an existing run directory when they find a stale lock file; `"crashed"` is not yet in the schema enum. `"partial"` and `"unknown"` are in the schema enum, but `pubrun` never writes them; readers display `"unknown"` when the field is missing. See [`pubrun.stop()`](api.md#pubrunstop) for the outcome classification rules. |
+      @@ -597,11 +607,18 @@
+      -**Hashed (if configured):**
+      +**Hashed (when `[redaction].representation = "hashed"`):**
+       ```json
+      -{"representation": "hashed", "value": "sha256:a1b2c3d4..."}
+      +{"representation": "hashed", "hash_algorithm": "sha256", "hash_value": "<64 hex characters>"}
+       ```
+      +
+      +**Unavailable (when no value exists, for example `git.remote_url` with no remote):**
+      +```json
+      +{"representation": "unavailable"}
+      +```
+      +
+      +`schemas/manifest.schema.json` (`$defs.redacted_value`) also allows `"suppressed"`, which `pubrun` never writes, and describes a hashed value as `{"representation": "hashed", "hash": {"algorithm": "...", "value": "..."}}` with `additionalProperties: false`. A hashed value written by the current code (`hash_algorithm` and `hash_value`) therefore does not validate against the schema. Reconciling the schema and runtime format is deferred to a separate schema-contract update.
+      ```
+    - `redact_value` probe (`src/pubrun/capture/redaction.py::redact_value`):
+      ```text
+      ['hash_algorithm', 'hash_value', 'representation']
+      ```
+    - V-02 grep check:
+      ```text
+      exit=1
+      ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `git diff -- docs/manifest.md` hunks for `capture.console_capture_mode`, `### invocation.script` (`real_path`, `ctime`, the 1,048,576-byte `sha256` limit with `sha256_skipped`, and `{}` for non-file `argv[0]`), `## console` (`captured`, `combined`, `partial`, `failed`), and `## Meta Snapshot` (the snapshot key list, `host` in the hydrable list, and the full hydration caller list). Pasted coverage check line `manifest_hydrable_missing=[]`. Pasted output of the command below showing `exit=1`:
 
     ```sh
@@ -435,14 +542,114 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     ```
 
   - Observed evidence:
-  - Result: pending
+    - `git diff -- docs/manifest.md` (E-03 hunks):
+      ```diff
+      @@ -103,13 +107,18 @@
+       ### `invocation.script`
+      +
+      +When `sys.argv[0]` is not an existing file (for example `python -c`), `script` is `{}`. Otherwise:
+      -| `path` | string | Absolute path to the entry-point script. |
+      +| `path` | string | Entry-point script path from `sys.argv[0]` as given (may be relative). |
+      +| `real_path` | string | Resolved absolute path to the entry-point script. |
+       | `mtime` | float | Last modification time (POSIX epoch float). |
+      -| `sha256` | string | SHA-256 hash of the file contents. |
+      +| `ctime` | float | Metadata change or creation time (POSIX epoch float). |
+      +| `sha256` | string | SHA-256 hash of the file contents, computed only for scripts up to 1,048,576 bytes. Omitted for larger scripts. |
+      +| `sha256_skipped` | string | Present only when the script exceeds 1,048,576 bytes, set to `"file exceeds 1MB"` instead of `sha256`. Not yet defined in `schemas/manifest.schema.json`. |
+      @@ -120,15 +129,17 @@
+      -| `stdout` | object | `{"path": "stdout.log", "lines_captured": N}`. |
+      -| `stderr` | object | `{"path": "stderr.log", "lines_captured": N}`. |
+      +| `stdout` | object | `{"captured": bool, "path": string \| null, "lines_captured": int \| null}`. |
+      +| `stderr` | object | `{"captured": bool, "path": string \| null, "lines_captured": int \| null}`. |
+      +| `combined` | object | `{"captured": bool, "path": string \| null, "lines_captured": int \| null}`. Always `{"captured": false, "path": null, "lines_captured": null}`, because `pubrun` writes only the split logs. |
+      -the run finishes it is rewritten with the final result and `capture_state.status = "complete"`. It is
+      -never emitted as an empty object, so a consumer reading a run before it finishes can tell "not finalized
+      -yet" (`pending`) from a genuine `"off"` result.
+      +the run finishes, `capture_state.status` is updated to `"complete"`, `"partial"` (with detail
+      +`"console log write failed during execution"`), or `"failed"` (when the interceptor could not start).
+      +It is never emitted as an empty object, so a consumer reading a run before it finishes can tell "not
+      +finalized yet" (`pending`) from a genuine `"off"` result.
+      @@ -511,9 +521,9 @@
+      -| `console_capture_mode` | string | The effective console mode for this run. |
+      +| `console_capture_mode` | string | The configured `[console].capture_mode` (default `"off"`), read before import-mode forcing (`full`, `noconsole`) and the Jupyter and non-TTY guards. The mode actually used is `console.capture_mode`. |
+      @@ -643,17 +660,18 @@
+      -The `pubrun meta` command generates a similar JSON structure, but with `manifest_type` set to `"pubrun-meta-snapshot"` instead of `"pubrun-manifest"`. Meta snapshots contain only environment-level data (hardware, python, packages, git, environment, host) and do not include run-specific fields (timing, invocation, status, etc.).
+      +The `pubrun meta` command generates a similar JSON structure, with `manifest_type` set to `"pubrun-meta-snapshot"` instead of `"pubrun-manifest"`. A snapshot holds `manifest_type`, `timing.started_at_utc` (used for the parent-age check during hydration), `hardware`, `python`, `packages`, `git`, `environment`, and `host`, and omits `schema_version`, `process`, `invocation`, `status`, `console`, and `resources`.
+      -child's run directory. Report commands (`pubrun inspect`, `pubrun show`, `pubrun methods`, the
+      -TUI) apply the parent at **report time**:
+      +child's run directory. Report and analysis callers (`pubrun show` and its hidden alias `report`,
+      +`pubrun inspect`, `pubrun methods`, `pubrun rerun`, `pubrun diff`, `pubrun res`, `pubrun cpu`,
+      +`pubrun mem`, the TUI, and `pubrun.diff()`) apply the parent at **report time**:
+      -- **What is filled:** the hydrable sections `hardware`, `process`, `python`, `packages`,
+      +- **What is filled:** the hydrable sections `hardware`, `host`, `process`, `python`, `packages`,
+      ```
+    - Coverage check line: `manifest_hydrable_missing=[]`
+    - V-03 grep check:
+      ```text
+      exit=1
+      ```
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `git diff -- docs/architecture.md` hunks for the header, the Section 5 skeleton, the Section 6 `type` bullet and throttling sentence, the Section 10 rows, and Section 13. Pasted coverage check lines `arch_skeleton_missing=[]`, `arch_events_missing=[]`, `arch_categories_missing=[]`, and `arch_rundir_missing=[]`. Pasted output of `grep -nE '<base_dir>/runs/|Status: v1\.0\.0' docs/architecture.md; echo "exit=$?"` showing `exit=1`.
   - Observed evidence:
-  - Result: pending
+    - `git diff -- docs/architecture.md` (E-04 hunks):
+      ```diff
+      @@ -2,7 +2,7 @@
+      -> Status: v1.0.0
+      +> Status: Current (schema v1.0)
+      @@ -86,9 +86,12 @@
+         "host": {},
+      +  "filesystem": {},
+         "resources": {},
+         "capture": {},
+         "signals": {},
+      +  "pubrun_imports": {},
+      +  "data_files": {},
+         "status": {}
+      @@ -99,14 +102,20 @@
+      -- `type` — `annotation`, `phase_start`, `phase_end`
+      +- `type`: event kind:
+      +  - `annotation` (`pubrun.annotate()`, also emitted by `pubrun.report()` and `pubrun.artifact()`)
+      +  - `phase_start` and `phase_end` (`pubrun.phase()`)
+      +  - `profile_saved` (phase profiling)
+      +  - `resource_sample` (`src/pubrun/capture/resources.py`)
+      +  - `input_dataset`, `output_artifact`, and `mixed_dataset` (`src/pubrun/capture/file_io.py`)
+      +  - `warning` (storage migration in `src/pubrun/tracker.py`)
+      -Events are subject to throttling via `max_tracked_events` to prevent runaway disk usage.
+      +The critical types `phase_start`, `phase_end`, and `annotation` are written and flushed immediately and are capped separately at `max(10000, 10 * max_tracked_events)`. Other types are buffered, flushed every `[events].flush_interval_events` events (default 100), and dropped once `[events].max_tracked_events` is reached.
+      @@ -148,18 +157,21 @@
+      -| Environment | `environment` | `allowlist`, `filtered`, `full` |
+      -| Packages | `packages` | `imported-only`, `imported-transitive`, `top-level-installed`, `full-environment` |
+      +| Environment | `environment` | `off`, `allowlist`, `filtered`, `full` |
+      +| Packages | `packages` | `off`, `imported-only`, `imported-transitive`, `top-level-installed`, `full-environment` |
+      +| Filesystem | `filesystem` | none (classified alongside hardware and host capture) |
+      +| File I/O | `data_files` | `[capture.file_io].level`: `none`, `name`, `stat` (default), `realpath`, `hash` |
+      +| Profiling | none (writes `profile-<phase>.prof` files and `profile_saved` events) | `[capture.profiling].enabled` with backend `cprofile` or `yappi` |
+      @@ -187,9 +199,11 @@
+      -<base_dir>/runs/pubrun-<script>-<timestamp>-<pid>-<run_id>/
+      +<output_dir>/pubrun-<script>-<timestamp>-<pid>-<run_id>/
+      +`<output_dir>` is `[core].output_dir`, or `./runs` under the current directory when that key is empty (the default).
+      @@ -198,10 +212,14 @@
+      +- `.pubrun.lock` (present while the run is active; removed on normal finalization)
+      +- `profile-<phase>.prof` (one per profiled phase, with the phase name reduced to `[A-Za-z0-9_-]`)
+      +- `<name>.json` or `<name>.txt` (written by `pubrun.report()`)
+      +- Files written by `pubrun.artifact()`
+      ```
+    - Coverage check lines:
+      ```text
+      arch_skeleton_missing=[]
+      arch_events_missing=[]
+      arch_categories_missing=[]
+      arch_rundir_missing=[]
+      ```
+    - V-04 grep check:
+      ```text
+      exit=1
+      ```
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted `git diff -- docs/design/file-io-provenance-evaluation.md docs/design/tomli-dependency-decision.md` showing the banner directly below the unchanged H1, the two `pubrun.paused()` corrections, the five TOML call sites, and the README location fix. Because E-05 is the last item, also paste, run after all eight E-items: the dash check output for each of the five files (each `exit=1`), the heading check output (`exit=1`), the table check output (`mismatched=0`), the link and anchor check output (`broken=0`), the full coverage check output (every list empty and `manifest_profiling_section=0`), and `python3 scripts/sanitize_paths.py --check --all; echo "exit=$?"` showing `exit=0`. Pasted output of the command below showing `exit=1`:
 
     ```sh
@@ -450,8 +657,92 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     ```
 
   - Observed evidence:
-  - Result: pending
-- [ ] V-06 validates E-06
+    - `git diff -- docs/design/file-io-provenance-evaluation.md docs/design/tomli-dependency-decision.md`:
+      ```diff
+      --- a/docs/design/file-io-provenance-evaluation.md
+      +++ b/docs/design/file-io-provenance-evaluation.md
+      @@ -1,5 +1,15 @@
+       # File-I/O provenance — Phase 0 evaluation
+
+      +> **Outcome as of 2026-11-25**
+      +>
+      +> - Recommendation 1 shipped as `resources.io_counters` (Linux `/proc/self/io`, implemented in `src/pubrun/capture/system_metrics.py::get_proc_io`).
+      +> - Recommendation 2 shipped as `pubrun.open()` with `ProvenanceFileProxy` (now in `src/pubrun/capture/file_io.py`) and `pubrun.register_file()`, `pubrun.register_input()`, and `pubrun.register_output()`. The `[capture.file_io].level` progression is `none < name < stat < realpath < hash`, with default `stat`.
+      +> - The "Proposed config knob" section below is superseded: its `level = "none"` default, level order, and `mode` and `exclude` keys were not shipped. The shipped keys under `[capture.file_io]` are `level`, `max_hash_bytes`, `max_total_hash_bytes`, `max_total_hash_seconds`, and `hash_algorithm`.
+      +> - The proxy correctness gaps listed in Mechanism A were addressed: `ProvenanceFileProxy` now intercepts `read1`, `readinto`, `readinto1`, and `seek`, and text-mode hashes are computed from the on-disk bytes.
+      +> - Recommendation 3 (`sys.addaudithook`) is not implemented, and the Recommendation 4 rejection stands.
+      +> - The `core.py` line references in this record describe the code as of 2026-07-06.
+      +> - For current behavior, see [API Reference](../api.md), [Manifest Reference](../manifest.md), and [Configuration Reference](../configuration.md).
+      +
+       - Date: 2026-07-06
+      @@ -29,7 +39,7 @@
+      -  `pubrun-hw`), and `pause()` mutes capture via a **thread-local depth counter**
+      +  `pubrun-hw`), and `pubrun.paused()` mutes capture via a **thread-local depth counter**
+      @@ -97,7 +107,7 @@
+      -- **Not removable** (`no sys.removeaudithook`). So "opt-in / muted by `pause()`" MUST be
+      +- **Not removable** (`no sys.removeaudithook`). So "opt-in / muted by `pubrun.paused()`" MUST be
+      --- a/docs/design/tomli-dependency-decision.md
+      +++ b/docs/design/tomli-dependency-decision.md
+      @@ -16,12 +16,13 @@
+      -TOML is parsed in exactly four places, all trivial:
+      +TOML is parsed in five functions:
+      -- `src/pubrun/config.py:58` — `tomllib.loads(...)` (bundled default config)
+      -- `src/pubrun/config.py:85` — `tomllib.loads(...)` (user config)
+      -- `src/pubrun/config.py:86` — `tomllib.TOMLDecodeError` (error handling)
+      -- `src/pubrun/_config_boot.py:45` — `tomllib.load(f)` (boot-time config)
+      +- `src/pubrun/config.py::load_default_config`: loads the bundled default configuration.
+      +- `src/pubrun/config.py::_safe_load_toml`: loads user and local configuration files, including `TOMLDecodeError` handling.
+      +- `src/pubrun/_config_boot.py::_load_toml_file`: loads boot-time import-mode configuration (returns `None` when `tomli` is missing on Python 3.8-3.10).
+      +- `src/pubrun/__init__.py::_pyproject_declares_pubrun`: reads `pyproject.toml` while resolving `__commit__`, with a fallback parser when neither module imports.
+      +- `src/pubrun/report/checks.py::_config_file_findings`: inspects configuration files for `pubrun self-check` findings.
+      @@ -95,10 +96,11 @@
+      -The "zero runtime dependencies" claim is true on 3.11+ but not on 3.8–3.10. The README already
+      -qualifies this (`README.md:9`, `README.md:19`): *zero runtime dependencies on 3.11+; on 3.8–3.10
+      -the sole dependency is `tomli`, a backport of stdlib `tomllib`.* Keep that qualification wherever
+      -the zero-dependency claim appears.
+      +The "zero runtime dependencies" claim is true on 3.11+ but not on 3.8-3.10. The README qualifies
+      +this in footnote `[^1]`, in the note under `## Installation`, and in the "Zero runtime
+      +dependencies" bullet under `## Built to be Trustworthy`: *zero runtime dependencies on 3.11+; on
+      +3.8-3.10 the sole dependency is `tomli`, a backport of stdlib `tomllib`.* Keep that qualification
+      +wherever the zero-dependency claim appears.
+      ```
+    - Dash checks (all five files, after all eight E-items):
+      ```text
+      --- dash: docs/api.md ---
+      exit=1
+      --- dash: docs/manifest.md ---
+      exit=1
+      --- dash: docs/architecture.md ---
+      exit=1
+      --- dash: docs/design/file-io-provenance-evaluation.md ---
+      exit=1
+      --- dash: docs/design/tomli-dependency-decision.md ---
+      exit=1
+      ```
+    - Heading check: `exit=1`
+    - Table check: `mismatched=0`
+    - Link and anchor check: `broken=0`
+    - Full coverage check:
+      ```text
+      arch_skeleton_missing=[]
+      arch_events_missing=[]
+      arch_categories_missing=[]
+      arch_rundir_missing=[]
+      arch_api_missing=[]
+      arch_hooks_missing=[]
+      arch_cli_missing=[]
+      arch_modules_missing=[]
+      api_summary_missing=[]
+      api_threading_missing=[]
+      api_hooks_missing=[]
+      manifest_hydrable_missing=[]
+      manifest_reserved_missing=[]
+      manifest_profiling_section=0
+      ```
+    - `python3 scripts/sanitize_paths.py --check --all; echo "exit=$?"`: `exit=0`
+    - V-05 grep check: `exit=1`
+  - Result: pass
+- [x] V-06 validates E-06
   - Required evidence: Pasted `git diff -- docs/api.md` hunks for the outcome rules under `### pubrun.stop()`, the `tracked_run()` intro sentence, the bare `@audit_run` sentence and example, the three new API Summary rows, the `subprocess.Popen(...)` and `should_fail_strict(a, *, fail_on="warn")` rows, the `paused()` Threading Model row, and the `sys.exit` hook row. Pasted outcome probe output `stop_in_except=completed unhandled_exception=failed sys_exit_3=failed tracked_run_keyboardinterrupt=interrupted tracked_run_systemexit0=completed` (code paths `src/pubrun/tracker.py::Run.stop`, `Run._finalize_state`, and `src/pubrun/core.py::_stop_for_exit`), with each value matching a rule in the diff. Pasted coverage check lines `api_summary_missing=[]`, `api_threading_missing=[]`, and `api_hooks_missing=[]`. Pasted output of the command below showing `exit=1`:
 
     ```sh
@@ -459,9 +750,56 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     ```
 
   - Observed evidence:
-  - Result: pending
+    - `git diff -- docs/api.md` (E-06 hunks):
+      ```diff
+      @@ -108,10 +108,11 @@
+      -The run outcome is determined automatically:
+      -- `"completed"` — Normal exit, no termination signals received.
+      -- `"failed"` — An unhandled exception occurred (set by `tracked_run` / `audit_run`).
+      -- `"interrupted"` — The process received SIGINT, SIGTERM, or SIGHUP during execution (even if user code caught `KeyboardInterrupt`).
+      +The run outcome depends on how the run ends:
+      +- **Explicit `pubrun.stop()`:** records `"completed"`, even when called inside an `except` block, unless the run is already `"failed"` or `"ghost"`, in which case that existing outcome is kept.
+      +- **`tracked_run()` and `audit_run()`:** classify the exception leaving the block or call. No exception, `SystemExit(0)`, or `SystemExit(None)` gives `"completed"`; `KeyboardInterrupt` gives `"interrupted"`; any other exception or non-zero `SystemExit` (including `SystemExit(True)`) gives `"failed"`.
+      +- **Interpreter-exit finalization (no explicit stop):** classifies the recorded exit. A `KeyboardInterrupt` gives `"interrupted"`; a non-zero exit code (for example `sys.exit(3)`) or an unhandled exception other than `SystemExit` gives `"failed"`; anything else gives `"completed"`.
+      +- **Signal override:** after classification, a `"completed"` run that received `SIGINT`, `SIGTERM`, or `SIGHUP` becomes `"interrupted"`.
+       - `"ghost"`: The run entered ghost mode because run output was unusable at startup.
+      @@ -236,7 +239,7 @@
+      -A context manager that wraps `start()` and `stop()` for you. If an exception occurs, the run is finalized with `outcome = "failed"`.
+      +A context manager that wraps `start()` and `stop()` for you. When the block exits, the run outcome follows the classification rules under [`pubrun.stop()`](#pubrunstop).
+      @@ -253,12 +256,19 @@
+      +The decorator also works bare without parentheses, using the resolved configuration:
+      +
+      +```python
+      +@audit_run
+      +def entrypoint(): ...
+      +```
+      @@ -482,6 +494,7 @@
+      +| `sys.exit` (`SignalExitCapture`) | Wraps the current `sys.exit` and chains to it. Records the exit code and `SystemExit` only on the main thread; recording never changes how the process exits. | Restores the previous `sys.exit` only when `sys.exit` is still `pubrun`'s wrapper. |
+      @@ -559,21 +574,24 @@
+      +| `paused()` | Suspend recording in the calling thread | Yes (no-op) |
+      -| `subprocess.run(...)` | Tracked subprocess execution | Yes (falls back to subprocess) |
+      +| `subprocess.run(...)` / `subprocess.Popen(...)` | Tracked subprocess execution | Yes (falls back to subprocess) |
+      +| `__version__` | Installed package version string | N/A (attribute) |
+      +| `__commit__` | Commit SHA of the running build, read from packaged build metadata or live `HEAD` of a verified `pubrun` source checkout, or `None` when unknown (resolved on first access) | N/A (attribute) |
+      -| `report.checks.should_fail_strict(a, fail_on)` | Apply `--strict` / `--fail-on` thresholds | N/A (pure function) |
+      +| `report.checks.should_fail_strict(a, *, fail_on="warn")` | Apply `--strict` / `--fail-on` thresholds | N/A (pure function) |
+      @@ -588,6 +606,7 @@
+      +| `paused()` | Safe from any thread; suspends recording only in the calling thread. |
+      ```
+    - Outcome probe (`src/pubrun/tracker.py::Run.stop`, `Run._finalize_state`, `src/pubrun/core.py::_stop_for_exit`):
+      ```text
+      stop_in_except=completed unhandled_exception=failed sys_exit_3=failed tracked_run_keyboardinterrupt=interrupted tracked_run_systemexit0=completed
+      ```
+    - Coverage check lines:
+      ```text
+      api_summary_missing=[]
+      api_threading_missing=[]
+      api_hooks_missing=[]
+      ```
+    - V-06 grep check: `exit=1`
+  - Result: pass
 
-- [ ] V-07 validates E-07
+- [x] V-07 validates E-07
   - Required evidence: Pasted `git diff -- docs/manifest.md` hunks for the `subprocesses[].cwd` row, the new ``### `hardware.gpus[]` `` table (with `floating_point_precision` named as schema-only), the `| null` changes for `uid`, `gid`, `repo_root`, `commit`, `branch`, `dirty`, `peak_rss_bytes`, `end_rss_bytes`, and `peak_cpu_percent`, the `capture.file_provenance_available` row, and the reserved-keys note in `## Top-Level Fields`. Pasted coverage check line `manifest_reserved_missing=[]`. Pasted output of the command below showing `exit=1` (it matches lines 148, 170, 171, 269 to 272, and 413 to 415 before execution):
 
     ```sh
@@ -469,9 +807,55 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     ```
 
   - Observed evidence:
-  - Result: pending
+    - `git diff -- docs/manifest.md` (E-07 hunks):
+      ```diff
+      @@ -16,6 +16,10 @@
+      +The JSON Schema also defines `artifacts`, `determinism`, and `extensions`, which `pubrun` does not write (`[capture.determinism]` is not yet implemented). Every top-level key that `pubrun` writes has its own section below.
+      @@ -145,7 +156,7 @@
+      -| `cwd` | string | Working directory of the subprocess. |
+      +| `cwd` | string \| null | Working directory passed to the subprocess. The global spy records the `cwd=` argument passed to `subprocess.Popen` (else `null`) and `null` for `os.system`; the explicit `pubrun.subprocess` and `pubrun.popen` wrappers omit this key. |
+      @@ -167,8 +178,8 @@
+      -| `uid` | int | User ID (Unix only; `null` on Windows). |
+      -| `gid` | int | Group ID (Unix only; `null` on Windows). |
+      +| `uid` | int \| null | User ID (Unix only; `null` on Windows). |
+      +| `gid` | int \| null | Group ID (Unix only; `null` on Windows). |
+      @@ -266,10 +277,10 @@
+      -| `repo_root` | string | Absolute path to the git repository root directory. |
+      -| `commit` | string | Full 40-character SHA-1 commit hash. |
+      -| `branch` | string | Active branch name (e.g., `"main"`). |
+      -| `dirty` | bool | Whether there are uncommitted changes. |
+      +| `repo_root` | string \| null | Absolute path to the git repository root directory, or `null` when unavailable. |
+      +| `commit` | string \| null | Full 40-character SHA-1 commit hash, or `null` when unavailable. |
+      +| `branch` | string \| null | Active branch name (for example `"main"`), or `null` when unavailable or detached. |
+      +| `dirty` | bool \| null | Whether there are uncommitted changes, or `null` when unavailable or skipped. |
+      @@ -361,6 +372,18 @@
+      +### `hardware.gpus[]`
+      +
+      +| Field | Type | Description |
+      +|---|---|---|
+      +| `vendor` | string | `"NVIDIA"` from `nvidia-smi`, `"Generic"` from Windows WMI, or `"Apple / Generic"` from macOS `system_profiler`. |
+      +| `model` | string \| null | GPU model name. |
+      +| `memory_total_bytes` | int \| null | Dedicated GPU memory in bytes; `null` on macOS or when unavailable. |
+      +| `driver_version` | string \| null | GPU driver version string; absent on macOS. |
+      +| `clock_speed_mhz` | int | Present for `nvidia-smi` only when `[capture.hardware].capture_gpu_clock_speed = true`. |
+      +
+      +`schemas/manifest.schema.json` (`$defs.gpu_record`) also defines `floating_point_precision`, which `pubrun` never writes.
+      @@ -410,9 +433,9 @@
+      -| `peak_rss_bytes` | int | Peak resident set size (RAM) of the main process in bytes. |
+      -| `end_rss_bytes` | int | RSS of the main process at finalization. |
+      -| `peak_cpu_percent` | float | Peak CPU utilization percentage. |
+      +| `peak_rss_bytes` | int \| null | Peak resident set size (RAM) of the main process in bytes, or `null` when no positive sample was taken. |
+      +| `end_rss_bytes` | int \| null | RSS of the main process at finalization, or `null` when no positive sample was taken. |
+      +| `peak_cpu_percent` | float \| null | Peak CPU utilization percentage, or `null` when no positive sample was taken. |
+      @@ -511,9 +521,9 @@
+      -| `file_provenance_available` | bool | Whether file-open provenance was available (a run was active and `pubrun.open` was importable). Note: file I/O is only *recorded* if the user calls `pubrun.open()` — an empty `data_files` means "not used", not "unavailable". |
+      +| `file_provenance_available` | bool | Whether file-open provenance was available (a run was active and `pubrun.open` was importable). `data_files` is filled only by `pubrun.open()`, `pubrun.register_file()`, `pubrun.register_input()`, and `pubrun.register_output()`; an empty `data_files` section means none of those APIs were used, not that provenance was unavailable. |
+      ```
+    - Coverage check line: `manifest_reserved_missing=[]`
+    - V-07 grep check: `exit=1`
+  - Result: pass
 
-- [ ] V-08 validates E-08
+- [x] V-08 validates E-08
   - Required evidence: Pasted `git diff -- docs/architecture.md` hunks for the twelve Section 16 rows and the `api.md#api-summary` link, the Section 18 `sys.exit` hook entry and `pubrun show` change, and the Section 21 module, package, and CLI command bullets. Pasted coverage check lines `arch_api_missing=[]`, `arch_hooks_missing=[]`, `arch_cli_missing=[]`, and `arch_modules_missing=[]`. Pasted output of the command below showing `exit=1` (it matches lines 267 and 302 before execution):
 
     ```sh
@@ -479,7 +863,56 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
     ```
 
   - Observed evidence:
-  - Result: pending
+    - `git diff -- docs/architecture.md` (E-08 hunks):
+      ```diff
+      @@ -238,9 +256,23 @@
+      +| `paused()` | Context manager that suspends recording in the calling thread. |
+      +| `report()` | Save a structured JSON or text report into the run directory. |
+      +| `artifact()` | Save a raw text or binary file into the run directory. |
+      +| `print()` | Drop-in `print()` replacement that also appends to `stdout.log`. |
+      +| `open()` | Drop-in `open()` replacement with file provenance tracking. |
+      +| `register_file()` | Record provenance for an external file with an explicit role. |
+      +| `register_input()` | Convenience wrapper for `register_file(..., role="input")`. |
+      +| `register_output()` | Convenience wrapper for `register_file(..., role="output")`. |
+      +| `subprocess` | Explicit tracked subprocess wrappers (`subprocess.run()` and `subprocess.Popen()`). |
+      +| `popen()` | Drop-in `os.popen()` replacement with provenance tracking. |
+      +| `__version__` | Installed `pubrun` package version string. |
+      +| `__commit__` | Commit SHA of the running `pubrun` build, resolved lazily on first access. |
+      +
+      +See [API Reference: API Summary](api.md#api-summary) for signatures and inactive-run behavior.
+      @@ -263,8 +295,8 @@
+      -- **Independent cleanup and hook ownership:** ... `sys.excepthook`, `subprocess.Popen.__init__`, ...
+      -- **Honest consumers:** `pubrun report`, `pubrun inspect`, `pubrun methods`, and `pubrun status` ...
+      +- **Independent cleanup and hook ownership:** ... `sys.excepthook`, `sys.exit`, `subprocess.Popen.__init__`, ...
+      +- **Honest consumers:** `pubrun show` (and its hidden alias `report`), `pubrun inspect`, `pubrun methods`, and `pubrun status` ...
+      @@ -299,7 +331,22 @@
+      -- **Diagnostics Analyzer** (`pubrun report`) — Evaluates and renders execution metrics from manifests.
+      +- **Import Mode Submodules** (`auto.py`, `full.py`, `minimal.py`, `noauto.py`, `noconsole.py`, `nopatch.py`): Namespaced entry points that select an import preset before loading `pubrun.core`.
+      +- **CLI Entry Point** (`__main__.py`): Parses command-line arguments and dispatches every `pubrun` subcommand.
+      +- **Run Status and Lock Manager** (`status.py`): Inspects live processes via lock files and closes out crashed runs.
+      +- **Diff Engine Package** (`analysis/`): Implements structural manifest diffing and normalization rules.
+      +- **Reporting and Assessment Package** (`report/`): Implements post-hoc diagnostics, reproducibility checks, hydration, methods rendering, and meta snapshots.
+      +- **Interactive Dashboard Package** (`tui/`): Implements the optional Textual terminal user interface.
+      +- **Diagnostics Analyzer** (`pubrun show`, with hidden alias `report`): Evaluates and renders execution metrics from manifests.
+      +- **Reproducibility Inspector** (`pubrun inspect`): Assesses a completed run's reproducibility evidence and runs optional offline preflight checks.
+      +- **Environment Self-Check** (`pubrun self-check`): Checks the current machine for configuration, filesystem, and installation pitfalls.
+      +- **Overhead Benchmark Runner** (`pubrun bench`): Runs the overhead benchmark suite and detects HPC schedulers.
+      +- **Interactive Dashboard** (`pubrun ui`, with aliases `tui` and `gui`): Launches the interactive Textual dashboard.
+      +- **Project Initializer** (`pubrun init`): Creates an annotated `.pubrun.toml` configuration file in the current project.
+      +- **Log Interleaver** (`pubrun combined`): Interleaves `stdout.log` and `stderr.log` chronologically across one or more runs.
+      +- **Resource Chart Renderers** (`pubrun res`, `pubrun cpu`, `pubrun mem`): Render CPU and memory utilization charts over a run's lifecycle (`resources` is an alias of `res`).
+      +- **Citation Generator** (`pubrun cite`): Prints formatted academic citations for `pubrun`.
+      +- **Issue and Feedback Helpers** (`pubrun report-bug`, `pubrun feedback`): Print environment diagnostics and open links for bug reports or general feedback.
+      ```
+    - Coverage check lines:
+      ```text
+      arch_api_missing=[]
+      arch_hooks_missing=[]
+      arch_cli_missing=[]
+      arch_modules_missing=[]
+      ```
+    - V-08 grep check: `exit=1`
+  - Result: pass
 
 
 ## Approval and execution gate

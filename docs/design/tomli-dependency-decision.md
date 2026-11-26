@@ -16,12 +16,13 @@ This documents the decision and the data behind it.
 
 ## Current mechanism
 
-TOML is parsed in exactly four places, all trivial:
+TOML is parsed in five functions:
 
-- `src/pubrun/config.py:58` — `tomllib.loads(...)` (bundled default config)
-- `src/pubrun/config.py:85` — `tomllib.loads(...)` (user config)
-- `src/pubrun/config.py:86` — `tomllib.TOMLDecodeError` (error handling)
-- `src/pubrun/_config_boot.py:45` — `tomllib.load(f)` (boot-time config)
+- `src/pubrun/config.py::load_default_config`: loads the bundled default configuration.
+- `src/pubrun/config.py::_safe_load_toml`: loads user and local configuration files, including `TOMLDecodeError` handling.
+- `src/pubrun/_config_boot.py::_load_toml_file`: loads boot-time import-mode configuration (returns `None` when `tomli` is missing on Python 3.8-3.10).
+- `src/pubrun/__init__.py::_pyproject_declares_pubrun`: reads `pyproject.toml` while resolving `__commit__`, with a fallback parser when neither module imports.
+- `src/pubrun/report/checks.py::_config_file_findings`: inspects configuration files for `pubrun self-check` findings.
 
 The import is a standard stdlib-first / backport-fallback shim:
 
@@ -95,10 +96,11 @@ decline is not expected even after 3.10's October 2026 EOL.
 
 ## Honesty note (docs)
 
-The "zero runtime dependencies" claim is true on 3.11+ but not on 3.8–3.10. The README already
-qualifies this (`README.md:9`, `README.md:19`): *zero runtime dependencies on 3.11+; on 3.8–3.10
-the sole dependency is `tomli`, a backport of stdlib `tomllib`.* Keep that qualification wherever
-the zero-dependency claim appears.
+The "zero runtime dependencies" claim is true on 3.11+ but not on 3.8-3.10. The README qualifies
+this in footnote `[^1]`, in the note under `## Installation`, and in the "Zero runtime
+dependencies" bullet under `## Built to be Trustworthy`: *zero runtime dependencies on 3.11+; on
+3.8-3.10 the sole dependency is `tomli`, a backport of stdlib `tomllib`.* Keep that qualification
+wherever the zero-dependency claim appears.
 
 ## Revisit criteria
 

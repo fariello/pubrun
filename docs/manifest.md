@@ -16,6 +16,10 @@ The formal JSON Schema is at [`schemas/manifest.schema.json`](../schemas/manifes
 | `manifest_type` | string | Always `"pubrun-manifest"`. Distinguishes from `"pubrun-meta-snapshot"`. |
 | `meta_ref` | string \| null | Path to a parent `meta.json` for HPC hydration. `null` if not used. |
 
+Phase profiling (`[capture.profiling].enabled`) adds no top-level key to `manifest.json`. Each profiled phase writes `profile-<phase>.prof` in the run directory and emits a `profile_saved` event with the file name in `events.jsonl`.
+
+The JSON Schema also defines `artifacts`, `determinism`, and `extensions`, which `pubrun` does not write (`[capture.determinism]` is not yet implemented). Every top-level key that `pubrun` writes has its own section below.
+
 ---
 
 ## `run`
@@ -103,13 +107,18 @@ What was run and how.
 
 ### `invocation.script`
 
+When `sys.argv[0]` is not an existing file (for example `python -c`), `script` is `{}`. Otherwise:
+
 | Field | Type | Description |
 |---|---|---|
-| `path` | string | Absolute path to the entry-point script. |
+| `path` | string | Entry-point script path from `sys.argv[0]` as given (may be relative). |
+| `real_path` | string | Resolved absolute path to the entry-point script. |
 | `basename` | string | Filename only. |
 | `size` | int | File size in bytes. |
 | `mtime` | float | Last modification time (POSIX epoch float). |
-| `sha256` | string | SHA-256 hash of the file contents. |
+| `ctime` | float | Metadata change or creation time (POSIX epoch float). |
+| `sha256` | string | SHA-256 hash of the file contents, computed only for scripts up to 1,048,576 bytes. Omitted for larger scripts. |
+| `sha256_skipped` | string | Present only when the script exceeds 1,048,576 bytes, set to `"file exceeds 1MB"` instead of `sha256`. Not yet defined in `schemas/manifest.schema.json`. |
 
 ---
 
@@ -120,15 +129,17 @@ Console capture metadata.
 | Field | Type | Description |
 |---|---|---|
 | `capture_mode` | string | `"off"`, `"basic"`, `"standard"`, or `"deep"`. |
-| `stdout` | object | `{"path": "stdout.log", "lines_captured": N}`. |
-| `stderr` | object | `{"path": "stderr.log", "lines_captured": N}`. |
+| `stdout` | object | `{"captured": bool, "path": string \| null, "lines_captured": int \| null}`. |
+| `stderr` | object | `{"captured": bool, "path": string \| null, "lines_captured": int \| null}`. |
+| `combined` | object | `{"captured": bool, "path": string \| null, "lines_captured": int \| null}`. Always `{"captured": false, "path": null, "lines_captured": null}`, because `pubrun` writes only the split logs. |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
 In the startup manifest (written before the run finishes) the `console` section is already
 self-describing: it carries the resolved `capture_mode` plus `capture_state.status = "pending"`. When
-the run finishes it is rewritten with the final result and `capture_state.status = "complete"`. It is
-never emitted as an empty object, so a consumer reading a run before it finishes can tell "not finalized
-yet" (`pending`) from a genuine `"off"` result.
+the run finishes, `capture_state.status` is updated to `"complete"`, `"partial"` (with detail
+`"console log write failed during execution"`), or `"failed"` (when the interceptor could not start).
+It is never emitted as an empty object, so a consumer reading a run before it finishes can tell "not
+finalized yet" (`pending`) from a genuine `"off"` result.
 
 ---
 
@@ -145,7 +156,7 @@ Array of subprocess records. Each element:
 | `duration_clock` | string \| null | Optional. `"monotonic"` when `elapsed_seconds` is present. Absent on records written before monotonic subprocess timing. |
 | `pid` | int \| null | Optional. Written by the explicit wrappers only: the process ID for `pubrun.subprocess.Popen`, `null` for `pubrun.subprocess.run()`, `pubrun.popen()`, and failed launches. |
 | `error` | string \| null | Optional. Bounded, redacted error detail when an explicit wrapper's launch failed. |
-| `cwd` | string | Working directory of the subprocess. |
+| `cwd` | string \| null | Working directory passed to the subprocess. The global spy records the `cwd=` argument passed to `subprocess.Popen` (else `null`) and `null` for `os.system`; the explicit `pubrun.subprocess` and `pubrun.popen` wrappers omit this key. |
 | `exit_code` | int \| null | Exit code, or `null` when `pubrun` did not observe the exit. |
 | `capture_state` | object | `"complete"` for exit code 0, `"failed"` for a nonzero exit code or a failed launch (with a redacted `detail`), and `"partial"` with a `detail` while the process runs, when `pubrun` did not observe its exit by finalization, or when its exit status is unavailable. See [Capture State](#capture-state). |
 
@@ -167,8 +178,8 @@ Process-level metadata.
 | Field | Type | Description |
 |---|---|---|
 | `username` | object | `{"representation": "plain", "value": "username"}`. May be `"redacted"`. |
-| `uid` | int | User ID (Unix only; `null` on Windows). |
-| `gid` | int | Group ID (Unix only; `null` on Windows). |
+| `uid` | int \| null | User ID (Unix only; `null` on Windows). |
+| `gid` | int \| null | Group ID (Unix only; `null` on Windows). |
 
 ---
 
@@ -183,7 +194,7 @@ Python runtime environment.
 | `implementation` | string | `"cpython"`, `"pypy"`, etc. |
 | `prefix` | string | `sys.prefix`. |
 | `base_prefix` | string | `sys.base_prefix`. Differs from `prefix` inside a virtual environment. |
-| `virtual_env` | string \| null | Path to the active virtual environment, or `null`. |
+| `virtual_env` | string \| null | Literal string `"venv"` when Python runs in a virtual environment (`sys.prefix` differs from `sys.base_prefix`, or `sys.real_prefix` exists), else `null`; it never holds a path. Use `prefix` for the path, and `environment_kind` and `in_venv` for environment classification. |
 | `sys_path` | list[string] | The Python module search path. |
 | `environment_kind` | string | `"venv"`, `"conda"`, `"virtualenv"`, `"system"`, or `"frozen"` — a non-identifying classification (no path). |
 | `in_venv` | bool | Whether `sys.prefix != sys.base_prefix` (PEP 405). |
@@ -266,10 +277,10 @@ Git repository state.
 
 | Field | Type | Description |
 |---|---|---|
-| `repo_root` | string | Absolute path to the git repository root directory. |
-| `commit` | string | Full 40-character SHA-1 commit hash. |
-| `branch` | string | Active branch name (e.g., `"main"`). |
-| `dirty` | bool | Whether there are uncommitted changes. |
+| `repo_root` | string \| null | Absolute path to the git repository root directory, or `null` when unavailable. |
+| `commit` | string \| null | Full 40-character SHA-1 commit hash, or `null` when unavailable. |
+| `branch` | string \| null | Active branch name (for example `"main"`), or `null` when unavailable or detached. |
+| `dirty` | bool \| null | Whether there are uncommitted changes, or `null` when unavailable or skipped. |
 | `remote_url` | object | A `redacted_value` object containing the remote URL. |
 | `capture_state` | object | See [Capture State](#capture-state). Records `"timeout"` when `[capture.git].timeout` or `[capture.git].total_timeout` expires before `repo_root` is determined, or `"partial"` when a subsequent query (`HEAD`, branch, `status --porcelain`, or `remote get-url origin`) times out or is skipped after budget exhaustion. |
 
@@ -361,6 +372,18 @@ Physical hardware details.
 | `logical_cores` | int | Number of logical CPU cores. |
 | `architecture` | string | CPU architecture (e.g., `"x86_64"`, `"aarch64"`). |
 
+### `hardware.gpus[]`
+
+| Field | Type | Description |
+|---|---|---|
+| `vendor` | string | `"NVIDIA"` from `nvidia-smi`, `"Generic"` from Windows WMI, or `"Apple / Generic"` from macOS `system_profiler`. |
+| `model` | string \| null | GPU model name. |
+| `memory_total_bytes` | int \| null | Dedicated GPU memory in bytes; `null` on macOS or when unavailable. |
+| `driver_version` | string \| null | GPU driver version string; absent on macOS. |
+| `clock_speed_mhz` | int | Present for `nvidia-smi` only when `[capture.hardware].capture_gpu_clock_speed = true`. |
+
+`schemas/manifest.schema.json` (`$defs.gpu_record`) also defines `floating_point_precision`, which `pubrun` never writes.
+
 ---
 
 ## `host`
@@ -410,9 +433,9 @@ Runtime resource utilization, sampled by a background thread.
 | Field | Type | Description |
 |---|---|---|
 | `scope` | string | `"process"` or `"tree"`. Indicates measurement scope. |
-| `peak_rss_bytes` | int | Peak resident set size (RAM) of the main process in bytes. |
-| `end_rss_bytes` | int | RSS of the main process at finalization. |
-| `peak_cpu_percent` | float | Peak CPU utilization percentage. |
+| `peak_rss_bytes` | int \| null | Peak resident set size (RAM) of the main process in bytes, or `null` when no positive sample was taken. |
+| `end_rss_bytes` | int \| null | RSS of the main process at finalization, or `null` when no positive sample was taken. |
+| `peak_cpu_percent` | float \| null | Peak CPU utilization percentage, or `null` when no positive sample was taken. |
 | `peak_tree_rss_bytes` | int \| null | Peak RSS summed across the process tree (only when `scope = "tree"`). |
 | `end_tree_rss_bytes` | int \| null | Tree RSS at finalization (only when `scope = "tree"`). |
 | `peak_tree_cpu_percent` | float \| null | Peak CPU% summed across the process tree (only when `scope = "tree"`; Linux-only). Computed from summed CPU-time deltas over the sample interval — **"% of one core"**, so it may exceed 100% on multiple cores (not clamped). `null` where unmeasured. Per-sample `tree_cpu_percent` is also emitted to `events.jsonl` for avg/min/max. |
@@ -489,19 +512,6 @@ timestamps, or a change after pubrun's last observation goes undetected.
 
 ---
 
-## `profiling`
-
-Phase-scoped profiling metadata (only present when `[capture.profiling].enabled = true`).
-
-| Field | Type | Description |
-|---|---|---|
-| `enabled` | bool | Whether profiling was active for this run. |
-| `backend` | string | `"cprofile"` or `"yappi"`. |
-| `profiles` | list[object] | Per-phase profile records: `{"phase": "name", "path": "profile-name.prof"}`. |
-| `capture_state` | object | See [Capture State](#capture-state). |
-
----
-
 ## `capture`
 
 Run-level capture metadata.
@@ -511,9 +521,9 @@ Run-level capture metadata.
 | `output_base_dir` | string | The base output directory (e.g., `"./runs"`). |
 | `run_dir` | string | Full path to this run's directory. |
 | `event_stream_enabled` | bool | Whether `events.jsonl` was active. |
-| `console_capture_mode` | string | The effective console mode for this run. |
+| `console_capture_mode` | string | The configured `[console].capture_mode` (default `"off"`), read before import-mode forcing (`full`, `noconsole`) and the Jupyter and non-TTY guards. The mode actually used is `console.capture_mode`. |
 | `subprocesses_enabled` | bool | Whether the subprocess spy was installed for this run. Lets tooling distinguish "subprocess tracking was OFF" from "on but no subprocesses ran" (an empty `subprocesses` list is otherwise ambiguous). |
-| `file_provenance_available` | bool | Whether file-open provenance was available (a run was active and `pubrun.open` was importable). Note: file I/O is only *recorded* if the user calls `pubrun.open()` — an empty `data_files` means "not used", not "unavailable". |
+| `file_provenance_available` | bool | Whether file-open provenance was available (a run was active and `pubrun.open` was importable). `data_files` is filled only by `pubrun.open()`, `pubrun.register_file()`, `pubrun.register_input()`, and `pubrun.register_output()`; an empty `data_files` section means none of those APIs were used, not that provenance was unavailable. |
 | `capture_state` | object | See [Capture State](#capture-state). Reports `{"status": "complete"}` when every enabled section succeeded, or `{"status": "partial", "detail": "capture degraded in: <sorted failed sections>"}` whenever any section failed (covering both escaping exceptions recorded in `errors.records` and self-caught engine returns whose own `capture_state.status` is `"failed"`). |
 
 ---
@@ -555,7 +565,7 @@ Run outcome.
 
 | Field | Type | Description |
 |---|---|---|
-| `outcome` | string | `"completed"`, `"failed"`, `"interrupted"`, `"ghost"`, or `"unknown"`. `"interrupted"` indicates the run received a termination signal (SIGINT, SIGTERM, or SIGHUP). |
+| `outcome` | string | Values written by `pubrun`: `"running"` (startup and in-progress manifests), `"completed"`, `"failed"`, `"interrupted"`, and `"ghost"`. `pubrun status` and `pubrun show` also write `"crashed"` into an existing run directory when they find a stale lock file; `"crashed"` is not yet in the schema enum. `"partial"` and `"unknown"` are in the schema enum, but `pubrun` never writes them; readers display `"unknown"` when the field is missing. See [`pubrun.stop()`](api.md#pubrunstop) for the outcome classification rules. |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
 > [!NOTE]
@@ -597,10 +607,17 @@ Sensitive values use a standard `redacted_value` object:
 {"representation": "redacted"}
 ```
 
-**Hashed (if configured):**
+**Hashed (when `[redaction].representation = "hashed"`):**
 ```json
-{"representation": "hashed", "value": "sha256:a1b2c3d4..."}
+{"representation": "hashed", "hash_algorithm": "sha256", "hash_value": "<64 hex characters>"}
 ```
+
+**Unavailable (when no value exists, for example `git.remote_url` with no remote):**
+```json
+{"representation": "unavailable"}
+```
+
+`schemas/manifest.schema.json` (`$defs.redacted_value`) also allows `"suppressed"`, which `pubrun` never writes, and describes a hashed value as `{"representation": "hashed", "hash": {"algorithm": "...", "value": "..."}}` with `additionalProperties: false`. A hashed value written by the current code (`hash_algorithm` and `hash_value`) therefore does not validate against the schema. Reconciling the schema and runtime format is deferred to a separate schema-contract update.
 
 ---
 
@@ -643,17 +660,18 @@ While a run is active, a `.pubrun.lock` JSON file exists in the run directory. I
 
 ## Meta Snapshot
 
-The `pubrun meta` command generates a similar JSON structure, but with `manifest_type` set to `"pubrun-meta-snapshot"` instead of `"pubrun-manifest"`. Meta snapshots contain only environment-level data (hardware, python, packages, git, environment, host) and do not include run-specific fields (timing, invocation, status, etc.).
+The `pubrun meta` command generates a similar JSON structure, with `manifest_type` set to `"pubrun-meta-snapshot"` instead of `"pubrun-manifest"`. A snapshot holds `manifest_type`, `timing.started_at_utc` (used for the parent-age check during hydration), `hardware`, `python`, `packages`, `git`, `environment`, and `host`, and omits `schema_version`, `process`, `invocation`, `status`, `console`, and `resources`.
 
 ### Inheritance from a parent snapshot (`meta_ref`)
 
 A child manifest's top-level `meta_ref` names a parent snapshot, resolved relative to the
-child's run directory. Report commands (`pubrun inspect`, `pubrun show`, `pubrun methods`, the
-TUI) apply the parent at **report time**:
+child's run directory. Report and analysis callers (`pubrun show` and its hidden alias `report`,
+`pubrun inspect`, `pubrun methods`, `pubrun rerun`, `pubrun diff`, `pubrun res`, `pubrun cpu`,
+`pubrun mem`, the TUI, and `pubrun.diff()`) apply the parent at **report time**:
 
 - **No change on disk:** hydration builds an in-memory copy. `manifest.json` is never
   rewritten, so the recorded file always shows what the child itself captured.
-- **What is filled:** the hydrable sections `hardware`, `process`, `python`, `packages`,
+- **What is filled:** the hydrable sections `hardware`, `host`, `process`, `python`, `packages`,
   `environment`, and `git`, and only when the child section is missing or its capture status is
   `suppressed`, `off`, `unavailable`, `unknown`, or `partial`. A section the child captured
   directly is never replaced.

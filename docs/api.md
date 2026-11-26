@@ -72,7 +72,7 @@ Begins tracking. Returns the active `Run` instance. API overrides always take th
 ```python
 import pubrun
 
-tracker = pubrun.start(profile="deep", output_dir="./custom_storage")
+tracker = pubrun.start(output_dir="./custom_storage", console={"capture_mode": "standard"})
 
 # ... do work ...
 
@@ -82,9 +82,9 @@ pubrun.stop()
 **Override syntax:** For convenience, common `[core]` keys can be passed as flat kwargs:
 
 ```python
-pubrun.start(profile="deep")                    # Equivalent to core={"profile": "deep"}
-pubrun.start(output_dir="./runs")               # Equivalent to core={"output_dir": "./runs"}
-pubrun.start(core={"profile": "deep"})          # Explicit nested form also works
+pubrun.start(output_dir="./runs")                      # Equivalent to core={"output_dir": "./runs"}
+pubrun.start(core={"output_dir": "./runs"})            # Explicit nested form also works
+pubrun.start(capture={"file_io": {"level": "hash"}})   # Any other section uses a nested dict
 ```
 
 **Timing:** `start()` creates the `Run`, which records `started_at_utc` and begins timing `pubrun`'s own startup capture. When startup capture and the startup manifest write finish, the run records `workload_started_at_utc`; the gap is reported as `timing.startup_overhead_seconds`. Everything your code does from that point until `stop()` is the tracked workload (`timing.workload_seconds`). Durations are measured with the monotonic clock `time.perf_counter()`, so they stay correct if the system clock changes during the run.
@@ -92,10 +92,10 @@ pubrun.start(core={"profile": "deep"})          # Explicit nested form also work
 > [!IMPORTANT]
 > `pubrun` measures the **tracked interval**, not the whole process lifetime. If you import `pubrun` (auto mode) or call `start()` partway through a script, any work done before that point, including interpreter startup and earlier imports, is not included in any `timing` duration. Each manifest records this as `timing.interval_scope = "tracked_interval"`.
 
-Flat shortcuts: `profile`, `output_dir`, `auto_start`, `meta_ref`. All other overrides use nested dicts matching the TOML structure (e.g., `console={"capture_mode": "off"}`).
+Flat shortcuts: `output_dir`, `auto_start`, `meta_ref`, and `profile`. `profile` is accepted only for compatibility, changes nothing, and records a `profile_deprecated` entry in the manifest's `config.notices` when set to a non-default value (it is never raised). All other overrides use nested dicts matching the TOML structure (for example `console={"capture_mode": "off"}`).
 
 > [!NOTE]
-> If both flat and nested forms are passed for the same key, the flat shortcut wins: `start(core={"profile": "minimal"}, profile="deep")` results in `profile = "deep"`.
+> If both flat and nested forms are passed for the same key, the flat shortcut wins: `start(core={"output_dir": "./a"}, output_dir="./b")` results in `output_dir = "./b"`.
 
 **Partial capture versus narrow ghost mode:**
 - If an individual capture engine fails during `start()`, `pubrun` isolates that failure to the affected section (`capture_state.status = "failed"` with a bounded redacted `detail`), appends a `"capture-error"` entry to `errors.records` (up to `MAX_CAPTURE_ERRORS = 50`), sets `capture.capture_state.status = "partial"`, and keeps all other capture active without affecting host execution.
@@ -108,10 +108,11 @@ Finalizes the active run: writes the manifest, closes log files, and resets inte
 
 `stop()` decrements `ref_count` and finalizes only when `ref_count` reaches zero. Repeated `stop()` calls (and the `atexit` safety net) are idempotent and never rewrite already-finalized artifacts. Every teardown step runs independently so a failure in one cleanup step never skips restoring other hooks, unregistering `atexit`, writing artifacts, or clearing `get_current_run()`. Calling `stop()` on a ghost run preserves `outcome = "ghost"` and clears the active run reference when `ref_count` reaches zero.
 
-The run outcome is determined automatically:
-- `"completed"` — Normal exit, no termination signals received.
-- `"failed"` — An unhandled exception occurred (set by `tracked_run` / `audit_run`).
-- `"interrupted"` — The process received SIGINT, SIGTERM, or SIGHUP during execution (even if user code caught `KeyboardInterrupt`).
+The run outcome depends on how the run ends:
+- **Explicit `pubrun.stop()`:** records `"completed"`, even when called inside an `except` block, unless the run is already `"failed"` or `"ghost"`, in which case that existing outcome is kept.
+- **`tracked_run()` and `audit_run()`:** classify the exception leaving the block or call. No exception, `SystemExit(0)`, or `SystemExit(None)` gives `"completed"`; `KeyboardInterrupt` gives `"interrupted"`; any other exception or non-zero `SystemExit` (including `SystemExit(True)`) gives `"failed"`.
+- **Interpreter-exit finalization (no explicit stop):** classifies the recorded exit. A `KeyboardInterrupt` gives `"interrupted"`; a non-zero exit code (for example `sys.exit(3)`) or an unhandled exception other than `SystemExit` gives `"failed"`; anything else gives `"completed"`.
+- **Signal override:** after classification, a `"completed"` run that received `SIGINT`, `SIGTERM`, or `SIGHUP` becomes `"interrupted"`.
 - `"ghost"`: The run entered ghost mode because run output was unusable at startup.
 
 ```python
@@ -169,6 +170,8 @@ enabled = true
 on_inactive_annotate = "ignore"
 ```
 
+Despite its name, `on_inactive_annotate` governs all seven functions that handle inactive calls: `annotate()`, `phase()`, `report()`, `artifact()`, `register_file()`, `register_input()`, and `register_output()`.
+
 ---
 
 ## 4. Phase Timing
@@ -194,7 +197,7 @@ This emits `phase_start` and `phase_end` events with timing metadata. The `phase
 
 Phase durations are measured inside the tracked workload; they are not subtracted from or added to `timing.workload_seconds`.
 
-Phase calls are safe to use even without an active run — they become silent no-ops.
+Without an active run, `phase()` times nothing and writes no event. Entering the block follows `[events].on_inactive_annotate`: `"ignore"` (default) does nothing, `"warn"` logs a warning, and `"error"` raises `RuntimeError`.
 
 ### `pubrun.paused() → ContextManager`
 
@@ -236,7 +239,7 @@ engines).
 
 ### `pubrun.tracked_run(**overrides) → ContextManager`
 
-A context manager that wraps `start()` and `stop()` for you. If an exception occurs, the run is finalized with `outcome = "failed"`.
+A context manager that wraps `start()` and `stop()` for you. When the block exits, the run outcome follows the classification rules under [`pubrun.stop()`](#pubrunstop).
 
 ```python
 from pubrun import tracked_run
@@ -253,10 +256,17 @@ A decorator that wraps an entire function in a tracked run. The function's retur
 ```python
 from pubrun import audit_run
 
-@audit_run(profile="basic")
+@audit_run(console={"capture_mode": "standard"})
 def entrypoint():
     train_model()
     return results
+```
+
+The decorator also works bare without parentheses, using the resolved configuration:
+
+```python
+@audit_run
+def entrypoint(): ...
 ```
 
 > [!NOTE]
@@ -410,9 +420,11 @@ reader or writer and does not patch `builtins.open`. The record goes into
     *   `defer`: for outputs, record a `pending` entry now and inspect the file later
         (on a post-creation registration or at run finalization).
     *   `metadata`: optional JSON-serializable dict stored on the record.
-*   **Return value**: the recorded provenance dict, or `None` when no run is active or
-    the effective level is `"none"`. Invalid arguments raise `ValueError`/`TypeError`
-    even without an active run.
+*   **Return value**: the recorded provenance dict, or `None` when the effective level is
+    `"none"` or when no run is active under `"ignore"` or `"warn"`. A call without an active
+    run follows `[events].on_inactive_annotate`, so `"warn"` logs a warning before returning
+    `None` and `"error"` raises `RuntimeError` instead of returning `None`. Invalid arguments
+    raise `ValueError`/`TypeError` even without an active run.
 
 Registering an output that does not exist yet is allowed and records
 `registered_before_creation = true` with `hash_status = "pending"`; the entry is completed
@@ -482,6 +494,7 @@ When global hooks are permitted by the active import mode and enabled in configu
 | `faulthandler` (`ConsoleInterceptor`) | Checks `faulthandler.is_enabled()` before touching it; enables `faulthandler` on `stderr.log` only when previously disabled. | Calls `faulthandler.disable()` (before closing `stderr.log`) only when `pubrun` enabled it. A pre-existing user or test-runner `faulthandler` remains enabled. |
 | OS signal handlers (`SignalExitCapture`) | Records each installed shim and chains to the prior handler. Rolls back registered shims on unexpected install errors. | Restores each signal only when `signal.getsignal(signum)` is still `pubrun`'s shim. Deactivated shims left under a later third-party handler pass signals through passively without recording or calling `_finalize_active_run()`. |
 | `sys.excepthook` (`SignalExitCapture`) | Captures the prior `sys.excepthook` in a local closure and redacts sensitive values in captured exception messages. | Restores `sys.excepthook` only when it is still `pubrun`'s wrapper. If a third-party hook wraps `pubrun`, `pubrun`'s deactivated wrapper forwards passively to the closure-captured prior hook. |
+| `sys.exit` (`SignalExitCapture`) | Wraps the current `sys.exit` and chains to it. Records the exit code and `SystemExit` only on the main thread; recording never changes how the process exits. | Restores the previous `sys.exit` only when `sys.exit` is still `pubrun`'s wrapper. |
 | `subprocess.Popen.__init__`, `subprocess.Popen.wait`, `subprocess.Popen.poll`, `subprocess.Popen.__del__`, and `os.system` (`SubprocessSpy`) | Snapshots live targets at `install()`, chains to pre-existing wrappers, tags spawned processes with install-generation state, and rolls back already-patched targets if a later patch fails. | Verifies caller ownership token when set, marks the generation inactive first, and restores each target independently only when it still matches `pubrun`'s installed wrapper. Any wrapper left beneath a later third-party wrapper passes calls through passively without recording. |
 
 ---
@@ -536,9 +549,11 @@ command, installs or fetches anything, or changes files, environment variables, 
 seeds. `check_hashes=False` skips file digests. The function never raises on malformed input;
 it reports what it could not evaluate.
 
-The CLI additionally merges canonical `file_provenance_*` finding codes into the
-`inputs_outputs` category, so `pubrun inspect --json` can list file-provenance findings that a
-direct `assess_run()` call does not.
+`assess_run()` itself reports the five `file_provenance_*` finding codes
+(`file_provenance_changed`, `file_provenance_hash_failed`, `file_provenance_over_budget`,
+`file_provenance_asserted_only`, and `file_provenance_unverified_paths`) in the
+`inputs_outputs` category. `pubrun inspect --json` calls the same assessment function, so
+both return the same findings for the same inputs.
 
 ### `pubrun.report.checks.should_fail_strict(assessment, *, fail_on="warn") → bool`
 
@@ -559,21 +574,24 @@ other `fail_on` value raises `ValueError`.
 | `stop()` | Finalize active run | Yes (silent no-op) |
 | `get_current_run()` | Access active `Run` instance | Yes (returns `None`) |
 | `annotate(msg, **kw)` | Inject custom events | Yes (configurable) |
-| `phase(name)` | Time a named code region | Yes (silent no-op) |
+| `phase(name)` | Time a named code region | Yes (configurable) |
+| `paused()` | Suspend recording in the calling thread | Yes (no-op) |
 | `report(name, data)` | Save structured custom report | Yes (configurable) |
 | `artifact(filename, content)` | Save a file inside the run directory | Yes (configurable) |
 | `print(*args, **kw)` | Print + log to stdout.log | Yes (falls back to print) |
 | `open(file, mode, **kw)` | File I/O with provenance | Yes (falls back to open) |
-| `register_file(path, role, ...)` | Record an external file read or written elsewhere | Yes (returns `None`) |
-| `register_input(path, ...)` | `register_file` with `role="input"` | Yes (returns `None`) |
-| `register_output(path, ...)` | `register_file` with `role="output"` | Yes (returns `None`) |
-| `subprocess.run(...)` | Tracked subprocess execution | Yes (falls back to subprocess) |
+| `register_file(path, role, ...)` | Record an external file read or written elsewhere | Yes (configurable; returns `None`) |
+| `register_input(path, ...)` | `register_file` with `role="input"` | Yes (configurable; returns `None`) |
+| `register_output(path, ...)` | `register_file` with `role="output"` | Yes (configurable; returns `None`) |
+| `subprocess.run(...)` / `subprocess.Popen(...)` | Tracked subprocess execution | Yes (falls back to subprocess) |
 | `popen(cmd)` | Tracked os.popen replacement | Yes (falls back to popen) |
 | `tracked_run(**kw)` | Context manager lifecycle | N/A (creates run) |
 | `audit_run(**kw)` | Decorator lifecycle | N/A (creates run) |
 | `diff(a, b, ignores)` | Compare two runs | N/A (reads files) |
+| `__version__` | Installed package version string | N/A (attribute) |
+| `__commit__` | Commit SHA of the running build, read from packaged build metadata or live `HEAD` of a verified `pubrun` source checkout, or `None` when unknown (resolved on first access) | N/A (attribute) |
 | `report.checks.assess_run(manifest, ...)` | Post-hoc reproducibility assessment (optional offline preflight) | N/A (reads a manifest) |
-| `report.checks.should_fail_strict(a, fail_on)` | Apply `--strict` / `--fail-on` thresholds | N/A (pure function) |
+| `report.checks.should_fail_strict(a, *, fail_on="warn")` | Apply `--strict` / `--fail-on` thresholds | N/A (pure function) |
 | `report.utils.hydrate_manifest_with_report(path, m)` | In-memory `meta_ref` parent hydration with a report | N/A (reads files) |
 
 ---
@@ -588,6 +606,7 @@ other `fail_on` value raises `ValueError`.
 | `stop()` | **Main thread only.** Finalizes engines and writes artifacts. |
 | `annotate()` | Safe from any thread. |
 | `phase()` | Safe from any thread. |
+| `paused()` | Safe from any thread; suspends recording only in the calling thread. |
 | `report()` | Safe from any thread. |
 | `artifact()` | Safe from any thread. |
 | `get_current_run()` | Safe from any thread (read-only). |
