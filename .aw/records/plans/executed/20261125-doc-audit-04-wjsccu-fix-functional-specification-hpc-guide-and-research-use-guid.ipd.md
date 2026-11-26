@@ -6,7 +6,7 @@
 - Scope: `docs/functional_spec.md`, `docs/hpc.md`, and `docs/research-use.md`.
 - Scope-Paths: docs/functional_spec.md, docs/hpc.md, docs/research-use.md
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix HPC meta_ref and inspect/res attribution, research-use input claims, and functional_spec.md CLI and behavior drift
@@ -17,12 +17,12 @@
 - Highest E allocated: 06
 - Author: Antigravity
 - Id: wjsccu
-- Approval: 2026-11-26, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-26 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: wjsccu verified (set doc-audit, attempt 1).
 - 2026-11-26 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Gemini 4 Neon, Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001..PR-009 all FIXED; review record `.aw/records/reviews/20261125-doc-audit-04-wjsccu-fix-functional-specification-hpc-guide-and-research-use-guid.review.md`.
 - 2026-11-25 to-review (aw set): Authored from /assess-documentation
