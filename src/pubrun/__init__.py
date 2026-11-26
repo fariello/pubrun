@@ -11,7 +11,7 @@ Usage
 
     import pubrun
 
-    tracker = pubrun.start(profile="deep")
+    tracker = pubrun.start(capture={"hardware": {"depth": "deep"}})
     pubrun.annotate("loading_datasets", batches=400, mode="lazy")
 
     with pubrun.phase("gradient_descent"):
@@ -21,7 +21,7 @@ Usage
 
 3. Decorator::
 
-    @pubrun.audit_run(profile="basic")
+    @pubrun.audit_run(capture={"hardware": {"depth": "basic"}})
     def evaluate_node():
         ...
 

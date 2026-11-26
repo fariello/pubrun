@@ -199,7 +199,7 @@ def start(**kwargs: Any) -> Run:
         - ``run.started_at_utc`` (float): POSIX start timestamp.
 
     Example:
-        >>> tracker = pubrun.start(profile="deep")
+        >>> tracker = pubrun.start(capture={"hardware": {"depth": "deep"}})
         >>> tracker.stop()
     """
     is_ghost_or_inactive = False
@@ -341,7 +341,7 @@ def audit_run(func: Optional[Callable] = None, **kwargs: Any) -> Callable:
         **kwargs: Configuration overrides forwarded to ``start()``.
 
     Example:
-        >>> @pubrun.audit_run(profile="deep")
+        >>> @pubrun.audit_run(capture={"hardware": {"depth": "deep"}})
         ... def train():
         ...     model.fit()
     """
@@ -371,7 +371,7 @@ class tracked_run:
         **kwargs: Configuration overrides forwarded to ``start()``.
 
     Example:
-        >>> with pubrun.tracked_run(profile="minimal"):
+        >>> with pubrun.tracked_run(capture={"packages": {"mode": "off"}}):
         ...     model.train(epochs=5)
     """
     def __init__(self, **kwargs: Any) -> None:

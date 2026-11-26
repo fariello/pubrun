@@ -62,15 +62,15 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Replace deprecated `profile=` examples in Python docstrings
 
-- [ ] E-01 Update the module docstring examples in `src/pubrun/__init__.py`:
+- [x] E-01 Update the module docstring examples in `src/pubrun/__init__.py`:
   - Under `2. Explicit control::`, replace `tracker = pubrun.start(profile="deep")` with `tracker = pubrun.start(capture={"hardware": {"depth": "deep"}})`.
   - Under `3. Decorator::`, replace `@pubrun.audit_run(profile="basic")` with `@pubrun.audit_run(capture={"hardware": {"depth": "basic"}})`.
   - Leave all other docstring text and all executable code in `src/pubrun/__init__.py` unchanged.
   - Depends on: none
   - Expected outcome: `src/pubrun/__init__.py` contains zero `profile=` examples, shows valid `capture.*` overrides in both usage blocks, and has zero runtime code changes.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update the public API docstring examples in `src/pubrun/core.py`:
+- [x] E-02 Update the public API docstring examples in `src/pubrun/core.py`:
   - In `start()`'s `Example:` block, replace `>>> tracker = pubrun.start(profile="deep")` with `>>> tracker = pubrun.start(capture={"hardware": {"depth": "deep"}})`.
   - In `audit_run()`'s `Example:` block, replace `>>> @pubrun.audit_run(profile="deep")` with `>>> @pubrun.audit_run(capture={"hardware": {"depth": "deep"}})`.
   - In `tracked_run()`'s `Example:` block, replace `>>> with pubrun.tracked_run(profile="minimal"):` with `>>> with pubrun.tracked_run(capture={"packages": {"mode": "off"}}):`.
@@ -78,28 +78,28 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Leave all executable code in `src/pubrun/core.py` unchanged.
   - Depends on: none
   - Expected outcome: `start()`, `audit_run()`, and `tracked_run()` in `src/pubrun/core.py` contain zero `profile=` examples, show valid `capture.*` overrides, and introduce zero executable code changes.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Replace deprecated profile comments in `default.toml`
 
-- [ ] E-03 Update the configuration header comments in `src/pubrun/resources/default.toml`:
+- [x] E-03 Update the configuration header comments in `src/pubrun/resources/default.toml`:
   - Under `# Resolution Order (highest to lowest precedence):`, replace `#   1. Explicit API arguments (e.g., pubrun.start(profile="deep"))` with `#   1. Explicit API arguments (e.g., pubrun.start(capture={"hardware": {"depth": "deep"}}))`.
   - Under `# Resolution Order (highest to lowest precedence):`, replace `#   2. Environment variables (e.g., PUBRUN_PROFILE="deep")` with `#   2. Environment variables (e.g., PUBRUN_IMPORT_MODE="noauto", PUBRUN_META_REF="path.json")`.
   - Under `[capture]`, replace `# Each category can override the master profile.` with `# Each category controls its own capture depth independently.` so the `[capture]` comment agrees with the `[core]` deprecation notice.
   - Keep the `[core]` key `profile = "default"` and its deprecation comment block unchanged so `src/pubrun/config.py::load_default_config`, `resolve_config`, and `profile_deprecation_notice` retain backward compatibility.
   - Depends on: none
   - Expected outcome: `src/pubrun/resources/default.toml` contains zero `profile=`, `PUBRUN_PROFILE=`, or `master profile` examples, parses to the exact same Tom's Obvious, Minimal Language (TOML) dictionary as before, and retains `[core].profile = "default"` with its deprecation notice.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Verify examples, TOML resolution, tests, typing, and path hygiene
 
-- [ ] E-04 Run all verification checks listed in `## Required tests / validation`:
+- [x] E-04 Run all verification checks listed in `## Required tests / validation`:
   - Run the negative `grep` check across `src/pubrun/__init__.py`, `src/pubrun/core.py`, and `src/pubrun/resources/default.toml` and confirm `profile = "default"` remains under `[core]` in `src/pubrun/resources/default.toml`.
   - Run the Python verification snippet that parses `src/pubrun/resources/default.toml` via `src/pubrun/config.py::load_default_config` and verifies that every `capture.*` override shown in the updated docstrings and comments resolves through `src/pubrun/config.py::resolve_config` with `profile_deprecation_notice(resolved) is None`.
   - Run the targeted `pytest` suite, `mypy` on `src/pubrun`, and `python3 scripts/sanitize_paths.py --check --all`.
   - Depends on: E-01, E-02, E-03
   - Expected outcome: All negative `grep` checks, TOML and override checks, targeted tests, `mypy`, and path-leak sanitization pass with exit code 0 (and exit code 1 for the negative `grep` check).
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -216,25 +216,161 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `git diff -- src/pubrun/__init__.py` confirming that only the two module-docstring examples changed (`capture={"hardware": {"depth": "deep"}}` and `capture={"hardware": {"depth": "basic"}}`) and no executable code changed, plus pasted `grep -n 'profile=' src/pubrun/__init__.py; echo "exit=$?"` showing `exit=1`.
   - Observed evidence:
-  - Result: pending
+    ```diff
+    diff --git a/src/pubrun/__init__.py b/src/pubrun/__init__.py
+    index 4b36a2e..b3aa978 100644
+    --- a/src/pubrun/__init__.py
+    +++ b/src/pubrun/__init__.py
+    @@ -11,7 +11,7 @@ Usage
 
-- [ ] V-02 validates E-02
+         import pubrun
+
+    -    tracker = pubrun.start(profile="deep")
+    +    tracker = pubrun.start(capture={"hardware": {"depth": "deep"}})
+         pubrun.annotate("loading_datasets", batches=400, mode="lazy")
+
+         with pubrun.phase("gradient_descent"):
+    @@ -21,7 +21,7 @@ Usage
+
+     3. Decorator::
+
+    -    @pubrun.audit_run(profile="basic")
+    +    @pubrun.audit_run(capture={"hardware": {"depth": "basic"}})
+         def evaluate_node():
+             ...
+    ```
+    ```text
+    $ grep -n 'profile=' src/pubrun/__init__.py; echo "exit=$?"
+    exit=1
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Pasted `git diff -- src/pubrun/core.py` confirming that only the `Example:` blocks in `start()`, `audit_run()`, and `tracked_run()` changed to `capture={"hardware": {"depth": "deep"}}` and `capture={"packages": {"mode": "off"}}`, `_inactive_policy()` remained unchanged, and no executable code changed, plus pasted `grep -n 'profile=' src/pubrun/core.py; echo "exit=$?"` showing `exit=1`.
   - Observed evidence:
-  - Result: pending
+    ```diff
+    diff --git a/src/pubrun/core.py b/src/pubrun/core.py
+    index 9634e4e..b9a2481 100644
+    --- a/src/pubrun/core.py
+    +++ b/src/pubrun/core.py
+    @@ -199,7 +199,7 @@ def start(**kwargs: Any) -> Run:
+             - ``run.started_at_utc`` (float): POSIX start timestamp.
 
-- [ ] V-03 validates E-03
+         Example:
+    -        >>> tracker = pubrun.start(profile="deep")
+    +        >>> tracker = pubrun.start(capture={"hardware": {"depth": "deep"}})
+             >>> tracker.stop()
+         """
+         is_ghost_or_inactive = False
+    @@ -341,7 +341,7 @@ def audit_run(func: Optional[Callable] = None, **kwargs: Any) -> Callable:
+             **kwargs: Configuration overrides forwarded to ``start()``.
+
+         Example:
+    -        >>> @pubrun.audit_run(profile="deep")
+    +        >>> @pubrun.audit_run(capture={"hardware": {"depth": "deep"}})
+             ... def train():
+             ...     model.fit()
+         """
+    @@ -371,7 +371,7 @@ class tracked_run:
+             **kwargs: Configuration overrides forwarded to ``start()``.
+
+         Example:
+    -        >>> with pubrun.tracked_run(profile="minimal"):
+    +        >>> with pubrun.tracked_run(capture={"packages": {"mode": "off"}}):
+             ...     model.train(epochs=5)
+         """
+         def __init__(self, **kwargs: Any) -> None:
+    ```
+    ```text
+    $ grep -n 'profile=' src/pubrun/core.py; echo "exit=$?"
+    exit=1
+    ```
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: Pasted `git diff -- src/pubrun/resources/default.toml` confirming the updated `Resolution Order` lines (`pubrun.start(capture={"hardware": {"depth": "deep"}})` and `PUBRUN_IMPORT_MODE="noauto", PUBRUN_META_REF="path.json"`) and the updated `[capture]` banner comment, while preserving `[core]` `profile = "default"` and its deprecation notice, plus pasted `grep -n '^profile = "default"$' src/pubrun/resources/default.toml` showing the preserved key and exit 0.
   - Observed evidence:
-  - Result: pending
+    ```diff
+    diff --git a/src/pubrun/resources/default.toml b/src/pubrun/resources/default.toml
+    index 1a41e4d..4416184 100644
+    --- a/src/pubrun/resources/default.toml
+    +++ b/src/pubrun/resources/default.toml
+    @@ -7,8 +7,8 @@
+     # runs, pubrun looks for user and project config files that override these.
+     #
+     # Resolution Order (highest to lowest precedence):
+    -#   1. Explicit API arguments (e.g., pubrun.start(profile="deep"))
+    -#   2. Environment variables (e.g., PUBRUN_PROFILE="deep")
+    +#   1. Explicit API arguments (e.g., pubrun.start(capture={"hardware": {"depth": "deep"}}))
+    +#   2. Environment variables (e.g., PUBRUN_IMPORT_MODE="noauto", PUBRUN_META_REF="path.json")
+     #   3. Local project override (./.pubrun.toml)
+     #   4. User home defaults (~/.config/pubrun/config.toml)
+     #   5. This default file.
+    @@ -185,7 +185,7 @@ argv_enabled = true
+     [capture]
+     # -----------------------------------------------------------------------------
+     # Per-category depth controls. Values: "off", "basic", "standard", "deep".
+    -# Each category can override the master profile.
+    +# Each category controls its own capture depth independently.
+     # -----------------------------------------------------------------------------
 
-- [ ] V-04 validates E-04
+     [capture.environment]
+    ```
+    ```text
+    $ grep -n '^profile = "default"$' src/pubrun/resources/default.toml; echo "exit=$?"
+    27:profile = "default"
+    exit=0
+    ```
+  - Result: pass
+
+- [x] V-04 validates E-04
   - Required evidence: Pasted outputs of all six checks in `## Required tests / validation`: (1) combined negative `grep` exiting `1`; (2) positive `grep` for `^profile = "default"$` exiting `0`; (3) runtime TOML parse and override resolution check printing `ok=True` and exiting `0` (executed via `src/pubrun/config.py::load_default_config`, `resolve_config`, and `profile_deprecation_notice`); (4) targeted `pytest` run exiting `0`; (5) `python3 -m mypy src/pubrun` exiting `0`; and (6) `python3 scripts/sanitize_paths.py --check --all` exiting `0`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    (1) Combined negative grep:
+    $ grep -n -E 'profile=|PUBRUN_PROFILE=|master profile' src/pubrun/__init__.py src/pubrun/core.py src/pubrun/resources/default.toml; echo "exit=$?"
+    exit=1
+
+    (2) Positive preservation check:
+    $ grep -n '^profile = "default"$' src/pubrun/resources/default.toml; echo "exit=$?"
+    27:profile = "default"
+    exit=0
+
+    (3) Runtime TOML parse and override resolution check (via pubrun.config.load_default_config, resolve_config, profile_deprecation_notice):
+    ok=True
+    exit=0
+
+    (4) Targeted pytest suite:
+    $ python3 -m pytest tests/test_config.py tests/test_profile_deprecation.py tests/test_api.py tests/test_explicit_api.py tests/test_import_modes.py tests/test_show_config.py -v --no-cov -p no:cacheprovider
+    collected 206 items
+    tests/test_config.py::TestDeepMerge::test_basic_merge PASSED [  0%]
+    ...
+    tests/test_profile_deprecation.py::TestProfileDoesNotGateCapture::test_minimal_and_deep_profiles_capture_identically PASSED [ 17%]
+    tests/test_profile_deprecation.py::TestProfileDeprecationNotice::test_notice_for_nondefault_profile PASSED [ 17%]
+    tests/test_profile_deprecation.py::TestProfileDeprecationNotice::test_no_notice_for_default_or_unset PASSED [ 18%]
+    tests/test_profile_deprecation.py::TestProfileDeprecationNotice::test_notice_shape PASSED [ 18%]
+    tests/test_profile_deprecation.py::TestProfileNoticeRecordedAndSurfaced::test_manifest_records_notice PASSED [ 19%]
+    tests/test_profile_deprecation.py::TestProfileNoticeRecordedAndSurfaced::test_default_profile_records_no_notice PASSED [ 19%]
+    tests/test_profile_deprecation.py::TestProfileNoticeRecordedAndSurfaced::test_runinfo_and_status_surface_notice PASSED [ 20%]
+    tests/test_profile_deprecation.py::TestProfileNoticeRecordedAndSurfaced::test_inspect_emits_notice_finding PASSED [ 20%]
+    ...
+    tests/test_show_config.py::TestShowConfigFlagDeprecation::test_show_config_flag_still_prints_defaults_with_notice PASSED [100%]
+    ============================= 206 passed in 33.17s =============================
+    exit=0
+
+    (5) Static type check:
+    $ python3 -m mypy src/pubrun
+    Success: no issues found in 59 source files
+    mypy_exit=0
+
+    (6) Path-leak sanitizer:
+    $ python3 scripts/sanitize_paths.py --check --all
+    sanitize_exit=0
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 

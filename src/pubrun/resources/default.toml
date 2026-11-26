@@ -7,8 +7,8 @@
 # runs, pubrun looks for user and project config files that override these.
 #
 # Resolution Order (highest to lowest precedence):
-#   1. Explicit API arguments (e.g., pubrun.start(profile="deep"))
-#   2. Environment variables (e.g., PUBRUN_PROFILE="deep")
+#   1. Explicit API arguments (e.g., pubrun.start(capture={"hardware": {"depth": "deep"}}))
+#   2. Environment variables (e.g., PUBRUN_IMPORT_MODE="noauto", PUBRUN_META_REF="path.json")
 #   3. Local project override (./.pubrun.toml)
 #   4. User home defaults (~/.config/pubrun/config.toml)
 #   5. This default file.
@@ -185,7 +185,7 @@ argv_enabled = true
 [capture]
 # -----------------------------------------------------------------------------
 # Per-category depth controls. Values: "off", "basic", "standard", "deep".
-# Each category can override the master profile.
+# Each category controls its own capture depth independently.
 # -----------------------------------------------------------------------------
 
 [capture.environment]
