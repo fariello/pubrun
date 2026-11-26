@@ -1,0 +1,17 @@
+# Leak-sanitizer repo allowlist (tracked, travels with the repo, CI-deterministic).
+# Managed by `aw check-local-leaks --configure`; hand-edits are fine but keep values on one
+# line and avoid a value containing BOTH ' and " (the minimal reader has no escape).
+#
+# Justified entries:
+# - Public maintainer Code of Conduct contact email (`gfariello@uri.edu`) and historical
+#   CHANGELOG GitHub URL migration notes (`gfariello/pubrun`, `` `gfariello` -> `fariello` ``).
+# - Synthetic placeholder home paths used in unit tests, sanitizer tests, and schema examples
+#   (`/home/alice`, `/home/bob`, `/home/user`, `/home/researcher`, `/home/tester`,
+#   `/home/example`, `/home/ci`, `/home/x`, `/home/...`, `/Users/carol`, `C:\\Users\\carol`,
+#   `C:/Users/carol`, `C:/Users/`, and the sanitizer test assertion `assert "~/VC/pubrun"`).
+
+allow_line_substrings = ["gfariello@uri.edu", "gfariello/pubrun", "`gfariello` → `fariello`", "/home/alice", "/home/bob", "/home/user", "/home/researcher", "/home/tester", "/home/example", "/home/ci", "/home/x", "/home/...", "/Users/carol", 'C:\\Users\\carol', "C:/Users/carol", "C:/Users/", 'assert "~/VC/pubrun"']
+fail_patterns = []
+
+ip_enabled = false
+hostname_fail = false

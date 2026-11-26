@@ -23,7 +23,7 @@ This plan details the design and implementation changes to:
 
 ### [Component] Packaging / CLI Entrypoints
 
-#### [MODIFY] [pyproject.toml](file://~/VC/pubrun/pyproject.toml)
+#### [MODIFY] [pyproject.toml](pyproject.toml)
 - Remove `pr = "pubrun.__main__:main"` from `[project.scripts]`.
 - Add `pbr = "pubrun.__main__:main"` to `[project.scripts]`.
 
@@ -31,7 +31,7 @@ This plan details the design and implementation changes to:
 
 ### [Component] CLI Main Entrypoint
 
-#### [MODIFY] [__main__.py](file://~/VC/pubrun/src/pubrun/__main__.py)
+#### [MODIFY] [__main__.py](src/pubrun/__main__.py)
 - In the dynamic program name checker:
   ```python
   prog_name = Path(sys.argv[0]).name if sys.argv[0] else "pubrun"
@@ -63,7 +63,7 @@ This plan details the design and implementation changes to:
 
 ### [Component] Test Suite
 
-#### [MODIFY] [test_cli.py](file://~/VC/pubrun/tests/test_cli.py)
+#### [MODIFY] [test_cli.py](tests/test_cli.py)
 - Update `test_pr_alias_registered_in_pyproject` to check for `pbr = "pubrun.__main__:main"` instead of `pr`.
 - Update `test_subcommand_help_examples` to assert `pbr` in help output:
   ```python

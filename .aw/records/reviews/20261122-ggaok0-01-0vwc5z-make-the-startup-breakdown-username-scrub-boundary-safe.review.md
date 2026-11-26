@@ -53,7 +53,7 @@ AW-TIER: standard
 
 ### Step R3
 
-- Checked (full form): what identifying data can leave the machine. Needles are the hostname, username (`getpass` plus `USER`/`USERNAME`/`LOGNAME`), home, repo root, and `--workdir`; path needles stay literal, so no path leak is introduced. The boundary rule narrows bare-needle matching: a username adjacent to `_` or a letter (for example `/scratch/gfariello_runs`) is no longer redacted, which matches `benchmarks/harness.py` (`8k73qj` D-1) and the self-check uses the same rule, so it does not catch that case either; home-directory paths are still caught literally and by `_HOME_PATH_RE`. Recorded as an accepted parity trade-off, not a finding.
+- Checked (full form): what identifying data can leave the machine. Needles are the hostname, username (`getpass` plus `USER`/`USERNAME`/`LOGNAME`), home, repo root, and `--workdir`; path needles stay literal, so no path leak is introduced. The boundary rule narrows bare-needle matching: a username adjacent to `_` or a letter (for example `/scratch/alice_runs`) is no longer redacted, which matches `benchmarks/harness.py` (`8k73qj` D-1) and the self-check uses the same rule, so it does not catch that case either; home-directory paths are still caught literally and by `_HOME_PATH_RE`. Recorded as an accepted parity trade-off, not a finding.
 - Skip keys exempt values from scrubbing, so each must be script-generated. `environment.os.release` is `platform.release()`, a host-controlled string that can carry a custom kernel suffix (PR-003).
 - The JSON validator as written would flag the scrub's own `<redacted>` markers when a bare needle is `redacted` (PR-002).
 
@@ -82,7 +82,7 @@ AW-TIER: standard
 | ID | Question | Chosen | Alternatives considered | Basis | Reversible |
 |---|---|---|---|---|---|
 | D-1 | Should `release` be a skip key? | No: keep it scrubbed with the boundary rule | Keep it skipped to protect the value from over-redaction | `platform.release()` is host-controlled; harness `_SCRUB_SKIP_KEYS` omits it; prototype shows `6.8.0-<redacted>` and validator `(True, [])` | yes |
-| D-2 | Should the boundary rule's narrowing (`gfariello_runs` not redacted) be changed? | No: keep parity with `benchmarks/harness.py` | Treat `_` as a boundary in both scripts | `8k73qj` review D-1 chose `[A-Za-z0-9_]`; changing it is outside the backlog item and would also change `harness.py` | yes |
+| D-2 | Should the boundary rule's narrowing (`alice_runs` not redacted) be changed? | No: keep parity with `benchmarks/harness.py` | Treat `_` as a boundary in both scripts | `8k73qj` review D-1 chose `[A-Za-z0-9_]`; changing it is outside the backlog item and would also change `harness.py` | yes |
 
 ### Step S6
 

@@ -6,7 +6,7 @@ RETIRED 2026-11-21: session recovery complete; queued show-config IPD was execut
 
 This document reconstructs an interrupted opencode session so a future opencode agent can resume it. It is intended to be read and executed directly.
 
-- **Original session ID:** `ses_0cf7e38f0ffeDlVZcXq3Z1ttH6`
+- **Original session ID:** `<redacted>`
 - **Original session title:** `Review and execute OpenCode recovery file`
 - **Transcript size:** 296 turns, 148 interactions, 16803 lines
 - **Truncation status:** Complete (no truncation applied)

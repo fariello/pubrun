@@ -8,7 +8,7 @@ This plan details the design and implementation changes to fix the CLI parsing e
 
 ### [Component] CLI Argument Parsing
 
-#### [MODIFY] [__main__.py](file://~/VC/pubrun/src/pubrun/__main__.py)
+#### [MODIFY] [__main__.py](src/pubrun/__main__.py)
 - Preprocess `sys.argv` at the beginning of `main()` to look for `--no-color`.
 - If `--no-color` is found:
   - If the subcommand is `run` and `--no-color` appears at or after `run`, do not remove it (to preserve it for the subprocess command).
@@ -20,7 +20,7 @@ This plan details the design and implementation changes to fix the CLI parsing e
 
 ### [Component] Tests
 
-#### [MODIFY] [test_cli.py](file://~/VC/pubrun/tests/test_cli.py)
+#### [MODIFY] [test_cli.py](tests/test_cli.py)
 - Add a new test case `test_report_no_color_any_position` under `TestCliColorControl` to verify that `pubrun report <run_id> --no-color` runs successfully with exit code 0 and suppresses color output.
 - Add a test verifying `pubrun run --mode minimal -- python -c "import sys; print(sys.argv)" --no-color` preserves the `--no-color` flag for the subprocess.
 - Add `test_subcommand_invalid_argument_error` under `TestCliSubcommandErrors` to verify that invalid subcommand arguments raise error exit code 2 and show subcommand-specific usage.

@@ -12,7 +12,7 @@ All changes will be implemented **locally** first. No commits will be pushed to 
 
 ### A. CLI Parser and Subcommand Dispatch
 
-#### [MODIFY] [src/pubrun/__main__.py](file://~/VC/pubrun/src/pubrun/__main__.py)
+#### [MODIFY] [src/pubrun/__main__.py](src/pubrun/__main__.py)
 1.  **Subcommands Set**:
     Update the `subcommands` check to include `"ui"`, `"tui"`, and `"gui"`:
     ```python
@@ -52,12 +52,12 @@ All changes will be implemented **locally** first. No commits will be pushed to 
 
 ### A. Subcommand Checklist Test
 
-#### [MODIFY] [tests/test_cli.py](file://~/VC/pubrun/tests/test_cli.py)
+#### [MODIFY] [tests/test_cli.py](tests/test_cli.py)
 Update the checked subcommands list to replace `"tui"` with `"ui"`, `"tui"`, `"gui"`.
 
 ### B. TUI Command Tests
 
-#### [MODIFY] [tests/test_tui.py](file://~/VC/pubrun/tests/test_tui.py)
+#### [MODIFY] [tests/test_tui.py](tests/test_tui.py)
 *   Update `test_tui_cli_parser_and_run()` to test parsing for all three invocations: `"ui"`, `"tui"`, and `"gui"`.
 *   Update `test_tui_missing_dependencies_prints_notice()` to verify execution for `"ui"`.
 

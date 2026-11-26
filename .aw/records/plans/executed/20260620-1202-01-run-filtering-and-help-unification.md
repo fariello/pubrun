@@ -40,7 +40,7 @@ No high-risk changes are introduced. The filtering options expand capabilities f
 
 ### [Component] Run Filtering Logic
 
-#### [MODIFY] [status.py](file://~/VC/pubrun/src/pubrun/status.py)
+#### [MODIFY] [status.py](src/pubrun/status.py)
 - Implement `filter_runs()` to apply filters to a list of `RunInfo` objects:
   ```python
   def filter_runs(
@@ -61,7 +61,7 @@ No high-risk changes are introduced. The filtering options expand capabilities f
 
 ### [Component] CLI Main Entrypoint
 
-#### [MODIFY] [__main__.py](file://~/VC/pubrun/src/pubrun/__main__.py)
+#### [MODIFY] [__main__.py](src/pubrun/__main__.py)
 - Implement `_add_run_filter_args(parser: argparse.ArgumentParser, include_limit: bool = True)` to easily attach the shared filter parameters to subparsers.
 - Attach the standard filter arguments to:
   - `status_parser`
@@ -105,12 +105,12 @@ No high-risk changes are introduced. The filtering options expand capabilities f
 
 ### [Component] Test Suite
 
-#### [MODIFY] [test_status.py](file://~/VC/pubrun/tests/test_status.py)
+#### [MODIFY] [test_status.py](tests/test_status.py)
 - Add unit tests for `filter_runs()`.
 - Verify backward compatibility for `clean_runs()` (list status filters and `older_than_days` float parameter).
 - Add tests for `close_out_crashed_run()` and the automatic close-out trigger in `RunInfo`.
 
-#### [MODIFY] [test_cli.py](file://~/VC/pubrun/tests/test_cli.py)
+#### [MODIFY] [test_cli.py](tests/test_cli.py)
 - Add tests verifying `pubrun help <command>` and `pubrun <command> help` behave identically.
 - Add tests verifying filtering logic on `clean`, `report`, `combined`, `methods`, and `rerun`.
 - Add tests verifying new formatted error output for locked/running runs in `pubrun report`.

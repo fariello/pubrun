@@ -21,7 +21,7 @@ This plan details the design and implementation changes to:
 
 ### [Component] Telemetry and Usability
 
-#### [MODIFY] [status.py](file://~/VC/pubrun/src/pubrun/status.py)
+#### [MODIFY] [status.py](src/pubrun/status.py)
 - Update `close_out_crashed_run` to:
   - Write `None` for `"ended_at_utc"` and `"elapsed_seconds"` under `"timing"`.
   - Include missing required schema fields (`capture` section, `capture_state` fields) to ensure fallback manifests strictly validate against `schemas/manifest.schema.json`.
@@ -30,14 +30,14 @@ This plan details the design and implementation changes to:
   - Format elapsed seconds as `HH:MM:SS` (and `Xd + HH:MM:SS` if the duration is $\ge$ 24 hours).
   - Handle negative seconds gracefully.
 
-#### [MODIFY] [pyproject.toml](file://~/VC/pubrun/pyproject.toml)
+#### [MODIFY] [pyproject.toml](pyproject.toml)
 - Bump version from `"1.0.0"` to `"1.0.1"`.
 
 ---
 
 ### [Component] Tests
 
-#### [MODIFY] [test_status.py](file://~/VC/pubrun/tests/test_status.py)
+#### [MODIFY] [test_status.py](tests/test_status.py)
 - Update `test_format_elapsed` assertions.
 - Add `test_crashed_run_elapsed_time_unknown` to:
   - Simulate a crashed run by creating a stale `.pubrun.lock` file.

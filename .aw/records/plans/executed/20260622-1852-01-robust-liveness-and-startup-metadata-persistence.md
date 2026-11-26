@@ -17,7 +17,7 @@ This implementation plan details changes to resolve two critical issues:
 
 ### 1. Robust Liveness Engine
 
-#### [MODIFY] [liveness.py](file://~/VC/pubrun/src/pubrun/capture/liveness.py)
+#### [MODIFY] [liveness.py](src/pubrun/capture/liveness.py)
 - Modify `is_same_process(pid: int, expected_start_utc: float, expected_script: Optional[str] = None, tolerance: float = 86400.0) -> bool`:
   - If `expected_script` is provided:
     - On Linux, read `/proc/<pid>/cmdline` and verify it contains `expected_script`.
@@ -27,7 +27,7 @@ This implementation plan details changes to resolve two critical issues:
 
 ### 2. Status Classification and Fallback Manifest updates
 
-#### [MODIFY] [status.py](file://~/VC/pubrun/src/pubrun/status.py)
+#### [MODIFY] [status.py](src/pubrun/status.py)
 - In `RunInfo._classify()`:
   - Prioritize `has_lock` check over `has_manifest` check so that active/crashed runs are processed via the lock file first.
   - If both lock and manifest files are present, call a new helper `_enrich_from_manifest()` to load all static metadata (packages, env vars, git, host, hardware) from the startup manifest.
@@ -39,7 +39,7 @@ This implementation plan details changes to resolve two critical issues:
 
 ### 3. Startup Metadata Persistence
 
-#### [MODIFY] [tracker.py](file://~/VC/pubrun/src/pubrun/tracker.py)
+#### [MODIFY] [tracker.py](src/pubrun/tracker.py)
 - In `Run.start()`:
   - Right after `self._initialize_capture()`, call `self.writer.write_artifacts()` to save the initial snapshot of `manifest.json` and `config.resolved.json` to the run directory immediately.
 - Update `self._outcome` default/initial state to `"running"` (representing active execution), which will be written to the startup manifest. It will be updated to `"completed"`, `"failed"`, or `"interrupted"` during `stop()`.

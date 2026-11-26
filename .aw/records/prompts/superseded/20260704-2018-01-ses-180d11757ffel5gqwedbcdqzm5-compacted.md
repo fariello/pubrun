@@ -6,7 +6,7 @@ RETIRED 2026-11-21: session recovery complete; queued /assess edge-cases was exe
 
 This document reconstructs an interrupted opencode session for a future agent to read and execute. It contains no other reliable context.
 
-- **Original session ID:** `ses_180d11757ffel5GqWedBcdqzm5`
+- **Original session ID:** `<redacted>`
 - **Original session title:** `pubrun 0.3.0 release`
 - **Transcript size:** 454 turns, 227 interactions, 14506 lines
 - **Truncation status:** Complete (no truncation applied)

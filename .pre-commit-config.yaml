@@ -29,6 +29,13 @@ repos:
         pass_filenames: true
         require_serial: true
 
+      - id: check-local-leaks
+        name: check local leaks (aw check-local-leaks --staged)
+        entry: aw check-local-leaks --staged
+        language: system
+        pass_filenames: false
+        require_serial: true
+
       # Retired post-commit cleanup no-op: hatch_build.py now stamps commit metadata
       # into wheel and sdist artifacts at build time without writing to the working tree.
       # Kept only so clones with an existing post-commit hook installation remove any

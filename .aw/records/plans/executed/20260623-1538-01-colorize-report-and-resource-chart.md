@@ -8,7 +8,7 @@ This plan outlines the changes to colorize the diagnostic report, respect the `-
 
 ### Command Line Interface
 
-#### [MODIFY] [__main__.py](file://~/VC/pubrun/src/pubrun/__main__.py)
+#### [MODIFY] [__main__.py](src/pubrun/__main__.py)
 - Register `show`, `res`, `cpu`, and `mem` subcommands.
 - Add `show` subcommand parser (with `report` as a separate, hidden subparser using `help=argparse.SUPPRESS`). They will accept positional `run_dir` and `section` arguments, and `--depth` flag.
 - Implement argument shifting logic: if the parsed `run_dir` is one of the known section names (`"logs"`, `"env"`, `"packages"`), shift it to `section` and set `run_dir = None` (defaulting to the latest run).
@@ -20,7 +20,7 @@ This plan outlines the changes to colorize the diagnostic report, respect the `-
 
 ### Telemetry Reporting
 
-#### [MODIFY] [diagnostics.py](file://~/VC/pubrun/src/pubrun/report/diagnostics.py)
+#### [MODIFY] [diagnostics.py](src/pubrun/report/diagnostics.py)
 - Update `print_resources_report(manifest_path, average=False, last=None, metric="all")` to filter charts based on the `metric` parameter:
   - If `metric == "cpu"`, only render the CPU utilization chart.
   - If `metric == "mem"`, only render the Memory (RSS) chart.
@@ -35,12 +35,12 @@ This plan outlines the changes to colorize the diagnostic report, respect the `-
 
 ### Verification and Tests
 
-#### [NEW] [test_show_sections.py](file://~/VC/pubrun/tests/test_show_sections.py)
+#### [NEW] [test_show_sections.py](tests/test_show_sections.py)
 - Add tests verifying `pubrun show env`, `pubrun show packages`, and `pubrun show logs` print the correct segments.
 - Add tests verifying argument shifting logic handles `pubrun show <section>` and `pubrun show <run-id> <section>` correctly.
 - Add tests verifying `pubrun report` continues to function exactly like `pubrun show` but remains hidden in `--help`.
 
-#### [MODIFY] [test_cli.py](file://~/VC/pubrun/tests/test_cli.py)
+#### [MODIFY] [test_cli.py](tests/test_cli.py)
 - Update mock assertions to reflect new parameter structures (`metric`, `section`, `last`).
 - Verify that `pbr cpu`, `pbr mem`, and `pbr res` correctly call the resources report function with expected filters.
 

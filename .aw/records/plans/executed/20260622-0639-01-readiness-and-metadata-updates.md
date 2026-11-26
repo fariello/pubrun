@@ -26,7 +26,7 @@ All changes will be implemented **locally** first. No commits will be pushed to 
 
 We will update the citation command output and report templates to reference the GitHub repository instead of the journal. (Historical note: the `Example Journal` / `example.1234/example.08024` entries shown as *Current* below are neutralized representations of a fabricated placeholder citation introduced by an automated agent and never authorized; no such paper or DOI exists.)
 
-#### [MODIFY] [src/pubrun/__main__.py](file://~/VC/pubrun/src/pubrun/__main__.py)
+#### [MODIFY] [src/pubrun/__main__.py](src/pubrun/__main__.py)
 Update `_run_cite(style: str)`:
 *   **APA style**:
     *   *Current*: `"Fariello, G. (2026). pubrun: A zero-dependency Python library for execution provenance and telemetry capture. Example Journal, 11(121), 8024. https://doi.org/example.1234/example.08024"`
@@ -62,7 +62,7 @@ Update `_run_cite(style: str)`:
         }
         ```
 
-#### [MODIFY] [src/pubrun/report/templates.py](file://~/VC/pubrun/src/pubrun/report/templates.py)
+#### [MODIFY] [src/pubrun/report/templates.py](src/pubrun/report/templates.py)
 *   **Markdown template (`MARKDOWN_TEMPLATE`)**:
     *   *Current*: `[1] Fariello, G. (2026). pubrun: A zero-dependency Python library for execution provenance and telemetry capture. *Example Journal*, 11(121), 8024. https://doi.org/example.1234/example.08024`
     *   *Proposed*: `[1] Fariello, G. (2026). pubrun: A zero-dependency Python library for execution provenance and telemetry capture. GitHub repository, https://github.com/fariello/pubrun`
@@ -95,23 +95,23 @@ Update `_run_cite(style: str)`:
 
 ### B. Add `CODE_OF_CONDUCT.md` and Link It
 
-#### [NEW] [CODE_OF_CONDUCT.md](file://~/VC/pubrun/CODE_OF_CONDUCT.md)
+#### [NEW] [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 We will add the standard Contributor Covenant v2.1 to the repository root.
 *   **Contact Address**: `gfariello@uri.edu`.
 
-#### [MODIFY] [CONTRIBUTING.md](file://~/VC/pubrun/CONTRIBUTING.md)
+#### [MODIFY] [CONTRIBUTING.md](CONTRIBUTING.md)
 Add a Code of Conduct section at the end of the contributing guide linking to the Code of Conduct document:
 ```markdown
 ## Code of Conduct
 
-Contributors are expected to adhere to the [Code of Conduct](file://~/VC/pubrun/CODE_OF_CONDUCT.md). Please report any unacceptable behavior to gfariello@uri.edu.
+Contributors are expected to adhere to the [Code of Conduct](CODE_OF_CONDUCT.md). Please report any unacceptable behavior to gfariello@uri.edu.
 ```
 
 ---
 
 ### C. Create Pull Request Template
 
-#### [NEW] [.github/pull_request_template.md](file://~/VC/pubrun/.github/pull_request_template.md)
+#### [NEW] [.github/pull_request_template.md](.github/pull_request_template.md)
 Create a detailed template requiring contributors to state PR details, test results, and compliance with the zero-dependency architecture:
 ```markdown
 ## Description
@@ -132,7 +132,7 @@ Explain how these changes were tested:
 - [ ] Manual verification steps (please describe below).
 
 ## Checklist
-- [ ] I have read the [CONTRIBUTING.md](file://~/VC/pubrun/CONTRIBUTING.md) guide.
+- [ ] I have read the [CONTRIBUTING.md](CONTRIBUTING.md) guide.
 - [ ] My code follows the code style of this project.
 - [ ] My changes maintain the core design philosophy (zero-dependency on Python 3.11+, lightweight footprint, and zero-configuration design).
 - [ ] My changes generate no new warnings or lint issues.
@@ -144,7 +144,7 @@ Explain how these changes were tested:
 
 ### D. Tone Down README Wording
 
-#### [MODIFY] [README.md](file://~/VC/pubrun/README.md)
+#### [MODIFY] [README.md](README.md)
 Revise lines 54 and 56 of the `README.md` to be precise and realistic:
 *   **Line 54**:
     *   *Current*: `` `pubrun` permanently ends this friction. ``

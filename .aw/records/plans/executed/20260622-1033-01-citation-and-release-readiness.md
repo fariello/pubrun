@@ -12,7 +12,7 @@ All changes will be implemented **locally** first. No commits or tags will be pu
 
 ### A. Citation Metadata Readiness
 
-#### [MODIFY] [CITATION.cff](file://~/VC/pubrun/CITATION.cff)
+#### [MODIFY] [CITATION.cff](CITATION.cff)
 - Update `version` to `1.2.0`.
 - Update `date-released` to `2026-06-22`.
 - Add `identifiers` block to specify the Zenodo DOIs (historical note: the numeric placeholder DOIs below were fabricated by an automated agent, never authorized, and never real citations; replaced here with inert tokens):
@@ -24,26 +24,26 @@ All changes will be implemented **locally** first. No commits or tags will be pu
   - DOI: `example.1234/example.08024` (FABRICATED PLACEHOLDER; introduced by an automated agent, never authorized; never a real citation)
   - Volume: `11`, Issue: `121`, Pages: `8024`, Year: `2026`
 
-#### [MODIFY] [README.md](file://~/VC/pubrun/README.md)
+#### [MODIFY] [README.md](README.md)
 - Add a new `## Citation` section before `## Roadmap`:
   - Show Zenodo badge images for both Concept DOI and Version DOI, clearly distinguishing them.
   - Provide instructions for citing the example paper as the preferred reference, and citing the software archive version specifically.
 
-#### [MODIFY] [__main__.py](file://~/VC/pubrun/src/pubrun/__main__.py)
+#### [MODIFY] [__main__.py](src/pubrun/__main__.py)
 - Update `_run_cite` subcommand helper to output the new preferred example paper citation for all styles (APA, Chicago, MLA, BibTeX) so that `pubrun cite` outputs the example paper reference.
 
 ---
 
 ### B. Release and Archive Readiness
 
-#### [MODIFY] [pyproject.toml](file://~/VC/pubrun/pyproject.toml)
+#### [MODIFY] [pyproject.toml](pyproject.toml)
 - Update `version` to `"1.2.0"`.
 
-#### [MODIFY] [CHANGELOG.md](file://~/VC/pubrun/CHANGELOG.md)
+#### [MODIFY] [CHANGELOG.md](CHANGELOG.md)
 - Insert a new release section for `## [1.2.0] - 2026-06-22` detailing all changes made since `1.1.2` (including command migration, research-use doc, API docs, minimal research workflow example, and citation metadata updates).
 
 
-#### [NEW] [release-notes-v1.2.0.md](file://~/VC/pubrun/release-notes-v1.2.0.md)
+#### [NEW] [release-notes-v1.2.0.md](release-notes-v1.2.0.md)
 - Draft release notes containing a changelog summary for the GitHub Release.
 
 #### Git Tag

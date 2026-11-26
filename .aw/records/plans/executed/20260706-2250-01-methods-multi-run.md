@@ -3,7 +3,7 @@
 - Date: 2026-07-06
 - Concern: functionality / UX (a real design decision, not a mechanical change)
 - Scope: how `pubrun methods` should behave when pointed at, or filtered to,
-  MANY runs (100+ is common, e.g. `~/VC/uri-ai-info` has 1600+). Today it emits
+  MANY runs (100+ is common, e.g. a large project `runs/` directory has 1600+). Today it emits
   one Computational Methods paragraph from exactly one run.
 - Status: EXECUTED (2026-07-06). `pubrun methods --all` implemented (option C:
   representative paragraph + variance note via `generate_report_multi`;
