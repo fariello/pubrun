@@ -6,7 +6,9 @@
 - Scope: Public module docstring examples in `src/pubrun/__init__.py`, public API docstring examples (`start`, `audit_run`, `tracked_run`) in `src/pubrun/core.py`, and configuration header comments (`Resolution Order` and `[capture]` banner) in `src/pubrun/resources/default.toml`.
 - Scope-Paths: src/pubrun/__init__.py, src/pubrun/core.py, src/pubrun/resources/default.toml
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: simple
 - Short-Description: Replace deprecated profile= and PUBRUN_PROFILE examples in src/pubrun/__init__.py, src/pubrun/core.py, and src/pubrun/resources/default.toml with non-deprecated overrides
 - Work-Kind: chore
 - Priority: low
@@ -21,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-26 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002; review record `.aw/records/reviews/20261126-mz0erz-01-ha769g-remove-deprecated-profile-examples-from-src-pubrun.review.md`.
 - 2026-11-26 to-review (aw set): Authored review-ready plan from backlog item mz0erz
 - 2026-11-26 draft (Antigravity): created.
 
@@ -150,13 +153,19 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
    grep -n '^profile = "default"$' src/pubrun/resources/default.toml
    ```
 
-3. **Runtime TOML parse and non-deprecated override resolution check** (must exit `0` with `ok=True`):
+3. **Runtime TOML parse and non-deprecated override resolution check** (isolated from ambient `PUBRUN_PROFILE` and host user/local config files; must exit `0` with `ok=True`):
 
    ```sh
-   PYTHONPATH=src python3 - <<'PY'
-   from pubrun.config import load_default_config, profile_deprecation_notice, resolve_config
+   PUBRUN_PROFILE= PYTHONPATH=src python3 - <<'PY'
+   import os
+   import pubrun.config as cfg
 
-   defaults = load_default_config()
+   # Isolate ambient env and host user/local config files so they cannot inject core.profile.
+   os.environ.pop("PUBRUN_PROFILE", None)
+   cfg.load_user_config = lambda: None
+   cfg.load_local_config = lambda start_dir=None: None
+
+   defaults = cfg.load_default_config()
    assert defaults["core"]["profile"] == "default", defaults["core"]
 
    cases = [
@@ -165,8 +174,8 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
        ({"capture": {"packages": {"mode": "off"}}}, ("capture", "packages", "mode"), "off"),
    ]
    for overrides, path, expected in cases:
-       resolved = resolve_config(overrides)
-       assert profile_deprecation_notice(resolved) is None, (overrides, resolved["core"])
+       resolved = cfg.resolve_config(overrides)
+       assert cfg.profile_deprecation_notice(resolved) is None, (overrides, resolved["core"])
        cur = resolved
        for key in path:
            cur = cur[key]
@@ -231,4 +240,9 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 - Size assessment: standard
 - Cohesion rationale: not required
 
-Execution begins only after a human approves this plan (`- Status: approved`). The executing agent must commit only files within `- Scope-Paths:` through `aw commit ha769g -- <paths>`, paste real validation output into each `V-*` item, and complete the post-gate lifecycle transition via `aw ipd finalize` (moving the plan to `.aw/records/plans/executed/` with `- Status: executed`). Do not push, tag, or modify the backlog item's requirements.
+Execution contract:
+1. Precondition: wait for human approval (`- Status: approved`) with no unresolved `Blocking: yes` open question before changing any file. This plan has no blocking open questions.
+2. Scope declaration: the expected modified files are the `- Scope-Paths:` entries (`src/pubrun/__init__.py`, `src/pubrun/core.py`, `src/pubrun/resources/default.toml`), plus updating this plan file's `E-*` and `V-*` records during execution. If execution requires an out-of-scope file, justify it with `--scope-reason` at finalization; if a declared file needs no edit, acknowledge it with `--scope-ack`. Do not modify the backlog item's requirements.
+3. Validation honesty: run every command in `## Required tests / validation` and paste its actual runner output into the matching `V-*` `Observed evidence:` field. Do not mark any `V-*` item `pass` without captured output from that run.
+4. Commit discipline: commit only the paths changed for this plan using `aw commit ha769g -- <paths>`. Do not use `git add -A` or raw `git commit`. Do not push or tag without an explicit human instruction.
+5. Lifecycle transition: finalize this plan with `aw ipd finalize ha769g`, never with a manual `git mv` to `.aw/records/plans/executed/`. Inside a runner lane (`aw oc run` or `aw agy run`), the runner owns finalization after the turn. Outside a runner, run `aw ipd finalize ha769g` after all `E-*` items are `performed`, all `V-*` items are `pass`, and `aw ipd lint --phase pre-transition` reports `conforming`.
