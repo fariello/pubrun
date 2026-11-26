@@ -64,35 +64,35 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Child plan execution confirmation
 
-- [ ] E-01 CONFIRM 0cjiv5 REACHED executed
+- [x] E-01 CONFIRM 0cjiv5 REACHED executed
   - Depends on: none
   - Expected outcome: `.aw/records/plans/executed/20261125-doc-audit-01-0cjiv5-fix-readme-contributing-github-templates-and-release-notes-s.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 CONFIRM pqcx6o REACHED executed
+- [x] E-02 CONFIRM pqcx6o REACHED executed
   - Depends on: none
   - Expected outcome: `.aw/records/plans/executed/20261125-doc-audit-02-pqcx6o-fix-cli-and-configuration-reference-inaccuracies-and-drift.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 CONFIRM dd7noz REACHED executed
+- [x] E-03 CONFIRM dd7noz REACHED executed
   - Depends on: none
   - Expected outcome: `.aw/records/plans/executed/20261125-doc-audit-03-dd7noz-fix-api-manifest-architecture-and-design-documentation-drift.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 CONFIRM wjsccu REACHED executed
+- [x] E-04 CONFIRM wjsccu REACHED executed
   - Depends on: none
   - Expected outcome: `.aw/records/plans/executed/20261125-doc-audit-04-wjsccu-fix-functional-specification-hpc-guide-and-research-use-guid.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 CONFIRM 77pdvl REACHED executed
+- [x] E-05 CONFIRM 77pdvl REACHED executed
   - Depends on: none
   - Expected outcome: `.aw/records/plans/executed/20261125-doc-audit-05-77pdvl-fix-performance-benchmarks-and-changelog-documentation-drift.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-06 CONFIRM 2uwuiu REACHED executed
+- [x] E-06 CONFIRM 2uwuiu REACHED executed
   - Depends on: none
   - Expected outcome: `.aw/records/plans/executed/20261125-doc-audit-06-2uwuiu-update-example-scripts-and-expected-methods-output-to-match.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Child IPDs, sequence, and dependencies
 
@@ -153,35 +153,64 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Confirm `.aw/records/plans/executed/20261125-doc-audit-01-0cjiv5-fix-readme-contributing-github-templates-and-release-notes-s.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`, and paste the output of `aw ipd lint --phase post-transition` on that file showing exit 0 and `conforming`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    -    ✓  executed     plan        20261125-doc-audit-01-0cjiv5  [high]  advisory
+         ? advisory: IPD-Z603: plan has 6 E-items (guidance: at most 5); a plan a modest agent can hold in its head is easier to execute correctly. Consider splitting into more child plans
+    exit=0
+    ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Confirm `.aw/records/plans/executed/20261125-doc-audit-02-pqcx6o-fix-cli-and-configuration-reference-inaccuracies-and-drift.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`, and paste the output of `aw ipd lint --phase post-transition` on that file showing exit 0 and `conforming`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    -    ✓  executed     plan        20261125-doc-audit-02-pqcx6o  [high]  advisory
+         ? advisory: IPD-Z603: plan has 8 E-items (guidance: at most 5); a plan a modest agent can hold in its head is easier to execute correctly. Consider splitting into more child plans
+    exit=0
+    ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Confirm `.aw/records/plans/executed/20261125-doc-audit-03-dd7noz-fix-api-manifest-architecture-and-design-documentation-drift.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`, and paste the output of `aw ipd lint --phase post-transition` on that file showing exit 0 and `conforming`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    -    ✓  executed     plan        20261125-doc-audit-03-dd7noz  [high]  advisory
+         ? advisory: IPD-Z603: plan has 8 E-items (guidance: at most 5); a plan a modest agent can hold in its head is easier to execute correctly. Consider splitting into more child plans
+    exit=0
+    ```
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Confirm `.aw/records/plans/executed/20261125-doc-audit-04-wjsccu-fix-functional-specification-hpc-guide-and-research-use-guid.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`, and paste the output of `aw ipd lint --phase post-transition` on that file showing exit 0 and `conforming`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    -    ✓  executed     plan        20261125-doc-audit-04-wjsccu  [high]  advisory
+         ? advisory: IPD-Z603: plan has 6 E-items (guidance: at most 5); a plan a modest agent can hold in its head is easier to execute correctly. Consider splitting into more child plans
+    exit=0
+    ```
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Confirm `.aw/records/plans/executed/20261125-doc-audit-05-77pdvl-fix-performance-benchmarks-and-changelog-documentation-drift.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`, and paste the output of `aw ipd lint --phase post-transition` on that file showing exit 0 and `conforming`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    -    ✓  executed     plan        20261125-doc-audit-05-77pdvl  [medium]  conforming
+    exit=0
+    ```
+  - Result: pass
 
-- [ ] V-06 validates E-06
+- [x] V-06 validates E-06
   - Required evidence: Confirm `.aw/records/plans/executed/20261125-doc-audit-06-2uwuiu-update-example-scripts-and-expected-methods-output-to-match.ipd.md` exists with `- Status: executed`, all `E-*` items `performed`, and all `V-*` items `pass`, and paste the output of `aw ipd lint --phase post-transition` on that file showing exit 0 and `conforming`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    -    ✓  executed     plan        20261125-doc-audit-06-2uwuiu  [medium]  advisory
+         ? advisory: IPD-Z603: plan declares 10 work Scope-Paths (guidance: at most 8); consider splitting by module family
+    exit=0
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 
