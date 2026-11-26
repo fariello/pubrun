@@ -5,8 +5,9 @@
 - Concern: Eight numbered example scripts (`examples/01_*.py` through `examples/11_*.py`) teach the deprecated, inert `profile=` argument (with `11_cli_report.py` passing `"standard"` and invoking the hidden legacy alias `report` in both code and docstring), all nine targeted scripts use the legacy `PUBRUN_AUTO_START="false"` environment-variable pattern instead of `import pubrun.noauto as pubrun`, `10_hardware_probe.py`'s docstring still refers to a "deep profile", and `examples/minimal-research-workflow/expected_methods.md` shows freeform prose that diverges from `src/pubrun/report/templates.py::MARKDOWN_TEMPLATE`.
 - Scope: Nine numbered example scripts (`examples/01_minimal_start_stop.py`, `examples/02_context_manager.py`, `examples/03_audit_decorator.py`, `examples/04_annotate_events.py`, `examples/05_execution_phases.py`, `examples/08_diff_engine.py`, `examples/09_cli_methods.py`, `examples/10_hardware_probe.py`, `examples/11_cli_report.py`) and `examples/minimal-research-workflow/expected_methods.md`.
 - Scope-Paths: examples/01_minimal_start_stop.py, examples/02_context_manager.py, examples/03_audit_decorator.py, examples/04_annotate_events.py, examples/05_execution_phases.py, examples/08_diff_engine.py, examples/09_cli_methods.py, examples/10_hardware_probe.py, examples/11_cli_report.py, examples/minimal-research-workflow/expected_methods.md
+- Scope-Exceeded: .aw/records/backlog/open/20261125-mz0erz-01-mz0erz-remove-deprecated-profile-examples-from-src-pubrun.backlog.md (Backlog item mz0erz filed for adjacent defect per driver defect-report contract)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Remove deprecated profile= kwargs from examples 01-11, switch them to pubrun.noauto, update 10/11 docstrings and CLI call, and align expected_methods.md with template output
@@ -17,12 +18,12 @@
 - Highest E allocated: 03
 - Author: Antigravity
 - Id: 2uwuiu
-- Approval: 2026-11-26, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-26 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 2uwuiu verified (set doc-audit, attempt 1). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261125-mz0erz-01-mz0erz-remove-deprecated-profile-examples-from-src-pubrun.backlog.md: Backlog item mz0erz filed for adjacent defect per driver defect-report contract]
 - 2026-11-26 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Gemini 4 Neon, Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001..PR-006 all FIXED; review record `.aw/records/reviews/20261125-doc-audit-06-2uwuiu-update-example-scripts-and-expected-methods-output-to-match.review.md`.
 - 2026-11-25 to-review (aw set): Authored from /assess-documentation
