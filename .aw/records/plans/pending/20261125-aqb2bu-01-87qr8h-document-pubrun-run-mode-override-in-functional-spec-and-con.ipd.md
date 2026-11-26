@@ -6,7 +6,7 @@
 - Scope: Add `PUBRUN_RUN_MODE_OVERRIDE` to `docs/functional_spec.md` Sections 10.2 and 10.3 and to `docs/configuration.md` (`## Environment Variables`), and align the adjacent `PUBRUN_IMPORT_MODE` row in both tables so neither contradicts `PUBRUN_RUN_MODE_OVERRIDE` or explicit submodule import precedence. No other file, section, or code changes.
 - Scope-Paths: docs/functional_spec.md, docs/configuration.md
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Document PUBRUN_RUN_MODE_OVERRIDE in docs/functional_spec.md sections 10.2 and 10.3 and docs/configuration.md
@@ -18,11 +18,13 @@
 - Highest E allocated: 02
 - Author: Antigravity
 - Id: 87qr8h
+- Approval: 2026-11-26, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-26 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004; review record `.aw/records/reviews/20261125-aqb2bu-01-87qr8h-document-pubrun-run-mode-override-in-functional-spec-and-con.review.md`.
 - 2026-11-25 to-review (aw set): graduated from backlog item aqb2bu into a review-ready plan.
 - 2026-11-25 draft (Antigravity): created.
