@@ -6,7 +6,7 @@
 - Scope: `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/bug_report.md`, `.github/ISSUE_TEMPLATE/feature_request.md`, `CONTRIBUTING.md`, `.pre-commit-config.yaml` (comment and display name of the retired `update-commit-file` hook only), `README.md`, and `release-notes-v1.2.0.md`.
 - Scope-Paths: .github/pull_request_template.md, .github/ISSUE_TEMPLATE/bug_report.md, .github/ISSUE_TEMPLATE/feature_request.md, CONTRIBUTING.md, .pre-commit-config.yaml, README.md, release-notes-v1.2.0.md
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix broken PR template URI, duplicate issue templates, CONTRIBUTING setup/stamping, and README accuracy errors
@@ -17,12 +17,12 @@
 - Highest E allocated: 06
 - Author: Antigravity
 - Id: 0cjiv5
-- Approval: 2026-11-26, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-26 executed (Antigravity): Verified in run-20261126T014957Z-3020938 (attempt 1); integrated after committing approved status [finalized WITHOUT a begin receipt (aw ipd begin was skipped); baseline c8db82c245c7; reason: Integrated verified lane aw/lane/0cjiv5 from run-20261126T014957Z-3020938 after resolving dirty-tree approval block]
 - 2026-11-26 approved (aw set): status set to approved
 - 2026-11-25 reviewed (aw set): plan-review complete; APPROVE WITH REVISIONS APPLIED
 - 2026-11-25 /plan-review (Claude Opus 5.5, OpenCode): APPROVE WITH REVISIONS APPLIED; PR-001..PR-009 all FIXED; review record `.aw/records/reviews/20261125-doc-audit-01-0cjiv5-fix-readme-contributing-github-templates-and-release-notes-s.review.md`.
