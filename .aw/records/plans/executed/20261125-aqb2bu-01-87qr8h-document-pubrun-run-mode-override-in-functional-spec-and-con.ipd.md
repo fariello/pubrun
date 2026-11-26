@@ -6,7 +6,7 @@
 - Scope: Add `PUBRUN_RUN_MODE_OVERRIDE` to `docs/functional_spec.md` Sections 10.2 and 10.3 and to `docs/configuration.md` (`## Environment Variables`), and align the adjacent `PUBRUN_IMPORT_MODE` row in both tables so neither contradicts `PUBRUN_RUN_MODE_OVERRIDE` or explicit submodule import precedence. No other file, section, or code changes.
 - Scope-Paths: docs/functional_spec.md, docs/configuration.md
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Document PUBRUN_RUN_MODE_OVERRIDE in docs/functional_spec.md sections 10.2 and 10.3 and docs/configuration.md
@@ -18,12 +18,12 @@
 - Highest E allocated: 02
 - Author: Antigravity
 - Id: 87qr8h
-- Approval: 2026-11-26, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-26 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 87qr8h verified (set aqb2bu, attempt 1).
 - 2026-11-26 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004; review record `.aw/records/reviews/20261125-aqb2bu-01-87qr8h-document-pubrun-run-mode-override-in-functional-spec-and-con.review.md`.
 - 2026-11-25 to-review (aw set): graduated from backlog item aqb2bu into a review-ready plan.
@@ -39,15 +39,15 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Environment-variable reference updates
 
-- [ ] E-01 Update `docs/functional_spec.md` under headings `### 10.2 Configuration Discovery` and `### 10.3 Supported Environment Variables` using the exact text in "Proposed changes" items 1 and 2. If a concurrent plan (such as `wjsccu`) has already edited either section, replace the boot-variable paragraph in Section 10.2 and replace any existing `PUBRUN_RUN_MODE_OVERRIDE` row together with the `PUBRUN_IMPORT_MODE` row in Section 10.3 so they match items 1 and 2 verbatim while preserving unrelated rows (such as `NO_COLOR` or `PUBRUN_DEBUG`); if both sections already match items 1 and 2 verbatim, leave `docs/functional_spec.md` unchanged and acknowledge it with `--scope-ack` at finalization.
+- [x] E-01 Update `docs/functional_spec.md` under headings `### 10.2 Configuration Discovery` and `### 10.3 Supported Environment Variables` using the exact text in "Proposed changes" items 1 and 2. If a concurrent plan (such as `wjsccu`) has already edited either section, replace the boot-variable paragraph in Section 10.2 and replace any existing `PUBRUN_RUN_MODE_OVERRIDE` row together with the `PUBRUN_IMPORT_MODE` row in Section 10.3 so they match items 1 and 2 verbatim while preserving unrelated rows (such as `NO_COLOR` or `PUBRUN_DEBUG`); if both sections already match items 1 and 2 verbatim, leave `docs/functional_spec.md` unchanged and acknowledge it with `--scope-ack` at finalization.
   - Depends on: none
   - Expected outcome: (1) Section 10.2 lists `PUBRUN_RUN_MODE_OVERRIDE`, `PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and `PUBRUN_IMPORT_CONFLICT` as boot-sequence variables excluded from `resolve_config()` and cites Sections 3.2, 3.3, and 3.4, matching "Proposed changes" item 1 verbatim. (2) Section 10.3 places the `PUBRUN_RUN_MODE_OVERRIDE` row immediately before `PUBRUN_IMPORT_MODE` with no duplicate `PUBRUN_RUN_MODE_OVERRIDE` row, and both rows match "Proposed changes" item 2 verbatim. (3) No other line in `docs/functional_spec.md` changes, and zero em dashes or en dashes appear in any target or added line.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update `docs/configuration.md` under heading `## Environment Variables` using the exact text in "Proposed changes" item 3. If reviewed pending plan `pqcx6o` (which reuses item 3 verbatim) has already executed and both rows already match item 3 verbatim, leave `docs/configuration.md` unchanged and acknowledge it with `--scope-ack` at finalization; if a `PUBRUN_RUN_MODE_OVERRIDE` row already exists with different text, replace both rows to match item 3 verbatim while preserving unrelated rows (such as `PUBRUN_DEBUG` or `NO_COLOR`).
+- [x] E-02 Update `docs/configuration.md` under heading `## Environment Variables` using the exact text in "Proposed changes" item 3. If reviewed pending plan `pqcx6o` (which reuses item 3 verbatim) has already executed and both rows already match item 3 verbatim, leave `docs/configuration.md` unchanged and acknowledge it with `--scope-ack` at finalization; if a `PUBRUN_RUN_MODE_OVERRIDE` row already exists with different text, replace both rows to match item 3 verbatim while preserving unrelated rows (such as `PUBRUN_DEBUG` or `NO_COLOR`).
   - Depends on: E-01
   - Expected outcome: (1) The `## Environment Variables` table places the `PUBRUN_RUN_MODE_OVERRIDE` row immediately before `PUBRUN_IMPORT_MODE` with no duplicate `PUBRUN_RUN_MODE_OVERRIDE` row, both rows match "Proposed changes" item 3 verbatim, and `"Takes highest precedence"` does not appear anywhere in `## Environment Variables`. (2) No other line in `docs/configuration.md` changes, and zero em dashes or en dashes appear in any target or added line.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -209,15 +209,62 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction, name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: (1) Paste `git diff -- docs/functional_spec.md` showing only the updated Section 10.2 paragraph and the `PUBRUN_RUN_MODE_OVERRIDE` and `PUBRUN_IMPORT_MODE` rows in Section 10.3, matching "Proposed changes" items 1 and 2 verbatim (or, if `docs/functional_spec.md` already matched verbatim before execution, paste the empty diff, paste the matching Section 10.2 and 10.3 lines from the file, and record `--scope-ack` for finalization). (2) Paste the `docs/functional_spec.md` output line (`docs/functional_spec.md: verified=ok added_lines=<N> dashes=0`) and exit status `0` from the Python content and dash check in "Required tests / validation" item 3.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- docs/functional_spec.md` (exit status `0`):
+    ```diff
+    diff --git a/docs/functional_spec.md b/docs/functional_spec.md
+    index ac70e85..f51cfe1 100644
+    --- a/docs/functional_spec.md
+    +++ b/docs/functional_spec.md
+    @@ -379,13 +379,14 @@ When both `.pubrun.toml` and `.config/pubrun/config.toml` exist in the same dire
 
-- [ ] V-02 validates E-02
+     An empty or whitespace-only `XDG_CONFIG_HOME` or `APPDATA` is treated as unset. On Windows, when `APPDATA` is unset, the user home config follows the `XDG_CONFIG_HOME` rule. The boot resolver (Section 3.2) uses the same user home config path.
+
+    -`PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and `PUBRUN_IMPORT_CONFLICT` are not part of this merge. The boot sequence reads them during import-mode resolution and conflict handling (Sections 3.2 and 3.3), so they do not change the values recorded in `config.resolved.json`.
+    +`PUBRUN_RUN_MODE_OVERRIDE`, `PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and `PUBRUN_IMPORT_CONFLICT` are not part of this merge. The boot sequence reads them during import-mode resolution, selection, and conflict handling (Sections 3.2, 3.3, and 3.4), so they do not change the values recorded in `config.resolved.json`.
+
+     ### 10.3 Supported Environment Variables
+
+     | Variable | Effect |
+     |---|---|
+    -| `PUBRUN_IMPORT_MODE` | Selects the import mode: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Overrides `PUBRUN_AUTO_START` and `[imports].mode`. A submodule import such as `import pubrun.noauto` takes precedence over it (Section 3.4). Matching ignores case and surrounding whitespace; any other value is ignored. `pubrun run --mode` sets it in the child process (Section 11.13). Consumed in the boot sequence (not in `resolve_config`). |
+    +| `PUBRUN_RUN_MODE_OVERRIDE` | Launch-time import-mode override: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Takes precedence over explicit in-code submodule imports (such as `import pubrun.full`), `PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and config files (`[imports].mode`, `[core].auto_start`). Records `"cli:pubrun run --mode"` as `selected_by` and `selected_source` in `manifest.json` and suppresses import-mode conflicts under `[imports].on_conflict` and `PUBRUN_IMPORT_CONFLICT` for overridden and subsequent imports. Matching ignores case and surrounding whitespace; any other value is ignored. `pubrun run --mode` sets it alongside `PUBRUN_IMPORT_MODE` in the child process (Section 11.13). Consumed in the boot sequence (`select_mode`, not in `resolve_config()`). |
+    +| `PUBRUN_IMPORT_MODE` | Selects the import mode: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Overrides `PUBRUN_AUTO_START` and config files (`[imports].mode`, `[core].auto_start`). `PUBRUN_RUN_MODE_OVERRIDE` and explicit submodule imports such as `import pubrun.noauto` take precedence over it (Section 3.4). Matching ignores case and surrounding whitespace; any other value is ignored. `pubrun run --mode` sets it alongside `PUBRUN_RUN_MODE_OVERRIDE` in the child process (Section 11.13). Consumed in the boot sequence (not in `resolve_config()`). |
+     | `PUBRUN_PROFILE` | Overrides `[core].profile`. Consumed in `resolve_config()` between local config and API overrides. |
+     | `PUBRUN_AUTO_START` | Overrides `[core].auto_start`. `"1"`, `"true"`, `"yes"`, and `"on"` select `auto` mode; `"0"`, `"false"`, `"no"`, and `"off"` select `noauto` mode (Section 3.3). Used only when `PUBRUN_IMPORT_MODE` is unset or invalid. Consumed in the boot sequence (not in `resolve_config`). |
+     | `PUBRUN_META_REF` | Sets `[core].meta_ref`. Consumed in `resolve_config()` between local config and API overrides. |
+    ```
+    (2) Python content and dash check output line (exit status `0`):
+    `docs/functional_spec.md: verified=ok added_lines=3 dashes=0`
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: (1) Paste `git diff -- docs/configuration.md` showing only the `PUBRUN_RUN_MODE_OVERRIDE` and `PUBRUN_IMPORT_MODE` rows in `## Environment Variables`, matching "Proposed changes" item 3 verbatim (or, if `pqcx6o` executed first and `docs/configuration.md` already matched verbatim, paste the empty diff, paste the matching `## Environment Variables` rows from the file, and record `--scope-ack` for finalization). (2) Paste the `docs/configuration.md` output line (`docs/configuration.md: verified=ok added_lines=<N> dashes=0`) and exit status `0` from the Python content and dash check in "Required tests / validation" item 3. (3) Paste the summary line and exit status `0` of `python3 -m pytest tests/test_import_modes.py tests/test_config.py --no-cov -q`. (4) Paste the exit status `0` of `python3 scripts/sanitize_paths.py --check --all`.
   - Observed evidence:
-  - Result: pending
+    (1) `git diff -- docs/configuration.md` (exit status `0`):
+    ```diff
+    diff --git a/docs/configuration.md b/docs/configuration.md
+    index 929e83f..0c51acc 100644
+    --- a/docs/configuration.md
+    +++ b/docs/configuration.md
+    @@ -358,7 +358,8 @@ long); override any of them in your `.pubrun.toml`.
+
+     | Variable | Description |
+     |---|---|
+    -| `PUBRUN_IMPORT_MODE` | Canonical import mode: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Takes highest precedence. |
+    +| `PUBRUN_RUN_MODE_OVERRIDE` | Launch-time import-mode override: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Takes precedence over explicit in-code `import pubrun.<mode>` imports, `PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and config files (`[imports].mode`, `[core].auto_start`). `pubrun run --mode` sets it alongside `PUBRUN_IMPORT_MODE` in the child process. It records `"cli:pubrun run --mode"` as manifest provenance and suppresses import-mode conflicts under `[imports].on_conflict` and `PUBRUN_IMPORT_CONFLICT`. Matching ignores case and surrounding whitespace; any other value is ignored. Consumed during the boot sequence (not in `resolve_config()`). |
+    +| `PUBRUN_IMPORT_MODE` | Canonical import mode: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Overrides `PUBRUN_AUTO_START` and config files (`[imports].mode`, `[core].auto_start`). `PUBRUN_RUN_MODE_OVERRIDE` and explicit in-code `import pubrun.<mode>` imports take precedence over it. Matching ignores case and surrounding whitespace; any other value is ignored. Consumed during the boot sequence (not in `resolve_config()`). |
+     | `PUBRUN_PROFILE` | **Deprecated and inert.** Sets `[core].profile`, which has no effect on capture (see the `[core]` table). Use the `capture.*` keys instead. |
+     | `PUBRUN_AUTO_START` | Legacy alias for import mode. `"1"`, `"true"`, `"yes"`, or `"on"` maps to `auto`; `"0"`, `"false"`, `"no"`, or `"off"` maps to `noauto` (case-insensitive). Other values are ignored. |
+     | `PUBRUN_META_REF` | Path to a parent `meta.json` for HPC hydration. Child runs will reference this. |
+    ```
+    (2) Python content and dash check output line (exit status `0`):
+    `docs/configuration.md: verified=ok added_lines=2 dashes=0`
+    (3) `python3 -m pytest tests/test_import_modes.py tests/test_config.py --no-cov -q` (exit status `0`): `124 passed in 21.89s`.
+    (4) `python3 scripts/sanitize_paths.py --check --all`: exit status `0`.
+  - Result: pass
 
 ## Approval and execution gate
 
