@@ -2,14 +2,16 @@
 
 - Date: 2026-11-25
 - Kind: orchestrator
-- Concern: Documentation accuracy, completeness, and consistency across user-facing guides, CLI/API/configuration/manifest references, examples, benchmarks, changelog, and GitHub templates (surfaced by `/assess-documentation`).
-- Scope: Coordination of six disjoint child plans (`0cjiv5`, `pqcx6o`, `dd7noz`, `wjsccu`, `77pdvl`, `2uwuiu`) covering all verified documentation-only fixes from `/assess-documentation`. This orchestrator modifies no product code, tests, docs, or templates.
+- Concern: Documentation accuracy, completeness, and consistency across user-facing guides, CLI/API/configuration/manifest references, examples, benchmarks, changelog, pre-commit hook comment, and GitHub templates (surfaced by `/assess-documentation`).
+- Scope: Coordination of six disjoint child plans (`0cjiv5`, `pqcx6o`, `dd7noz`, `wjsccu`, `77pdvl`, `2uwuiu`) covering all verified documentation-only fixes from `/assess-documentation` (including `.pre-commit-config.yaml` hook-comment sync in `0cjiv5`). This orchestrator modifies no product code, tests, docs, or templates.
 - Scope-Paths: .aw/records/plans/pending/20261125-doc-audit-00-86cd17-remediate-repository-documentation-inaccuracies-and-drift.ipd.md
 - Item-Dependencies: executed:0cjiv5, executed:pqcx6o, executed:dd7noz, executed:wjsccu, executed:77pdvl, executed:2uwuiu
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: orchestrator
 - Coverage: pass
-- Coverage-Fingerprint: d14e8d5acb0de515a58428d4d4e8db272ee84c2198aa57777abd53f6a8f54835
-- Coverage-Checked: 2026-11-25 by uri/its_direct/pt3-claude-opus-5.5-1m-us
+- Coverage-Fingerprint: 18600a8f727e11340f329343e6315b9147327ea26533777a202fc8814386118f
+- Coverage-Checked: 2026-11-26 by uri/its_direct/pt3-claude-opus-5.5-1m-us
 - Short-Description: Coordinate six disjoint documentation remediation plans from /assess-documentation
 - Work-Kind: chore
 - Priority: medium
@@ -23,6 +25,8 @@
 
 ## Workflow history
 
+- 2026-11-26 coverage pass (aw oc run): fingerprint 18600a8f727e, model uri/its_direct/pt3-claude-opus-5.5-1m-us
+- 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-25 to-review (aw set): Authored from /assess-documentation; 6 disjoint children
 - 2026-11-25 coverage pass (aw oc run): fingerprint d14e8d5acb0d, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-25 /assess documentation (Antigravity): assessed; proposed 6 disjoint child plans (25 execution items across 59 verified documentation findings)
@@ -30,18 +34,18 @@
 
 ## Goal
 
-Bring every user-facing documentation file, example script, benchmark guide, changelog entry, and GitHub template in `pubrun` into accurate agreement with the live codebase at `HEAD` (`f7c0897`). Six child plans divide the work along disjoint file boundaries so every child stays small, reviewable, and safe to execute in parallel without merge conflicts.
+Bring every user-facing documentation file, example script, benchmark guide, changelog entry, pre-commit hook comment, and GitHub template in `pubrun` into accurate agreement with the live codebase (audited at `/assess-documentation` baseline `f7c0897`, with `87qr8h` subsequently landed at `da1fbe7`). Six child plans divide the work along disjoint file boundaries so every child stays reviewable and safe to execute in parallel without merge conflicts.
 
 ### Set dependency architecture
 
 ```mermaid
 flowchart TD
-    C1["01 0cjiv5: README, CONTRIBUTING, GitHub templates, release-notes snapshot"]
+    C1["01 0cjiv5: README, CONTRIBUTING, pre-commit comment, GitHub templates, release-notes snapshot"]
     C2["02 pqcx6o: docs/cli.md and docs/configuration.md"]
     C3["03 dd7noz: docs/api.md, manifest.md, architecture.md, docs/design/"]
     C4["04 wjsccu: docs/functional_spec.md, docs/hpc.md, docs/research-use.md"]
     C5["05 77pdvl: docs/performance.md, benchmarks/README.md, CHANGELOG.md, CITATION.cff"]
-    C6["06 2uwuiu: examples/ scripts and expected_methods.md"]
+    C6["06 2uwuiu: 9 example scripts and expected_methods.md"]
     ORCH["00 86cd17: orchestrator retirement"]
 
     C1 --> ORCH
@@ -92,28 +96,28 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 | Order | Id | File | What it does | Depends on |
 |---|---|---|---|---|
-| 01 | `0cjiv5` | `20261125-doc-audit-01-0cjiv5-fix-readme-contributing-github-templates-and-release-notes-s.ipd.md` | Fixes broken local `file://` URI in `.github/pull_request_template.md`, removes duplicate legacy `.md` issue templates, updates `CONTRIBUTING.md` onboarding and `hatch_build.py` commit stamping, fixes `README.md` CLI/HPC/examples/Windows/roadmap/sample-output/license drift, and adds an archival banner to `release-notes-v1.2.0.md`. | none |
-| 02 | `pqcx6o` | `20261125-doc-audit-02-pqcx6o-fix-cli-and-configuration-reference-inaccuracies-and-drift.ipd.md` | Fixes `docs/cli.md` (`show`/`report` grammar and section extracts, `diff` depths/args, run-selector path rules, standard run filters, `--info`/`--no-color`/`help`/exit-codes/non-TTY scope) and `docs/configuration.md` (malformed `[diff]` table, `[capture.resources].scope`, `[methods].format`, inert/reserved keys, `[core].meta_ref` and `_CORE_SHORTCUTS`, env-var precedence and missing vars). | none |
+| 01 | `0cjiv5` | `20261125-doc-audit-01-0cjiv5-fix-readme-contributing-github-templates-and-release-notes-s.ipd.md` | Fixes broken local `file://` URI in `.github/pull_request_template.md`, removes duplicate legacy `.md` issue templates, updates `CONTRIBUTING.md` onboarding and `hatch_build.py` commit stamping (plus `.pre-commit-config.yaml` hook comment), fixes `README.md` CLI/HPC/examples/Windows/roadmap/sample-output/license drift, and adds an archival notice to `release-notes-v1.2.0.md`. | none |
+| 02 | `pqcx6o` | `20261125-doc-audit-02-pqcx6o-fix-cli-and-configuration-reference-inaccuracies-and-drift.ipd.md` | Fixes `docs/cli.md` (`show`/`report` grammar and section extracts, `diff` depths/args, run-selector path rules, standard run filters, `--info`/`--no-color`/`help`/exit-codes/non-TTY scope) and `docs/configuration.md` (malformed `[diff]` table, `[capture.resources].scope`, `[methods].format`, inert/reserved keys, `[core].meta_ref` and `_CORE_SHORTCUTS`, env-var precedence and missing `PUBRUN_DEBUG`/`NO_COLOR` rows). | none |
 | 03 | `dd7noz` | `20261125-doc-audit-03-dd7noz-fix-api-manifest-architecture-and-design-documentation-drift.ipd.md` | Fixes `docs/api.md` (deprecated `profile=` examples, false `inspect --json` vs `assess_run()` claim, `phase()`/`register_*()` inactive behavior, `stop()`/`tracked_run()`/`audit_run()`, `__all__`/`paused()`/`should_fail_strict`), `docs/manifest.md` (removes phantom `profiling`, fixes `redacted_value`, `virtual_env`, `status.outcome`, `console`, `invocation.script`, `Meta Snapshot`, `subprocesses[].cwd`, `gpus[]`), `docs/architecture.md`, and `docs/design/` banners/call sites. | none |
-| 04 | `wjsccu` | `20261125-doc-audit-04-wjsccu-fix-functional-specification-hpc-guide-and-research-use-guid.ipd.md` | Fixes `docs/hpc.md` (working `PUBRUN_META_REF` + `[report].meta_ref_allowed_dirs` example, `host` section, `inspect` vs `res` attribution, `register_*()`, `pubrun bench` checkout and Slurm behavior), `docs/research-use.md` (input-file capture nuance and `00`-`12` examples), and `docs/functional_spec.md` (Section 11 CLI overhaul plus Sections 1-10 and 12-17 drift). | none |
-| 05 | `77pdvl` | `20261125-doc-audit-05-77pdvl-fix-performance-benchmarks-and-changelog-documentation-drift.ipd.md` | Fixes `benchmarks/README.md` (redacted-only default output inversion, Slurm output path and pass count, `pubrun.open()` vs `patched open()`, `io_baseline`/`io_sink`, `.gitignore`, relative paths), `docs/performance.md` (already-fixed `uatvzh` bug and leaked internal IDs), `CHANGELOG.md` (`[Unreleased]` deduplication and stale intermediate claims), and `CITATION.cff` release date. | none |
-| 06 | `2uwuiu` | `20261125-doc-audit-06-2uwuiu-update-example-scripts-and-expected-methods-output-to-match.ipd.md` | Removes deprecated/inert `profile=` arguments from examples `01`-`05`, `08`, `09`, and `11`, updates `10_hardware_probe.py` docstring and `11_cli_report.py` CLI call, aligns `examples/minimal-research-workflow/expected_methods.md` with `MARKDOWN_TEMPLATE`, and validates with `examples/verify_all.py` and example smoke tests. | none |
+| 04 | `wjsccu` | `20261125-doc-audit-04-wjsccu-fix-functional-specification-hpc-guide-and-research-use-guid.ipd.md` | Fixes `docs/hpc.md` (working `PUBRUN_META_REF` + `[report].meta_ref_allowed_dirs` example, `host` section, `inspect` vs `res` attribution, `register_*()`, `pubrun bench` checkout and Slurm behavior), `docs/research-use.md` (input-file capture nuance and `00`-`12` examples), and `docs/functional_spec.md` (Section 11 CLI overhaul covering existing subsections plus 10 omitted primary subcommands and global CLI options, and Sections 1-10, 12, 14, 16, and 18 drift while leaving Section 17 Ghost Mode unchanged). | none |
+| 05 | `77pdvl` | `20261125-doc-audit-05-77pdvl-fix-performance-benchmarks-and-changelog-documentation-drift.ipd.md` | Fixes `benchmarks/README.md` (redacted-only default output inversion, Slurm output path and pass count, `pubrun.open()` vs `patched open()`, `io_baseline`/`io_sink`, `.gitignore`, relative paths), `docs/performance.md` (already-fixed `uatvzh` bug and leaked internal IDs), `CHANGELOG.md` (`[Unreleased]` deduplication, stale intermediate claims, and `v1.0.1`-`v1.0.3` historical entries), and `CITATION.cff` release date and trailing comment cleanup. | none |
+| 06 | `2uwuiu` | `20261125-doc-audit-06-2uwuiu-update-example-scripts-and-expected-methods-output-to-match.ipd.md` | Removes deprecated/inert `profile=` arguments from examples `01`-`05`, `08`, `09`, and `11`, switches `01`-`05` and `08`-`11` from legacy `PUBRUN_AUTO_START` to `import pubrun.noauto as pubrun` (dropping unused `import os` in `09`/`11`), updates `10_hardware_probe.py` and `11_cli_report.py` docstrings/CLI call, aligns `examples/minimal-research-workflow/expected_methods.md` with `MARKDOWN_TEMPLATE`, and validates with `examples/verify_all.py`, runtime zero-`profile_deprecated` manifest notice checks, and example smoke tests. | none |
 
-All six children edit strictly disjoint files and have no inter-child dependencies.
+All six children edit strictly disjoint files (verified pairwise across all 31 declared work Scope-Paths) and have no inter-child dependencies.
 
 ## Completion criteria (the whole Set is done only when)
 
-- Root documentation (`README.md`, `CONTRIBUTING.md`), GitHub templates (`.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/`), and `release-notes-v1.2.0.md` match the live repository with zero broken links or local URIs. Owner: `0cjiv5`.
+- Root documentation (`README.md`, `CONTRIBUTING.md`), `.pre-commit-config.yaml` hook comment, GitHub templates (`.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/`), and `release-notes-v1.2.0.md` match the live repository with zero broken links or local URIs. Owner: `0cjiv5`.
 - `docs/cli.md` and `docs/configuration.md` accurately describe every CLI subcommand, filter flag, config key, reserved key, and environment-variable precedence rule, with valid GFM tables. Owner: `pqcx6o`.
 - `docs/api.md`, `docs/manifest.md`, `docs/architecture.md`, and `docs/design/` match `src/pubrun/` and `schemas/manifest.schema.json` with no phantom sections or deprecated primary examples. Owner: `dd7noz`.
 - `docs/functional_spec.md`, `docs/hpc.md`, and `docs/research-use.md` match live HPC hydration, `inspect`/`res` division, input-capture mechanics, and the full current CLI. Owner: `wjsccu`.
-- `docs/performance.md`, `benchmarks/README.md`, `CHANGELOG.md`, and `CITATION.cff` accurately describe live benchmark behavior, resolved timing bugs, and consolidated `[Unreleased]` changes. Owner: `77pdvl`.
-- All example scripts (`examples/00_*.py` through `examples/12_*.py`) and `examples/minimal-research-workflow/expected_methods.md` avoid deprecated `profile=` usage, match live template output, and pass `examples/verify_all.py` and example tests. Owner: `2uwuiu`.
+- `docs/performance.md`, `benchmarks/README.md`, `CHANGELOG.md` (including `v1.0.1`-`v1.0.3` patch entries), and `CITATION.cff` accurately describe live benchmark behavior, resolved timing bugs, and consolidated `[Unreleased]` changes. Owner: `77pdvl`.
+- The 9 targeted example scripts (`01`-`05`, `08`-`11`) and `examples/minimal-research-workflow/expected_methods.md` avoid deprecated `profile=` usage, switch to `pubrun.noauto`, match live template output, emit zero `profile_deprecated` manifest notices at runtime, and pass `examples/verify_all.py` and example tests. Owner: `2uwuiu`.
 
 ## Cross-IPD validation
 
 - Every child plan edits only its own disjoint Scope-Paths and validates: (1) zero broken relative/anchor links across its edited Markdown files, (2) zero em or en dashes (`\u2013`, `\u2014`) introduced in added lines of user-facing Markdown per `AGENTS.md`, and (3) `python3 scripts/sanitize_paths.py --check --all` exiting 0. Owners: `0cjiv5`, `pqcx6o`, `dd7noz`, `wjsccu`, `77pdvl`, `2uwuiu`.
-- Cross-document consistency on shared topics (`PUBRUN_META_REF` + `[report].meta_ref_allowed_dirs` + `host` hydration across `README.md`, `docs/cli.md`, `docs/manifest.md`, `docs/hpc.md`, `docs/functional_spec.md`; `pubrun show` single-run + filter syntax across `README.md`, `docs/cli.md`, `docs/functional_spec.md`; `PUBRUN_RUN_MODE_OVERRIDE` precedence across `docs/configuration.md` and `docs/functional_spec.md`, satisfying open backlog `aqb2bu`) is enforced by identical concrete specifications in each owning child plan. Owners: `0cjiv5`, `pqcx6o`, `dd7noz`, `wjsccu`.
+- Cross-document consistency on shared topics (`PUBRUN_META_REF` + `[report].meta_ref_allowed_dirs` + `host` hydration across `README.md`, `docs/cli.md`, `docs/manifest.md`, `docs/hpc.md`, `docs/functional_spec.md`; `pubrun show` single-run + filter syntax across `README.md`, `docs/cli.md`, `docs/functional_spec.md`; `PUBRUN_RUN_MODE_OVERRIDE` precedence across `docs/configuration.md` and `docs/functional_spec.md`, preserving the `PUBRUN_RUN_MODE_OVERRIDE` entries already landed by executed plan `87qr8h` for closed backlog `aqb2bu` while adding `PUBRUN_DEBUG` and `NO_COLOR`) is enforced by identical concrete specifications in each owning child plan. Owners: `0cjiv5`, `pqcx6o`, `dd7noz`, `wjsccu`.
 
 ## Deferred / out of scope (with reason)
 
@@ -132,12 +136,12 @@ All six children edit strictly disjoint files and have no inter-child dependenci
 
 ## Scope check
 
-- Over-scope: none. The orchestrator modifies no product code, tests, docs, or templates; every child edits only documentation, templates, or example scripts.
-- Under-scope: none. Every verified documentation finding from `/assess-documentation` is assigned to one of the six children or explicitly deferred with its Remediation-Risk axis above. Open backlog item `aqb2bu` (`PUBRUN_RUN_MODE_OVERRIDE` in `docs/functional_spec.md` 10.2/10.3 and `docs/configuration.md`) is satisfied once `pqcx6o` and `wjsccu` execute.
+- Over-scope: none. The orchestrator modifies no product code, tests, docs, or templates; every child edits only documentation, templates, the `.pre-commit-config.yaml` hook comment (`0cjiv5`), or example scripts (`2uwuiu`).
+- Under-scope: none. Every verified documentation finding from `/assess-documentation` is assigned to one of the six children or explicitly deferred with its Remediation-Risk axis above. Executed plan `87qr8h` (commit `da1fbe7`) has already landed the `PUBRUN_RUN_MODE_OVERRIDE` rows in `docs/functional_spec.md` and `docs/configuration.md` and closed backlog `aqb2bu`; `pqcx6o` and `wjsccu` preserve those rows while adding `PUBRUN_DEBUG`, `NO_COLOR`, and the remaining document fixes.
 
 ## Required tests / validation
 
-This orchestrator runs no product tests itself. Each child plan owns its own verification (diff inspection, link/anchor checks, zero-dash checks on added user-facing prose, and `python3 scripts/sanitize_paths.py --check --all`), and `2uwuiu` owns running `python3 examples/verify_all.py` and `python3 -m pytest tests/test_examples_smoke.py tests/test_example_minimal_research_workflow.py -v`.
+This orchestrator runs no product tests itself. Each child plan owns its own verification (diff inspection, link/anchor checks, zero-dash checks on added user-facing prose, and `python3 scripts/sanitize_paths.py --check --all`), and `2uwuiu` owns running `python3 examples/verify_all.py`, the runtime zero-`profile_deprecated` manifest notice check across the 9 edited example scripts, and `python3 -m pytest tests/test_examples_smoke.py tests/test_example_minimal_research_workflow.py -v --no-cov -p no:cacheprovider`.
 
 ## Open questions
 
@@ -182,11 +186,11 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 - Size assessment: standard
 - Cohesion rationale: not required
 
-Execution begins only after a human approves this orchestrator and its six child plans (`- Status: approved`). This assessment workflow does not execute the plan.
+Execution begins only after a human approves this orchestrator and its six child plans (`- Status: approved`).
 
 Execution contract:
 1. Open-questions precondition: no blocking open question remains in this plan or in any child.
-2. Scope declaration: this Order-0 orchestrator modifies no product code, tests, docs, or templates; its `- Scope-Paths:` covers only this file.
-3. Validation honesty: every `V-*` claim must paste the actual `aw ipd lint --phase post-transition` output observed on disk.
-4. Commit discipline: commit only this orchestrator's retirement files through `aw commit 86cd17 -- <paths>`. Never use `git add -A` or `-a`, and never push without an explicit human instruction.
-5. Lifecycle transition: inside `aw oc run` / `aw agy run`, the runner retires this orchestrator once all six children (`0cjiv5`, `pqcx6o`, `dd7noz`, `wjsccu`, `77pdvl`, `2uwuiu`) are `executed`. Outside a runner, after all six are executed, run `aw ipd finalize 86cd17` (never a hand-written `git mv`).
+2. Scope declaration: this Order-0 orchestrator modifies no product code, tests, docs, or templates; its `- Scope-Paths:` covers only this file. Justify any out-of-scope edit with `--scope-reason` (and any declared-but-unmodified path with `--scope-ack`) at finalization.
+3. Validation honesty (HARD MUST): every `V-*` claim must paste the actual `aw ipd lint --phase post-transition` output observed on disk. Never claim a child is executed without reading its executed file and pasting the linter output.
+4. Commit discipline: commit only this orchestrator's retirement files through `aw commit 86cd17 -- <paths>` (or the runner's bookkeeping transaction). Never use `git add -A` or `-a`, and never push without an explicit human instruction.
+5. Lifecycle transition: inside `aw oc run` / `aw agy run`, the runner retires this orchestrator once all six children (`0cjiv5`, `pqcx6o`, `dd7noz`, `wjsccu`, `77pdvl`, `2uwuiu`) are `executed`, spending no agent turn. Outside a runner, after all six are executed and `aw ipd lint --phase pre-transition` reports `conforming`, run `aw ipd finalize 86cd17` (never a hand-written `git mv`).
