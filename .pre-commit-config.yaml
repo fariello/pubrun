@@ -29,12 +29,12 @@ repos:
         pass_filenames: true
         require_serial: true
 
-      # Post-commit: stamp src/pubrun/COMMIT with the just-made HEAD so the packaged
-      # fallback stays current (pubrun.__commit__ prefers live git in a checkout). Runs
-      # after the commit; the refreshed file rides along with the next commit. Install with
-      # `pre-commit install --hook-type post-commit`.
+      # Retired post-commit cleanup no-op: hatch_build.py now stamps commit metadata
+      # into wheel and sdist artifacts at build time without writing to the working tree.
+      # Kept only so clones with an existing post-commit hook installation remove any
+      # stale untracked src/pubrun/COMMIT file.
       - id: update-commit-file
-        name: stamp src/pubrun/COMMIT with HEAD
+        name: clean up stale src/pubrun/COMMIT (retired no-op)
         entry: python3 scripts/update_commit_file.py
         language: system
         stages: [post-commit]

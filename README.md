@@ -50,14 +50,14 @@ Almost certainly yes, if you run Python and would ever want to reproduce, compar
 
 The [`examples/`](https://github.com/fariello/pubrun/tree/main/examples) directory has runnable scripts, from trivial to real, so you can find your own use and climb from there:
 
-- **A trivial script:** [`examples/01_minimal_start_stop.py`](https://github.com/fariello/pubrun/blob/main/examples/01_minimal_start_stop.py) (add provenance to any script in one import).
+- **A trivial script:** [`examples/00_auto_start.py`](https://github.com/fariello/pubrun/blob/main/examples/00_auto_start.py) (add provenance to any script in one import; see [`examples/01_minimal_start_stop.py`](https://github.com/fariello/pubrun/blob/main/examples/01_minimal_start_stop.py) for explicit `start()`/`stop()`).
 - **A data or analysis run:** [`examples/minimal-research-workflow/`](https://github.com/fariello/pubrun/tree/main/examples/minimal-research-workflow) (a full round trip on synthetic data: run, inspect, diff two runs, extract a rerun command).
-- **Recording inputs and outputs** (ETL, scrapers, file-producing jobs): [`examples/07_file_capture.py`](https://github.com/fariello/pubrun/blob/main/examples/07_file_capture.py).
+- **Recording inputs and outputs** (ETL, scrapers, file-producing jobs): [`examples/12_external_file_provenance.py`](https://github.com/fariello/pubrun/blob/main/examples/12_external_file_provenance.py) (`register_input()`/`register_output()`), and [`examples/07_file_capture.py`](https://github.com/fariello/pubrun/blob/main/examples/07_file_capture.py) for detection of input files named on the command line.
 - **Comparing two runs:** [`examples/08_diff_engine.py`](https://github.com/fariello/pubrun/blob/main/examples/08_diff_engine.py).
 - **An HPC array job:** no dedicated worked example yet; see [HPC](https://github.com/fariello/pubrun/blob/main/docs/hpc.md) for the parent-child `PUBRUN_META_REF` pattern.
 - **An ML training and evaluation run:** no dedicated worked example yet; the pattern is the same one import, plus the deep-dive links above.
 
-See [`examples/`](https://github.com/fariello/pubrun/tree/main/examples) for the full set (`00_*` through `11_*`, plus a `verify_all.py` harness).
+See [`examples/`](https://github.com/fariello/pubrun/tree/main/examples) for the full set (`00_*` through `12_*`, plus a `verify_all.py` harness).
 
 ## Features
 
@@ -182,15 +182,24 @@ pubrun.stop()
 Now extract your method paragraph for your paper:
 
 ```bash
-pubrun methods --format latex
+pubrun methods --format markdown
 ```
 
 ### Sample Output
 
-> Computational experiments were executed on a machine running Linux (5.15.0-91-generic) equipped with an Intel(R) Core(TM) i7-12700H and 32.0 GB of RAM. The execution environment relied on Python 3.10.12 (CPython). Key dependencies tracked include torch (v2.0.1) and numpy (v1.24.3). To facilitate computational reproducibility, the exact state of the source code was anchored at Git commit `a1b2c3d4`. Environment and execution provenance were tracked using the `pubrun` library [1].
+> ### Computational Methods
+>
+> Computational experiments were executed on a machine running Linux (5.15.0-91-generic) equipped with an Intel(R) Core(TM) i7-12700H and 32.0 GB of RAM. The execution environment relied on Python 3.10.12 (Cpython).
+>
+> Key dependencies tracked include torch (v2.0.1), numpy (v1.24.3).
+>
+> To facilitate computational reproducibility, the exact state of the source code was archived at Git commit `a1b2c3d4`. Environment and execution provenance were captured with pubrun v1.3.1 [1].
+>
+> **References:**
+> [1] Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research [Computer software]. https://github.com/fariello/pubrun
 
 > [!NOTE]
-> **Windows support**: `pubrun` works on Windows, but some capture engines have reduced functionality. Process `uid`/`gid` fields are not available, and `os.system` interception uses shell-string parsing rather than structured argument lists. All other features work identically.
+> **Windows support**: `pubrun` works on Windows, but some capture engines have reduced functionality. Process `uid`/`gid` fields are not available, and `os.system` interception uses shell-string parsing rather than structured argument lists. Process-tree memory is not measured (only the main process is sampled). System memory, load average, node iowait (`system_iowait_pct`), and per-process I/O counters (`io_counters`) are not captured because they come from `/proc` or `os.getloadavg()`. The Unix-only signals `SIGHUP`, `SIGPIPE`, `SIGUSR1`, and `SIGUSR2` are not captured, and `artifact_durability = "strict"` skips the parent-directory `fsync`.
 
 ---
 
@@ -232,9 +241,9 @@ pubrun self-check --strict           # exit non-zero if any warning fired
 ```
 
 ### `pubrun inspect`
-Diagnose a completed run: what was captured, what wasn't, and how to capture more.
+Diagnose a completed run: what was captured, what wasn't, and how to capture more. Pass `--preflight` to run a read-only offline comparison of the recorded requirements against the current environment.
 ```bash
-pubrun inspect [RUN_DIR] [--show-suggestions]
+pubrun inspect [RUN_DIR] [--show-suggestions] [--preflight]
 ```
 
 ### `pubrun bench`
@@ -293,9 +302,11 @@ pubrun methods [RUN_DIR] --format markdown|latex
 ```
 
 ### `pubrun show`
-A diagnostic viewer that surfaces execution timing, hardware, dependencies, and codebase drift. Accepts multiple run directories for sequential evaluation. (The name `report` remains as a backward-compatible alias.)
+A diagnostic viewer that surfaces execution timing, hardware, dependencies, and codebase drift. Pass an optional section (`logs`, `env`, or `packages`) for one run, or use the standard run filters (`-n`, `-f`, `-s`) to inspect several runs. (The name `report` remains as a backward-compatible alias.)
 ```bash
-pubrun show ./runs/pubrun-A ./runs/pubrun-B --deep
+pubrun show ./runs/pubrun-A env --deep  # single run, optional section
+pubrun show -n 2 --deep                 # two most recent runs
+pubrun show -f train.py                 # runs matching script/arg filter
 ```
 
 ### `pubrun show config`
@@ -308,9 +319,9 @@ pubrun show default config      # the shipped built-in defaults only
 See the [CLI Reference](https://github.com/fariello/pubrun/blob/main/docs/cli.md) for details.
 
 ### `pubrun rerun`
-Extracts the exact shell command needed to reproduce a run.
+Extracts the exact shell command needed to reproduce a run. Pass `--preflight` to run a read-only offline comparison of the recorded requirements against the current environment; preflight diagnostics go to stderr while stdout keeps only the command.
 ```bash
-pubrun rerun ./runs/pubrun-A
+pubrun rerun ./runs/pubrun-A [--preflight]
 ```
 
 ### `pubrun res` / `pubrun cpu` / `pubrun mem`
@@ -329,7 +340,7 @@ pubrun run --mode nopatch -- python train.py
 ```
 
 ### `pubrun status`
-Lists all runs with their current status (completed, failed, interrupted, running, crashed, ghost), or inspects a specific run in detail. Detects active processes via cross-platform PID liveness checks.
+Lists all runs with their current status (completed, failed, interrupted, broken pipe, running, crashed, ghost), or inspects a specific run in detail. Detects active processes via cross-platform PID liveness checks.
 ```bash
 pubrun status              # Compact table of all runs (with a leading # recency index)
 pubrun status -v           # Verbose listing with PID, RSS, CPU, events
@@ -404,7 +415,7 @@ Signal capture is configurable via `[capture.signals].enabled` in `.pubrun.toml`
 For running processes, `pubrun status <run-id>` shows live resource usage (RSS memory and CPU percent) queried cross-platform:
 - **Linux**: reads from `/proc/<pid>/status` and `/proc/<pid>/stat`
 - **macOS**: queries via `ps`
-- **Windows**: uses `ctypes` (`kernel32`/`psapi`) and `wmic`
+- **Windows**: uses `ctypes` (`kernel32`) for liveness, start time, and CPU, and `wmic` for memory (RSS); where `wmic` is absent, RSS is reported as unavailable
 
 No external dependencies are required.
 
@@ -415,18 +426,26 @@ No external dependencies are required.
 If you run thousands of array jobs across a cluster, you don't want each child run wasting time and disk logging identical dependency graphs. `pubrun` supports **parent-child manifest hydration**.
 
 #### Step 1: Snap the Parent Cluster
-On the head node, snapshot the global environment:
+On the head node, snapshot the global environment to an absolute path on shared storage:
 ```bash
-pubrun meta --out ./runs/meta.json --deep
+pubrun meta --out /shared/proj/meta.json --deep
 ```
 This generates a deep metadata map of hardware, environment variables, and the full Python package tree.
 
 #### Step 2: Hydrate Children
-In your Slurm script, reference the parent snapshot:
+In your Slurm script, reference the parent snapshot by its shared absolute path:
 ```bash
-export PUBRUN_META_REF=meta.json
+export PUBRUN_META_REF=/shared/proj/meta.json
 python minimal_script.py
 ```
+
+Allow report-time hydration to read snapshots from `/shared/proj` in `.pubrun.toml` (or in `~/.config/pubrun/config.toml`):
+```toml
+[report]
+meta_ref_allowed_dirs = ["/shared/proj"]
+```
+
+Use an absolute path in `PUBRUN_META_REF` because a relative path resolves against each child's run directory, not the working directory. A path outside the run directory is refused with status `blocked_by_policy` unless `[report].meta_ref_allowed_dirs` lists its directory or `[report].allow_external_meta_ref = true`. This policy is read when `pubrun show` or `pubrun methods` runs, from the `.pubrun.toml` in the current working directory or the user config `~/.config/pubrun/config.toml`, so the setting must be visible where the report command runs.
 
 Setting `PUBRUN_META_REF` records the reference in each child's manifest and enables
 **report-time hydration**: when you run `pubrun show` or `pubrun methods`, the orchestrator
@@ -485,10 +504,9 @@ See [Configuration Reference](https://github.com/fariello/pubrun/blob/main/docs/
 
 1. **Sphinx / MkDocs integration**: Generate hosted API documentation from docstrings.
 2. **Plugin / extension model**: Formal extension points for custom capture engines.
-3. **Artifact registration API**: `register_artifact()` for tracking user-produced output files.
-4. **Custom metadata API**: `register_metadata()` for injecting structured data into the manifest.
+3. **Custom metadata API**: `register_metadata()` for injecting structured data into the manifest (shipped alternatives that do not write into the manifest itself are `pubrun.annotate()` for events in `events.jsonl`, `pubrun.report()` for a separate JSON or text file, and `register_file(..., metadata=...)` for metadata on one file record).
 
-Recently shipped (see the [Changelog](https://github.com/fariello/pubrun/blob/main/CHANGELOG.md)): GitHub Actions CI, timestamped console capture, the `pubrun combined` log interleaver, `self-check`/`inspect` diagnostics, and the `pubrun bench` benchmark suite.
+Recently shipped (see the [Changelog](https://github.com/fariello/pubrun/blob/main/CHANGELOG.md)): GitHub Actions CI, timestamped console capture, the `pubrun combined` log interleaver, `self-check`/`inspect` diagnostics, the `pubrun bench` benchmark suite, and the file registration API (`pubrun.register_input()`, `pubrun.register_output()`, `pubrun.register_file()`, and `pubrun.artifact()`).
 
 ---
 
@@ -506,7 +524,7 @@ The DOI is archived via [Zenodo](https://zenodo.org/); citing the **concept DOI*
 (`10.5281/zenodo.20801582`, above) always resolves to the latest archived version. This
 citation will be updated to a peer-reviewed reference only *if and when* a journal article
 is actually accepted; pubrun does not yet have one, and this section will not
-imply otherwise. See the consolidated **License, Attribution & Citation** section below for
+imply otherwise. See the [License & Attribution](#license--attribution) section below for
 the required attribution.
 
 ---
@@ -521,8 +539,7 @@ the required attribution.
 
 ## License & Attribution
 
-`pubrun` is licensed under the **Apache License 2.0**. Copyright 2007-2026 Gabriele G. R.
-Fariello. See the [LICENSE](https://github.com/fariello/pubrun/blob/main/LICENSE) and
+`pubrun` is licensed under the **Apache License 2.0**. Copyright 2007-2026 Gabriele Fariello. See the [LICENSE](https://github.com/fariello/pubrun/blob/main/LICENSE) and
 [NOTICE](https://github.com/fariello/pubrun/blob/main/NOTICE) files for full terms.
 
 **Attribution (required).** Under Apache-2.0 §4(d), any distribution of this software or a

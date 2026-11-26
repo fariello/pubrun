@@ -1,5 +1,8 @@
 # Release Notes - v1.2.0 (2026-06-22)
 
+> [!NOTE]
+> This file is a preserved snapshot of the v1.2.0 release notes. The same changes are recorded in `CHANGELOG.md` under `## [1.2.0] - 2026-06-22`. The paths named below (`expected_methods_text.md`, `generated_output_notes.md`, and `tests/test_examples.py`) existed at tag `v1.2.0` and have since been renamed or removed on `main`.
+
 We are proud to release version 1.2.0 of `pubrun`! This release includes significant enhancements to documentation, examples, and the interactive terminal dashboard command.
 
 ## Key Changes

@@ -16,7 +16,7 @@ Explain how these changes were tested:
 - [ ] Manual verification steps (please describe below).
 
 ## Checklist
-- [ ] I have read the [CONTRIBUTING.md](file://~/VC/pubrun/CONTRIBUTING.md) guide.
+- [ ] I have read the [CONTRIBUTING.md](https://github.com/fariello/pubrun/blob/main/CONTRIBUTING.md) guide.
 - [ ] My code follows the code style of this project.
 - [ ] My changes maintain the core design philosophy (zero-dependency on Python 3.11+, lightweight footprint, and zero-configuration design).
 - [ ] My changes generate no new warnings or lint issues.

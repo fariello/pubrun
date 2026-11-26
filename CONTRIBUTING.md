@@ -4,13 +4,15 @@ Thank you for your interest in contributing to `pubrun`. Contributions are welco
 
 ## Development setup
 
-Clone the repository and install the package in editable mode:
+Clone the repository and install the package in editable mode with development and TUI dependencies:
 
 ```bash
 git clone https://github.com/fariello/pubrun.git
 cd pubrun
-python -m pip install -e .
+python -m pip install -e ".[dev,tui]"
 ```
+
+Installing `.[dev]` alone also works; the TUI tests skip when `textual` is not installed (`tests/test_tui.py` calls `pytest.importorskip("textual")`).
 
 Run the test suite before opening a pull request:
 
@@ -36,10 +38,11 @@ To run the intake-script and benchmark contract suites that live outside `tests/
 python -m pytest .github/scripts/ benchmarks/test_share_safety.py benchmarks/test_pull_submissions.py benchmarks/test_benchmarks.py
 ```
 
+Installing `pyyaml` (as the `extra-suites` job in `.github/workflows/ci.yml` does) enables the optional YAML cross-check tests, which skip when `pyyaml` is absent.
+
 Run static type checks locally before opening a pull request. The GitHub Actions CI `typecheck` job runs all three platform checks (`mypy`, `mypy --platform win32`, and `mypy --platform darwin`) and fails on a type error in any module of the package:
 
 ```bash
-python -m pip install -e ".[dev,tui]"
 mypy
 mypy --platform win32
 mypy --platform darwin
@@ -52,12 +55,9 @@ Install the pre-commit hooks once per clone:
 ```bash
 pip install pre-commit
 pre-commit install
-pre-commit install --hook-type post-commit
 ```
 
-The `post-commit` hook stamps `src/pubrun/COMMIT` with the just-made commit hash, so the
-packaged commit fallback stays current (at runtime `pubrun --version` prefers the live
-`git rev-parse HEAD` in a checkout and uses this file for installed wheels).
+`hatch_build.py` stamps commit metadata into wheels (`pubrun/_build_meta.json` and `pubrun/COMMIT`) and source distributions (`src/pubrun/_build_meta.json` and `src/pubrun/COMMIT`) at build time without writing to the working tree. In a source checkout, `pubrun --version` prefers live `git rev-parse HEAD`. `scripts/update_commit_file.py` remains only as a cleanup no-op that removes any stale untracked `src/pubrun/COMMIT` file for clones that installed the retired `post-commit` hook.
 
 One of the hooks (`sanitize-paths`) blocks commits that contain absolute home
 directory paths (`/home/<you>/...`), your machine hostname, and (if you enable it)
