@@ -122,6 +122,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - Updating `CHANGELOG.md` for the retired `update_commit_file.py` note is owned by sibling plan `77pdvl` so file scopes stay disjoint.
   - Carrier: 77pdvl
+  - Carrier-Evidence: .aw/records/plans/executed/20261125-doc-audit-05-77pdvl-fix-performance-benchmarks-and-changelog-documentation-drift.ipd.md
 
 ## Scope check
 
