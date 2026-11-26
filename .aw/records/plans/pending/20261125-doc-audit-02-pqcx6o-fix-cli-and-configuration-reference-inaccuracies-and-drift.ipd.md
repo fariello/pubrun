@@ -6,7 +6,7 @@
 - Scope: `docs/cli.md` and `docs/configuration.md`.
 - Scope-Paths: docs/cli.md, docs/configuration.md
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix docs/cli.md show/diff/filter/selection docs and docs/configuration.md table, scope, inert keys, and env precedence
@@ -17,11 +17,13 @@
 - Highest E allocated: 08
 - Author: Antigravity
 - Id: pqcx6o
+- Approval: 2026-11-26, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-26 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Claude Opus 5.5, OpenCode): APPROVE WITH REVISIONS APPLIED; PR-001..PR-010 all FIXED; review record `.aw/records/reviews/20261125-doc-audit-02-pqcx6o-fix-cli-and-configuration-reference-inaccuracies-and-drift.review.md`.
 - 2026-11-25 reviewed (aw set): plan-review complete; APPROVE WITH REVISIONS APPLIED
 - 2026-11-25 to-review (aw set): Authored from /assess-documentation
