@@ -6,7 +6,7 @@
 - Scope: `docs/api.md`, `docs/manifest.md`, `docs/architecture.md`, `docs/design/file-io-provenance-evaluation.md`, and `docs/design/tomli-dependency-decision.md`.
 - Scope-Paths: docs/api.md, docs/manifest.md, docs/architecture.md, docs/design/file-io-provenance-evaluation.md, docs/design/tomli-dependency-decision.md
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix phantom manifest sections, deprecated profile examples, API behavioral errors, architecture layout, and design banners
@@ -17,11 +17,13 @@
 - Highest E allocated: 08
 - Author: Antigravity
 - Id: dd7noz
+- Approval: 2026-11-26, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-26 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Claude Opus 5.5, OpenCode): APPROVE WITH REVISIONS APPLIED; PR-001..PR-012 all FIXED; review record `.aw/records/reviews/20261125-doc-audit-03-dd7noz-fix-api-manifest-architecture-and-design-documentation-drift.review.md`
 - 2026-11-26 reviewed (aw set): plan-review complete; APPROVE WITH REVISIONS APPLIED
 - 2026-11-25 to-review (aw set): Authored from /assess-documentation

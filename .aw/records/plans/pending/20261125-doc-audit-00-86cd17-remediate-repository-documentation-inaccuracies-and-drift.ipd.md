@@ -6,7 +6,7 @@
 - Scope: Coordination of six disjoint child plans (`0cjiv5`, `pqcx6o`, `dd7noz`, `wjsccu`, `77pdvl`, `2uwuiu`) covering all verified documentation-only fixes from `/assess-documentation` (including `.pre-commit-config.yaml` hook-comment sync in `0cjiv5`). This orchestrator modifies no product code, tests, docs, or templates.
 - Scope-Paths: .aw/records/plans/pending/20261125-doc-audit-00-86cd17-remediate-repository-documentation-inaccuracies-and-drift.ipd.md
 - Item-Dependencies: executed:0cjiv5, executed:pqcx6o, executed:dd7noz, executed:wjsccu, executed:77pdvl, executed:2uwuiu
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: orchestrator
 - Coverage: pass
@@ -20,11 +20,13 @@
 - Highest E allocated: 06
 - Author: Antigravity
 - Id: 86cd17
+- Approval: 2026-11-26, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-26 approved (aw set): status set to approved
 - 2026-11-26 coverage pass (aw oc run): fingerprint 18600a8f727e, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-25 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-25 to-review (aw set): Authored from /assess-documentation; 6 disjoint children

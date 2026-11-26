@@ -6,7 +6,7 @@
 - Scope: `benchmarks/README.md`, `docs/performance.md`, `CHANGELOG.md`, and `CITATION.cff`.
 - Scope-Paths: benchmarks/README.md, docs/performance.md, CHANGELOG.md, CITATION.cff
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Fix benchmarks/README.md redacted-default inversion, docs/performance.md stale bug/IDs, CHANGELOG consolidation and v1.0.1-v1.0.3 entries, and CITATION date
@@ -17,11 +17,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: 77pdvl
+- Approval: 2026-11-26, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-26 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Gemini 4 Neon, Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001..PR-007 all FIXED; review record `.aw/records/reviews/20261125-doc-audit-05-77pdvl-fix-performance-benchmarks-and-changelog-documentation-drift.review.md`.
 - 2026-11-25 to-review (aw set): Authored from /assess-documentation
 - 2026-11-25 /assess documentation (Antigravity): assessed; proposed 4 documentation and metadata fixes (4 grouped findings across benchmarks, performance, changelog, and citation metadata)

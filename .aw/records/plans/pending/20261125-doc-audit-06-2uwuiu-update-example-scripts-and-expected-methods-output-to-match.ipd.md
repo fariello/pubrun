@@ -6,7 +6,7 @@
 - Scope: Nine numbered example scripts (`examples/01_minimal_start_stop.py`, `examples/02_context_manager.py`, `examples/03_audit_decorator.py`, `examples/04_annotate_events.py`, `examples/05_execution_phases.py`, `examples/08_diff_engine.py`, `examples/09_cli_methods.py`, `examples/10_hardware_probe.py`, `examples/11_cli_report.py`) and `examples/minimal-research-workflow/expected_methods.md`.
 - Scope-Paths: examples/01_minimal_start_stop.py, examples/02_context_manager.py, examples/03_audit_decorator.py, examples/04_annotate_events.py, examples/05_execution_phases.py, examples/08_diff_engine.py, examples/09_cli_methods.py, examples/10_hardware_probe.py, examples/11_cli_report.py, examples/minimal-research-workflow/expected_methods.md
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Remove deprecated profile= kwargs from examples 01-11, switch them to pubrun.noauto, update 10/11 docstrings and CLI call, and align expected_methods.md with template output
@@ -17,11 +17,13 @@
 - Highest E allocated: 03
 - Author: Antigravity
 - Id: 2uwuiu
+- Approval: 2026-11-26, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-26 approved (aw set): status set to approved
 - 2026-11-25 /plan-review (Gemini 4 Neon, Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001..PR-006 all FIXED; review record `.aw/records/reviews/20261125-doc-audit-06-2uwuiu-update-example-scripts-and-expected-methods-output-to-match.review.md`.
 - 2026-11-25 to-review (aw set): Authored from /assess-documentation
 - 2026-11-25 /assess documentation (Antigravity): assessed; proposed 3 example-suite and output-alignment fixes (2 verified findings across 10 files under `examples/`)
