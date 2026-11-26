@@ -20,17 +20,20 @@ machines.
   package snapshot and the finalization refresh separately across all five
   package-capture modes, using two synthetic profiles and the ambient (real)
   interpreter profile.
-- **`scenarios.py`** — declarative scenario list (import mode, config overrides,
-  workload) grouped into `startup`, `feature`, and `hotpath`.
-- **`workloads/`** — tiny scripts the scenarios execute (`noop`, `cpu_burn`,
-  `file_read`, `print_loop`).
-- **`aggregate.py`** — stdlib-only; merges result JSONs into a CSV + a Markdown
+- **`scenarios.py`** - declarative scenario list (import mode, config overrides,
+  workload) grouped into `startup`, `feature`, `hotpath`, and `io_baseline`.
+- **`workloads/`** - tiny scripts the scenarios execute (`noop`, `cpu_burn`,
+  `file_read`, `print_loop`, `io_sink`).
+- **`aggregate.py`** - stdlib-only; merges result JSONs into a CSV + a Markdown
   overhead table (overhead computed vs each group's baseline).
-- **`plot.py`** — optional matplotlib figures (requires `pip install -e .[bench]`).
-- **`test_benchmarks.py`** — optional `pytest-benchmark` micro-suite for hot
+- **`plot.py`** - optional matplotlib figures (requires `pip install -e .[bench]`).
+- **`test_benchmarks.py`** - optional `pytest-benchmark` micro-suite for hot
   paths. Not collected by the default `pytest` run.
-- **`results/`** — collected result JSONs (committed for reproducibility) plus
-  the generated `summary.csv`/`summary.md`.
+- **`results/`** - local result JSONs. `benchmarks/results/.gitignore` tracks only
+  `.gitignore` and `*.redacted.json`. Running `benchmarks/aggregate.py` locally writes
+  gitignored `benchmarks/results/summary.csv` and `benchmarks/results/summary.md` by
+  default; committed community summaries live in `benchmarks/data/summary.csv` and
+  `benchmarks/data/summary.md`.
 
 ## Running
 
@@ -45,11 +48,15 @@ python benchmarks/harness.py --iterations 1 --passes 1   # tiny custom run
 python benchmarks/harness.py --no-baseline               # skip the baseline pass
 ```
 
-Each run writes `results/<hostname>-<UTC-timestamp>.unredacted.json` (the full result;
-add `--redacted-out <path>` to also write a shareable, redacted copy). Files are written
-**compact** (no indentation): the redacted copy must fit GitHub's ~65 KB issue-body cap, and
-the local copy uses the same form (it parses identically). The timestamp in the filename is
-UTC; the JSON also records `generated_utc` and `generated_local` (local time with its offset).
+By default, each run writes only the share-safe redacted result at
+`benchmarks/results/pubrun-bench-<hash>-<UTC-timestamp>.redacted.json` (pass
+`--redacted-out <path>` to override its output path). The identifying unredacted copy
+(`benchmarks/results/<hostname>-<UTC-timestamp>.unredacted.json`) is written only when you
+explicitly pass `--unredacted` (or `--out <path>`, which implies `--unredacted`). Files are
+written **compact** (no indentation): the redacted copy must fit GitHub's ~65 KB issue-body
+cap, and any unredacted local copy uses the same form (it parses identically). The timestamp
+in the filename is UTC; the JSON also records `generated_utc` and `generated_local` (local
+time with its offset).
 
 The result format is `pubrun-benchmark/5`, defined by a machine-readable JSON Schema at
 [`schemas/benchmark.schema.json`](../schemas/benchmark.schema.json). Both the full and the
@@ -193,24 +200,32 @@ PBS/Torque, LSF, or SGE/Grid Engine**) and offers to submit to a compute node.
 
 For direct use, per-scheduler submit scripts live here:
 
-- `submit_bench.sh` + `run_bench.sbatch` — **Slurm**. Picks a **random idle CPU node**
+- `submit_bench.sh` + `run_bench.sbatch` - **Slurm**. Picks a **random idle CPU node**
   (via `sinfo`) and submits to it; falls back to an unpinned submit if none are idle.
-  Each job writes a node-tagged result to `benchmarks/results/<node>-<timestamp>.json`.
-- `submit_bench_pbs.sh` — **PBS/Torque/OpenPBS** (`qsub`).
-- `submit_bench_lsf.sh` — **LSF** (`bsub`).
-- `submit_bench_sge.sh` — **SGE / Grid Engine** (`qsub`).
+  By default, each job writes only a redacted result to
+  `benchmarks/results/pubrun-bench-${NODE}-${STAMP}.redacted.json` (override its path with
+  `PUBRUN_REDACTED_OUT`; set `PUBRUN_UNREDACTED=1` to also write
+  `benchmarks/results/${NODE}-${STAMP}.unredacted.json`).
+- `submit_bench_pbs.sh` - **PBS/Torque/OpenPBS** (`qsub`).
+- `submit_bench_lsf.sh` - **LSF** (`bsub`).
+- `submit_bench_sge.sh` - **SGE / Grid Engine** (`qsub`).
 
 The PBS/LSF/SGE scripts submit to the default queue and let the scheduler place the job (no
-site-specific idle-node query). They are **starting points** — real clusters usually need an
+site-specific idle-node query). They are **starting points**: real clusters usually need an
 account/allocation and often a queue/walltime, set via env knobs (`PUBRUN_QUEUE`,
 `PUBRUN_ACCOUNT`/`PUBRUN_PROJECT`, `PUBRUN_PE`) or by editing the directives. Only the Slurm
 path is exercised in CI; the others are provided as adaptable templates. Note: PBS and SGE
-both use `qsub` — if `pubrun bench` cannot tell them apart, pass `--scheduler pbs|sge`.
+both use `qsub`; if `pubrun bench` cannot tell them apart, pass `--scheduler pbs|sge`.
+While `benchmarks/harness.py` default output, `pubrun bench`, and `benchmarks/run_bench.sbatch`
+never write a bare `*.json`, the template scripts `benchmarks/submit_bench_pbs.sh`,
+`benchmarks/submit_bench_lsf.sh`, and `benchmarks/submit_bench_sge.sh` currently pass
+`--out "$RESULTS_DIR/${NODE}-${STAMP}.json"`, which writes an unredacted bare `.json` file
+(gitignored; do not share) alongside the default `.redacted.json` file.
 
 ### Slurm details
 
 ```bash
-# random idle node, full 2-pass run:
+# random idle node, default tier (1 uncaptured baseline pass + 3 measured passes x 30 iterations):
 benchmarks/submit_bench.sh
 
 # forward harness args (e.g. a quick smoke run):
@@ -222,9 +237,12 @@ PUBRUN_PARTITION=compute PUBRUN_EXCLUDE='^gpu' \
 ```
 
 Environment knobs (all optional): `PUBRUN_PARTITION`, `PUBRUN_PY` (default
-`python3`), `PUBRUN_REPO`, `PUBRUN_EXCLUDE` (regex of node names to skip). The
-job fails fast with a clear message if `pubrun` is not importable on the node —
-`pip install -e .` into the venv the compute nodes share, if needed. To sample
+`python3`), `PUBRUN_REPO`, `PUBRUN_EXCLUDE` (regex of node names to skip),
+`PUBRUN_REDACTED_OUT` (overrides the default redacted output path), and
+`PUBRUN_UNREDACTED` (set to `1` to also write
+`benchmarks/results/${NODE}-${STAMP}.unredacted.json`). The
+job fails fast with a clear message if `pubrun` is not importable on the node:
+run `pip install -e .` into the venv the compute nodes share, if needed. To sample
 several node types, submit repeatedly (each lands on a different random idle
 node) or set `PUBRUN_PARTITION` per node class, then `aggregate.py` over all the
 committed result JSONs.
@@ -238,15 +256,18 @@ pip install -e .
 python -m pubrun bench            # runs locally; on an HPC login node, offers to submit to Slurm
 ```
 
-By default `pubrun bench` writes only a redacted, share-safe file under `results/`:
+By default `pubrun bench` writes only a redacted, share-safe file under `benchmarks/results/`:
 
-- `pubrun-bench-<hash>-<UTC-timestamp>.redacted.json`: a **redacted** copy safe to share
+- `benchmarks/results/pubrun-bench-<hash>-<UTC-timestamp>.redacted.json`: a **redacted** copy safe to share
   publicly. The filename embeds a stable, non-identifying hostname hash (never the hostname
   itself, matching the in-file hostname redaction). Inside, hostname, OS username, and every
   home-directory path are masked, while the analysis-relevant data (CPU/GPU model, core count,
   raw timings, versions, filesystem type, Slurm partition) is preserved.
-- Pass `--unredacted` if you also want `<host>-<UTC-timestamp>.unredacted.json` (the full,
-  identifying result for your own local analysis; do not share). Never a bare `*.json`.
+- Pass `--unredacted` if you also want `benchmarks/results/<host>-<UTC-timestamp>.unredacted.json`
+  (the full, identifying result for your own local analysis; do not share). `harness.py` default
+  output, `pubrun bench`, and `benchmarks/run_bench.sbatch` never write a bare `*.json` (the
+  PBS/LSF/SGE template scripts currently pass `--out "$RESULTS_DIR/${NODE}-${STAMP}.json"`,
+  writing a gitignored unredacted bare `.json` alongside the default `.redacted.json`).
 
 After a run, `pubrun bench` runs the structural share-safety validator
 (`benchmarks/share_safety.py`) and, on an interactive terminal, **offers to contribute** the
@@ -259,7 +280,7 @@ unavailable.
 If you decline, or if a Slurm wait is interrupted, submit later without re-running:
 
 ```bash
-pubrun bench --submit-file results/pubrun-bench-<hash>-<timestamp>.redacted.json
+pubrun bench --submit-file benchmarks/results/pubrun-bench-<hash>-<timestamp>.redacted.json
 ```
 
 Prefer to attach manually in a browser? Run `pubrun bench --prepare-submission` to copy only
@@ -275,8 +296,9 @@ are comfortable making public.
 
 Advanced / manual:
 
-- `python benchmarks/harness.py --redacted-out results/shareable.redacted.json` runs the
-  harness directly and writes a compact redacted copy.
+- `python benchmarks/harness.py --redacted-out benchmarks/results/shareable.redacted.json` runs
+  the harness directly and overrides the default redacted output path (redaction is already
+  enabled by default).
 - `python benchmarks/pull_submissions.py` (dry-run; `--apply` to store/aggregate/re-tag)
   collects validated community submissions locally into `benchmarks/data/`.
 - Re-run `aggregate.py` over results and, if helpful, `plot.py`.
@@ -339,8 +361,8 @@ Advanced / manual:
   - `feature` scenarios compare against `feature-baseline`; note `feature-none`
     (pubrun active with everything off) captures pubrun's fixed startup cost —
     the *marginal* cost of a single feature is its delta above `feature-none`.
-  - `hotpath` scenarios pair with their `*-baseline` (e.g. patched `open()` vs
-    `builtins.open`).
+  - `hotpath` scenarios pair with their `*-baseline` (for example, `pubrun.open()`
+    and `pubrun.register_input()` vs `builtins.open()`; `pubrun` never patches `open()`).
   - `io_baseline` scenarios are **ground-truth reference floors** (not overhead pairs):
     `io-baseline-devnull` (write-only sink — isolates the open()/write path from any
     storage), `io-baseline-devshm` (RAM-backed tmpfs, Linux; skipped where `/dev/shm` is

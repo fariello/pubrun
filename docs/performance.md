@@ -34,10 +34,18 @@ python benchmarks/aggregate.py benchmarks/results/*.json
 
 ### Result files (schema `pubrun-benchmark/5`)
 
-Each run writes a **compact** (no-indent) JSON. The full local copy is
-`<host>-<UTC-timestamp>.unredacted.json`; a shareable, redacted copy is
-`pubrun-bench-<hostname-hash>-<UTC-timestamp>.redacted.json` (the filename embeds a
-non-identifying hostname hash, never the hostname). Neither is ever a bare `*.json`.
+Each run writes a **compact** (no-indent) JSON file. By default, `benchmarks/harness.py`
+writes only the shareable, redacted copy:
+`benchmarks/results/pubrun-bench-<hostname-hash>-<UTC-timestamp>.redacted.json` (the filename
+embeds a non-identifying hostname hash, never the hostname; pass `--redacted-out <path>` to
+override its path). The identifying local copy
+(`benchmarks/results/<host>-<UTC-timestamp>.unredacted.json`) is written only when you pass
+`--unredacted` or `--out <path>`. Neither `benchmarks/harness.py` default output,
+`pubrun bench`, nor Slurm (`benchmarks/run_bench.sbatch`) ever writes a bare `*.json` (the
+PBS/LSF/SGE template scripts `benchmarks/submit_bench_{pbs,lsf,sge}.sh` currently pass
+`--out "$RESULTS_DIR/${NODE}-${STAMP}.json"`, which writes a gitignored unredacted bare
+`.json` file alongside the default `.redacted.json` file; see
+[`benchmarks/README.md`](../benchmarks/README.md#running-on-an-hpc-cluster)).
 
 Schema `/5` is a compact, non-redundant reshape of `/4` with **zero analytical data loss**:
 static per-scenario descriptors live once in a top-level `scenario_defs` map; each pass keeps
@@ -93,7 +101,7 @@ The measurements below come from a single local machine and are scoped strictly 
 
 - **Machine and runtime:** `Linux 6.8.0-149-generic` (`x86_64`), Python `3.14.6`, `Intel(R) Core(TM) i7-6800K CPU @ 3.40GHz` (12 logical cores), `pubrun 1.3.1`.
 - **Storage:** Local `ext4` (`is_network = false` for `workdir`, `tmpdir`, and `pubrun_install`).
-- **Revisions:** Pre-change baseline `d1ba84b55997d9d6cad99830570aadd9b8c41b00` (`fthyv5`) versus post-change `e9e694ca62c67a0a49e4df8f6e14c53382f2d6ba` (`ckc3vl`).
+- **Revisions:** Pre-change baseline `d1ba84b55997d9d6cad99830570aadd9b8c41b00` versus post-change `e9e694ca62c67a0a49e4df8f6e14c53382f2d6ba`.
 - **Method:** `python3 benchmarks/startup_breakdown.py --passes 3 --iterations 15 --warmup 1` (with `--durability-policies fsync,finalize,atomic,strict` post-change) and local non-publishing `python3 benchmarks/harness.py --passes 3 --iterations 15`. Workloads are short (`benchmarks/workloads/noop.py`, baseline `bare-python-noop`) and long (`benchmarks/workloads/cpu_burn.py`, baseline `bare-python-cpu-burn`). Pass 1 is cold and Pass 3 is warm.
 
 #### Before and after comparison under default durability (`fsync`)
@@ -196,7 +204,7 @@ Values are median / stdev / IQR in milliseconds over 30 fresh processes.
 What these measurements show on this machine:
 
 - **The timing instrumentation itself is negligible.** A run takes a handful of `perf_counter()` readings, each about 67 ns warm, so the clock reads add well under a microsecond per run.
-- **pubrun's overhead stays out of `workload_seconds`.** A `time.sleep(0.020)` workload measured `20.099` ms warm median (`20.091` ms cold), about 0.1 ms above the requested sleep, while pubrun's own startup (about 21 to 22 ms in process) and finalization (about 2.8 ms) were reported separately. The three disjoint intervals add up to `session_seconds`. **Known exception (backlog `uatvzh`):** these runs wrote to a temporary directory where the background hardware refresh write took about 7 ms. With the run directory on the repository disk, that refresh write (an `fsync`ed `manifest.json` rewrite, made while holding the run lock) took a median of 180 ms, and a `stop()` issued during it waited for the lock before recording `ended_at_utc`. For a 20 ms workload this added a median of 47.3 ms (stdev 36.1, IQR 40.0, maximum 185.9, n=30) to `workload_seconds`; for a 500 ms workload, which ends after the refresh, it added 0.03 ms. Very short runs on slow-to-sync storage can therefore report an inflated `workload_seconds` until that defect is fixed.
+- **pubrun's overhead stays out of `workload_seconds`.** A `time.sleep(0.020)` workload measured `20.099` ms warm median (`20.091` ms cold), about 0.1 ms above the requested sleep, while pubrun's own startup (about 21 to 22 ms in process) and finalization (about 2.8 ms) were reported separately. The three disjoint intervals add up to `session_seconds`. **Historical exception at `af36c852` (fixed in commit `cb1b6d1`):** these `af36c852` runs wrote to a temporary directory where the background hardware refresh write took about 7 ms. At that revision, with the run directory on the repository disk, that refresh write (an `fsync`ed `manifest.json` rewrite, made while holding the run lock) took a median of 180 ms, and a `stop()` issued during it waited for the lock before recording `ended_at_utc`. For a 20 ms workload this added a median of 47.3 ms (stdev 36.1, IQR 40.0, maximum 185.9, n=30) to `workload_seconds`; for a 500 ms workload, which ended after the refresh, it added 0.03 ms. That exception has since been fixed in commit `cb1b6d1`: `src/pubrun/tracker.py::Run._finalize_state` now records `end_mono` and `end_utc` before acquiring `_run_lock`, so wait time for an in-flight background hardware refresh is attributed to `finalization_overhead_seconds` rather than `workload_seconds`.
 - **Background hardware capture overlaps the workload.** `background_hardware_seconds` (about 21 to 22 ms) is close to the 20 ms workload because the two ran concurrently; adding it to `workload_seconds` would double-count. The finalization wait for it was about 4 us because it had already finished.
 - **The `manifest.json` write is not in any persisted duration.** `Run.writer_overhead_seconds` (about 8 ms, held in memory only) is larger than `finalization_overhead_seconds` (about 2.8 ms) because it also covers building and atomically writing `manifest.json` and `methods.md`.
 - **An active `pubrun.phase()` costs about 18 us warm** (38 us cold) per block, mostly writing the `phase_start` and `phase_end` events. A later measurement of the inactive-policy cache change (built on commit `7f8af7c`, CPython 3.14.6, Intel Core i7-6800K, same machine) put a `pubrun.phase()` with **no** active run at about 22 us per block and an active one at about 19 us per block, down from about 114 us inactive on the unchanged tree in the same session. The inactive path caches `[events].on_inactive_annotate` and resolves the configuration again only when the user or local configuration file, the working directory, or the user configuration directory changes.
@@ -210,14 +218,14 @@ The measurements below come from one local machine and are scoped strictly to th
 
 - **Machine and runtime:** Operating System (OS) `Linux 6.8.0-149-generic` (`x86_64`), Central Processing Unit (CPU) `Intel(R) Core(TM) i7-6800K CPU @ 3.40GHz` (12 logical cores), Python `3.14.6`.
 - **Storage:** Local `ext4` detected via `pubrun.capture.filesystem.get_filesystem()` (`is_network = false` for both `workdir` and `tmpdir`).
-- **Git revisions:** Pre-`p6pon8` baseline `9703da77e41fb27fd19e8f0b081ac0fccdc0547f` versus post-`26euz0` HEAD `114d243d1e82739172d45a4d842303f7281882c5`.
+- **Git revisions:** Pre-isolation baseline `9703da77e41fb27fd19e8f0b081ac0fccdc0547f` versus post-isolation HEAD `114d243d1e82739172d45a4d842303f7281882c5`.
 - **Workloads and repetitions:**
-  1. Ephemeral Python micro-benchmark run against both revisions (baseline checked out in a temporary detached Git worktree that was removed after measurement), with 1 explicit cold pass plus 25 warm iterations per workload. `SubprocessSpy` micro-benchmarks monkeypatch `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` to no-op stubs before importing `pubrun.capture.subprocesses` so both import-time (pre-`p6pon8`) and install-time (post-`p6pon8`) hooks measure pure Python wrapper overhead without OS fork jitter.
+  1. Ephemeral Python micro-benchmark run against both revisions (baseline checked out in a temporary detached Git worktree that was removed after measurement), with 1 explicit cold pass plus 25 warm iterations per workload. `SubprocessSpy` micro-benchmarks monkeypatch `subprocess.Popen.__init__`, `subprocess.Popen.wait`, and `os.system` to no-op stubs before importing `pubrun.capture.subprocesses` so both import-time (`9703da77`) and install-time (`114d243d`) hooks measure pure Python wrapper overhead without OS fork jitter.
   2. Local non-publishing harness sweep (`python3 benchmarks/harness.py --passes 2 --iterations 20 --redacted-out <temp_path>`) on `114d243d` (1 uncaptured baseline pass, Pass 1 cold, Pass 2 warm, 20 measured iterations plus 1 discarded warmup per scenario; total wall time `303.579` s; temporary output deleted after reading).
 
-### Micro-benchmark comparison (pre-`p6pon8` `9703da77` vs. post-`26euz0` `114d243d`)
+### Micro-benchmark comparison (pre-isolation `9703da77` vs. post-isolation `114d243d`)
 
-| Workload | Pre-`p6pon8` (`9703da77`) Cold / Warm Median (ms) | Pre-`p6pon8` IQR / Stdev (ms) | Post-`26euz0` (`114d243d`) Cold / Warm Median (ms) | Post-`26euz0` IQR / Stdev (ms) | Warm Median Delta |
+| Workload | Pre-isolation (`9703da77`) Cold / Warm Median (ms) | Pre-isolation IQR / Stdev (ms) | Post-isolation (`114d243d`) Cold / Warm Median (ms) | Post-isolation IQR / Stdev (ms) | Warm Median Delta |
 |---|---:|---:|---:|---:|---:|
 | `Run` start/stop (all-off, 1 run) | 46.427 / 47.739 | 8.278 / 6.055 | 31.479 / 34.871 | 3.962 / 4.199 | -12.868 ms (-26.95%) |
 | `Run` start/stop (default, 1 run) | 200.246 / 93.500 | 16.926 / 15.714 | 427.441 / 62.941 | 10.906 / 6.390 | -30.559 ms (-32.68%) |
@@ -335,8 +343,7 @@ uploaded or written under `benchmarks/results/`.
 
 Environment: Linux 6.8 (x86_64), Intel Core i7-6800K (12 logical CPUs), CPython 3.14.6,
 temporary directory on local `ext4` (file contents in the page cache), Git revision
-`7164b15` plus the uncommitted changes of plan `4gpguy` (workload and documentation
-only; no `src/pubrun/` changes).
+`7164b15` plus uncommitted workload and documentation changes (no `src/pubrun/` changes).
 
 Columns: **Read total** is the time from the first read to the end of close (or of the
 registration call), which also includes the one-time lazy import of

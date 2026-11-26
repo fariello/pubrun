@@ -9,681 +9,129 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- **Maintainer tool to collect benchmark submissions locally (`benchmarks/pull_submissions.py`).** A
-  maintainer-run script that fetches benchmark-submission issues via `gh`, runs the SAME fail-closed
-  validation the server does (schema `pubrun-benchmark/5` + structural share-safety) plus a 256 KB size
-  cap, stores each accepted redacted result content-addressed under `benchmarks/data/accepted/<sha256>.redacted.json`
-  (with a metadata sidecar recording every contributing issue), aggregates the corpus into
-  `summary.csv`/`summary.md` via the existing aggregator, and re-tags issues (quiet on acceptance, a short
-  actionable comment on rejection). It is dry-run by default (`--apply` to write), calls `gh` via argv
-  lists (never a shell), parses untrusted JSON as data only, and never pushes. This is the "local pull"
-  design for collecting the corpus: GitHub Actions gains NO new write access; nothing is stored
-  automatically. Dev/reproducibility tooling, not shipped in the wheel.
-- **One-command benchmark contribution to GitHub (gist-and-link, inline fallback).** `pubrun bench` can
-  now publish a share-checked redacted result to `fariello/pubrun` in one command, no browser required.
-  It uses the GitHub CLI (`gh`): it creates an UNLISTED Gist of the redacted file and opens an issue
-  linking the raw `.json` URL, falling back to embedding the JSON inline in the issue body when the
-  complete body is under GitHub's ~65 KB cap, and finally to the browser Issue Form when `gh` is
-  unavailable. A non-blocking `gh` preflight before the run tells you if `gh` needs installing or
-  authenticating (it never runs `gh auth login`, never blocks the benchmark). New flags:
-  `--contribute` / `--no-contribute` (pre-decide publication; distinct from the HPC scheduler
-  `--submit`/`--yes`), and on an interactive terminal a post-run prompt offers to publish (Enter
-  accepts). `--submit-file` now contributes an existing redacted file the same way. All transport uses
-  argv lists / stdin (never a shell), re-runs the share-safety check immediately before sending, never
-  prints the token or payload, and rolls back an orphaned Gist if issue creation fails. The intake
-  workflow now also routes on a body marker (so client submissions, which cannot set a label, are
-  picked up) and accepts Gist raw URLs and inline JSON; it self-applies labels and updates a single
-  receipt comment idempotently.
-- **Slurm submit-and-wait.** On a Slurm login node, `pubrun bench` offers to run by submitting the job
-  to the queue and, if you accept, keeps the login-node process alive polling for completion (bounded
-  default wait, `--wait-timeout` to extend or disable), then runs the interactive share-check and
-  contribution from the login node (which has your terminal and network). Any interruption, timeout, or
-  job failure falls back to `pubrun bench --submit-file <path>`; the result is always written to the
-  shared filesystem, so nothing is lost.
-- **`pubrun --version` now shows the commit hash.** The version line reads
-  `pubrun <version> (commit <hash>)` when a commit is resolvable. The hash is resolved live from
-  `git rev-parse HEAD` when running from a source checkout (always exact), falling back to the packaged
-  `src/pubrun/COMMIT` file for installed wheels. A `post-commit` git hook
-  (`scripts/update_commit_file.py`, wired through pre-commit) stamps `src/pubrun/COMMIT` with the
-  just-made commit so the packaged fallback stays current. Both paths are best-effort and stdlib-only
-  (the zero-runtime-dependency invariant is preserved). Enable the hook with
-  `pre-commit install --hook-type post-commit`.
-- **Community benchmark intake: attach a file, not paste (Phase 1).** Contributing a benchmark result
-  now works by ATTACHING the redacted file to a GitHub Issue Form on the main repo, instead of pasting
-  the JSON into an issue body (which hit GitHub's ~65 KB cap and embedded the file into a request the
-  client transmitted). `pubrun bench` prints an unmistakable safe-file block at the end of a run: which
-  file is PRIVATE (`*.unredacted.json`), which is SAFE to submit (`*.redacted.json`), a share-check
-  verdict, and the Issue Form URL to attach the safe file. A new `pubrun bench --prepare-submission`
-  copies ONLY the redacted file into a clean `pubrun-share/` folder, so the folder you browse to attach
-  contains only the file that is safe to share (the primary mitigation for picking the wrong file).
-  `pubrun bench --submit-file <file>` now share-checks an existing redacted file and shows how to attach
-  it (it no longer transmits). A shared structural share-safety validator (`benchmarks/share_safety.py`)
-  is used both locally (the pre-share gate) and server-side, so local and server checks agree. A
-  validate-only GitHub Actions workflow (`.github/workflows/benchmark-intake.yml`, `contents: read` +
-  `issues: write`, no write access) parses a submitted attachment as data only (host allowlist, byte
-  cap, schema `/5`, share-safety, semantic checks; never executes or echoes the payload) and comments a
-  pass/fail receipt. Archival/aggregation is a later, separately gated phase.
-
-### Changed
-- **CI test suites now run in random order with `pytest-randomly`.** Every `pytest` command in
-  `.github/workflows/ci.yml` now passes `-p randomly` without a fixed seed, so each CI job exercises
-  a different test order and prints its seed in the `pytest` header (`Using --randomly-seed=<N>`).
-  Reproduce a CI test order locally with `python -m pytest -p randomly --randomly-seed=<N>`. Local
-  and `tox` runs keep the fixed default order through `addopts = "-p no:randomly"` in
-  `pyproject.toml`.
-- **Full-package static type checking with `mypy`.** Static type checking with `mypy` now checks
-  every module of the `pubrun` package on Linux, and the CI `typecheck` job also runs
-  `mypy --platform win32` and `mypy --platform darwin` to check the Windows and macOS code paths.
-  The per-module `ignore_errors` exemption list has been removed from `pyproject.toml`.
-- **Testable entry points.** `pubrun.__main__.main()` now accepts an optional argument list without
-  modifying `sys.argv`, and `print_report` and `print_resources_report` in
-  `pubrun.report.diagnostics` accept a keyword-only `out` stream and raise `DiagnosticsError`
-  instead of exiting the process. Command-line output and exit codes are unchanged, except that
-  `pubrun --no-color --info` now reports `--no-color` in its printed invocation fields because
-  `main()` no longer strips it from `sys.argv`.
-- **Static type checking (`mypy`) repaired and gated in CI.** Fixed the duplicate-module import in
-  `src/pubrun/__main__.py` so `pubrun report-bug` no longer loads the `pubrun` package a second time,
-  resolved type errors in `src/pubrun/__main__.py`, `src/pubrun/tui/widgets/actions.py`,
-  `src/pubrun/tui/widgets/diff.py`, and `src/pubrun/report/reproducibility.py`, added a `[tool.mypy]`
-  per-module ratchet in `pyproject.toml`, and added a blocking Linux Python 3.12 `typecheck` job in
-  GitHub Actions CI.
-- **Pytest coverage is now opt-in, `tox` is repaired, and CI gates additional suites and builds.**
-  Removed the unconditional `--cov` flags from `pyproject.toml` `addopts`, registered the `slow`
-  pytest marker, and updated `tox.ini` for tox 4 using `extras = dev` so `pytest` and `tox` run
-  without requiring `pytest-cov` by default. GitHub Actions CI now enforces a 78% total coverage
-  floor on the `ubuntu-latest` Python 3.12 matrix job, runs the numbered example smoke tests in
-  every matrix job, and adds three dedicated Linux Python 3.12 jobs: `extra-suites` (intake
-  scripts and benchmark contract suites), `no-tui` (editable install with only the `dev` extra),
-  and `packaging` (real sdist and wheel builds, sdist-to-wheel round-trip, and commit stamp
-  verification in clean virtual environments).
-- **Zenodo concept DOI live across citation surfaces.** Replaced the `10.5281/zenodo.PENDING`
-  placeholder with the archived Zenodo concept DOI (`10.5281/zenodo.20801582`) across
-  `CITATION.cff`, `pubrun cite` (all styles), `README.md` (with a Zenodo DOI badge),
-  `docs/research-use.md`, and `docs/cli.md`, and tightened the citation consistency test to
-  reject `PENDING` placeholders.
-- **`pubrun bench` writes only a redacted result by default (behavior change).** Previously every run
-  wrote both a full `*.unredacted.json` (embedding hostname/paths) and a redacted `*.redacted.json`.
-  Now only the redacted, share-safe file is written by default; pass `--unredacted` to also write the
-  identifying copy for local debugging. This removes the wrong-file risk at the source (the dangerous
-  file no longer exists unless you ask for it). The `--no-redact` flag is removed (it is contradictory
-  under a redacted-only default); `--unredacted` covers the "keep full detail" case. The Slurm batch
-  scripts (`submit_bench.sh`, `run_bench.sbatch`) follow the same default and now emit a parseable job
-  id via `sbatch --parsable`.
-- **`pubrun bench` contribution replaces the earlier attach-only flow.** The attach-a-file Issue Form
-  path introduced earlier this cycle (which required leaving the terminal and could not work on a
-  browserless HPC node) is superseded by the one-command gist/inline contribution above; attaching in a
-  browser remains supported as a fallback. `--submit`/`--yes` govern HPC scheduler JOB submission only
-  and never imply consent to publish. The default contribution target is `fariello/pubrun`.
-
-### Documentation
-- **Synced benchmark-intake documentation and Issue Form with the current `pubrun bench` behavior.**
-  Updated `docs/cli.md`, `benchmarks/README.md`, `.github/ISSUE_TEMPLATE/benchmark-result.yml`,
-  `.github/workflows/benchmark-intake.yml`, and `pubrun bench --help` to reflect the redacted-only
-  default, `--unredacted` / `--contribute` / `--prepare-submission` / `--wait-timeout` flags,
-  main-repo (`fariello/pubrun`) targeting, and the local-pull collection workflow
-  (`benchmarks/pull_submissions.py`). Fixed a stale `Code of Conduct` link in `CONTRIBUTING.md`.
-- **Adoption bridges, an examples ladder, and deep-page positioning (no behavior change).** The README
-  now has an "Is pubrun for me?" section with two signpost links (a plain-script/data-job path and an
-  HPC/large-scale/ML path) and an examples ladder pointing into `examples/` from a trivial script up to
-  HPC and ML runs, so a reader can find their own use. `docs/research-use.md` was reframed to lead with
-  why provenance is not optional in high-stakes scientific and ML work (and the unverifiable download
-  count and specific adopter count were removed/generalized for honest docs). `docs/hpc.md` now leads
-  with a laptop-to-cluster thesis and hosts a "Where pubrun fits" note positioning pubrun accurately as
-  a component that complements (does not replace) MLflow, Weights and Biases, and DVC. Em and en dashes
-  were removed from these three files per the house style. Competitor and ML-depth material is kept in
-  the deep pages, never the README front door.
-
-### Fixed
-- **`pubrun inspect` and `pubrun show` Data Files badges now require a non-empty digest value before
-  labeling a file `verified`.** Previously, the Data Files summary and detail views labeled a
-  `data_files` record `verified` whenever `hash_status` was `completed` or `evidence_strength` was
-  `verified_content`, even when no digest value was recorded. Display classification now delegates
-  to the shared file-evidence classifier, so digestless records render as `metadata-only` (or
-  `path-only` when `evidence_strength` is `path_only`), and legacy records carrying only an `md5`
-  digest render as `verified` with a sanitized `md5:<prefix>` digest.
-- **Methods reports no longer count a file record without a digest value as independently
-  verified.** The file-provenance sentence in `methods.md`, `methods.tex`, and `pubrun methods`
-  counted a `data_files` record as verified when its `hash_status` was `completed` or its
-  `evidence_strength` was `verified_content`, even if the record held no digest value. The methods
-  report now uses the same classifier as the `pubrun inspect` reproducibility findings: such a
-  record is counted as recorded by path or stat metadata only, and a legacy record with only an
-  `md5` value is counted as verified.
-- **`pubrun run --mode <mode>` now overrides explicit in-code `import pubrun.<mode>` imports.**
-  Previously, `pubrun run --mode <mode>` set only `PUBRUN_IMPORT_MODE`, so an explicit submodule
-  import such as `import pubrun.full` took precedence over the launch-time CLI flag. The wrapper
-  now also sets `PUBRUN_RUN_MODE_OVERRIDE`, which takes precedence ahead of explicit submodule
-  imports, records `"cli:pubrun run --mode"` as the manifest import-mode provenance, and avoids
-  spurious import-mode conflicts under `[imports].on_conflict = "error"`. Setting
-  `PUBRUN_IMPORT_MODE` directly without `PUBRUN_RUN_MODE_OVERRIDE` still yields to explicit
-  in-code submodule imports.
-- **Manifest schema now declares every import-mode behavior flag.** `pubrun_imports.selected_behavior`
-  in `schemas/manifest.schema.json` now declares `patch_subprocesses`, `patch_console`,
-  `signal_hooks`, and `force_console` as booleans alongside `auto_start` and `global_hooks`, and
-  rejects undeclared flags. Previously the schema checked only two of the six flags pubrun can
-  write. Manifests that pubrun writes are unchanged, and older manifests with only `auto_start` and
-  `global_hooks` still validate.
-- **A SIGTERM or SIGHUP no longer hangs the process when it arrives while pubrun holds an internal lock.**
-  Previously, a lethal signal arriving while pubrun was recording a file, an error, a subprocess, an
-  event, or a resource sample (or while the background hardware thread was refreshing the manifest)
-  could deadlock signal finalization and leave the manifest at outcome `running`. During lethal-signal
-  finalization, pubrun now waits a bounded time for its own locks and falls back to lock-free
-  completion, so the run still finalizes as `interrupted` and the process exits.
-- **`pubrun ui` run details pane handles null or plain-string `git.remote_url` and escapes Git markup.**
-  Selecting a run whose manifest stores `git.remote_url` as `null` or as a plain string, or whose
-  `git` section is not an object, no longer closes the TUI. Commit hashes, branch names, remote
-  URLs, and working directories are now escaped before rendering so bracketed text appears
-  literally and redacted remote URLs keep their `[REDACTED]` marker.
-- **`pubrun ui` Archive action reports errors instead of closing the TUI or returning silently.**
-  When the `archive` folder cannot be created, pressing Archive in the Actions tab now displays an
-  error notification and keeps the TUI running instead of exiting. When the selected run directory
-  was removed after selection, Archive now reports an error notification instead of doing nothing.
-- **`pubrun ui` Save Settings writes valid TOML for control characters and non-BMP characters.**
-  Saving settings now serializes string and list values containing newlines, control characters,
-  or characters outside the Basic Multilingual Plane (such as emoji) as valid TOML so pubrun can
-  load `.pubrun.toml` back instead of ignoring it as malformed.
-- **Live `python -m <package>` runs are no longer closed out as crashed or deleted by `pubrun clean`.**
-  `pubrun clean` no longer deletes, and `pubrun status` no longer closes out as crashed, a run that
-  is still executing when it was started with `python -m <package>`. The lock file records the
-  script as `__main__`, which the liveness check now treats as too generic to decide by name and
-  resolves by process start time.
-- **`pubrun --create-config` now handles closed stdin cleanly without a traceback.** When invoked
-  with no destination and closed stdin, `pubrun --create-config` now prints `Configuration abandoned.`
-  and exits 1 instead of raising an uncaught `EOFError` traceback.
-- **Redacted `sys.argv` values are no longer recorded in `invocation.inputs`.** Input discovery in
-  `get_invocation()` now runs after `redact_argv()` and skips any argument whose value changed
-  during redaction, so file paths passed to secret flags (such as `--credentials creds.json`) no
-  longer appear in `invocation.inputs` or trigger MD5 warning logs.
-- **Hyphenated prefixed API keys (such as `sk-proj-...`) are now redacted in environment and
-  argument values.** Value heuristics in `redaction.py` now match prefixed keys containing hyphens
-  and underscores, closing the gap where hyphenated `sk-` keys survived in non-secret environment
-  variables, JSON payloads, and positional arguments.
-- **A `pathlib.Path` entry in `sys.argv` no longer fails invocation capture.** Removed the unused
-  pre-redaction `rerun_command` block in `get_invocation()`, stringified `sys.argv` entries during
-  input discovery, and ensured `redact_argv()` returns strings even when `argv_enabled` is false.
-- **An unknown `[capture.profiling].backend` value now logs a warning instead of failing
-  silently.** `phase.__enter__()` now raises `ValueError("unknown backend")` inside its guarded
-  profiling block so an unsupported backend name logs the documented warning and skips profiling.
-- **Unwaited `subprocess.Popen` children now record observable exit codes and report unobserved exits as `"partial"` instead of `"complete"`.**
-  `SubprocessSpy` now hooks `subprocess.Popen.__del__` without taking locks and performs a single non-blocking poll of live unwaited `Popen` objects at finalization, recording the real `exit_code` with `capture_state.status: "complete"` (exit code 0) or `"failed"` (nonzero) when observable through public `Popen` attributes. A child still running at finalization, or whose exit status was collected outside `pubrun`, now records `exit_code: null`, `ended_at_utc: null`, and `capture_state: {"status": "partial", "detail": ...}` instead of `"complete"`. Downstream consumers that filter subprocess records on `capture_state.status == "complete"` should note that unobserved unwaited children now report `"partial"`.
-- **`workload_seconds` no longer includes a background manifest refresh write.** A `stop()` call made
-  while the background hardware capture was rewriting `manifest.json` waited for that write and counted
-  it as workload; with the default fsynced durability on a slow disk this added tens to hundreds of
-  milliseconds. The end of the workload is now recorded before that wait, so the time is reported in
-  `finalization_overhead_seconds` instead. A regression test covers both `stop()` and the `atexit`
-  write path.
-- **Hardware, host, and filesystem capture no longer fails under `import pubrun.auto`, `pubrun.full`,
-  `pubrun.nopatch`, or `pubrun.noconsole`.** These imports could print
-  `Exception in thread pubrun-hw: ... ImportError: cannot import name '_run_lock'` and leave the
-  `hardware`, `host`, and `filesystem` manifest sections `pending`. With
-  `[capture.hardware].depth = "off"` the same imports disabled tracking entirely. Plain `import pubrun`
-  was not affected, and a regression test now covers all six mode modules and plain `import pubrun`.
-- **A SIGTERM or SIGHUP that arrives while the background hardware refresh is writing the manifest no
-  longer hangs the process.** Reading the recorded signals no longer waits on a lock the interrupted
-  main thread may hold, so the two threads can no longer deadlock and the run finalizes as
-  `interrupted`.
-- **`[imports].on_conflict` set in `./.config/pubrun/config.toml` or in the user config file is
-  no longer ignored.** The import-conflict policy was read only from `./.pubrun.toml`, so
-  `on_conflict = "error"` in the other two files left the policy at the default `"warn"`. It is
-  now read from the same files, in the same order, as `[imports].mode`.
-- **Calls made with no active run no longer resolve the full configuration on every call.**
-  `annotate()`, `phase()`, `report()`, `artifact()`, `register_file()`, `register_input()`, and
-  `register_output()` with no active run now cache the `[events].on_inactive_annotate` policy and
-  resolve the configuration again only when the user or local configuration file, the working
-  directory, or the user configuration directory changes. An inactive `phase()` block dropped from
-  about 114 us to about 22 us on the reference machine (CPython 3.14.6, Intel Core i7-6800K). A
-  malformed configuration file is now reported once per change of that file instead of once per call.
-- **The minimal research workflow example no longer leaves `outputs/` in the caller's directory.**
-  `examples/minimal-research-workflow/analysis.py` now writes `synthetic_data.csv` and
-  `summary.json` to `outputs/` next to the script (already git-ignored) instead of the current
-  working directory, and a new `--output-dir <path>` option writes them elsewhere. Running
-  `examples/verify_all.py` from the repository root or from `examples/` no longer leaves an
-  untracked `outputs/` directory behind.
-- **Citation metadata and repository hygiene correction.** Cleaned up residual placeholder DOI
-  tokens and venue-specific phrasing in historical plan records. Earlier releases had shipped
-  erroneous, unauthorized citation metadata introduced by an automated tooling error (the software
-  itself was unaffected); live citation surfaces (`pubrun cite`, `CITATION.cff`, `README.md`) emit
-  an honest software citation with no paper claim.
-- **Startup manifest no longer emits an empty `console` section.** The manifest written at startup
-  previously left `console` as `{}` (no `capture_mode`), which a consumer reading a run before it
-  finished could not distinguish from a real `"off"` result, and which caused an intermittent
-  test/CI failure (a `console.capture_mode` read of `None`). The startup manifest now writes the
-  resolved `capture_mode` plus `capture_state.status = "pending"`, and the final write sets
-  `status = "complete"` (matching the other manifest sections). A regression test covers the
-  `pending` to `complete` transition. No schema change (the schema already permitted this shape).
-
-### Added
-- **Path/hostname/IP sanitizer with a pre-commit hook and CI check
-  (`scripts/sanitize_paths.py`).** A stdlib-only guard that blocks commits containing
-  absolute home-directory paths (`/home/<user>/...`), the machine hostname, and
-  (opt-in) IP addresses, so machine-specific strings do not leak into the repo. It has
-  a `--check` mode (block, used by the pre-commit hook and a CI step in the secret-scan
-  workflow) and a `--fix` mode (rewrite on demand), with `--scrub`/`--match`/`--replace`/
-  `--dry-run`. Rules anchor on the home-path prefix, so author name and email are never
-  touched. Allow/block lists live in a tracked baseline `.sanitize-allow.toml` (generic
-  test placeholders) unioned with a gitignored `.sanitize-local.toml`
-  (`.sanitize-local.toml.example` documents the schema, including commented private and
-  documentation IP ranges). A one-time sweep replaced existing absolute home paths in
-  tracked files with `~` (docs and plans only; no behavior change).
-
-### Documentation
-- **Reframed the README lead to the trustworthy-ML register (no behavior change).** The opening now
-  leads with what pubrun does — reproducible, auditable runs via automatic provenance, environment
-  capture, and run-to-run comparison from a single `import pubrun` — and states plainly that pubrun is
-  a reproducibility/provenance *component used inside* an ML pipeline, not an orchestrator/scheduler/
-  serving platform. Features and Problem/Solution were reframed accordingly, "scales from laptop to
-  cluster" is now a first-class differentiator, and a short "Built to be Trustworthy" section surfaces
-  existing engineering-maturity signals (cross-platform CI over Python 3.8–3.14, the schema-validated
-  manifest contract, zero runtime deps, a real changelog). The publication/pub-joke framing is demoted
-  (kept as one accurate `pubrun methods` feature bullet plus a light "About the name" note), not
-  removed. Every claim is checkable against the code; no docs were amputated.
-
-### Added
-- **Machine-readable JSON Schema for benchmark results** (`schemas/benchmark.schema.json`, Draft
-  2020-12) defining the `pubrun-benchmark/5` format. Both the full and the redacted result forms
-  validate against it (redaction masks values, not structure); a conformance test enforces it and
-  guards the committed redacted sample from drift. Gives future benchmark-intake tooling something
-  concrete to validate submissions against.
-
-### Changed
-- **Benchmark result JSON is now compact schema `pubrun-benchmark/5` (fits the GitHub submission
-  path, zero data loss).** The shareable redacted result was far too large for the community
-  submission path (a GitHub issue body caps at ~65 KB; a real redacted `/4` result was ~120 KB
-  compact). Schema `/5` reshapes the file to remove structural redundancy with no analytical data
-  loss: static per-scenario descriptors are defined once in a top-level `scenario_defs` map (the
-  removed schema/1 top-level `scenarios` last-pass alias is gone); each pass stores only what varies
-  (`timings`/`failures`/`skipped` maps keyed by scenario name); raw per-iteration timings are retained
-  but rounded to 6 decimal places (the one deliberate, sub-signal lossy step) and grouped by pass; and
-  the derived stats (`median_s`/`p95_s`/`stdev_s`/…) are no longer stored (they are recomputed on read
-  from the raw timings). The `baseline` block uses the same compact shape. Files are written compact
-  (no indentation); a real default run's redacted copy is ~38 KB, well under the cap. `aggregate.py`
-  reads both `/4` (stored stats) and `/5` (recomputed) and produces identical output either way;
-  `plot.py` is unaffected. The result JSON now records both `generated_utc` and `generated_local`
-  (local time with its UTC offset). Result files are always named `*.unredacted.json` (full, embeds
-  the hostname) and `pubrun-bench-<hostname-hash>-<UTC-timestamp>.redacted.json` (shareable; the
-  filename carries a non-identifying hostname hash, never the hostname) — never a bare `*.json`. The
-  `pubrun bench` submit path and the harness now print a non-fatal warning if a redacted file exceeds
-  the GitHub issue-body budget, suggesting you attach the file instead of pasting it.
-
-### Fixed
-- **Manifest schema now accepts the `imported-transitive` packages mode (and its records).** The
-  `packages_section.mode` enum omitted `imported-transitive` (a mode the code supports and writes),
-  and `package_record` rejected the `required_by` field that transitive records carry, so a run with
-  `capture.packages.mode = "imported-transitive"` would have failed the schema conformance gate. Both
-  are now in the schema, documented in `docs/manifest.md`, and covered by a conformance test. Also
-  hid the deprecated `--show-config` flag from `--help` (it still works, still prints the deprecation
-  notice), and corrected several doc inaccuracies (`config.source_files` type in the manifest doc, the
-  config precedence table's local-config tier, and the README `show config` coverage).
-
-### Added
-- **`pubrun show config` family — inspect resolved configuration.** Three contexts: `pubrun show
-  config` (what `import pubrun` would use right now, in the current directory), `pubrun show run
-  config [<id>]` (the config a past run actually used, from its `config.resolved.json`; a crashed
-  run shows its labeled startup snapshot, a ghost run reports a clear error), and `pubrun show
-  default config` (built-in defaults). `show config` **surfaces resolution ambiguity**: keys a
-  higher-precedence layer overrode are annotated (e.g. `capture.hardware.depth = 'off' [local,
-  overrides built-in 'basic']`); a no-conflict config prints clean, and `--all` annotates every
-  key with its source layer. Backed by a new opt-in `resolve_config_with_provenance()` that is
-  value-identical to `resolve_config()` (provenance never alters the resolved config).
-
-### Deprecated
-- **`--show-config` is deprecated in favor of `pubrun show default config`.** It still works (prints
-  the built-in defaults) but emits a one-line deprecation notice to stderr; slated for removal in a
-  future release. Also corrected the `--info` help text (it no longer claims to list detected config
-  files, which it never did; use `pubrun show config` for resolved configuration).
-
-### Fixed
-- **Manifest schema now accepts the transient `pending` and `timeout` capture states, so
-  crashed/startup manifests validate.** The schema's capture-state enum omitted `pending` (async
-  hardware/host/filesystem sections at `start()`, which persist in a run that crashed before
-  finalizing) and `timeout` (git/hardware external-tool timeout — already documented but not in the
-  enum). Both are now in the schema and documented; a new test validates the startup manifest shape.
-- **Manifest JSON schema reconciled with reality; schema-conformance is now a hard test gate.** The
-  shipped `schemas/manifest.schema.json` had drifted — several manifest sections were added over time
-  without schema updates, so a real manifest failed validation (root `filesystem`; `capture` enable
-  flags; the full `host` section incl. `hostname` mistyped as an object when the code emits a string;
-  `packages.records[].source`; `python` env-classification fields; `resources` system/tree metrics).
-  All are reconciled against what pubrun actually emits, `docs/manifest.md` matches field-for-field,
-  and `tests/test_manifest_schema.py` now validates freshly-generated manifests across variants
-  (default, profile-notice, console-on, tree-scope) as a hard gate so the contract cannot silently
-  drift again.
-- **Manifest JSON schema now covers `config.notices`, and manifest schema-conformance is now
-  tested.** The new `config.notices` field violated the shipped schema (`additionalProperties:false`
-  on the config section); the schema was updated and `docs/manifest.md` documents the field. A new
-  `tests/test_manifest_schema.py` validates real manifests against `schemas/manifest.schema.json`
-  (via a dev-only `jsonschema` dependency) so schema drift can no longer go unnoticed. A broader,
-  pre-existing schema staleness (several sections added over time without schema updates) is tracked
-  for full reconciliation in a pending IPD and guarded by an `xfail` tripwire.
-- **`import pubrun.report.<submodule>` no longer breaks after selecting an import mode.** Every
-  import-mode module (`auto`/`noauto`/`full`/`nopatch`/`noconsole`/`minimal`) and the deferred
-  `__init__` bound the top-level `report()` function onto the package as `pubrun.report = report`,
-  which **shadowed the `pubrun.report` subpackage** (a CallableModule that is both the callable
-  `report()` API and the home of `pubrun.report.output/checks/diagnostics/…`). In certain import
-  orders this left `pubrun.report` as a plain function, so `import pubrun.report.diagnostics` raised
-  `ImportError`. Fixed by importing the subpackage (so `pubrun.report` stays the CallableModule —
-  callable **and** submodule-bearing) instead of overwriting it. Added regression tests covering
-  every import mode plus a generalized guard that no mode module shadows any `pubrun` subpackage.
-
-### Deprecated
-- **`core.profile` (and `PUBRUN_PROFILE`, the `start(profile=)` shorthand, and the TUI "Profile
-  Mode" selector) is deprecated because it never worked.** `profile` was documented as a "master
-  capture depth" dial (`minimal`/`default`/`deep`) but was never wired to any capture engine — setting
-  it had **no effect** on what pubrun captured. It is still accepted (so no existing config or script
-  breaks), but is now explicitly inert: setting it to a non-default value records a **deprecation
-  notice in the run manifest** (`config.notices`), surfaced by `pubrun status`, `pubrun status <id>`,
-  `pubrun inspect`, and `pubrun show` so it is not buried in JSON. To control capture depth, set the
-  specific `capture.*` keys (e.g. `[capture.hardware].depth`, `[capture.packages].mode`). The false
-  "controls capture depth" claims in `docs/configuration.md`, `default.toml`, and the TUI label were
-  corrected. A future release may remove `profile` entirely. (Whether to instead *wire* profile to
-  real capture tiers was considered and declined — see the executed decision IPD.)
-
-### Fixed
-- **`pubrun resources` now works as the documented alias of `pubrun res`.** The docs described
-  `resources` as a backward-compatible alias, but it errored with "unknown command" because the
-  argparse subparser was never registered (only the dispatch handled it). It is now a real alias
-  (like `ui`/`tui`/`gui`), consistent across the subparser, the dispatch, and the run-ID/`--no-color`
-  pre-parser. The dead, undocumented, unreachable `monitor`/`chart`/`stats` dispatch strings were
-  removed (they now error cleanly as unknown commands).
-- **Honest HPC hydration docs.** The README previously claimed children "automatically skip heavy
-  footprint tracking" when `PUBRUN_META_REF` is set. In fact, `meta_ref` is recorded in the manifest
-  and used for **report-time** hydration (`pubrun show`/`methods` stitch the parent snapshot into any
-  section the child did not capture); it does not by itself suppress capture. To reduce per-child
-  overhead, suppress the heavy engines explicitly (`capture.hardware.depth="off"`,
-  `capture.packages.mode="off"`). Docs corrected; `core.profile`'s (currently inert) relationship to
-  capture is tracked as a separate design decision.
-
-### Changed
-- **`pubrun diff --basic`/`--standard` are now genuinely concise.** Previously `--basic` could
-  explode a subprocess-heavy run pair into 11,000+ lines and surfaced per-run volatile fields
-  (`filesystem.run_dir.path`) and derived duplicates (`invocation.command_line` /
-  `rerun_command`, both derived from `argv`). Now: `--basic` shows only high-signal, user-facing
-  differences (script/argv, packages, python, git, config) and hides the high-volume sections;
-  `--standard` **summarizes** list sections (e.g. `subprocesses.count: 300 → 302`,
-  `subprocesses.by_command.bash: +2`) instead of diffing every element; a single `argv` change
-  is reported once (the derived `command_line`/`rerun_command` appear only at `--deep`).
-  **`--deep` output is unchanged** (full element-by-element detail). New `pubrun diff --table`
-  renders a compact aligned `change / field / A → B` table (the git-style `+/-/~` inline output
-  remains the default). Also fixed a stale doc claim that `--basic` was the default (it is
-  `--standard`).
-- **Normalized CLI output prefixes + alphabetized the `-h` command list.** All pubrun status
-  lines now use a consistent, accessible vocabulary — `[INFO ]` (green), `[ OK  ]` (green),
-  `[WARN ]` (yellow), `[ERROR]` (red), `[DEBUG]` (light blue, silent unless `PUBRUN_DEBUG`),
-  `[FAIL ]` (self-test failures) — replacing the previous ad-hoc mix (`[*]`, `[OK]`, `[ERRO]`,
-  `[WARNING]`, lowercase `[warn]`/`[info]`, `[dry run]`). One central helper now emits them;
-  color is optional reinforcement (never dimmed; suppressed under `NO_COLOR`/`--no-color`/non-TTY;
-  the textual label is authoritative). The `pubrun -h` command list is now alphabetical. If you
-  grep pubrun output, match on the level word (e.g. `WARN`), not the exact bracket text.
-- **BREAKING (command rename): `pubrun bug-report` → `pubrun report-bug`, and `feedback` is
-  now its own command.** The old `bug-report` command and its `issue` alias were removed
-  (hard rename). Use `pubrun report-bug` (bug reports / feature requests) or `pubrun
-  feedback` (general feedback) — both open the GitHub issue tracker and print diagnostics.
-- **`pubrun res` now shows a comprehensive resource summary**, not just single-process
-  CPU%/RSS: it also surfaces process-tree RSS, system available memory (start + lowest),
-  load average, node iowait (labeled indicative-only), and per-process I/O byte volume
-  (`/proc/self/io`) — each shown only when captured. `pubrun cpu`/`mem` remain single-metric.
-- **Behavior change: `pubrun.open()` no longer hashes file contents by default.** The default
-  `[capture.file_io].level` is now `stat` (path + size + mtime/ctime), not content hashing.
-  Hashing is opt-in via `level = "hash"`. Rationale: hashing reads every byte (expensive,
-  especially over NFS) for information that file size + mtime usually already capture. The
-  `data_files` record shape is unchanged; `sha256` is `null` unless the level is `hash`.
-- **BREAKING (`pubrun combined`): `-f` now means `--filter`, not `--force`.** For CLI
-  consistency, `-f`/`--filter` on `combined` now filters runs (as it does on every other
-  command). The force-large-file flag is now **`--force`** (long form only). Scripts that
-  relied on `combined -f` to force must switch to `combined --force`.
-- **`pubrun diff` now accepts the standard run filters** (`-f`/`--filter`,
-  `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`).
-  When run directories are omitted, the auto-selected comparison pair is drawn from the
-  matching runs; if a filter matches fewer than two runs, `diff` errors clearly instead of
-  ignoring the filter. Behavior with no filters and no run directories is unchanged (still
-  compares the two most recent runs).
-- **License changed from BSD-3-Clause to Apache-2.0.** Now licensed under the Apache License 2.0
-  (see `LICENSE` and the new `NOTICE`). Apache-2.0 requires redistributions and derivative works to
-  retain the `NOTICE` file and display its attribution reasonably prominently ("Based on the original
-  pubrun by Gabriele Fariello — https://github.com/fariello/pubrun"), and adds an explicit
-  patent grant. Copyright holder normalized to the full legal name **Gabriele Fariello**
-  (copyright span 2007–2026 preserved); author email set to gfariello@fariel.com.
-- **Package metadata license fixed**: `pubrun.__license__` now reports `Apache-2.0` (was still
-  `BSD-3-Clause`). Legal/copyright surfaces (`LICENSE`, `NOTICE`, `__copyright__`, README copyright)
-  use the full legal name **Gabriele Fariello**; **citation** surfaces (`pubrun cite`, generated
-  methods report, `CITATION.cff`, PyPI author) use the publication name **Gabriele Fariello** so
-  citations aggregate with the author's existing record.
-- **`pubrun cite` and generated methods citation corrected**: now cite the software itself
-  (`[Computer software]`, repository URL, version-aware) instead of a premature, unpublished
-  reference; a single consistent title is used across all surfaces.
-- **`pubrun --version`** now prints the required NOTICE attribution line.
-- **Import-mode docs accuracy**: the README "Preset Modes Behavior Matrix" (and
-  `functional_spec.md`, `api.md`, and the `auto`/`noauto` docstrings) previously implied
-  console wrapping is ON in `auto`/`noauto`. Corrected: a mode only *permits* the console
-  tee; it is **off by default** in every mode because `[console].capture_mode` defaults to
-  `"off"`. Also clarified that background resource monitoring is NOT gated by import mode
-  (it runs in every mode while a run is active). Removed a stale `pubrun.quiet` reference
-  in the `noauto` docstring (the mode is `noconsole`).
-
-### Added
-- **Benchmark pass tiers + uncaptured baseline pass + total wall-time.** Every `pubrun bench`
-  run now begins with a **baseline (uncaptured) pass** — the workload run without pubrun — that
-  warms caches and records the pubrun-absent cost floor, stored separately so it never mixes
-  into overhead stats. Three tiers replace the old flat 2×30: `--quick` (baseline + 2×15),
-  `--full`/default (baseline + 3×30), and new `--rigorous` (baseline + 5×50, for tight
-  confidence intervals; can take many minutes). `--iterations`/`--passes` still override. The
-  result JSON now records `mode`, `baseline_pass`, the baseline sweep, and `total_wall_time_s`
-  (whole-invocation wall time). `--full` remains the default's clarity alias (not the heavy
-  mode). `--no-baseline` skips the baseline pass.
-- **TUI resource view (`pubrun ui`).** Selecting a run now populates a new **Resources** tab
-  showing peak/avg/min for CPU and memory (main process, and the process tree when captured)
-  plus a compact sparkline of each over the run's lifecycle — reusing the same per-sample data
-  as `pubrun res`. Press `r` to jump to it; runs with no resource samples show a clear message.
-  (TUI is the optional `[tui]` extra — the core library gains no dependency.)
-- **Recency-index run selector.** Every command that takes a run (`show`/`report`,
-  `res`/`cpu`/`mem`, `methods`, `inspect`, `rerun`, `diff`, `status`) now accepts a bare
-  positive integer as a **recency index** — `1` = most recent run, `2` = second most recent,
-  and so on — in addition to the existing run-id/prefix and directory-path forms. `pubrun
-  status` shows the index in a leading `#` column. Resolution is additive (id-prefix and path
-  behavior are unchanged); a run id being a bare small integer is effectively impossible (ids
-  are timestamp+hash), and in the vanishing case one collided, pubrun refuses to guess and
-  points you at the full id / path.
-- **Verbose, transparent `self-check` and `meta`.** `pubrun self-check` is now **itemized by
-  default**: one line per check with its `[ OK  ]`/`[WARN ]`/`[INFO ]` outcome (including the
-  checks that PASSED) plus a `N checks in 0.0Xs` timing footer — instead of a bare one-line
-  verdict. `--quiet`/`-q` restores the terse one-liner (for scripts/CI); `--json` now emits the
-  full structured result (`checks`, `findings`, `elapsed_seconds`); `--show-suggestions` adds
-  remediation detail. `--strict` still keys on WARN only. `pubrun meta` likewise itemizes each
-  gathered section (hardware/python/packages/git/environment/host) with an outcome and
-  per-section timing plus a total, surfacing any failed section as `[WARN ]` (the `meta.json`
-  file remains the source of truth).
-- **Richer `report`/`res` output + `report`/`show` flag parity.** `pubrun res` now shows
-  **peak / avg / min** (computed from the per-sample `events.jsonl`) for each metric, with
-  explicit `RSS (main)` / `CPU (main)` / `RSS (tree)` / `CPU (tree)` labels. **Process-tree CPU
-  is now captured** (`resources.peak_tree_cpu_percent` + per-sample `tree_cpu_percent`) when
-  `[capture.resources].scope = "tree"` — computed from summed CPU-time deltas across the tree
-  (not a sum of instantaneous percentages), labeled "% of one core" and not clamped (may exceed
-  100% on multiple cores; Linux-only). This intentionally changes the prior "child CPU excluded
-  from the CPU metric" behavior, gated to tree scope. The `report`/`show` **event timeline**
-  now uses a compact `YYYY-MM-DD HH:MM:SS` timestamp (local by default, `--utc` for UTC) and
-  shows the oldest 10 + newest 10 events with a truncation marker above 20 (was full ISO with
-  microseconds, truncating only above 40). `pubrun report` now accepts `--utc` (previously only
-  `show` did — an accidental asymmetry).
-- **HPC multi-scheduler benchmark submission (Slurm/PBS/LSF/SGE).** `pubrun bench` now detects
-  and offers to submit to PBS/Torque, LSF, and SGE/Grid Engine in addition to Slurm (auto-detect
-  order Slurm > PBS > LSF > SGE), with a new `--scheduler {auto,slurm,pbs,lsf,sge,local}` override.
-  Detection is env+PATH only (no scheduler query, no network); the PBS-vs-SGE `qsub` ambiguity is
-  reported and resolved with `--scheduler`. New starting-point submit scripts
-  `submit_bench_pbs.sh`/`_lsf.sh`/`_sge.sh` (submit to the default queue, let the scheduler place
-  the job; adapt account/queue/walltime to your site — not CI-validated against live clusters).
-  Never auto-submits (same consent gate as Slurm; argv-list, no shell injection). `pubrun
-  self-check` now emits an INFO nudge when you appear to be on an HPC login node, suggesting a
-  compute-node `pubrun bench` for representative numbers (INFO, so it does not trip `--strict`).
-- **Benchmark data quality + filesystem-health diagnostics.** Benchmark results now record
-  **raw per-iteration timings** (in run order) alongside the summary stats (schema
-  `pubrun-benchmark/4`), so distribution shape, warmup drift, and correct cross-submission
-  pooling are recoverable. Results also capture non-identifying **environment classification**
-  (`environment_kind` = venv/conda/system/virtualenv/frozen, `in_venv`, `sys_path_len`) and
-  classify more paths (Python install prefix, `/dev/shm`, the I/O-baseline target) — all of
-  which **survive share-redaction** so a slow/odd result stays interpretable after PII
-  masking. Filesystem classification now prefers Linux `/proc/self/mountinfo` (bind/overlay
-  aware) and gains a **Windows** `ctypes` fstype branch. New **diagnostic-only** live probe
-  (`os.statvfs`) surfaces free space, inode counts, read-only mounts, and — crucially —
-  **wedged (hung) or slow** mounts; it runs in a daemon thread with a decoupled wait budget
-  (a slow-but-alive mount is captured with its measured latency, not falsely called hung) and
-  is **never invoked by `import pubrun`** or the startup path. `pubrun self-check` now warns
-  about hung/slow/network-backed mounts as an honest **system-wide** hazard (affects any
-  script, not just pubrun). Zero new runtime dependencies.
-- **Low-friction, consent-gated benchmark result submission.** After a local `pubrun bench`
-  run, pubrun now **offers** to contribute the redacted result to the public
-  `pubrun-benchmarks` repo. It never transmits without an explicit yes: the prompt defaults to
-  No (Enter = don't send), and it tries the GitHub CLI (`gh`) → a direct GitHub Issues API call
-  (stdlib `urllib`, needs a token) → printing a ready-to-paste submission, in that order. New
-  `pubrun bench --submit-file <redacted.json>` submits a previously produced file without
-  re-running (the "oh, I meant yes" recovery, and the HPC run-on-compute-node →
-  submit-from-login-node path). New flags: `--submit-file`, `--no-submit`, `--submit-method
-  {gh,http,print}`, `--gh-repo`, `--gh-token`, `--print-submission`. pubrun **never
-  auto-transmits an un-redacted result** — the submit path verifies the file looks redacted
-  (no hostname/username/home-path leak) and refuses otherwise. Zero new runtime dependencies.
-- **Benchmark ground-truth I/O baselines.** New `io_baseline` scenarios establish reference
-  floors for I/O so storage-dependent numbers are interpretable: `io-baseline-devnull`
-  (write-only null sink — isolates the open/write path from storage; `NUL` on Windows),
-  `io-baseline-devshm` (RAM-backed tmpfs, Linux; cleanly skipped where `/dev/shm` is absent),
-  and `io-baseline-tmpdir` (the default temp filesystem). `pubrun bench` gained a `--full`
-  flag (explicit alias of the default) alongside `--quick` for clarity.
-- **Graded file-I/O provenance for `pubrun.open()` + per-process I/O counters.** `pubrun.open()`
-  now records provenance at a configurable `[capture.file_io].level` — `none | name | stat |
-  realpath | hash` (progressive). `stat` uses `fstat` on the open fd (size/mtime/ctime, ~free
-  even on NFS); `realpath` adds symlink resolution (costlier on network filesystems); `hash`
-  adds a SHA-256 read from the on-disk bytes at close (correct regardless of read path).
-  `max_hash_bytes` caps hashing of large files. Still opt-in and per-file — pubrun never
-  patches the global `open()`. Also: the resource watcher now records per-process I/O byte
-  counters from Linux `/proc/self/io` (`resources.io_counters`, `system_metrics`-gated).
-- **`pubrun bench` command (friendly benchmark runner + HPC submit + shareable results).**
-  Runs the overhead benchmark suite locally by default; on an HPC login node with Slurm
-  detected it **offers** to submit to a compute node (never submits without confirmation).
-  Writes a **redacted, shareable** copy of the results by default (`--no-redact` to opt out)
-  that masks hostname, OS username, and all home-directory paths while preserving the
-  analysis-relevant data (CPU/GPU model, timings, versions, filesystem type, Slurm
-  partition), and prints how to contribute it to the (forthcoming) public `pubrun-benchmarks`
-  repository. Requires a source checkout (the benchmark tooling is not shipped in the pip
-  package). The harness also gained a `--redacted-out` option and a reusable `redact_result`
-  helper (deep-scan scrub of home-dir/username substrings as a safety net).
-- **`pubrun self-check` and `pubrun inspect` commands (environment & run diagnosis).**
-  `self-check` reports pubrun performance/config pitfalls on the current machine (network
-  filesystems backing the install/output/`$TMPDIR`, low RAM, high load) plus install health
-  (config validity, output-dir writability, `git` availability, Python version) — report-only.
-  `inspect` diagnoses a completed run's manifest: recorded I/O/RAM/load/filesystem signals, a
-  **capture-completeness assessment** (what provenance was NOT captured and how to capture more,
-  with honest performance trade-offs), and a glaring banner when the inspecting host differs
-  from where the run executed (HPC head-node vs compute-node). Both support
-  `--show-suggestions`/`-v` (terse by default), `--json`, and `--strict` (non-zero exit on any
-  warning). The findings logic is CLI-only and is **not** imported by `import pubrun`, so it
-  cannot affect a host script. New [HPC & performance diagnosis](docs/hpc.md) doc.
-- **Run-time I/O / environment capture (enables post-hoc diagnosis of NFS/contention).** A run now
-  records the **filesystem type** of its output dir, run dir, and `$TMPDIR` (new `filesystem` manifest
-  section) — flagging network filesystems (NFS/Lustre/GPFS/CIFS) that can silently inflate I/O on HPC
-  clusters. Classification parses `/proc/mounts` (Linux) / the `mount` table (macOS) and **never** calls
-  `statvfs`/`df`/`stat` on the target, so it cannot hang on a sick network mount. The background resource
-  watcher additionally samples **system-wide available memory, load average, and (Linux) node iowait**
-  (new `resources.system_memory`/`load_average`/`system_iowait_pct`), controlled by the new
-  `[capture.resources].system_metrics` key (default `true`; only samples while the watcher runs). All
-  reads are cheap, stdlib-only, exception-safe, and never disturb the host script. Note: `system_iowait_pct`
-  is **node-wide, indicative only** (not run-scoped). Two additive manifest flags
-  (`capture.subprocesses_enabled`, `capture.file_provenance_available`) let tooling distinguish "feature was
-  OFF" from "on but produced no records".
-- **Benchmark schema `pubrun-benchmark/3`.** The harness now captures filesystem context + Slurm allocation
-  context in the `machine` block and the dynamic host state (RAM/load/iowait) at the **start of each pass**
-  (`pass_results[i].pass_env`), so cross-machine/cross-node results are interpretable and a node loaded
-  between passes is visible. `aggregate.py`/`plot.py` still read `/2` files.
-- **Citation DOI metadata (Zenodo-ready).** Added `.zenodo.json` so the next GitHub release can mint a
-  Zenodo **concept DOI** (all-versions) with controlled metadata. `CITATION.cff` gained an
-  `identifiers` (DOI) block, a `version` field, and the author's ORCID
-  (`0000-0002-0326-4752`) and affiliation (University of Rhode Island); `pubrun cite` (all styles),
-  the README Citation section, and `docs/research-use.md` now include the DOI. The DOI is a clearly
-  labeled placeholder (`10.5281/zenodo.PENDING`) until the repository is enabled in Zenodo and a
-  release mints the real one; no fabricated DOI is shipped. No `preferred-citation`/paper reference is
-  added — pubrun has no peer-reviewed paper yet and does not imply one. A consistency test guards
-  against author-name/DOI/version drift across these surfaces. Author display name remains the
-  **publication** form (`Gabriele Fariello` / `Fariello, G.`); ORCID/affiliation are additive.
-- **`NOTICE`** file with the required Apache-2.0 attribution string; **`CITATION.cff`** added/updated
-  for citation; README gained a License/Attribution/Citation section.
+- **`pubrun bench` command and one-command GitHub contribution (`fariello/pubrun`).** Friendly front-end over the benchmark harness that runs locally by default and, on an HPC login node, detects the batch scheduler (`--scheduler {auto,slurm,pbs,lsf,sge,local}`) and offers to submit the job to a compute node (never submits without confirmation; `--submit`/`--yes` govern HPC scheduler job submission only and never imply consent to publish). Writes only a share-safe redacted result by default (`benchmarks/results/pubrun-bench-<hash>-<UTC-timestamp>.redacted.json`; pass `--unredacted` to also write the identifying local copy). After a run, `pubrun bench` runs the shared structural share-safety validator (`benchmarks/share_safety.py`) and offers to contribute the redacted result to `fariello/pubrun` (`--contribute` / `--no-contribute`, `--no-submit`, `--gh-repo`): via `gh` it creates an unlisted Gist and opens a GitHub issue linking the raw `.json` URL, falling back to embedding JSON inline under GitHub's ~65 KB body cap and then to a manual browser Issue Form (`--prepare-submission` copies only the redacted file into a clean `pubrun-share/` folder). `--submit-file <file>` validates and contributes an existing redacted file without re-running. All transport uses argv lists or stdin (never a shell), re-checks share-safety immediately before sending, never prints tokens or payloads, and rolls back an orphaned Gist if issue creation fails. A validate-only GitHub Actions workflow (`.github/workflows/benchmark-intake.yml`, `contents: read` + `issues: write`) checks attachments, Gist raw URLs, and inline JSON as data only and comments an idempotent pass/fail receipt. Requires a source checkout (benchmark tooling is not shipped in the wheel).
+- **Slurm submit-and-wait.** On a Slurm login node, `pubrun bench` offers to submit the benchmark job (`benchmarks/submit_bench.sh` / `benchmarks/run_bench.sbatch`, emitting a parseable job ID via `sbatch --parsable`) and poll for completion (`--wait-timeout` to extend or disable), then runs the interactive share-check and contribution from the login node. Any interruption, timeout, or job failure falls back to `pubrun bench --submit-file <path>`; the result stays on the shared filesystem.
+- **HPC multi-scheduler benchmark submission (Slurm/PBS/LSF/SGE).** `pubrun bench` detects and offers to submit to PBS/Torque, LSF, and SGE/Grid Engine in addition to Slurm (auto-detect order Slurm > PBS > LSF > SGE) using env+PATH checks only (resolving PBS-vs-SGE `qsub` ambiguity with `--scheduler pbs|sge`). Starting-point template scripts `benchmarks/submit_bench_pbs.sh`, `benchmarks/submit_bench_lsf.sh`, and `benchmarks/submit_bench_sge.sh` submit to the default queue (not CI-validated against live clusters; they currently pass `--out "$RESULTS_DIR/${NODE}-${STAMP}.json"`, writing a gitignored unredacted bare `.json` alongside the default `.redacted.json`). `pubrun self-check` emits an `INFO` nudge on HPC login nodes suggesting a compute-node `pubrun bench` run (does not trip `--strict`).
+- **Maintainer tool to collect benchmark submissions locally (`benchmarks/pull_submissions.py`).** Fetches benchmark-submission issues via `gh`, runs the same fail-closed validation as CI (schema `pubrun-benchmark/5` + structural share-safety + 256 KB size cap), stores accepted redacted results content-addressed under `benchmarks/data/accepted/<sha256>.redacted.json` (with a metadata sidecar recording contributing issues), aggregates into `benchmarks/data/summary.csv` and `benchmarks/data/summary.md` via `benchmarks/aggregate.py`, and re-tags issues. Dry-run by default (`--apply` to write), invokes `gh` via argv lists, parses untrusted JSON as data only, and never pushes. Dev/reproducibility tooling, not shipped in the wheel.
+- **Benchmark suite (`benchmarks/`) and `pubrun-benchmark/5` schema (`schemas/benchmark.schema.json`).** A reproducible, stdlib-only harness (`benchmarks/harness.py`) measuring startup and run-time overhead per feature (import modes, resource watcher, subprocess spy, git/hardware/packages capture, `pubrun.open()` / `pubrun.register_input()` and `print()` console tee hot paths; `pubrun` never patches `open()`). Includes `aggregate.py` (CSV + Markdown summary), optional `plot.py` and `test_benchmarks.py` under the dev-only `[bench]` extra, `docs/performance.md`, and a Draft 2020-12 JSON Schema (`schemas/benchmark.schema.json`) validated against both full and redacted `pubrun-benchmark/5` results.
+- **Benchmark pass tiers, uncaptured baseline pass, and total wall time.** Every benchmark run starts with an uncaptured baseline pass (workload without `pubrun`, stored separately so it never mixes into overhead stats; `--no-baseline` skips it), followed by three preset tiers: `--quick` (baseline + 2x15), `--full`/default (baseline + 3x30), and `--rigorous` (baseline + 5x50), overridable with `--iterations`/`--passes`. Records `mode`, `baseline_pass`, `baseline`, and `total_wall_time_s`.
+- **Benchmark data quality, ground-truth I/O baselines, and filesystem-health diagnostics.** Benchmark results (`pubrun-benchmark/5`) retain raw per-iteration timings, `environment_kind` (`venv`/`conda`/`system`/`virtualenv`/`frozen`), `in_venv`, `sys_path_len`, filesystem and Slurm allocation context, and per-pass dynamic host state (`pass_results[i].pass_env`: available RAM, load average, node iowait) while surviving share-redaction; `aggregate.py`/`plot.py` remain backward-compatible with older `/2`, `/3`, and `/4` files. New `io_baseline` scenarios (`io-baseline-devnull`, `io-baseline-devshm`, `io-baseline-tmpdir`) establish storage reference floors. Filesystem classification prefers Linux `/proc/self/mountinfo` (bind/overlay aware) and adds a Windows `ctypes` fstype branch. A diagnostic-only `os.statvfs` live probe surfaces free space, inode counts, read-only mounts, and wedged/slow mounts in a bounded daemon thread (never invoked by `import pubrun`); `pubrun self-check` warns about hung/slow/network-backed mounts as a system-wide hazard.
+- **`pubrun --version` shows the commit hash.** Prints `pubrun <version> (commit <hash>)` when resolvable: live `git rev-parse HEAD` in source checkouts, falling back to build-time commit metadata stamped by `hatch_build.py` (`_build_meta.json` and legacy `COMMIT` written into wheel and sdist artifacts during build without mutating the working tree). Both paths are best-effort and stdlib-only.
+- **Path/hostname/IP sanitizer (`scripts/sanitize_paths.py`).** Stdlib-only guard wired into pre-commit and CI (`--check` and `--fix` modes, with `--scrub`/`--match`/`--replace`/`--dry-run`) that blocks commits containing absolute home-directory paths, the machine hostname, and opt-in IP addresses, configured via tracked `.sanitize-allow.toml` and gitignored `.sanitize-local.toml` (`.sanitize-local.toml.example` documents the schema).
+- **`pubrun show config` family.** Inspect resolved configuration across three contexts: `pubrun show config` (current directory), `pubrun show run config [<id>]` (from a past run's `config.resolved.json`, showing labeled startup snapshots for crashed runs and a clear error for ghost runs), and `pubrun show default config` (built-in defaults). Annotates keys overridden by higher-precedence layers (`--all` annotates every key), backed by `resolve_config_with_provenance()`.
+- **TUI resource view (`pubrun ui`).** Adds a **Resources** tab showing peak/avg/min for CPU and memory (main process and process tree when captured) with compact sparklines (`r` shortcut; optional `[tui]` extra).
+- **Recency-index run selector.** Commands accepting a run (`show`/`report`, `res`/`cpu`/`mem`, `methods`, `inspect`, `rerun`, `diff`, `status`) accept a bare positive integer recency index (`1` = most recent, `2` = second most recent) alongside run-ID prefixes and directory paths; `pubrun status` shows the index in a leading `#` column and refuses to guess on any collision.
+- **Verbose, transparent `self-check` and `meta`.** `pubrun self-check` is itemized by default (one line per check with `[ OK  ]`/`[WARN ]`/`[INFO ]` and a timing footer; `--quiet`/`-q` restores the terse one-liner; `--json` emits `checks`, `findings`, `elapsed_seconds`; `--show-suggestions` adds remediation detail; `--strict` keys on `WARN` only). `pubrun meta` itemizes each gathered section with outcome, per-section timing, and total, surfacing failed sections as `[WARN ]`.
+- **Richer `report`/`res` output and `report`/`show` flag parity.** `pubrun res` displays peak/avg/min with explicit `RSS (main)` / `CPU (main)` / `RSS (tree)` / `CPU (tree)` labels. Process-tree CPU (`resources.peak_tree_cpu_percent` and per-sample `tree_cpu_percent`) is captured under `[capture.resources].scope = "tree"` from summed CPU-time deltas across the tree (labeled "% of one core", unclamped, Linux-only). The `report`/`show` event timeline uses compact `YYYY-MM-DD HH:MM:SS` timestamps (local by default, `--utc` for UTC) showing the oldest 10 and newest 10 events with a truncation marker above 20, and `pubrun report` now accepts `--utc`.
+- **Graded file-I/O provenance for `pubrun.open()` and per-process I/O counters.** `pubrun.open()` records provenance at configurable `[capture.file_io].level` (`none | name | stat | realpath | hash`): `stat` uses `fstat` on the open fd, `realpath` adds symlink resolution, and `hash` computes a streamed SHA-256 hash during sequential reads via `ProvenanceFileProxy`, falling back to re-reading at close only when streaming is not possible (capped by `max_hash_bytes`). Still opt-in and per-file (`pubrun` never patches global `open()`). The resource watcher also records per-process Linux `/proc/self/io` byte counters (`resources.io_counters`, `system_metrics`-gated).
+- **`pubrun self-check` and `pubrun inspect` commands.** `self-check` reports local performance/config pitfalls (network filesystems, low RAM, high load) and install health (report-only). `inspect` diagnoses a completed run's manifest (I/O/RAM/load/filesystem signals, capture-completeness assessment, and a cross-host mismatch banner when inspecting from a different machine). Both support `--show-suggestions`/`-v`, `--json`, and `--strict`, and remain CLI-only (never imported by `import pubrun`). Added [HPC & performance diagnosis](docs/hpc.md).
+- **Run-time I/O and environment capture.** Records filesystem types of output dir, run dir, and `$TMPDIR` (`filesystem` manifest section, flagging NFS/Lustre/GPFS/CIFS by parsing mount tables without blocking on `statvfs`/`df`/`stat`). The resource watcher samples system-wide available memory, load average, and Linux node iowait (`resources.system_memory`/`load_average`/`system_iowait_pct`, gated by `[capture.resources].system_metrics`, default `true`; `system_iowait_pct` is node-wide and indicative only). Added `capture.subprocesses_enabled` and `capture.file_provenance_available` manifest flags.
+- **Citation and Zenodo concept DOI metadata.** Added `.zenodo.json`, `NOTICE` (Apache-2.0 attribution), and updated `CITATION.cff` (author ORCID `0000-0002-0326-4752`, affiliation `University of Rhode Island`, `version`, and live Zenodo concept DOI `10.5281/zenodo.20801582`), plus matching DOI/citation metadata across `pubrun cite` (all styles), `README.md` (with a Zenodo DOI badge), `docs/research-use.md`, and `docs/cli.md`. No `preferred-citation`/paper reference is added (no peer-reviewed paper exists yet). A citation consistency test guards author, DOI, and version alignment across all citation surfaces and rejects placeholder DOIs.
 - **`pubrun init` command**: Creates `.pubrun.toml` and prints getting-started guidance.
-- **Process-tree resource capture**: `[capture.resources].scope = "tree"` sums RSS/CPU across all child processes (Linux /proc walk, macOS ps-based tree walk).
-- **Phase-scoped profiling**: `[capture.profiling].enabled = true` profiles `pubrun.phase()` blocks via cProfile or yappi. Saves `profile-<phase>.prof` per phase.
-- **`imported-transitive` package mode**: Records imported packages plus their declared dependencies (one level deep) with `source` and `required_by` fields.
-- **Status summary line**: `pubrun status` ends with a colored summary showing run count, date range, status frequencies, and non-zero exit codes. Reflects full run set even with `-n` limit.
-- **`[console].non_tty_mode`**: Override capture behavior when stdout is piped/redirected.
+- **Process-tree resource capture**: `[capture.resources].scope = "tree"` sums RSS/CPU across all child processes (Linux `/proc` walk, macOS `ps`-based tree walk).
+- **Phase-scoped profiling**: `[capture.profiling].enabled = true` profiles `pubrun.phase()` blocks via `cProfile` or `yappi`, saving `profile-<phase>.prof` per phase.
+- **`imported-transitive` package mode**: Records imported packages plus their recursive, cycle-safe transitive dependency closure (`src/pubrun/capture/packages.py::_resolve_transitive_closure`) with `source` and `required_by` fields.
+- **Status summary line**: `pubrun status` ends with a colored summary showing run count, date range, status frequencies, and non-zero exit codes (reflecting the full run set even with `-n`).
+- **`[console].non_tty_mode`**: Override capture behavior when stdout is piped or redirected.
 - **`[console].jupyter_mode`**: Auto-disable console capture in Jupyter notebooks (default `"off"`).
-- **`[capture.git].check_dirty`**: Skip `git status --porcelain` for faster startup on large repos.
+- **`[capture.git].check_dirty`**: Skip `git status --porcelain` for faster startup on large repositories.
 - **`[events].flush_interval_events`**: Buffer non-critical events (default 100) for throughput.
 - **Secret scanning CI**: `gitleaks` workflow on push/PR + `.gitleaksignore`.
 - **Dependency audit CI**: `pip-audit` workflow on push/PR.
 - **Pre-commit framework**: gitleaks + hygiene hooks (large-file guard, whitespace, YAML/TOML check).
-- **Benchmark suite** (`benchmarks/`): a reproducible, stdlib-only harness that measures
-  pubrun's startup and run-time overhead per feature (import modes, resource watcher,
-  subprocess spy, git/hardware/packages capture, patched `open()`/`print()` hot paths).
-  `harness.py` writes machine-tagged result JSONs; `aggregate.py` merges them into CSV +
-  Markdown; optional `plot.py`/`test_benchmarks.py` use a new dev-only `[bench]` extra
-  (`pytest-benchmark`, `matplotlib`). New `docs/performance.md` documents how to run it
-  and holds a placeholder results table. Does not affect the runtime install (zero deps
-  on 3.11+).
-- **`pubrun methods --all`**: aggregate the whole matching run set into ONE
-  representative "Computational Methods" paragraph plus a variance note (only the
-  fields that differ across runs — OS/CPU/RAM/Python/git commit/pubrun/packages).
-  Homogeneous sets read like the single-run output with "across N runs" added; a
-  differing git commit is disclosed as variance, not an error. Bound/curate with
-  the shared run filters (`-n`/`-f`/`-F`/`-s`/`-S`); `-n` is now enabled for
-  `methods`. A large/divergent set prints a "narrow it" suggestion to stderr that
-  is clearly marked as **not part of the methods section** (and respects
-  `NO_COLOR`). Single-run `pubrun methods` is unchanged; aggregation is opt-in via
-  `--all` (unlike `pubrun show`, which iterates per-run — a deliberate difference,
-  since a methods section is one publication artifact).
-- **`pubrun.paused()` context manager**: `with pubrun.paused(): ...` suspends
-  pubrun's *recording* for a block — the console tee and subprocess spy stop
-  recording while output still prints and subprocesses still run. Thread-local
-  (other threads keep being captured), nestable, and resumes automatically even
-  on exception. Does not pause `annotate()`/`phase()` markers or resource
-  sampling. Useful for silencing a noisy call without disabling capture globally.
-- **`full` import mode**: `import pubrun.full as pubrun` (or `[imports].mode = "full"`, `PUBRUN_IMPORT_MODE=full`, `pubrun run --mode full`) captures everything on import, including console output — it forces the console tee on regardless of `[console].capture_mode` (the mirror of `noconsole`), while still respecting the Jupyter/non-TTY safety guards. An in-code import mode is an absolute imperative over env/config; only `pubrun run --mode` overrides it.
-- **`status`/`show --utc` flag**: Display timestamps in UTC (default remains local time). Timestamps are always stored as UTC epochs; this only affects display.
-- **Capture subprocess timeouts**: `[capture.hardware].timeout` (default 10s), `[capture.resources].poll_timeout` (default 3s), and `[capture.git].timeout` (default 5s) bound hung external tools so they cannot orphan a capture thread/child. A git timeout is recorded as `capture_state.status = "timeout"` (distinct from "not a git repository").
+- **`pubrun methods --all`**: Aggregates a matching run set into one representative "Computational Methods" paragraph plus a variance note for fields that differ across runs (OS/CPU/RAM/Python/git commit/pubrun/packages), supporting the shared run filters (`-n`/`-f`/`-F`/`-s`/`-S`). Large/divergent sets print a narrowing hint to stderr clearly marked as outside the methods text (respecting `NO_COLOR`). Single-run `pubrun methods` is unchanged.
+- **`pubrun.paused()` context manager**: `with pubrun.paused(): ...` suspends console tee and subprocess spy recording while output still prints and subprocesses still run. Thread-local, nestable, exception-safe; does not pause `annotate()`/`phase()` markers or resource sampling.
+- **`full` import mode**: `import pubrun.full as pubrun` (or `[imports].mode = "full"`, `PUBRUN_IMPORT_MODE=full`, `pubrun run --mode full`) captures everything on import, forcing the console tee on regardless of `[console].capture_mode` while still respecting Jupyter/non-TTY safety guards. An in-code import mode overrides env/config; only `pubrun run --mode` overrides it.
+- **`status`/`show --utc` flag**: Display timestamps in UTC (default remains local time; stored timestamps are always UTC epochs).
+- **Capture subprocess timeouts**: `[capture.hardware].timeout` (default 10s), `[capture.resources].poll_timeout` (default 3s), and `[capture.git].timeout` (default 5s) bound hung external tools; git timeouts record `capture_state.status = "timeout"`.
 
 ### Changed
-- **BREAKING: `capture_mode` default is now `"off"`**. `import pubrun` no longer wraps stdout/stderr without explicit opt-in. To restore the old behavior, add `capture_mode = "standard"` to `.pubrun.toml`. Jupyter/IPython is auto-detected and capture is suppressed.
-- **Hardware detection deferred to background thread**: Import/startup is ~200-500ms faster. Hardware data appears in the manifest after the thread completes; crash-safety manifest shows `pending` until then.
-- **Event stream buffering**: Non-critical events are buffered (100 events) before flushing. Critical events (annotations, phases) still flush immediately.
-- **Default config and regex caching**: `load_default_config()` cached at module level; redaction regex compiled once.
+- **BREAKING: `capture_mode` default is now `"off"`.** `import pubrun` no longer wraps stdout/stderr without explicit opt-in. To restore the old behavior, add `capture_mode = "standard"` to `.pubrun.toml`. Jupyter/IPython is auto-detected and capture is suppressed.
+- **BREAKING (command rename): `pubrun bug-report` -> `pubrun report-bug`, and `feedback` is now its own command.** The old `bug-report` command and its `issue` alias were removed (hard rename). Use `pubrun report-bug` (bug reports / feature requests) or `pubrun feedback` (general feedback); both open the GitHub issue tracker and print diagnostics.
+- **BREAKING (`pubrun combined`): `-f` now means `--filter`, not `--force`.** For CLI consistency, `-f`/`--filter` on `combined` now filters runs (as on every other command). The force-large-file flag is now **`--force`** (long form only). Scripts relying on `combined -f` to force must switch to `combined --force`.
+- **Behavior change: `pubrun.open()` no longer hashes file contents by default.** The default `[capture.file_io].level` is now `stat` (path + size + mtime/ctime), not content hashing. Hashing is opt-in via `level = "hash"`. The `data_files` record shape is unchanged; `sha256` is `null` unless the level is `hash`.
+- **Behavior change: `pubrun bench` and `benchmarks/harness.py` write only a redacted result by default.** Only `benchmarks/results/pubrun-bench-<hostname-hash>-<UTC-timestamp>.redacted.json` is written by default; pass `--unredacted` (or `--out <path>` on `harness.py`) to also write the identifying `*.unredacted.json` copy for local debugging. `harness.py` default output, `pubrun bench`, and `benchmarks/run_bench.sbatch` never write a bare `*.json` (the adaptable PBS/LSF/SGE template scripts `benchmarks/submit_bench_{pbs,lsf,sge}.sh` currently pass `--out "$RESULTS_DIR/${NODE}-${STAMP}.json"`, writing a gitignored unredacted bare `.json` alongside the default `.redacted.json`).
+- **Benchmark result JSON uses compact schema `pubrun-benchmark/5`.** Removes structural redundancy with zero analytical data loss so redacted results (~38 KB for a default run) fit GitHub's ~65 KB issue-body cap: static descriptors live once in `scenario_defs` (removing the old top-level `scenarios` alias), each pass stores only `timings`/`failures`/`skipped` maps with raw timings rounded to 6 decimal places, derived stats are recomputed on read by `aggregate.py` (which still reads older `/2`, `/3`, and `/4` files with identical output), and both `generated_utc` and `generated_local` are recorded. A non-fatal warning prints if a redacted file exceeds the GitHub issue-body budget.
+- **CI test suites run in random order with `pytest-randomly`.** Every `pytest` command in `.github/workflows/ci.yml` passes `-p randomly` without a fixed seed and prints `Using --randomly-seed=<N>` for local reproduction (`python -m pytest -p randomly --randomly-seed=<N>`). Local and `tox` runs keep deterministic order via `addopts = "-p no:randomly"` in `pyproject.toml`.
+- **Full-package 3-platform static type checking (`mypy`) repaired and gated in CI.** Fixed the duplicate-module import in `src/pubrun/__main__.py` (preventing `pubrun report-bug` from loading `pubrun` twice) and type errors in `src/pubrun/__main__.py`, `src/pubrun/tui/widgets/actions.py`, `src/pubrun/tui/widgets/diff.py`, and `src/pubrun/report/reproducibility.py`. `mypy` now checks every module of the `pubrun` package with no `ignore_errors` exemptions in `pyproject.toml`, and the blocking Linux Python 3.12 CI `typecheck` job runs `mypy` for Linux plus `--platform win32` and `--platform darwin`.
+- **Testable entry points.** `pubrun.__main__.main()` accepts an optional argument list without modifying `sys.argv`, and `print_report` and `print_resources_report` in `pubrun.report.diagnostics` accept a keyword-only `out` stream and raise `DiagnosticsError` instead of exiting the process. Output and exit codes are unchanged, except `pubrun --no-color --info` now includes `--no-color` in its printed invocation fields.
+- **Pytest coverage is opt-in, `tox` is repaired, and CI gates additional suites and builds.** Removed unconditional `--cov` flags from `pyproject.toml` `addopts`, registered the `slow` marker, and updated `tox.ini` for tox 4 (`extras = dev`). CI enforces a 78% coverage floor on `ubuntu-latest` Python 3.12, runs numbered example smoke tests across the matrix, and adds `extra-suites`, `no-tui`, and `packaging` (sdist/wheel round-trip and build-stamped commit verification) jobs.
+- **`pubrun diff --basic`/`--standard` are concise, and `pubrun diff` accepts standard run filters.** `--basic` shows only high-signal user-facing differences (script/argv, packages, python, git, config); `--standard` summarizes list sections (such as `subprocesses.count` and `subprocesses.by_command`) and deduplicates `command_line`/`rerun_command` (shown at `--deep`); `--deep` is unchanged. Added `pubrun diff --table` for a compact aligned table. `pubrun diff` also accepts `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, and `--exit-code` when auto-selecting runs, and corrects the doc claim that `--basic` was default (`--standard` is default).
+- **Normalized CLI output prefixes and alphabetized `-h` command list.** Unified status prefixes to `[INFO ]` (green), `[ OK  ]` (green), `[WARN ]` (yellow), `[ERROR]` (red), `[DEBUG]` (light blue, silent unless `PUBRUN_DEBUG`), and `[FAIL ]` via one central helper (color is optional reinforcement, never dimmed, suppressed under `NO_COLOR`/`--no-color`/non-TTY). Alphabetized the `pubrun -h` command list.
+- **`pubrun res` shows a comprehensive resource summary.** Surfaces process-tree RSS, system available memory (start + lowest), load average, node iowait (labeled indicative-only), and per-process `/proc/self/io` byte volume when captured; `pubrun cpu`/`mem` remain single-metric.
+- **License changed from BSD-3-Clause to Apache-2.0 and package metadata aligned.** Relicensed under Apache-2.0 (`LICENSE`, `NOTICE`, `pubrun.__license__ = "Apache-2.0"`, copyright span 2007-2026 preserved, author email `gfariello@fariel.com`). Legal, copyright, and citation surfaces (`LICENSE`, `NOTICE`, `__copyright__`, README copyright, `pubrun cite`, generated methods report, `CITATION.cff`, PyPI author) consistently use **Gabriele Fariello**.
+- **`pubrun cite` and generated methods citation corrected.** Cite the software itself (`[Computer software]`, repository URL, version-aware, live Zenodo concept DOI `10.5281/zenodo.20801582`) with one consistent title across all surfaces instead of a premature, unpublished reference.
+- **`pubrun --version` prints the required NOTICE attribution line.**
+- **Import-mode documentation accuracy.** Clarified across README, `functional_spec.md`, `api.md`, and `auto`/`noauto` docstrings that import modes only permit the console tee (`[console].capture_mode` defaults to `"off"` in every mode), background resource monitoring runs in every mode while active, and removed a stale `pubrun.quiet` reference in the `noauto` docstring (the mode is `noconsole`).
+- **Hardware detection deferred to background thread**: Import/startup is ~200-500ms faster; startup manifests show `pending` until the thread completes.
+- **Event stream buffering**: Non-critical events buffer (default 100 events) before flushing; critical events (annotations, phases) still flush immediately.
+- **Default config and regex caching**: `load_default_config()` cached at module level; redaction regexes compiled once.
 - **Console tee timestamps**: Computed once per `write()` call, not per line.
 - **Script hash gated by size**: Files >= 1MB skip SHA-256 at startup.
 
+### Deprecated
+- **`--show-config` is deprecated in favor of `pubrun show default config`.** It still works (prints built-in defaults) and emits a one-line deprecation notice to stderr; hidden from `--help` and slated for removal in a future release. Also corrected `--info` help text so it no longer claims to list detected config files.
+- **`core.profile` (and `PUBRUN_PROFILE`, `start(profile=)`, and the TUI "Profile Mode" selector) is deprecated and inert.** `profile` was never wired to any capture engine, so setting it had no effect on capture. It remains accepted for backward compatibility, records a deprecation notice in `config.notices` (surfaced by `pubrun status`, `pubrun inspect`, and `pubrun show`) when set to a non-default value, and may be removed in a future release. To control capture depth, set the specific `capture.*` keys (such as `[capture.hardware].depth` and `[capture.packages].mode`). Wiring `profile` to real capture tiers was considered and declined; `core.profile` remains deprecated and inert.
+
 ### Fixed
-- **macOS RSS**: Reverted from `resource.getrusage` (peak only) to `ps -o rss=` (current RSS) for accurate polling. Tree mode uses `ps -eo pid,ppid,rss`.
-- **`start()` race condition**: Double-checked locking prevents concurrent threads from creating duplicate Runs.
-- **ProvenanceFileProxy**: Uses incremental hash for read-mode files (no redundant re-read); added `write()`/`writelines()` for write-mode hash accuracy.
-- **Hardware manifest staleness**: Background thread re-writes startup manifest after hardware data is collected.
+- **`pubrun inspect` and `pubrun show` Data Files badges require a non-empty digest value before labeling a file `verified`.** Display classification now delegates to the shared file-evidence classifier so digestless records render as `metadata-only` (or `path-only` when `evidence_strength` is `path_only`), and legacy records with only an `md5` digest render as `verified` with a sanitized `md5:<prefix>` digest.
+- **Methods reports no longer count a file record without a digest value as independently verified.** `methods.md`, `methods.tex`, and `pubrun methods` now use the same file-evidence classifier as `pubrun inspect`, counting digestless records as path/stat metadata only and legacy `md5`-only records as verified.
+- **`pubrun run --mode <mode>` overrides explicit in-code `import pubrun.<mode>` imports.** The wrapper now sets `PUBRUN_RUN_MODE_OVERRIDE` alongside `PUBRUN_IMPORT_MODE`, taking precedence ahead of explicit submodule imports, recording `"cli:pubrun run --mode"` as manifest provenance, and avoiding spurious conflicts under `[imports].on_conflict = "error"`. Setting `PUBRUN_IMPORT_MODE` alone still yields to explicit in-code submodule imports.
+- **Manifest schema declares every import-mode behavior flag.** `pubrun_imports.selected_behavior` in `schemas/manifest.schema.json` now declares `patch_subprocesses`, `patch_console`, `signal_hooks`, and `force_console` alongside `auto_start` and `global_hooks`, and rejects undeclared flags (older manifests with only `auto_start` and `global_hooks` still validate).
+- **SIGTERM or SIGHUP no longer hangs the process when arriving while `pubrun` holds an internal lock.** During lethal-signal finalization, `pubrun` waits a bounded time for internal locks and falls back to lock-free completion, and reading recorded signals no longer waits on a lock held by the interrupted main thread, so runs finalize cleanly as `interrupted` and exit.
+- **`pubrun ui` run details pane handles null or plain-string `git.remote_url` and escapes Git markup.** Non-object `git` sections or null/string `git.remote_url` no longer close the TUI; commit hashes, branch names, remote URLs, and working directories are escaped so bracketed text and `[REDACTED]` markers render literally.
+- **`pubrun ui` Archive action reports errors instead of closing the TUI or returning silently.** Failure to create the `archive` folder or archiving a removed run directory now displays an error notification and keeps the TUI running.
+- **`pubrun ui` Save Settings writes valid TOML for control characters and non-BMP characters.** Strings and lists with newlines, control characters, or emoji now serialize as valid TOML that `pubrun` reloads cleanly.
+- **Live `python -m <package>` runs are no longer closed out as crashed or deleted by `pubrun clean`.** Liveness checks treat `__main__` as too generic to match by script name and resolve liveness by process start time.
+- **`pubrun --create-config` handles closed stdin cleanly without a traceback.** Prints `Configuration abandoned.` and exits 1 instead of raising `EOFError`.
+- **Redacted `sys.argv` values are no longer recorded in `invocation.inputs`.** Input discovery in `get_invocation()` runs after `redact_argv()` and skips arguments changed by redaction, keeping secret flag paths out of `invocation.inputs` and MD5 warnings.
+- **Hyphenated prefixed API keys (such as `sk-proj-...`) are redacted in environment and argument values.** Value heuristics in `redaction.py` now match prefixed keys containing hyphens and underscores.
+- **A `pathlib.Path` entry in `sys.argv` no longer fails invocation capture.** Removed the unused pre-redaction `rerun_command` block in `get_invocation()`, stringified `sys.argv` entries during input discovery, and ensured `redact_argv()` returns strings even when `argv_enabled` is false.
+- **Unknown `[capture.profiling].backend` values log a warning instead of failing silently.** `phase.__enter__()` raises `ValueError("unknown backend")` inside its guarded profiling block so unsupported backends log the documented warning and skip profiling.
+- **Unwaited `subprocess.Popen` children record observable exit codes and report unobserved exits as `"partial"` instead of `"complete"`.** `SubprocessSpy` hooks `subprocess.Popen.__del__` lock-free and performs a non-blocking poll at finalization, recording real `exit_code` (`"complete"` for 0, `"failed"` for nonzero) when observable and `exit_code: null`, `ended_at_utc: null`, `capture_state.status: "partial"` when unobserved.
+- **`workload_seconds` no longer includes a background manifest refresh write.** `Run._finalize_state` records the workload-end anchor before waiting on `_run_lock`, attributing any in-flight hardware-refresh wait to `finalization_overhead_seconds` instead (covered by regression tests for both `stop()` and `atexit`).
+- **Hardware, host, and filesystem capture no longer fails under `import pubrun.auto`, `pubrun.full`, `pubrun.nopatch`, or `pubrun.noconsole`.** Fixed the `ImportError: cannot import name '_run_lock'` failure in `pubrun-hw` and the bug where `[capture.hardware].depth = "off"` disabled tracking under those mode imports; covered by a regression test across all six mode modules and plain `import pubrun`.
+- **`[imports].on_conflict` set in `./.config/pubrun/config.toml` or the user config file is no longer ignored.** Now read from the same files in the same order as `[imports].mode`.
+- **Calls made with no active run no longer resolve full configuration on every call.** `annotate()`, `phase()`, `report()`, `artifact()`, `register_file()`, `register_input()`, and `register_output()` cache `[events].on_inactive_annotate` and reload only when config files, working directory, or user config directory change (cutting inactive `phase()` from ~114 us to ~22 us on the reference machine); malformed config files are reported once per change.
+- **Minimal research workflow example no longer leaves `outputs/` in the caller's working directory.** `examples/minimal-research-workflow/analysis.py` writes `synthetic_data.csv` and `summary.json` under `outputs/` next to the script (gitignored) and adds `--output-dir <path>`.
+- **Citation metadata and repository hygiene correction.** Cleaned up residual placeholder DOI tokens and venue-specific phrasing in historical plan records; live citation surfaces (`pubrun cite`, `CITATION.cff`, `README.md`) emit an honest software citation with no paper claim.
+- **Startup manifest no longer emits an empty `console` section.** Writes the resolved `capture_mode` with `capture_state.status = "pending"` at startup and `"complete"` at finalization (covered by a regression test).
+- **Manifest schema reconciled with emitted manifests and enforced as a hard test gate.** `schemas/manifest.schema.json` now covers `config.notices`, `imported-transitive` and `package_record.required_by`, transient `pending` and `timeout` capture states, root `filesystem`, `capture` enable flags, the full `host` section (with string `hostname`), `packages.records[].source`, `python` env-classification fields, and `resources` system/tree metrics. `docs/manifest.md` matches field-for-field, and `tests/test_manifest_schema.py` validates freshly generated manifests across variants (default, profile-notice, console-on, tree-scope, startup, and `imported-transitive`) as a hard gate via the dev-only `jsonschema` dependency.
+- **`import pubrun.report.<submodule>` no longer breaks after selecting an import mode.** Mode modules and deferred `__init__` keep `pubrun.report` as the callable subpackage (`CallableModule`) instead of shadowing it with a plain function; regression tests cover every import mode and guard against subpackage shadowing.
+- **`pubrun resources` works as the documented alias of `pubrun res`.** Registered across the subparser, dispatch, and pre-parser; removed dead unreachable `monitor`/`chart`/`stats` dispatch strings.
+- **Honest HPC hydration documentation.** Corrected README and docs to state that `PUBRUN_META_REF` provides report-time hydration rather than automatically suppressing child capture; suppress heavy engines explicitly via `capture.hardware.depth = "off"` and `capture.packages.mode = "off"`. (`core.profile` is deprecated and inert.)
+- **macOS RSS**: Reverted from `resource.getrusage` (peak only) to `ps -o rss=` (current RSS) for accurate polling; tree mode uses `ps -eo pid,ppid,rss`.
+- **`start()` race condition**: Double-checked locking prevents concurrent threads from creating duplicate `Run` instances.
+- **`ProvenanceFileProxy`**: Uses incremental streamed hashing for read-mode files (avoiding redundant re-reads); added `write()`/`writelines()` support for write-mode hash accuracy.
+- **Hardware manifest staleness**: Background thread rewrites the startup manifest after hardware data is collected.
 - **Event stream serialization errors**: Non-serializable payloads log at warning level (not debug).
-- **SubprocessSpy records**: Cleared on uninstall to prevent cross-run leakage; saved before clearing.
+- **`SubprocessSpy` records**: Saved before clearing and cleared on uninstall to prevent cross-run leakage.
 - **Event stream migration**: Guarded emit after failed directory migration.
-- **Orphaned profilers**: Disabled in `_finalize_state()` if phase entered without exit.
-- **yappi concurrent guard**: Nested/concurrent phases with yappi log a warning and skip.
+- **Orphaned profilers**: Disabled in `_finalize_state()` if a phase was entered without exiting.
+- **`yappi` concurrent guard**: Nested/concurrent phases with `yappi` log a warning and skip.
 
 #### Other fixes
-- **Namespaced import-mode aliases now expose the full public API.** `import pubrun.auto/
-  noauto/nopatch/noconsole/minimal as pubrun` previously rebound only 8 of the 12 public
-  names, so `pubrun.print`, `pubrun.open`, `pubrun.report`, `pubrun.artifact`,
-  `pubrun.subprocess`, and `pubrun.popen` raised `AttributeError` via the alias (top-level
-  `import pubrun` was unaffected). All aliases now match the top-level surface; a
-  regression test asserts parity. This makes `pubrun.print()` usable as the output-capture
-  escape hatch in `noconsole`/`nopatch`/`minimal` as documented.
+- **Namespaced import-mode aliases expose the full public API.** `import pubrun.auto/noauto/nopatch/noconsole/minimal as pubrun` now match the full top-level `pubrun` symbol surface (including `pubrun.print`, `pubrun.open`, `pubrun.report`, `pubrun.artifact`, `pubrun.subprocess`, and `pubrun.popen`), guarded by a parity regression test.
 
 #### Edge-case / failure-mode hardening
 - **Status reader tolerance**: A single malformed, truncated, hand-edited, or foreign-version `manifest.json`/`.pubrun.lock` (non-numeric `started_at_utc`, out-of-range/NaN epoch, non-dict `signals_received`, non-string `argv`) no longer crashes `pubrun status`/`show`/`inspect`; the bad run is shown degraded and the rest still list. Numeric fields are coerced at a single choke point; `scan_runs` has a per-run backstop.
-- **PID liveness**: `is_pid_alive` rejects `None`/non-positive/overflow PIDs before `os.kill` (which would signal a process group for `pid <= 0`); same-process script matching now trusts only an exact basename (substring-only or generic tokens like `python`/`-c` fall through to timing), correcting recycled-PID false positives; the conservative "assume alive when start time is unreadable" default is preserved to avoid false "crashed" verdicts on macOS.
-- **Package capture**: A distribution with a missing/`None` name no longer crashes package capture (and thus no longer demotes the whole run to ghost mode).
-- **Manual subprocess records**: `pubrun.subprocess.run`/`Popen`/`popen` records are now bounded by `[capture.subprocesses].max_tracked_commands` (previously unbounded — an OOM risk in tight loops); a failed `run()` invocation is now recorded before re-raising.
+- **PID liveness**: `is_pid_alive` rejects `None`/non-positive/overflow PIDs before `os.kill` (which would signal a process group for `pid <= 0`); same-process script matching trusts only an exact basename (substring-only or generic tokens like `python`/`-c` fall through to timing), correcting recycled-PID false positives; the conservative "assume alive when start time is unreadable" default is preserved to avoid false "crashed" verdicts on macOS.
+- **Package capture**: A distribution with a missing/`None` name no longer crashes package capture (and no longer demotes the run to ghost mode).
+- **Manual subprocess records**: `pubrun.subprocess.run`/`Popen`/`popen` records are bounded by `[capture.subprocesses].max_tracked_commands` (preventing unbounded memory growth in tight loops); a failed `run()` invocation is recorded before re-raising.
 - **Config tolerance**: A malformed `.pubrun.toml`/user config is warned-and-skipped instead of crashing CLI commands.
 - **Resource watcher**: Only unreadable polls (errors/timeouts) count toward the consecutive-failure self-abort; a legitimate RSS of 0 no longer permanently disables telemetry.
-- **`sys.excepthook` restore**: Only restores pubrun's wrapper if it is still installed, so a third party's later-installed hook is not clobbered.
-- **Console tee**: Passthrough tolerates `OSError`/`ValueError` from the original stream (e.g. host closed stdout), matching plain-stream behavior.
-- **`show --export json`**: Tolerates flat-key prefix collisions (e.g. a package named `numpy.core`) instead of raising.
+- **`sys.excepthook` restore**: Only restores `pubrun`'s wrapper if it is still installed, so a third party's later-installed hook is not clobbered.
+- **Console tee**: Passthrough tolerates `OSError`/`ValueError` from the original stream (such as a closed stdout), matching plain-stream behavior.
+- **`show --export json`**: Tolerates flat-key prefix collisions (such as a package named `numpy.core`) instead of raising.
 - **Diff correctness**: Guards non-list `environment.variables`/`packages.records`; list diffs use a type-tagged comparison so `bool`/`int` (`True`/`1`) no longer alias.
 - **Combined logs**: Interleave uses a stable secondary sort key so untimestamped/partial lines keep their original position instead of being hoisted to the top.
 - **`pubrun.print`**: Tolerates `sep=None`/`end=None` (accepted by the builtin `print`).
-- **`pubrun status` timestamps**: Now rendered in local time by default with an explicit zone, resolving the prior status-vs-diff inconsistency; event counts shown from the size estimate are labeled `~N (est.)`.
+- **`pubrun status` timestamps**: Rendered in local time by default with an explicit zone, resolving the prior status-vs-diff inconsistency; event counts shown from the size estimate are labeled `~N (est.)`.
+
+### Documentation
+- **Synced benchmark-intake documentation and Issue Form with live `pubrun bench` behavior.** Updated `docs/cli.md`, `benchmarks/README.md`, `.github/ISSUE_TEMPLATE/benchmark-result.yml`, `.github/workflows/benchmark-intake.yml`, and `pubrun bench --help` to reflect the redacted-only default, `--unredacted` / `--contribute` / `--prepare-submission` / `--wait-timeout` flags, main-repo (`fariello/pubrun`) targeting, and the local-pull collection workflow (`benchmarks/pull_submissions.py`). Fixed a stale `Code of Conduct` link in `CONTRIBUTING.md`.
+- **Adoption bridges, an examples ladder, and deep-page positioning (no behavior change).** Added an "Is pubrun for me?" section and an examples ladder to `README.md`, reframed `docs/research-use.md` around high-stakes scientific and ML provenance (removing unverifiable download/adopter counts), and framed `docs/hpc.md` around a laptop-to-cluster workflow with a "Where pubrun fits" note positioning `pubrun` as a complement to MLflow, Weights and Biases, and DVC. Removed em and en dashes from those three files per house style.
+- **Reframed the README lead to the trustworthy-ML register (no behavior change).** Leads with reproducible, auditable runs via automatic provenance, environment capture, and run-to-run comparison from a single `import pubrun`, clearly states that `pubrun` is a reproducibility/provenance component used inside an ML pipeline (not an orchestrator, scheduler, or serving platform), elevates laptop-to-cluster scaling, and adds a "Built to be Trustworthy" section highlighting cross-platform CI (Python 3.8 to 3.14), the schema-validated manifest contract, zero runtime dependencies, and a real changelog.
 
 ## [1.3.1] - 2026-06-24
 
@@ -759,6 +207,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - **Windows CI compatibility**: Made rerun tests platform-independent to ensure Windows CI compatibility.
+
+## [1.0.3] - 2026-06-21
+
+### Added
+- **Explicit Telemetry and Provenance API**: Added explicit file, output, and provenance tracking APIs (`e301c44`).
+
+### Fixed
+- **Subparser error handling**: Improved CLI subparser error handling to display subcommand usage on invalid arguments (`2c0ee37`).
+- **Position-independent `--no-color`**: Accepted `--no-color` in any position on the CLI (`fe99380`).
+- **Windows newline test assertion**: Fixed Windows newline handling in `test_explicit_api.py` (`98058ec`).
+
+## [1.0.2] - 2026-06-20
+
+### Fixed
+- **Remote-host liveness checks**: Improved liveness checks for remote-host runs using lock age (`a015c14`).
+
+## [1.0.1] - 2026-06-20
+
+### Fixed
+- **Crashed-run timing and elapsed formatting**: Set crashed-run timing fields to `None` and implemented `HH:MM:SS` elapsed duration formatting (`88fe38b`).
 
 ## [1.0.0] - 2026-06-19
 
