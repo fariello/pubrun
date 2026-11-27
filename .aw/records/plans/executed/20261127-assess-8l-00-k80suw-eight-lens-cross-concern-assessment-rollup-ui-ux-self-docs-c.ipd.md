@@ -6,7 +6,7 @@
 - Scope: Coordination of ten right-sized child plans for Set `assess-8l`: `1o1cua` (config, Current Working Directory (CWD), artifact-write safety, strict JSON, core API ergonomics), `76z7ww` (fork/spawn, signal, console, subprocess, and lifecycle resource safety), `l596kn` (`file_io` O(1) indexing, record cap, and streaming-hash fast path), `p4ueaj` (cold-start import, package-capture optimization, and PEP 561 mode parity), `ameehy` (cross-platform hardware, liveness, invocation, environment, git, filesystem, and redaction compatibility), `m5s3g8` (status, clean, and run-scanning safety, scalability, and terminal output), `caeqdz` (diff, methods, diagnostics, and meta-snapshot correctness and streaming), `2ge0ea` (CLI ergonomics, `--dir`/`PUBRUN_OUTPUT_DIR`, `--json`, streaming `combined`, self-documenting help, and config defaults), `3q5rd5` (TUI safety, `meta_ref` hydration, memory/responsiveness, and usability), and `6y55x4` (Continuous Integration (CI) matrix expansion, local scaling benchmarks, `README.md`/`docs/cli.md`/`docs/configuration.md` sync, and whole-Set verification). This orchestrator modifies no product code, tests, docs, or CI files.
 - Scope-Paths: .aw/records/plans/pending/20261127-assess-8l-00-k80suw-eight-lens-cross-concern-assessment-rollup-ui-ux-self-docs-c.ipd.md
 - Item-Dependencies: executed:1o1cua, executed:76z7ww, executed:l596kn, executed:p4ueaj, executed:ameehy, executed:m5s3g8, executed:caeqdz, executed:2ge0ea, executed:3q5rd5, executed:6y55x4
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Coverage: pass
 - Coverage-Fingerprint: 25079b0b41380c0183b119e140f7976e8d09da99f7e8b86a9a01dc2e8599db56
@@ -20,12 +20,12 @@
 - Highest E allocated: 10
 - Author: Antigravity
 - Id: k80suw
-- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 executed (aw agy run model=Gemini-4-Neon-High): RETIRED as the orchestrator rollup step of a runner Set completion, not executed by an agent: every child of Set assess-8l reached executed, so the runner (run run-20261127T181739Z-3404307) retired this Order-0 plan as bookkeeping. Its own E-*/V-* items were NOT performed; the runner superseded them by enforcing the ordering, the isolation and the per-child merge gate. Justifying children: 1o1cua, 76z7ww, l596kn, p4ueaj, ameehy, m5s3g8, caeqdz, 2ge0ea, 3q5rd5, 6y55x4.
 - 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 coverage pass (aw oc run): fingerprint 25079b0b4138, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
@@ -78,6 +78,9 @@ flowchart TD
 ```
 
 ## Detailed Implementation Checklist (TODO)
+
+
+> Its own E-*/V-* items were NOT performed; the runner superseded them by enforcing the ordering, the isolation and the per-child merge gate.
 
 Execution-state rule: mark an `E-*` item complete only after performing the action. That mark is not validation. Right-sizing rule: each child plan stays bounded around 4 to 5 E-items and cohesive Scope-Paths. Accepted execution states: blocked, failed, pending, performed; terminal gate demands `performed`.
 
