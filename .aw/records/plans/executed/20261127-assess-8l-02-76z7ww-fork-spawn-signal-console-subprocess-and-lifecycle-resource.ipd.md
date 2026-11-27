@@ -6,7 +6,7 @@
 - Scope: Harden `src/pubrun/tracker.py`, `src/pubrun/core.py`, `src/pubrun/capture/console.py`, `src/pubrun/capture/subprocesses.py`, `src/pubrun/capture/signals.py`, and `src/pubrun/capture/resources.py`; extend `schemas/manifest.schema.json` and synchronize `docs/manifest.md` for optional `signals.signals_truncated`; add targeted behavioral regression tests in `tests/test_runtime_safety.py` and `tests/test_signals.py`.
 - Scope-Paths: src/pubrun/tracker.py, src/pubrun/core.py, src/pubrun/capture/console.py, src/pubrun/capture/subprocesses.py, src/pubrun/capture/signals.py, src/pubrun/capture/resources.py, schemas/manifest.schema.json, docs/manifest.md, tests/test_runtime_safety.py, tests/test_signals.py
 - Item-Dependencies: executed:1o1cua
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix POSIX fork buffer/lock/SubprocessSpy hazards, multiprocessing spawn storms, migration races, TqdmSafeTee writelines/perf, lethal SIGUSR1/2, Windows shlex, and ResourceWatcher bounds
@@ -17,12 +17,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: 76z7ww
-- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 76z7ww verified (set assess-8l, attempt 1).
 - 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-27 /assess-all (Antigravity): created Child 02 of Set `assess-8l` covering fork/spawn, migration, signals, console, subprocess, and resource-watcher lifecycle safety (`ROLL-01`, `ROLL-02`, `ROLL-04`, `ROLL-08`, `ROLL-14`, `ROLL-26`, `ROLL-28`, `ROLL-29`, `ROLL-31`, `ROLL-33`).
