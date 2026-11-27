@@ -749,7 +749,7 @@ class TestCliBugReport:
 
     @pytest.mark.parametrize("cmd", ["report-bug", "feedback"])
     def test_report_bug_and_feedback_open_browser_and_print_diagnostics(self, cmd, monkeypatch, capsys):
-        """report-bug and feedback both print diagnostics and open the GitHub issues URL."""
+        """report-bug and feedback both print diagnostics and open the GitHub issues URL on a graphical TTY."""
         import webbrowser
         import sys
         from pubrun.__main__ import main
@@ -762,6 +762,11 @@ class TestCliBugReport:
             return True
 
         monkeypatch.setattr(webbrowser, "open", mock_open)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        monkeypatch.setenv("DISPLAY", ":0")
+        monkeypatch.delenv("SSH_CLIENT", raising=False)
+        monkeypatch.delenv("SSH_TTY", raising=False)
+        monkeypatch.delenv("SSH_CONNECTION", raising=False)
         monkeypatch.setattr(sys, "argv", ["pubrun", cmd])
 
         try:
@@ -775,6 +780,65 @@ class TestCliBugReport:
         assert "platform" in stdout_lower
         assert "github.com/fariello/pubrun/issues/new" in captured.out
         assert browser_opened_url == "https://github.com/fariello/pubrun/issues/new"
+
+    def test_report_bug_no_browser_flag_skips_browser(self, monkeypatch, capsys):
+        """--no-browser prints diagnostics and URL without calling webbrowser.open."""
+        import webbrowser
+        import sys
+        from pubrun.__main__ import main
+
+        called = False
+
+        def mock_open(url, *args, **kwargs):
+            nonlocal called
+            called = True
+            return True
+
+        monkeypatch.setattr(webbrowser, "open", mock_open)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        monkeypatch.setenv("DISPLAY", ":0")
+        monkeypatch.delenv("SSH_CLIENT", raising=False)
+        monkeypatch.delenv("SSH_TTY", raising=False)
+        monkeypatch.delenv("SSH_CONNECTION", raising=False)
+        monkeypatch.setattr(sys, "argv", ["pubrun", "report-bug", "--no-browser"])
+
+        main()
+        out = capsys.readouterr().out
+        assert "github.com/fariello/pubrun/issues/new" in out
+        assert not called
+
+    def test_report_bug_skips_browser_on_non_tty_and_ssh_headless(self, monkeypatch, capsys):
+        """Non-TTY and SSH sessions without DISPLAY/WAYLAND_DISPLAY must not launch a browser."""
+        import webbrowser
+        import sys
+        from pubrun.__main__ import main
+
+        called = False
+
+        def mock_open(url, *args, **kwargs):
+            nonlocal called
+            called = True
+            return True
+
+        monkeypatch.setattr(webbrowser, "open", mock_open)
+
+        # Case 1: non-TTY
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+        monkeypatch.setenv("DISPLAY", ":0")
+        monkeypatch.setattr(sys, "argv", ["pubrun", "report-bug"])
+        main()
+        assert not called
+        assert "github.com/fariello/pubrun/issues/new" in capsys.readouterr().out
+
+        # Case 2: TTY over SSH without DISPLAY/WAYLAND_DISPLAY
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        monkeypatch.setenv("SSH_CONNECTION", "1.2.3.4 12345 5.6.7.8 22")
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+        monkeypatch.setattr(sys, "argv", ["pubrun", "report-bug"])
+        main()
+        assert not called
+        assert "github.com/fariello/pubrun/issues/new" in capsys.readouterr().out
 
     @pytest.mark.parametrize("old", ["bug-report", "issue"])
     def test_old_bugreport_names_are_gone(self, old):
@@ -1294,23 +1358,44 @@ raise ValueError("TEST_EXCEPTION")
             assert exc_info.value.code == 0
             assert f.getvalue().strip() == "ASAP"
 
-    def test_empty_invocation_shows_help_and_run_count(self):
+    def test_empty_invocation_shows_help_and_run_count(self, tmp_path, monkeypatch):
+        import io
         import sys
+        from contextlib import redirect_stdout
         from unittest.mock import patch
         from pubrun.__main__ import main
 
-        with patch("pubrun.status.scan_runs") as mock_scan:
-            mock_scan.return_value = [object()]
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        (runs_dir / "pubrun-train-20260101T000000Z-1-aaaa1111").mkdir()
+        (runs_dir / "pubrun-eval-20260101T000100Z-2-bbbb2222").mkdir()
+        (runs_dir / "unrelated-dir").mkdir()
 
-            with patch.object(sys, 'argv', ['pubrun']):
-                import io
-                from contextlib import redirect_stdout
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("PUBRUN_OUTPUT_DIR", raising=False)
+
+        with patch("pubrun.status.scan_runs", side_effect=AssertionError("scan_runs must not be called")):
+            with patch.object(sys, "argv", ["pubrun"]):
                 f = io.StringIO()
                 with redirect_stdout(f):
                     main()
                 output = f.getvalue()
                 assert output.splitlines()[0].startswith("usage: pubrun ")
-                assert "Found 1 run(s) in the output directory." in output
+                assert "Found 2 run(s) in the output directory." in output
+
+        # Zero-run quick-start guidance
+        empty_dir = tmp_path / "empty_proj"
+        empty_dir.mkdir()
+        monkeypatch.setenv("PUBRUN_OUTPUT_DIR", str(empty_dir / "runs"))
+        with patch("pubrun.status.scan_runs", side_effect=AssertionError("scan_runs must not be called")):
+            with patch.object(sys, "argv", ["pubrun"]):
+                f = io.StringIO()
+                with redirect_stdout(f):
+                    main()
+                output = f.getvalue()
+                assert "No runs found in the output directory." in output
+                assert "Quick start:" in output
+                assert "import pubrun" in output
 
 
 class TestCliResourcesAliases:
@@ -1338,7 +1423,9 @@ class TestCliResourcesAliases:
                 average=True,
                 last=None,
                 metric='all',
-                width=None
+                width=None,
+                output_dir=None,
+                utc=False,
             )
 
     def test_res_last_flag(self):
@@ -1364,7 +1451,9 @@ class TestCliResourcesAliases:
                 average=False,
                 last='10m',
                 metric='all',
-                width=None
+                width=None,
+                output_dir=None,
+                utc=False,
             )
 
     def test_res_width_flag(self):
@@ -1390,8 +1479,35 @@ class TestCliResourcesAliases:
                 average=False,
                 last=None,
                 metric='all',
-                width=60
+                width=60,
+                output_dir=None,
+                utc=False,
             )
+
+    def test_res_dir_and_utc_flags(self):
+        import sys
+        from unittest.mock import patch
+        from pubrun.__main__ import main
+
+        for cmd, metric in (("res", "all"), ("cpu", "cpu"), ("mem", "mem")):
+            with patch("pubrun.__main__._run_resources") as mock_run_resources:
+                with patch.object(sys, 'argv', ['pbr', cmd, '--dir', '/tmp/custom', '--utc', '16528343']):
+                    main()
+                mock_run_resources.assert_called_once_with(
+                    '16528343',
+                    filter_str=None,
+                    status_filter=None,
+                    older_than=None,
+                    exit_code=None,
+                    not_filter_str=None,
+                    not_status_filter=None,
+                    average=False,
+                    last=None,
+                    metric=metric,
+                    width=None,
+                    output_dir='/tmp/custom',
+                    utc=True,
+                )
 
     def test_run_id_subcommand_swapping(self):
         import sys
@@ -1416,7 +1532,9 @@ class TestCliResourcesAliases:
                 average=False,
                 last=None,
                 metric='cpu',
-                width=None
+                width=None,
+                output_dir=None,
+                utc=False,
             )
 
         # Test swapping of 'pbr 16528343 cpu --width 60' -> 'pbr cpu 16528343 --width 60'
@@ -1437,7 +1555,9 @@ class TestCliResourcesAliases:
                 average=False,
                 last=None,
                 metric='cpu',
-                width=60
+                width=60,
+                output_dir=None,
+                utc=False,
             )
 
     def test_resources_alias_routes_like_res(self):
@@ -1467,7 +1587,9 @@ class TestCliResourcesAliases:
                 average=False,
                 last=None,
                 metric='all',
-                width=None
+                width=None,
+                output_dir=None,
+                utc=False,
             )
 
     def test_resources_alias_recency_index_and_no_color(self):
@@ -1499,7 +1621,9 @@ class TestCliResourcesAliases:
                 average=False,
                 last=None,
                 metric='all',
-                width=None
+                width=None,
+                output_dir=None,
+                utc=False,
             )
 
         # Pre-subcommand run-ID swapping: 'pbr 1 resources' -> 'pbr resources 1'.
@@ -1520,7 +1644,9 @@ class TestCliResourcesAliases:
                 average=False,
                 last=None,
                 metric='all',
-                width=None
+                width=None,
+                output_dir=None,
+                utc=False,
             )
 
         # --no-color placed before the alias must be stripped without breaking it.
@@ -1541,7 +1667,9 @@ class TestCliResourcesAliases:
                 average=False,
                 last=None,
                 metric='all',
-                width=None
+                width=None,
+                output_dir=None,
+                utc=False,
             )
 
     def test_dead_dispatch_aliases_error_cleanly(self, capsys):
@@ -1851,3 +1979,424 @@ class TestCliRerunPreflightAndShowReproducibility:
             assert res_sec.returncode == 0
             assert "--- Reproducibility ---" not in res_sec.stdout
             assert "PUBRUN DIAGNOSTICS" not in res_sec.stdout
+
+
+class TestCliErgonomicsAndCompat2ge0ea:
+    """Behavioral regression tests for IPD 2ge0ea (config, reproducibility, CLI --dir/--json/combined/help)."""
+
+    @staticmethod
+    def _write_run(
+        runs_dir: Path,
+        dirname: str,
+        *,
+        run_id: str,
+        started_at: float = 1780250000.0,
+        script: str = "train.py",
+        extra: dict = None,
+        stdout_lines=None,
+        stderr_lines=None,
+        events=None,
+        write_config: bool = True,
+    ) -> Path:
+        run_dir = runs_dir / dirname
+        run_dir.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "schema_version": "1.0",
+            "manifest_type": "pubrun-manifest",
+            "run": {"run_id": run_id, "library_version": "1.4.0"},
+            "timing": {
+                "started_at_utc": started_at,
+                "ended_at_utc": started_at + 10.0,
+                "elapsed_seconds": 10.0,
+                "workload_seconds": 9.5,
+            },
+            "status": {"outcome": "completed", "exit_code": 0},
+            "host": {"hostname": "test-node", "os_name": "Linux"},
+            "hardware": {"cpu": {"model": "TestCPU"}, "memory_total_bytes": 8 * 1024**3},
+            "python": {"version": "3.11.5 final", "implementation": "cpython"},
+            "packages": {"mode": "imported-only", "records": [{"name": "numpy", "version": "1.26.0"}]},
+            "invocation": {
+                "entrypoint_type": "script",
+                "script": {"basename": script, "path": str(runs_dir.parent / script)},
+                "argv": [script, "--lr", "0.01"],
+                "rerun_command": f"python {script} --lr 0.01",
+            },
+            "capture": {"subprocesses_enabled": True},
+        }
+        if extra:
+            manifest.update(extra)
+        (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        if write_config:
+            (run_dir / "config.resolved.json").write_text(
+                json.dumps({"core": {"output_dir": str(runs_dir)}, "methods": {"format": "markdown"}}),
+                encoding="utf-8",
+            )
+        if stdout_lines is not None:
+            (run_dir / "stdout.log").write_text("\n".join(stdout_lines) + "\n", encoding="utf-8")
+        if stderr_lines is not None:
+            (run_dir / "stderr.log").write_text("\n".join(stderr_lines) + "\n", encoding="utf-8")
+        if events is not None:
+            with open(run_dir / "events.jsonl", "w", encoding="utf-8") as ef:
+                for ev in events:
+                    ef.write(json.dumps(ev) + "\n")
+        return run_dir
+
+    def test_config_pubrun_output_dir_and_var_tilde_expansion(self, tmp_path, monkeypatch):
+        from pubrun.config import resolve_config, resolve_config_with_provenance
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("MY_RUN_BASE", str(tmp_path / "var_base"))
+        monkeypatch.setenv("PUBRUN_OUTPUT_DIR", "  $MY_RUN_BASE/custom_runs  ")
+
+        plain = resolve_config()
+        withp, prov = resolve_config_with_provenance()
+        expected = str(tmp_path / "var_base" / "custom_runs")
+        assert plain["core"]["output_dir"] == expected
+        assert withp == plain
+        assert prov["core.output_dir"]["layer"] == "env"
+        assert prov["core.output_dir"]["value"] == expected
+
+        # Empty/whitespace PUBRUN_OUTPUT_DIR is ignored; local config with ~ expands identically
+        monkeypatch.setenv("PUBRUN_OUTPUT_DIR", "   ")
+        (tmp_path / ".pubrun.toml").write_text('[core]\noutput_dir = "~/pubrun_tilde_runs"\n', encoding="utf-8")
+        plain2 = resolve_config()
+        withp2, prov2 = resolve_config_with_provenance()
+        expected_tilde = os.path.expanduser("~/pubrun_tilde_runs")
+        assert plain2["core"]["output_dir"] == expected_tilde
+        assert withp2 == plain2
+        assert prov2["core.output_dir"]["value"] == expected_tilde
+
+        # $VAR containing ~ expands both variable and home
+        monkeypatch.setenv("PUBRUN_OUTPUT_DIR", "$TILDE_VAR/sub")
+        monkeypatch.setenv("TILDE_VAR", "~/nested_var")
+        plain3 = resolve_config()
+        withp3, _ = resolve_config_with_provenance()
+        assert plain3["core"]["output_dir"] == os.path.expanduser("~/nested_var/sub")
+        assert withp3 == plain3
+
+    def test_default_toml_comments_accuracy_and_gpu_clock_active(self, tmp_path):
+        res = run_pubrun("show", "default", "config", cwd=str(tmp_path))
+        assert res.returncode == 0
+        text = res.stdout
+        assert "PUBRUN_OUTPUT_DIR" in text
+        assert ".config/pubrun/config.toml" in text
+        assert "RESERVED (no effect)" in text
+        assert "[imports].mode" in text
+        # capture_gpu_clock_speed is actively implemented and must NOT be marked reserved
+        for line in text.splitlines():
+            if "capture_gpu_clock_speed" in line:
+                assert "RESERVED" not in line
+        # environment mode comment accurately documents off/allowlist/filtered/full with redaction
+        assert '"off"' in text and "env_enabled = true" in text
+        # resources scope comment accurately describes tree RSS and tree CPU
+        assert "Affects memory only" not in text
+
+    def test_python_runtime_environment_kind_windows_conda_normcase(self, monkeypatch):
+        from pubrun.capture import python_runtime
+
+        monkeypatch.setattr(sys, "prefix", r"C:\ProgramData\Miniconda3\envs\sci")
+        monkeypatch.setattr(sys, "base_prefix", r"C:\ProgramData\Miniconda3\envs\sci")
+        monkeypatch.setenv("CONDA_PREFIX", r"c:\programdata\miniconda3\envs\sci")
+        monkeypatch.setattr(os.path, "normcase", lambda p: p.lower())
+        monkeypatch.setattr(os.path, "isdir", lambda p: False)
+
+        info = python_runtime.environment_kind()
+        assert info["environment_kind"] == "conda"
+
+    def test_reproducibility_schema_version_seed_annotation_humanized_and_utf8_git(self, tmp_path, monkeypatch):
+        from pubrun.report.reproducibility import (
+            assess_manifest_reproducibility,
+            compare_with_current_environment,
+            format_reproducibility_summary,
+        )
+
+        # 1. Future schema_version = "2.0" emits unsupported_schema_version WARN
+        m_future = {
+            "schema_version": "2.0",
+            "status": {"outcome": "completed"},
+            "capture": {"subprocesses_enabled": True},
+        }
+        res_future = assess_manifest_reproducibility(m_future)
+        sv_findings = [f for f in res_future["findings"] if f["code"] == "unsupported_schema_version"]
+        assert len(sv_findings) == 1
+        assert sv_findings[0]["severity"] == "warn"
+        assert sv_findings[0]["impact"] == "material"
+        assert "2.0" in sv_findings[0]["message"]
+
+        # 2. events.jsonl seed annotation suppresses determinism_seeds_not_recorded; absence suggests pubrun.annotate(seed=...)
+        run_with_seed = tmp_path / "run_with_seed"
+        run_with_seed.mkdir()
+        mp_seed = run_with_seed / "manifest.json"
+        mp_seed.write_text("{}", encoding="utf-8")
+        (run_with_seed / "events.jsonl").write_text(
+            json.dumps({"type": "annotation", "name": "setup", "payload": {"Seed": 42}}) + "\n",
+            encoding="utf-8",
+        )
+        m_base = {"schema_version": "1.0", "status": {"outcome": "completed"}, "capture": {"subprocesses_enabled": True}}
+        res_seeded = assess_manifest_reproducibility(m_base, manifest_path=str(mp_seed))
+        assert not any(f["code"] == "determinism_seeds_not_recorded" for f in res_seeded["findings"])
+
+        run_no_seed = tmp_path / "run_no_seed"
+        run_no_seed.mkdir()
+        mp_noseed = run_no_seed / "manifest.json"
+        mp_noseed.write_text("{}", encoding="utf-8")
+        res_unseeded = assess_manifest_reproducibility(m_base, manifest_path=str(mp_noseed))
+        det_f = [f for f in res_unseeded["findings"] if f["code"] == "determinism_seeds_not_recorded"]
+        assert len(det_f) == 1
+        assert "pubrun.annotate(seed=...)" in det_f[0]["suggestion"]
+
+        # 3. format_reproducibility_summary humanizes portability_diff & not_checked without changing JSON keys
+        assessment = {
+            "summary": "Preflight done.",
+            "categories": [],
+            "preflight": {
+                "requested": True,
+                "status": "portability_diff",
+                "counts": {
+                    "match": 3,
+                    "mismatch": 0,
+                    "portability_diff": 2,
+                    "unknown": 0,
+                    "not_checked": 1,
+                },
+            },
+        }
+        rendered = format_reproducibility_summary(assessment)
+        assert "2 portability diff" in rendered
+        assert "1 not checked." in rendered
+        assert "portability_diff" not in rendered
+        assert "not_checked" not in rendered
+        # JSON dict keys unchanged
+        assert assessment["preflight"]["counts"]["portability_diff"] == 2
+        assert assessment["preflight"]["counts"]["not_checked"] == 1
+
+        # 4. _run_readonly_git passes encoding="utf-8", errors="replace"
+        captured_kwargs = []
+
+        class _FakeProc:
+            returncode = 0
+            stdout = "deadbeef12345678\n"
+            stderr = ""
+
+        def fake_run(cmd, **kwargs):
+            captured_kwargs.append(kwargs)
+            return _FakeProc()
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        compare_with_current_environment(
+            {"git": {"commit": "deadbeef12345678", "dirty": False, "capture_state": {"status": "complete"}}},
+            cwd=str(tmp_path),
+        )
+        assert captured_kwargs
+        assert all(kw.get("encoding") == "utf-8" and kw.get("errors") == "replace" for kw in captured_kwargs)
+
+    def test_dir_flag_across_all_run_reading_subcommands(self, tmp_path):
+        custom = tmp_path / "custom_runs"
+        ev = [
+            {"type": "resource_sample", "timestamp_utc": 1780250000.0, "payload": {"rss_bytes": 10 * 1024 * 1024, "cpu_percent": 15.0}},
+            {"type": "resource_sample", "timestamp_utc": 1780250010.0, "payload": {"rss_bytes": 20 * 1024 * 1024, "cpu_percent": 30.0}},
+        ]
+        self._write_run(custom, "pubrun-train-1-aaaa1111", run_id="aaaa1111", started_at=1780250000.0, events=ev)
+        self._write_run(custom, "pubrun-eval-2-bbbb2222", run_id="bbbb2222", started_at=1780250100.0, script="eval.py", events=ev)
+
+        env = {"NO_COLOR": "1", "PUBRUN_AUTO_START": "false"}
+        # Run from an empty working directory with no ./runs/
+        empty_cwd = tmp_path / "work"
+        empty_cwd.mkdir()
+
+        for args, expected in [
+            (["show", "--dir", str(custom)], "bbbb2222"),
+            (["show", "run", "config", "1", "--dir", str(custom)], "resolved configuration for run"),
+            (["diff", "--dir", str(custom)], "invocation.argv"),
+            (["methods", "--dir", str(custom)], "Computational Methods"),
+            (["methods", "--all", "--dir", str(custom)], "across 2 runs"),
+            (["inspect", "--dir", str(custom)], "pubrun inspect:"),
+            (["rerun", "--dir", str(custom)], "python eval.py"),
+            (["res", "--dir", str(custom), "--utc"], "2026-05-31 17:53:20Z"),
+            (["cpu", "--dir", str(custom), "--utc"], "2026-05-31 17:53:20Z"),
+            (["mem", "--dir", str(custom), "--utc"], "2026-05-31 17:53:20Z"),
+        ]:
+            res = run_pubrun(*args, cwd=str(empty_cwd), env=env)
+            assert res.returncode == 0, f"{args} failed: {res.stderr}"
+            assert expected in res.stdout, f"{args} missing {expected!r} in stdout:\n{res.stdout}"
+
+    def test_status_json_and_diff_json(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        self._write_run(runs_dir, "pubrun-a-aaaa1111", run_id="aaaa1111", started_at=1780250000.0, script="a.py")
+        self._write_run(runs_dir, "pubrun-b-bbbb2222", run_id="bbbb2222", started_at=1780250100.0, script="b.py")
+        env = {"NO_COLOR": "1", "PUBRUN_AUTO_START": "false"}
+
+        # status --json (list mode)
+        res_list = run_pubrun("status", "--dir", str(runs_dir), "--json", cwd=str(tmp_path), env=env)
+        assert res_list.returncode == 0, res_list.stderr
+        data = json.loads(res_list.stdout)
+        assert data["total_runs"] == 2
+        assert data["matched_runs"] == 2
+        assert len(data["runs"]) == 2
+        required_keys = {
+            "index", "run_id", "run_dir", "script", "args", "status", "exit_code",
+            "started_at_utc", "ended_at_utc", "elapsed", "workload_seconds",
+            "pid", "hostname", "git_commit", "cwd", "event_count", "console_log_size",
+        }
+        assert required_keys.issubset(set(data["runs"][0].keys()))
+        assert data["runs"][0]["index"] == 1
+        assert data["runs"][0]["run_id"] == "bbbb2222"
+
+        # status <run> --json (single-run mode)
+        res_one = run_pubrun("status", "aaaa1111", "--dir", str(runs_dir), "--json", cwd=str(tmp_path), env=env)
+        assert res_one.returncode == 0, res_one.stderr
+        one_data = json.loads(res_one.stdout)
+        assert "run" in one_data
+        assert required_keys.issubset(set(one_data["run"].keys()))
+        assert one_data["run"]["run_id"] == "aaaa1111"
+        assert one_data["run"]["index"] == 2
+
+        # diff --json
+        res_diff = run_pubrun("diff", "--dir", str(runs_dir), "--json", cwd=str(tmp_path), env=env)
+        assert res_diff.returncode == 0, res_diff.stderr
+        diff_data = json.loads(res_diff.stdout)
+        assert diff_data["run_a"] == "pubrun-a-aaaa1111"
+        assert diff_data["run_b"] == "pubrun-b-bbbb2222"
+        assert diff_data["depth"] == "standard"
+        assert isinstance(diff_data["diff"], dict)
+
+    def test_clean_force_remote_locks(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        remote_dir = runs_dir / "pubrun-remote-1"
+        remote_dir.mkdir(parents=True)
+        (remote_dir / ".pubrun.lock").write_text(
+            json.dumps({
+                "run_id": "rem11111",
+                "pid": 12345,
+                "started_at_utc": time.time() - 3 * 86400,
+                "script": "train.py",
+                "hostname": "remote-hpc-node-999.example.invalid",
+            }),
+            encoding="utf-8",
+        )
+        env = {"NO_COLOR": "1", "PUBRUN_AUTO_START": "false"}
+
+        # Without --force-remote-locks, remote-locked run is NOT deleted
+        res_safe = run_pubrun("clean", "--dir", str(runs_dir), "--yes", cwd=str(tmp_path), env=env)
+        assert res_safe.returncode == 0
+        assert remote_dir.exists()
+        assert "remote-host lock" in res_safe.stdout
+
+        # With --force-remote-locks, remote-locked run IS deleted
+        res_force = run_pubrun(
+            "clean", "--dir", str(runs_dir), "--yes", "--force-remote-locks",
+            cwd=str(tmp_path), env=env,
+        )
+        assert res_force.returncode == 0
+        assert not remote_dir.exists()
+
+    def test_methods_config_format_latex_and_stderr_banners(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        self._write_run(runs_dir, "pubrun-m1-aaaa1111", run_id="aaaa1111", started_at=1780250000.0)
+        self._write_run(runs_dir, "pubrun-m2-bbbb2222", run_id="bbbb2222", started_at=1780250100.0)
+        (tmp_path / ".pubrun.toml").write_text('[methods]\nformat = "latex"\n', encoding="utf-8")
+        env = {"NO_COLOR": "1", "PUBRUN_AUTO_START": "false"}
+
+        # Single-run honors [methods].format = "latex" and keeps banners off stdout
+        res = run_pubrun("methods", cwd=str(tmp_path), env=env)
+        assert res.returncode == 0, res.stderr
+        assert r"\subsection*{Computational Methods}" in res.stdout
+        assert "--- Generated Computational Methods Section ---" not in res.stdout
+        assert "--- Generated Computational Methods Section ---" in res.stderr
+
+        # Aggregate (--all) also honors [methods].format = "latex" and keeps banners off stdout
+        res_all = run_pubrun("methods", "--all", cwd=str(tmp_path), env=env)
+        assert res_all.returncode == 0, res_all.stderr
+        assert r"\subsection*{Computational Methods}" in res_all.stdout
+        assert "--- Generated Computational Methods Section ---" not in res_all.stdout
+        assert "--- Generated Computational Methods Section ---" in res_all.stderr
+
+    def test_combined_streaming_no_hoisting_empty_logs_and_ambiguous_prefix(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        self._write_run(
+            runs_dir,
+            "pubrun-r1-ab111111",
+            run_id="ab111111",
+            started_at=1780250000.0,
+            stdout_lines=[
+                "[2026-06-19T22:00:00.000Z] run1 line 1",
+                "[2026-06-19T22:00:02.000Z] run1 line 2",
+            ],
+        )
+        self._write_run(
+            runs_dir,
+            "pubrun-r2-ab222222",
+            run_id="ab222222",
+            started_at=1780250005.0,
+            stdout_lines=[
+                "leading untimestamped banner in run2",
+                "[2026-06-19T22:00:05.000Z] run2 line 1",
+            ],
+        )
+        env = {"NO_COLOR": "1", "PUBRUN_AUTO_START": "false"}
+
+        # Leading untimestamped line in run2 must NOT be hoisted above run1
+        res = run_pubrun("combined", "ab111111", "ab222222", "--dir", str(runs_dir), cwd=str(tmp_path), env=env)
+        assert res.returncode == 0, res.stderr
+        lines = res.stdout.strip().splitlines()
+        assert lines == [
+            "[ab111111][stdout] [2026-06-19T22:00:00.000Z] run1 line 1",
+            "[ab111111][stdout] [2026-06-19T22:00:02.000Z] run1 line 2",
+            "[ab222222][stdout] leading untimestamped banner in run2",
+            "[ab222222][stdout] [2026-06-19T22:00:05.000Z] run2 line 1",
+        ]
+
+        # Ambiguous prefix selector handled cleanly via _emit_ambiguous_selector (no traceback)
+        res_amb = run_pubrun("combined", "ab", "--dir", str(runs_dir), cwd=str(tmp_path), env=env)
+        assert res_amb.returncode == 1
+        assert "Traceback" not in res_amb.stderr
+        assert "ambiguous" in res_amb.stderr.lower()
+        assert "ab111111" in res_amb.stderr and "ab222222" in res_amb.stderr
+
+        # Zero log files emits helpful hint on stderr (not "Logs lack timestamps")
+        no_logs_dir = tmp_path / "runs_nologs"
+        self._write_run(no_logs_dir, "pubrun-nl-cccc3333", run_id="cccc3333", started_at=1780250010.0)
+        res_empty = run_pubrun("combined", "--dir", str(no_logs_dir), cwd=str(tmp_path), env=env)
+        assert res_empty.returncode == 0
+        assert res_empty.stdout == ""
+        assert 'capture_mode = "standard"' in res_empty.stderr
+        assert "pubrun.full" in res_empty.stderr
+        assert "Logs lack timestamps" not in res_empty.stderr
+
+    def test_show_config_shorthands_and_run_config_all_note(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        self._write_run(runs_dir, "pubrun-s1-aaaa1111", run_id="aaaa1111", started_at=1780250000.0)
+        env = {"NO_COLOR": "1", "PUBRUN_AUTO_START": "false"}
+
+        # show config 1 -> interprets as show run config 1
+        res1 = run_pubrun("show", "config", "1", "--dir", str(runs_dir), cwd=str(tmp_path), env=env)
+        assert res1.returncode == 0, res1.stderr
+        assert "Interpreting 'show config 1' as 'show run config 1'" in res1.stderr
+        assert "resolved configuration for run pubrun-s1-aaaa1111" in res1.stdout
+
+        # show config default -> prints default.toml
+        res_def = run_pubrun("show", "config", "default", cwd=str(tmp_path), env=env)
+        assert res_def.returncode == 0, res_def.stderr
+        assert "[core]" in res_def.stdout
+
+        # show run config --all -> emits stderr provenance note
+        res_all = run_pubrun("show", "run", "config", "1", "--all", "--dir", str(runs_dir), cwd=str(tmp_path), env=env)
+        assert res_all.returncode == 0, res_all.stderr
+        assert "pubrun show config --all" in res_all.stderr
+        assert "resolved configuration for run pubrun-s1-aaaa1111" in res_all.stdout
+
+    def test_pbr_exe_help_and_init_copy(self, tmp_path, monkeypatch, capsys):
+        from pubrun.__main__ import main
+
+        monkeypatch.setattr(sys, "argv", [r"C:\Python311\Scripts\pbr.exe", "--help"])
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        out = capsys.readouterr().out
+        assert out.startswith("usage: pbr ")
+
+        # init step 2 copy has no em dash and does not contradict opt-in console capture
+        res_init = run_pubrun("init", str(tmp_path / ".pubrun.toml"), cwd=str(tmp_path))
+        assert res_init.returncode == 0, res_init.stderr
+        assert "\u2014" not in res_init.stdout
+        assert "captures everything" not in res_init.stdout

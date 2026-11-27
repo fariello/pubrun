@@ -8,8 +8,10 @@
 #
 # Resolution Order (highest to lowest precedence):
 #   1. Explicit API arguments (e.g., pubrun.start(capture={"hardware": {"depth": "deep"}}))
-#   2. Environment variables (e.g., PUBRUN_IMPORT_MODE="noauto", PUBRUN_META_REF="path.json")
-#   3. Local project override (./.pubrun.toml)
+#   2. Environment variables:
+#      PUBRUN_IMPORT_MODE, PUBRUN_IMPORT_CONFLICT, PUBRUN_OUTPUT_DIR,
+#      PUBRUN_META_REF, PUBRUN_DEBUG, NO_COLOR, PUBRUN_RESULTS_DIR
+#   3. Local project overrides (./.pubrun.toml over ./.config/pubrun/config.toml)
 #   4. User home defaults (~/.config/pubrun/config.toml)
 #   5. This default file.
 
@@ -28,10 +30,12 @@ profile = "default"
 
 # Base directory for run output. pubrun creates timestamped subdirectories
 # inside this path for each run. Empty string defaults to ./runs/.
+# Supports $VAR and ~ expansion; overridden by PUBRUN_OUTPUT_DIR.
 output_dir = ""
 
-# If true, `import pubrun` starts a trace automatically. If false, you must
-# call pubrun.start() or use @audit_run to begin tracking.
+# Legacy fallback when [imports].mode is unset. When [imports].mode is set
+# (the default is "auto"), [imports].mode takes precedence over core.auto_start;
+# to disable auto-start, set [imports].mode = "noauto" or "minimal".
 auto_start = true
 
 # Explicit artifact durability policy, separate from atomic visibility.
@@ -69,7 +73,8 @@ artifact_durability = "fsync"
 # Controls what happens when `import pubrun` is executed.
 # -----------------------------------------------------------------------------
 
-# Import behavior preset.
+# Import behavior preset. Takes precedence over [core].auto_start (which is
+# consulted only when [imports].mode is unset/legacy).
 # Values:
 #   "auto"      - import pubrun starts tracking and enables normal capture hooks (default).
 #   "full"      - like "auto", but ALSO forces the console tee on (captures stdout/stderr
@@ -87,17 +92,17 @@ mode = "auto"
 # Values: "ignore", "warn", "error"
 on_conflict = "warn"
 
-# Record the file or package that selected the import mode in manifest metadata.
+# RESERVED (no effect): Record the file or package that selected the import mode in manifest metadata.
 record_provenance = true
 
-# Number of external caller frames to record for import diagnostics.
+# RESERVED (no effect): Number of external caller frames to record for import diagnostics.
 provenance_depth = 3
 
-# How file paths should be written in import provenance metadata.
+# RESERVED (no effect): How file paths should be written in import provenance metadata.
 # Values: "absolute", "relative", "basename", "redacted"
 provenance_path_mode = "relative"
 
-# Maximum number of import-mode requests to retain in metadata.
+# RESERVED (no effect): Maximum number of import-mode requests to retain in metadata.
 max_requests = 50
 
 
@@ -191,9 +196,10 @@ argv_enabled = true
 [capture.environment]
 # How system environment variables are recorded.
 # Values:
-#   "allowlist" - Only variables named in `allowlist` below.
-#   "filtered"  - All variables, with secret redaction applied.
-#   "full"      - Raw dump without filtering (unsafe).
+#   "off"       - Suppresses environment capture completely.
+#   "allowlist" - Captures only variables matching `allowlist` below.
+#   "filtered"  - Captures all variables; applies [redaction] when [redaction].env_enabled = true.
+#   "full"      - Captures all variables; still applies [redaction] when [redaction].env_enabled = true.
 mode = "filtered"
 depth = "standard"
 
@@ -302,9 +308,10 @@ timeout = 10
 # calls in a single capture. Bounds worst-case background hardware work.
 total_timeout = 10
 
-# Advanced flags for ML reproducibility. These require additional system calls
-# (nvidia-smi / sysfs / /proc reads) and are opt-in even when depth is "deep".
+# Advanced flags for ML reproducibility. `capture_gpu_clock_speed` queries
+# nvidia-smi and is opt-in even when depth is "deep".
 capture_gpu_clock_speed = false
+# RESERVED (no effect): future hardware precision and CPU clock flags.
 capture_gpu_fp_precision = false
 capture_cpu_clock_speed = false
 capture_cpu_fp_precision = false
@@ -318,11 +325,12 @@ capture_cpu_fp_precision = false
 # When enabled, a background thread samples CPU and memory usage.
 depth = "standard"
 
-# Which RSS (resident memory) to measure: the main process only, or the entire
-# process tree (parent + all descendant processes). Tree mode is useful for
-# multiprocessing/Dask/Ray workloads where the main process is a thin orchestrator.
-# Affects memory only -- CPU is always measured for the current process. Tree RSS
-# is captured on Linux and macOS; Windows falls back to process scope.
+# Whether to measure the main process only ("process") or the entire process
+# tree ("tree": parent plus descendant processes, useful for multiprocessing,
+# Dask, and Ray workloads where the main process is a thin orchestrator).
+# In "tree" mode, pubrun samples process-tree resident memory (RSS) on Linux
+# and macOS and process-tree CPU on Linux (macOS retains process CPU; Windows
+# falls back to process scope).
 # Values: "process" (default) | "tree"
 scope = "process"
 
@@ -429,8 +437,7 @@ enabled = true
 
 
 [capture.determinism]
-# Track or lock pseudorandom seeds (Python random, numpy.random).
-# NOTE: Not yet implemented. Reserved for future use.
+# RESERVED (no effect): Track or lock pseudorandom seeds (Python random, numpy.random).
 depth = "off"
 
 
@@ -439,8 +446,7 @@ depth = "off"
 # Output generation.
 # -----------------------------------------------------------------------------
 
-# Whether to write a human-readable summary.txt in the run directory.
-# NOTE: Not yet implemented. Reserved for future use.
+# RESERVED (no effect): Whether to write a human-readable summary.txt in the run directory.
 write_summary = false
 
 [methods]

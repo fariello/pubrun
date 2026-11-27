@@ -23,7 +23,7 @@ def environment_kind() -> Dict[str, Any]:
     conda = False
     try:
         cp = os.environ.get("CONDA_PREFIX")
-        if cp and os.path.normpath(cp) == os.path.normpath(sys.prefix):
+        if cp and os.path.normcase(os.path.normpath(cp)) == os.path.normcase(os.path.normpath(sys.prefix)):
             conda = True
         elif os.path.isdir(os.path.join(sys.prefix, "conda-meta")):
             conda = True

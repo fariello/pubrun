@@ -1384,3 +1384,94 @@ class TestWheelNonCheckoutBench:
         assert str(files[0]) in bench_res.stderr, bench_res.stderr
         ok, reasons = check_share_safe_text(files[0].read_text(encoding="utf-8"))
         assert ok and not reasons, reasons
+
+
+class TestBenchErgonomicsAndValidation2ge0ea:
+    """Regression tests for IPD 2ge0ea benchmark harness and CLI improvements."""
+
+    def test_toml_dumps_windows_backslashes_roundtrip(self):
+        from pubrun._bench.harness import _toml_dumps
+        from pubrun.config import tomllib
+
+        raw = {
+            "core": {
+                "output_dir": r"C:\pubrun\runs\exp_1",
+                "note": 'quote "and" \\ backslash',
+                "auto_start": True,
+            },
+            "events": {"max_tracked_events": 1000},
+        }
+        serialized = _toml_dumps(raw)
+        parsed = tomllib.loads(serialized)
+        assert parsed == raw
+
+    @pytest.mark.parametrize("flag,val", [
+        ("--iterations", "0"),
+        ("--iterations", "-1"),
+        ("--passes", "0"),
+        ("--passes", "-1"),
+    ])
+    def test_harness_rejects_zero_and_negative_iterations_and_passes(self, flag, val):
+        proc = subprocess.run(
+            [PYTHON, "-m", "pubrun._bench.harness", flag, val],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert proc.returncode == 2
+        assert ">= 1" in proc.stderr
+
+    @pytest.mark.parametrize("flag,val", [
+        ("--iterations", "0"),
+        ("--iterations", "-1"),
+        ("--passes", "0"),
+        ("--passes", "-1"),
+        ("--wait-timeout", "-1"),
+    ])
+    def test_cli_bench_rejects_invalid_numeric_bounds(self, flag, val, tmp_path):
+        res = run_pubrun("bench", "--local", flag, val, cwd=str(tmp_path))
+        assert res.returncode == 2
+        assert flag in res.stderr
+
+    def test_print_safe_file_block_tip_uses_submit_file_prepare_submission(self, tmp_path, capsys):
+        from pubrun.__main__ import _print_safe_file_block
+        from pubrun._bench.share_safety import check_share_safe_text
+
+        red_file = tmp_path / "pubrun-bench-deadbeef-20261127T000000Z.redacted.json"
+        # Minimal share-safe schema/5 payload
+        sample = {
+            "schema": "pubrun-benchmark/5",
+            "generated_utc": "2026-11-27T00:00:00+00:00",
+            "generated_local": "2026-11-27T00:00:00+00:00",
+            "mode": "quick",
+            "iterations": 1,
+            "warmup": 0,
+            "passes": 1,
+            "baseline_pass": False,
+            "git_commit": "abcdef0",
+            "machine": {
+                "platform": "linux",
+                "python_executable": "<redacted>",
+                "host": {"hostname": "<redacted>", "os_name": "Linux"},
+                "hardware": {"cpu": {"model": "Generic CPU"}},
+                "python": {"version": "3.11.0", "executable": "<redacted>", "prefix": "<redacted>", "base_prefix": "<redacted>", "sys_path": ["<redacted>"]},
+                "filesystem": {},
+            },
+            "scenario_defs": {"noop": {"group": "core", "mode": "auto", "workload": "noop", "config": {}}},
+            "pass_results": [{"pass": 1, "pass_env": {}, "timings": {"noop": [0.01]}, "failures": {"noop": 0}}],
+            "total_wall_time_s": 0.1,
+        }
+        red_file.write_text(json.dumps(sample), encoding="utf-8")
+        ok, reasons = check_share_safe_text(red_file.read_text(encoding="utf-8"))
+        assert ok, reasons
+
+        _print_safe_file_block(None, str(red_file))
+        err = capsys.readouterr().err
+        expected_cmd = f'pubrun bench --submit-file "{red_file}" --prepare-submission'
+        assert expected_cmd in err
+
+    def test_bench_help_has_explicit_option_groups(self):
+        res = run_pubrun("bench", "--help")
+        assert res.returncode == 0
+        assert "HPC scheduler options:" in res.stdout
+        assert "GitHub contribution options:" in res.stdout

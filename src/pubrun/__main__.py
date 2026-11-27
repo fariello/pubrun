@@ -1,13 +1,19 @@
 import argparse
+from collections import deque
+import contextlib
+import heapq
 import sys
 import os
 import re
 import json
+import math
+import shutil
 import time
 import tempfile
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, NoReturn, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, NoReturn, Optional, Set, Tuple
 
 from pubrun import __version__
 
@@ -22,11 +28,79 @@ def _print_warn(message: str) -> None:
     _out.warn(message)
 
 
-def _emit_ambiguous_selector(e) -> None:
-    """Print a clear, non-guessing message when a bare integer matched both a recency index
-    and a run id. The unambiguous escape hatch is the full id or the directory path."""
-    rec = getattr(e.by_recency, "run_id", "?")
-    other = getattr(e.by_id, "run_id", "?")
+def _resolve_output_base_dir(output_dir: Optional[str] = None) -> Path:
+    """Resolve the active runs directory from explicit ``output_dir`` or config."""
+    if output_dir:
+        return Path(os.path.expanduser(os.path.expandvars(output_dir)))
+    try:
+        from pubrun.config import resolve_config
+        base_str = resolve_config().get("core", {}).get("output_dir", "")
+        return Path(base_str) if base_str else Path.cwd() / "runs"
+    except Exception:
+        return Path("runs")
+
+
+def _format_no_runs_error(all_runs_count: int, output_dir: Optional[str] = None) -> str:
+    """Distinguish an empty runs directory from a filter that matched zero runs."""
+    if all_runs_count == 0:
+        runs_dir = _resolve_output_base_dir(output_dir)
+        return f"No runs found in '{runs_dir}'."
+    return f"0 of {all_runs_count} runs matched the filter criteria."
+
+
+def _dump_strict_json(payload: Any, *, indent: Optional[int] = 2) -> str:
+    """Serialize payload as strict RFC 8259 JSON (sanitizing non-finite floats)."""
+    from pubrun.writer import _sanitize_json_value
+    return json.dumps(
+        _sanitize_json_value(payload),
+        indent=indent,
+        allow_nan=False,
+        default=str,
+    )
+
+
+def _serialize_run_info(run_info: Any, *, index: Optional[int]) -> Dict[str, Any]:
+    """Serialize a RunInfo object into the stable ``status --json`` schema."""
+    return {
+        "index": index,
+        "run_id": getattr(run_info, "run_id", None),
+        "run_dir": str(getattr(run_info, "run_dir", "")),
+        "script": getattr(run_info, "script", None),
+        "args": getattr(run_info, "args", None),
+        "status": getattr(run_info, "status", None),
+        "exit_code": getattr(run_info, "exit_code", None),
+        "started_at_utc": getattr(run_info, "started_at_utc", None),
+        "ended_at_utc": getattr(run_info, "ended_at_utc", None),
+        "elapsed": getattr(run_info, "elapsed", None),
+        "workload_seconds": getattr(run_info, "workload_seconds", None),
+        "pid": getattr(run_info, "pid", None),
+        "hostname": getattr(run_info, "hostname", None),
+        "git_commit": getattr(run_info, "git_commit", None),
+        "cwd": getattr(run_info, "cwd", None),
+        "event_count": getattr(run_info, "event_count", None),
+        "console_log_size": getattr(run_info, "console_log_size", None),
+    }
+
+
+def _emit_ambiguous_selector(e: Any) -> None:
+    """Print a clear, non-guessing message when a selector matched multiple runs."""
+    by_recency = getattr(e, "by_recency", None)
+    by_id = getattr(e, "by_id", None)
+    candidates = getattr(e, "candidates", None)
+    if candidates and (by_recency is None or by_id is None):
+        items = []
+        for c in candidates:
+            cid = getattr(c, "run_id", None) or "?"
+            cdir = getattr(getattr(c, "run_dir", None), "name", "?")
+            items.append(f"{cid} ({cdir})")
+        _out.warn(
+            f"'{e.selector}' is ambiguous; matched {len(candidates)} runs: "
+            f"{', '.join(items)}. Refusing to guess. Re-run with a longer run ID "
+            f"or the full run directory path to disambiguate."
+        )
+        return
+    rec = getattr(by_recency, "run_id", "?")
+    other = getattr(by_id, "run_id", "?")
     _out.warn(
         f"'{e.selector}' is ambiguous: it means both the {e.selector}th-most-recent run "
         f"(id {rec}) AND run id '{other}'. Refusing to guess. Re-run with the full run id "
@@ -75,13 +149,15 @@ def _get_manifest_path(
     exit_code: Optional[int] = None,
     not_filter_str: Optional[str] = None,
     not_status_filter: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    runs: Optional[List[Any]] = None,
 ) -> str:
     """Resolve the path to a manifest.json, auto-detecting the latest run if needed."""
     if run_dir:
         # Resolve via find_run first (supports recency index / id-prefix / dir-substring).
         from pubrun.status import find_run, AmbiguousRunSelectorError
         try:
-            run_info = find_run(run_dir)
+            run_info = find_run(run_dir, output_dir, runs=runs)
             if run_info:
                 run_path = run_info.run_dir
             else:
@@ -105,13 +181,7 @@ def _get_manifest_path(
         raise FileNotFoundError(f"Run directory '{run_dir}' does not exist or does not contain a manifest.json.")
     else:
         # Auto-detect latest run matching the filters
-        try:
-            from pubrun.config import resolve_config
-            config = resolve_config()
-            base_str = config.get("core", {}).get("output_dir", "")
-            runs_dir = Path(base_str) if base_str else Path.cwd() / "runs"
-        except Exception:
-            runs_dir = Path("runs")
+        runs_dir = _resolve_output_base_dir(output_dir)
 
         if not runs_dir.exists() or not runs_dir.is_dir():
             _print_error(
@@ -121,7 +191,7 @@ def _get_manifest_path(
             sys.exit(1)
 
         from pubrun.status import scan_runs, filter_runs
-        all_runs = scan_runs(str(runs_dir))
+        all_runs = runs if runs is not None else scan_runs(str(runs_dir), keep_manifest=False)
         try:
             matched = filter_runs(
                 all_runs,
@@ -137,7 +207,7 @@ def _get_manifest_path(
             _print_error(str(e))
             sys.exit(1)
         if not matched:
-            _print_error("No runs match the filter criteria.")
+            _print_error(_format_no_runs_error(len(all_runs), str(runs_dir)))
             sys.exit(1)
 
         latest_run = matched[0].run_dir
@@ -154,9 +224,23 @@ def _get_manifest_path(
         raise FileNotFoundError(f"Could not find manifest file at '{manifest_path}'.")
 
 
+def _resolve_methods_format(format_type: Optional[str]) -> str:
+    """Resolve methods output format from explicit CLI flag or ``[methods].format`` config."""
+    if format_type in ("markdown", "latex"):
+        return format_type
+    try:
+        from pubrun.config import resolve_config
+        cfg_fmt = resolve_config().get("methods", {}).get("format", "markdown")
+        if isinstance(cfg_fmt, str) and cfg_fmt.lower() in ("markdown", "latex"):
+            return cfg_fmt.lower()
+    except Exception:
+        pass
+    return "markdown"
+
+
 def _run_methods(
     run_dir: str,
-    format_type: str,
+    format_type: Optional[str] = None,
     filter_str: Optional[str] = None,
     status_filter: Optional[str] = None,
     older_than: Optional[str] = None,
@@ -165,6 +249,7 @@ def _run_methods(
     not_status_filter: Optional[str] = None,
     aggregate: bool = False,
     limit: Optional[int] = None,
+    output_dir: Optional[str] = None,
 ) -> None:
     """Generate and print an academic 'Computational Methods' paragraph.
 
@@ -172,13 +257,14 @@ def _run_methods(
     ``aggregate=True`` (the ``--all`` flag): aggregate ALL matching runs into one
     representative paragraph plus a variance note (IPD 20260706-methods-multi-run).
     """
+    resolved_format = _resolve_methods_format(format_type)
     if aggregate:
         _run_methods_aggregate(
-            run_dir, format_type,
+            run_dir, resolved_format,
             filter_str=filter_str, status_filter=status_filter,
             older_than=older_than, exit_code=exit_code,
             not_filter_str=not_filter_str, not_status_filter=not_status_filter,
-            limit=limit,
+            limit=limit, output_dir=output_dir,
         )
         return
     try:
@@ -193,6 +279,7 @@ def _run_methods(
             exit_code=exit_code,
             not_filter_str=not_filter_str,
             not_status_filter=not_status_filter,
+            output_dir=output_dir,
         )
 
         with open(manifest_path, "r", encoding="utf-8") as f:
@@ -204,11 +291,11 @@ def _run_methods(
             for w in warnings:
                 _out.warn(w)
 
-        # Dispatch to structural compilers
-        text = generate_report(manifest, format_type)
-        print("--- Generated Computational Methods Section ---")
+        # Dispatch to structural compilers; decorative banners go to stderr so stdout is pipe-clean.
+        text = generate_report(manifest, resolved_format)
+        print("--- Generated Computational Methods Section ---", file=sys.stderr)
         print(text)
-        print("-----------------------------------------------\n")
+        print("-----------------------------------------------\n", file=sys.stderr)
     except RunInProgressOrCrashedError as e:
         status = e.run_info.status if e.run_info else "crashed/running"
         _print_error(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.")
@@ -227,7 +314,7 @@ _METHODS_LARGE_SET = 25
 
 def _run_methods_aggregate(
     run_dir: str,
-    format_type: str,
+    format_type: Optional[str] = None,
     filter_str: Optional[str] = None,
     status_filter: Optional[str] = None,
     older_than: Optional[str] = None,
@@ -235,6 +322,7 @@ def _run_methods_aggregate(
     not_filter_str: Optional[str] = None,
     not_status_filter: Optional[str] = None,
     limit: Optional[int] = None,
+    output_dir: Optional[str] = None,
 ) -> None:
     """`pubrun methods --all`: aggregate the matching run set into one paragraph.
 
@@ -244,17 +332,19 @@ def _run_methods_aggregate(
     methods text (authoritative textual marker; optional non-DIM color; safe
     under NO_COLOR).
     """
-    import json as _json
     from pubrun.report.methods import generate_report_multi
     from pubrun.report.utils import hydrate_manifest
     from pubrun.status import scan_runs, filter_runs
 
+    resolved_format = _resolve_methods_format(format_type)
+
     if run_dir:
         _print_error("`pubrun methods --all` aggregates a filtered set; do not also "
-                     "pass a specific run directory. Use -f/-F/-s/-S/-n to select.")
+                     "pass a specific run directory. Use -f/--filter, -F/--not-filter, "
+                     "-s/--status, -S/--not-status, or -n/--limit to select.")
         sys.exit(1)
 
-    all_runs = scan_runs()
+    all_runs = scan_runs(output_dir, keep_manifest=False)
     try:
         matched = filter_runs(
             all_runs,
@@ -270,32 +360,31 @@ def _run_methods_aggregate(
         _print_error(str(e))
         sys.exit(1)
     if not matched:
-        _print_error("No runs match the filter criteria.")
+        _print_error(_format_no_runs_error(len(all_runs), output_dir))
         sys.exit(1)
 
     manifests: list = []
     skipped = 0
     for r in matched:
         mp = r.run_dir / "manifest.json"
-        if not mp.exists():
+        m = r.load_manifest()
+        if m is None:
             skipped += 1
             continue
         try:
-            with open(mp, "r", encoding="utf-8") as f:
-                m = _json.load(f)
             m, _warnings = hydrate_manifest(str(mp), m)
             manifests.append(m)
         except Exception:
-            skipped += 1  # malformed/unreadable manifest — skip, don't abort
+            skipped += 1  # malformed/unreadable manifest - skip, don't abort
 
     if not manifests:
         _print_error("No readable manifests among the matching runs.")
         sys.exit(1)
 
-    text = generate_report_multi(manifests, format_type)
-    print("--- Generated Computational Methods Section ---")
+    text = generate_report_multi(manifests, resolved_format)
+    print("--- Generated Computational Methods Section ---", file=sys.stderr)
     print(text)
-    print("-----------------------------------------------\n")
+    print("-----------------------------------------------\n", file=sys.stderr)
 
     # Non-methods suggestion: authoritative textual marker (works under NO_COLOR,
     # pipes, screen readers), optional full-strength color reinforcement (never
@@ -307,11 +396,13 @@ def _run_methods_aggregate(
     if skipped:
         notes.append(f"{skipped} matching run(s) had no readable manifest and were skipped.")
     if n > _METHODS_LARGE_SET:
-        notes.append(f"aggregated {n} runs — consider narrowing with -f / -F / -s / -n "
-                     f"if that is broader than the study you mean to report.")
+        notes.append(
+            f"aggregated {n} runs; consider narrowing with -f/--filter, -F/--not-filter, "
+            f"-s/--status, or -n/--limit if that is broader than the study you mean to report."
+        )
     if notes:
-        from pubrun.report.diagnostics import Colors, _has_color
-        use_color = _has_color()
+        from pubrun.report.diagnostics import Colors
+        use_color = _out.use_color(sys.stderr)
         prefix = "# pubrun note (not part of the methods section):"
         if use_color:
             prefix = f"{Colors.CYAN}{prefix}{Colors.RESET}"
@@ -413,6 +504,7 @@ def _run_rerun(
     strict: bool = False,
     fail_on: Optional[str] = None,
     as_json: bool = False,
+    output_dir: Optional[str] = None,
 ) -> None:
     """Print the shell command needed to reproduce a recorded run.
 
@@ -434,6 +526,7 @@ def _run_rerun(
             exit_code=exit_code,
             not_filter_str=not_filter_str,
             not_status_filter=not_status_filter,
+            output_dir=output_dir,
         )
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
@@ -643,83 +736,120 @@ def _run_rerun(
         sys.exit(1)
 
 
-def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_config: Optional[bool] = None, max_length: Optional[int] = None, depth: str = "basic", show_same: Optional[bool] = None,
-              filter_str: Optional[str] = None, not_filter_str: Optional[str] = None,
-              status_filter: Optional[str] = None, not_status_filter: Optional[str] = None,
-              older_than: Optional[str] = None, exit_code: Optional[int] = None, table: bool = False) -> None:
+def _resolve_direct_manifest_path(raw_path: str) -> str:
+    """Resolve an explicit existing filesystem run path without scanning output_dir."""
+    run_path = Path(raw_path)
+    manifest_path = (
+        run_path
+        if (run_path.is_file() and run_path.name == "manifest.json")
+        else (run_path / "manifest.json")
+    )
+    if manifest_path.exists():
+        return str(manifest_path)
+    lock_path = run_path / ".pubrun.lock" if run_path.is_dir() else (run_path.parent / ".pubrun.lock")
+    if lock_path.exists():
+        raise RunInProgressOrCrashedError(run_path if run_path.is_dir() else run_path.parent)
+    raise FileNotFoundError(
+        f"Run directory '{raw_path}' does not exist or does not contain a manifest.json."
+    )
+
+
+def _run_diff(
+    run_dirs: List[str],
+    export_format: Any,
+    no_color: bool,
+    wrap_config: Optional[bool] = None,
+    max_length: Optional[int] = None,
+    depth: str = "basic",
+    show_same: Optional[bool] = None,
+    filter_str: Optional[str] = None,
+    not_filter_str: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    not_status_filter: Optional[str] = None,
+    older_than: Optional[str] = None,
+    exit_code: Optional[int] = None,
+    table: bool = False,
+    output_dir: Optional[str] = None,
+    as_json: bool = False,
+) -> None:
     """Run the semantic diff engine comparing two execution traces.
 
     When no positional run directories are given, the pair to compare is drawn from
     the runs matching the shared filter options (``-f/-F/-s/-S/--older-than/--exit-code``);
     with no filters this is every run with a manifest (the historical behavior).
     """
+    if len(run_dirs) > 2:
+        _print_error(f"diff accepts at most 2 runs, got {len(run_dirs)}.")
+        sys.exit(2)
+    if as_json and export_format:
+        _print_error("--json cannot be combined with --export.")
+        sys.exit(2)
+
     try:
         from pubrun.report.utils import hydrate_manifest
         from pubrun.config import resolve_config
         from pubrun.analysis.diff import compare_manifests, export_manifest
         from pubrun.analysis.render import print_diff
-        from pubrun.status import scan_runs, find_run, filter_runs
+        from pubrun.status import AmbiguousRunSelectorError, scan_runs, find_run, filter_runs
 
-        all_runs = scan_runs()
-        valid_runs = [r for r in all_runs if (r.run_dir / "manifest.json").exists()]
-
-        # Apply the shared run filters to narrow the candidate set used for
-        # auto-selection. Explicit positional run_dirs always win over filters.
         has_filter = any(v is not None for v in (
             filter_str, not_filter_str, status_filter, not_status_filter, older_than, exit_code
         ))
-        if has_filter:
-            valid_runs = filter_runs(
-                valid_runs,
-                filter_str=filter_str,
-                status_filter=status_filter,
-                older_than=older_than,
-                exit_code=exit_code,
-                not_filter_str=not_filter_str,
-                not_status_filter=not_status_filter,
-            )
 
-        if len(run_dirs) >= 2:
-            run_dir_a = run_dirs[0]
-            run_dir_b = run_dirs[1]
-        elif len(run_dirs) == 1:
-            run_dir_a = run_dirs[0]
-
-            # Resolve run_dir_a to its canonical path first
-            r_a = find_run(run_dir_a)
-            run_dir_a_path = r_a.run_dir if r_a else Path(run_dir_a)
-            if run_dir_a_path.is_file() and run_dir_a_path.name == "manifest.json":
-                run_dir_a_path = run_dir_a_path.parent
-
-            run_dir_b_path = None
-            for r in valid_runs:
-                if r.run_dir.resolve() != run_dir_a_path.resolve():
-                    run_dir_b_path = r.run_dir
-                    break
-            if not run_dir_b_path:
-                if has_filter:
-                    _print_error("Only one run was provided, and no other runs matching the filter were found to compare against. Widen the filter or pass a second run directory.")
-                else:
-                    _print_error("Only one run was provided, and no other runs with a manifest.json were found to compare against.")
-                sys.exit(1)
-
-            run_dir_b = str(run_dir_b_path)
-            _out.info(f"Comparing {run_dir_a_path.name} against most recent other run: {run_dir_b_path.name}")
+        if len(run_dirs) == 2 and Path(run_dirs[0]).exists() and Path(run_dirs[1]).exists():
+            # Explicit existing filesystem paths: skip scan_runs() entirely.
+            manifest_path_a = _resolve_direct_manifest_path(run_dirs[0])
+            manifest_path_b = _resolve_direct_manifest_path(run_dirs[1])
         else:
-            # 0 runs provided: diff the last two runs from the (optionally filtered)
-            # candidate set: second most recent as baseline A, most recent as target B.
-            if len(valid_runs) < 2:
+            all_runs = scan_runs(output_dir, keep_manifest=False)
+            if len(run_dirs) == 2:
+                manifest_path_a = _get_manifest_path(run_dirs[0], output_dir=output_dir, runs=all_runs)
+                manifest_path_b = _get_manifest_path(run_dirs[1], output_dir=output_dir, runs=all_runs)
+            else:
+                valid_runs = [r for r in all_runs if (r.run_dir / "manifest.json").exists()]
                 if has_filter:
-                    _print_error(f"diff needs two runs, but only {len(valid_runs)} matched the filter. Widen the filter or pass two run directories explicitly.")
-                else:
-                    _print_error(f"Need at least 2 runs with manifest.json to perform default diff (found {len(valid_runs)}).")
-                sys.exit(1)
-            run_dir_a = str(valid_runs[1].run_dir)
-            run_dir_b = str(valid_runs[0].run_dir)
-            _out.info(f"Auto-detected last two runs for comparison: {valid_runs[1].run_dir.name} vs {valid_runs[0].run_dir.name}")
+                    valid_runs = filter_runs(
+                        valid_runs,
+                        filter_str=filter_str,
+                        status_filter=status_filter,
+                        older_than=older_than,
+                        exit_code=exit_code,
+                        not_filter_str=not_filter_str,
+                        not_status_filter=not_status_filter,
+                    )
 
-        manifest_path_a = _get_manifest_path(run_dir_a)
-        manifest_path_b = _get_manifest_path(run_dir_b)
+                if len(run_dirs) == 1:
+                    run_dir_a = run_dirs[0]
+                    r_a = find_run(run_dir_a, output_dir, runs=all_runs)
+                    run_dir_a_path = r_a.run_dir if r_a else Path(run_dir_a)
+                    if run_dir_a_path.is_file() and run_dir_a_path.name == "manifest.json":
+                        run_dir_a_path = run_dir_a_path.parent
+
+                    run_dir_b_path = None
+                    for r in valid_runs:
+                        if r.run_dir.resolve() != run_dir_a_path.resolve():
+                            run_dir_b_path = r.run_dir
+                            break
+                    if not run_dir_b_path:
+                        if has_filter:
+                            _print_error("Only one run was provided, and no other runs matching the filter were found to compare against. Widen the filter or pass a second run directory.")
+                        else:
+                            _print_error("Only one run was provided, and no other runs with a manifest.json were found to compare against.")
+                        sys.exit(1)
+
+                    _out.info(f"Comparing {run_dir_a_path.name} against most recent other run: {run_dir_b_path.name}")
+                    manifest_path_a = _get_manifest_path(run_dir_a, output_dir=output_dir, runs=all_runs)
+                    manifest_path_b = _resolve_direct_manifest_path(str(run_dir_b_path))
+                else:
+                    if len(valid_runs) < 2:
+                        if has_filter:
+                            _print_error(f"diff needs two runs, but only {len(valid_runs)} matched the filter. Widen the filter or pass two run directories explicitly.")
+                        else:
+                            _print_error(f"Need at least 2 runs with manifest.json to perform default diff (found {len(valid_runs)}).")
+                        sys.exit(1)
+                    _out.info(f"Auto-detected last two runs for comparison: {valid_runs[1].run_dir.name} vs {valid_runs[0].run_dir.name}")
+                    manifest_path_a = str(valid_runs[1].run_dir / "manifest.json")
+                    manifest_path_b = str(valid_runs[0].run_dir / "manifest.json")
 
         with open(manifest_path_a, "r", encoding="utf-8") as f:
             manifest_a = json.load(f)
@@ -762,12 +892,26 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
 
             _out.ok(f"Successfully exported semantic baseline A to: {out_a}")
             _out.ok(f"Successfully exported semantic target B to: {out_b}")
+        elif as_json:
+            diff_report = compare_manifests(manifest_a, manifest_b, ignores, show_same=ss_target, depth=depth)
+            name_a = Path(manifest_path_a).parent.name
+            name_b = Path(manifest_path_b).parent.name
+            payload = {
+                "run_a": name_a,
+                "run_b": name_b,
+                "depth": depth,
+                "diff": diff_report,
+            }
+            print(_dump_strict_json(payload, indent=2))
         else:
             diff_report = compare_manifests(manifest_a, manifest_b, ignores, show_same=ss_target, depth=depth)
             wrap_target = wrap_config if wrap_config is not None else conf.get("wrap", True)
             mlen_target = max_length if max_length is not None else conf.get("max_string_length", 300)
             print_diff(diff_report, no_color=no_color, wrap=wrap_target, max_length=mlen_target, depth=depth, table=table)
 
+    except AmbiguousRunSelectorError as e:
+        _emit_ambiguous_selector(e)
+        sys.exit(1)
     except RunInProgressOrCrashedError as e:
         status = e.run_info.status if e.run_info else "crashed/running"
         _print_error(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.")
@@ -775,6 +919,8 @@ def _run_diff(run_dirs: List[str], export_format: str, no_color: bool, wrap_conf
     except Exception as e:
         _print_error(f"Failed to generate diff report: {e}")
         sys.exit(1)
+
+
 def _run_resources(
     run_dir: str,
     filter_str: Optional[str] = None,
@@ -787,6 +933,8 @@ def _run_resources(
     last: Optional[str] = None,
     metric: str = "all",
     width: Optional[int] = None,
+    output_dir: Optional[str] = None,
+    utc: bool = False,
 ) -> None:
     """Print resource monitoring graphs for a recorded run."""
     from pubrun.report.diagnostics import DiagnosticsError, print_resources_report
@@ -799,8 +947,16 @@ def _run_resources(
             exit_code=exit_code,
             not_filter_str=not_filter_str,
             not_status_filter=not_status_filter,
+            output_dir=output_dir,
         )
-        print_resources_report(manifest_path, average=average, last=last, metric=metric, width=width)
+        print_resources_report(
+            manifest_path,
+            average=average,
+            last=last,
+            metric=metric,
+            width=width,
+            utc=utc,
+        )
     except RunInProgressOrCrashedError as e:
         status = e.run_info.status if e.run_info else "crashed/running"
         _print_error(f"Run '{e.run_dir.name}' is currently {status} and does not have a manifest.json.")
@@ -851,7 +1007,12 @@ def _render_config_toml(config: dict, title: str, note: Optional[str] = None,
     walk(config)
 
 
-def _run_show_config(mode: str, run_selector: Optional[str] = None, show_all: bool = False) -> None:
+def _run_show_config(
+    mode: str,
+    run_selector: Optional[str] = None,
+    show_all: bool = False,
+    output_dir: Optional[str] = None,
+) -> None:
     """Show resolved configuration for one of three contexts.
 
     mode: "current"  -> live resolve_config() in the CWD (what `import pubrun` would use now)
@@ -879,10 +1040,15 @@ def _run_show_config(mode: str, run_selector: Optional[str] = None, show_all: bo
 
     if mode == "run":
         from pubrun.status import find_run, AmbiguousRunSelectorError
+        if show_all:
+            _out.info(
+                "Past runs persist only resolved configuration values (not per-layer provenance). "
+                "Use 'pubrun show config --all' to inspect live layer provenance."
+            )
         run_path = None
         if run_selector:
             try:
-                info = find_run(run_selector)
+                info = find_run(run_selector, output_dir)
                 run_path = info.run_dir if info else Path(run_selector)
             except AmbiguousRunSelectorError as e:
                 _emit_ambiguous_selector(e)
@@ -893,11 +1059,9 @@ def _run_show_config(mode: str, run_selector: Optional[str] = None, show_all: bo
             # Most recent run.
             try:
                 from pubrun.status import scan_runs
-                from pubrun.config import resolve_config as _rc
-                out_dir = _rc().get("core", {}).get("output_dir") or "runs"
-                runs = scan_runs(out_dir)
+                runs = scan_runs(output_dir, keep_manifest=False)
                 if not runs:
-                    _print_error("No runs found to show config for.")
+                    _print_error(_format_no_runs_error(0, output_dir))
                     sys.exit(1)
                 run_path = sorted(runs, key=lambda r: r.started_at_utc or 0, reverse=True)[0].run_dir
             except SystemExit:
@@ -954,12 +1118,18 @@ def _run_show_config(mode: str, run_selector: Optional[str] = None, show_all: bo
     sys.exit(1)
 
 
-def _run_report(run_dir: str, depth: str, section: Optional[str] = None, utc: bool = False) -> None:
+def _run_report(
+    run_dir: str,
+    depth: str,
+    section: Optional[str] = None,
+    utc: bool = False,
+    output_dir: Optional[str] = None,
+) -> None:
     """Print a human-readable diagnostic report for a recorded run."""
     from pubrun.report.diagnostics import DiagnosticsError, print_report
     try:
         try:
-            manifest_path = _get_manifest_path(run_dir)
+            manifest_path = _get_manifest_path(run_dir, output_dir=output_dir)
             print_report(manifest_path, depth, section, utc=utc)
         except RunInProgressOrCrashedError as e:
             if section == "logs":
@@ -969,13 +1139,13 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None, utc: bo
                 if stdout_path.exists():
                     try:
                         with open(stdout_path, "r", encoding="utf-8", errors="replace") as sf:
-                            print(sf.read(), end="")
+                            shutil.copyfileobj(sf, sys.stdout, length=65536)
                     except Exception as le:
                         _print_error(f"Failed to read stdout log: {le}")
                 if stderr_path.exists():
                     try:
                         with open(stderr_path, "r", encoding="utf-8", errors="replace") as se:
-                            print(se.read(), end="")
+                            shutil.copyfileobj(se, sys.stdout, length=65536)
                     except Exception as le:
                         _print_error(f"Failed to read stderr log: {le}")
                 return
@@ -1001,7 +1171,6 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None, utc: bo
             started_str = "-"
             if run_info.started_at_utc:
                 try:
-                    from datetime import datetime
                     dt = datetime.fromtimestamp(run_info.started_at_utc)
                     started_date_str = dt.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1026,7 +1195,7 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None, utc: bo
             print(f"  - CWD:       {cwd_str}", file=sys.stderr)
             print("", file=sys.stderr)
 
-            use_color = not os.environ.get("NO_COLOR", "")
+            use_color = _out.use_color(sys.stderr)
             bold = "\033[1m" if use_color else ""
             red = "\033[91m" if use_color else ""
             yellow = "\033[93m" if use_color else ""
@@ -1043,55 +1212,67 @@ def _run_report(run_dir: str, depth: str, section: Optional[str] = None, utc: bo
                 if can_safely_auto_close_crashed_run(run_dir_path, run_info.lock_data):
                     close_out_crashed_run(run_dir_path, run_info.lock_data)
 
-        # Tail error logs (last 10 lines)
+        # Tail error logs (last 10 lines in O(1) memory)
         log_file = None
         stderr_path = run_dir_path / "stderr.log"
         stdout_path = run_dir_path / "stdout.log"
-        if stderr_path.exists() and stderr_path.stat().st_size > 0:
-            log_file = stderr_path
-        elif stdout_path.exists() and stdout_path.stat().st_size > 0:
-            log_file = stdout_path
+        try:
+            if stderr_path.exists() and stderr_path.stat().st_size > 0:
+                log_file = stderr_path
+            elif stdout_path.exists() and stdout_path.stat().st_size > 0:
+                log_file = stdout_path
+        except OSError:
+            log_file = None
 
         if log_file:
             print(f"Last 10 lines of {log_file.name}:", file=sys.stderr)
             try:
                 with open(log_file, "r", encoding="utf-8", errors="replace") as lf:
-                    lines = lf.readlines()
-                    tail_lines = lines[-10:]
-                    for line in tail_lines:
-                        sys.stderr.write(line)
-                    if tail_lines and not tail_lines[-1].endswith("\n"):
-                        sys.stderr.write("\n")
+                    tail_lines = list(deque(lf, maxlen=10))
+                for line in tail_lines:
+                    sys.stderr.write(line)
+                if tail_lines and not tail_lines[-1].endswith("\n"):
+                    sys.stderr.write("\n")
             except Exception as le:
                 print(f"  (Failed to read log file: {le})", file=sys.stderr)
             print("", file=sys.stderr)
 
-        # Suggest the most recent non-crashed (completed/failed) run
-        try:
-            from pubrun.config import resolve_config
-            config = resolve_config()
-            base_str = config.get("core", {}).get("output_dir", "")
-            runs_dir = Path(base_str) if base_str else Path.cwd() / "runs"
-        except Exception:
-            runs_dir = Path("runs")
+        # Suggest the most recent non-crashed (completed/failed) run without parsing every manifest
+        runs_dir = _resolve_output_base_dir(output_dir)
 
-        completed_runs = []
+        candidate_dirs: List[Tuple[Path, float]] = []
         if runs_dir.exists() and runs_dir.is_dir():
-            for d in runs_dir.iterdir():
-                if d.is_dir() and d.name.startswith("pubrun-") and (d / "manifest.json").exists():
-                    try:
-                        with open(d / "manifest.json", "r", encoding="utf-8") as f:
-                            m = json.load(f)
-                            if m.get("status", {}).get("outcome") != "crashed":
-                                completed_runs.append((d, d.stat().st_mtime))
-                    except Exception:
-                        pass
+            try:
+                with os.scandir(runs_dir) as it:
+                    for entry in it:
+                        try:
+                            if not entry.name.startswith("pubrun-"):
+                                continue
+                            if not entry.is_dir(follow_symlinks=False):
+                                continue
+                            d = Path(entry.path)
+                            if (d / "manifest.json").exists():
+                                candidate_dirs.append((d, entry.stat(follow_symlinks=False).st_mtime))
+                        except OSError:
+                            continue
+            except OSError:
+                pass
 
-        if completed_runs:
-            completed_runs.sort(key=lambda x: x[1], reverse=True)
-            latest_completed = completed_runs[0][0]
+        candidate_dirs.sort(key=lambda x: x[1], reverse=True)
+        latest_completed: Optional[Path] = None
+        for d, _mtime in candidate_dirs:
+            try:
+                with open(d / "manifest.json", "r", encoding="utf-8") as f:
+                    m = json.load(f)
+                if isinstance(m, dict) and m.get("status", {}).get("outcome") != "crashed":
+                    latest_completed = d
+                    break
+            except Exception:
+                continue
+
+        if latest_completed is not None:
             print("Suggestion: To view the report for the most recent completed run, run:", file=sys.stderr)
-            print(f"  pubrun report {latest_completed}", file=sys.stderr)
+            print(f"  pubrun show {latest_completed}", file=sys.stderr)
         else:
             print("No completed runs with a manifest.json were found in the output directory.", file=sys.stderr)
             print("See 'pubrun status' to view all active or crashed runs.", file=sys.stderr)
@@ -1179,7 +1360,7 @@ def _emit_findings(findings: list, *, show_suggestions: bool, as_json: bool, hea
     if as_json:
         print(json.dumps({"findings": findings}, indent=2))
         return
-    use_color = not os.environ.get("NO_COLOR", "") and sys.stdout.isatty()
+    use_color = _out.use_color(sys.stdout)
     warns = [f for f in findings if f.get("severity") == "warn"]
     if not findings:
         print(f"{header}: no concerns found.")
@@ -1225,7 +1406,7 @@ def _run_self_check(show_suggestions: bool, as_json: bool, strict: bool, quiet: 
                        header="pubrun self-check")
     else:
         # Itemized: one line per check + total-time footer.
-        use_color = not os.environ.get("NO_COLOR", "") and sys.stdout.isatty()
+        use_color = _out.use_color(sys.stdout)
         _level_for = {"ok": "ok", "warn": "warn", "info": "info"}
         for c in checks:
             lvl = _level_for.get(c.get("status", "ok"), "info")
@@ -1265,6 +1446,7 @@ def _run_inspect(
     exit_code: Optional[int] = None,
     preflight: bool = False,
     fail_on: Optional[str] = None,
+    output_dir: Optional[str] = None,
 ) -> None:
     """Assess a completed run's reproducibility evidence and optional offline preflight.
 
@@ -1276,7 +1458,7 @@ def _run_inspect(
         manifest_path = _get_manifest_path(
             run_dir or "", filter_str=filter_str, status_filter=status_filter,
             older_than=older_than, exit_code=exit_code, not_filter_str=not_filter_str,
-            not_status_filter=not_status_filter,
+            not_status_filter=not_status_filter, output_dir=output_dir,
         )
     except RunInProgressOrCrashedError as e:
         _print_error(f"Run '{e.run_dir.name}' is still running or crashed (no manifest.json yet).")
@@ -1319,7 +1501,7 @@ def _run_inspect(
     if as_json:
         print(json.dumps(assessment, indent=2))
     else:
-        use_color = not os.environ.get("NO_COLOR", "") and sys.stdout.isatty()
+        use_color = _out.use_color(sys.stdout)
         findings = assessment.get("findings") or []
         banner = [
             f for f in findings if isinstance(f, dict) and f.get("code") == "different_host"
@@ -1567,9 +1749,9 @@ def _print_safe_file_block(unredacted_path, redacted_path) -> None:
         print("  Submit (attach the SAFE file, do NOT paste it):", file=sys.stderr)
         print(f"    {_BENCH_SUBMIT_URL}", file=sys.stderr)
         print("", file=sys.stderr)
-        print("  Tip: `pubrun bench --prepare-submission` copies ONLY the safe file into a", file=sys.stderr)
-        print("  clean pubrun-share/ folder, so the folder you browse to attach contains", file=sys.stderr)
-        print("  only the file that is safe to share.", file=sys.stderr)
+        print(f'  Tip: `pubrun bench --submit-file "{redacted_path}" --prepare-submission`', file=sys.stderr)
+        print("  copies ONLY the safe file into a clean pubrun-share/ folder, so the", file=sys.stderr)
+        print("  folder you browse to attach contains only the file that is safe to share.", file=sys.stderr)
     else:
         print("  The share check FAILED, so this file is NOT safe to submit as-is:", file=sys.stderr)
         for r in reasons:
@@ -1740,6 +1922,7 @@ def _run_gh(args, *, input_text=None, timeout=30) -> str:
     env["GH_PROMPT_DISABLED"] = "1"
     try:
         proc = _sp.run(["gh", *args], input=input_text, text=True,
+                       encoding="utf-8", errors="replace",
                        capture_output=True, timeout=timeout, env=env)
     except FileNotFoundError:
         raise _GhError("GitHub CLI (gh) is not installed")
@@ -1951,7 +2134,7 @@ def _slurm_job_state(job_id: str):
     if _sh.which("squeue"):
         try:
             q = _sp.run(["squeue", "-h", "-j", job_id, "-o", "%T"],
-                        capture_output=True, text=True, timeout=15)
+                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15)
             if q.returncode == 0 and q.stdout.strip():
                 return "RUNNING"
         except Exception:
@@ -1960,7 +2143,7 @@ def _slurm_job_state(job_id: str):
     if _sh.which("sacct"):
         try:
             a = _sp.run(["sacct", "-n", "-P", "-j", job_id, "-o", "State"],
-                        capture_output=True, text=True, timeout=15)
+                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15)
             if a.returncode == 0 and a.stdout.strip():
                 states = {ln.strip().split()[0] for ln in a.stdout.splitlines() if ln.strip()}
                 if any(s.startswith("COMPLETED") for s in states) and not (
@@ -2046,6 +2229,15 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
     if not _GH_REPO_RE.match(repo):
         _print_error(f"Invalid --gh-repo {repo!r}; expected OWNER/NAME.")
         sys.exit(1)
+    if iterations is not None and iterations < 1:
+        _print_error("--iterations must be >= 1.")
+        sys.exit(2)
+    if passes is not None and passes < 1:
+        _print_error("--passes must be >= 1.")
+        sys.exit(2)
+    if wait_timeout is not None and wait_timeout < 0:
+        _print_error("--wait-timeout must be >= 0.")
+        sys.exit(2)
     interactive = sys.stdin.isatty()
 
     # --- Recovery / HPC / batch path: contribute an EXISTING redacted file, no benchmark run. ---
@@ -2124,9 +2316,9 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
             extra.append("--rigorous")
         if no_baseline:
             extra.append("--no-baseline")
-        if iterations:
+        if iterations is not None:
             extra += ["--iterations", str(int(iterations))]
-        if passes:
+        if passes is not None:
             extra += ["--passes", str(int(passes))]
         cmd = ["bash", str(submit_script)] + extra
         label = chosen["name"].upper() if chosen["name"] != "slurm" else "Slurm"
@@ -2169,7 +2361,8 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
             env["PUBRUN_REDACTED_OUT"] = str(redacted_target)
         try:
             proc = _sp.run(cmd, env=env, check=False,
-                           capture_output=is_slurm, text=True)  # argv list; no shell
+                           capture_output=is_slurm, text=True,
+                           encoding="utf-8", errors="replace")  # argv list; no shell
         except Exception as e:
             _print_error(f"Failed to submit: {e}")
             sys.exit(1)
@@ -2228,9 +2421,9 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
         argv.append("--rigorous")
     if no_baseline:
         argv.append("--no-baseline")
-    if iterations:
+    if iterations is not None:
         argv += ["--iterations", str(int(iterations))]
-    if passes:
+    if passes is not None:
         argv += ["--passes", str(int(passes))]
     print(f"Running benchmarks locally (this may take a few minutes)...", file=sys.stderr)
     rc = _sp.run(argv, check=False).returncode
@@ -2276,6 +2469,7 @@ def _run_status(
     exit_code: Optional[int] = None,
     not_filter_str: Optional[str] = None,
     not_status_filter: Optional[str] = None,
+    as_json: bool = False,
 ) -> None:
     """List runs or inspect a specific run."""
     from pubrun.status import (
@@ -2292,8 +2486,15 @@ def _run_status(
     if run_id:
         # Inspect a specific run (recency index / id-prefix / dir-substring).
         from pubrun.status import AmbiguousRunSelectorError
+        idx: Optional[int] = None
         try:
-            run_info = find_run(run_id, output_dir)
+            if as_json:
+                all_runs = scan_runs(output_dir, keep_manifest=False)
+                run_info = find_run(run_id, output_dir, runs=all_runs)
+                if run_info is not None:
+                    idx = next((i for i, r in enumerate(all_runs, 1) if r is run_info), None)
+            else:
+                run_info = find_run(run_id, output_dir)
         except AmbiguousRunSelectorError as e:
             _emit_ambiguous_selector(e)
             sys.exit(1)
@@ -2304,10 +2505,13 @@ def _run_status(
             run_info.run_dir, run_info.lock_data
         ):
             close_out_crashed_run(run_info.run_dir, run_info.lock_data)
-        print(render_inspect(run_info))
+        if as_json:
+            print(_dump_strict_json({"run": _serialize_run_info(run_info, index=idx)}, indent=2))
+        else:
+            print(render_inspect(run_info))
     else:
         # List all runs
-        all_runs = scan_runs(output_dir)
+        all_runs = scan_runs(output_dir, keep_manifest=False)
         try:
             runs = filter_runs(
                 all_runs,
@@ -2329,8 +2533,16 @@ def _run_status(
             ):
                 close_out_crashed_run(r.run_dir, r.lock_data)
 
-        if verbose:
-            print(render_verbose_list(runs))
+        if as_json:
+            index_map = {id(r): i for i, r in enumerate(all_runs, 1)}
+            payload = {
+                "total_runs": len(all_runs),
+                "matched_runs": len(runs),
+                "runs": [_serialize_run_info(r, index=index_map.get(id(r))) for r in runs],
+            }
+            print(_dump_strict_json(payload, indent=2))
+        elif verbose:
+            print(render_verbose_list(runs, all_runs=all_runs))
         else:
             print(render_short_list(runs, all_runs=all_runs))
 
@@ -2346,6 +2558,7 @@ def _run_clean(
     exit_code: Optional[int] = None,
     not_filter_str: Optional[str] = None,
     not_status_filter: Optional[str] = None,
+    force_remote_locks: bool = False,
 ) -> None:
     """Interactive or automatic cleanup of old run directories."""
     from pubrun.status import clean_runs
@@ -2362,10 +2575,23 @@ def _run_clean(
             exit_code=exit_code,
             not_filter_str=not_filter_str,
             not_status_filter=not_status_filter,
+            force_remote_locks=force_remote_locks,
         )
     except ValueError as e:
         _print_error(str(e))
         sys.exit(1)
+
+
+def _fallback_iso_ts(run_info: Any) -> str:
+    """Return an ISO-8601 UTC fallback timestamp derived from ``run_info.started_at_utc``."""
+    started = getattr(run_info, "started_at_utc", None)
+    if isinstance(started, (int, float)) and not isinstance(started, bool) and math.isfinite(started):
+        try:
+            dt = datetime.fromtimestamp(float(started), tz=timezone.utc)
+            return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        except (OSError, OverflowError, ValueError):
+            pass
+    return ""
 
 
 def _run_combined(
@@ -2382,15 +2608,13 @@ def _run_combined(
     not_filter_str: Optional[str] = None,
     not_status_filter: Optional[str] = None,
 ) -> None:
-    """Interleave stdout/stderr logs from one or more runs."""
-    import re
-    from pubrun.status import scan_runs, find_run
+    """Interleave stdout/stderr logs from one or more runs in O(K) memory."""
+    from pubrun.status import AmbiguousRunSelectorError, filter_runs, find_run, scan_runs
 
     TIMESTAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\] (.*)$")
 
+    all_runs = scan_runs(dir_path, keep_manifest=False)
     if not run_ids:
-        from pubrun.status import filter_runs
-        all_runs = scan_runs(dir_path)
         has_filters = any(v is not None for v in (
             filter_str, status_filter, older_than, exit_code, not_filter_str, not_status_filter
         ))
@@ -2410,24 +2634,40 @@ def _run_combined(
             _print_error(str(e))
             sys.exit(1)
         if not target_runs:
-            _print_error("No runs match the filter criteria.")
+            _print_error(_format_no_runs_error(len(all_runs), dir_path))
             sys.exit(1)
     else:
         target_runs = []
         for rid in run_ids:
-            run_info = find_run(rid, dir_path)
+            try:
+                run_info = find_run(rid, dir_path, runs=all_runs)
+            except AmbiguousRunSelectorError as e:
+                _emit_ambiguous_selector(e)
+                sys.exit(1)
             if not run_info:
-                _print_error(f"Run ID '{rid}' not found or ambiguous.")
+                _print_error(f"Run ID '{rid}' not found.")
                 sys.exit(1)
             target_runs.append(run_info)
 
-    # Calculate total size of stdout.log and stderr.log files
+    # Collect existing log files and compute total size safely.
+    log_entries: List[Tuple[Any, str, Path]] = []
     total_size = 0
     for r in target_runs:
-        for suffix in ("stdout.log", "stderr.log"):
-            p = r.run_dir / suffix
+        for stream in ("stdout", "stderr"):
+            p = r.run_dir / f"{stream}.log"
             if p.exists():
-                total_size += p.stat().st_size
+                log_entries.append((r, stream, p))
+                try:
+                    total_size += p.stat().st_size
+                except OSError:
+                    pass
+
+    if not log_entries:
+        _out.info(
+            'No stdout.log or stderr.log files found for the selected run(s). '
+            'Enable [console].capture_mode = "standard" in .pubrun.toml or use `import pubrun.full` to capture console logs.'
+        )
+        return
 
     if total_size > 500 * 1024 * 1024:
         if not force:
@@ -2446,66 +2686,79 @@ def _run_combined(
                 print("\nOperation cancelled.", file=sys.stderr)
                 sys.exit(0)
 
-    # Check if any log files exist and if they contain any timestamps
+    # Check if any log file contains timestamps (first 50 lines per file).
     has_any_timestamps = False
-    for r in target_runs:
-        for suffix in ("stdout.log", "stderr.log"):
-            p = r.run_dir / suffix
-            if p.exists():
-                try:
-                    with open(p, "r", encoding="utf-8", errors="replace") as f:
-                        for _ in range(50):  # Check first 50 lines to detect standard mode
-                            line = f.readline()
-                            if not line:
-                                break
-                            if TIMESTAMP_RE.match(line):
-                                has_any_timestamps = True
-                                break
-                except Exception:
-                    pass
-            if has_any_timestamps:
-                break
+    for _r, _stream, p in log_entries:
+        try:
+            with open(p, "r", encoding="utf-8", errors="replace") as f:
+                for _ in range(50):
+                    line = f.readline()
+                    if not line:
+                        break
+                    if TIMESTAMP_RE.match(line):
+                        has_any_timestamps = True
+                        break
+        except Exception:
+            pass
         if has_any_timestamps:
             break
 
-    out_file = None
-    if output:
-        try:
-            out_file = open(output, "w", encoding="utf-8")
-        except Exception as e:
-            _print_error(f"Failed to open output file '{output}': {e}")
-            sys.exit(1)
+    def _stream_log_entries(
+        fh: Any,
+        file_idx: int,
+        prefix: str,
+        fallback_ts: str,
+    ) -> Iterator[Tuple[str, int, int, int, str]]:
+        """Yield (sort_ts, phase, file_idx, line_idx, formatted_line) in O(1) steady-state RAM.
 
-    def _parse_log_file(file_path: Path, run_id: Optional[str], stream: str, multiple_runs: bool) -> list:
-        entries: list = []
+        Leading untimestamped lines are buffered only until the file's first timestamped
+        line (or EOF, using ``fallback_ts`` from ``run.started_at_utc``), so they stay
+        anchored to their own run instead of being hoisted above earlier runs.
+        """
+        leading_buffer: List[Tuple[int, str]] = []
+        seen_first_ts = False
         current_ts = ""
-        prefix = f"[{run_id}][{stream}] " if multiple_runs else f"[{stream}] "
-        if not file_path.exists():
-            return entries
-        try:
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                for line in f:
-                    line_str = line.rstrip("\r\n")
-                    m = TIMESTAMP_RE.match(line_str)
-                    if m:
-                        ts, msg = m.groups()
-                        current_ts = ts
-                        # Keep the prefix and the entire original line (including its timestamp)
-                        entries.append((ts, prefix + line_str))
-                    else:
-                        entries.append((current_ts, prefix + line_str))
-        except Exception as e:
-            print(f"Warning: Failed to read log file {file_path}: {e}", file=sys.stderr)
-        return entries
+        for line_idx, raw_line in enumerate(fh):
+            line_str = raw_line.rstrip("\r\n")
+            m = TIMESTAMP_RE.match(line_str)
+            if m:
+                ts = m.group(1)
+                if not seen_first_ts:
+                    seen_first_ts = True
+                    for lead_idx, lead_line in leading_buffer:
+                        yield (ts, 0, file_idx, lead_idx, prefix + lead_line)
+                    leading_buffer.clear()
+                current_ts = ts
+                yield (ts, 1, file_idx, line_idx, prefix + line_str)
+            else:
+                if not seen_first_ts:
+                    leading_buffer.append((line_idx, line_str))
+                else:
+                    yield (current_ts, 1, file_idx, line_idx, prefix + line_str)
+        if leading_buffer:
+            for lead_idx, lead_line in leading_buffer:
+                yield (fallback_ts, 0, file_idx, lead_idx, prefix + lead_line)
 
+    multiple_runs = len(target_runs) > 1
     try:
-        if not has_any_timestamps:
-            print("Warning: Logs lack timestamps. Falling back to sequential concatenation. True interleaving requires capture_mode = \"standard\".", file=sys.stderr)
-            for r in target_runs:
-                for stream in ("stdout", "stderr"):
-                    p = r.run_dir / f"{stream}.log"
-                    if p.exists():
-                        prefix = f"[{r.run_id}][{stream}] " if len(target_runs) > 1 else f"[{stream}] "
+        with contextlib.ExitStack() as stack:
+            out_file = None
+            if output:
+                try:
+                    out_file = stack.enter_context(open(output, "w", encoding="utf-8"))
+                except Exception as e:
+                    _print_error(f"Failed to open output file '{output}': {e}")
+                    sys.exit(1)
+
+            if not has_any_timestamps:
+                print(
+                    'Warning: Logs lack timestamps. Falling back to sequential concatenation. '
+                    'True interleaving requires capture_mode = "standard".',
+                    file=sys.stderr,
+                )
+                for r, stream, p in log_entries:
+                    prefix = f"[{r.run_id}][{stream}] " if multiple_runs else f"[{stream}] "
+                    try:
                         with open(p, "r", encoding="utf-8", errors="replace") as f:
                             for line in f:
                                 out_line = prefix + line.rstrip("\r\n")
@@ -2513,35 +2766,30 @@ def _run_combined(
                                     out_file.write(out_line + "\n")
                                 else:
                                     print(out_line)
-        else:
-            all_entries = []
-            multiple_runs = len(target_runs) > 1
-            for r in target_runs:
-                for stream in ("stdout", "stderr"):
-                    p = r.run_dir / f"{stream}.log"
-                    if p.exists():
-                        all_entries.extend(_parse_log_file(p, r.run_id, stream, multiple_runs))
+                    except OSError as e:
+                        print(f"Warning: Failed to read log file {p}: {e}", file=sys.stderr)
+            else:
+                streams: List[Iterator[Tuple[str, int, int, int, str]]] = []
+                for file_idx, (r, stream, p) in enumerate(log_entries):
+                    prefix = f"[{r.run_id}][{stream}] " if multiple_runs else f"[{stream}] "
+                    try:
+                        fh = stack.enter_context(open(p, "r", encoding="utf-8", errors="replace"))
+                    except OSError as e:
+                        print(f"Warning: Failed to read log file {p}: {e}", file=sys.stderr)
+                        continue
+                    streams.append(
+                        _stream_log_entries(fh, file_idx, prefix, _fallback_iso_ts(r))
+                    )
+                for _ts, _phase, _fidx, _lidx, formatted in heapq.merge(*streams):
+                    if out_file:
+                        out_file.write(formatted + "\n")
+                    else:
+                        print(formatted)
 
-            # Sort chronologically by timestamp, keeping the original read order
-            # as a stable secondary key. Lines with an empty timestamp (content
-            # before the first timestamped line, or partial final lines from a
-            # killed process) thus stay in their original relative position
-            # instead of being hoisted to the top. (IPD 20260705 EC-22.)
-            indexed = list(enumerate(all_entries))
-            indexed.sort(key=lambda pair: (pair[1][0], pair[0]))
-            all_entries = [entry for _, entry in indexed]
-            for _, line in all_entries:
-                if out_file:
-                    out_file.write(line + "\n")
-                else:
-                    print(line)
-        if out_file:
-            _out.ok(f"Combined logs written to {output}", stream=sys.stderr)
+            if out_file:
+                _out.ok(f"Combined logs written to {output}", stream=sys.stderr)
     except BrokenPipeError:
         pass
-    finally:
-        if out_file:
-            out_file.close()
 
 
 def _show_info() -> None:
@@ -2634,7 +2882,15 @@ print('Mock Training Complete.')
         env = os.environ.copy()
         env["PUBRUN_AUTO_START"] = "true"
 
-        result = subprocess.run([sys.executable, str(script_path)], env=env, capture_output=True, text=True, cwd=td)
+        result = subprocess.run(
+            [sys.executable, str(script_path)],
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=td,
+        )
 
         if result.returncode != 0:
             _out.fail(f"Mock Evaluation Failed. Exit Code: {result.returncode}")
@@ -2664,11 +2920,28 @@ print('Mock Training Complete.')
     _out.ok("Validation complete.")
 
 
-def _run_bug_report() -> None:
+def _can_open_browser(no_browser: bool) -> bool:
+    """Return True only when an interactive local graphical session can safely open a browser."""
+    if no_browser:
+        return False
+    try:
+        if not sys.stdout.isatty():
+            return False
+    except Exception:
+        return False
+    has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    in_ssh = any(os.environ.get(k) for k in ("SSH_CLIENT", "SSH_TTY", "SSH_CONNECTION"))
+    if in_ssh and not has_display:
+        return False
+    if sys.platform.startswith("linux") and not has_display:
+        return False
+    return True
+
+
+def _run_bug_report(no_browser: bool = False) -> None:
     """Guide the user to report a bug or request a feature on GitHub."""
     import webbrowser
     import platform
-    import sys
     import time
     from pubrun import __version__
 
@@ -2686,6 +2959,10 @@ def _run_bug_report() -> None:
     print("--------------------------------------------------\n")
 
     url = "https://github.com/fariello/pubrun/issues/new"
+    if not _can_open_browser(no_browser):
+        print(f"Open the GitHub issue tracker at:\n  {url}\n")
+        return
+
     print(f"Opening GitHub issue tracker at:\n  {url}\n")
     try:
         opened = webbrowser.open(url)
@@ -2699,14 +2976,17 @@ def _run_bug_report() -> None:
 
 def _add_run_filter_args(parser: argparse.ArgumentParser, include_limit: bool = True) -> None:
     """Helper to add standard run filter arguments to a subparser."""
+    from pubrun.status import VALID_STATUSES
+
+    status_choices_text = ", ".join(VALID_STATUSES)
     has_f = any("-f" in getattr(action, "option_strings", []) for action in parser._actions)
     if has_f:
         parser.add_argument("--filter", type=str, default=None, metavar="QUERY", help="Filter runs by script name, arguments, or run ID (supports regex or plain string).")
     else:
         parser.add_argument("-f", "--filter", type=str, default=None, metavar="QUERY", help="Filter runs by script name, arguments, or run ID (supports regex or plain string).")
     parser.add_argument("-F", "--not-filter", type=str, default=None, metavar="QUERY", help="Exclude runs matching script name, arguments, or run ID.")
-    parser.add_argument("-s", "--status", type=str, default=None, metavar="STATUS", help="Comma-separated status filter (e.g. 'completed,failed,crashed').")
-    parser.add_argument("-S", "--not-status", type=str, default=None, metavar="STATUS", help="Comma-separated status exclusion filter (e.g. 'completed').")
+    parser.add_argument("-s", "--status", type=str, default=None, metavar="STATUS", help=f"Comma-separated status filter. Valid statuses: {status_choices_text}.")
+    parser.add_argument("-S", "--not-status", type=str, default=None, metavar="STATUS", help=f"Comma-separated status exclusion filter. Valid statuses: {status_choices_text}.")
     parser.add_argument("--older-than", type=str, default=None, metavar="AGE", help="Only consider runs older than AGE (e.g. '7d', '24h', '30' for 30 days).")
     parser.add_argument("--exit-code", type=int, default=None, metavar="CODE", help="Only consider runs with this exit code.")
     if include_limit:
@@ -2780,9 +3060,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         argv: Full argument vector including the program name (defaults to ``sys.argv``).
     """
     argv = list(sys.argv if argv is None else argv)
-    prog_name = Path(argv[0]).name if argv and argv[0] else "pubrun"
-    if prog_name not in ("pubrun", "pbr"):
-        prog_name = "pubrun"
+    raw_stem = Path(argv[0].replace("\\", "/")).stem.lower() if argv and argv[0] else "pubrun"
+    prog_name = "pbr" if raw_stem == "pbr" else "pubrun"
 
     # Primary commands (excluding aliases) for clean error messages.
     _PRIMARY_COMMANDS: list = []
@@ -2810,7 +3089,6 @@ def main(argv: Optional[List[str]] = None) -> None:
             # UX-01: Rewrite "invalid choice" errors to show only primary
             # commands (not aliases) for a cleaner novice experience.
             if "invalid choice" in message and _PRIMARY_COMMANDS:
-                import re
                 bad = re.search(r"'([^']+)'", message)
                 bad_cmd = bad.group(1) if bad else "?"
                 clean_msg = (
@@ -2825,8 +3103,23 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     parser = _SubcommandAwareArgumentParser(
         prog=prog_name,
-        description=f"{prog_name}: Zero-dependency execution telemetry and publication engine.",
-        epilog=f"Use '{prog_name} <command> --help' for detailed information on a specific command."
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            f"{prog_name}: Zero-dependency execution telemetry and publication engine.\n\n"
+            "Command groups:\n"
+            "  Setup & run:    init, run, meta, self-check\n"
+            "  Inspect runs:   status, show, diff, inspect, rerun, combined\n"
+            "  Resources:      res (resources), cpu, mem\n"
+            "  Publish & UI:   methods, cite, ui (tui/gui), bench\n"
+            "  Maintenance:    clean, report-bug"
+        ),
+        epilog=(
+            "Quick start:\n"
+            f"  {prog_name} init                         Create .pubrun.toml in this project\n"
+            f"  {prog_name} status                       List recorded runs and their status\n"
+            f"  {prog_name} show                         Inspect the most recent run\n\n"
+            f"Use '{prog_name} <command> --help' for detailed information on a specific command."
+        ),
     )
     from pubrun import __commit__ as _commit
     _commit_line = f" (commit {_commit})" if _commit else ""
@@ -2844,6 +3137,12 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     subparsers = parser.add_subparsers(dest="command", title="Available core commands", metavar="<command>")
 
+    _RUN_HELP = (
+        "Run selector: recency index (#1, #2 passed as 1, 2), run ID/prefix, "
+        "or directory path. Defaults to the most recent matching run."
+    )
+    _DIR_HELP = "Override the output directory to scan (default: configured output_dir, PUBRUN_OUTPUT_DIR, or ./runs)."
+
     # ---------------- Init Subparser (UX-08) ----------------
     init_parser = subparsers.add_parser(
         "init",
@@ -2858,15 +3157,16 @@ def main(argv: Optional[List[str]] = None) -> None:
     # ---------------- Bug Report Subparser ----------------
     report_bug_parser = subparsers.add_parser(
         "report-bug",
+        aliases=["feedback"],
         help="File a bug report or request a feature.",
-        description="Opens the GitHub issue tracker and prints environment diagnostics for copy-pasting.",
+        description="Print environment diagnostics and open the GitHub issue tracker (skipped automatically on non-TTY or headless sessions).",
+        epilog=f"Examples:\n  {prog_name} report-bug\n  {prog_name} report-bug --no-browser",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    feedback_parser = subparsers.add_parser(
-        "feedback",
-        help="Send feedback about pubrun.",
-        description="Opens the GitHub issue tracker and prints environment diagnostics for copy-pasting.",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+    report_bug_parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Print diagnostics and the GitHub issue URL without opening a web browser.",
     )
 
     # ---------------- Cite Subparser ----------------
@@ -2899,19 +3199,23 @@ def main(argv: Optional[List[str]] = None) -> None:
     inspect_parser = subparsers.add_parser(
         "inspect",
         help="Assess a completed run's reproducibility evidence and optional offline preflight.",
-        description="Report-only, post-hoc reproducibility assessment of a completed run's "
-                    "manifest (with parent meta_ref hydration): evaluates seven structured "
-                    "evidence categories, prioritizes concrete next steps, and optionally "
-                    "runs a read-only offline preflight comparison (--preflight) against the "
-                    "current machine. Prints a prominent banner when the inspecting host "
-                    "differs from where the run executed (e.g. HPC head node vs compute node).",
-        epilog=f"Examples:\n  {prog_name} inspect\n  {prog_name} inspect runs/pubrun-XYZ --show-suggestions\n"
+        description=(
+            "Report-only, post-hoc reproducibility assessment of a completed run's manifest. "
+            "If the run references a parent meta.json snapshot (created by `pubrun meta` and "
+            "linked via PUBRUN_META_REF or [core].meta_ref), inspect hydrates shared hardware, "
+            "host, git, and package metadata from that parent snapshot before evaluating seven "
+            "structured evidence categories. Pass --preflight to run a read-only offline "
+            "comparison against the current machine. Prints a prominent banner when the "
+            "inspecting host differs from where the run executed (e.g. HPC head node vs compute node)."
+        ),
+        epilog=f"Examples:\n  {prog_name} inspect\n  {prog_name} inspect 1 --show-suggestions\n"
                f"  {prog_name} inspect runs/pubrun-XYZ --preflight\n"
                f"  {prog_name} inspect runs/pubrun-XYZ --preflight --fail-on mismatch\n"
                f"  {prog_name} inspect -f train.py --json",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    inspect_parser.add_argument("run_dir", type=str, nargs="?", help="Run directory to inspect. Defaults to the most recent matching run.")
+    inspect_parser.add_argument("run_dir", type=str, nargs="?", metavar="RUN", help=_RUN_HELP)
+    inspect_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help=_DIR_HELP)
     inspect_parser.add_argument("--show-suggestions", "-v", action="store_true", help="Show per-category status, preflight checks, and per-finding detail with next steps.")
     inspect_parser.add_argument("--preflight", action="store_true", help="Run read-only offline comparison of supported recorded requirements against the current environment.")
     inspect_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit the full structured reproducibility assessment as JSON (preserving top-level 'findings').")
@@ -2920,7 +3224,12 @@ def main(argv: Optional[List[str]] = None) -> None:
         "--fail-on",
         choices=["warn", "mismatch", "unknown"],
         default=None,
-        help="Strict exit threshold ('warn', 'mismatch', or 'unknown'). Implies strict exit checking and works with or without --preflight.",
+        help=(
+            "Strict exit threshold (implies --strict, works with or without --preflight): "
+            "'warn' fails on any warning finding; "
+            "'mismatch' fails on material warnings or preflight mismatches; "
+            "'unknown' also fails on unknown/not-checked preflight checks or uncertain categories."
+        ),
     )
     _add_run_filter_args(inspect_parser, include_limit=False)
 
@@ -2940,7 +3249,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     "offers to contribute the redacted result to GitHub (via `gh` "
                     "gist/inline, or browser Issue Form fallback).",
         epilog=f"Examples:\n  {prog_name} bench --quick\n  {prog_name} bench --local --passes 3\n"
-               f"  {prog_name} bench --prepare-submission\n"
+               f"  {prog_name} bench --submit-file runs.redacted.json --prepare-submission\n"
                f"  {prog_name} bench --submit-file runs.redacted.json",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -2949,37 +3258,40 @@ def main(argv: Optional[List[str]] = None) -> None:
     bench_speed.add_argument("--full", action="store_true", help="Standard run (baseline + 3 passes x 30 iterations). This is the default; the flag is for clarity.")
     bench_speed.add_argument("--rigorous", action="store_true", help="Tight-CI run (baseline + 5 passes x 50 iterations); can take many minutes.")
     bench_parser.add_argument("--no-baseline", action="store_true", help="Skip the initial uncaptured baseline pass (the pubrun-absent reference sweep).")
-    bench_parser.add_argument("--iterations", type=int, default=None, help="Override iterations per scenario (takes precedence over --quick/--full).")
-    bench_parser.add_argument("--passes", type=int, default=None, help="Override the number of measured scenario sweeps (default depends on the tier: quick=2, full=3, rigorous=5).")
-    bench_group = bench_parser.add_mutually_exclusive_group()
-    bench_group.add_argument("--local", action="store_true", help="Run here even if an HPC scheduler is detected.")
-    bench_group.add_argument("--submit", action="store_true", help="Submit the benchmark JOB to the detected HPC scheduler without prompting (no effect off HPC).")
-    bench_parser.add_argument("--scheduler", choices=("auto", "slurm", "pbs", "lsf", "sge", "local"),
-                              default="auto", help="HPC scheduler to submit to (default: auto-detect; 'local' forces a local run).")
-    bench_parser.add_argument("-y", "--yes", action="store_true", help="Assume yes to the HPC scheduler submit prompt.")
+    bench_parser.add_argument("--iterations", type=int, default=None, help="Override iterations per scenario (>= 1; takes precedence over --quick/--full).")
+    bench_parser.add_argument("--passes", type=int, default=None, help="Override the number of measured scenario sweeps (>= 1; default depends on the tier: quick=2, full=3, rigorous=5).")
     bench_parser.add_argument("--unredacted", action="store_true",
                               help="ALSO write the identifying, un-redacted result (embeds hostname/paths; for local "
                                    "debugging only, do NOT share). By default only the redacted, share-safe file is written.")
     bench_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit the redacted/unredacted paths as JSON.")
-    # --- contribution to GitHub (gist-and-link, inline fallback, browser fallback) ---
-    contrib = bench_parser.add_mutually_exclusive_group()
+
+    hpc_group = bench_parser.add_argument_group("HPC scheduler options")
+    bench_exec = hpc_group.add_mutually_exclusive_group()
+    bench_exec.add_argument("--local", action="store_true", help="Run here even if an HPC scheduler is detected.")
+    bench_exec.add_argument("--submit", action="store_true", help="Submit the benchmark JOB to the detected HPC scheduler without prompting (no effect off HPC).")
+    hpc_group.add_argument("--scheduler", choices=("auto", "slurm", "pbs", "lsf", "sge", "local"),
+                           default="auto", help="HPC scheduler to submit to (default: auto-detect; 'local' forces a local run).")
+    hpc_group.add_argument("-y", "--yes", action="store_true", help="Assume yes to the HPC scheduler submit prompt.")
+    hpc_group.add_argument("--wait-timeout", type=int, default=None, metavar="SECONDS",
+                           help="For Slurm submit-and-wait: how long the login-node process waits for the "
+                                "queued job before pointing you at --submit-file (>= 0; default ~1800s; 0 = wait forever).")
+
+    gh_group = bench_parser.add_argument_group("GitHub contribution options")
+    contrib = gh_group.add_mutually_exclusive_group()
     contrib.add_argument("--contribute", dest="contribute", action="store_true", default=None,
                          help="Publish the share-checked redacted result to GitHub after the run (no prompt). "
                               "Uses `gh`: an unlisted gist linked from an issue, or inline if small.")
     contrib.add_argument("--no-contribute", dest="contribute", action="store_false",
                          help="Never offer or attempt GitHub publication.")
-    bench_parser.add_argument("--prepare-submission", action="store_true",
-                              help="Instead of publishing, copy ONLY the redacted (safe) file into a clean "
-                                   "pubrun-share/ folder for a manual browser attach.")
-    bench_parser.add_argument("--submit-file", metavar="FILE", default=None,
-                              help="Contribute an existing redacted result file (share-check + publish/prepare), "
-                                   "without running a benchmark.")
-    bench_parser.add_argument("--wait-timeout", type=int, default=None, metavar="SECONDS",
-                              help="For Slurm submit-and-wait: how long the login-node process waits for the "
-                                   "queued job before pointing you at --submit-file (default ~1800s; 0 = wait forever).")
-    bench_parser.add_argument("--no-submit", action="store_true", help="Skip the end-of-run contribution offer entirely.")
-    bench_parser.add_argument("--gh-repo", metavar="OWNER/NAME", default=None,
-                              help=f"Target GitHub repo for the contribution (default {_DEFAULT_BENCH_REPO}).")
+    gh_group.add_argument("--prepare-submission", action="store_true",
+                          help="Instead of publishing, copy ONLY the redacted (safe) file into a clean "
+                               "pubrun-share/ folder for a manual browser attach.")
+    gh_group.add_argument("--submit-file", metavar="FILE", default=None,
+                          help="Contribute an existing redacted result file (share-check + publish/prepare), "
+                               "without running a benchmark.")
+    gh_group.add_argument("--no-submit", action="store_true", help="Skip the end-of-run contribution offer entirely.")
+    gh_group.add_argument("--gh-repo", metavar="OWNER/NAME", default=None,
+                          help=f"Target GitHub repo for the contribution (default {_DEFAULT_BENCH_REPO}).")
 
     # ---------------- Clean Subparser ----------------
     clean_parser = subparsers.add_parser(
@@ -2989,9 +3301,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         epilog=f"Examples:\n  {prog_name} clean\n  {prog_name} clean --older-than 7d --yes\n  {prog_name} clean --status completed,ghost",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    clean_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan.")
+    clean_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help=_DIR_HELP)
     clean_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt (delete all matching runs).")
     clean_parser.add_argument("--dry-run", action="store_true", help="Show what would be deleted without actually deleting.")
+    clean_parser.add_argument(
+        "--force-remote-locks",
+        action="store_true",
+        help="Allow deleting runs locked by a different host (never bypasses active local PID, unreadable lock, or symlink confinement checks).",
+    )
     _add_run_filter_args(clean_parser)
 
     # ---------------- Combined Subparser ----------------
@@ -2999,11 +3316,11 @@ def main(argv: Optional[List[str]] = None) -> None:
         "combined",
         help="Interleave stdout/stderr logs from one or more runs.",
         description="Interleave stdout/stderr logs from one or more runs.",
-        epilog=f"Examples:\n  {prog_name} combined\n  {prog_name} combined run-A run-B --output combined.log",
+        epilog=f"Examples:\n  {prog_name} combined\n  {prog_name} combined 1 2 --output combined.log",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    combined_parser.add_argument("run_ids", type=str, nargs="*", help="Run IDs (or prefixes) to combine. Defaults to the latest run if omitted.")
-    combined_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
+    combined_parser.add_argument("run_ids", type=str, nargs="*", metavar="RUN", help="Run selectors (recency index #1/#2 as 1/2, run ID/prefix, or directory path) to combine. Defaults to the latest matching run if omitted.")
+    combined_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help=_DIR_HELP)
     combined_parser.add_argument("--output", type=str, default=None, metavar="FILE", help="Write combined logs to this file instead of stdout.")
     combined_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt for files > 250 MB.")
     # NOTE: as of 1.4.0, `-f` means `--filter` on `combined` (consistent with every other
@@ -3017,13 +3334,15 @@ def main(argv: Optional[List[str]] = None) -> None:
         "cpu",
         help="Display CPU utilization chart over the run lifecycle.",
         description="Display CPU utilization chart over the run lifecycle.",
-        epilog=f"Examples:\n  {prog_name} cpu\n  {prog_name} cpu runs/pubrun-XYZ",
+        epilog=f"Examples:\n  {prog_name} cpu\n  {prog_name} cpu 1 --utc",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    cpu_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
+    cpu_parser.add_argument("run_dir", type=str, nargs="?", metavar="RUN", help=_RUN_HELP)
+    cpu_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help=_DIR_HELP)
     cpu_parser.add_argument("--average", action="store_true", help="Plot average/mean values instead of the default maximum values.")
     cpu_parser.add_argument("-l", "--last", type=str, default=None, help="Only show the last X minutes, hours, or seconds of data (e.g. '10m', '2h', '30s').")
     cpu_parser.add_argument("-w", "--width", type=int, default=None, help="Override chart width in columns.")
+    cpu_parser.add_argument("--utc", action="store_true", help="Display chart axis timestamps in UTC instead of local time.")
     _add_run_filter_args(cpu_parser, include_limit=False)
 
     # ---------------- Diff Subparser ----------------
@@ -3031,11 +3350,24 @@ def main(argv: Optional[List[str]] = None) -> None:
         "diff",
         help="Compare two execution traces and highlight differences.",
         description="Compare two execution traces and highlight differences.",
-        epilog=f"Examples:\n  {prog_name} diff runs/pubrun-A runs/pubrun-B\n  {prog_name} diff runs/pubrun-A runs/pubrun-B --deep --same",
+        epilog=(
+            "Examples:\n"
+            f"  {prog_name} diff\n"
+            f"  {prog_name} diff 2 1 --deep --same\n"
+            f"  {prog_name} diff runs/pubrun-A runs/pubrun-B --json"
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    diff_parser.add_argument("run_dirs", type=str, nargs="*", help="Run directories to compare. If omitted, diffs the last two runs. If one is provided, diffs it against the most recent different run.")
-    diff_parser.add_argument("--export", type=str, nargs="?", const=True, help="Export flattened manifests to files ('txt' or 'json').")
+    diff_parser.add_argument("run_dirs", type=str, nargs="*", metavar="RUN", help="Up to two run selectors (recency index #1/#2 as 1/2, run ID/prefix, or directory path). Omit to diff the last two runs; pass one to diff it against the most recent other run.")
+    diff_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help=_DIR_HELP)
+    diff_parser.add_argument(
+        "--export",
+        type=str,
+        nargs="?",
+        const=True,
+        help="Export cleaned manifests to .pubrun_diff_A_<run>_clean.<fmt> and .pubrun_diff_B_<run>_clean.<fmt> in the current directory ('txt' or 'json'; default from [diff].export_format, which defaults to 'txt').",
+    )
+    diff_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit the structured diff report as strict JSON to stdout (cannot be combined with --export).")
     diff_parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output.")
 
     wrap_group = diff_parser.add_mutually_exclusive_group()
@@ -3061,20 +3393,29 @@ def main(argv: Optional[List[str]] = None) -> None:
         "mem",
         help="Display memory utilization chart over the run lifecycle.",
         description="Display memory utilization chart over the run lifecycle.",
-        epilog=f"Examples:\n  {prog_name} mem\n  {prog_name} mem runs/pubrun-XYZ",
+        epilog=f"Examples:\n  {prog_name} mem\n  {prog_name} mem 1 --utc",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    mem_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
+    mem_parser.add_argument("run_dir", type=str, nargs="?", metavar="RUN", help=_RUN_HELP)
+    mem_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help=_DIR_HELP)
     mem_parser.add_argument("--average", action="store_true", help="Plot average/mean values instead of the default maximum values.")
     mem_parser.add_argument("-l", "--last", type=str, default=None, help="Only show the last X minutes, hours, or seconds of data (e.g. '10m', '2h', '30s').")
     mem_parser.add_argument("-w", "--width", type=int, default=None, help="Override chart width in columns.")
+    mem_parser.add_argument("--utc", action="store_true", help="Display chart axis timestamps in UTC instead of local time.")
     _add_run_filter_args(mem_parser, include_limit=False)
 
     # ---------------- Meta Subparser ----------------
     meta_parser = subparsers.add_parser(
         "meta",
         help="Generate a standalone meta.json environment snapshot.",
-        description="Generate a standalone meta.json environment snapshot for HPC parent-child hydration.",
+        description=(
+            "Capture shared node and environment metadata (hardware, host, git, Python, "
+            "and packages) once into a standalone meta.json file. In HPC array or batch "
+            "jobs, point child runs at this file via PUBRUN_META_REF or [core].meta_ref "
+            "so `pubrun show`, `pubrun inspect`, `pubrun methods`, and `pubrun diff` "
+            "hydrate (merge) the shared parent context into each child manifest without "
+            "re-capturing slow node details on every task."
+        ),
         epilog=f"Examples:\n  {prog_name} meta\n  {prog_name} meta --out custom_meta.json --deep",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -3090,13 +3431,19 @@ def main(argv: Optional[List[str]] = None) -> None:
     methods_parser = subparsers.add_parser(
         "methods",
         help="Generate publication-ready 'Computational Methods' paragraphs.",
-        description="Generate publication-ready 'Computational Methods' paragraphs.",
-        epilog=f"Examples:\n  {prog_name} methods\n  {prog_name} methods runs/pubrun-XYZ --format latex",
+        description="Generate publication-ready 'Computational Methods' paragraphs (prints pure Markdown or LaTeX to stdout; status banners go to stderr).",
+        epilog=(
+            "Examples:\n"
+            f"  {prog_name} methods\n"
+            f"  {prog_name} methods 1 --format latex\n"
+            f"  {prog_name} methods --all --filter train.py --status completed --limit 10"
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    methods_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
-    methods_parser.add_argument("--format", type=str, choices=["markdown", "latex"], default="markdown", help="Output format: markdown or latex.")
-    methods_parser.add_argument("--all", action="store_true", help="Aggregate ALL matching runs into one methods paragraph (with a variance note where they differ), instead of the single most-recent run. Combine with -f/-F/-s/-S/-n to bound the set.")
+    methods_parser.add_argument("run_dir", type=str, nargs="?", metavar="RUN", help=_RUN_HELP)
+    methods_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help=_DIR_HELP)
+    methods_parser.add_argument("--format", type=str, choices=["markdown", "latex"], default=None, help="Output format: markdown or latex (default: [methods].format in config, or markdown).")
+    methods_parser.add_argument("--all", action="store_true", help="Aggregate ALL matching runs into one methods paragraph (with a variance note where they differ), instead of the single most-recent run. Combine with --filter (-f), --not-filter (-F), --status (-s), --not-status (-S), or --limit (-n) to bound the set.")
     _add_run_filter_args(methods_parser, include_limit=True)
 
     # ---------------- Hidden Report Subparser ----------------
@@ -3107,8 +3454,9 @@ def main(argv: Optional[List[str]] = None) -> None:
         epilog=f"Examples:\n  {prog_name} report\n  {prog_name} report runs/pubrun-XYZ\n  {prog_name} report env",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    report_parser.add_argument("run_dir", type=str, nargs="?", help="Run directory (e.g., runs/pubrun-XYZ). Defaults to the most recent run.")
+    report_parser.add_argument("run_dir", type=str, nargs="?", metavar="RUN", help=_RUN_HELP)
     report_parser.add_argument("section", type=str, nargs="?", help="Optional section to view (e.g. 'logs', 'env', 'packages').")
+    report_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help=_DIR_HELP)
 
     depth_group_report = report_parser.add_mutually_exclusive_group()
     depth_group_report.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Timing and outcome only.")
@@ -3126,20 +3474,26 @@ def main(argv: Optional[List[str]] = None) -> None:
                     "the command to stdout (safe for piping such as `pubrun rerun | bash`). "
                     "Pass --preflight to run a read-only offline comparison against the current "
                     "environment (diagnostics go to stderr; never executes the command).",
-        epilog=f"Examples:\n  {prog_name} rerun\n  {prog_name} rerun runs/pubrun-XYZ\n"
+        epilog=f"Examples:\n  {prog_name} rerun\n  {prog_name} rerun 1\n"
                f"  {prog_name} rerun runs/pubrun-XYZ --preflight\n"
                f"  {prog_name} rerun runs/pubrun-XYZ --preflight --strict\n"
                f"  {prog_name} rerun runs/pubrun-XYZ --preflight --fail-on mismatch --json",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    rerun_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
+    rerun_parser.add_argument("run_dir", type=str, nargs="?", metavar="RUN", help=_RUN_HELP)
+    rerun_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help=_DIR_HELP)
     rerun_parser.add_argument("--preflight", action="store_true", help="Run read-only offline preflight comparison before printing the rerun command (diagnostics go to stderr).")
     rerun_parser.add_argument("--strict", action="store_true", help="Requires --preflight. Exit 1 and suppress stdout when the strict threshold triggers (default: 'warn').")
     rerun_parser.add_argument(
         "--fail-on",
         choices=["warn", "mismatch", "unknown"],
         default=None,
-        help="Requires --preflight. Strict exit threshold ('warn', 'mismatch', or 'unknown'); implies --strict.",
+        help=(
+            "Requires --preflight; implies --strict. Strict exit threshold: "
+            "'warn' fails on any warning finding; "
+            "'mismatch' fails on material warnings or preflight mismatches; "
+            "'unknown' also fails on unknown/not-checked preflight checks."
+        ),
     )
     rerun_parser.add_argument("--json", action="store_true", dest="as_json", help="Requires --preflight. Emit JSON with rerun_command, executable_as_printed, and assessment to stdout.")
     _add_run_filter_args(rerun_parser, include_limit=False)
@@ -3150,21 +3504,35 @@ def main(argv: Optional[List[str]] = None) -> None:
         aliases=["resources"],
         help="Display memory and CPU utilization charts over the run lifecycle.",
         description="Display memory and CPU utilization charts over the run lifecycle.",
-        epilog=f"Examples:\n  {prog_name} res\n  {prog_name} res runs/pubrun-XYZ",
+        epilog=f"Examples:\n  {prog_name} res\n  {prog_name} res 1 --utc",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    res_parser.add_argument("run_dir", type=str, nargs="?", help="Directory path to an existing pubrun artifact. Automatically defaults to the most recent run if omitted.")
+    res_parser.add_argument("run_dir", type=str, nargs="?", metavar="RUN", help=_RUN_HELP)
+    res_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help=_DIR_HELP)
     res_parser.add_argument("--average", action="store_true", help="Plot average/mean values instead of the default maximum values.")
     res_parser.add_argument("-l", "--last", type=str, default=None, help="Only show the last X minutes, hours, or seconds of data (e.g. '10m', '2h', '30s').")
     res_parser.add_argument("-w", "--width", type=int, default=None, help="Override chart width in columns.")
+    res_parser.add_argument("--utc", action="store_true", help="Display chart axis timestamps in UTC instead of local time.")
     _add_run_filter_args(res_parser, include_limit=False)
 
     # ---------------- Run Subparser ----------------
     run_parser = subparsers.add_parser(
         "run",
         help="Run a command with a specific pubrun import mode.",
-        description="Spawn a child process with PUBRUN_IMPORT_MODE set. Useful for CI, shell scripts, and HPC workflows where source code should remain unchanged.",
-        epilog=f"Examples:\n  {prog_name} run --mode minimal -- python train.py --epochs 10\n  {prog_name} run --mode noconsole -- python evaluate.py",
+        description=(
+            "Spawn a child process with PUBRUN_IMPORT_MODE and PUBRUN_RUN_MODE_OVERRIDE set.\n"
+            "Prerequisite: the target Python script must still contain `import pubrun` (or\n"
+            "`import pubrun.<mode>`). `pubrun run` overrides the import mode at launch time\n"
+            "without editing source code; it does not inject pubrun into untracked scripts.\n\n"
+            "Import modes:\n"
+            "  auto       Start tracking on import with standard hooks (default).\n"
+            "  full       Like auto, plus force stdout/stderr console capture on.\n"
+            "  noauto     Load API only; start tracking when pubrun.start() is called.\n"
+            "  nopatch    Start tracking without subprocess or console patching (keeps signals).\n"
+            "  noconsole  Start tracking without wrapping stdout/stderr.\n"
+            "  minimal    Load API only, with no auto-start and no process-global hooks."
+        ),
+        epilog=f"Examples:\n  {prog_name} run --mode minimal -- python train.py --epochs 10\n  {prog_name} run --mode full -- python evaluate.py",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     run_parser.add_argument("--mode", type=str, choices=["auto", "noauto", "nopatch", "noconsole", "minimal", "full"], default="auto", help="Import mode for the child process (default: auto).")
@@ -3175,12 +3543,13 @@ def main(argv: Optional[List[str]] = None) -> None:
         "show",
         help="Analyze and display diagnostic telemetry from a specific run.",
         description="Analyze and display diagnostic telemetry from a specific run.",
-        epilog=f"Examples:\n  {prog_name} show\n  {prog_name} show runs/pubrun-XYZ\n  {prog_name} show runs/pubrun-XYZ env\n  {prog_name} show env\n  {prog_name} show config\n  {prog_name} show run config 1\n  {prog_name} show default config",
+        epilog=f"Examples:\n  {prog_name} show\n  {prog_name} show 1\n  {prog_name} show runs/pubrun-XYZ env\n  {prog_name} show env\n  {prog_name} show config\n  {prog_name} show run config 1\n  {prog_name} show default config",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    show_parser.add_argument("run_dir", type=str, nargs="?", help="Run directory (e.g., runs/pubrun-XYZ). Defaults to the most recent run. Also the keyword 'config' (current resolved config), or 'run'/'default' in the `show <run|default> config` forms.")
+    show_parser.add_argument("run_dir", type=str, nargs="?", metavar="RUN", help="Run selector (recency index #1/#2 as 1/2, run ID/prefix, or directory path; defaults to latest). Also the keyword 'config' (current resolved config), or 'run'/'default' in the `show <run|default> config` forms.")
     show_parser.add_argument("section", type=str, nargs="?", help="Optional section to view ('logs', 'env', 'packages'), or 'config' in the `show run config` / `show default config` forms.")
-    show_parser.add_argument("config_extra", type=str, nargs="?", help="Optional run selector for `pubrun show run config <id>` (recency index, id prefix, or path). Defaults to the most recent run.")
+    show_parser.add_argument("config_extra", type=str, nargs="?", metavar="RUN", help="Optional run selector for `pubrun show run config <RUN>` (recency index #1/#2 as 1/2, run ID/prefix, or directory path). Defaults to the most recent run.")
+    show_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help=_DIR_HELP)
 
     depth_group_show = show_parser.add_mutually_exclusive_group()
     depth_group_show.add_argument("--basic", action="store_const", dest="depth", const="basic", help="Timing and outcome only.")
@@ -3196,13 +3565,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         "status",
         help="List runs and their status, or inspect a specific run.",
         description="List runs and their status, or inspect a specific run.",
-        epilog=f"Examples:\n  {prog_name} status\n  {prog_name} status --status failed,crashed\n  {prog_name} status --limit 5\n  {prog_name} status -f train.py",
+        epilog=f"Examples:\n  {prog_name} status\n  {prog_name} status --status failed,crashed\n  {prog_name} status --limit 5\n  {prog_name} status -f train.py --json",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    status_parser.add_argument("run_id", type=str, nargs="?", help="Run ID (or prefix) to inspect in detail. If omitted, lists all runs.")
-    status_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
+    status_parser.add_argument("run_id", type=str, nargs="?", metavar="RUN", help="Run selector (recency index #1/#2 as 1/2, run ID/prefix, or directory path) to inspect in detail. If omitted, lists matching runs.")
+    status_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help=_DIR_HELP)
     status_parser.add_argument("-v", "--verbose", action="store_true", help="Show detailed information for each run in the listing.")
     status_parser.add_argument("--utc", action="store_true", help="Display timestamps in UTC instead of local time.")
+    status_parser.add_argument("--json", action="store_true", dest="as_json", help="Emit run status output as strict JSON to stdout.")
     _add_run_filter_args(status_parser)
 
     # ---------------- UI Subparser ----------------
@@ -3214,7 +3584,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         epilog=f"Examples:\n  {prog_name} ui\n  {prog_name} ui --dir /path/to/runs",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ui_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help="Override the output directory to scan (default: configured output_dir or ./runs).")
+    ui_parser.add_argument("--dir", type=str, default=None, metavar="PATH", help=_DIR_HELP)
 
     # Hide the `report` alias from the help listing, then sort the remaining commands
     # alphabetically so `pubrun -h` presents them in a predictable order. This affects
@@ -3233,7 +3603,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument("--run-tests", action="store_true", help="Run the built-in test suite and a mock end-to-end script.")
 
     # UX-01: Build the primary commands list (excluding aliases) for clean errors.
-    _known_aliases = {"tui", "gui", "report", "resources"}
+    _known_aliases = {"tui", "gui", "report", "resources", "feedback"}
     _PRIMARY_COMMANDS.extend(
         name for name in subparsers.choices if name not in _known_aliases
     )
@@ -3254,24 +3624,44 @@ def main(argv: Optional[List[str]] = None) -> None:
     _apply_global_flags(args, no_color_present)
 
     # `pubrun show config` family (positional grammar), intercepted BEFORE run resolution so
-    # the keyword `config` is not mistaken for a run selector. Three forms:
+    # the keyword `config` is not mistaken for a run selector. Forms:
     #   show config                -> current resolved config (run_dir == "config", no section)
+    #   show config default        -> shipped defaults      (run_dir == "config", section == "default")
+    #   show config <id>           -> a past run's config   (run_dir == "config", section == <id>)
     #   show default config        -> shipped defaults      (run_dir == "default", section == "config")
-    #   show run config [<id>]     -> a past run's config    (run_dir == "run",     section == "config")
+    #   show run config [<id>]     -> a past run's config   (run_dir == "run",     section == "config")
     # Precedence note: these keyword forms win over a run whose id literally starts with
     # config/run/default; such a run must be selected by full id or path.
     if args.command in {"show", "report"}:
         _rd = getattr(args, "run_dir", None)
         _sec = getattr(args, "section", None)
         _extra = getattr(args, "config_extra", None)  # optional run id after `show run config`
-        if _rd == "config" and _sec is None:
-            _run_show_config("current", show_all=getattr(args, "all", False))
+        _out_dir = getattr(args, "dir", None)
+        if _rd == "config":
+            if _sec is None:
+                _run_show_config("current", show_all=getattr(args, "all", False))
+                return
+            if _sec == "default":
+                _run_show_config("default")
+                return
+            _out.info(f"Interpreting 'show config {_sec}' as 'show run config {_sec}'.")
+            _run_show_config(
+                "run",
+                run_selector=_sec,
+                show_all=getattr(args, "all", False),
+                output_dir=_out_dir,
+            )
             return
         if _rd == "default" and _sec == "config":
             _run_show_config("default")
             return
         if _rd == "run" and _sec == "config":
-            _run_show_config("run", run_selector=_extra, show_all=getattr(args, "all", False))
+            _run_show_config(
+                "run",
+                run_selector=_extra,
+                show_all=getattr(args, "all", False),
+                output_dir=_out_dir,
+            )
             return
 
     # Shifting logic: if run_dir is a bare section name, shift it to section and null run_dir.
@@ -3285,9 +3675,10 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     if args.command in {"show", "report"}:
         run_dir = getattr(args, "run_dir", None)
+        out_dir = getattr(args, "dir", None)
         if not run_dir:
             from pubrun.status import scan_runs, filter_runs
-            all_runs = scan_runs()
+            all_runs = scan_runs(out_dir, keep_manifest=False)
             show_filters = {
                 "filter_str": getattr(args, "filter", None),
                 "status_filter": getattr(args, "status", None),
@@ -3306,14 +3697,26 @@ def main(argv: Optional[List[str]] = None) -> None:
                 _print_error(str(e))
                 sys.exit(1)
             if not matched:
-                _print_error("No runs match the filter criteria.")
+                _print_error(_format_no_runs_error(len(all_runs), out_dir))
                 sys.exit(1)
             for idx, r in enumerate(matched):
                 if idx > 0:
                     print("\n")
-                _run_report(str(r.run_dir), args.depth, getattr(args, "section", None), utc=getattr(args, "utc", False))
+                _run_report(
+                    str(r.run_dir),
+                    args.depth,
+                    getattr(args, "section", None),
+                    utc=getattr(args, "utc", False),
+                    output_dir=out_dir,
+                )
         else:
-            _run_report(run_dir, args.depth, getattr(args, "section", None), utc=getattr(args, "utc", False))
+            _run_report(
+                run_dir,
+                args.depth,
+                getattr(args, "section", None),
+                utc=getattr(args, "utc", False),
+                output_dir=out_dir,
+            )
         executed = True
 
     elif args.command in {"res", "resources", "cpu", "mem"}:
@@ -3335,6 +3738,8 @@ def main(argv: Optional[List[str]] = None) -> None:
             last=getattr(args, "last", None),
             metric=metric,
             width=getattr(args, "width", None),
+            output_dir=getattr(args, "dir", None),
+            utc=getattr(args, "utc", False),
         )
         executed = True
 
@@ -3350,6 +3755,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             not_status_filter=getattr(args, "not_status", None),
             aggregate=getattr(args, "all", False),
             limit=getattr(args, "limit", None),
+            output_dir=getattr(args, "dir", None),
         )
         executed = True
 
@@ -3366,6 +3772,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             strict=getattr(args, "strict", False),
             fail_on=getattr(args, "fail_on", None),
             as_json=getattr(args, "as_json", False),
+            output_dir=getattr(args, "dir", None),
         )
         executed = True
 
@@ -3385,6 +3792,8 @@ def main(argv: Optional[List[str]] = None) -> None:
             older_than=getattr(args, "older_than", None),
             exit_code=getattr(args, "exit_code", None),
             table=getattr(args, "table", False),
+            output_dir=getattr(args, "dir", None),
+            as_json=getattr(args, "as_json", False),
         )
         executed = True
 
@@ -3420,6 +3829,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             exit_code=getattr(args, "exit_code", None),
             preflight=getattr(args, "preflight", False),
             fail_on=getattr(args, "fail_on", None),
+            output_dir=getattr(args, "dir", None),
         )
         executed = True
 
@@ -3457,6 +3867,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             exit_code=getattr(args, "exit_code", None),
             not_filter_str=getattr(args, "not_filter", None),
             not_status_filter=getattr(args, "not_status", None),
+            as_json=getattr(args, "as_json", False),
         )
         executed = True
 
@@ -3472,6 +3883,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             exit_code=getattr(args, "exit_code", None),
             not_filter_str=getattr(args, "not_filter", None),
             not_status_filter=getattr(args, "not_status", None),
+            force_remote_locks=getattr(args, "force_remote_locks", False),
         )
         executed = True
 
@@ -3493,7 +3905,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         executed = True
 
     elif args.command in {"report-bug", "feedback"}:
-        _run_bug_report()
+        _run_bug_report(no_browser=getattr(args, "no_browser", False))
         executed = True
 
     elif args.command in {"ui", "tui", "gui"}:
@@ -3582,7 +3994,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         print()
         print("Getting started:")
         print("  1. Add 'import pubrun' at the top of your script.")
-        print("  2. Run your script normally — pubrun captures everything.")
+        print("  2. Run your script normally to record environment, git, packages, and resources.")
         print("  3. View results: pubrun status")
         print()
         print(f"  Config: {dest}")
@@ -3636,12 +4048,24 @@ def main(argv: Optional[List[str]] = None) -> None:
     if not executed:
         parser.print_help()
         try:
-            from pubrun.status import scan_runs
-            runs = scan_runs()
-            if runs:
-                print(f"\nFound {len(runs)} run(s) in the output directory. Run '{prog_name} status' to view them.")
+            runs_dir = _resolve_output_base_dir()
+            run_count = 0
+            if runs_dir.exists() and runs_dir.is_dir():
+                with os.scandir(runs_dir) as it:
+                    for entry in it:
+                        try:
+                            if entry.name.startswith("pubrun-") and entry.is_dir(follow_symlinks=False):
+                                run_count += 1
+                        except OSError:
+                            continue
+            if run_count:
+                print(f"\nFound {run_count} run(s) in the output directory. Run '{prog_name} status' to view them.")
             else:
                 print("\nNo runs found in the output directory.")
+                print("Quick start:")
+                print("  1. Add 'import pubrun' at the top of your Python script.")
+                print(f"  2. Run your script, then inspect results with '{prog_name} status' or '{prog_name} show'.")
+                print(f"  3. Optional: run '{prog_name} init' to create a .pubrun.toml configuration file.")
         except Exception:
             pass
 

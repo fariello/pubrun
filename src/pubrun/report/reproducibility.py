@@ -12,6 +12,7 @@ IMPORTANT: this module is CLI/report-only and must never be imported by
 """
 
 import hashlib
+import json
 import math
 import os
 import platform
@@ -1168,11 +1169,72 @@ def _recorded_network_fs_findings(fs_data: Dict[str, Any]) -> List[Dict[str, Any
     return findings
 
 
+_SEED_SCAN_MAX_LINES: int = 10_000
+_SEED_SCAN_MAX_BYTES: int = 2 * 1024 * 1024
+
+
+def _has_recorded_seed_annotation(manifest_path: Optional[str]) -> bool:
+    """Return True if ``events.jsonl`` beside ``manifest_path`` has a seed annotation.
+
+    Streams at most 10,000 lines and 2 MiB, pre-filtering for ``"annotation"``
+    before JSON parsing, and tolerates missing/unreadable/malformed lines.
+    """
+    if not manifest_path:
+        return False
+    events_path = Path(manifest_path).parent / "events.jsonl"
+    try:
+        bytes_read = 0
+        with open(events_path, "rb") as fh:
+            for line_no, raw_line in enumerate(fh):
+                if line_no >= _SEED_SCAN_MAX_LINES:
+                    break
+                bytes_read += len(raw_line)
+                if bytes_read > _SEED_SCAN_MAX_BYTES:
+                    break
+                if b'"annotation"' not in raw_line:
+                    continue
+                try:
+                    rec = json.loads(raw_line.decode("utf-8", errors="replace"))
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if not isinstance(rec, dict) or rec.get("type") != "annotation":
+                    continue
+                payload = rec.get("payload")
+                if not isinstance(payload, dict):
+                    continue
+                for k, v in payload.items():
+                    if isinstance(k, str) and k.lower() == "seed" and v is not None:
+                        return True
+    except OSError:
+        return False
+    return False
+
+
 def _assess_capture_completeness(
     manifest: Dict[str, Any],
+    manifest_path: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Assess run outcome, capture states, config notices, subprocesses, and determinism."""
     findings: List[Dict[str, Any]] = []
+
+    # 0. Unsupported future/incompatible schema_version detection.
+    raw_sv = manifest.get("schema_version")
+    if isinstance(raw_sv, str) and raw_sv.strip():
+        sv_clean = raw_sv.strip()
+        major = sv_clean.split(".", 1)[0]
+        if major != "1":
+            findings.append(
+                _make_finding(
+                    WARN,
+                    "unsupported_schema_version",
+                    f"Manifest records schema_version '{sv_clean}', which is not supported by this version of pubrun (supports schema major version 1).",
+                    "Upgrade pubrun to a version that supports this manifest schema.",
+                    category="capture_completeness",
+                    evidence_status="observed",
+                    impact="material",
+                    details={"schema_version": sv_clean, "supported_major": "1"},
+                )
+            )
 
     # 1. Run outcome.
     status_sec = manifest.get("status")
@@ -1427,13 +1489,15 @@ def _assess_capture_completeness(
     # 9. Determinism / random seeds.
     det = manifest.get("determinism")
     registered_seeds = det.get("registered_seeds") if isinstance(det, dict) else None
-    if not isinstance(registered_seeds, list) or len(registered_seeds) == 0:
+    has_registered_seeds = isinstance(registered_seeds, list) and len(registered_seeds) > 0
+    has_annotated_seeds = (not has_registered_seeds) and _has_recorded_seed_annotation(manifest_path)
+    if not has_registered_seeds and not has_annotated_seeds:
         findings.append(
             _make_finding(
                 INFO,
                 "determinism_seeds_not_recorded",
                 "No random seeds were registered; nondeterminism in numerical or ML libraries is not tracked automatically.",
-                "Register random seeds explicitly if your workflow requires deterministic random state.",
+                "Record random seeds explicitly with `pubrun.annotate(seed=...)` if your workflow requires deterministic random state.",
                 category="capture_completeness",
                 evidence_status="not_checked",
                 impact="informational",
@@ -3189,6 +3253,8 @@ def _preflight_source(
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
+                        encoding="utf-8",
+                        errors="replace",
                         timeout=remaining,
                         env=clean_env,
                     )
@@ -4465,7 +4531,6 @@ def assess_manifest_reproducibility(
     Does not emit numerical reproducibility scores and always includes
     ``NON_GUARANTEE_DISCLAIMER``.
     """
-    _ = manifest_path  # Reserved for downstream preflight path resolution.
     hydration_dict = _hydration_report_to_dict(hydration_report)
 
     try:
@@ -4478,7 +4543,7 @@ def assess_manifest_reproducibility(
             lambda: _assess_runtime(manifest_dict, current_hostname),
             lambda: _assess_dependencies(manifest_dict),
             lambda: _assess_inputs_outputs(manifest_dict),
-            lambda: _assess_capture_completeness(manifest_dict),
+            lambda: _assess_capture_completeness(manifest_dict, manifest_path=manifest_path),
             lambda: _assess_parent_metadata(
                 manifest_dict, hydration_dict, stale_parent_seconds
             ),
@@ -4755,9 +4820,9 @@ def format_reproducibility_summary(assessment: Dict[str, Any]) -> str:
             f"Preflight [{pf_status}]: "
             f"{int(counts.get('match', 0))} match, "
             f"{int(counts.get('mismatch', 0))} mismatch, "
-            f"{int(counts.get('portability_diff', 0))} portability_diff, "
+            f"{int(counts.get('portability_diff', 0))} portability diff, "
             f"{int(counts.get('unknown', 0))} unknown, "
-            f"{int(counts.get('not_checked', 0))} not_checked."
+            f"{int(counts.get('not_checked', 0))} not checked."
         )
 
     parent_meta = assessment.get("parent_metadata")

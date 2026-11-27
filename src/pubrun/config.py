@@ -183,6 +183,10 @@ def _resolve_layers(overrides: Optional[Dict[str, Any]] = None):
     if env_meta_ref:
         layers.append(("env", {"core": {"meta_ref": env_meta_ref}}))
 
+    env_output_dir = os.environ.get("PUBRUN_OUTPUT_DIR", "").strip()
+    if env_output_dir:
+        layers.append(("env", {"core": {"output_dir": env_output_dir}}))
+
     if overrides:
         # Convenience flattening: allow start(profile="deep", output_dir="./x")
         # as shorthand for start(core={"profile": "deep", "output_dir": "./x"}).
@@ -198,6 +202,14 @@ def _resolve_layers(overrides: Optional[Dict[str, Any]] = None):
     return layers
 
 
+def _expand_output_dir(config: Dict[str, Any]) -> None:
+    """Expand environment variables (``$VAR``) and home (``~``) in ``core.output_dir``."""
+    core = _section(config, "core")
+    raw = core.get("output_dir")
+    if isinstance(raw, str) and raw:
+        core["output_dir"] = os.path.expanduser(os.path.expandvars(raw))
+
+
 def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Build the final configuration by merging all sources.
 
@@ -205,7 +217,7 @@ def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     1. Built-in defaults (``default.toml``)
     2. User home config (``~/.config/pubrun/config.toml``)
     3. Local project config (``.config/pubrun/config.toml`` then ``.pubrun.toml``)
-    4. Environment variables (``PUBRUN_PROFILE`` / ``PUBRUN_META_REF``)
+    4. Environment variables (``PUBRUN_PROFILE`` / ``PUBRUN_META_REF`` / ``PUBRUN_OUTPUT_DIR``)
     5. API overrides (this function's ``overrides`` argument)
 
     Args:
@@ -214,6 +226,7 @@ def resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     config: Dict[str, Any] = {}
     for _name, layer in _resolve_layers(overrides):
         config = _deep_merge(config, layer)
+    _expand_output_dir(config)
     return config
 
 
@@ -231,6 +244,7 @@ def resolve_config_with_provenance(overrides: Optional[Dict[str, Any]] = None):
     config: Dict[str, Any] = {}
     for _name, layer in layers:
         config = _deep_merge(config, layer)
+    _expand_output_dir(config)
 
     provenance: Dict[str, Any] = {}
     for layer_name, layer in layers:
@@ -246,6 +260,14 @@ def resolve_config_with_provenance(overrides: Optional[Dict[str, Any]] = None):
                 }
             else:
                 provenance[dotted] = {"layer": layer_name, "value": value, "overrides": []}
+
+    expanded_output_dir = _section(config, "core").get("output_dir")
+    if (
+        isinstance(expanded_output_dir, str)
+        and expanded_output_dir
+        and "core.output_dir" in provenance
+    ):
+        provenance["core.output_dir"]["value"] = expanded_output_dir
 
     return config, provenance
 

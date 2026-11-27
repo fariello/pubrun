@@ -91,7 +91,7 @@ def _toml_dumps(data: Dict[str, Any]) -> str:
             return "true" if v else "false"
         if isinstance(v, (int, float)):
             return str(v)
-        return '"' + str(v).replace('"', '\\"') + '"'
+        return json.dumps(str(v))
 
     _emit_table("", data)
     return "\n".join(lines) + "\n"
@@ -214,7 +214,7 @@ def _git_commit() -> Optional[str]:
     try:
         out = subprocess.run(
             ["git", "-C", str(checkout_root), "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         if out.returncode == 0:
             return out.stdout.strip() or None
@@ -780,14 +780,19 @@ def main() -> None:
     )
     args = ap.parse_args()
 
+    if args.iterations is not None and args.iterations < 1:
+        ap.error("--iterations must be >= 1")
+    if args.passes is not None and args.passes < 1:
+        ap.error("--passes must be >= 1")
+
     # Tier selection: quick / default / rigorous. Every tier runs 1 uncaptured baseline pass
     # first (unless --no-baseline), then N measured passes of M iterations. --iterations /
     # --passes override the tier's preset.
     mode = "quick" if args.quick else ("rigorous" if args.rigorous else "default")
     tier_iters, tier_passes = _TIERS[mode]
-    iterations = args.iterations if args.iterations else tier_iters
-    passes = max(1, args.passes) if args.passes else tier_passes
-    if args.iterations or args.passes:
+    iterations = args.iterations if args.iterations is not None else tier_iters
+    passes = args.passes if args.passes is not None else tier_passes
+    if args.iterations is not None or args.passes is not None:
         mode = "custom"
 
     # Decide the unredacted and redacted destinations BEFORE running so filesystem context

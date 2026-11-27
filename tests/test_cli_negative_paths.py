@@ -136,7 +136,22 @@ class TestDiagnosticsNegativePaths:
         _write_run(tmp_path / "runs", "pubrun-good", manifest=_good_manifest())
         res = run_pubrun("methods", "--all", "-f", "nomatch", cwd=str(tmp_path), env=_CLI_ENV)
         assert res.returncode == 1
-        assert "No runs match the filter criteria." in res.stderr
+        assert "0 of 1 runs matched the filter criteria." in res.stderr
+
+    def test_empty_dir_vs_zero_match_messages(self, tmp_path):
+        empty_runs = tmp_path / "empty_runs"
+        empty_runs.mkdir()
+        for cmd in (["show", "--dir", str(empty_runs)], ["combined", "--dir", str(empty_runs)], ["methods", "--all", "--dir", str(empty_runs)]):
+            res = run_pubrun(*cmd, cwd=str(tmp_path), env=_CLI_ENV)
+            assert res.returncode == 1
+            assert "No runs found in" in res.stderr
+
+        pop_runs = tmp_path / "pop_runs"
+        _write_run(pop_runs, "pubrun-good", manifest=_good_manifest())
+        for cmd in (["show", "--dir", str(pop_runs), "-f", "nomatch"], ["combined", "--dir", str(pop_runs), "-f", "nomatch"], ["methods", "--all", "--dir", str(pop_runs), "-f", "nomatch"]):
+            res = run_pubrun(*cmd, cwd=str(tmp_path), env=_CLI_ENV)
+            assert res.returncode == 1
+            assert "0 of 1 runs matched the filter criteria." in res.stderr
 
     def test_methods_all_only_corrupt_runs(self, tmp_path):
         _write_run(tmp_path / "runs", "pubrun-bad", raw_manifest="{bad")
@@ -441,3 +456,110 @@ class TestTopLevelCliInProcess:
         assert exc_info.value.code == 0
         out = capsys.readouterr().out
         assert out.startswith("usage: pbr ")
+
+
+class TestCliHelpAndNegativePaths2ge0ea:
+    """Negative-path and self-documenting help regression tests for IPD 2ge0ea."""
+
+    def test_diff_rejects_more_than_two_positional_runs(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        d1 = _write_run(runs_dir, "pubrun-1", manifest=_good_manifest("aaaa1111", 1000.0))
+        d2 = _write_run(runs_dir, "pubrun-2", manifest=_good_manifest("bbbb2222", 2000.0))
+        d3 = _write_run(runs_dir, "pubrun-3", manifest=_good_manifest("cccc3333", 3000.0))
+        res = run_pubrun("diff", str(d1), str(d2), str(d3), cwd=str(tmp_path), env=_CLI_ENV)
+        assert res.returncode == 2
+        assert "at most 2" in res.stderr
+
+    def test_diff_rejects_json_combined_with_export(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        d1 = _write_run(runs_dir, "pubrun-1", manifest=_good_manifest("aaaa1111", 1000.0))
+        d2 = _write_run(runs_dir, "pubrun-2", manifest=_good_manifest("bbbb2222", 2000.0))
+        res = run_pubrun("diff", str(d1), str(d2), "--json", "--export", cwd=str(tmp_path), env=_CLI_ENV)
+        assert res.returncode == 2
+        assert "--json" in res.stderr and "--export" in res.stderr
+
+    def test_diff_ambiguous_prefix_prints_candidates_without_traceback(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        _write_run(runs_dir, "pubrun-1", manifest=_good_manifest("ab111111", 1000.0))
+        _write_run(runs_dir, "pubrun-2", manifest=_good_manifest("ab222222", 2000.0))
+        res = run_pubrun("diff", "ab", "--dir", str(runs_dir), cwd=str(tmp_path), env=_CLI_ENV)
+        assert res.returncode == 1
+        assert "Traceback" not in res.stderr
+        assert "ab111111" in res.stderr and "ab222222" in res.stderr
+
+    def test_feedback_hidden_alias_not_in_primary_commands(self, monkeypatch, capsys):
+        from pubrun.__main__ import main
+
+        monkeypatch.setattr(sys, "argv", ["pubrun", "not-a-cmd"])
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 2
+        err = capsys.readouterr().err
+        choices_str = err.split("(choose from: ", 1)[1].split(")", 1)[0]
+        choices = [c.strip() for c in choices_str.split(",")]
+        assert "report-bug" in choices
+        assert "feedback" not in choices
+
+    def test_self_documenting_help_surfaces(self):
+        from pubrun.status import VALID_STATUSES
+
+        # Top-level grouped help
+        top = run_pubrun("--help")
+        assert top.returncode == 0
+        assert top.stdout.splitlines()[0].startswith("usage: pubrun ")
+        assert "Command groups:" in top.stdout
+        assert "Quick start:" in top.stdout
+
+        # run --help explains import prerequisite and all 6 modes
+        run_help = run_pubrun("run", "--help")
+        assert run_help.returncode == 0
+        assert "import pubrun" in run_help.stdout
+        for mode in ("auto", "full", "noauto", "nopatch", "noconsole", "minimal"):
+            assert mode in run_help.stdout
+
+        # status --help lists all 7 VALID_STATUSES in -s/-S
+        status_help = run_pubrun("status", "--help")
+        assert status_help.returncode == 0
+        for st in VALID_STATUSES:
+            assert st in status_help.stdout
+
+        # show --help does not expose raw config_extra
+        show_help = run_pubrun("show", "--help")
+        assert show_help.returncode == 0
+        assert "config_extra" not in show_help.stdout
+        assert "RUN" in show_help.stdout
+
+        # meta & inspect explain hydration; diff explains --export filenames
+        meta_help = run_pubrun("meta", "--help")
+        assert meta_help.returncode == 0
+        assert "PUBRUN_META_REF" in meta_help.stdout
+
+        inspect_help = run_pubrun("inspect", "--help")
+        assert inspect_help.returncode == 0
+        assert "PUBRUN_META_REF" in inspect_help.stdout
+        assert "mismatch" in inspect_help.stdout and "unknown" in inspect_help.stdout
+
+        diff_help = run_pubrun("diff", "--help")
+        assert diff_help.returncode == 0
+        assert ".pubrun_diff_A_" in diff_help.stdout
+        assert "[diff].export_format" in diff_help.stdout
+
+    def test_crashed_run_suggestion_uses_pubrun_show(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        _write_run(runs_dir, "pubrun-done", manifest=_good_manifest("done1111", 1000.0))
+        crashed = runs_dir / "pubrun-crash"
+        crashed.mkdir(parents=True)
+        (crashed / ".pubrun.lock").write_text(
+            json.dumps({
+                "run_id": "crash222",
+                "pid": _dead_pid(),
+                "started_at_utc": time.time() - 100,
+                "script": "train.py",
+                "hostname": "remote-other-host",
+            }),
+            encoding="utf-8",
+        )
+        res = run_pubrun("show", str(crashed), "--dir", str(runs_dir), cwd=str(tmp_path), env=_CLI_ENV)
+        assert res.returncode == 1
+        assert "pubrun show " in res.stderr
+        assert "pubrun report " not in res.stderr

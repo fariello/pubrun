@@ -53,7 +53,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Output directory, config defaults, and `reproducibility.py`
 
-- [ ] E-01 Add `PUBRUN_OUTPUT_DIR`, path expansion, accurate `default.toml` comments, and Windows Conda prefix normalization in `src/pubrun/config.py`, `src/pubrun/resources/default.toml`, and `src/pubrun/capture/python_runtime.py`:
+- [x] E-01 Add `PUBRUN_OUTPUT_DIR`, path expansion, accurate `default.toml` comments, and Windows Conda prefix normalization in `src/pubrun/config.py`, `src/pubrun/resources/default.toml`, and `src/pubrun/capture/python_runtime.py`:
   - In `src/pubrun/config.py::_resolve_layers`: read `env_output_dir = os.environ.get("PUBRUN_OUTPUT_DIR", "").strip()`; when non-empty, append `("env", {"core": {"output_dir": env_output_dir}})` at the same environment-variable precedence tier as `PUBRUN_META_REF`.
   - In `src/pubrun/config.py`, apply a shared `_expand_output_dir(config: Dict[str, Any]) -> None` helper (using `_section(config, "core")` from Child 01 `1o1cua`) identically in BOTH `resolve_config()` and `resolve_config_with_provenance()` (and reflecting the expanded string in `provenance["core.output_dir"]["value"]` when non-empty) so `resolve_config_with_provenance()[0] == resolve_config()` remains byte-identical (`tests/test_show_config.py::TestShowConfigProvenance.test_provenance_does_not_change_resolved_value`). Expand non-empty `str` values with `os.path.expanduser(os.path.expandvars(raw))` so both `$VAR/...`, `~/...`, and `$VAR` containing `~` expand cleanly.
   - In `src/pubrun/resources/default.toml`:
@@ -65,9 +65,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - In `src/pubrun/capture/python_runtime.py::environment_kind`: compare Conda prefixes with `os.path.normcase(os.path.normpath(cp)) == os.path.normcase(os.path.normpath(sys.prefix))` for Windows drive-letter case invariance.
   - Depends on: none
   - Expected outcome: `PUBRUN_OUTPUT_DIR` and `$VAR`/`~` expansion work identically in `resolve_config()` and `resolve_config_with_provenance()`; empty/whitespace `PUBRUN_OUTPUT_DIR` is ignored; `default.toml` comments accurately reflect implemented vs reserved keys; and `python_runtime.py::environment_kind()` normalizes Windows drive-letter case.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update `src/pubrun/report/reproducibility.py` and `src/pubrun/_bench/harness.py`:
+- [x] E-02 Update `src/pubrun/report/reproducibility.py` and `src/pubrun/_bench/harness.py`:
   - In `src/pubrun/report/reproducibility.py::_assess_capture_completeness`:
     - When `manifest.get("schema_version")` is a non-empty `str` whose major version (`sv.strip().split(".", 1)[0]`) is not `"1"`, emit a `WARN` finding with `code="unsupported_schema_version"`, `category="capture_completeness"`, `evidence_status="observed"`, `impact="material"`, noting the recorded `schema_version` and recommending upgrading `pubrun`.
     - Recognize explicit seed annotations when `manifest_path` is provided: stream `Path(manifest_path).parent / "events.jsonl"` with a bounded cap (up to 10,000 lines / 2 MiB, pre-filtering `if '"annotation"' not in line: continue` and ignoring `OSError`/`json.JSONDecodeError`), treating any `"annotation"` event whose `payload` dict contains a case-insensitive `"seed"` key with a non-`None` value as recorded seeds alongside `manifest.get("determinism", {}).get("registered_seeds")`. When neither is present, emit `determinism_seeds_not_recorded` recommending `pubrun.annotate(seed=...)`.
@@ -76,11 +76,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - In `src/pubrun/_bench/harness.py`: validate `if args.iterations is not None and args.iterations < 1: ap.error("--iterations must be >= 1")` and `if args.passes is not None and args.passes < 1: ap.error("--passes must be >= 1")` in `main()` (checking `is not None` rather than truthiness so `0` is rejected rather than silently defaulted); serialize strings with `json.dumps(str(v))` in `_toml_dumps()` so Windows backslashes serialize as valid TOML; and pass `encoding="utf-8", errors="replace"` in `_git_commit()`.
   - Depends on: none
   - Expected outcome: Future `schema_version` manifests warn clearly, seed annotations in `events.jsonl` are recognized with bounded I/O and actionable `pubrun.annotate(seed=...)` guidance, summary text reads cleanly without changing JSON keys, `_toml_dumps` round-trips Windows paths through `tomllib.loads()`, `--iterations 0`/`-1` and `--passes 0`/`-1` fail with exit code `2`, and git subprocesses decode UTF-8 safely.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: CLI `--dir`, `--json`, streaming, and single-scan plumbing
 
-- [ ] E-03 Add `--dir`, `--json`, `--utc`, `--force-remote-locks`, `--no-browser`, complete `m5s3g8`/`caeqdz` CLI handoffs, and eliminate redundant scans and RAM buffering in `src/pubrun/__main__.py`:
+- [x] E-03 Add `--dir`, `--json`, `--utc`, `--force-remote-locks`, `--no-browser`, complete `m5s3g8`/`caeqdz` CLI handoffs, and eliminate redundant scans and RAM buffering in `src/pubrun/__main__.py`:
   - Add `--dir PATH` consistently across `show`/`report`, `diff`, `methods`, `inspect`, `rerun`, `res`/`resources`, `cpu`, and `mem`, threading `output_dir` into `_get_manifest_path()`, `_run_show_config("run", ...)`, `_run_report()` (including its crash-fallback completed-run suggestion), `_run_diff()`, `_run_methods()`, `_run_methods_aggregate()`, `_run_inspect()`, `_run_rerun()`, `_run_resources()`, `find_run()`, and `scan_runs()`.
   - Complete handoffs from Children 06 (`m5s3g8`) and 07 (`caeqdz`):
     - Update `src/pubrun/__main__.py::_emit_ambiguous_selector(e)` to branch on `getattr(e, "candidates", None)`: when `candidates` is non-empty (ambiguous ID prefix or directory substring where `e.by_recency` and `e.by_id` are `None`), print all matching candidate run IDs and directory names; otherwise keep the existing recency-vs-ID collision message. Catch `AmbiguousRunSelectorError` via `_emit_ambiguous_selector(e)` in `_run_diff()` and `_run_combined()` as well as `_get_manifest_path()`, `_run_status()`, and `_run_show_config()`.
@@ -101,11 +101,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Pass `encoding="utf-8", errors="replace"` to all `text=True` `subprocess.run()` calls in `src/pubrun/__main__.py` (`_run_gh`, `_slurm_job_state` `squeue`/`sacct`, `_run_bench` submit, `_run_tests` mock script), and detect `pbr.exe` via `Path(argv[0]).stem.lower()` (normalizing `"pbr"` -> `"pbr"`, `"pubrun"` -> `"pubrun"`, fallback `"pubrun"`).
   - Depends on: E-01, E-02
   - Expected outcome: Every run-reading command honors `--dir` and `keep_manifest=False`, `_emit_ambiguous_selector()` handles prefix `candidates`, `status`/`diff` emit strict `--json`, `res`/`cpu`/`mem` support `--utc`, `clean` supports `--force-remote-locks`, `_run_combined()` streams in `O(K)` memory without hoisting leading untimestamped lines, `pbr.exe` is detected, and all `text=True` subprocesses decode UTF-8 safely.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Self-documenting help, onboarding, `methods`, `show`, and `bench` UX
 
-- [ ] E-04 Fix `show`, `methods`, `bench`, `init`, `run`, and top-level help/errors in `src/pubrun/__main__.py`:
+- [x] E-04 Fix `show`, `methods`, `bench`, `init`, `run`, and top-level help/errors in `src/pubrun/__main__.py`:
   - In `methods`: change `--format` parser default from `"markdown"` to `None`; in `_run_methods()`, when `format_type is None`, resolve `resolve_config().get("methods", {}).get("format", "markdown")` (falling back to `"markdown"` if invalid/empty). Move decorative `--- Generated Computational Methods Section ---` and `-----------------------------------------------` banners to `sys.stderr` so `stdout` is pure Markdown or LaTeX (note `MARKDOWN_TEMPLATE` and `LATEX_TEMPLATE` retain `### Computational Methods` / `\subsection*{Computational Methods}` on stdout). Add a `--all` example and long flag names (`--filter`, `--status`, `--limit`) to `methods --help` and the `_METHODS_LARGE_SET` note.
   - In `show`: handle `pubrun show config <arg>` cleanly in `main()` before falling through to `_run_report()`: if `_sec == "default"`, dispatch `_run_show_config("default")`; otherwise print `_out.info(f"Interpreting 'show config {_sec}' as 'show run config {_sec}'.")` and dispatch `_run_show_config("run", run_selector=_sec, show_all=getattr(args, "all", False), output_dir=getattr(args, "dir", None))`. In `_run_show_config("run", ..., show_all=True)`, emit an informative note to `stderr` explaining that past runs persist only resolved values (not per-layer provenance) and pointing to `pubrun show config --all` for live provenance.
   - In `diff`: reject `len(run_dirs) > 2` with a clear error message and exit code `2` instead of silently ignoring extra positional arguments.
@@ -124,11 +124,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Add a 3-line quick start to bare `pubrun` when zero runs exist, and fix `pubrun init` step 2 copy (`src/pubrun/__main__.py:3585`) so it does not contradict the opt-in `[console].capture_mode` tip on line 3589.
   - Depends on: E-03
   - Expected outcome: CLI help, errors, tips, and outputs are accurate, pipe-clean, and learnable without external docs, while all existing help/error-format tests remain compatible.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Existing-test alignment and regression tests
 
-- [ ] E-05 Update affected existing tests and add regression tests in `tests/test_cli.py`, `tests/test_cli_negative_paths.py`, and `tests/test_bench_command.py`, and run all validation commands:
+- [x] E-05 Update affected existing tests and add regression tests in `tests/test_cli.py`, `tests/test_cli_negative_paths.py`, and `tests/test_bench_command.py`, and run all validation commands:
   - Update existing tests in `tests/test_cli.py` whose internal call signatures or TTY assumptions change:
     - Update the 9 `mock_run_resources.assert_called_once_with(...)` tests (`tests/test_cli.py:1303-1520`) to include `output_dir=None` and `utc=False` (or match the updated `_run_resources` kwargs) and add tests passing `--dir` and `--utc`.
     - Update `tests/test_cli.py::TestCliBugReport.test_report_bug_and_feedback_open_browser_and_print_diagnostics` to simulate a TTY with display (e.g., monkeypatching `_can_open_browser` or `sys.stdout.isatty` + `DISPLAY`), and add separate tests verifying `--no-browser`, non-TTY, and SSH-without-`DISPLAY` skip `webbrowser.open()`.
@@ -141,7 +141,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Run all commands in `## Required tests / validation`.
   - Depends on: E-04
   - Expected outcome: All updated, new, and existing CLI, status, diff, methods, config, reproducibility, and benchmark tests pass, and three-platform `mypy` exits `0`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -198,30 +198,33 @@ None. All fixes preserve backward-compatible CLI aliases and defaults (`[Y/n]` o
 
 Validation-state rule: inspect evidence in a separate pass. Accepted validation results: blocked, failed, pass, pending; terminal gate demands `pass`.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest tests/test_config.py tests/test_show_config.py tests/test_hardware.py tests/test_cli.py -v` output confirming `src/pubrun/config.py` (`PUBRUN_OUTPUT_DIR`, empty/whitespace ignored, `$VAR`/`~` expansion identical across `resolve_config()` and `resolve_config_with_provenance()`), `src/pubrun/capture/python_runtime.py::environment_kind` Windows-case Conda prefix matching, and `src/pubrun/resources/default.toml` accuracy (including active `capture_gpu_clock_speed` and reserved markers).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Covered by the 12-suite `-v` run (`python3 -m pytest tests/test_cli.py ... tests/test_hardware.py -v`, exit 0, `449 passed in 185.67s`): `tests/test_config.py` (35 passed), `tests/test_show_config.py` (13 passed, including `test_provenance_does_not_change_resolved_value`), `tests/test_hardware.py` (12 passed, including `test_get_gpus_nvidia_with_clock_speed`), and `tests/test_cli.py` (122 passed, including `test_config_pubrun_output_dir_and_var_tilde_expansion`, `test_default_toml_comments_accuracy_and_gpu_clock_active`, `test_python_runtime_environment_kind_windows_conda_normcase`). Also verified by `aw suite` (`2521 passed in 100.48s`).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest tests/test_reproducibility_preflight.py tests/test_reproducibility_assessment.py tests/test_bench_command.py -v` output confirming `src/pubrun/report/reproducibility.py` (`unsupported_schema_version` warning for `schema_version = "2.0"`, bounded `events.jsonl` seed annotation recognition vs `pubrun.annotate(seed=...)` suggestion, humanized `format_reproducibility_summary()` with unchanged JSON keys, UTF-8 `_run_readonly_git()`) and `src/pubrun/_bench/harness.py` (`_toml_dumps()` Windows backslash `tomllib.loads()` round-trip, `--iterations 0`/`-1` and `--passes 0`/`-1` exit `2`).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Covered by the 12-suite `-v` run (`exit 0`, `449 passed in 185.67s`): `tests/test_reproducibility_preflight.py` (13 passed), `tests/test_reproducibility_assessment.py` (23 passed), `tests/test_cli.py::TestCliErgonomicsAndCompat2ge0ea::test_reproducibility_schema_version_seed_annotation_humanized_and_utf8_git` (PASSED), and `tests/test_bench_command.py` (94 passed, including `test_toml_dumps_windows_backslashes_roundtrip` and `test_harness_rejects_zero_and_negative_iterations_and_passes` for `--iterations 0`/`-1` and `--passes 0`/`-1`).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `pytest tests/test_cli.py tests/test_cli_negative_paths.py tests/test_combined.py tests/test_show_config.py tests/test_cli_diff_bugs.py -v` output confirming `--dir` across all 8 subcommands plus `show run config`, `_emit_ambiguous_selector()` prefix `candidates`, `keep_manifest=False` / single-scan paths, `status --json` and `diff --json`, `res`/`cpu`/`mem --utc`, `clean --force-remote-locks`, streaming `heapq.merge` `_run_combined` with non-hoisted leading untimestamped lines and empty-logs hint, `pbr.exe`, and `report-bug --no-browser`/non-TTY/SSH guard.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Covered by the 12-suite `-v` run (`exit 0`, `449 passed in 185.67s`): `tests/test_cli.py` (122 passed, including `test_dir_flag_across_all_run_reading_subcommands`, `test_status_json_and_diff_json`, `test_clean_force_remote_locks`, `test_combined_streaming_no_hoisting_empty_logs_and_ambiguous_prefix`, `test_pbr_exe_help_and_init_copy`, `test_report_bug_no_browser_flag_skips_browser`, `test_report_bug_skips_browser_on_non_tty_and_ssh_headless`), `tests/test_cli_negative_paths.py` (46 passed, including `test_diff_rejects_json_combined_with_export`, `test_diff_ambiguous_prefix_prints_candidates_without_traceback`, `test_crashed_run_suggestion_uses_pubrun_show`), `tests/test_combined.py` (9 passed), `tests/test_show_config.py` (13 passed), and `tests/test_cli_diff_bugs.py` (58 passed).
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest tests/test_cli.py tests/test_cli_negative_paths.py tests/test_bench_command.py tests/test_methods_multi.py tests/test_show_config.py -v` output confirming `[methods].format` config default + banner-free stdout with stderr banners, `show config 1` / `show config default` / `show run config --all`, `diff` >2 args exit `2`, empty-dir vs 0-match messages, `_print_safe_file_block()` exact `--submit-file ... --prepare-submission` tip, grouped `bench` help + zero/negative arg rejection, hidden `feedback` alias, grouped top-level `--help`, bare-`pubrun` quick start, and updated `init` copy.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Covered by the 12-suite `-v` run (`exit 0`, `449 passed in 185.67s`): `tests/test_cli.py` (122 passed, including `test_methods_config_format_latex_and_stderr_banners`, `test_show_config_shorthands_and_run_config_all_note`, `test_empty_invocation_shows_help_and_run_count`, `test_pbr_exe_help_and_init_copy`), `tests/test_cli_negative_paths.py` (46 passed, including `test_empty_dir_vs_zero_match_messages`, `test_diff_rejects_more_than_two_positional_runs`, `test_feedback_hidden_alias_not_in_primary_commands`, `test_self_documenting_help_surfaces`), `tests/test_bench_command.py` (94 passed, including `test_cli_bench_rejects_invalid_numeric_bounds`, `test_print_safe_file_block_tip_uses_submit_file_prepare_submission`, `test_bench_help_has_explicit_option_groups`), `tests/test_methods_multi.py` (12 passed), and `tests/test_show_config.py` (13 passed). Zero added em/en dashes verified in `src/pubrun/resources/default.toml` and `src/pubrun/__main__.py`.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted output of Command 1 (all 12 targeted `pytest` suites, including aligned `mock_run_resources`, `TestCliBugReport`, and `test_empty_invocation_shows_help_and_run_count` tests) and Command 2 (`mypy && mypy --platform win32 && mypy --platform darwin`) all exiting `0`.
   - Observed evidence:
-  - Result: pending
+    - Command 1 (`python3 -m pytest tests/test_cli.py tests/test_cli_negative_paths.py tests/test_bench_command.py tests/test_combined.py tests/test_show_config.py tests/test_config.py tests/test_methods_multi.py tests/test_diff_usability.py tests/test_cli_diff_bugs.py tests/test_reproducibility_preflight.py tests/test_reproducibility_assessment.py tests/test_hardware.py -v`): exit 0 (`449 passed in 185.67s (0:03:05)`).
+    - Command 2 (`mypy && mypy --platform win32 && mypy --platform darwin`): exit 0 (`Success: no issues found in 70 source files` x3).
+    - Full repository suite (`aw suite`): exit 0 (`2521 passed in 100.48s (0:01:40)`).
+  - Result: pass
 
 ## Approval and execution gate
 
