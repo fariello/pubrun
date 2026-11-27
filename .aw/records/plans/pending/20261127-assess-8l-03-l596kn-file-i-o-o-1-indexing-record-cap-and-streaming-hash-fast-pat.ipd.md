@@ -56,7 +56,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: O(1) indexing and record cap
 
-- [ ] E-01 Replace linear scans with `O(1)` lookup indexes and cap invalid-algorithm warnings in `src/pubrun/capture/file_io.py`:
+- [x] E-01 Replace linear scans with `O(1)` lookup indexes and cap invalid-algorithm warnings in `src/pubrun/capture/file_io.py`:
   - Maintain per-run indexes lazily attached to the `Run` instance (guarded by `_data_files_lock`):
     - `_data_files_dedup_index`: `Dict[str, Dict[Tuple[Any, ...], Dict[str, Any]]]` mapping `bucket_name -> {_record_dedup_key(record): existing_record}` for `src/pubrun/capture/file_io.py::append_or_deduplicate_record`.
     - `_completed_hash_index`: `Dict[str, Dict[Tuple[Any, ...], List[Dict[str, Any]]]]` mapping `bucket_name -> {(path, role, label, alg): [existing_records]}` for `src/pubrun/capture/file_io.py::_find_unchanged_completed_record` (indexing only records with `hash_status == "completed"`, `evidence_source == "observed"`, `evidence_strength == "verified_content"`, and `caller_digest is None`).
@@ -66,9 +66,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - In `src/pubrun/capture/file_io.py::validate_hash_algorithm`, cap `_warned_invalid_algorithms` at 256 entries while keeping it a `Set[str]`, and emit `logger.warning(...)` outside `_warn_lock`.
   - Depends on: none
   - Expected outcome: Deduplicating, registering, and upgrading 2,000 distinct files executes in `O(1)` amortized time per operation with identical list insertion order and manifest output, and `_warned_invalid_algorithms` never exceeds 256 entries.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Add configurable `[capture.file_io].max_tracked_files` record cap and `data_files.records_truncated` propagation across `src/pubrun/capture/file_io.py`, `src/pubrun/tracker.py`, `src/pubrun/resources/default.toml`, `schemas/manifest.schema.json`, `docs/configuration.md`, and `docs/manifest.md`:
+- [x] E-02 Add configurable `[capture.file_io].max_tracked_files` record cap and `data_files.records_truncated` propagation across `src/pubrun/capture/file_io.py`, `src/pubrun/tracker.py`, `src/pubrun/resources/default.toml`, `schemas/manifest.schema.json`, `docs/configuration.md`, and `docs/manifest.md`:
   - Add `max_tracked_files = 5000` under `[capture.file_io]` in `src/pubrun/resources/default.toml`, explicitly documenting that `0` disables file provenance recording (storing 0 records, matching `[capture.subprocesses].max_tracked_commands`, and explicitly contrasting with `max_hash_bytes = 0` which means unlimited).
   - In `src/pubrun/capture/file_io.py::resolve_file_io_config`, parse `"max_tracked_files"` via `validate_non_negative_int(raw.get("max_tracked_files", 5000), 5000)` (so negative, boolean, or malformed values fall back to `5000`, while `0` stays `0`).
   - Enforce `max_tracked_files` under `_data_files_lock` across total stored records (`len(data_files["inputs"]) + len(data_files["outputs"]) + len(data_files["mixed"])`, which already includes all pending output records): deduplication updates and in-place pending upgrades still succeed, while any new record when total stored records `>= max_tracked_files` is not appended to `data_files` or `_pending_file_registrations`, increments `data_files["records_truncated"]`, suppresses `_emit_file_event`, and returns `None` from `register_file_provenance()` (and `append_or_deduplicate_record()`). When `max_tracked_files == 0`, short-circuit before disk hashing in `register_file_provenance()` and skip streaming hashing in `ProvenanceFileProxy.__init__()`.
@@ -77,26 +77,26 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Synchronize `docs/configuration.md` (`### [capture.file_io]` table) and `docs/manifest.md` (`## data_files` table) with zero em or en dashes in added or edited lines.
   - Depends on: E-01
   - Expected outcome: Opening or registering files beyond `max_tracked_files` bounds stored `data_files` records and `_pending_file_registrations` to `max_tracked_files`, persists exact `data_files.records_truncated` in `manifest.json` via `Run.to_manifest_dict()`, validates against `schemas/manifest.schema.json`, and matches `docs/configuration.md` and `docs/manifest.md`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Streaming-hash fast path and tests
 
-- [ ] E-03 Optimize `ProvenanceFileProxy` and `FileIoBudgetTracker` in `src/pubrun/capture/file_io.py`:
+- [x] E-03 Optimize `ProvenanceFileProxy` and `FileIoBudgetTracker` in `src/pubrun/capture/file_io.py`:
   - Cache `self._has_caps: bool = (self.max_hash_bytes > 0 or self.max_total_hash_bytes > 0 or self.max_total_hash_seconds > 0.0)` on `src/pubrun/capture/file_io.py::FileIoBudgetTracker.__init__`.
   - In `src/pubrun/capture/file_io.py::ProvenanceFileProxy._update_stream_hash`, when `self._budget is None or not self._budget._has_caps`, update `self._stream_hasher.update(data)` and increment `self._stream_bytes += n` directly without calling `time.monotonic()` or `check_stream_progress()` (preserving `bytes_hashed` and `total_bytes_hashed` accounting). When caps are enabled (`self._budget._has_caps`), check `self._budget.max_hash_bytes > 0 and self._stream_bytes > self._budget.max_hash_bytes` lock-free on every chunk so small per-file caps abort immediately, and call `time.monotonic()` + `check_stream_progress()` at `>= 65536`-byte (64 KiB) intervals plus at `close()` in `_populate_hash_fields()`.
   - In `src/pubrun/capture/file_io.py::ProvenanceFileProxy.write`, bypass the 3-level `memoryview(data)` -> `mv.cast("B")` -> `bv[:n]` wrapper when `isinstance(data, (bytes, bytearray)) and n == len(data)` and call `self._update_stream_hash(data)` directly (keeping `self._stream_bytes` and cap enforcement intact). Apply the same direct-pass fast path in `readinto()` and `readinto1()` when `isinstance(b, bytearray) and n == len(b)`.
   - Depends on: E-02
   - Expected outcome: Uncapped binary streaming writes and reads bypass per-chunk `monotonic()`, lock, and `memoryview` overhead while producing byte-identical SHA-256 digests, accurate `bytes_hashed`/`total_bytes_hashed`, and intact cap enforcement (including small per-file caps like `max_hash_bytes=10`).
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Add behavioral scaling, cap/truncation, index-consistency, schema, and streaming-hash tests in `tests/test_file_io_provenance.py`, and run all required validation checks:
+- [x] E-04 Add behavioral scaling, cap/truncation, index-consistency, schema, and streaming-hash tests in `tests/test_file_io_provenance.py`, and run all required validation checks:
   - Test deduplication parity and `O(1)` index consistency across 2,000 distinct records, direct `run.data_files` mutation fallback, pending-output upgrade followed by repeat registration (verifying zero duplicate records and zero re-hash), and `_warned_invalid_algorithms` 256-entry `set` cap.
   - Test `max_tracked_files=100` across `pubrun.open()`, `register_input()`, and `register_output(defer=True)` asserting stored count `<= 100`, `len(run._pending_file_registrations) <= 100`, `manifest["data_files"]["records_truncated"]` matches the exact dropped count, deduplication updates and in-place pending upgrades still succeed at the cap, truncated `register_input()` returns `None`, `max_tracked_files=0` records 0 files and skips hashing, negative/`bool` values fall back to `5000`, and both truncated and uncapped manifests validate against `schemas/manifest.schema.json`.
   - Test streaming SHA-256 digest and `bytes_hashed`/`total_bytes_hashed` accuracy for `bytes`, `bytearray`, `memoryview`, partial writes, `readinto`/`readinto1`, uncapped (`_has_caps is False`, zero `check_stream_progress` calls during streaming), and capped budgets (small `max_hash_bytes=10` and large `>= 64 KiB` streams).
   - Run all commands in `## Required tests / validation` (pytest suites, three-platform `mypy`, standalone timing measurement for 2,000 records and 10,000 x 256B streaming writes, and the `docs/` em/en dash check).
   - Depends on: E-03
   - Expected outcome: All new and existing tests pass without flaky wall-clock assertions inside `pytest`, standalone timing demonstrates linear scaling and streaming speedup, three-platform `mypy` exits `0`, and `docs/configuration.md` and `docs/manifest.md` diffs contain zero em or en dashes.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -152,25 +152,25 @@ None. `max_tracked_files = 5000` (`0` = store 0 records) matches `[capture.subpr
 
 Validation-state rule: inspect evidence in a separate pass. Accepted validation results: blocked, failed, pass, pending; terminal gate demands `pass`.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest` output and standalone 2,000-record timing output confirming `src/pubrun/capture/file_io.py` units (`append_or_deduplicate_record`, `_find_unchanged_completed_record`, `_upgrade_pending_or_append`, `finalize_pending_registrations`, `validate_hash_algorithm`) preserve deduplication parity, handle pending-upgrade re-indexing and direct `data_files` mutations, cap `_warned_invalid_algorithms` at 256 entries, and scale linearly.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_file_io_provenance.py tests/test_file_registration.py tests/test_manifest_schema.py tests/test_explicit_api.py tests/test_tracker.py -v` passed `173 passed in 25.91s` (including `TestIndexingScalingAndWarningCap::test_dedup_index_parity_and_order_across_2000_records`, `test_direct_data_files_and_pending_mutations_rebuild_indexes`, `test_pending_upgrade_swap_pop_and_repeat_registration_zero_rehash`, `test_warned_invalid_algorithms_capped_at_256`). Standalone 2,000-record timing via `PYTHONPATH=src python3 -c ...`: `TIMING dedup_2000_ms=15.85` (down from 1,111.58 ms baseline; within `<= 25 ms` target).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest` output confirming `src/pubrun/capture/file_io.py::resolve_file_io_config`, `register_file_provenance`, `append_or_deduplicate_record`, `src/pubrun/tracker.py::Run.to_manifest_dict`, `src/pubrun/resources/default.toml`, and `schemas/manifest.schema.json` enforce `max_tracked_files` (including `0`, `100`, and invalid-value fallback to `5000`), persist `manifest["data_files"]["records_truncated"]` when `> 0` (omitted when `0`), and validate against `schemas/manifest.schema.json`, plus `git diff -U0 -- docs/configuration.md docs/manifest.md | grep '^+' | grep -c $'\u2014\|\u2013'` printing `0`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `TestMaxTrackedFilesCapAndSchema` (`test_resolve_file_io_config_max_tracked_files_validation`, `test_max_tracked_files_100_enforces_cap_preserves_dedup_and_upgrades_and_schema`, `test_uncapped_manifest_omits_records_truncated_and_validates`, `test_max_tracked_files_zero_records_nothing_and_skips_hashing`) and `tests/test_manifest_schema.py` all PASSED within `173 passed in 25.91s`. Dash check `git diff -U0 -- docs/configuration.md docs/manifest.md | grep '^+' | grep -c $'\u2014\|\u2013' || true` printed `DASH_COUNT=0`.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `pytest` output and standalone 10,000 x 256B write timing output confirming `src/pubrun/capture/file_io.py::FileIoBudgetTracker._has_caps` and `ProvenanceFileProxy` (`_update_stream_hash`, `write`, `readinto`, `readinto1`) bypass per-chunk `monotonic()`/lock/`memoryview` when uncapped, produce exact SHA-256 digests and `bytes_hashed`/`total_bytes_hashed`, and enforce small (`max_hash_bytes=10`) and large (`>= 64 KiB`) caps accurately.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `TestStreamingHashFastPath` (`test_uncapped_streaming_bypasses_check_stream_progress_with_exact_digests`, `test_partial_binary_write_hashes_only_written_prefix`, `test_capped_streaming_small_per_file_cap_and_large_64k_intervals`) all PASSED within `173 passed in 25.91s`. Warmed standalone 10,000 x 256B binary write timing via `PYTHONPATH=src python3 -c ...`: `hash[0]=14.80ms`, `hash[1]=14.60ms`, `hash[2]=15.22ms` (vs `raw=7.83ms`, `stat=7.58ms`; down from 76.8 ms baseline and within `<= 15 ms` target).
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted output of `pytest tests/test_file_io_provenance.py tests/test_file_registration.py tests/test_manifest_schema.py tests/test_explicit_api.py tests/test_tracker.py -v` and `mypy && mypy --platform win32 && mypy --platform darwin` all exiting `0`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_file_io_provenance.py tests/test_file_registration.py tests/test_manifest_schema.py tests/test_explicit_api.py tests/test_tracker.py -v` exited `0` (`173 passed in 25.91s`); `mypy && mypy --platform win32 && mypy --platform darwin` exited `0` (`Success: no issues found in 70 source files` on all three platforms); full repository suite `aw suite` exited `0` (`2428 passed in 162.25s (0:02:42)`).
+  - Result: pass
 
 ## Approval and execution gate
 

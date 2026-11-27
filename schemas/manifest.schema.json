@@ -213,6 +213,11 @@
                     },
                     "default": []
                 },
+                "records_truncated": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Number of file provenance records omitted after [capture.file_io].max_tracked_files was reached. Present only when greater than 0."
+                },
                 "hashing_summary": {
                     "anyOf": [
                         {

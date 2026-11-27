@@ -464,6 +464,7 @@ not listed here.
 | `inputs` | list[object] | Files read (`role = "input"`). Each entry is a file provenance record (below). |
 | `outputs` | list[object] | Files written (`role = "output"`). |
 | `mixed` | list[object] | Files both read and written (`role = "input_output"`, for example a `"r+"` open or `register_file(..., role="input_output")`). |
+| `records_truncated` | int \| absent | Number of additional file provenance records omitted after `[capture.file_io].max_tracked_files` was reached. Present only when greater than `0`. |
 | `hashing_summary` | object \| null | Run-wide hashing budget and outcome counters: `max_hash_bytes`, `max_total_hash_bytes`, `max_total_hash_seconds`, `hash_algorithm`, `total_bytes_hashed`, `total_hash_seconds`, `files_hashed`, `files_skipped_over_budget`, `files_changed`, `files_failed`. Present once the run has used its hashing budget (for example a file handled at `hash` level); otherwise absent. |
 
 ### File provenance record (`$defs.file_provenance_record`)

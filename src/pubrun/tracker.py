@@ -1812,6 +1812,7 @@ class Run:
                     "outputs": list(raw_data_files.get("outputs", [])),
                     "mixed": list(raw_data_files.get("mixed", [])),
                 }
+                data_files_truncated = raw_data_files.get("records_truncated", 0)
         else:
             raw_data_files = getattr(self, "data_files", None) or {}
             data_files_snapshot = {
@@ -1819,6 +1820,13 @@ class Run:
                 "outputs": list(raw_data_files.get("outputs", [])),
                 "mixed": list(raw_data_files.get("mixed", [])),
             }
+            data_files_truncated = raw_data_files.get("records_truncated", 0)
+        if (
+            isinstance(data_files_truncated, int)
+            and not isinstance(data_files_truncated, bool)
+            and data_files_truncated > 0
+        ):
+            data_files_snapshot["records_truncated"] = int(data_files_truncated)
         file_io_budget = getattr(self, "_file_io_budget", None)
         if file_io_budget is not None:
             try:

@@ -373,6 +373,16 @@ system_metrics = true
 #                and zero fallback content reads.
 level = "stat"
 
+# Maximum total file provenance records retained per run across inputs, outputs,
+# and mixed buckets (including pending deferred outputs). Deduplication updates
+# and in-place pending upgrades still succeed at the cap; additional new files
+# are omitted and counted in manifest.data_files.records_truncated.
+# 0 disables file provenance recording (stores 0 records and skips hashing,
+# matching [capture.subprocesses].max_tracked_commands, and contrasting with
+# max_hash_bytes = 0 which means no byte cap). Negative or invalid values fall
+# back to 5000.
+max_tracked_files = 5000
+
 # At level "hash", skip hashing any single file larger than this (bytes).
 # 0 = no per-file byte cap.
 max_hash_bytes = 0

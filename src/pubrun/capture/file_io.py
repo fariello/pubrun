@@ -14,7 +14,7 @@ import stat
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pubrun.capture.signals import finalization_lock
 
@@ -57,6 +57,8 @@ OBSERVATION_TIMES: Tuple[str, ...] = (
 SUPPORTED_HASH_ALGORITHMS: Tuple[str, ...] = ("sha256", "sha512", "sha1", "md5")
 DEFAULT_HASH_ALGORITHM: str = "sha256"
 DEFAULT_CHUNK_SIZE: int = 65536
+DEFAULT_MAX_TRACKED_FILES: int = 5000
+_MAX_WARNED_INVALID_ALGORITHMS: int = 256
 
 _warn_lock = threading.Lock()
 _warned_invalid_algorithms: Set[str] = set()
@@ -87,16 +89,22 @@ def validate_hash_algorithm(value: Any) -> str:
         if normalized in SUPPORTED_HASH_ALGORITHMS:
             return normalized
     key = repr(value)
+    should_warn = False
     with _warn_lock:
-        if key not in _warned_invalid_algorithms:
+        if (
+            key not in _warned_invalid_algorithms
+            and len(_warned_invalid_algorithms) < _MAX_WARNED_INVALID_ALGORITHMS
+        ):
             _warned_invalid_algorithms.add(key)
-            logger.warning(
-                "pubrun: unsupported [capture.file_io].hash_algorithm %s; "
-                "falling back to '%s' (supported: %s)",
-                key,
-                DEFAULT_HASH_ALGORITHM,
-                ", ".join(SUPPORTED_HASH_ALGORITHMS),
-            )
+            should_warn = True
+    if should_warn:
+        logger.warning(
+            "pubrun: unsupported [capture.file_io].hash_algorithm %s; "
+            "falling back to '%s' (supported: %s)",
+            key,
+            DEFAULT_HASH_ALGORITHM,
+            ", ".join(SUPPORTED_HASH_ALGORITHMS),
+        )
     return DEFAULT_HASH_ALGORITHM
 
 
@@ -134,9 +142,8 @@ def validate_non_negative_float(value: Any, default: float = 0.0) -> float:
     return default
 
 
-def resolve_file_io_config(run_instance: Any) -> Dict[str, Any]:
-    """Extract and validate ``[capture.file_io]`` settings from a run."""
-    raw: Dict[str, Any] = {}
+def _raw_file_io_config(run_instance: Any) -> Dict[str, Any]:
+    """Return the raw ``[capture.file_io]`` config dict for ``run_instance``."""
     try:
         cfg = getattr(run_instance, "config", None)
         if isinstance(cfg, dict):
@@ -144,14 +151,33 @@ def resolve_file_io_config(run_instance: Any) -> Dict[str, Any]:
             if isinstance(cap, dict):
                 fio = cap.get("file_io")
                 if isinstance(fio, dict):
-                    raw = fio
+                    return fio
     except Exception:
-        raw = {}
+        pass
+    return {}
+
+
+def _resolve_max_tracked_files(run_instance: Any) -> int:
+    """Resolve ``[capture.file_io].max_tracked_files`` with safe fallback."""
+    raw = _raw_file_io_config(run_instance)
+    return validate_non_negative_int(
+        raw.get("max_tracked_files", DEFAULT_MAX_TRACKED_FILES),
+        DEFAULT_MAX_TRACKED_FILES,
+    )
+
+
+def resolve_file_io_config(run_instance: Any) -> Dict[str, Any]:
+    """Extract and validate ``[capture.file_io]`` settings from a run."""
+    raw = _raw_file_io_config(run_instance)
 
     raw_level = raw.get("level", "stat")
     level = raw_level if isinstance(raw_level, str) and raw_level in FILE_IO_LEVELS else "stat"
     return {
         "level": level,
+        "max_tracked_files": validate_non_negative_int(
+            raw.get("max_tracked_files", DEFAULT_MAX_TRACKED_FILES),
+            DEFAULT_MAX_TRACKED_FILES,
+        ),
         "max_hash_bytes": validate_non_negative_int(raw.get("max_hash_bytes", 0), 0),
         "max_total_hash_bytes": validate_non_negative_int(
             raw.get("max_total_hash_bytes", 0), 0
@@ -293,6 +319,11 @@ class FileIoBudgetTracker:
             max_total_hash_seconds, 0.0
         )
         self.hash_algorithm: str = validate_hash_algorithm(hash_algorithm)
+        self._has_caps: bool = (
+            self.max_hash_bytes > 0
+            or self.max_total_hash_bytes > 0
+            or self.max_total_hash_seconds > 0.0
+        )
 
         self.total_bytes_hashed: int = 0
         self.total_hash_seconds: float = 0.0
@@ -1059,9 +1090,177 @@ def _emit_file_event(run_instance: Any, record: Dict[str, Any]) -> None:
         pass
 
 
+def _total_stored_records(data_files: Dict[str, Any]) -> int:
+    """Return total records across inputs, outputs, and mixed buckets."""
+    return (
+        len(data_files["inputs"])
+        + len(data_files["outputs"])
+        + len(data_files["mixed"])
+    )
+
+
+def _increment_records_truncated(data_files: Dict[str, Any]) -> None:
+    """Increment ``data_files['records_truncated']`` under ``_data_files_lock``."""
+    data_files["records_truncated"] = int(data_files.get("records_truncated", 0)) + 1
+
+
+def _is_completed_hash_record(record: Dict[str, Any]) -> bool:
+    """Return True when ``record`` is eligible for ``_completed_hash_index``."""
+    return (
+        record.get("hash_status") == "completed"
+        and record.get("evidence_source") == "observed"
+        and record.get("evidence_strength") == "verified_content"
+        and record.get("caller_digest") is None
+    )
+
+
+def _completed_hash_key(record: Dict[str, Any]) -> Tuple[Any, ...]:
+    """Return the lookup key for ``_completed_hash_index``."""
+    return (
+        record.get("path"),
+        record.get("role"),
+        record.get("label"),
+        record.get("hash_algorithm"),
+    )
+
+
+def _index_record(
+    record: Dict[str, Any],
+    dedup_bucket: Dict[Tuple[Any, ...], Dict[str, Any]],
+    completed_bucket: Dict[Tuple[Any, ...], List[Dict[str, Any]]],
+    *,
+    dedup_key: Optional[Tuple[Any, ...]] = None,
+) -> None:
+    """Insert ``record`` into the bucket dedup and completed-hash indexes."""
+    key = dedup_key if dedup_key is not None else _record_dedup_key(record)
+    if key not in dedup_bucket:
+        dedup_bucket[key] = record
+    if _is_completed_hash_record(record):
+        c_key = _completed_hash_key(record)
+        entries = completed_bucket.setdefault(c_key, [])
+        if not any(existing is record for existing in entries):
+            entries.append(record)
+
+
+def _evict_record_from_indexes(
+    record: Dict[str, Any],
+    dedup_bucket: Dict[Tuple[Any, ...], Dict[str, Any]],
+    completed_bucket: Dict[Tuple[Any, ...], List[Dict[str, Any]]],
+) -> None:
+    """Remove ``record`` from the bucket dedup and completed-hash indexes."""
+    old_key = _record_dedup_key(record)
+    if dedup_bucket.get(old_key) is record:
+        del dedup_bucket[old_key]
+    if _is_completed_hash_record(record):
+        old_ckey = _completed_hash_key(record)
+        entries = completed_bucket.get(old_ckey)
+        if entries:
+            remaining = [r for r in entries if r is not record]
+            if remaining:
+                completed_bucket[old_ckey] = remaining
+            else:
+                del completed_bucket[old_ckey]
+
+
+def _set_bucket_index_meta(
+    run_instance: Any, bucket_name: str, bucket: List[Any]
+) -> None:
+    """Record list identity and length for a ``data_files`` bucket."""
+    meta = getattr(run_instance, "_data_files_index_meta", None)
+    if isinstance(meta, dict):
+        meta[bucket_name] = (id(bucket), len(bucket))
+
+
+def _get_synced_bucket_indexes(
+    run_instance: Any, bucket_name: str, bucket: List[Any]
+) -> Tuple[
+    Dict[Tuple[Any, ...], Dict[str, Any]],
+    Dict[Tuple[Any, ...], List[Dict[str, Any]]],
+]:
+    """Return O(1) dedup and completed-hash indexes synced with ``bucket``.
+
+    Caller must hold ``_data_files_lock``. Automatically rebuilds the bucket
+    indexes if external code replaced or resized the list directly.
+    """
+    dedup_index = getattr(run_instance, "_data_files_dedup_index", None)
+    if not isinstance(dedup_index, dict):
+        dedup_index = {}
+        try:
+            run_instance._data_files_dedup_index = dedup_index
+        except Exception:
+            pass
+
+    completed_index = getattr(run_instance, "_completed_hash_index", None)
+    if not isinstance(completed_index, dict):
+        completed_index = {}
+        try:
+            run_instance._completed_hash_index = completed_index
+        except Exception:
+            pass
+
+    meta = getattr(run_instance, "_data_files_index_meta", None)
+    if not isinstance(meta, dict):
+        meta = {}
+        try:
+            run_instance._data_files_index_meta = meta
+        except Exception:
+            pass
+
+    expected_meta = (id(bucket), len(bucket))
+    if (
+        meta.get(bucket_name) != expected_meta
+        or bucket_name not in dedup_index
+        or bucket_name not in completed_index
+    ):
+        dedup_bucket: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+        completed_bucket: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
+        for existing in bucket:
+            if not isinstance(existing, dict):
+                continue
+            _index_record(existing, dedup_bucket, completed_bucket)
+        dedup_index[bucket_name] = dedup_bucket
+        completed_index[bucket_name] = completed_bucket
+        meta[bucket_name] = expected_meta
+
+    return dedup_index[bucket_name], completed_index[bucket_name]
+
+
+def _set_pending_index_meta(run_instance: Any, pending_list: List[Any]) -> None:
+    """Record list identity and length for ``_pending_file_registrations``."""
+    try:
+        run_instance._pending_file_index_meta = (id(pending_list), len(pending_list))
+    except Exception:
+        pass
+
+
+def _get_synced_pending_index(
+    run_instance: Any, pending_list: List[Any]
+) -> Dict[Tuple[Any, ...], int]:
+    """Return O(1) ``(normalized_path, role, label) -> index`` map for pending entries.
+
+    Caller must hold ``_data_files_lock``. Automatically rebuilds the map if
+    external code replaced or resized ``pending_list`` directly.
+    """
+    pending_index = getattr(run_instance, "_pending_file_index", None)
+    meta = getattr(run_instance, "_pending_file_index_meta", None)
+    expected_meta = (id(pending_list), len(pending_list))
+    if not isinstance(pending_index, dict) or meta != expected_meta:
+        pending_index = {}
+        for idx, item in enumerate(pending_list):
+            p_key = (item.normalized_path, item.role, item.label)
+            if p_key not in pending_index:
+                pending_index[p_key] = idx
+        try:
+            run_instance._pending_file_index = pending_index
+            run_instance._pending_file_index_meta = expected_meta
+        except Exception:
+            pass
+    return pending_index
+
+
 def append_or_deduplicate_record(
     run_instance: Any, record: Dict[str, Any]
-) -> Dict[str, Any]:
+) -> Optional[Dict[str, Any]]:
     """Thread-safely route and append or deduplicate a file provenance record.
 
     Routes ``role == "input"`` to ``data_files["inputs"]``, ``"output"`` to
@@ -1069,35 +1268,48 @@ def append_or_deduplicate_record(
     Identical unchanged ``(path, role, label, identity, hash_status, digest)``
     entries increment ``registration_count`` instead of appending duplicates,
     while records with changed content or identity are preserved separately.
+    When total stored records reach ``[capture.file_io].max_tracked_files``,
+    deduplication updates still succeed while new records are omitted,
+    incrementing ``data_files["records_truncated"]`` and returning ``None``.
     """
     lock = getattr(run_instance, "_data_files_lock", _fallback_data_files_lock)
     bucket_name = _bucket_for_role(record.get("role"))
     new_key = _record_dedup_key(record)
+    max_tracked = _resolve_max_tracked_files(run_instance)
 
     with lock:
         data_files = _ensure_data_files_buckets(run_instance)
         bucket = data_files[bucket_name]
-        for existing in bucket:
-            if isinstance(existing, dict) and _record_dedup_key(existing) == new_key:
-                existing["registration_count"] = int(existing.get("registration_count", 1)) + 1
-                if record.get("last_observed_at_utc") is not None:
-                    existing["last_observed_at_utc"] = record["last_observed_at_utc"]
-                if record.get("accessed_at_utc") is not None:
-                    existing["accessed_at_utc"] = record["accessed_at_utc"]
-                if record.get("modified_at_utc") is not None:
-                    existing["modified_at_utc"] = record["modified_at_utc"]
-                if record.get("metadata") is not None:
-                    if isinstance(existing.get("metadata"), dict) and isinstance(
-                        record["metadata"], dict
-                    ):
-                        merged_meta = dict(existing["metadata"])
-                        merged_meta.update(record["metadata"])
-                        existing["metadata"] = merged_meta
-                    else:
-                        existing["metadata"] = record["metadata"]
-                return existing
+        dedup_bucket, completed_bucket = _get_synced_bucket_indexes(
+            run_instance, bucket_name, bucket
+        )
+        existing = dedup_bucket.get(new_key)
+        if isinstance(existing, dict):
+            existing["registration_count"] = int(existing.get("registration_count", 1)) + 1
+            if record.get("last_observed_at_utc") is not None:
+                existing["last_observed_at_utc"] = record["last_observed_at_utc"]
+            if record.get("accessed_at_utc") is not None:
+                existing["accessed_at_utc"] = record["accessed_at_utc"]
+            if record.get("modified_at_utc") is not None:
+                existing["modified_at_utc"] = record["modified_at_utc"]
+            if record.get("metadata") is not None:
+                if isinstance(existing.get("metadata"), dict) and isinstance(
+                    record["metadata"], dict
+                ):
+                    merged_meta = dict(existing["metadata"])
+                    merged_meta.update(record["metadata"])
+                    existing["metadata"] = merged_meta
+                else:
+                    existing["metadata"] = record["metadata"]
+            return existing
+
+        if _total_stored_records(data_files) >= max_tracked:
+            _increment_records_truncated(data_files)
+            return None
 
         bucket.append(record)
+        _index_record(record, dedup_bucket, completed_bucket, dedup_key=new_key)
+        _set_bucket_index_meta(run_instance, bucket_name, bucket)
         return record
 
 
@@ -1132,23 +1344,27 @@ def _find_unchanged_completed_record(
     """Deduplicate an unchanged already-hashed file without re-reading disk bytes."""
     lock = getattr(run_instance, "_data_files_lock", _fallback_data_files_lock)
     bucket_name = _bucket_for_role(role)
+    p_key = (normalized_path, role, label)
+    c_key = (path, role, label, target_alg)
     with lock:
         pending_list = getattr(run_instance, "_pending_file_registrations", None)
-        if pending_list:
-            for item in pending_list:
-                if (
-                    item.normalized_path == normalized_path
-                    and item.role == role
-                    and item.label == label
-                ):
-                    return None
+        if isinstance(pending_list, list) and pending_list:
+            pending_index = _get_synced_pending_index(run_instance, pending_list)
+            if p_key in pending_index:
+                return None
         data_files = getattr(run_instance, "data_files", None)
         if not isinstance(data_files, dict):
             return None
         bucket = data_files.get(bucket_name)
         if not isinstance(bucket, list):
             return None
-        for existing in bucket:
+        _, completed_bucket = _get_synced_bucket_indexes(
+            run_instance, bucket_name, bucket
+        )
+        candidates = completed_bucket.get(c_key)
+        if not candidates:
+            return None
+        for existing in candidates:
             if not isinstance(existing, dict):
                 continue
             if (
@@ -1187,37 +1403,57 @@ def _upgrade_pending_or_append(
     role: str,
     label: Optional[str],
     metadata_copy: Optional[Dict[str, Any]],
-) -> Dict[str, Any]:
+) -> Optional[Dict[str, Any]]:
     """Upgrade a matching pending output record in place, or append/deduplicate."""
     lock = getattr(run_instance, "_data_files_lock", _fallback_data_files_lock)
+    bucket_name = _bucket_for_role(role)
+    p_key = (normalized_path, role, label)
     with lock:
         pending_list = getattr(run_instance, "_pending_file_registrations", None)
-        if pending_list:
-            for idx, item in enumerate(pending_list):
-                if (
-                    item.normalized_path == normalized_path
-                    and item.role == role
-                    and item.label == label
-                ):
-                    pending_list.pop(idx)
-                    existing_rec = item.record_ref
-                    prev_count = int(existing_rec.get("registration_count", 1))
-                    prev_reg_at = existing_rec.get("registered_at_utc")
-                    prev_meta = existing_rec.get("metadata")
-                    existing_rec.clear()
-                    existing_rec.update(record)
-                    existing_rec["registered_before_creation"] = True
-                    existing_rec["registration_count"] = prev_count + 1
-                    if prev_reg_at is not None:
-                        existing_rec["registered_at_utc"] = prev_reg_at
-                    if isinstance(prev_meta, dict):
-                        if metadata_copy is not None:
-                            merged_meta = dict(prev_meta)
-                            merged_meta.update(metadata_copy)
-                            existing_rec["metadata"] = merged_meta
-                        else:
-                            existing_rec["metadata"] = prev_meta
-                    return existing_rec
+        if isinstance(pending_list, list) and pending_list:
+            pending_index = _get_synced_pending_index(run_instance, pending_list)
+            idx = pending_index.get(p_key)
+            if idx is not None and 0 <= idx < len(pending_list):
+                item = pending_list[idx]
+                last_idx = len(pending_list) - 1
+                if idx != last_idx:
+                    last_item = pending_list[last_idx]
+                    pending_list[idx] = last_item
+                    pending_index[
+                        (last_item.normalized_path, last_item.role, last_item.label)
+                    ] = idx
+                pending_list.pop()
+                pending_index.pop(p_key, None)
+                _set_pending_index_meta(run_instance, pending_list)
+
+                data_files = _ensure_data_files_buckets(run_instance)
+                bucket = data_files[bucket_name]
+                dedup_bucket, completed_bucket = _get_synced_bucket_indexes(
+                    run_instance, bucket_name, bucket
+                )
+
+                existing_rec = item.record_ref
+                _evict_record_from_indexes(existing_rec, dedup_bucket, completed_bucket)
+
+                prev_count = int(existing_rec.get("registration_count", 1))
+                prev_reg_at = existing_rec.get("registered_at_utc")
+                prev_meta = existing_rec.get("metadata")
+                existing_rec.clear()
+                existing_rec.update(record)
+                existing_rec["registered_before_creation"] = True
+                existing_rec["registration_count"] = prev_count + 1
+                if prev_reg_at is not None:
+                    existing_rec["registered_at_utc"] = prev_reg_at
+                if isinstance(prev_meta, dict):
+                    if metadata_copy is not None:
+                        merged_meta = dict(prev_meta)
+                        merged_meta.update(metadata_copy)
+                        existing_rec["metadata"] = merged_meta
+                    else:
+                        existing_rec["metadata"] = prev_meta
+
+                _index_record(existing_rec, dedup_bucket, completed_bucket)
+                return existing_rec
     return append_or_deduplicate_record(run_instance, record)
 
 
@@ -1642,6 +1878,14 @@ def register_file_provenance(
         if effective_level == "none":
             return None
 
+        max_tracked = cfg["max_tracked_files"]
+        if max_tracked == 0:
+            lock = getattr(run_instance, "_data_files_lock", _fallback_data_files_lock)
+            with lock:
+                data_files = _ensure_data_files_buckets(run_instance)
+                _increment_records_truncated(data_files)
+            return None
+
         now = time.time()
         record: Dict[str, Any] = {
             "path": path_str,
@@ -1712,6 +1956,8 @@ def register_file_provenance(
                 record["hash_status_detail"] = "remote object-store URIs are out of scope"
 
             stored = append_or_deduplicate_record(run_instance, record)
+            if stored is None:
+                return None
             _emit_file_event(run_instance, stored)
             return stored
 
@@ -1734,6 +1980,7 @@ def register_file_provenance(
         if is_pending:
             lock = getattr(run_instance, "_data_files_lock", _fallback_data_files_lock)
             bucket_name = _bucket_for_role(role_val)
+            p_key = (normalized_path, role_val, label)
             with lock:
                 pending_list = getattr(run_instance, "_pending_file_registrations", None)
                 if not isinstance(pending_list, list):
@@ -1743,41 +1990,55 @@ def register_file_provenance(
                     except Exception:
                         pass
 
-                for item in pending_list:
-                    if (
-                        item.normalized_path == normalized_path
-                        and item.role == role_val
-                        and item.label == label
-                    ):
-                        rec = item.record_ref
-                        rec["registration_count"] = int(rec.get("registration_count", 1)) + 1
-                        rec["last_observed_at_utc"] = now
-                        rec["modified_at_utc"] = now
-                        if role_val == "input_output":
-                            rec["accessed_at_utc"] = now
-                        if explicit_level is not None:
-                            item.effective_level = explicit_level
-                        if metadata_copy is not None:
-                            if isinstance(rec.get("metadata"), dict):
-                                merged_meta = dict(rec["metadata"])
-                                merged_meta.update(metadata_copy)
-                                rec["metadata"] = merged_meta
-                            else:
-                                rec["metadata"] = metadata_copy
-                        if digest_val is not None:
-                            item.digest_val = digest_val
-                            item.alg = alg
-                            item.verify_digest = verify_flag
-                            rec["hash_algorithm"] = alg
-                            rec["caller_digest"] = {
-                                "algorithm": alg,
-                                "value": digest_val,
-                                "verified": None,
-                            }
-                            rec["digest"] = {"algorithm": alg, "value": digest_val}
-                            rec["evidence_source"] = "asserted"
-                            rec["evidence_strength"] = "asserted_content"
-                        return rec
+                pending_index = _get_synced_pending_index(run_instance, pending_list)
+                idx = pending_index.get(p_key)
+                if idx is not None and 0 <= idx < len(pending_list):
+                    item = pending_list[idx]
+                    rec = item.record_ref
+                    dedup_bucket: Optional[Dict[Tuple[Any, ...], Dict[str, Any]]] = None
+                    completed_bucket: Optional[Dict[Tuple[Any, ...], List[Dict[str, Any]]]] = None
+                    if digest_val is not None:
+                        data_files = _ensure_data_files_buckets(run_instance)
+                        bucket = data_files[bucket_name]
+                        dedup_bucket, completed_bucket = _get_synced_bucket_indexes(
+                            run_instance, bucket_name, bucket
+                        )
+                        _evict_record_from_indexes(rec, dedup_bucket, completed_bucket)
+                    rec["registration_count"] = int(rec.get("registration_count", 1)) + 1
+                    rec["last_observed_at_utc"] = now
+                    rec["modified_at_utc"] = now
+                    if role_val == "input_output":
+                        rec["accessed_at_utc"] = now
+                    if explicit_level is not None:
+                        item.effective_level = explicit_level
+                    if metadata_copy is not None:
+                        if isinstance(rec.get("metadata"), dict):
+                            merged_meta = dict(rec["metadata"])
+                            merged_meta.update(metadata_copy)
+                            rec["metadata"] = merged_meta
+                        else:
+                            rec["metadata"] = metadata_copy
+                    if digest_val is not None:
+                        item.digest_val = digest_val
+                        item.alg = alg
+                        item.verify_digest = verify_flag
+                        rec["hash_algorithm"] = alg
+                        rec["caller_digest"] = {
+                            "algorithm": alg,
+                            "value": digest_val,
+                            "verified": None,
+                        }
+                        rec["digest"] = {"algorithm": alg, "value": digest_val}
+                        rec["evidence_source"] = "asserted"
+                        rec["evidence_strength"] = "asserted_content"
+                        if dedup_bucket is not None and completed_bucket is not None:
+                            _index_record(rec, dedup_bucket, completed_bucket)
+                    return rec
+
+                data_files = _ensure_data_files_buckets(run_instance)
+                if _total_stored_records(data_files) >= max_tracked:
+                    _increment_records_truncated(data_files)
+                    return None
 
                 record["path"] = path_str if effective_level == "name" else normalized_path
                 record["hash_status"] = "pending"
@@ -1803,8 +2064,14 @@ def register_file_provenance(
                     record["evidence_source"] = "none"
                     record["evidence_strength"] = "unavailable"
 
-                data_files = _ensure_data_files_buckets(run_instance)
-                data_files[bucket_name].append(record)
+                bucket = data_files[bucket_name]
+                dedup_bucket_new, completed_bucket_new = _get_synced_bucket_indexes(
+                    run_instance, bucket_name, bucket
+                )
+                bucket.append(record)
+                _index_record(record, dedup_bucket_new, completed_bucket_new)
+                _set_bucket_index_meta(run_instance, bucket_name, bucket)
+                pending_idx = len(pending_list)
                 pending_list.append(
                     _PendingRegistration(
                         record_ref=record,
@@ -1819,6 +2086,8 @@ def register_file_provenance(
                         registration_source=registration_source,
                     )
                 )
+                pending_index[p_key] = pending_idx
+                _set_pending_index_meta(run_instance, pending_list)
             _emit_file_event(run_instance, record)
             return record
 
@@ -1852,6 +2121,8 @@ def register_file_provenance(
             label=label,
             metadata_copy=metadata_copy,
         )
+        if stored is None:
+            return None
         _emit_file_event(run_instance, stored)
         return stored
     except Exception as exc:
@@ -1877,6 +2148,10 @@ def finalize_pending_registrations(run_instance: Any) -> None:
             return
         items = list(pending_list)
         pending_list.clear()
+        pending_index = getattr(run_instance, "_pending_file_index", None)
+        if isinstance(pending_index, dict):
+            pending_index.clear()
+        _set_pending_index_meta(run_instance, pending_list)
 
     for item in items:
         try:
@@ -1918,7 +2193,16 @@ def finalize_pending_registrations(run_instance: Any) -> None:
             )
 
             with finalization_lock(lock, 0.25):
+                bucket_name = _bucket_for_role(item.role)
+                data_files = _ensure_data_files_buckets(run_instance)
+                bucket = data_files[bucket_name]
+                dedup_bucket, completed_bucket = _get_synced_bucket_indexes(
+                    run_instance, bucket_name, bucket
+                )
+
                 existing_rec = item.record_ref
+                _evict_record_from_indexes(existing_rec, dedup_bucket, completed_bucket)
+
                 prev_count = int(existing_rec.get("registration_count", 1))
                 prev_reg_at = existing_rec.get("registered_at_utc")
                 prev_meta = existing_rec.get("metadata")
@@ -1930,6 +2214,8 @@ def finalize_pending_registrations(run_instance: Any) -> None:
                     existing_rec["registered_at_utc"] = prev_reg_at
                 if prev_meta is not None:
                     existing_rec["metadata"] = prev_meta
+
+                _index_record(existing_rec, dedup_bucket, completed_bucket)
 
             _emit_file_event(run_instance, item.record_ref)
         except Exception as exc:
@@ -1987,11 +2273,13 @@ class ProvenanceFileProxy:
         self._stream_algorithm: Optional[str] = None
         self._stream_valid: bool = False
         self._stream_bytes: int = 0
+        self._stream_bytes_since_check: int = 0
         self._stream_elapsed: float = 0.0
         self._stream_over_budget: bool = False
         self._stream_over_budget_reason: Optional[str] = None
+        self._max_tracked_files: int = _resolve_max_tracked_files(self._run)
 
-        if self._level in ("stat", "realpath", "hash"):
+        if self._level in ("stat", "realpath", "hash") and self._max_tracked_files > 0:
             try:
                 fileno = self._file_obj.fileno()
                 if isinstance(fileno, int):
@@ -1999,7 +2287,7 @@ class ProvenanceFileProxy:
             except Exception:
                 self._open_identity = None
 
-        if self._level == "hash":
+        if self._level == "hash" and self._max_tracked_files > 0:
             self._init_streaming()
 
     def _init_streaming(self) -> None:
@@ -2045,19 +2333,39 @@ class ProvenanceFileProxy:
         n = data.nbytes if isinstance(data, memoryview) else len(data)
         if n <= 0:
             return
-        t0 = time.monotonic()
-        self._stream_hasher.update(data)
-        dt = max(0.0, time.monotonic() - t0)
+        budget = self._budget
+        if budget is None or not budget._has_caps:
+            self._stream_hasher.update(data)
+            self._stream_bytes += n
+            return
+
         self._stream_bytes += n
-        self._stream_elapsed += dt
-        if self._budget is not None:
-            over = self._budget.check_stream_progress(
+        self._stream_bytes_since_check += n
+        if budget.max_hash_bytes > 0 and self._stream_bytes > budget.max_hash_bytes:
+            self._stream_over_budget = True
+            self._stream_over_budget_reason = (
+                f"streamed bytes ({self._stream_bytes}) exceeded "
+                f"max_hash_bytes ({budget.max_hash_bytes})"
+            )
+            self._invalidate_stream()
+            return
+
+        if self._stream_bytes_since_check >= DEFAULT_CHUNK_SIZE:
+            t0 = time.monotonic()
+            self._stream_hasher.update(data)
+            dt = max(0.0, time.monotonic() - t0)
+            self._stream_elapsed += dt
+            self._stream_bytes_since_check = 0
+            over = budget.check_stream_progress(
                 self._stream_bytes, self._stream_elapsed
             )
             if over is not None:
                 self._stream_over_budget = True
                 self._stream_over_budget_reason = over
                 self._invalidate_stream()
+            return
+
+        self._stream_hasher.update(data)
 
     def _is_read_mode(self) -> bool:
         return self._role == "input"
@@ -2141,10 +2449,13 @@ class ProvenanceFileProxy:
             if n:
                 self._bytes_read += n
                 if self._role == "input" and self._stream_valid:
-                    with memoryview(b) as mv:
-                        with mv.cast("B") as bv:
-                            with bv[:n] as slice_view:
-                                self._update_stream_hash(slice_view)
+                    if isinstance(b, bytearray) and n == len(b):
+                        self._update_stream_hash(b)
+                    else:
+                        with memoryview(b) as mv:
+                            with mv.cast("B") as bv:
+                                with bv[:n] as slice_view:
+                                    self._update_stream_hash(slice_view)
             elif n == 0:
                 try:
                     with memoryview(b) as mv:
@@ -2161,10 +2472,13 @@ class ProvenanceFileProxy:
             if n:
                 self._bytes_read += n
                 if self._role == "input" and self._stream_valid:
-                    with memoryview(b) as mv:
-                        with mv.cast("B") as bv:
-                            with bv[:n] as slice_view:
-                                self._update_stream_hash(slice_view)
+                    if isinstance(b, bytearray) and n == len(b):
+                        self._update_stream_hash(b)
+                    else:
+                        with memoryview(b) as mv:
+                            with mv.cast("B") as bv:
+                                with bv[:n] as slice_view:
+                                    self._update_stream_hash(slice_view)
             elif n == 0:
                 try:
                     with memoryview(b) as mv:
@@ -2184,10 +2498,13 @@ class ProvenanceFileProxy:
                     self._open_disposition in ("write", "exclusive_create")
                     and self._stream_valid
                 ):
-                    with memoryview(data) as mv:
-                        with mv.cast("B") as bv:
-                            with bv[:n] as slice_view:
-                                self._update_stream_hash(slice_view)
+                    if isinstance(data, (bytes, bytearray)) and n == len(data):
+                        self._update_stream_hash(data)
+                    else:
+                        with memoryview(data) as mv:
+                            with mv.cast("B") as bv:
+                                with bv[:n] as slice_view:
+                                    self._update_stream_hash(slice_view)
         else:
             if isinstance(n, int) and n > 0:
                 self._bytes_written += n
@@ -2226,7 +2543,7 @@ class ProvenanceFileProxy:
         self._closed = True
         close_identity: Optional[FileIdentity] = None
         try:
-            if self._level in ("stat", "realpath", "hash"):
+            if self._level in ("stat", "realpath", "hash") and self._max_tracked_files > 0:
                 if self._role != "input":
                     try:
                         self._file_obj.flush()
@@ -2260,6 +2577,13 @@ class ProvenanceFileProxy:
 
     def _register_provenance(self, close_identity: Optional[FileIdentity]) -> None:
         try:
+            if _resolve_max_tracked_files(self._run) == 0:
+                lock = getattr(self._run, "_data_files_lock", _fallback_data_files_lock)
+                with lock:
+                    data_files = _ensure_data_files_buckets(self._run)
+                    _increment_records_truncated(data_files)
+                return
+
             level = self._level
             now = time.time()
             record: Dict[str, Any] = {
@@ -2350,7 +2674,9 @@ class ProvenanceFileProxy:
                 else:
                     self._populate_hash_fields(record, close_identity)
 
-            append_or_deduplicate_record(self._run, record)
+            stored = append_or_deduplicate_record(self._run, record)
+            if stored is None:
+                return
 
             if self._role == "input":
                 event = "input_dataset"
@@ -2430,8 +2756,10 @@ class ProvenanceFileProxy:
                 stream_ready = True
 
         if stream_ready and self._stream_hasher is not None:
-            over_reason = budget.check_stream_progress(
-                self._stream_bytes, self._stream_elapsed
+            over_reason = (
+                budget.check_stream_progress(self._stream_bytes, self._stream_elapsed)
+                if budget._has_caps
+                else None
             )
             if over_reason is None:
                 digest_hex = self._stream_hasher.hexdigest()

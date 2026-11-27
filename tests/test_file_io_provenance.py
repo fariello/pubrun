@@ -944,3 +944,522 @@ class TestProxyEdgeMethods:
         assert rec["hash_status"] == "completed"
         assert rec["observation_time"] == "during_stream"
         assert rec["sha256"] == hashlib.sha256(b"exclusive\n").hexdigest()
+
+
+class TestIndexingScalingAndWarningCap:
+
+    def test_dedup_index_parity_and_order_across_2000_records(self):
+        from pubrun.capture.file_io import append_or_deduplicate_record
+
+        class _DummyRun:
+            def __init__(self):
+                self.data_files = {"inputs": [], "outputs": [], "mixed": []}
+
+        run = _DummyRun()
+        expected_paths = []
+        for i in range(2000):
+            path = f"/tmp/dataset_{i:04d}.bin"
+            expected_paths.append(path)
+            rec = {
+                "path": path,
+                "role": "input",
+                "label": None,
+                "device": 1,
+                "inode": 1000 + i,
+                "size_bytes": 64 + i,
+                "mtime_ns": 10_000 + i,
+                "hash_status": "disabled",
+                "digest": None,
+                "registration_count": 1,
+                "last_observed_at_utc": float(i),
+            }
+            stored = append_or_deduplicate_record(run, rec)
+            assert stored is rec
+
+        assert len(run.data_files["inputs"]) == 2000
+        assert [r["path"] for r in run.data_files["inputs"]] == expected_paths
+
+        # Re-registering existing records deduplicates in place without altering order.
+        for i in (0, 999, 1999):
+            dup = {
+                "path": f"/tmp/dataset_{i:04d}.bin",
+                "role": "input",
+                "label": None,
+                "device": 1,
+                "inode": 1000 + i,
+                "size_bytes": 64 + i,
+                "mtime_ns": 10_000 + i,
+                "hash_status": "disabled",
+                "digest": None,
+                "registration_count": 1,
+                "last_observed_at_utc": 99999.0,
+            }
+            stored = append_or_deduplicate_record(run, dup)
+            assert stored is run.data_files["inputs"][i]
+            assert stored["registration_count"] == 2
+            assert stored["last_observed_at_utc"] == 99999.0
+        assert len(run.data_files["inputs"]) == 2000
+
+    def test_direct_data_files_and_pending_mutations_rebuild_indexes(self, tmp_path):
+        from pubrun.capture.file_io import (
+            append_or_deduplicate_record,
+            register_file_provenance,
+        )
+
+        class _DummyRun:
+            def __init__(self):
+                self.data_files = {"inputs": [], "outputs": [], "mixed": []}
+                self._pending_file_registrations = []
+                self.config = {"capture": {"file_io": {"level": "hash"}}}
+
+        run = _DummyRun()
+        base = {
+            "path": "/tmp/direct.bin",
+            "role": "input",
+            "label": None,
+            "device": 1,
+            "inode": 7,
+            "size_bytes": 5,
+            "mtime_ns": 100,
+            "hash_status": "disabled",
+            "digest": None,
+            "registration_count": 1,
+            "last_observed_at_utc": 1.0,
+        }
+        r1 = append_or_deduplicate_record(run, dict(base))
+        assert len(run.data_files["inputs"]) == 1
+
+        # Direct list replacement invalidates cached identity and rebuilds index.
+        run.data_files["inputs"] = []
+        r2 = append_or_deduplicate_record(run, dict(base))
+        assert r2 is not r1
+        assert len(run.data_files["inputs"]) == 1
+
+        # Direct append changes length and rebuilds index so a matching key dedups.
+        injected = {**base, "path": "/tmp/injected.bin", "inode": 8}
+        run.data_files["inputs"].append(injected)
+        r3 = append_or_deduplicate_record(run, dict(injected))
+        assert r3 is injected
+        assert injected["registration_count"] == 2
+
+        # Direct mutation of _pending_file_registrations rebuilds _pending_file_index.
+        out_path = tmp_path / "mutated_pending.bin"
+        rec_p = register_file_provenance(run, out_path, role="output", defer=True)
+        assert rec_p is not None and rec_p["hash_status"] == "pending"
+        assert len(run._pending_file_registrations) == 1
+        run._pending_file_registrations.clear()
+        out_path.write_bytes(b"created-later")
+        rec_after = register_file_provenance(run, out_path, role="output", level="hash")
+        assert rec_after is not None
+        assert rec_after["hash_status"] == "completed"
+        assert rec_after["sha256"] == hashlib.sha256(b"created-later").hexdigest()
+
+    def test_pending_upgrade_swap_pop_and_repeat_registration_zero_rehash(
+        self, tmp_path, monkeypatch
+    ):
+        import pubrun.capture.file_io as file_io
+
+        p1 = tmp_path / "out1.bin"
+        p2 = tmp_path / "out2.bin"
+        p3 = tmp_path / "out3.bin"
+        hash_calls = []
+        orig_hash = file_io.hash_file_checked
+
+        def _spy_hash(*args, **kwargs):
+            hash_calls.append(args[0])
+            return orig_hash(*args, **kwargs)
+
+        def _work(_base, run):
+            # Register 3 pending outputs so upgrading the first exercises swap-pop.
+            r1 = pubrun.register_output(p1, defer=True)
+            r2 = pubrun.register_output(p2, defer=True)
+            r3 = pubrun.register_output(p3, defer=True)
+            assert r1 is not None and r2 is not None and r3 is not None
+            assert len(run._pending_file_registrations) == 3
+
+            p1.write_bytes(b"payload-1")
+            p2.write_bytes(b"payload-2")
+            p3.write_bytes(b"payload-3")
+
+            with monkeypatch.context() as mp:
+                mp.setattr(file_io, "hash_file_checked", _spy_hash)
+                # First registration after creation upgrades p1 in place (1 hash call).
+                up1 = pubrun.register_output(p1, level="hash")
+                assert up1 is r1
+                assert up1["hash_status"] == "completed"
+                assert up1["registration_count"] == 2
+                assert len(run._pending_file_registrations) == 2
+                assert len(hash_calls) == 1
+
+                # Repeat registration of unchanged p1 must deduplicate with ZERO re-hash.
+                rep1 = pubrun.register_output(p1, level="hash")
+                assert rep1 is r1
+                assert rep1["registration_count"] == 3
+                assert len(hash_calls) == 1
+
+                # Swapped element p3 (moved into slot 0) and p2 both upgrade cleanly.
+                up3 = pubrun.register_output(p3, level="hash")
+                assert up3 is r3
+                assert up3["hash_status"] == "completed"
+                assert len(run._pending_file_registrations) == 1
+
+                up2 = pubrun.register_output(p2, level="hash")
+                assert up2 is r2
+                assert up2["hash_status"] == "completed"
+                assert run._pending_file_registrations == []
+
+        m = _run_with_file_io(tmp_path, {"level": "hash"}, _work)
+        outputs = m["data_files"]["outputs"]
+        assert len(outputs) == 3
+        by_name = {Path(r["path"]).name: r for r in outputs}
+        assert by_name["out1.bin"]["sha256"] == hashlib.sha256(b"payload-1").hexdigest()
+        assert by_name["out1.bin"]["registration_count"] == 3
+        assert by_name["out2.bin"]["sha256"] == hashlib.sha256(b"payload-2").hexdigest()
+        assert by_name["out3.bin"]["sha256"] == hashlib.sha256(b"payload-3").hexdigest()
+
+    def test_warned_invalid_algorithms_capped_at_256(self, caplog):
+        import pubrun.capture.file_io as file_io
+
+        saved = set(file_io._warned_invalid_algorithms)
+        try:
+            file_io._warned_invalid_algorithms.clear()
+            with caplog.at_level("WARNING", logger="pubrun"):
+                for i in range(300):
+                    assert file_io.validate_hash_algorithm(f"invalid-alg-{i}") == "sha256"
+            assert isinstance(file_io._warned_invalid_algorithms, set)
+            assert len(file_io._warned_invalid_algorithms) == 256
+            warn_msgs = [
+                r for r in caplog.records if "unsupported [capture.file_io].hash_algorithm" in r.message
+            ]
+            assert len(warn_msgs) == 256
+        finally:
+            file_io._warned_invalid_algorithms.clear()
+            file_io._warned_invalid_algorithms.update(saved)
+
+
+class TestMaxTrackedFilesCapAndSchema:
+
+    def _validate_manifest_schema(self, manifest):
+        jsonschema = pytest.importorskip("jsonschema")
+        schema_path = Path(__file__).resolve().parents[1] / "schemas" / "manifest.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        jsonschema.validate(manifest, schema)
+
+    def test_resolve_file_io_config_max_tracked_files_validation(self):
+        from types import SimpleNamespace
+        from pubrun.capture.file_io import resolve_file_io_config
+
+        def _resolve(val):
+            run = SimpleNamespace(config={"capture": {"file_io": {"max_tracked_files": val}}})
+            return resolve_file_io_config(run)["max_tracked_files"]
+
+        assert resolve_file_io_config(SimpleNamespace(config={}))["max_tracked_files"] == 5000
+        assert _resolve(0) == 0
+        assert _resolve(100) == 100
+        assert _resolve(-1) == 5000
+        assert _resolve(-999) == 5000
+        assert _resolve(True) == 5000
+        assert _resolve(False) == 5000
+        assert _resolve(None) == 5000
+        assert _resolve("not-a-number") == 5000
+        assert _resolve(float("nan")) == 5000
+
+    def test_max_tracked_files_100_enforces_cap_preserves_dedup_and_upgrades_and_schema(
+        self, tmp_path
+    ):
+        def _work(base, run):
+            # 40 files via pubrun.open()
+            for i in range(40):
+                p = base / f"open_{i:03d}.bin"
+                with pubrun.open(p, "wb") as fh:
+                    fh.write(f"open-{i}".encode())
+
+            # 40 files via register_input()
+            first_input = base / "reg_in_000.bin"
+            for i in range(40):
+                p = base / f"reg_in_{i:03d}.bin"
+                p.write_bytes(f"in-{i}".encode())
+                rec = pubrun.register_input(p)
+                assert rec is not None
+
+            # 20 pending outputs via register_output(defer=True) -> reaches cap of 100
+            tracked_pending = base / "pending_000.bin"
+            for i in range(20):
+                p = base / f"pending_{i:03d}.bin"
+                rec = pubrun.register_output(p, defer=True)
+                assert rec is not None
+            assert len(run._pending_file_registrations) == 20
+
+            # Beyond cap: 5 pubrun.open(), 10 register_input(), 10 register_output(defer=True)
+            # -> 25 truncated records total.
+            for i in range(5):
+                p = base / f"over_open_{i:03d}.bin"
+                with pubrun.open(p, "wb") as fh:
+                    fh.write(b"dropped-open")
+
+            for i in range(10):
+                p = base / f"over_in_{i:03d}.bin"
+                p.write_bytes(b"dropped-in")
+                assert pubrun.register_input(p) is None
+
+            for i in range(10):
+                p = base / f"over_pending_{i:03d}.bin"
+                assert pubrun.register_output(p, defer=True) is None
+
+            assert len(run._pending_file_registrations) <= 100
+            assert len(run._pending_file_registrations) == 20
+
+            # At the cap, deduplication of an already-tracked input STILL succeeds.
+            dup_rec = pubrun.register_input(first_input)
+            assert dup_rec is not None
+            assert dup_rec["registration_count"] == 2
+
+            # At the cap, in-place upgrade of an already-tracked pending output STILL succeeds.
+            tracked_pending.write_bytes(b"upgraded-at-cap")
+            up_rec = pubrun.register_output(tracked_pending)
+            assert up_rec is not None
+            assert up_rec["hash_status"] != "pending"
+            assert up_rec["registration_count"] == 2
+            assert len(run._pending_file_registrations) == 19
+
+        m = _run_with_file_io(
+            tmp_path,
+            {"level": "stat", "max_tracked_files": 100},
+            _work,
+        )
+        df = m["data_files"]
+        total_stored = len(df["inputs"]) + len(df["outputs"]) + len(df["mixed"])
+        assert total_stored == 100
+        assert df["records_truncated"] == 25
+        self._validate_manifest_schema(m)
+
+    def test_uncapped_manifest_omits_records_truncated_and_validates(self, tmp_path):
+        def _work(base, _run):
+            p = base / "single.bin"
+            p.write_bytes(b"hello")
+            assert pubrun.register_input(p) is not None
+
+        m = _run_with_file_io(tmp_path, {"level": "stat", "max_tracked_files": 10}, _work)
+        assert "records_truncated" not in m["data_files"]
+        assert len(m["data_files"]["inputs"]) == 1
+        self._validate_manifest_schema(m)
+
+    def test_max_tracked_files_zero_records_nothing_and_skips_hashing(
+        self, tmp_path, monkeypatch
+    ):
+        import pubrun.capture.file_io as file_io
+
+        def _forbid_hash(*args, **kwargs):
+            raise AssertionError("hash_file_checked must not run when max_tracked_files=0")
+
+        def _work(base, _run):
+            inp = base / "zero_in.bin"
+            inp.write_bytes(b"should-not-hash")
+            out = base / "zero_out.bin"
+            with monkeypatch.context() as mp:
+                mp.setattr(file_io, "hash_file_checked", _forbid_hash)
+                with pubrun.open(inp, "rb") as fh:
+                    assert fh.read() == b"should-not-hash"
+                with pubrun.open(out, "wb") as fh:
+                    fh.write(b"written-no-hash")
+                assert pubrun.register_input(inp, level="hash") is None
+                assert pubrun.register_output(out, level="hash", defer=True) is None
+
+        m = _run_with_file_io(
+            tmp_path,
+            {"level": "hash", "max_tracked_files": 0},
+            _work,
+        )
+        df = m["data_files"]
+        assert df["inputs"] == []
+        assert df["outputs"] == []
+        assert df["mixed"] == []
+        assert df["records_truncated"] == 4
+        assert "hashing_summary" not in df
+        self._validate_manifest_schema(m)
+
+
+class TestStreamingHashFastPath:
+
+    def test_uncapped_streaming_bypasses_check_stream_progress_with_exact_digests(
+        self, tmp_path, monkeypatch
+    ):
+        from pubrun.capture.file_io import FileIoBudgetTracker
+
+        progress_calls = []
+        orig_check = FileIoBudgetTracker.check_stream_progress
+
+        def _spy_check(self, pending_bytes, pending_seconds):
+            progress_calls.append((pending_bytes, pending_seconds))
+            return orig_check(self, pending_bytes, pending_seconds)
+
+        p_write = tmp_path / "fast_write.bin"
+        p_read = tmp_path / "fast_read.bin"
+        expected_write = b"bytes-chunk-" + bytes(bytearray(b"bytearray-chunk-")) + b"mv-chunk"
+        expected_read = b"R" * 4096 + b"tail"
+        p_read.write_bytes(expected_read)
+
+        def _work(_base, run):
+            with monkeypatch.context() as mp:
+                mp.setattr(FileIoBudgetTracker, "check_stream_progress", _spy_check)
+                with pubrun.open(p_write, "wb") as fh:
+                    assert fh._budget is not None
+                    assert fh._budget._has_caps is False
+                    fh.write(b"bytes-chunk-")
+                    fh.write(bytearray(b"bytearray-chunk-"))
+                    fh.write(memoryview(b"mv-chunk"))
+
+                out_buf = bytearray()
+                buf = bytearray(1024)
+                with pubrun.open(p_read, "rb") as fh:
+                    while True:
+                        n = fh.readinto(buf)
+                        if not n:
+                            break
+                        out_buf.extend(buf[:n])
+                assert bytes(out_buf) == expected_read
+
+                out_buf1 = bytearray()
+                buf1 = bytearray(1024)
+                with pubrun.open(p_read, "rb") as fh:
+                    while True:
+                        n = fh.readinto1(buf1)
+                        if not n:
+                            break
+                        out_buf1.extend(buf1[:n])
+                assert bytes(out_buf1) == expected_read
+
+        m = _run_with_file_io(tmp_path, {"level": "hash"}, _work)
+        assert progress_calls == []
+
+        out_rec = m["data_files"]["outputs"][0]
+        assert out_rec["observation_time"] == "during_stream"
+        assert out_rec["sha256"] == hashlib.sha256(expected_write).hexdigest()
+        assert out_rec["hash_stats"]["bytes_hashed"] == len(expected_write)
+        assert out_rec["hash_stats"]["extra_read_bytes"] == 0
+
+        in_rec = m["data_files"]["inputs"][0]
+        assert in_rec["observation_time"] == "during_stream"
+        assert in_rec["sha256"] == hashlib.sha256(expected_read).hexdigest()
+        assert in_rec["hash_stats"]["bytes_hashed"] == len(expected_read)
+        assert in_rec["registration_count"] == 2
+
+        summary = m["data_files"]["hashing_summary"]
+        assert summary["total_bytes_hashed"] == len(expected_write) + 2 * len(expected_read)
+
+    def test_partial_binary_write_hashes_only_written_prefix(self, tmp_path):
+        from pubrun.capture.file_io import ProvenanceFileProxy
+
+        p = tmp_path / "partial_write.bin"
+
+        class _PartialWriter:
+            def __init__(self, real_fh):
+                self._fh = real_fh
+
+            def write(self, data):
+                # Write only the first 4 bytes to simulate a non-blocking partial write.
+                prefix = bytes(data)[:4]
+                return self._fh.write(prefix)
+
+            def flush(self):
+                return self._fh.flush()
+
+            def fileno(self):
+                return self._fh.fileno()
+
+            def close(self):
+                return self._fh.close()
+
+        def _work(_base, run):
+            real_fh = open(p, "wb")
+            proxy = ProvenanceFileProxy(
+                _PartialWriter(real_fh), p, "wb", run, level="hash"
+            )
+            with proxy as fh:
+                n1 = fh.write(b"ABCDxxxx")
+                n2 = fh.write(bytearray(b"EFGHyyyy"))
+                assert n1 == 4
+                assert n2 == 4
+
+        m = _run_with_file_io(tmp_path, {"level": "hash"}, _work)
+        assert p.read_bytes() == b"ABCDEFGH"
+        rec = m["data_files"]["outputs"][0]
+        assert rec["hash_status"] == "completed"
+        assert rec["observation_time"] == "during_stream"
+        assert rec["sha256"] == hashlib.sha256(b"ABCDEFGH").hexdigest()
+        assert rec["hash_stats"]["bytes_hashed"] == 8
+
+    def test_capped_streaming_small_per_file_cap_and_large_64k_intervals(
+        self, tmp_path, monkeypatch
+    ):
+        from pubrun.capture.file_io import FileIoBudgetTracker
+
+        # 1. Small per-file cap (max_hash_bytes=10) aborts immediately lock-free.
+        p_small_over = tmp_path / "small_over.bin"
+        p_small_ok = tmp_path / "small_ok.bin"
+
+        def _work_small(_base, _run):
+            with pubrun.open(p_small_over, "wb") as fh:
+                assert fh._budget is not None
+                assert fh._budget._has_caps is True
+                fh.write(b"12345")
+                assert fh._stream_valid is True
+                fh.write(b"678901")  # 11 bytes > 10 -> aborts immediately
+                assert fh._stream_valid is False
+                assert fh._stream_over_budget is True
+            with pubrun.open(p_small_ok, "wb") as fh:
+                fh.write(b"1234567890")  # exactly 10 bytes
+
+        m_small = _run_with_file_io(
+            tmp_path,
+            {"level": "hash", "max_hash_bytes": 10},
+            _work_small,
+        )
+        by_name = {Path(r["path"]).name: r for r in m_small["data_files"]["outputs"]}
+        assert by_name["small_over.bin"]["hash_status"] == "over_budget"
+        assert by_name["small_over.bin"]["sha256"] is None
+        assert by_name["small_ok.bin"]["hash_status"] == "completed"
+        assert by_name["small_ok.bin"]["sha256"] == hashlib.sha256(b"1234567890").hexdigest()
+
+        # 2. Large >= 64 KiB stream checks progress at 64 KiB intervals + close.
+        progress_calls = []
+        orig_check = FileIoBudgetTracker.check_stream_progress
+
+        def _spy_check(self, pending_bytes, pending_seconds):
+            progress_calls.append(pending_bytes)
+            return orig_check(self, pending_bytes, pending_seconds)
+
+        p_big_ok = tmp_path / "big_ok.bin"
+        p_big_over = tmp_path / "big_over.bin"
+        chunk = b"Z" * 4096
+        big_payload = chunk * 40  # 160 KiB
+
+        def _work_big(_base, _run):
+            with monkeypatch.context() as mp:
+                mp.setattr(FileIoBudgetTracker, "check_stream_progress", _spy_check)
+                with pubrun.open(p_big_ok, "wb") as fh:
+                    for _ in range(40):
+                        fh.write(chunk)
+                with pubrun.open(p_big_over, "wb") as fh:
+                    for _ in range(40):
+                        fh.write(chunk)
+
+        m_big = _run_with_file_io(
+            tmp_path,
+            {"level": "hash", "max_total_hash_bytes": 200 * 1024},
+            _work_big,
+        )
+        # First file (160 KiB): checked at 64 KiB, 128 KiB, and close (160 KiB).
+        # Second file: checked at 64 KiB (total 224 KiB > 200 KiB) -> aborts mid-stream.
+        assert 65536 in progress_calls
+        assert 131072 in progress_calls
+        assert len(progress_calls) < 10
+
+        big_by_name = {Path(r["path"]).name: r for r in m_big["data_files"]["outputs"]}
+        assert big_by_name["big_ok.bin"]["hash_status"] == "completed"
+        assert big_by_name["big_ok.bin"]["observation_time"] == "during_stream"
+        assert big_by_name["big_ok.bin"]["sha256"] == hashlib.sha256(big_payload).hexdigest()
+        assert big_by_name["big_ok.bin"]["hash_stats"]["bytes_hashed"] == len(big_payload)
+        assert big_by_name["big_over.bin"]["hash_status"] == "over_budget"
+        assert big_by_name["big_over.bin"]["sha256"] is None
+        assert m_big["data_files"]["hashing_summary"]["total_bytes_hashed"] == len(big_payload)
