@@ -1,8 +1,10 @@
+import ctypes
+import logging
+import math
 import os
 import sys
-import time
 import threading
-import logging
+import time
 from typing import Any, Dict, Optional, Tuple
 
 from pubrun.capture.signals import finalization_lock, in_signal_finalization
@@ -14,6 +16,7 @@ def _sysconf(name: str) -> int:
     """Return ``os.sysconf(name)``; raises ``AttributeError`` where ``os.sysconf`` is absent (Windows)."""
     return int(getattr(os, "sysconf")(name))
 
+
 # _get_rss_windows uses GetProcessMemoryInfo through ctypes first and falls back to wmic.
 
 # Per-poll timeout (seconds) for the macOS/Windows sampling subprocesses
@@ -22,14 +25,97 @@ def _sysconf(name: str) -> int:
 _DEFAULT_POLL_TIMEOUT = 3.0
 _poll_timeout = _DEFAULT_POLL_TIMEOUT
 
+# Validation defaults and lower bound for ResourceWatcher polling intervals.
+_DEFAULT_INTERVAL = 15.0
+_MIN_INTERVAL = 0.05
+_DEFAULT_MAX_FAILURES = 3
+
+_MISSING = object()
+
+
+class _PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+    """Win32 PROCESS_MEMORY_COUNTERS defined once to avoid ctypes pointer-cache leaks."""
+
+    _fields_ = [
+        ("cb", ctypes.c_ulong),
+        ("PageFaultCount", ctypes.c_ulong),
+        ("PeakWorkingSetSize", ctypes.c_size_t),
+        ("WorkingSetSize", ctypes.c_size_t),
+        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+        ("PagefileUsage", ctypes.c_size_t),
+        ("PeakPagefileUsage", ctypes.c_size_t),
+    ]
+
+
+_WIN_RSS_LOCK = threading.Lock()
+_WIN_RSS_API: Optional[Tuple[Any, Any]] = None
+
+
+def _get_win32_rss_api() -> Tuple[Any, Any]:
+    """Lazily initialize and cache private WinDLL handles for Windows RSS polling."""
+    global _WIN_RSS_API
+    cached = _WIN_RSS_API
+    if cached is not None:
+        return cached
+    with _WIN_RSS_LOCK:
+        cached = _WIN_RSS_API
+        if cached is not None:
+            return cached
+        win_dll_cls = getattr(ctypes, "WinDLL", None)
+        if win_dll_cls is None:
+            raise AttributeError("ctypes.WinDLL is unavailable on this platform")
+        kernel32 = win_dll_cls("kernel32", use_last_error=True)
+        get_current_process = kernel32.GetCurrentProcess
+        get_current_process.restype = ctypes.c_void_p
+
+        get_mem_info = getattr(kernel32, "K32GetProcessMemoryInfo", None)
+        if get_mem_info is None:
+            psapi = win_dll_cls("psapi", use_last_error=True)
+            get_mem_info = psapi.GetProcessMemoryInfo
+        get_mem_info.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(_PROCESS_MEMORY_COUNTERS),
+            ctypes.c_ulong,
+        ]
+        get_mem_info.restype = ctypes.c_int
+
+        _WIN_RSS_API = (get_current_process, get_mem_info)
+        return _WIN_RSS_API
+
 
 def set_poll_timeout(seconds: float) -> None:
     """Set the module-level subprocess poll timeout (seconds)."""
     global _poll_timeout
-    try:
-        _poll_timeout = float(seconds)
-    except (TypeError, ValueError):
+    if isinstance(seconds, bool):
+        logger.warning(
+            "pubrun: invalid poll_timeout %r; falling back to %s s",
+            seconds,
+            _DEFAULT_POLL_TIMEOUT,
+        )
         _poll_timeout = _DEFAULT_POLL_TIMEOUT
+        return
+    try:
+        val = float(seconds)
+    except (TypeError, ValueError):
+        logger.warning(
+            "pubrun: invalid poll_timeout %r; falling back to %s s",
+            seconds,
+            _DEFAULT_POLL_TIMEOUT,
+        )
+        _poll_timeout = _DEFAULT_POLL_TIMEOUT
+        return
+    if not math.isfinite(val) or val <= 0:
+        logger.warning(
+            "pubrun: invalid poll_timeout %r; falling back to %s s",
+            seconds,
+            _DEFAULT_POLL_TIMEOUT,
+        )
+        _poll_timeout = _DEFAULT_POLL_TIMEOUT
+        return
+    _poll_timeout = val
 
 
 def _get_rss_windows() -> int:
@@ -37,35 +123,26 @@ def _get_rss_windows() -> int:
     # works on Windows Server 2025+ where wmic was removed).
     if sys.platform == "win32":
         try:
-            import ctypes
+            windll: Any = getattr(ctypes, "windll", _MISSING)
+            if windll is not _MISSING and not isinstance(windll, ctypes.LibraryLoader):
+                # Honor explicit test patches of ctypes.windll (fake namespace or None).
+                if windll is None:
+                    raise RuntimeError("ctypes.windll disabled")
+                kernel32 = windll.kernel32
+                get_current_process = kernel32.GetCurrentProcess
+                get_current_process.restype = ctypes.c_void_p
 
-            class _PROCESS_MEMORY_COUNTERS(ctypes.Structure):
-                _fields_ = [
-                    ("cb", ctypes.c_ulong),
-                    ("PageFaultCount", ctypes.c_ulong),
-                    ("PeakWorkingSetSize", ctypes.c_size_t),
-                    ("WorkingSetSize", ctypes.c_size_t),
-                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
-                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-                    ("PagefileUsage", ctypes.c_size_t),
-                    ("PeakPagefileUsage", ctypes.c_size_t),
+                get_mem_info = getattr(kernel32, "K32GetProcessMemoryInfo", None)
+                if get_mem_info is None:
+                    get_mem_info = windll.psapi.GetProcessMemoryInfo
+                get_mem_info.argtypes = [
+                    ctypes.c_void_p,
+                    ctypes.POINTER(_PROCESS_MEMORY_COUNTERS),
+                    ctypes.c_ulong,
                 ]
-
-            kernel32 = ctypes.windll.kernel32
-            get_current_process = kernel32.GetCurrentProcess
-            get_current_process.restype = ctypes.c_void_p
-
-            get_mem_info = getattr(kernel32, "K32GetProcessMemoryInfo", None)
-            if get_mem_info is None:
-                get_mem_info = ctypes.windll.psapi.GetProcessMemoryInfo
-            get_mem_info.argtypes = [
-                ctypes.c_void_p,
-                ctypes.POINTER(_PROCESS_MEMORY_COUNTERS),
-                ctypes.c_ulong,
-            ]
-            get_mem_info.restype = ctypes.c_int
+                get_mem_info.restype = ctypes.c_int
+            else:
+                get_current_process, get_mem_info = _get_win32_rss_api()
 
             counters = _PROCESS_MEMORY_COUNTERS()
             counters.cb = ctypes.sizeof(counters)
@@ -254,7 +331,9 @@ def _get_tree_cpu_jiffies_linux() -> int:
                     # The comm field (2nd) may contain spaces/parens; split on the last ')'.
                     data = f.read()
                     rparen = data.rfind(')')
-                    fields = data[rparen + 2:].split() if rparen != -1 else data.split()
+                    if rparen == -1:
+                        continue
+                    fields = data[rparen + 2:].split()
                     # After the '(comm)' the fields are 0-indexed: state=0, ... utime=11, stime=12
                     utime = int(fields[11])
                     stime = int(fields[12])
@@ -273,8 +352,55 @@ class ResourceWatcher(threading.Thread):
                  scope: str = "process", system_metrics: bool = True):
         super().__init__(daemon=True)
         self.run_tracker = run_tracker
-        self.interval = float(interval_seconds)
-        self.max_failures = max_failures
+
+        if isinstance(interval_seconds, bool):
+            logger.warning(
+                "pubrun: invalid sample_interval_seconds %r; falling back to %s s",
+                interval_seconds,
+                _DEFAULT_INTERVAL,
+            )
+            interval_val = _DEFAULT_INTERVAL
+        else:
+            try:
+                interval_val = float(interval_seconds)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "pubrun: invalid sample_interval_seconds %r; falling back to %s s",
+                    interval_seconds,
+                    _DEFAULT_INTERVAL,
+                )
+                interval_val = _DEFAULT_INTERVAL
+            else:
+                if not math.isfinite(interval_val):
+                    logger.warning(
+                        "pubrun: non-finite sample_interval_seconds %r; falling back to %s s",
+                        interval_seconds,
+                        _DEFAULT_INTERVAL,
+                    )
+                    interval_val = _DEFAULT_INTERVAL
+                elif interval_val < _MIN_INTERVAL:
+                    logger.warning(
+                        "pubrun: sample_interval_seconds %r below minimum %s s; clamping to %s s",
+                        interval_seconds,
+                        _MIN_INTERVAL,
+                        _MIN_INTERVAL,
+                    )
+                    interval_val = _MIN_INTERVAL
+        self.interval = interval_val
+
+        if (
+            isinstance(max_failures, bool)
+            or not isinstance(max_failures, int)
+            or max_failures < 1
+        ):
+            logger.warning(
+                "pubrun: invalid max_consecutive_failures %r; falling back to %s",
+                max_failures,
+                _DEFAULT_MAX_FAILURES,
+            )
+            self.max_failures = _DEFAULT_MAX_FAILURES
+        else:
+            self.max_failures = max_failures
         self._scope = scope
         self._system_metrics = system_metrics
         self._stop_event = threading.Event()

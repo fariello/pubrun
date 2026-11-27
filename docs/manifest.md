@@ -318,7 +318,8 @@ OS signals received during execution and the process exit code. This section is 
 
 | Field | Type | Description |
 |---|---|---|
-| `signals_received` | list[object] | Signals received during execution. Each entry has `signal` (int), `signal_name` (string), and `timestamp_utc` (float). |
+| `signals_received` | list[object] | Signals received during execution, capped at 1,000 entries per run. Each entry has `signal` (int), `signal_name` (string), and `timestamp_utc` (float). |
+| `signals_truncated` | int \| absent | Number of additional signals omitted after the 1,000-entry cap was reached. Present only when greater than `0`; `capture_state` also becomes `partial` when not already `failed` or unavailable. |
 | `exit_code` | int \| null | Process exit code at finalization. `0` for clean exit, `1` for unhandled exception, or the `SystemExit` code. Null if unknown. |
 | `exit_exception` | string \| null | String representation of the exit-causing exception (e.g., `"SystemExit(42)"`), or null. |
 | `capture_state` | object | See [Capture State](#capture-state). |

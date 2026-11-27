@@ -2200,6 +2200,11 @@
                     "default": [],
                     "description": "List of OS signals received during execution."
                 },
+                "signals_truncated": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Number of additional signals omitted after the per-run cap of 1000 recorded signals was reached. Present only when greater than 0."
+                },
                 "exit_code": {
                     "type": [
                         "integer",

@@ -176,6 +176,15 @@ def _handle_inactive(context: str) -> None:
         )
 
 
+def _mark_run_activity(run: Any) -> None:
+    """Clear any stale caught ``sys.exit()`` state once host code resumes API calls."""
+    sig_cap = getattr(run, "signal_capture", None)
+    if sig_cap is not None and getattr(sig_cap, "_exit_from_sys_exit", False):
+        clear_fn = getattr(sig_cap, "clear_stale_sys_exit", None)
+        if clear_fn is not None:
+            clear_fn()
+
+
 # -- Public API ---------------------------------------------------------------
 
 def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
@@ -194,6 +203,8 @@ def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
         >>> pubrun.annotate("Model Configured", layers=50, optimizer="adamw")
     """
     current_run = get_current_run()
+    if current_run and getattr(current_run, "is_active", False):
+        _mark_run_activity(current_run)
     event_stream = getattr(current_run, "event_stream", None) if current_run else None
     if event_stream:
         payload = kwargs.copy()
@@ -645,6 +656,8 @@ class phase:
         # Bind at entry, not construction, so a phase object created before
         # start() (or reused across runs) logs to the run active when it runs.
         self.run_tracker = get_current_run()
+        if self.run_tracker and getattr(self.run_tracker, "is_active", False):
+            _mark_run_activity(self.run_tracker)
         event_stream = getattr(self.run_tracker, "event_stream", None) if self.run_tracker else None
         if event_stream:
             event_stream.emit("phase_start", name=self.name)
@@ -922,6 +935,37 @@ def _is_pubrun_cli_invocation() -> bool:
     return False
 
 
+def _is_multiprocessing_worker() -> bool:
+    """Return True when running inside a multiprocessing worker (e.g. spawn/forkserver).
+
+    Inspects ``sys.modules`` without eagerly importing ``multiprocessing`` so
+    non-multiprocessing scripts incur no extra import overhead. Checks both
+    ``multiprocessing.parent_process() is not None`` (set once a worker enters
+    ``Process._bootstrap()``) and ``current_process()._inheriting`` (set by
+    CPython's ``multiprocessing.spawn._main()`` during ``prepare()``, when the
+    script is re-imported as ``__mp_main__`` before ``parent_process()`` is
+    populated).
+    """
+    mp = sys.modules.get("multiprocessing")
+    if mp is None:
+        return False
+    parent_process = getattr(mp, "parent_process", None)
+    if callable(parent_process):
+        try:
+            if parent_process() is not None:
+                return True
+        except Exception:
+            pass
+    current_process = getattr(mp, "current_process", None)
+    if callable(current_process):
+        try:
+            if getattr(current_process(), "_inheriting", False):
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def _execute_boot_sequence(selected_by: str = "pubrun") -> None:
     """Resolve import mode, register selection, and auto-start if configured.
 
@@ -957,7 +1001,7 @@ def _execute_boot_sequence(selected_by: str = "pubrun") -> None:
         mark_core_loaded()
 
     if _should_auto and not get_current_run():
-        if _is_pubrun_cli_invocation():
+        if _is_pubrun_cli_invocation() or _is_multiprocessing_worker():
             return
 
         try:
@@ -1040,6 +1084,7 @@ def report(name: str, data: Any) -> None:
     if not run or not run.is_active:
         _handle_inactive(f"pubrun.report('{name}')")
         return
+    _mark_run_activity(run)
 
     try:
         if not isinstance(name, str) or not name.strip():
@@ -1094,6 +1139,7 @@ def artifact(filename: str, content: Any) -> None:
     if not run or not run.is_active:
         _handle_inactive(f"pubrun.artifact('{filename}')")
         return
+    _mark_run_activity(run)
 
     try:
         dest = _resolve_within_run_dir(run.run_dir, filename)
@@ -1143,11 +1189,12 @@ def _close_print_log_handle(run: Any) -> None:
             except Exception:
                 pass
         return
-    with lock:
+    from pubrun.capture.signals import finalization_lock
+    with finalization_lock(lock, 0.25) as acquired:
         fh = getattr(run, "_print_log_file", None)
         run._print_log_file = None
         run._print_log_path = None
-        if fh is not None:
+        if acquired and fh is not None:
             try:
                 fh.close()
             except Exception:
@@ -1204,6 +1251,8 @@ def print(*args: Any, **kwargs: Any) -> None:
     builtins.print(*args, **kwargs)
 
     run = get_current_run()
+    if run and run.is_active:
+        _mark_run_activity(run)
     if (
         run
         and run.is_active
@@ -1395,6 +1444,7 @@ def register_file(
     if not run or not run.is_active:
         _handle_inactive("pubrun.register_file()")
         return None
+    _mark_run_activity(run)
     from pubrun.capture.file_io import register_file_provenance
 
     return register_file_provenance(
@@ -1456,6 +1506,7 @@ def register_input(
     if not run or not run.is_active:
         _handle_inactive("pubrun.register_input()")
         return None
+    _mark_run_activity(run)
     from pubrun.capture.file_io import register_file_provenance
 
     return register_file_provenance(
@@ -1521,6 +1572,7 @@ def register_output(
     if not run or not run.is_active:
         _handle_inactive("pubrun.register_output()")
         return None
+    _mark_run_activity(run)
     from pubrun.capture.file_io import register_file_provenance
 
     return register_file_provenance(
@@ -1569,6 +1621,7 @@ def open(file: Any, mode: str = "r", **kwargs: Any) -> Any:
 
     current_run = get_current_run()
     if current_run and current_run.is_active:
+        _mark_run_activity(current_run)
         try:
             level = _file_io_level(current_run)
             if level != "none":
@@ -1646,6 +1699,9 @@ class _PubrunSubprocessNamespace:
             >>> res = pubrun.subprocess.run(["python", "step.py"], check=True)
         """
         cmd = args[0] if args else kwargs.get("args")
+        active_run = get_current_run()
+        if active_run and active_run.is_active:
+            _mark_run_activity(active_run)
 
         started_at = time.time()
         start_mono = time.perf_counter()
@@ -1728,6 +1784,9 @@ class _PubrunSubprocessNamespace:
         """
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             self._pubrun_cmd = args[0] if args else kwargs.get("args")
+            active_run = get_current_run()
+            if active_run and active_run.is_active:
+                _mark_run_activity(active_run)
             self._pubrun_started_at = time.time()
             self._pubrun_start_mono = time.perf_counter()
             self._pubrun_log_lock = threading.Lock()
@@ -1839,6 +1898,9 @@ def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
     """
     started_at = time.time()
     start_mono = time.perf_counter()
+    active_run = get_current_run()
+    if active_run and active_run.is_active:
+        _mark_run_activity(active_run)
     from pubrun.capture.subprocesses import disable_spy
     try:
         with disable_spy():

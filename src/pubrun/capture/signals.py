@@ -19,9 +19,11 @@ import signal
 import sys
 import time
 import threading
-from contextlib import contextmanager
-from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+
+# Maximum number of signal records retained per run manifest.
+MAX_SIGNALS_RECORDED = 1000
 
 # Signals we attempt to intercept (subset of catchable, meaningful signals).
 # We intentionally omit SIGKILL/SIGSTOP (uncatchable) and obscure signals.
@@ -38,7 +40,7 @@ _TARGET_SIGNALS: List[str] = [
 # Signals that will kill the process when delivered with SIG_DFL disposition.
 # For these, we must finalize the run before re-delivering.
 _LETHAL_SIGNALS: set = set()
-for _sig_name in ("SIGTERM", "SIGHUP"):
+for _sig_name in ("SIGTERM", "SIGHUP", "SIGUSR1", "SIGUSR2"):
     _sig = getattr(signal, _sig_name, None)
     if _sig is not None:
         _LETHAL_SIGNALS.add(_sig)
@@ -58,34 +60,44 @@ def in_signal_finalization() -> bool:
     return _finalizing_active_run
 
 
-@contextmanager
-def finalization_lock(lock: Any, timeout: float) -> Iterator[bool]:
+class finalization_lock:
     """Acquire ``lock`` normally, or with a bound during lethal-signal finalization.
 
     Outside signal finalization (``_finalizing_active_run`` is False), this
-    acquires ``lock`` with a normal blocking ``with lock:`` and always yields
-    ``True``. During signal finalization, it waits at most ``timeout`` seconds
-    (or uses ``acquire(blocking=False)`` if ``lock`` already timed out in this
-    finalization). Yields ``True`` when the lock is held and ``False`` when it
-    gave up so the caller can proceed lock-free.
+    acquires ``lock`` with a normal blocking acquire and returns ``True`` from
+    ``__enter__``. During signal finalization, it waits at most ``timeout``
+    seconds (or uses ``acquire(blocking=False)`` if ``lock`` already timed out
+    in this finalization), returning ``True`` when the lock is held and
+    ``False`` when it gave up so the caller can proceed lock-free.
     """
-    if not _finalizing_active_run:
-        with lock:
-            yield True
-        return
 
-    lock_id = id(lock)
-    if lock_id in _timed_out_locks:
-        acquired = lock.acquire(blocking=False)
-    else:
-        acquired = lock.acquire(timeout=timeout)
-        if not acquired:
-            _timed_out_locks.add(lock_id)
-    try:
-        yield acquired
-    finally:
-        if acquired:
-            lock.release()
+    __slots__ = ("_lock", "_timeout", "_acquired")
+
+    def __init__(self, lock: Any, timeout: float) -> None:
+        self._lock = lock
+        self._timeout = timeout
+        self._acquired = False
+
+    def __enter__(self) -> bool:
+        if not _finalizing_active_run:
+            self._lock.acquire()
+            self._acquired = True
+            return True
+
+        lock_id = id(self._lock)
+        if lock_id in _timed_out_locks:
+            acquired = bool(self._lock.acquire(blocking=False))
+        else:
+            acquired = bool(self._lock.acquire(timeout=self._timeout))
+            if not acquired:
+                _timed_out_locks.add(lock_id)
+        self._acquired = acquired
+        return acquired
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        if self._acquired:
+            self._acquired = False
+            self._lock.release()
 
 
 # Signal-context lock rule: during signal finalization, never block without a
@@ -102,17 +114,17 @@ def finalization_lock(lock: Any, timeout: float) -> Iterator[bool]:
 # - src/pubrun/capture/resources.py::ResourceWatcher._lock (Lock): bounded 0.25 s via finalization_lock in ResourceWatcher.stop (with 0.5 s thread join cap) and ResourceWatcher.to_manifest_dict; lock-free fallback.
 # - src/pubrun/__init__.py::_commit_lock (Lock): unchanged; startup manifest write caches the commit before the active run is published, so _get_commit returns without taking the lock.
 # - src/pubrun/capture/signals.py::SignalExitCapture._lock (RLock): unchanged; get_records already uses acquire(blocking=False) with lock-free fallback (commit 94e504a).
-# - src/pubrun/capture/console.py::TqdmSafeTee._lock (RLock): unchanged; not taken by ConsoleInterceptor.stop.
+# - src/pubrun/capture/console.py::TqdmSafeTee._lock (RLock): bounded 0.25 s via finalization_lock in TqdmSafeTee.write, TqdmSafeTee.flush, ConsoleInterceptor.suspend_for_migration, ConsoleInterceptor.resume_after_migration, and ConsoleInterceptor._cleanup_resources (skips flush on timeout, still detaches log_file).
 # - src/pubrun/capture/packages.py::_CACHE_LOCK and _DistributionIndex._files_lock (Lock): unchanged; main thread holds them only at startup (before handlers are installed) or inside _finalize_state after _finalized is latched.
 # - src/pubrun/writer.py::_durability_warn_lock and src/pubrun/capture/file_io.py::_warn_lock (Lock): unchanged; only acquired when a configuration value is invalid.
 # - src/pubrun/_bootstrap.py::_lock, src/pubrun/core.py::_start_lock, and src/pubrun/core.py::_pubrun_log_lock (Lock): unchanged; not reached during finalization (_bootstrap.get_import_metadata takes no lock).
 def _finalize_active_run() -> None:
     """Best-effort finalization of the active run before process death.
 
-    Called when a lethal signal (SIGTERM, SIGHUP) is about to kill the
-    process via SIG_DFL re-delivery.  Imports tracker lazily to avoid
-    circular imports.  A nested call made while a finalization is already in
-    progress returns without writing.
+    Called when a lethal signal (SIGTERM, SIGHUP, SIGUSR1, SIGUSR2) is about
+    to kill the process via SIG_DFL re-delivery. Imports tracker lazily to
+    avoid circular imports. A nested call made while a finalization is already
+    in progress returns without writing.
     """
     global _finalizing_active_run
     if _finalizing_active_run:
@@ -154,9 +166,12 @@ class SignalExitCapture:
         self._lock = threading.RLock()
         self._config: Optional[Dict[str, Any]] = config
         self._signals_received: List[Dict[str, Any]] = []
+        self._signals_truncated: int = 0
+        self._fatal_signal: Optional[str] = None
         self._exit_code: Optional[int] = None
         self._exit_exception: Optional[str] = None
         self._exit_exception_type: Optional[str] = None
+        self._exit_from_sys_exit: bool = False
         self._installed = False
         self._active = False
         self._signals_unavailable = False
@@ -244,6 +259,7 @@ class SignalExitCapture:
                 self._lock.release()
 
     def _snapshot_records(self) -> Dict[str, Any]:
+        truncated = self._signals_truncated
         if self._install_error:
             capture_state: Dict[str, Any] = {
                 "status": "failed",
@@ -254,14 +270,22 @@ class SignalExitCapture:
                 "status": "partial",
                 "detail": "signal handlers unavailable off main thread",
             }
+        elif truncated > 0:
+            capture_state = {
+                "status": "partial",
+                "detail": f"{truncated} additional signal(s) omitted",
+            }
         else:
             capture_state = {"status": "complete"}
-        return {
+        result: Dict[str, Any] = {
             "signals_received": list(self._signals_received),
             "exit_code": self._exit_code,
             "exit_exception": self._exit_exception,
             "capture_state": capture_state,
         }
+        if truncated > 0:
+            result["signals_truncated"] = truncated
+        return result
 
     def record_exit_code(self, code: Optional[int]) -> None:
         """Explicitly record the process exit code (called at finalization).
@@ -277,7 +301,18 @@ class SignalExitCapture:
         """Return the class name of the exception that ended the process, if recorded."""
         return self._exit_exception_type
 
-    def _set_exit(self, code: int, exc_str: Optional[str], exc_type_name: Optional[str]) -> None:
+    def fatal_signal_name(self) -> Optional[str]:
+        """Return the symbolic name of the lethal SIG_DFL signal finalizing this run, if any."""
+        return self._fatal_signal
+
+    def _set_exit(
+        self,
+        code: int,
+        exc_str: Optional[str],
+        exc_type_name: Optional[str],
+        *,
+        from_sys_exit: bool = False,
+    ) -> None:
         """Record a definitive exit, overwriting any earlier value.
 
         Lock-free on purpose: this runs from the ``sys.exit`` wrapper, which a
@@ -287,6 +322,20 @@ class SignalExitCapture:
         self._exit_code = code
         self._exit_exception = exc_str
         self._exit_exception_type = exc_type_name
+        self._exit_from_sys_exit = from_sys_exit
+
+    def clear_stale_sys_exit(self) -> None:
+        """Clear a non-zero exit recorded by ``sys.exit()`` after execution continued.
+
+        When host code catches ``SystemExit`` and resumes normal execution,
+        calling this method resets the stale non-zero exit state so the run
+        is not misclassified as failed at finalization.
+        """
+        if self._exit_from_sys_exit and self._exit_code not in (None, 0):
+            self._exit_code = None
+            self._exit_exception = None
+            self._exit_exception_type = None
+            self._exit_from_sys_exit = False
 
     # ------------------------------------------------------------------
     # Signal handler installation
@@ -344,23 +393,26 @@ class SignalExitCapture:
                 # _finalize_active_run(), and never reinstall _handler on SIG_DFL.
                 if previous_handler is signal.SIG_DFL:
                     signal.signal(sig, signal.SIG_DFL)
-                    os.kill(os.getpid(), sig)
+                    signal.raise_signal(sig)
                 elif previous_handler is signal.SIG_IGN:
                     pass
                 elif callable(previous_handler):
                     previous_handler(sig, frame)
                 return
 
-            # Record the signal
+            # Record the signal (capped at MAX_SIGNALS_RECORDED per run).
             # Lock-free: list.append is atomic under the GIL, and taking
             # self._lock here could deadlock if the interrupted main-thread code
             # already holds it.
             sig_name = _signal_name(sig)
-            self._signals_received.append({
-                "signal": sig,
-                "signal_name": sig_name,
-                "timestamp_utc": time.time(),
-            })
+            if len(self._signals_received) < MAX_SIGNALS_RECORDED:
+                self._signals_received.append({
+                    "signal": sig,
+                    "signal_name": sig_name,
+                    "timestamp_utc": time.time(),
+                })
+            else:
+                self._signals_truncated += 1
 
             # Chain to the previous handler.
             # The previous handler can be:
@@ -368,16 +420,17 @@ class SignalExitCapture:
             #   - signal.SIG_IGN (1) -- ignore
             #   - A callable (user handler or Python's default KeyboardInterrupt raiser)
             if previous_handler is signal.SIG_DFL:
-                # For lethal signals (SIGTERM, SIGHUP), finalize the run before
-                # re-delivering, because SIG_DFL will kill the process without
-                # running atexit handlers.
+                # For lethal signals (SIGTERM, SIGHUP, SIGUSR1, SIGUSR2), finalize
+                # the run before re-delivering, because SIG_DFL will kill the
+                # process without running atexit handlers.
                 if sig in _LETHAL_SIGNALS:
+                    self._fatal_signal = sig_name
                     _finalize_active_run()
 
                 # Re-raise with default behavior: temporarily reset to SIG_DFL,
                 # re-send the signal to ourselves.
                 signal.signal(sig, signal.SIG_DFL)
-                os.kill(os.getpid(), sig)
+                signal.raise_signal(sig)
                 # If we survive (e.g., SIGINT raised KeyboardInterrupt which was
                 # caught by user code), re-install our shim only while active.
                 if self._active:
@@ -476,7 +529,7 @@ class SignalExitCapture:
                 try:
                     status = args[0] if args else None
                     code, exit_exc_str = _exit_details(SystemExit(status), _self._config)
-                    _self._set_exit(code, exit_exc_str, "SystemExit")
+                    _self._set_exit(code, exit_exc_str, "SystemExit", from_sys_exit=True)
                 except Exception:
                     pass  # Recording must never change how the process exits.
             return prev_exit(*args)

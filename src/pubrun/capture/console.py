@@ -1,7 +1,8 @@
 import sys
 import logging
 import threading
-from typing import TextIO, Dict, Any, Optional
+from datetime import datetime, timezone
+from typing import Iterable, TextIO, Dict, Any, Optional
 from pathlib import Path
 
 from pubrun.capture.signals import finalization_lock
@@ -175,34 +176,37 @@ class TqdmSafeTee:
             if not log_file or getattr(log_file, "closed", False):
                 return ret
             try:
-                # 2. Process strings for log file safely (handling carriage returns aka TQDM interception)
-                # CRLF is a line ending, not a redraw: normalize it to \n first, then
-                # split on the remaining bare \r to squash progress bar redraws.
-                # PERF-05: compute timestamp once per write() call, not per line.
-                if self.timestamped:
-                    from datetime import datetime, timezone
-                    ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
-                else:
-                    ts = ""
-                if self._pending_cr:
-                    self._pending_cr = False
-                    if not data.startswith('\n'):
-                        # The deferred \r was a bare redraw, not half of a CRLF.
-                        self._current_buffer = ""
-                text = data.replace('\r\n', '\n')
-                if text.endswith('\r'):
-                    self._pending_cr = True
-                    text = text[:-1]
-                segments = text.split('\r')
-                for i, segment in enumerate(segments):
-                    if i > 0:
-                        # A bare \r was encountered: discard the current buffer (progress bar redraw)
-                        self._current_buffer = ""
-                    lines = segment.split('\n')
-                    # All but the last piece end with \n
-                    for j, line in enumerate(lines):
-                        if j < len(lines) - 1:
-                            full_line = self._current_buffer + line
+                # 2. Process strings for log file safely (handling carriage returns aka TQDM interception).
+                # Compute timestamp lazily only when at least one line is actually written.
+                ts: Optional[str] = None
+                timestamped = self.timestamped
+
+                if '\r' not in data and not self._pending_cr:
+                    # Fast path: no carriage returns and no deferred CR state.
+                    if '\n' not in data:
+                        self._current_buffer += data
+                        if len(self._current_buffer) >= self._MAX_BUFFER_CHARS:
+                            if timestamped:
+                                ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
+                                log_file.write(ts + self._current_buffer + '\n')
+                            else:
+                                log_file.write(self._current_buffer + '\n')
+                            self.line_count += 1
+                            self._current_buffer = ""
+                    else:
+                        if timestamped:
+                            ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
+                        else:
+                            ts = ""
+                        lines = data.split('\n')
+                        last_idx = len(lines) - 1
+                        if last_idx == 1 and not lines[1]:
+                            # Most common single-line write("...\n") fast path.
+                            full_line = (
+                                self._current_buffer + lines[0]
+                                if self._current_buffer
+                                else lines[0]
+                            )
                             if ts:
                                 log_file.write(ts + full_line + '\n')
                             else:
@@ -210,18 +214,87 @@ class TqdmSafeTee:
                             self.line_count += 1
                             self._current_buffer = ""
                         else:
-                            self._current_buffer += line
-                            if len(self._current_buffer) >= self._MAX_BUFFER_CHARS:
+                            for j, line in enumerate(lines):
+                                if j < last_idx:
+                                    full_line = (
+                                        self._current_buffer + line
+                                        if self._current_buffer
+                                        else line
+                                    )
+                                    if ts:
+                                        log_file.write(ts + full_line + '\n')
+                                    else:
+                                        log_file.write(full_line + '\n')
+                                    self.line_count += 1
+                                    self._current_buffer = ""
+                                elif line:
+                                    self._current_buffer = line
+                                    if len(self._current_buffer) >= self._MAX_BUFFER_CHARS:
+                                        if ts:
+                                            log_file.write(ts + self._current_buffer + '\n')
+                                        else:
+                                            log_file.write(self._current_buffer + '\n')
+                                        self.line_count += 1
+                                        self._current_buffer = ""
+                else:
+                    # Full CR/CRLF path: normalize CRLF to \n first, then split on
+                    # remaining bare \r to squash progress bar redraws.
+                    if self._pending_cr:
+                        self._pending_cr = False
+                        if not data.startswith('\n'):
+                            # The deferred \r was a bare redraw, not half of a CRLF.
+                            self._current_buffer = ""
+                    text = data.replace('\r\n', '\n')
+                    if text.endswith('\r'):
+                        self._pending_cr = True
+                        text = text[:-1]
+                    segments = text.split('\r')
+                    for i, segment in enumerate(segments):
+                        if i > 0:
+                            # A bare \r was encountered: discard the current buffer (progress bar redraw)
+                            self._current_buffer = ""
+                        lines = segment.split('\n')
+                        last_idx = len(lines) - 1
+                        # All but the last piece end with \n
+                        for j, line in enumerate(lines):
+                            if j < last_idx:
+                                if ts is None:
+                                    ts = (
+                                        f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
+                                        if timestamped
+                                        else ""
+                                    )
+                                full_line = self._current_buffer + line
                                 if ts:
-                                    log_file.write(ts + self._current_buffer + '\n')
+                                    log_file.write(ts + full_line + '\n')
                                 else:
-                                    log_file.write(self._current_buffer + '\n')
+                                    log_file.write(full_line + '\n')
                                 self.line_count += 1
                                 self._current_buffer = ""
+                            else:
+                                self._current_buffer += line
+                                if len(self._current_buffer) >= self._MAX_BUFFER_CHARS:
+                                    if ts is None:
+                                        ts = (
+                                            f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
+                                            if timestamped
+                                            else ""
+                                        )
+                                    if ts:
+                                        log_file.write(ts + self._current_buffer + '\n')
+                                    else:
+                                        log_file.write(self._current_buffer + '\n')
+                                    self.line_count += 1
+                                    self._current_buffer = ""
             except Exception as e:
                 self._handle_log_error(e)
 
         return ret
+
+    def writelines(self, lines: Iterable[str]) -> None:
+        """Write an iterable of strings through ``write()`` so every line is captured."""
+        for line in lines:
+            self.write(line)
 
     def flush(self) -> None:
         """Flush both the original stream and the log file."""
@@ -235,6 +308,9 @@ class TqdmSafeTee:
         # pending buffer into the log (the passthrough flush above still ran).
         if _tee_paused():
             return
+        log_file = self.log_file
+        if not log_file or getattr(log_file, "closed", False):
+            return
         with finalization_lock(self._lock, 0.25) as acquired:
             if not acquired:
                 return
@@ -246,7 +322,6 @@ class TqdmSafeTee:
                     # (or half a CRLF): leave it for the next write to resolve.
                     if self._current_buffer and not self._pending_cr:
                         if self.timestamped:
-                            from datetime import datetime, timezone
                             ts = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z] "
                             log_file.write(ts + self._current_buffer + '\n')
                         else:
@@ -317,49 +392,53 @@ class ConsoleInterceptor:
         except Exception:
             pass
 
-        # 3. Flush stdout_tee, record metrics, and detach log_file.
+        # 3. Flush stdout_tee, record metrics, and detach log_file under bounded tee lock.
         if self.stdout_tee is not None:
-            try:
-                self.stdout_tee.flush()
-            except Exception:
-                out_failed = True
-            finally:
+            with finalization_lock(self.stdout_tee._lock, 0.25) as acquired:
                 try:
-                    lines_out = self.stdout_tee.line_count
+                    if acquired:
+                        self.stdout_tee.flush()
                 except Exception:
-                    pass
-                try:
-                    out_failed = out_failed or bool(
-                        getattr(self.stdout_tee, "_log_write_failed", False)
-                    )
-                except Exception:
-                    pass
-                try:
-                    self.stdout_tee.log_file = None
-                except Exception:
-                    pass
+                    out_failed = True
+                finally:
+                    try:
+                        lines_out = self.stdout_tee.line_count
+                    except Exception:
+                        pass
+                    try:
+                        out_failed = out_failed or bool(
+                            getattr(self.stdout_tee, "_log_write_failed", False)
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        self.stdout_tee.log_file = None
+                    except Exception:
+                        pass
 
-        # 4. Flush stderr_tee, record metrics, and detach log_file.
+        # 4. Flush stderr_tee, record metrics, and detach log_file under bounded tee lock.
         if self.stderr_tee is not None:
-            try:
-                self.stderr_tee.flush()
-            except Exception:
-                err_failed = True
-            finally:
+            with finalization_lock(self.stderr_tee._lock, 0.25) as acquired:
                 try:
-                    lines_err = self.stderr_tee.line_count
+                    if acquired:
+                        self.stderr_tee.flush()
                 except Exception:
-                    pass
-                try:
-                    err_failed = err_failed or bool(
-                        getattr(self.stderr_tee, "_log_write_failed", False)
-                    )
-                except Exception:
-                    pass
-                try:
-                    self.stderr_tee.log_file = None
-                except Exception:
-                    pass
+                    err_failed = True
+                finally:
+                    try:
+                        lines_err = self.stderr_tee.line_count
+                    except Exception:
+                        pass
+                    try:
+                        err_failed = err_failed or bool(
+                            getattr(self.stderr_tee, "_log_write_failed", False)
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        self.stderr_tee.log_file = None
+                    except Exception:
+                        pass
 
         # 5. Disable faulthandler BEFORE closing stderr_log, only when we enabled it.
         if self._faulthandler_owned:
@@ -420,10 +499,15 @@ class ConsoleInterceptor:
             if log_handle is not None:
                 try:
                     log_handle.flush()
-                    log_handle.close()
                 except Exception:
                     pass
-                setattr(self, log_attr, None)
+                finally:
+                    try:
+                        log_handle.close()
+                    except Exception:
+                        pass
+                    finally:
+                        setattr(self, log_attr, None)
 
         return was_faulthandler
 

@@ -227,7 +227,18 @@ class SubprocessSpy:
                         if proc_rec is not None:
                             _complete_record(proc_rec, rc, time.time(), time.perf_counter())
                     else:
-                        still_running.append(proc)
+                        try:
+                            polled_rc = prev_popen_poll(proc)
+                        except Exception:
+                            polled_rc = None
+                        if isinstance(polled_rc, int) and not isinstance(polled_rc, bool):
+                            proc_rec = getattr(proc, "_pubrun_rec", None)
+                            if proc_rec is not None:
+                                _complete_record(
+                                    proc_rec, polled_rc, time.time(), time.perf_counter()
+                                )
+                        else:
+                            still_running.append(proc)
                 if still_running and state["active"]:
                     pending_running.extend(still_running)
 
@@ -580,6 +591,89 @@ class SubprocessSpy:
             cls._truncated = False
 
     @classmethod
+    def _disarm_in_child(cls) -> None:
+        """Disarm SubprocessSpy after POSIX ``os.fork()`` without acquiring ``cls._lock``.
+
+        A parent thread may have held ``cls._lock`` at fork time, so acquiring it
+        in the child would deadlock permanently. Replaces ``cls._lock`` directly,
+        deactivates any inherited state, identity-guardedly restores patched
+        targets, and clears all class-level tracking state.
+        """
+        cls._lock = threading.Lock()
+        state = cls._active_state
+        if state is not None:
+            try:
+                state["active"] = False
+            except Exception:
+                pass
+            try:
+                state["pending_exits"].clear()
+            except Exception:
+                pass
+            try:
+                state["pending_running"].clear()
+            except Exception:
+                pass
+            restores = [
+                (
+                    subprocess.Popen,
+                    "__init__",
+                    cls._installed_popen_init,
+                    state.get("prev_popen_init"),
+                ),
+                (
+                    subprocess.Popen,
+                    "wait",
+                    cls._installed_popen_wait,
+                    state.get("prev_popen_wait"),
+                ),
+                (
+                    subprocess.Popen,
+                    "poll",
+                    cls._installed_popen_poll,
+                    state.get("prev_popen_poll"),
+                ),
+                (
+                    subprocess.Popen,
+                    "__del__",
+                    cls._installed_popen_del,
+                    state.get("prev_popen_del"),
+                ),
+                (
+                    os,
+                    "system",
+                    cls._installed_os_system,
+                    state.get("prev_os_system"),
+                ),
+            ]
+            for target_obj, attr_name, installed_wrapper, previous in restores:
+                try:
+                    if (
+                        installed_wrapper is not None
+                        and previous is not None
+                        and getattr(target_obj, attr_name, None) is installed_wrapper
+                    ):
+                        setattr(target_obj, attr_name, previous)
+                except Exception:
+                    pass
+
+        cls._installed = False
+        cls._owner = None
+        cls._active_state = None
+        cls._installed_popen_init = None
+        cls._installed_popen_wait = None
+        cls._installed_popen_poll = None
+        cls._installed_popen_del = None
+        cls._installed_os_system = None
+        cls._records = []
+        cls._start_monos = {}
+        cls._popen_refs = {}
+        cls._pending_exits = collections.deque()
+        cls._pending_running = collections.deque()
+        cls._truncated = False
+        cls._config = None
+
+    @classmethod
     def get_records(cls) -> List[Dict[str, Any]]:
         return cls._records
 
@@ -679,14 +773,28 @@ class SubprocessSpy:
                 state["pending_running"].clear()
 
     @staticmethod
-    def _safe_shlex_split(args: Any) -> list:
-        """Parse a command string into a list, falling back to [args] on failure."""
+    def _safe_shlex_split(args: Any, posix: Optional[bool] = None) -> list:
+        """Parse a command string into a list, falling back to [args] on failure.
+
+        Defaults to ``posix=(sys.platform != "win32")``. In non-POSIX (Windows)
+        mode, preserves backslashes in paths while stripping one matched outer
+        pair of double or single quotes from each token.
+        """
         if isinstance(args, str):
+            use_posix = (sys.platform != "win32") if posix is None else bool(posix)
             try:
-                return shlex.split(args)
+                tokens = shlex.split(args, posix=use_posix)
             except ValueError:
                 # Unterminated quotes or other parse errors — store raw string
                 return [args]
+            if not use_posix:
+                cleaned = []
+                for tok in tokens:
+                    if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ('"', "'"):
+                        tok = tok[1:-1]
+                    cleaned.append(tok)
+                return cleaned
+            return tokens
         elif isinstance(args, (list, tuple)):
             return [str(a) for a in args]
         else:

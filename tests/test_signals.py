@@ -773,3 +773,261 @@ with lock:
             if proc.poll() is None:
                 proc.kill()
                 proc.wait(timeout=5)
+
+
+class TestSignalHardeningAndRecovery:
+    """IPD 76z7ww tests for __slots__ finalization_lock, SIGUSR1/2, raise_signal, signal cap, and caught sys.exit."""
+
+    def test_finalization_lock_uses_slots_and_releases_on_exception(self):
+        """finalization_lock is a lightweight __slots__ class with no __dict__ and releases on exception."""
+        from pubrun.capture.signals import finalization_lock
+
+        lock = threading.Lock()
+        ctx = finalization_lock(lock, 0.1)
+        assert finalization_lock.__slots__ == ("_lock", "_timeout", "_acquired")
+        assert not hasattr(ctx, "__dict__")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            with finalization_lock(lock, 0.1) as acquired:
+                assert acquired is True
+                raise RuntimeError("boom")
+
+        assert lock.acquire(blocking=False) is True
+        lock.release()
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="SIGUSR1 is Unix-specific")
+    def test_sigusr1_sig_dfl_finalizes_as_interrupted_while_user_handler_completes(self, tmp_path):
+        """SIGUSR1 with SIG_DFL finalizes as interrupted; user-handled SIGUSR1 finishes completed."""
+        import json
+        import subprocess
+        from pathlib import Path
+
+        src_dir = str(Path(__file__).resolve().parent.parent / "src")
+        env = dict(os.environ)
+        env["PYTHONPATH"] = src_dir + os.pathsep + env.get("PYTHONPATH", "")
+
+        # 1. Default SIG_DFL SIGUSR1 kills process and finalizes as "interrupted".
+        dfl_script = tmp_path / "sigusr1_dfl.py"
+        dfl_script.write_text(
+            f"""
+import signal, time
+import pubrun.noauto as pubrun
+signal.signal(signal.SIGUSR1, signal.SIG_DFL)
+run = pubrun.start(output_dir={str(tmp_path / "dfl_runs")!r}, capture={{"hardware": {{"depth": "off"}}}})
+print(run.run_dir, flush=True)
+time.sleep(30)
+""",
+            encoding="utf-8",
+        )
+        proc = subprocess.Popen(
+            [sys.executable, str(dfl_script)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        try:
+            assert proc.stdout is not None
+            run_dir = Path(proc.stdout.readline().strip())
+            proc.send_signal(signal.SIGUSR1)
+            proc.wait(timeout=15)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
+        assert proc.returncode == -signal.SIGUSR1
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["status"]["outcome"] == "interrupted"
+        assert any(s["signal_name"] == "SIGUSR1" for s in manifest["signals"]["signals_received"])
+
+        # 2. User-handled SIGUSR1 stays "completed".
+        handled_script = tmp_path / "sigusr1_handled.py"
+        handled_script.write_text(
+            f"""
+import os, signal
+import pubrun.noauto as pubrun
+
+handled = []
+signal.signal(signal.SIGUSR1, lambda s, f: handled.append(s))
+run = pubrun.start(output_dir={str(tmp_path / "handled_runs")!r}, capture={{"hardware": {{"depth": "off"}}}})
+os.kill(os.getpid(), signal.SIGUSR1)
+assert handled == [signal.SIGUSR1]
+print(run.run_dir, flush=True)
+run.stop()
+""",
+            encoding="utf-8",
+        )
+        res = subprocess.run(
+            [sys.executable, str(handled_script)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert res.returncode == 0, res.stderr
+        h_run_dir = Path(res.stdout.strip())
+        h_manifest = json.loads((h_run_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert h_manifest["status"]["outcome"] == "completed"
+        assert any(s["signal_name"] == "SIGUSR1" for s in h_manifest["signals"]["signals_received"])
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="SIGUSR2 is Unix-specific")
+    def test_sig_dfl_reraise_uses_signal_raise_signal(self, monkeypatch):
+        """Both active and passive-passthrough SIG_DFL paths re-raise via signal.raise_signal."""
+        raised = []
+        os_kill_called = []
+
+        monkeypatch.setattr(signal, "raise_signal", lambda s: raised.append(s))
+        monkeypatch.setattr(os, "kill", lambda p, s: os_kill_called.append((p, s)))
+        monkeypatch.setattr("pubrun.capture.signals._finalize_active_run", lambda: None)
+
+        old = signal.signal(signal.SIGUSR2, signal.SIG_DFL)
+        cap = SignalExitCapture()
+        try:
+            cap.install()
+            shim = signal.getsignal(signal.SIGUSR2)
+            assert callable(shim)
+            # Active SIG_DFL path
+            shim(signal.SIGUSR2, None)
+            assert raised == [signal.SIGUSR2]
+            assert cap.fatal_signal_name() == "SIGUSR2"
+            assert os_kill_called == []
+
+            # Passive passthrough after uninstall
+            cap.uninstall()
+            shim(signal.SIGUSR2, None)
+            assert raised == [signal.SIGUSR2, signal.SIGUSR2]
+            assert os_kill_called == []
+        finally:
+            cap.uninstall()
+            signal.signal(signal.SIGUSR2, old)
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="SIGUSR1 is Unix-specific")
+    def test_signals_received_cap_and_schema_validation(self, tmp_path):
+        """_signals_received caps at MAX_SIGNALS_RECORDED (1000) and signals_truncated validates against manifest schema."""
+        import json
+        from pathlib import Path
+        from pubrun.capture.signals import MAX_SIGNALS_RECORDED
+        from pubrun.tracker import Run
+
+        old = signal.signal(signal.SIGUSR1, signal.SIG_IGN)
+        run = Run(overrides={"output_dir": str(tmp_path), "capture": {"hardware": {"depth": "off"}}})
+        try:
+            assert run.signal_capture is not None
+            # When not truncated, signals_truncated must be omitted.
+            assert "signals_truncated" not in run.signal_capture.get_records()
+
+            shim = signal.getsignal(signal.SIGUSR1)
+            assert callable(shim)
+            for _ in range(MAX_SIGNALS_RECORDED + 5):
+                shim(signal.SIGUSR1, None)
+
+            recs = run.signal_capture.get_records()
+            assert len(recs["signals_received"]) == MAX_SIGNALS_RECORDED
+            assert recs["signals_truncated"] == 5
+            assert recs["capture_state"] == {
+                "status": "partial",
+                "detail": "5 additional signal(s) omitted",
+            }
+            run.stop()
+
+            manifest = json.loads((run.run_dir / "manifest.json").read_text(encoding="utf-8"))
+            assert manifest["signals"]["signals_truncated"] == 5
+            assert len(manifest["signals"]["signals_received"]) == MAX_SIGNALS_RECORDED
+
+            schema_path = Path(__file__).resolve().parent.parent / "schemas" / "manifest.schema.json"
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            jsonschema = pytest.importorskip("jsonschema")
+            jsonschema.validate(instance=manifest, schema=schema)
+        finally:
+            if run.is_active:
+                run.stop()
+            signal.signal(signal.SIGUSR1, old)
+
+    def test_caught_sys_exit_recovers_while_uncaught_stays_failed(self, tmp_path):
+        """Caught sys.exit(5) followed by stop() or annotate()+atexit completes cleanly; uncaught stays failed."""
+        import json
+        import subprocess
+        from pathlib import Path
+        import pubrun
+
+        # 1. Caught sys.exit(5) followed by explicit pubrun.stop()
+        run = pubrun.start(
+            output_dir=str(tmp_path / "stop_recovery"),
+            capture={"hardware": {"depth": "off"}},
+        )
+        try:
+            with pytest.raises(SystemExit) as exc_info:
+                sys.exit(5)
+            assert exc_info.value.code == 5
+        finally:
+            pubrun.stop()
+
+        m1 = json.loads((run.run_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert m1["status"]["outcome"] == "completed"
+        assert m1["signals"]["exit_code"] == 0
+
+        # 2. Subprocess: caught sys.exit(5) + pubrun.annotate() + normal atexit exit -> completed
+        src_dir = str(Path(__file__).resolve().parent.parent / "src")
+        env = dict(os.environ)
+        env["PYTHONPATH"] = src_dir + os.pathsep + env.get("PYTHONPATH", "")
+
+        recover_script = tmp_path / "caught_exit_annotate.py"
+        recover_script.write_text(
+            f"""
+import sys
+import pubrun.noauto as pubrun
+
+run = pubrun.start(
+    output_dir={str(tmp_path / "atexit_recovery")!r},
+    events={{"enabled": True}},
+    capture={{"hardware": {{"depth": "off"}}}},
+)
+print(run.run_dir, flush=True)
+try:
+    sys.exit(5)
+except SystemExit:
+    pass
+pubrun.annotate("recovered after caught sys.exit")
+""",
+            encoding="utf-8",
+        )
+        res = subprocess.run(
+            [sys.executable, str(recover_script)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert res.returncode == 0, res.stderr
+        m2 = json.loads((Path(res.stdout.strip()) / "manifest.json").read_text(encoding="utf-8"))
+        assert m2["status"]["outcome"] == "completed"
+        assert m2["signals"]["exit_code"] == 0
+
+        # 3. Subprocess: uncaught sys.exit(5) via atexit -> failed with exit_code == 5
+        uncaught_script = tmp_path / "uncaught_exit.py"
+        uncaught_script.write_text(
+            f"""
+import sys
+import pubrun.noauto as pubrun
+
+run = pubrun.start(
+    output_dir={str(tmp_path / "uncaught_exit")!r},
+    capture={{"hardware": {{"depth": "off"}}}},
+)
+print(run.run_dir, flush=True)
+sys.exit(5)
+""",
+            encoding="utf-8",
+        )
+        res3 = subprocess.run(
+            [sys.executable, str(uncaught_script)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert res3.returncode == 5
+        m3 = json.loads((Path(res3.stdout.strip()) / "manifest.json").read_text(encoding="utf-8"))
+        assert m3["status"]["outcome"] == "failed"
+        assert m3["signals"]["exit_code"] == 5
