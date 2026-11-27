@@ -1,14 +1,26 @@
-"""Print-loop workload: many stdout writes.
+"""Source-checkout compatibility shim for ``src/pubrun/_bench/workloads/print_loop.py``."""
+from __future__ import annotations
 
-Exercises the console tee (when capture_mode != off). Comparing against baseline
-isolates the per-write tee/logging tax. Output is small per line to keep the
-dominant cost the write path, not formatting.
-"""
+import importlib.util
+from pathlib import Path
 
-def _work() -> None:
-    for i in range(5000):
-        print(f"line {i}")
-
+_TARGET_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "pubrun"
+    / "_bench"
+    / "workloads"
+    / "print_loop.py"
+)
+_SPEC = importlib.util.spec_from_file_location("_pubrun_bench_workload_print_loop", _TARGET_PATH)
+if _SPEC is None or _SPEC.loader is None:
+    raise ImportError(f"Could not load workload from {_TARGET_PATH}")
+_MOD = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MOD)
+for _attr, _val in vars(_MOD).items():
+    if not (_attr.startswith("__") and _attr.endswith("__")):
+        globals()[_attr] = _val
+del _TARGET_PATH, _SPEC, _MOD, _attr, _val
 
 if __name__ == "__main__":
-    _work()
+    _work()  # type: ignore[name-defined]

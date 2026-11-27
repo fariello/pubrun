@@ -1,0 +1,842 @@
+#!/usr/bin/env python3
+"""pubrun benchmark harness (stdlib-only measurement core).
+
+Runs each scenario (see ``pubrun._bench.scenarios``) in a FRESH subprocess N times and
+records wall-clock timing statistics, then writes one JSON result file
+containing the machine metadata (captured via pubrun itself) and every
+scenario's stats. Importing matplotlib/pytest-benchmark is intentionally avoided
+here so the harness runs anywhere pubrun runs (including locked-down HPC nodes).
+
+By default it runs the FULL scenario sweep multiple times and records every pass
+so any startup / filesystem caching effect is visible (compare pass 1 vs pass N)
+rather than silently baked in.
+
+Usage:
+    python -m pubrun._bench.harness                 # full run: 3 passes x 30 iterations
+    python -m pubrun._bench.harness --quick         # smoke run: 2 passes x 15 iterations
+    python -m pubrun._bench.harness --passes 1      # single pass (no cache-warming)
+    python -m pubrun._bench.harness --iterations 50 # custom
+    python -m pubrun._bench.harness --redacted-out ./pubrun-bench-results/my.redacted.json
+
+Portability: pure standard library packaged inside ``pubrun._bench``. Works from
+any working directory in a wheel installation or source checkout and writes default
+output into the default writable results directory (``PUBRUN_RESULTS_DIR``,
+``<checkout>/benchmarks/results``, or ``./pubrun-bench-results``).
+"""
+from __future__ import annotations
+
+import argparse
+import copy
+import getpass
+import hashlib
+import json
+import os
+import platform
+import re
+import statistics
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+
+from pubrun._bench import (
+    _package_checkout_root,
+    default_results_dir,
+    find_checkout_root,
+    get_workload_path,
+)
+from pubrun._bench import scenarios as _scenarios
+from pubrun._bench import share_safety as _ss
+
+FULL_ITERATIONS = 30
+QUICK_ITERATIONS = 8
+
+# Tier presets: (iterations, measured passes). Every tier also runs one uncaptured baseline
+# pass first. --iterations/--passes override the preset.
+#   quick    = a fast smoke run       (2 x 15)
+#   default  = the standard run       (3 x 30)
+#   rigorous = tight-CI / overnight   (5 x 50)
+_TIERS: Dict[str, Tuple[int, int]] = {
+    "quick": (15, 2),
+    "default": (30, 3),
+    "rigorous": (50, 5),
+}
+
+
+def _toml_dumps(data: Dict[str, Any]) -> str:
+    """Minimal TOML serializer for the nested config dicts we emit.
+
+    Handles the small subset we use: nested tables, strings, bools, ints. Kept
+    dependency-free (we must not require tomli-w). Section paths are dotted.
+    """
+    lines: List[str] = []
+
+    def _emit_table(prefix: str, table: Dict[str, Any]) -> None:
+        scalars = {k: v for k, v in table.items() if not isinstance(v, dict)}
+        tables = {k: v for k, v in table.items() if isinstance(v, dict)}
+        if prefix and scalars:
+            lines.append(f"[{prefix}]")
+        for k, v in scalars.items():
+            lines.append(f"{k} = {_fmt(v)}")
+        if prefix and scalars:
+            lines.append("")
+        for k, v in tables.items():
+            _emit_table(f"{prefix}.{k}" if prefix else k, v)
+
+    def _fmt(v: Any) -> str:
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, (int, float)):
+            return str(v)
+        return '"' + str(v).replace('"', '\\"') + '"'
+
+    _emit_table("", data)
+    return "\n".join(lines) + "\n"
+
+
+def _machine_metadata() -> Dict[str, Any]:
+    """Capture host/hardware/python metadata by reusing pubrun's own capture."""
+    md: Dict[str, Any] = {}
+    try:
+        from pubrun.config import resolve_config
+        cfg = resolve_config()
+        from pubrun.capture.host import get_host
+        from pubrun.capture.hardware import get_hardware
+        from pubrun.capture.python_runtime import get_python_runtime
+        md["host"] = get_host(cfg)
+        md["hardware"] = get_hardware(cfg)
+        md["python"] = get_python_runtime(cfg)
+    except Exception as e:  # never let metadata capture abort a benchmark run
+        md["capture_error"] = f"{type(e).__name__}: {e}"
+    try:
+        import pubrun
+        md["pubrun_version"] = getattr(pubrun, "__version__", None)
+        md["pubrun_commit"] = getattr(pubrun, "__commit__", None)
+    except Exception:
+        md["pubrun_version"] = None
+    md["python_executable"] = sys.executable
+    md["platform"] = sys.platform
+    return md
+
+
+def _pass_env() -> Dict[str, Any]:
+    """Dynamic host state captured at the START OF EACH PASS.
+
+    A node that gets loaded (or runs low on RAM) between passes would otherwise be
+    invisible. Cheap /proc reads; reuses pubrun's own system-metrics capture.
+    """
+    env: Dict[str, Any] = {}
+    try:
+        from pubrun.capture.system_metrics import (
+            get_load_average,
+            get_system_memory,
+            iowait_pct_between,
+            read_proc_stat_cpu_times,
+        )
+        env["system_memory"] = get_system_memory()
+        env["load_average"] = get_load_average()
+        # Sample iowait over a short window so the per-pass value is meaningful.
+        a = read_proc_stat_cpu_times()
+        time.sleep(0.05)
+        b = read_proc_stat_cpu_times()
+        env["system_iowait_pct"] = iowait_pct_between(a, b)  # NODE-WIDE, indicative only
+    except Exception as e:
+        env["capture_error"] = f"{type(e).__name__}: {e}"
+    return env
+
+
+def _filesystem_context(results_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """Filesystem type of the harness workdir/$TMPDIR and the results dir.
+
+    Surfaces the "installed/running over NFS" case that confounds cross-machine results.
+    Non-blocking (parses /proc/mounts; never statvfs/df on the target).
+    """
+    try:
+        from pubrun.capture.filesystem import get_filesystem
+        target_results_dir = results_dir if results_dir is not None else default_results_dir()
+        paths: Dict[str, str] = {
+            "tmpdir": tempfile.gettempdir(),
+            "results_dir": str(target_results_dir),
+            # Python install (stdlib/interpreter) — a startup-I/O source; on NFS it
+            # dominates import time independent of where the run writes.
+            "python_prefix": sys.base_prefix,
+        }
+        try:
+            import pubrun
+            pkg_file = getattr(pubrun, "__file__", None)
+            if pkg_file:
+                paths["pubrun_install"] = str(Path(pkg_file).resolve().parent)
+        except Exception:
+            pass
+        # /dev/shm (RAM-backed tmpfs) — a devshm I/O-baseline target when present.
+        if os.path.isdir("/dev/shm"):
+            paths["devshm"] = "/dev/shm"
+        # The actual I/O-baseline target, if the scenarios point PUBRUN_BENCH_IO_TARGET
+        # somewhere non-obvious (e.g. an NFS $TMPDIR) — so a slow baseline is interpretable.
+        io_target = os.environ.get("PUBRUN_BENCH_IO_TARGET")
+        if io_target and io_target not in ("/dev/null", "NUL") and os.path.exists(io_target):
+            paths["io_target"] = io_target
+        fs_data: Dict[str, Any] = get_filesystem({}, paths)
+        # Live capacity/health probe (bench is an explicit diagnostic context — NOT the
+        # import path). Deduped by mount; a wedged mount is recorded as pending/hung rather
+        # than hanging the harness. Never raises.
+        try:
+            from pubrun.capture.filesystem import probe_paths_live
+            probe_paths_live(fs_data)
+        except Exception:
+            pass
+        return fs_data
+    except Exception as e:
+        return {"capture_error": f"{type(e).__name__}: {e}"}
+
+
+def _slurm_context() -> Optional[Dict[str, str]]:
+    """Slurm allocation context (when running under Slurm), for interpreting cross-node results."""
+    keys = {
+        "SLURM_JOB_ID": "job_id",
+        "SLURM_CPUS_PER_TASK": "cpus_per_task",
+        "SLURM_MEM_PER_NODE": "mem_per_node",
+        "SLURM_JOB_PARTITION": "partition",
+        "SLURMD_NODENAME": "node",
+        "SLURM_JOB_NUM_NODES": "num_nodes",
+    }
+    ctx = {dest: os.environ[src] for src, dest in keys.items() if os.environ.get(src)}
+    return ctx or None
+
+
+def _git_commit() -> Optional[str]:
+    checkout_root = find_checkout_root()
+    if checkout_root is None:
+        return None
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(checkout_root), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode == 0:
+            return out.stdout.strip() or None
+    except Exception:
+        pass
+    return None
+
+
+def _child_env_with_checkout_src() -> Dict[str, str]:
+    """Build child environment, prepending checkout ``src/`` only when running from a checkout."""
+    env = dict(os.environ)
+    checkout_root = _package_checkout_root() or find_checkout_root()
+    if checkout_root is not None:
+        src_dir = checkout_root / "src"
+        if src_dir.is_dir():
+            env["PYTHONPATH"] = os.pathsep.join(
+                [str(src_dir)] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+            )
+    return env
+
+
+def _build_child_command(scn: _scenarios.Scenario, workdir: Path) -> Tuple[List[str], Dict[str, str]]:
+    """Return (argv, env) to run one iteration of the scenario in a fresh process."""
+    del workdir  # unused; child runs with cwd=scn_cwd
+    workload_path = get_workload_path(scn.workload)
+    env = _child_env_with_checkout_src()
+    # Scenario-specific env (e.g. a workload's I/O target path).
+    for k, v in getattr(scn, "env", {}).items():
+        env[k] = v
+
+    if scn.is_baseline:
+        # No pubrun import at all: run the workload directly.
+        return [sys.executable, str(workload_path)], env
+
+    # pubrun-active: import pubrun in the requested mode, then exec the workload.
+    env["PUBRUN_IMPORT_MODE"] = scn.mode
+    module = {
+        "auto": "pubrun",
+        "noauto": "pubrun.noauto",
+        "nopatch": "pubrun.nopatch",
+        "noconsole": "pubrun.noconsole",
+        "minimal": "pubrun.minimal",
+    }[scn.mode]
+    # runpy executes the workload as __main__ so its `if __name__ == "__main__"` runs.
+    preamble = (
+        f"import {module}  # noqa\n"
+        f"import runpy; runpy.run_path({str(workload_path)!r}, run_name='__main__')\n"
+    )
+    return [sys.executable, "-c", preamble], env
+
+
+def _time_once(argv: List[str], env: Dict[str, str], cwd: Path) -> Optional[float]:
+    """Run one child process; return elapsed wall seconds, or None on failure."""
+    t0 = time.perf_counter()
+    try:
+        proc = subprocess.run(
+            argv, env=env, cwd=str(cwd),
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=120,
+        )
+    except Exception:
+        return None
+    elapsed = time.perf_counter() - t0
+    if proc.returncode != 0:
+        return None
+    return elapsed
+
+
+def _stats(samples: Sequence[float]) -> Dict[str, Any]:
+    s = sorted(samples)
+    n = len(s)
+
+    def _pct(p: float) -> float:
+        if not s:
+            return 0.0
+        idx = min(n - 1, int(round(p * (n - 1))))
+        return s[idx]
+
+    return {
+        "n": n,
+        "min_s": s[0] if s else None,
+        "median_s": statistics.median(s) if s else None,
+        "mean_s": statistics.fmean(s) if s else None,
+        "p95_s": _pct(0.95) if s else None,
+        "max_s": s[-1] if s else None,
+        "stdev_s": statistics.pstdev(s) if n > 1 else 0.0,
+    }
+
+
+# Timings are rounded to this many decimal places in the STORED file (schema/5). Six places
+# is microsecond-ish on a wall-clock second, far finer than any real signal, and it is the
+# decisive size lever: rounding + de-duplication lands the shared file well under the GitHub
+# issue-body cap with NO analytical data loss (every raw sample is retained, only rounded).
+_TIMING_DECIMALS = 6
+
+
+def _round_timings(samples: Sequence[float]) -> List[float]:
+    return [round(s, _TIMING_DECIMALS) for s in samples]
+
+
+def _run_pass(pass_no: int, iterations: int, warmup: int, workdir: Path) -> Dict[str, Any]:
+    """Run the whole scenario sweep once (schema/5 compact shape).
+
+    Returns ``{"defs": {name: {group, mode, workload, config}}, "timings": {name: [..6dp..]},
+    "failures": {name: int}, "skipped": {name: reason}}``. Static scenario descriptors live in
+    ``defs`` (hoisted to the top-level ``scenario_defs`` map by :func:`run`, defined ONCE);
+    per pass we keep only what VARIES (timings, failures, skips)."""
+    scns = _scenarios.all_scenarios()
+    defs: Dict[str, Any] = {}
+    timings: Dict[str, List[float]] = {}
+    failures_map: Dict[str, int] = {}
+    skipped: Dict[str, str] = {}
+    for scn in scns:
+        defs[scn.name] = {
+            "group": scn.group,
+            "mode": scn.mode,
+            "workload": scn.workload,
+            "config": scn.config or {},
+        }
+        skip = scn.skip_if() if scn.skip_if else None
+        if skip:
+            skipped[scn.name] = skip
+            print(f"  [pass {pass_no}] {scn.name}: SKIPPED ({skip})", file=sys.stderr)
+            continue
+
+        # Fresh cwd per (pass, scenario) so a stale .pubrun.toml never leaks.
+        scn_cwd = workdir / f"pass{pass_no}" / scn.name
+        scn_cwd.mkdir(parents=True, exist_ok=True)
+        (scn_cwd / "runs").mkdir(exist_ok=True)
+        if scn.config:
+            (scn_cwd / ".pubrun.toml").write_text(_toml_dumps(scn.config), encoding="utf-8")
+
+        argv, env = _build_child_command(scn, scn_cwd)
+        env["PUBRUN_PROFILE"] = env.get("PUBRUN_PROFILE", "default")
+
+        samples: List[float] = []
+        failures = 0
+        for i in range(iterations + warmup):
+            dt = _time_once(argv, env, scn_cwd)
+            if dt is None:
+                failures += 1
+                continue
+            if i >= warmup:
+                samples.append(dt)
+
+        # Raw per-iteration wall times IN RUN ORDER (schema/5), rounded to 6 dp: the source of
+        # truth. Derived stats are NOT stored (they are recomputable from these samples);
+        # readers recompute them. Only the raw samples allow later re-analysis (any statistic,
+        # distribution shape, order/warmup drift) and CORRECT pooling across submissions.
+        timings[scn.name] = _round_timings(samples)
+        failures_map[scn.name] = failures
+        st = _stats(samples)
+        med = st.get("median_s")
+        print(
+            f"  [pass {pass_no}] {scn.name}: median={med * 1000:.1f} ms "
+            f"(n={st['n']}, fail={failures})"
+            if med
+            else f"  [pass {pass_no}] {scn.name}: NO DATA (fail={failures})",
+            file=sys.stderr,
+        )
+    return {"defs": defs, "timings": timings, "failures": failures_map, "skipped": skipped}
+
+
+def _run_baseline_pass(iterations: int, warmup: int, workdir: Path) -> Dict[str, Any]:
+    """Run every scenario's workload WITHOUT pubrun active (a cache-warming + pubrun-absent
+    reference sweep). Recorded as the baseline pass (pass 0), in the same schema/5 compact
+    shape as a measured pass (timings/failures/skipped maps keyed by scenario name; no
+    per-scenario static descriptors, no stored stats)."""
+    scns = _scenarios.all_scenarios()
+    timings: Dict[str, List[float]] = {}
+    failures_map: Dict[str, int] = {}
+    skipped: Dict[str, str] = {}
+    for scn in scns:
+        skip = scn.skip_if() if scn.skip_if else None
+        if skip:
+            skipped[scn.name] = skip
+            continue
+        scn_cwd = workdir / "pass0" / scn.name
+        scn_cwd.mkdir(parents=True, exist_ok=True)
+        (scn_cwd / "runs").mkdir(exist_ok=True)
+        # Run the workload directly (no pubrun import), regardless of the scenario's mode.
+        workload_path = get_workload_path(scn.workload)
+        env = _child_env_with_checkout_src()
+        for k, v in getattr(scn, "env", {}).items():
+            env[k] = v
+        argv = [sys.executable, str(workload_path)]
+        samples: List[float] = []
+        failures = 0
+        for i in range(iterations + warmup):
+            dt = _time_once(argv, env, scn_cwd)
+            if dt is None:
+                failures += 1
+                continue
+            if i >= warmup:
+                samples.append(dt)
+        timings[scn.name] = _round_timings(samples)
+        failures_map[scn.name] = failures
+    return {"timings": timings, "failures": failures_map, "skipped": skipped}
+
+
+def run(
+    iterations: int,
+    out_path: Optional[Union[str, Path]] = None,
+    warmup: int = 1,
+    passes: int = 2,
+    mode: str = "default",
+    baseline_pass: bool = True,
+    results_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Run the benchmark and return the (unredacted) result dict.
+
+    If ``out_path`` is given, the UNREDACTED result is also written there (compact JSON); if it
+    is ``None``, nothing is written and the caller decides what to persist. As of the
+    redacted-only default (IPD 20260722-1930-01), ``main()`` no longer passes ``out_path`` unless
+    the user asked for the unredacted copy with ``--unredacted``; the redacted file is written
+    from the returned dict instead. Callers that pass a path (e.g. tests) still get a file."""
+    scns = _scenarios.all_scenarios()
+    machine = _machine_metadata()
+    # Enrich the machine block with filesystem type (the NFS signal) and Slurm context
+    # so cross-machine / cross-node results are interpretable.
+    effective_results_dir: Optional[Path] = (
+        results_dir
+        if results_dir is not None
+        else (Path(out_path).parent if out_path is not None else None)
+    )
+    machine["filesystem"] = _filesystem_context(effective_results_dir)
+    slurm = _slurm_context()
+    if slurm:
+        machine["slurm"] = slurm
+    _wall_start = time.perf_counter()
+    scenario_defs: Dict[str, Any] = {}
+    pass_results: List[Dict[str, Any]] = []
+    result: Dict[str, Any] = {
+        # The machine-readable contract for this shape lives at schemas/benchmark.schema.json
+        # (const-checks this exact version string). Bump both together when the format changes.
+        "schema": "pubrun-benchmark/5",
+        # UTC timestamp (canonical) AND local time WITH its UTC offset. Storing local+offset
+        # explicitly is more reliable than reconstructing local time from UTC after the fact;
+        # the offset lives in the data.
+        "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_local": datetime.now().astimezone().isoformat(),
+        "mode": mode,               # quick | default | rigorous | custom
+        "iterations": iterations,   # iterations per pass (fixed for the run)
+        "warmup": warmup,           # discarded warmup iterations per pass (fixed for the run)
+        "passes": passes,
+        "baseline_pass": baseline_pass,
+        "git_commit": _git_commit(),
+        "machine": machine,
+        # Static per-scenario descriptors, defined ONCE (identical across passes): the
+        # decisive de-duplication lever for the shared file size. Passes reference scenarios
+        # by name. NOTE: intentionally NOT named "scenarios" (schema/1's removed last-pass
+        # alias used that key); readers key off scenario_defs + per-pass timings.
+        "scenario_defs": scenario_defs,
+        # Each pass is the FULL scenario sweep, run in order. Recording every
+        # pass (rather than discarding a warmup pass) makes startup / filesystem
+        # caching effects VISIBLE: compare pass 1 vs pass N. Aggregation/reporting
+        # can prefer the last pass (warmest) or show the spread. Each pass also
+        # records the dynamic host state (RAM/load/iowait) at its start, so a node
+        # loaded between passes is visible. Per pass we store only what VARIES:
+        # {pass, pass_env, timings:{name:[..6dp..]}, failures:{name:int}, skipped:{name:reason}}.
+        "pass_results": pass_results,
+    }
+
+    print(
+        f"Running {'baseline (uncaptured) + ' if baseline_pass else ''}{passes} pass(es) x "
+        f"{len(scns)} scenarios x {iterations} iterations (+{warmup} warmup each) ...",
+        file=sys.stderr,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="pubrun-bench-") as td:
+        workdir = Path(td)
+        # Pass 0: an uncaptured baseline sweep (pubrun absent) — warms caches and records the
+        # "cost floor" without pubrun. Kept SEPARATE from the measured passes so aggregation
+        # never mixes it into pubrun-overhead stats.
+        if baseline_pass:
+            print("--- pass 0/baseline (uncaptured) ---", file=sys.stderr)
+            b_env = _pass_env()
+            b = _run_baseline_pass(iterations, warmup, workdir)
+            baseline: Dict[str, Any] = {
+                "pass": 0,
+                "uncaptured": True,
+                "pass_env": b_env,
+                "timings": b["timings"],
+                "failures": b["failures"],
+            }
+            if b.get("skipped"):
+                baseline["skipped"] = b["skipped"]
+            result["baseline"] = baseline
+        for pass_no in range(1, passes + 1):
+            print(f"--- pass {pass_no}/{passes} ---", file=sys.stderr)
+            pass_env = _pass_env()
+            p = _run_pass(pass_no, iterations, warmup, workdir)
+            # Static scenario descriptors are identical across passes: define them ONCE
+            # in the top-level scenario_defs map (fixed per run; nothing mutates a def
+            # mid-run). Later passes update in place with identical values (a no-op).
+            scenario_defs.update(p["defs"])
+            entry: Dict[str, Any] = {
+                "pass": pass_no,
+                "pass_env": pass_env,
+                "timings": p["timings"],
+                "failures": p["failures"],
+            }
+            if p.get("skipped"):
+                entry["skipped"] = p["skipped"]
+            pass_results.append(entry)
+
+    # Total wall-time for the WHOLE benchmark invocation (harness start -> now), distinct from
+    # the summed per-iteration timings.
+    result["total_wall_time_s"] = round(time.perf_counter() - _wall_start, 3)
+
+    # Write COMPACT (no indentation): the shared/redacted copy must fit GitHub's issue-body
+    # cap; the local unredacted copy uses the same compact form (parses identically). Only
+    # write the UNREDACTED result when a path was requested (redacted-only default: main()
+    # persists the redacted file separately).
+    if out_path is not None:
+        out_file = Path(out_path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text(json.dumps(result, separators=(",", ":")), encoding="utf-8")
+        print(f"\nWrote {out_file}", file=sys.stderr)
+    return result
+
+
+def _utc_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+
+def _hostname() -> str:
+    try:
+        return platform.node() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _host_token(host: str) -> str:
+    """A stable, NON-identifying token for the redacted filename: the first 8 hex of the
+    SHA-256 of the hostname. Deterministic per host (so a host's redacted files sort/group)
+    yet does not embed the hostname itself, matching the in-file hostname redaction."""
+    return hashlib.sha256(host.encode("utf-8", "replace")).hexdigest()[:8]
+
+
+def _default_out() -> Path:
+    """The FULL (unredacted) result path. Always a ``*.unredacted.json`` name (never a bare
+    ``*.json``); embeds the real hostname (this local copy is for your own analysis)."""
+    safe_host = "".join(c if c.isalnum() or c in "-_" else "_" for c in _hostname())
+    return default_results_dir() / f"{safe_host}-{_utc_stamp()}.unredacted.json"
+
+
+def _default_redacted_out(unredacted: Path) -> Path:
+    """The shareable (redacted) result path derived from an unredacted path. The filename must
+    NOT embed the hostname: use ``pubrun-bench-<8hexOfSHA256(hostname)>-<utcstamp>.redacted.json``.
+    The UTC stamp is taken from the unredacted name when present so the pair is correlatable."""
+    host = _hostname()
+    stamp: Optional[str] = None
+    # Reuse the stamp from the unredacted filename (…-YYYYMMDD-HHMMSS.unredacted.json).
+    name = unredacted.name
+    for suffix in (".unredacted.json", ".json"):
+        if name.endswith(suffix):
+            stem = name[: -len(suffix)]
+            parts = stem.rsplit("-", 2)
+            if len(parts) == 3 and len(parts[1]) == 8 and len(parts[2]) == 6:
+                stamp = f"{parts[1]}-{parts[2]}"
+            break
+    if stamp is None:
+        stamp = _utc_stamp()
+    return unredacted.parent / f"pubrun-bench-{_host_token(host)}-{stamp}.redacted.json"
+
+
+_REDACTED = "<redacted>"
+
+# GitHub caps an issue body at 65,536 bytes; the submission path embeds the redacted JSON in
+# the body. Warn (never fail) a bit under the hard cap so the fenced-block wrapper still fits.
+_GH_ISSUE_BODY_LIMIT = 65000
+
+
+def _warn_if_over_gh_cap(path: Path) -> None:
+    """Warn (non-fatal) if a redacted result exceeds the GitHub issue-body budget, pointing at
+    the attach-file alternative. Shared with the ``pubrun bench`` submit path."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return
+    if size > _GH_ISSUE_BODY_LIMIT:
+        print(
+            f"WARNING: {path.name} is {size} bytes, over GitHub's ~65 KB issue-body limit "
+            f"({_GH_ISSUE_BODY_LIMIT} byte guard). The in-body submission path will be "
+            "rejected; ATTACH the file to the issue instead of pasting it.",
+            file=sys.stderr,
+        )
+
+
+# Keys whose *entire value* is an identifier or a path that can embed the home dir /
+# username. Matched by key name anywhere in the nested structure.
+_REDACT_KEYS = {
+    "hostname", "username", "executable", "prefix", "base_prefix", "virtual_env",
+    "python_executable", "path", "mount_point", "run_dir", "output_base_dir",
+    "results_dir", "pubrun_install", "tmpdir",
+}
+# Keys whose value is a LIST of paths.
+_REDACT_LIST_KEYS = {"sys_path", "source_files"}
+
+
+def _redact_secrets(obj: Any) -> Any:
+    """Field-level redaction of identifiers/paths, applied recursively."""
+    if isinstance(obj, dict):
+        out: Dict[str, Any] = {}
+        for k, v in obj.items():
+            if k in _REDACT_LIST_KEYS and isinstance(v, list):
+                out[k] = [_REDACTED for _ in v]
+            elif k in _REDACT_KEYS and isinstance(v, str):
+                out[k] = _REDACTED
+            else:
+                out[k] = _redact_secrets(v)
+        return out
+    if isinstance(obj, list):
+        return [_redact_secrets(x) for x in obj]
+    return obj
+
+
+# Keys whose string values are fixed, non-PII metadata or schema markers. The substring scrub
+# skips them so a short username (e.g. `pub` or `benchmark`) can never corrupt a contract
+# value such as `schema: "pubrun-benchmark/5"`.
+_SCRUB_SKIP_KEYS = frozenset({
+    "schema", "mode", "group", "workload", "fstype", "environment_kind", "os_name",
+    "platform", "architecture", "implementation", "pubrun_version", "pubrun_commit",
+    "git_commit",
+})
+
+# Slurm fields that identify the machine/allocation (the compute-node hostname and the job id).
+# The remaining Slurm context (partition, cpus_per_task, mem_per_node, num_nodes) is kept.
+_SLURM_REDACT_KEYS = ("node", "job_id")
+
+
+def _is_path_needle(needle: str) -> bool:
+    return "/" in needle or "\\" in needle
+
+
+def _scrub_segment(text: str, needles: Sequence[str]) -> str:
+    """Scrub one segment that contains no `<redacted>` marker. Each needle's matches become
+    `<redacted>`; the text between matches is scrubbed with the remaining needles only, so a
+    marker produced here is never rescanned (a username like `ed` cannot corrupt it)."""
+    if not needles or not text:
+        return text
+    needle, rest = needles[0], needles[1:]
+    if _is_path_needle(needle):
+        pieces = text.split(needle)
+    else:
+        pieces = re.split(r"(?<![A-Za-z0-9_])" + re.escape(needle) + r"(?![A-Za-z0-9_])", text)
+    return _REDACTED.join(_scrub_segment(p, rest) for p in pieces)
+
+
+def _scrub_string(s: str, needles: Sequence[str]) -> str:
+    if s == _REDACTED:
+        return s
+    return _REDACTED.join(_scrub_segment(seg, needles) for seg in s.split(_REDACTED))
+
+
+def _scrub_pii_substrings(obj: Any, needles: Sequence[str]) -> Any:
+    """Belt-and-suspenders: replace any home-dir prefix / username substring that leaked
+    into an un-enumerated string value, anywhere in the structure.
+
+    Path-like needles (containing a separator) are replaced literally, longest first; a bare
+    username is replaced only at identifier boundaries so it never matches inside a larger
+    word. Existing `<redacted>` markers and fixed metadata keys (`_SCRUB_SKIP_KEYS`) are left
+    untouched."""
+    ordered = sorted({n for n in needles if n}, key=len, reverse=True)
+
+    def _walk(o: Any) -> Any:
+        if isinstance(o, dict):
+            return {
+                k: (v if k in _SCRUB_SKIP_KEYS and isinstance(v, str) else _walk(v))
+                for k, v in o.items()
+            }
+        if isinstance(o, list):
+            return [_walk(x) for x in o]
+        if isinstance(o, str):
+            return _scrub_string(o, ordered)
+        return o
+
+    return _walk(obj)
+
+
+def redact_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a redacted copy of a benchmark result safe to share to a PUBLIC repo.
+
+    Masks hostname, OS username, and every path field that can embed the home directory,
+    then does a deep substring scrub of the home-dir prefix and username as a safety net.
+    Also masks the Slurm compute-node hostname and job id. Preserves the analysis-relevant,
+    non-identifying data (CPU model, timings, versions, fstype classification, Slurm
+    partition/cpus/memory/node count).
+    """
+    raw_redacted = _redact_secrets(copy.deepcopy(result))
+    redacted: Dict[str, Any] = raw_redacted if isinstance(raw_redacted, dict) else {}
+    machine = redacted.get("machine")
+    slurm = machine.get("slurm") if isinstance(machine, dict) else None
+    if isinstance(slurm, dict):
+        for key in _SLURM_REDACT_KEYS:
+            if slurm.get(key) is not None:
+                slurm[key] = _REDACTED
+    needles: List[str] = []
+    try:
+        home = os.path.expanduser("~")
+        if home and home != "~":
+            needles.append(home)
+    except Exception:
+        pass
+    try:
+        needles.append(getpass.getuser())
+    except Exception:
+        pass
+    try:
+        node = platform.node()
+        if node and node.lower() != "localhost":
+            needles.append(node)
+            short_node = node.split(".", 1)[0]
+            if short_node and len(short_node) >= 3 and short_node.lower() != "localhost":
+                needles.append(short_node)
+    except Exception:
+        pass
+    # Longest first so a home path containing the username is scrubbed whole.
+    needles = sorted({n for n in needles if n}, key=len, reverse=True)
+    scrubbed = _scrub_pii_substrings(redacted, needles)
+    return scrubbed if isinstance(scrubbed, dict) else redacted
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="pubrun overhead benchmark harness")
+    tier = ap.add_mutually_exclusive_group()
+    tier.add_argument("--quick", action="store_true", help="Fast smoke run (2 passes x 15 iters).")
+    tier.add_argument("--rigorous", action="store_true", help="Tight-CI run (5 passes x 50 iters); long.")
+    ap.add_argument("--iterations", type=int, default=None, help="Override iterations per scenario.")
+    ap.add_argument(
+        "--passes",
+        type=int,
+        default=None,
+        help="Override the number of measured scenario sweeps.",
+    )
+    ap.add_argument(
+        "--no-baseline",
+        action="store_true",
+        help="Skip the initial uncaptured baseline pass.",
+    )
+    # Redacted-only by default (IPD 20260722-1930-01): every run writes the redacted, share-safe
+    # file. The identifying UNREDACTED copy is written only when explicitly requested via
+    # --unredacted (or an explicit --out path), for local debugging.
+    ap.add_argument(
+        "--redacted-out",
+        type=str,
+        default=None,
+        help="Redacted (share-safe) output path (default: an auto-named "
+             "pubrun-bench-<hash>-<stamp>.redacted.json in the default writable "
+             "results directory).",
+    )
+    ap.add_argument(
+        "--unredacted",
+        action="store_true",
+        help="ALSO write the identifying, un-redacted result (embeds hostname/paths; "
+             "for local debugging only, do NOT share).",
+    )
+    ap.add_argument(
+        "--out",
+        type=str,
+        default=None,
+        help="Explicit path for the UN-redacted result (implies --unredacted).",
+    )
+    args = ap.parse_args()
+
+    # Tier selection: quick / default / rigorous. Every tier runs 1 uncaptured baseline pass
+    # first (unless --no-baseline), then N measured passes of M iterations. --iterations /
+    # --passes override the tier's preset.
+    mode = "quick" if args.quick else ("rigorous" if args.rigorous else "default")
+    tier_iters, tier_passes = _TIERS[mode]
+    iterations = args.iterations if args.iterations else tier_iters
+    passes = max(1, args.passes) if args.passes else tier_passes
+    if args.iterations or args.passes:
+        mode = "custom"
+
+    # Decide the unredacted and redacted destinations BEFORE running so filesystem context
+    # probes the real target results directory.
+    want_unredacted = bool(args.unredacted or args.out)
+    unredacted_path: Optional[Path] = None
+    if want_unredacted:
+        unredacted_path = Path(args.out) if args.out else _default_out()
+
+    if args.redacted_out:
+        red_path = Path(args.redacted_out)
+    elif unredacted_path is not None:
+        red_path = _default_redacted_out(unredacted_path)
+    else:
+        red_path = _default_redacted_out(_default_out())
+
+    result = run(
+        iterations,
+        unredacted_path,
+        passes=passes,
+        mode=mode,
+        baseline_pass=not args.no_baseline,
+        results_dir=red_path.parent,
+    )
+
+    redacted = redact_result(result)
+    # Redaction self-check (defense in depth): confirm the redacted result is structurally
+    # share-safe before writing it. A failure means a redaction bug, so refuse to write a file
+    # that claims to be safe but is not, and exit non-zero.
+    try:
+        ok, reasons = _ss.check_share_safe(redacted)
+    except Exception as e:
+        ok, reasons = False, [f"self-check raised {type(e).__name__}"]
+    if not ok:
+        print(
+            "ERROR: redaction self-check FAILED; refusing to write the redacted output "
+            f"{red_path}. Reasons: " + "; ".join(reasons),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    red_path.parent.mkdir(parents=True, exist_ok=True)
+    # Compact (no indent): the redacted copy must fit GitHub's issue-body cap.
+    red_path.write_text(json.dumps(redacted, separators=(",", ":")), encoding="utf-8")
+    print(f"Wrote redacted result {red_path}", file=sys.stderr)
+    # Non-fatal size guard: warn if the shareable file is too big for the GitHub issue-body
+    # submission path (~65 KB); suggest attaching the file / using the gist path instead.
+    _warn_if_over_gh_cap(red_path)
+
+
+if __name__ == "__main__":
+    main()

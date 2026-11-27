@@ -1,133 +1,92 @@
 #!/usr/bin/env python3
-"""Structural share-safety validator for benchmark result JSON (IPD 20260721-2255-01).
+"""Source-checkout compatibility shim for ``src/pubrun/_bench/share_safety.py``.
 
-This is a VALIDATOR, not a redactor. It answers one question: "is this result already
-safe to publish?" by checking that privacy-sensitive fields carry the expected redaction
-marker and that no unredacted-looking value survives. It does NOT produce redacted output
-(that is `src/pubrun/capture/redaction.py`'s job, and the harness's redaction pass), and it
-does NOT compare against the current machine's live hostname (meaningless server-side: the
-CI runner is a different machine than the submitter). The check is STRUCTURAL
-(is-it-redacted), not identity-based (does-it-match-this-host).
-
-Shared by:
-  - the local `pubrun bench` submission path (a pre-share gate), and
-  - the server-side GitHub Action validator,
-so local and server checks stay in lockstep. Reused via import; stdlib only. This module is
-NOT part of the installed pubrun runtime surface (it lives under benchmarks/, dev/CI only).
-
-NOTE: agent-workflows will soon ship a canonical commit-hook/CI path/hostname scrubber
-(cf. executed IPD 20260720-2331-01). Where it lands, prefer adopting its share-safety
-patterns over this local copy, keeping only the benchmark-result-specific structural rules
-(the `<redacted>` marker assertions) here.
+Loads the canonical packaged share-safety validator directly by file path (or
+reuses ``sys.modules["pubrun._bench.share_safety"]`` when already imported)
+without importing ``pubrun``. This keeps Continuous Integration (CI) intake
+validation (which runs without ``pubrun`` installed) and local checkout scripts
+working with zero auto-start side effects.
 """
 from __future__ import annotations
 
-import re
-from typing import Any, Dict, List, Tuple
+import importlib.util
+import sys
+import types
+from pathlib import Path
+from typing import Any, List
 
-# Versioned so an accepted result can record which ruleset validated it, and so the local
-# client and the server Action can assert they agree.
-SHARE_SAFETY_VERSION = 1
-
-REDACTED = "<redacted>"
-
-# Absolute home / user-profile path shapes that must never appear in a shareable result.
-# Detection patterns only (reused idea from scripts/sanitize_paths.py); NOT live-host based.
-# The scan runs over the JSON-serialized document, where a single backslash is escaped to
-# two, so the Windows pattern tolerates one-or-more backslashes (\\+) between segments.
-_HOME_PATH_RE = re.compile(
-    r"(?:/home|/Users)/[A-Za-z0-9._-]+"            # POSIX: /home/<x> or /Users/<x>
-    r"|[A-Za-z]:(?:\\+|/)[Uu]sers(?:\\+|/)[^/\\\"]+"  # Windows: C:\Users\<x> or C:/Users/<x>
-)
-
-# Dotted paths (into the result dict) whose leaf value MUST equal the redaction marker when
-# present and non-null. These are the fields the harness redacts; if any carries a real value
-# that is not the marker, the file is not safe. `None` is allowed (e.g. `virtual_env` on a
-# non-venv run, or an optional field that was never captured): a null carries no identity.
-_MUST_BE_REDACTED = (
-    "machine.host.hostname",
-    "machine.python.executable",
-    "machine.python.prefix",
-    "machine.python.base_prefix",
-    "machine.python.virtual_env",
-    "machine.python_executable",
-    "machine.slurm.node",
-    "machine.slurm.job_id",
+_SHIM_OWN_ATTRS = frozenset(
+    {
+        "_shim_target",
+        "__class__",
+        "__dict__",
+        "__spec__",
+        "__loader__",
+        "__package__",
+        "__path__",
+        "__file__",
+        "__name__",
+        "__cached__",
+        "__doc__",
+    }
 )
 
 
-def _get(d: Dict[str, Any], dotted: str):
-    cur: Any = d
-    for part in dotted.split("."):
-        if not isinstance(cur, dict) or part not in cur:
-            return _MISSING
-        cur = cur[part]
-    return cur
+class _ShareSafetyShim(types.ModuleType):
+    """Forwarding module proxy so monkeypatching targets the canonical module."""
+
+    def _rebind_shim_target(self, target: types.ModuleType) -> None:
+        object.__setattr__(self, "_shim_target", target)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(object.__getattribute__(self, "_shim_target"), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in _SHIM_OWN_ATTRS:
+            object.__setattr__(self, name, value)
+        else:
+            setattr(object.__getattribute__(self, "_shim_target"), name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name in _SHIM_OWN_ATTRS:
+            object.__delattr__(self, name)
+        else:
+            delattr(object.__getattribute__(self, "_shim_target"), name)
+
+    def __dir__(self) -> List[str]:
+        target = object.__getattribute__(self, "_shim_target")
+        own = object.__getattribute__(self, "__dict__").keys()
+        return sorted(set(dir(target)) | set(own))
 
 
-_MISSING = object()
+def _load_canonical_share_safety() -> types.ModuleType:
+    existing = sys.modules.get("pubrun._bench.share_safety")
+    if isinstance(existing, types.ModuleType):
+        return existing
+    target_path = (
+        Path(__file__).resolve().parent.parent / "src" / "pubrun" / "_bench" / "share_safety.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "_pubrun_bench_share_safety_standalone", target_path
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load canonical share_safety from {target_path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
-def check_share_safe(result: Dict[str, Any]) -> Tuple[bool, List[str]]:
-    """Return (is_safe, reasons). reasons is empty when safe.
-
-    Rules (structural):
-      1. Each field in _MUST_BE_REDACTED, when PRESENT and not null, must equal "<redacted>"
-         (a non-string value such as an integer job id is also unsafe).
-      2. No absolute home/user-profile path may appear anywhere in the serialized document.
-    A missing field is not by itself unsafe (a partial/older result may omit it); an
-    unredacted PRESENT value is unsafe.
-    """
-    reasons: List[str] = []
-
-    for dotted in _MUST_BE_REDACTED:
-        val = _get(result, dotted)
-        if val is _MISSING or val is None:
-            continue
-        if not isinstance(val, str) or val != REDACTED:
-            # Report the field, never the raw value (do not echo a potential leak).
-            reasons.append(f"field `{dotted}` is not redacted (must equal \"{REDACTED}\")")
-
-    # List-typed sensitive paths (machine.python.sys_path)
-    sys_path_val = _get(result, "machine.python.sys_path")
-    if isinstance(sys_path_val, list):
-        for entry in sys_path_val:
-            if entry is not None and (not isinstance(entry, str) or entry != REDACTED):
-                reasons.append(f"field `machine.python.sys_path` contains an unredacted entry (must equal \"{REDACTED}\")")
-                break
-
-    # Filesystem path / mount_point fields anywhere under machine.filesystem
-    fs_val = _get(result, "machine.filesystem")
-    if isinstance(fs_val, dict):
-        def _check_fs(obj: Any, prefix: str) -> None:
-            if isinstance(obj, dict):
-                for k, v in obj.items():
-                    if k in ("path", "mount_point") and v is not None:
-                        if not isinstance(v, str) or v != REDACTED:
-                            reasons.append(f"field `{prefix}.{k}` is not redacted (must equal \"{REDACTED}\")")
-                    elif isinstance(v, dict):
-                        _check_fs(v, f"{prefix}.{k}")
-        _check_fs(fs_val, "machine.filesystem")
-
-    # Whole-document scan for home/user-profile paths. Serialize once.
-    import json as _json
-
-    blob = _json.dumps(result)
-    if _HOME_PATH_RE.search(blob):
-        reasons.append("an absolute home or user-profile path is present somewhere in the result")
-
-    return (len(reasons) == 0, reasons)
+def _install_shim() -> None:
+    target = _load_canonical_share_safety()
+    registered = sys.modules.get(__name__)
+    if registered is not None and registered.__dict__ is globals():
+        object.__setattr__(registered, "_shim_target", target)
+        registered.__class__ = _ShareSafetyShim
+    else:
+        for attr, val in vars(target).items():
+            if not (attr.startswith("__") and attr.endswith("__")):
+                globals()[attr] = val
 
 
-def check_share_safe_text(text: str) -> Tuple[bool, List[str]]:
-    """Convenience wrapper: parse JSON text then check. Returns (False, [reason]) on parse
-    failure so callers get a uniform result."""
-    import json as _json
-
-    try:
-        result = _json.loads(text)
-    except (ValueError, TypeError) as e:
-        return (False, [f"not valid JSON: {e}"])
-    if not isinstance(result, dict):
-        return (False, ["top-level JSON is not an object"])
-    return check_share_safe(result)
+_install_shim()
+del _install_shim, _load_canonical_share_safety

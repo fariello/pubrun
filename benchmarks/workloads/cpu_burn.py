@@ -1,16 +1,26 @@
-"""CPU-bound workload: a fixed, deterministic arithmetic loop.
+"""Source-checkout compatibility shim for ``src/pubrun/_bench/workloads/cpu_burn.py``."""
+from __future__ import annotations
 
-Runs the same amount of work regardless of whether pubrun is active, so timing
-differences between scenarios reflect pubrun's per-run overhead on a compute
-workload (e.g. resource-watcher sampling, event flushing), not the work itself.
-"""
+import importlib.util
+from pathlib import Path
 
-def _work() -> int:
-    total = 0
-    for i in range(2_000_000):
-        total += (i * i) % 7
-    return total
-
+_TARGET_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "pubrun"
+    / "_bench"
+    / "workloads"
+    / "cpu_burn.py"
+)
+_SPEC = importlib.util.spec_from_file_location("_pubrun_bench_workload_cpu_burn", _TARGET_PATH)
+if _SPEC is None or _SPEC.loader is None:
+    raise ImportError(f"Could not load workload from {_TARGET_PATH}")
+_MOD = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MOD)
+for _attr, _val in vars(_MOD).items():
+    if not (_attr.startswith("__") and _attr.endswith("__")):
+        globals()[_attr] = _val
+del _TARGET_PATH, _SPEC, _MOD, _attr, _val
 
 if __name__ == "__main__":
-    _work()
+    _work()  # type: ignore[name-defined]

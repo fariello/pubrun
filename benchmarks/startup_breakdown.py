@@ -1030,8 +1030,10 @@ def run_breakdown(
         extra_needles.append(str(parent_dir.resolve()))
 
     wall_start = time.perf_counter()
-    noop_path = _HERE / "workloads" / "noop.py"
-    cpu_burn_path = _HERE / "workloads" / "cpu_burn.py"
+    pkg_workloads = _SRC_ROOT / "pubrun" / "_bench" / "workloads"
+    workloads_dir = pkg_workloads if pkg_workloads.is_dir() else (_HERE / "workloads")
+    noop_path = workloads_dir / "noop.py"
+    cpu_burn_path = workloads_dir / "cpu_burn.py"
 
     with tempfile.TemporaryDirectory(
         prefix="pubrun-startup-bench-",

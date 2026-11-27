@@ -96,7 +96,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Create packaged helpers, share-safety, scenarios, and workloads
 
-- [ ] E-01 Create `src/pubrun/_bench/__init__.py`, `src/pubrun/_bench/share_safety.py`, and `src/pubrun/_bench/scenarios.py`:
+- [x] E-01 Create `src/pubrun/_bench/__init__.py`, `src/pubrun/_bench/share_safety.py`, and `src/pubrun/_bench/scenarios.py`:
   - In `src/pubrun/_bench/__init__.py`, keep imports standard-library only and side-effect free (must never import `pubrun.core` or select an import mode, so `tests/test_report_subpackage_integrity.py::test_no_mode_module_shadows_a_pubrun_subpackage` passes under every import mode). Provide typed helpers using Python 3.8-compatible `typing` annotations:
     - `find_checkout_root(start: Optional[Path] = None) -> Optional[Path]`: inspect `start` (default `Path.cwd()`) and its parent directories, returning the first directory that contains `benchmarks/harness.py` and a `pyproject.toml` declaring `name = "pubrun"` (verified lazily via `pubrun._pyproject_declares_pubrun`). Return `None` when `start` is outside a verified checkout, even if `pubrun` itself is imported from an editable `<repo>/src/pubrun` checkout.
     - `_package_checkout_root() -> Optional[Path]`: check whether the `pubrun` package directory (`Path(__file__).resolve().parents[1]`) lives inside a verified `pubrun` source checkout (via `pubrun._is_verified_source_checkout`), returning `None` for wheel installations in `site-packages`.
@@ -107,19 +107,19 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Move the canonical scenario definitions from `benchmarks/scenarios.py` into `src/pubrun/_bench/scenarios.py`, keeping it standard-library only, Python 3.8+ compatible, and `mypy`-clean.
   - Depends on: none
   - Expected outcome: `src/pubrun/_bench/__init__.py`, `src/pubrun/_bench/share_safety.py`, and `src/pubrun/_bench/scenarios.py` exist, import cleanly with zero third-party dependencies, implement working-directory vs package-checkout separation accurately, and pass `mypy`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Move the five runtime workloads into `src/pubrun/_bench/workloads/`:
+- [x] E-02 Move the five runtime workloads into `src/pubrun/_bench/workloads/`:
   - Create empty `src/pubrun/_bench/workloads/__init__.py`.
   - Copy `noop.py`, `cpu_burn.py`, `file_read.py`, `io_sink.py`, and `print_loop.py` from `benchmarks/workloads/` into `src/pubrun/_bench/workloads/`.
   - Keep `noop.py` completely free of imports (`if __name__ == "__main__": pass`) and ensure all five files remain Python 3.8+ compatible, standard-library only (with lazy `import pubrun` in `file_read.py` only for non-baseline modes), and `mypy`-clean across Linux, `win32`, and `darwin` (annotating mutated dict/optional locals such as `path: Optional[str]`, `record: Optional[Dict[str, Any]]`, and `result: Dict[str, Any]` in `file_read.py::measure_detail` where needed).
   - Depends on: E-01
   - Expected outcome: All five workloads live under `src/pubrun/_bench/workloads/` alongside `__init__.py` and pass `mypy` on all three platforms.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Create packaged benchmark harness
 
-- [ ] E-03 Create `src/pubrun/_bench/harness.py` from `benchmarks/harness.py` and remove source-checkout assumptions:
+- [x] E-03 Create `src/pubrun/_bench/harness.py` from `benchmarks/harness.py` and remove source-checkout assumptions:
   - Import `platform` at module top level (fixing the unimported `platform.node()` call in `redact_result` so hostname scrubbing works and `mypy` passes).
   - Replace the `sys.path.insert` sibling imports with `from pubrun._bench import scenarios as _scenarios`, `from pubrun._bench import share_safety as _ss`, and `from pubrun._bench import _package_checkout_root, default_results_dir, find_checkout_root, get_workload_path`.
   - In `_build_child_command` and `_run_baseline_pass`, resolve `workload_path = get_workload_path(scn.workload)`. Prepend `<checkout_root>/src` to child `PYTHONPATH` only when `(_package_checkout_root() or find_checkout_root())` returns a path whose `src/` directory exists; in a wheel installation outside a checkout, inherit the caller's environment without adding a bogus `PYTHONPATH` entry.
@@ -130,11 +130,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Ensure all type annotations are `mypy`-clean on Linux, `win32`, and `darwin` (and compatible with Python 3.8 via `from __future__ import annotations` and `typing` imports, including `result: Dict[str, Any]` in `run()`).
   - Depends on: E-01, E-02
   - Expected outcome: `src/pubrun/_bench/harness.py` runs via `python3 -m pubrun._bench.harness` from any working directory, writes a share-safe redacted JavaScript Object Notation (JSON) file to `default_results_dir()` (or `--redacted-out`), probes the real target results directory, and passes `mypy`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Convert checkout files to shims and update startup breakdown
 
-- [ ] E-04 Convert `benchmarks/share_safety.py`, `benchmarks/scenarios.py`, `benchmarks/harness.py`, and `benchmarks/workloads/` into source-checkout compatibility shims and update `benchmarks/startup_breakdown.py`:
+- [x] E-04 Convert `benchmarks/share_safety.py`, `benchmarks/scenarios.py`, `benchmarks/harness.py`, and `benchmarks/workloads/` into source-checkout compatibility shims and update `benchmarks/startup_breakdown.py`:
   - `benchmarks/share_safety.py`: load `src/pubrun/_bench/share_safety.py` directly by file path (`importlib.util.spec_from_file_location`) or reuse `sys.modules["pubrun._bench.share_safety"]` when already loaded. Do NOT trigger `import pubrun` in this shim, so `.github/scripts/validate_benchmark_submission.py` (which runs in Continuous Integration (CI) with only `jsonschema` installed and without `pubrun` installed), `benchmarks/startup_breakdown.py`, and `benchmarks/test_share_safety.py` work with zero auto-start side effects. When `sys.modules.get(__name__)` is registered, attach a `types.ModuleType` proxy subclass that forwards `__getattr__`, `__setattr__`, `__delattr__`, and `__dir__` to the canonical target module and exposes a `_rebind_shim_target(mod)` helper; when not registered in `sys.modules`, populate `globals()` with the target's non-dunder attributes (including `_HOME_PATH_RE`, `SHARE_SAFETY_VERSION`, `REDACTED`, `check_share_safe`, `check_share_safe_text`).
   - `benchmarks/scenarios.py`: load `src/pubrun/_bench/scenarios.py` directly by file path (or reuse `sys.modules["pubrun._bench.scenarios"]` when already loaded) without triggering `import pubrun`, re-exporting `Scenario`, `all_scenarios`, and module helpers (registering the temporary module in `sys.modules` during `exec_module` so Python 3.12+ `@dataclass` resolves `cls.__module__`).
   - `benchmarks/harness.py`: preserve executable mode where present; at module top level prepend `_REPO_ROOT / "src"` to `sys.path` if `pubrun` is not already importable and immediately run `if "pubrun" not in sys.modules: import pubrun.minimal` **before** importing `pubrun._bench.harness` or `pubrun._bench.share_safety`, so neither `python benchmarks/harness.py` nor importing the shim ever triggers `pubrun` auto-start. If `sys.modules.get("share_safety")` is the checkout shim exposing `_rebind_shim_target`, call `_rebind_shim_target(pubrun._bench.share_safety)` so `monkeypatch.setattr(ss, "check_share_safe", ...)` in `tests/test_benchmark_intake_bugs.py::TestHarnessSelfCheckGate` targets the same module object that `pubrun._bench.harness.main()` calls. When `__name__ != "__main__"` and `sys.modules.get(__name__)` is registered, attach a `types.ModuleType` proxy subclass forwarding `__getattr__`, `__setattr__`, `__delattr__`, and `__dir__` to `pubrun._bench.harness` so `monkeypatch.setattr(h, "run", ...)` and `monkeypatch.setattr(h, "redact_result", ...)` target `pubrun._bench.harness` directly; when not registered in `sys.modules` (such as `tests/test_bench_command.py::_load_harness`), copy non-dunder attributes (including `run`, `redact_result`, `_stats`, `_TIERS`, `_scrub_pii_substrings`, `main`, `_default_out`, `_default_redacted_out`) into `globals()`. Inside `if __name__ == "__main__":`, call `pubrun._bench.harness.main()`.
@@ -142,11 +142,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - `benchmarks/startup_breakdown.py`: resolve `noop_path` and `cpu_burn_path` from `_SRC_ROOT / "pubrun" / "_bench" / "workloads"` (with fallback to `_HERE / "workloads"`) so breakdown measurements execute the canonical packaged workloads directly.
   - Depends on: E-01, E-02, E-03
   - Expected outcome: Single canonical source in `src/pubrun/_bench/`; direct checkout invocations, existing test suites (`tests/test_benchmark_intake_bugs.py`, `tests/test_bench_command.py`, `tests/test_startup_benchmark.py`, `benchmarks/test_benchmarks.py`), and CI validation scripts without `pubrun` installed all work without auto-starting a tracked run.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Verify core runtime, shims, typing, and integrity tests
 
-- [ ] E-05 Run all verification checks listed in `## Required tests / validation`:
+- [x] E-05 Run all verification checks listed in `## Required tests / validation`:
   - Run `mypy`, `mypy --platform win32`, and `mypy --platform darwin`.
   - Run `pubrun._bench` helper unit check (`find_checkout_root`, `_package_checkout_root`, `default_results_dir` under `PUBRUN_RESULTS_DIR`, checkout cwd, and outside-checkout cwd, plus `get_workload_path` and `get_submit_script_path`) and workload shim check (`benchmarks/workloads/file_read.py --measure-detail` in `baseline` mode without importing `pubrun`).
   - Run targeted regression tests covering subpackage integrity, `share_safety`, CI intake validator, intake bug regression tests (`TestHarnessSelfCheckGate`), security hardening, startup breakdown, package benchmark scenarios, and non-slow `benchmarks/test_benchmarks.py` / `tests/test_bench_command.py` suites.
@@ -155,7 +155,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Run a smoke invocation of `python3 benchmarks/harness.py --iterations 1 --passes 1 --no-baseline --redacted-out <tmp>/checkout.redacted.json` (with ambient `PUBRUN_*` stripped and `cwd` isolated) and verify it exits `0`, writes a share-safe file, and creates no `runs/` directory.
   - Depends on: E-01, E-02, E-03, E-04
   - Expected outcome: Every check exits `0` with expected behavior, zero regressions, and zero stray temporary directories or checkout artifacts.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -251,30 +251,104 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted file listing of `src/pubrun/_bench/{__init__,share_safety,scenarios}.py`, pasted output of validation command 1 (`mypy && mypy --platform win32 && mypy --platform darwin`) and `pytest tests/test_report_subpackage_integrity.py -v` exiting `0`, plus pasted output of validation command 2 confirming `pubrun._bench` helper behavior (`find_checkout_root`, `_package_checkout_root`, `default_results_dir`, `get_workload_path`, `get_submit_script_path`, created by E-01).
   - Observed evidence:
-  - Result: pending
+    - `ls -1 src/pubrun/_bench/`: `__init__.py`, `harness.py`, `scenarios.py`, `share_safety.py`, `workloads`.
+    - Validation command 1 (`mypy && mypy --platform win32 && mypy --platform darwin`, exit `0`):
+      ```text
+      Success: no issues found in 69 source files
+      Success: no issues found in 69 source files
+      Success: no issues found in 69 source files
+      ```
+    - `pytest tests/test_report_subpackage_integrity.py -v` (exit `0`):
+      ```text
+      collected 13 items
+      tests/test_report_subpackage_integrity.py::test_report_is_callable_and_subpackage_under_every_mode[auto] PASSED [  7%]
+      tests/test_report_subpackage_integrity.py::test_report_is_callable_and_subpackage_under_every_mode[noauto] PASSED [ 15%]
+      tests/test_report_subpackage_integrity.py::test_report_is_callable_and_subpackage_under_every_mode[full] PASSED [ 23%]
+      tests/test_report_subpackage_integrity.py::test_report_is_callable_and_subpackage_under_every_mode[nopatch] PASSED [ 30%]
+      tests/test_report_subpackage_integrity.py::test_report_is_callable_and_subpackage_under_every_mode[noconsole] PASSED [ 38%]
+      tests/test_report_subpackage_integrity.py::test_report_is_callable_and_subpackage_under_every_mode[minimal] PASSED [ 46%]
+      tests/test_report_subpackage_integrity.py::test_no_mode_module_shadows_a_pubrun_subpackage[auto] PASSED [ 53%]
+      tests/test_report_subpackage_integrity.py::test_no_mode_module_shadows_a_pubrun_subpackage[noauto] PASSED [ 61%]
+      tests/test_report_subpackage_integrity.py::test_no_mode_module_shadows_a_pubrun_subpackage[full] PASSED [ 69%]
+      tests/test_report_subpackage_integrity.py::test_no_mode_module_shadows_a_pubrun_subpackage[nopatch] PASSED [ 76%]
+      tests/test_report_subpackage_integrity.py::test_no_mode_module_shadows_a_pubrun_subpackage[noconsole] PASSED [ 84%]
+      tests/test_report_subpackage_integrity.py::test_no_mode_module_shadows_a_pubrun_subpackage[minimal] PASSED [ 92%]
+      tests/test_report_subpackage_integrity.py::test_report_call_and_submodule_coexist_same_process PASSED [100%]
+      13 passed in 6.37s
+      ```
+    - Validation command 2 (exit `0`): `ok`
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted file listing of `src/pubrun/_bench/workloads/` showing `__init__.py` and all five workload scripts (`noop.py`, `cpu_burn.py`, `file_read.py`, `io_sink.py`, `print_loop.py`), pasted content of `src/pubrun/_bench/workloads/noop.py` confirming zero imports, and pasted output of validation command 1 (`mypy` across all three platforms) exiting `0`.
   - Observed evidence:
-  - Result: pending
+    - `ls -1 src/pubrun/_bench/workloads/`: `__init__.py`, `cpu_burn.py`, `file_read.py`, `io_sink.py`, `noop.py`, `print_loop.py`.
+    - `cat src/pubrun/_bench/workloads/noop.py`:
+      ```python
+      """No-op workload: measures pure import/startup + finalize overhead.
 
-- [ ] V-03 validates E-03
+      The workload body does nothing; timing differences between scenarios that run
+      this file reflect pubrun's import-mode / startup / shutdown cost, not any work.
+      """
+
+      if __name__ == "__main__":
+          pass
+      ```
+    - Validation command 1 (`mypy && mypy --platform win32 && mypy --platform darwin`, exit `0`):
+      ```text
+      Success: no issues found in 69 source files
+      Success: no issues found in 69 source files
+      Success: no issues found in 69 source files
+      ```
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: Pasted output of validation command 5 (`python3 -m pubrun._bench.harness --iterations 1 --passes 1 --no-baseline` run from an outside temp dir via `src/pubrun/_bench/harness.py::main`, created by E-03) showing `rc= 0`, one `*.redacted.json` file under `pubrun-bench-results/`, `runs_exists= False`, and `share_safe= True []`.
   - Observed evidence:
-  - Result: pending
+    - Validation command 5 (exit `0`):
+      ```text
+      rc= 0
+      0)
+        [pass 1] hotpath-register-hash: median=197.7 ms (n=1, fail=0)
+        [pass 1] hotpath-print-baseline: median=23.7 ms (n=1, fail=0)
+        [pass 1] hotpath-print-tee: median=269.0 ms (n=1, fail=0)
+        [pass 1] io-baseline-devnull: median=36.7 ms (n=1, fail=0)
+        [pass 1] io-baseline-devshm: median=43.9 ms (n=1, fail=0)
+        [pass 1] io-baseline-tmpdir: median=52.0 ms (n=1, fail=0)
+      Wrote redacted result /tmp/pubrun-bench-smoke-0cke81ph/pubrun-bench-results/pubrun-bench-50687292-20261127-062943.redacted.json
 
-- [ ] V-04 validates E-04
+      files= ['pubrun-bench-50687292-20261127-062943.redacted.json']
+      runs_exists= False
+      share_safe= True []
+      ```
+  - Result: pass
+
+- [x] V-04 validates E-04
   - Required evidence: Pasted output of validation commands 2, 3, 4, and 6 showing the `benchmarks/workloads/file_read.py --measure-detail` shim passing, `benchmarks/test_share_safety.py`, `benchmarks/test_benchmarks.py`, `tests/test_benchmark_intake_bugs.py`, `tests/test_startup_benchmark.py` (including `benchmarks/startup_breakdown.py` updated by E-04), and `.github/scripts/` passing, `benchmarks/share_safety.py` loading with `PYTHONPATH=""` and `"pubrun" not in sys.modules`, and `python3 benchmarks/harness.py` (delegating to `src/pubrun/_bench/harness.py::main` created by E-03/E-04) exiting `0` with `runs_exists= False` and `share_safe= True []`.
   - Observed evidence:
-  - Result: pending
+    - Validation command 2 (exit `0`): `ok`
+    - Validation command 3 (exit `0`): `180 passed, 3 skipped, 10 deselected in 28.61s` (including `tests/test_benchmark_intake_bugs.py::TestHarnessSelfCheckGate::test_failed_self_check_exits_nonzero_and_writes_nothing PASSED`, `test_self_check_exception_exits_nonzero PASSED`, `test_passing_self_check_writes_file PASSED`, `tests/test_startup_benchmark.py`, `benchmarks/test_share_safety.py`, `benchmarks/test_benchmarks.py`, and `.github/scripts/`).
+    - Validation command 4 (`PYTHONPATH=""`, `"pubrun" not in sys.modules`, exit `0`): `ok`
+    - Validation command 6 (exit `0`):
+      ```text
+      rc= 0 exists= True runs_exists= False
+      share_safe= True []
+      ```
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted output of all six commands in `## Required tests / validation` exiting `0`.
   - Observed evidence:
-  - Result: pending
+    - Command 1 (`mypy && mypy --platform win32 && mypy --platform darwin`, exit `0`): `Success: no issues found in 69 source files` (all 3 platforms).
+    - Command 2 (`pubrun._bench` helpers + `benchmarks/workloads/file_read.py --measure-detail`, exit `0`): `ok`.
+    - Command 3 (targeted `pytest` suite `-m "not slow" -v`, exit `0`): `180 passed, 3 skipped, 10 deselected in 28.61s`.
+    - Command 4 (`PYTHONPATH=""` `benchmarks/share_safety.py` zero-`pubrun` import check, exit `0`): `ok`.
+    - Command 5 (`python3 -m pubrun._bench.harness --iterations 1 --passes 1 --no-baseline` from temp dir, exit `0`): `rc= 0`, `files= ['pubrun-bench-50687292-20261127-062943.redacted.json']`, `runs_exists= False`, `share_safe= True []`.
+    - Command 6 (`python3 benchmarks/harness.py --iterations 1 --passes 1 --no-baseline --redacted-out ...`, exit `0`): `rc= 0 exists= True runs_exists= False`, `share_safe= True []`.
+  - Result: pass
 
 ## Approval and execution gate
 
