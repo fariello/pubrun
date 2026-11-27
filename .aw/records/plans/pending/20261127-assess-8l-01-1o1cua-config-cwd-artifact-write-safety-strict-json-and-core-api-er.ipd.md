@@ -2,12 +2,12 @@
 
 - Date: 2026-11-27
 - Kind: child
-- Concern: Eight-lens rollup findings `ROLL-03`, `ROLL-04` (config/events), `ROLL-07`, `ROLL-12` (`CallableModule`), `ROLL-29` (`pubrun.print` handle), `ROLL-33` (manual subprocess and `phase` profiling/filenames), and `ROLL-36` (`tracked_run`, unknown `start()` kwargs, `pubrun.diff` parity, `_inactive_policy` TTL, `_config_version` caching, API docstrings), surfaced by `edge-cases`, `memory-resources`, `performance`, `ui-ux`, and `self-documentation`.
+- Concern: Eight-lens rollup findings `ROLL-03`, `ROLL-04` (config/events), `ROLL-07`, `ROLL-12` (`CallableModule`), `ROLL-29` (`pubrun.print` handle), `ROLL-33` (manual subprocess and `phase` profiling/filenames), and `ROLL-36` (`tracked_run`, unknown `start()` kwargs, `pubrun.diff` parity, `_config_version` caching, API docstrings; `_inactive_policy` TTL dropped per resolved `OQ-01`), surfaced by `edge-cases`, `memory-resources`, `performance`, `ui-ux`, and `self-documentation`.
 - Scope: Harden `src/pubrun/config.py`, `src/pubrun/core.py`, `src/pubrun/events.py`, `src/pubrun/writer.py`, and `src/pubrun/report/__init__.py` against deleted current working directories (CWD), non-UTF-8 or malformed Tom's Obvious Minimal Language (TOML) files, reserved artifact overwrites, non-finite JavaScript Object Notation (JSON) numbers, unguarded subprocess wrappers, `phase` profiling races and filename collisions, repeated `pubrun.print()` handle churn, and application programming interface (API) ergonomics and docstring gaps; synchronize `docs/api.md`; add regression tests in `tests/test_edge_cases.py` and `tests/test_explicit_api.py`.
 - Scope-Paths: src/pubrun/config.py, src/pubrun/core.py, src/pubrun/events.py, src/pubrun/writer.py, src/pubrun/report/__init__.py, tests/test_edge_cases.py, tests/test_explicit_api.py, docs/api.md
 - Item-Dependencies: none
 - Status: reviewed
-- Readiness: no-go
+- Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Harden deleted-CWD, non-UTF-8/malformed TOML, reserved artifact writes, NaN/Inf JSON, subprocess wrappers, yappi locks, cached print handle, and core API ergonomics
 - Work-Kind: bug
@@ -22,6 +22,7 @@
 
 ## Workflow history
 
+- 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-27 /plan-review (Antigravity): REVIEWED - OPEN QUESTIONS; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-27 /assess-all (Antigravity): created Child 01 of Set `assess-8l` covering config/CWD/core-API/JSON/writer hardening (`ROLL-03`, `ROLL-04`, `ROLL-07`, `ROLL-12`, `ROLL-29`, `ROLL-33`, `ROLL-36`).
 
@@ -81,10 +82,10 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - In `src/pubrun/core.py::report` and `src/pubrun/core.py::artifact` (and `_resolve_within_run_dir`), reject empty or whitespace-only names before appending `.json`/`.txt`, and reject any resolved destination whose relative path to `run_dir` is a single component matching (case-insensitively) a reserved top-level run file (`manifest.json`, `config.resolved.json`, `.pubrun.lock`, `events.jsonl`, `stdout.log`, `stderr.log`). Log a warning without raising and preserve `"pubrun: failed to write report '{name}': {e}"` / `"pubrun: failed to write artifact '{filename}': {e}"` checked by `tests/test_explicit_api.py`. Serialize `report()` JSON via `pubrun.writer._sanitize_json_value` with `allow_nan=False, default=str`, and pass a JSON-safe summary (`json.loads(content)` for `dict`, `{"items": len(data)}` for `list`) to `annotate()`.
   - Wrap all provenance-recording blocks in `src/pubrun/core.py::_PubrunSubprocessNamespace.run` (exception and return paths), `_PubrunSubprocessNamespace.Popen.__init__` (exception path), `_PubrunSubprocessNamespace.Popen._log_pubrun_record`, `popen` (exception path), and `_PopenPipeProxy.close` (after `self._pipe_obj.close()`) in `try/except Exception` so host return values and exceptions are never replaced. Guard `src/pubrun/core.py::_append_manual_subprocess_record` with a lock, reject `bool` cap values (falling back to `5000`), and enforce `cap <= 0` as "record 0" (matching `src/pubrun/capture/subprocesses.py::SubprocessSpy`).
   - In `src/pubrun/core.py::phase`, read `[capture]`/`[profiling]` through `_section()`, add class-level `_yappi_lock = threading.Lock()` (preserving `phase._yappi_active: bool = False`) and module-level `_profilers_lock = threading.Lock()` (preserving `run._active_profilers` as a `list`), assign `self._profiler = prof` and append to `run._active_profilers` only after `prof.enable()` succeeds (disabling `prof` on append failure), and set `self.run_tracker._yappi_owned = True` when starting yappi under `phase._yappi_lock`. Expose `src/pubrun/core.py::phase._release_yappi_for_run(run)` (shared contract with Child 02 `76z7ww`'s `Run._rollback_owned_hooks`) and check `phase._yappi_active` under `phase._yappi_lock` in `phase.__exit__` before calling `yappi.stop()` (atomically clearing `phase._yappi_active = False` and `run._yappi_owned = False`) so `yappi.stop()` runs at most once even when `run.stop()` executes inside a `phase` block. Cap `src/pubrun/core.py::_safe_phase_filename` to 80 characters (when longer, truncate to 71 chars plus `"-"` and an 8-hex-char SHA-256 hash of `str(name)`), and allocate `.prof` filenames through a lock-guarded `_allocate_profile_filename` helper (`profile-<name>.prof`, `profile-<name>-2.prof`, ...), emitting the allocated filename in `_emit_profile_saved`.
-  - In `src/pubrun/core.py::_inactive_policy`, wrap `Path.cwd()` in `try/except OSError` (treating unavailable CWD as `None` and skipping local file probes) and read `[events]` via `pubrun.config._section(resolver(), "events")` (falling back to `"ignore"` if non-string). **[Unresolved: OQ-01]** Do not add a 1.0-second monotonic time-to-live (TTL) cache to `_inactive_policy()` until the maintainer resolves `OQ-01` (adding a 1.0 s TTL contradicts executed plan `68iw9a`, `docs/performance.md`, and `tests/test_api.py::TestInactivePolicyCache`).
+  - In `src/pubrun/core.py::_inactive_policy`, wrap `Path.cwd()` in `try/except OSError` (treating unavailable CWD as `None` and skipping local file probes) and read `[events]` via `pubrun.config._section(resolver(), "events")` (falling back to `"ignore"` if non-string). Preserve the immediate stat-fingerprint file-change detection shipped by executed plan `68iw9a` (do not add a 1.0-second time-to-live (TTL) cache, keeping `tests/test_api.py::TestInactivePolicyCache` and `docs/performance.md` unchanged per resolved `OQ-01`).
   - In `src/pubrun/core.py::print`, cache a lazily opened, lock-guarded append handle on the active `Run` (`run._print_log_lock`, `run._print_log_file`, `run._print_log_path`, initializing `_print_log_lock` under a module-level `_print_handle_init_lock`) when console tee is `"off"`: skip logging if `os.getpid() != getattr(run, "pid", os.getpid())`, read `[console]` via `_section()`, re-check `run.is_active` under `run._print_log_lock`, close and reopen if `run._print_log_path != log_path` (directory migration safety), call `f.flush()` after each write, and close/clear the handle on any write error. Expose `src/pubrun/core.py::_close_print_log_handle(run)` called from `core.py::stop` and `writer.py::ArtifactWriter.write_artifacts` (E-02) and documented as the teardown contract for Child 02 (`76z7ww`).
   - Depends on: E-01, E-02
-  - Expected outcome: Reserved top-level run files cannot be clobbered on case-sensitive or case-insensitive filesystems; manual subprocess wrappers never mask host exceptions and honor `cap == 0`; `phase` profiling is race-free, double-stop-free, and collision-free; `_inactive_policy()` survives deleted CWD and scalar `[events]` (TTL gated on `OQ-01`); `pubrun.print()` reuses one flushed handle with zero FD leaks.
+  - Expected outcome: Reserved top-level run files cannot be clobbered on case-sensitive or case-insensitive filesystems; manual subprocess wrappers never mask host exceptions and honor `cap == 0`; `phase` profiling is race-free, double-stop-free, and collision-free; `_inactive_policy()` survives deleted CWD and scalar `[events]` while preserving immediate stat-based file-change detection (per resolved `OQ-01`); `pubrun.print()` reuses one flushed handle with zero FD leaks.
   - Execution state: pending
 
 - [ ] E-04 Improve core API ergonomics, `CallableModule`, docstrings, error hints, and `docs/api.md` in `src/pubrun/core.py`, `src/pubrun/report/__init__.py`, and `docs/api.md`:
@@ -126,13 +127,13 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 | `ROLL-12` | self-documentation | High | Low (`usability`) | Novice / Power user | `pubrun.report` loses its docstring and call signature through `src/pubrun/report/__init__.py::CallableModule`. |
 | `ROLL-29` | performance | Medium | Low (`complexity`) | Software engineer | `pubrun.print()` opens and closes `stdout.log` on every call when console capture is off. |
 | `ROLL-33` | edge-cases; memory-resources | Medium | Low (`functionality`) | Software engineer | Manual subprocess wrappers lack provenance `try/except` guards and lock (`cap == 0` bypass); `phase` yappi lacks lock and `cProfile` assigns before `enable()`; long or duplicate phase names fail or collide. |
-| `ROLL-36` | ui-ux; self-documentation; performance | Medium | Low (`usability`) | Novice / Power user | `tracked_run` lacks `Run` properties; `start(**kwargs)` silently ignores typos; `pubrun.diff()` lacks `depth`/`show_same`; inactive `annotate()` does 4 syscalls/call (routed to `OQ-01`); `writer` re-serializes unchanged config on refresh; API docstrings omit examples. |
+| `ROLL-36` | ui-ux; self-documentation; performance | Medium | Low (`usability`) | Novice / Power user | `tracked_run` lacks `Run` properties; `start(**kwargs)` silently ignores typos; `pubrun.diff()` lacks `depth`/`show_same`; inactive `annotate()` TTL dropped per resolved `OQ-01` (keeping `68iw9a` immediate file-change detection); `writer` re-serializes unchanged config on refresh; API docstrings omit examples. |
 
 ## Proposed changes (ordered, validatable)
 
 1. `E-01` (`src/pubrun/config.py`): Catch `UnicodeDecodeError`, guard `Path.cwd()` with `OSError`, and add `_section()` dict guards.
 2. `E-02` (`src/pubrun/events.py`, `src/pubrun/writer.py`): Add shared cycle-safe `_sanitize_json_value` with `allow_nan=False`, validate `EventStream` bounds, skip redundant config serialization on hardware `refresh`, cap `_warned_invalid_durability` `set` at 256, and close cached print handles in `write_artifacts()`.
-3. `E-03` (`src/pubrun/core.py`): Protect reserved top-level run files (case-insensitively) and sanitize JSON/summary in `report()`/`artifact()`, guard and lock manual subprocess wrappers (`cap <= 0`), lock/order `phase` profilers with single-stop yappi contract for `76z7ww`, cap/disambiguate `.prof` filenames, guard `_inactive_policy()` against deleted CWD and scalar `[events]` (TTL gated on `OQ-01`), and cache a flushed, locked, migration-safe `pubrun.print()` append handle with `_close_print_log_handle(run)`.
+3. `E-03` (`src/pubrun/core.py`): Protect reserved top-level run files (case-insensitively) and sanitize JSON/summary in `report()`/`artifact()`, guard and lock manual subprocess wrappers (`cap <= 0`), lock/order `phase` profilers with single-stop yappi contract for `76z7ww`, cap/disambiguate `.prof` filenames, guard `_inactive_policy()` against deleted CWD and scalar `[events]` (preserving `68iw9a` immediate file-change detection per resolved `OQ-01`), and cache a flushed, locked, migration-safe `pubrun.print()` append handle with `_close_print_log_handle(run)`.
 4. `E-04` (`src/pubrun/core.py`, `src/pubrun/report/__init__.py`, `docs/api.md`): Add `tracked_run` pass-through properties, unknown `start()` kwarg warnings, `pubrun.diff` `depth`/`show_same`, `CallableModule` module docstring and signature, API docstrings/hints, and `docs/api.md` sync.
 5. `E-05` (`tests/test_edge_cases.py`, `tests/test_explicit_api.py`): Add regression and concurrency tests for every change above and run full targeted validation plus three-platform `mypy`.
 
@@ -142,11 +143,13 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Carrier: 76z7ww
 - `PUBRUN_OUTPUT_DIR` and `$VAR`/`~` expansion in `src/pubrun/config.py` are owned by Child 08 (`2ge0ea`) alongside the CLI `--dir` plumbing.
   - Carrier: 2ge0ea
+- Adding a 1.0-second monotonic TTL to `src/pubrun/core.py::_inactive_policy` was dropped per maintainer resolution of `OQ-01` (preserving immediate file-change detection from `68iw9a`, `tests/test_api.py::TestInactivePolicyCache`, and `docs/performance.md`; revisit only if future NFS/Lustre benchmarks show need). Orchestrator `k80suw` will drop the stale `_inactive_policy` TTL mention during its own review.
+  - Carrier: k80suw
 
 ## Scope check
 
 - Over-scope: none. Every change maps directly to verified findings in `ROLL-03`, `ROLL-04`, `ROLL-07`, `ROLL-12`, `ROLL-29`, `ROLL-33`, and `ROLL-36`, plus required `docs/api.md` synchronization for public API additions.
-- Under-scope: none after `E-01..E-05` revisions; the `_inactive_policy()` TTL trade-off is surfaced explicitly in `OQ-01` rather than silently assumed.
+- Under-scope: none after `E-01..E-05` revisions; `OQ-01` was resolved by the maintainer to keep `68iw9a` immediate file-change detection and drop the 1.0 s TTL.
 
 ## Required tests / validation
 
@@ -157,7 +160,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 ## Spec / documentation sync
 
 - In-code API docstrings in `src/pubrun/core.py` and `src/pubrun/report/__init__.py`, plus public API documentation in `docs/api.md`, are updated in `E-04` (with zero em or en dashes in `docs/api.md`).
-- If `OQ-01` resolves in favor of a 1.0 s monotonic TTL in `_inactive_policy()`, `docs/performance.md` and `tests/test_api.py` must also be added to `- Scope-Paths:` and updated before approval.
+- Per resolved `OQ-01`, immediate file-change detection from `68iw9a` is retained, so `docs/performance.md` and `tests/test_api.py::TestInactivePolicyCache` remain unchanged.
 - `README.md` and `docs/cli.md` sync for Set `assess-8l` is handled in Child 10 (`6y55x4`).
 
 ## Open questions
@@ -165,11 +168,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 ### OQ-01: Should `_inactive_policy()` keep immediate config-file change detection (`68iw9a`) or adopt a 1.0-second monotonic TTL?
 
 - Blocking: yes
-- Status: open
+- Status: resolved
 - Owner: maintainer
 - Finding: PR-001
 - Carrier: k80suw
-- Resolution or deferral rationale: Pending maintainer decision. Executed plan `68iw9a` (2026-11-23, commit `bb725f2`) explicitly established next-call file-change detection in `src/pubrun/core.py::_inactive_policy`, pinned by five tests in `tests/test_api.py::TestInactivePolicyCache` and documented in `docs/performance.md`. Adopting the proposed 1.0 s monotonic TTL cuts syscalls in tight inactive loops (helpful on NFS/Lustre) but breaks three tests in `TestInactivePolicyCache` and relaxes the documented next-call guarantee, requiring `tests/test_api.py` and `docs/performance.md` to be updated. Recommended answer (recommendation strength: `medium`): Keep immediate file-change detection from `68iw9a` (drop the 1.0 s TTL from `1o1cua` while retaining the deleted-CWD `OSError` and scalar-`[events]` crash fixes), unless tight inactive loops on network filesystems are a priority that justifies a 1.0 s config-edit staleness window.
+- Resolution or deferral rationale: Pending maintainer decision. Executed plan `68iw9a` (2026-11-23, commit `bb725f2`) explicitly established next-call file-change detection in `src/pubrun/core.py::_inactive_policy`, pinned by five tests in `tests/test_api.py::TestInactivePolicyCache` and documented in `docs/performance.md`. Adopting the proposed 1.0 s monotonic TTL cuts syscalls in tight inactive loops (helpful on NFS/Lustre) but breaks three tests in `TestInactivePolicyCache` and relaxes the documented next-call guarantee, requiring `tests/test_api.py` and `docs/performance.md` to be updated. Recommended answer (recommendation strength: `medium`): Keep immediate file-change detection from `68iw9a` (drop the 1.0 s TTL from `1o1cua` while retaining the deleted-CWD `OSError` and scalar-`[events]` crash fixes), unless tight inactive loops on network filesystems are a priority that justifies a 1.0 s config-edit staleness window. RESOLVED 2026-11-27 by the user via /askme: Option 1 - keep immediate file-change detection from plan `68iw9a` (drop the 1.0-second TTL from `1o1cua` and `k80suw`, keeping the deleted-CWD `OSError` and malformed-`[events]`-section crash fixes). Preserve `TestInactivePolicyCache` and `docs/performance.md` unchanged; revisit a filesystem-aware TTL later if NFS/Lustre benchmarks show real need.
 
 ## Validation and cross-check (verify before reporting done)
 
@@ -186,7 +189,7 @@ Validation-state rule: inspect evidence in a separate pass. Accepted validation 
   - Result: pending
 
 - [ ] V-03 validates E-03
-  - Required evidence: Pasted `pytest` output confirming `src/pubrun/core.py` units pass: `report()`/`artifact()`/`_resolve_within_run_dir()` (case-insensitive reserved top-level filename rejection, blank-name rejection, JSON-safe `annotate` summary), `_PubrunSubprocessNamespace`/`popen()`/`_append_manual_subprocess_record()` (exception isolation, lock safety, `max_tracked_commands == 0`), `phase`/`_safe_phase_filename`/`_allocate_profile_filename` (yappi lock, `_release_yappi_for_run` single-stop guard, `cProfile` enable ordering, >80-char hash cap, `.prof` collision disambiguation), `_inactive_policy()` (deleted CWD and scalar `[events]`, plus `OQ-01` outcome), and `print()`/`_close_print_log_handle()` (handle reuse, immediate flush, migration reopen, fork PID guard, zero `ResourceWarning` on `tracker.stop()` and `pubrun.stop()`).
+  - Required evidence: Pasted `pytest` output confirming `src/pubrun/core.py` units pass: `report()`/`artifact()`/`_resolve_within_run_dir()` (case-insensitive reserved top-level filename rejection, blank-name rejection, JSON-safe `annotate` summary), `_PubrunSubprocessNamespace`/`popen()`/`_append_manual_subprocess_record()` (exception isolation, lock safety, `max_tracked_commands == 0`), `phase`/`_safe_phase_filename`/`_allocate_profile_filename` (yappi lock, `_release_yappi_for_run` single-stop guard, `cProfile` enable ordering, >80-char hash cap, `.prof` collision disambiguation), `_inactive_policy()` (deleted CWD and scalar `[events]`, plus `tests/test_api.py::TestInactivePolicyCache` passing unchanged per resolved `OQ-01`), and `print()`/`_close_print_log_handle()` (handle reuse, immediate flush, migration reopen, fork PID guard, zero `ResourceWarning` on `tracker.stop()` and `pubrun.stop()`).
   - Observed evidence:
   - Result: pending
 
@@ -202,7 +205,7 @@ Validation-state rule: inspect evidence in a separate pass. Accepted validation 
 
 ## Approval and execution gate
 
-1. **Open questions and approval:** This plan is a proposal and MUST NOT be executed until every `- Blocking: yes` open question (`OQ-01`) is resolved, any resulting plan edits are re-reviewed, and explicit human approval is recorded (`aw set plan approved 1o1cua --by-human`).
+1. **Open questions and approval:** This plan is a proposal and MUST NOT be executed until all blocking open questions are resolved (`OQ-01` resolved by the maintainer on 2026-11-27) and explicit human approval is recorded (`aw set plan approved 1o1cua --by-human`).
 2. **Scope declaration:** `- Scope-Paths:` declares the expected files this plan modifies (`src/pubrun/config.py`, `src/pubrun/core.py`, `src/pubrun/events.py`, `src/pubrun/writer.py`, `src/pubrun/report/__init__.py`, `tests/test_edge_cases.py`, `tests/test_explicit_api.py`, `docs/api.md`). If execution requires touching an additional file or leaving a declared file untouched, justify each delta at finalization with `--scope-reason` or `--scope-ack`.
 3. **Validation honesty (hard MUST):** Every `V-*` item MUST paste actual runner output from this workspace confirming exit `0` and the required behavior; never claim passing tests, `mypy`, or checks that were not actually run.
 4. **Commits and push policy:** Commit ONLY files changed for this plan using `aw commit 1o1cua -- <paths>` (never `git add -A`, bare `git add`, `git commit -a`, or raw `git commit`). Never push, tag, or publish.

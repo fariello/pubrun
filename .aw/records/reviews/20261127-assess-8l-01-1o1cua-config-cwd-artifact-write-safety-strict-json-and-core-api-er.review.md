@@ -4,7 +4,7 @@
 - Subject-Type: ipd
 - Reviewed-At: 2026-11-27
 - Reviewer: Antigravity
-- Verdict: REVIEWED - OPEN QUESTIONS
+- Verdict: APPROVE WITH REVISIONS APPLIED
 
 ## Round 1
 
@@ -165,5 +165,60 @@ AW-REVIEW: AGAIN
 ### Step S6
 
 - Checked: Round 2 introduced no further structural issues, no new findings, and zero `IPD-Z603` or `check.ipd-uncarried-obligation` diagnostics. All revisions from Round 1 are internally consistent and reconciled across all sections, with `PR-001` cleanly escalated to `OQ-01` (`- Carrier: k80suw`) and the lane outcome JSON. Ready for Step S7 finalization (`REVIEWED - OPEN QUESTIONS`, `no-go`).
+
+AW-REVIEW: DONE
+
+## Round 3
+
+### Step P
+
+- Checked: re-read `.aw/records/plans/pending/20261127-assess-8l-01-1o1cua-config-cwd-artifact-write-safety-strict-json-and-core-api-er.ipd.md` after applying the maintainer's `OQ-01` resolution (Option 1: keep immediate stat-fingerprint file-change detection from executed plan `68iw9a`, drop the 1.0-second TTL from `1o1cua` and note `k80suw` carrier follow-up, and keep deleted-CWD `OSError` and scalar-`[events]` crash fixes). Swept and reconciled every section (`- Concern:`, `E-03`, `## Findings`, `## Proposed changes`, `## Deferred / out of scope`, `## Scope check`, `## Spec / documentation sync`, `## Open questions`, `V-03`, `## Approval and execution gate`) so zero `[Unresolved: OQ-01]` or TTL-gated wording remains.
+
+### Proofreading
+
+#### Changes
+| Location | Old text summary | New text summary | Reason |
+|---|---|---|---|
+| `- Concern:`, `E-03`, `## Findings`, `## Proposed changes`, `## Deferred / out of scope`, `## Scope check`, `## Spec / documentation sync`, `## Open questions` (`OQ-01`), `V-03`, `## Approval and execution gate` | Left `OQ-01` (`- Status: open`, `- Blocking: yes`) with `[Unresolved: OQ-01]` guard in `E-03`, TTL-conditional doc sync, and `- Readiness: no-go` | Marked `OQ-01` `- Status: resolved` (appending `RESOLVED 2026-11-27 by the user via /askme: ...`), removed `[Unresolved: OQ-01]` from `E-03`, pinned retention of `68iw9a` immediate file-change detection (`TestInactivePolicyCache` and `docs/performance.md` unchanged), recorded dropped TTL + `k80suw` carrier note in `## Deferred / out of scope`, and updated `- Readiness: go-pending-approval` | Apply maintainer answer to `02-1o1cua-a1-inactive-policy-ttl-vs-immediate-stat` and clear `PR-001` via escalation return path |
+
+#### Issues
+| ID | Location | Ambiguity | Information needed | Recommended answer | Recommendation strength |
+|---|---|---|---|---|---|
+
+### Step R2
+
+- Checked: verified `- Highest E allocated: 05` matches `E-01..E-05` and `V-01..V-05` (1:1 bijection); verified `- Scope-Paths:` (8 files) stays unchanged and clean (no `tests/test_api.py` or `docs/performance.md` edits needed under Option 1); verified `OQ-01` has `- Status: resolved` (clearing `IPD-Q501`); verified zero superseded TTL-gated wording remains.
+
+### Step R7
+
+- Checked: verified `## Deferred / out of scope` records `- Carrier: k80suw` so orchestrator `k80suw` drops the stale `_inactive_policy` TTL mention during its own review without touching `k80suw` from `1o1cua`'s review lane.
+
+### Step S5
+
+- Checked: `OQ-01` (`- Blocking: yes`, `- Status: resolved`, `- Owner: maintainer`, `- Finding: PR-001`, `- Carrier: k80suw`) is resolved by the maintainer on `2026-11-27` (`Option 1`). Following the escalation return path in `steps/s5-questions.md`, `PR-001` is now `FIXED` in Round 3. Zero open findings, zero blocking open questions, and zero unescalated decisions remain. Lane outcome JSON carries `"questions": []`.
+
+### Findings
+
+| ID | Severity | Scope | Area | Evidence | Finding | Remediation Risk | Decision | Resolution |
+|---|---|---|---|---|---|---|---|---|
+| PR-001 | HIGH | IN-SCOPE | `r4-engineering.md` D (Anti-regression) / `r1-references.md` / `r7-cross-plan.md` | `OQ-01` resolved 2026-11-27 by maintainer (`02-1o1cua-a1-inactive-policy-ttl-vs-immediate-stat`); `E-03`, `V-03`, `## Deferred / out of scope` | Draft proposed a 1.0 s monotonic TTL cache on `src/pubrun/core.py::_inactive_policy` contradicting `68iw9a`, `docs/performance.md`, and `tests/test_api.py::TestInactivePolicyCache`. | C:Low; U:Low; S:Low; F:Low; Overall:Low | FIXED | Cleared via escalation return path on 2026-11-27: maintainer chose Option 1 on `OQ-01` (keep immediate stat-fingerprint file-change detection from `68iw9a`, drop the 1.0 s TTL while keeping deleted-CWD `OSError` and scalar-`[events]` crash fixes, preserve `TestInactivePolicyCache` and `docs/performance.md` unchanged, and carry `k80suw` wording cleanup via `- Carrier: k80suw`) (recommendation strength: `very strong`). |
+| PR-002 | HIGH | IN-SCOPE | `r4-engineering.md` A, D / `r7-cross-plan.md` | `src/pubrun/writer.py::_write_config_if_needed`, `tests/test_timing_accuracy.py:283,326`, `tests/test_startup_overhead_writes.py:494`, `tests/test_writer.py:229,264` | `E-02` `_config_version` / cached config identity crossed `tracker.py` Scope-Paths and broke in-place `run.config` mutation tests; `_warned_invalid_durability` must remain a `set` for `.discard()`. | C:Low; U:Low; S:Low; F:Low; Overall:Low | FIXED | Retained from Round 1/2: `E-02` and `V-02` scope fast-path skip to `stage == "refresh"`, preserve canonical digest checks on `startup`/`sync`/`finalize`, keep `_warned_invalid_durability` as a 256-entry `set`, and include the affected test suites (recommendation strength: `very strong`). |
+| PR-003 | HIGH | IN-SCOPE | `r4-engineering.md` A, C / `r7-cross-plan.md` | `src/pubrun/core.py::print:807-856`, `src/pubrun/writer.py::ArtifactWriter.write_artifacts:257-349`, `tests/test_explicit_api.py:57-64`, `tests/test_core_lifecycle_bugs.py:749-756` | Cached `pubrun.print()` append handle lacked close/flush/fork/migration contract before Child 02 (`76z7ww`) lands. | C:Low; U:Low; S:Low; F:Low; Overall:Low | FIXED | Retained from Round 1/2: `E-02`, `E-03`, and `V-03` specify flushed locked handle, PID fork guard, migration reopen, and `core._close_print_log_handle(run)` wired into `writer.py::write_artifacts` and `core.py::stop` (recommendation strength: `very strong`). |
+| PR-004 | HIGH | IN-SCOPE | `r4-engineering.md` A, D / `r7-cross-plan.md` | `src/pubrun/core.py::phase:466-569`, `tests/test_core_lifecycle_bugs.py:840-866`, `tests/conftest.py:145`, `76z7ww` `E-01` | Unnamed yappi ownership contract with `76z7ww` and double `yappi.stop()` hazard when `run.stop()` runs inside `phase`. | C:Low; U:Low; S:Low; F:Low; Overall:Low | FIXED | Retained from Round 1/2: `E-03` and `V-03` specify `phase._yappi_lock`, `_profilers_lock`, `run._yappi_owned = True`, `phase._release_yappi_for_run(run)`, and at-most-once `yappi.stop()` guard (recommendation strength: `very strong`). |
+| PR-005 | HIGH | IN-SCOPE | `r4-engineering.md` A, D, F / `r3-security.md` | `src/pubrun/core.py`, `src/pubrun/report/__init__.py`, `tests/test_explicit_api.py:525-526,590`, `tests/test_core_lifecycle_bugs.py:361-364` | Underspecified edge cases and test-assertion breaks across reserved run files, `report()` summary, `phase.__enter__` warning, `diff` `ignore_{depth}`/`show_same`, sanitizer cycles, `_section` guards, `tracked_run` pre-enter properties, and `CallableModule` module docstring. | C:Low; U:Low; S:Low; F:Low; Overall:Low | FIXED | Retained from Round 1/2: all six fixes are present and reconciled across `E-01..E-05`, `## Proposed changes`, and `V-01..V-05` (recommendation strength: `very strong`). |
+| PR-006 | MEDIUM | UNDER-SCOPE | `r2-executability.md` / `r4-engineering.md` E, F / `p-proofread.md` / `s7-finalize.md` | `.aw/records/plans/pending/20261127-assess-8l-01-1o1cua-config-cwd-artifact-write-safety-strict-json-and-core-api-er.ipd.md` | Missing `docs/api.md` sync, 8 missing test suites in validation, unbalanced `E-04`, incomplete execution gate, unexpanded acronyms, and incomplete Mermaid diagram. | C:Low; U:Low; S:Low; F:Low; Overall:Low | FIXED | Retained from Round 1/2: `docs/api.md` added with dash check, `E-03`/`E-04` rebalanced within 5 E-items, 13 test suites listed, five-clause gate added, acronyms expanded, and Mermaid diagram reconciled (recommendation strength: `strong`). |
+
+### Decisions
+
+| ID | Question | Chosen | Alternatives considered | Basis | Reversible |
+|---|---|---|---|---|---|
+| D-1 | Review tier for `1o1cua` | `complex` | `standard` | Order 01 of 10-child Set `assess-8l`, changes public Python APIs and strict JSON format, touches 5 production modules and shared contracts with `76z7ww`/`p4ueaj`/`2ge0ea`, and answers Yes to tier questions 1, 3, and 5 in `steps/t-tier.md`. | yes |
+| D-2 | How to fix `writer.py::_write_config_if_needed()` config caching without breaking `tests/test_timing_accuracy.py:283,326` and `tests/test_startup_overhead_writes.py:494` or editing `src/pubrun/tracker.py` | Skip `_serialize_config_and_digest()` on `stage == "refresh"` when `config_path` is already written at `>= required_rank` and exists; keep canonical digest checks on `startup`, `sync_config_if_changed()`, and `finalize` | Add `_config_version` to `tracker.py` or wrap `run.config` in a custom dirty-tracking dict proxy | `tests/test_timing_accuracy.py:283,326`, `tests/test_startup_overhead_writes.py:494`, `tests/test_writer.py:244-272`, and Set `assess-8l` Scope-Paths partition (`76z7ww` owns `tracker.py`). | yes |
+| D-3 | Where to close the cached `pubrun.print()` file handle before Child 02 (`76z7ww`) lands | Expose `src/pubrun/core.py::_close_print_log_handle(run)` and call it from `src/pubrun/writer.py::ArtifactWriter.write_artifacts` (E-02) and `src/pubrun/core.py::stop` (E-03), while documenting it for `76z7ww` | Pull `src/pubrun/tracker.py` into `1o1cua` Scope-Paths or defer handle closing to `76z7ww` | `src/pubrun/writer.py::ArtifactWriter.write_artifacts:257-349`, `tests/test_explicit_api.py:57-64`, `tests/test_core_lifecycle_bugs.py:749-756`, and `76z7ww` `E-01`. | yes |
+| D-4 | Whether to split `1o1cua` into multiple child plans or rebalance internally | Rebalance `E-03` (runtime safety) and `E-04` (API ergonomics and `docs/api.md`) within 5 E-items (`E-01..E-05`) | Split `1o1cua` into two child plans and rewire `k80suw`, `76z7ww`, `p4ueaj`, `2ge0ea`, and `6y55x4` dependencies, or add a 6th E-item triggering `IPD-Z603` | Tight helper coupling across the 5 modules, existing 10-child Set `assess-8l` dependency graph, and `IPD-Z603` 5-E-item guidance. | yes |
+
+### Step S6
+
+- Checked: Round 3 applied the maintainer's `OQ-01` resolution across `1o1cua` without changing `- Scope-Paths:` or adding/removing `E-*`/`V-*` items, cleared `PR-001` via the escalation return path, and left zero open questions or unresolved findings. Ready for Step S7 finalization (`APPROVE WITH REVISIONS APPLIED`, `go-pending-approval`).
 
 AW-REVIEW: DONE
