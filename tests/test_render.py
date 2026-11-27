@@ -1,9 +1,12 @@
 """Tests for pubrun.analysis.render -- diff rendering (inline fallback and color control)."""
-import os
+import io
+import math
+import time
 import sys
 import pytest
 
 from pubrun.analysis.render import (
+    _format_array_diff,
     _has_color,
     _render_inline,
     _render_table,
@@ -12,27 +15,42 @@ from pubrun.analysis.render import (
 )
 
 
-class TestHasColor:
-    """Tests for color detection logic."""
+class _FakeTty(io.StringIO):
+    def isatty(self) -> bool:
+        return True
 
-    def test_no_color_flag_disables(self):
-        """Explicit no_color flag returns False."""
-        assert _has_color(no_color_flag=True) is False
+
+class TestHasColor:
+    """Tests for TTY-aware color detection logic delegated to report.output.use_color."""
+
+    def test_no_color_flag_disables(self, monkeypatch):
+        """Explicit no_color flag returns False even with FORCE_COLOR or TTY."""
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        assert _has_color(no_color_flag=True, stream=_FakeTty()) is False
 
     def test_no_color_env_var_disables(self, monkeypatch):
-        """NO_COLOR environment variable disables color."""
+        """NO_COLOR overrides FORCE_COLOR and TTY."""
         monkeypatch.setenv("NO_COLOR", "1")
-        assert _has_color(no_color_flag=False) is False
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        assert _has_color(no_color_flag=False, stream=_FakeTty()) is False
 
     def test_default_with_no_env_var(self, monkeypatch):
-        """Without NO_COLOR env var, returns True."""
+        """Non-TTY returns False; TTY or FORCE_COLOR=1 returns True."""
         monkeypatch.delenv("NO_COLOR", raising=False)
-        assert _has_color(no_color_flag=False) is True
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
+        assert _has_color(no_color_flag=False, stream=io.StringIO()) is False
+        assert _has_color(no_color_flag=False, stream=_FakeTty()) is True
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        assert _has_color(no_color_flag=False, stream=io.StringIO()) is True
 
     def test_no_color_env_empty_string(self, monkeypatch):
-        """Empty NO_COLOR string does NOT disable (per spec: only non-empty)."""
+        """Empty NO_COLOR string does NOT disable color on a TTY or under FORCE_COLOR."""
         monkeypatch.setenv("NO_COLOR", "")
-        assert _has_color(no_color_flag=False) is True
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
+        assert _has_color(no_color_flag=False, stream=io.StringIO()) is False
+        assert _has_color(no_color_flag=False, stream=_FakeTty()) is True
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        assert _has_color(no_color_flag=False, stream=io.StringIO()) is True
 
 
 class TestRenderInline:
@@ -257,4 +275,88 @@ class TestRenderTableAndSummarize:
         assert "\x1b[1m   Field  Change\x1b[0m" in lines
         assert "\x1b[92m+\x1b[0m  y      \x1b[92m1\x1b[0m" in output
         assert "\x1b[93m~\x1b[0m  x      \x1b[93m1  ->  2\x1b[0m" in output
-        assert "\x1b[2m=\x1b[0m  w      \x1b[2m3\x1b[0m" in output
+        assert "=  w      3" in lines
+        assert "\x1b[2m" not in output
+
+    def test_render_inline_emits_no_differences_and_zero_dim(self, capsys):
+        diff_empty = {"added": {}, "removed": {}, "modified": {}, "same": {}}
+        _render_inline(diff_empty, use_color=True)
+        out_empty = capsys.readouterr().out
+        assert "(no differences)" in out_empty.splitlines()
+        assert "\x1b[2m" not in out_empty
+
+        diff_same = {"added": {}, "removed": {}, "modified": {}, "same": {"host.os": "Linux"}}
+        _render_inline(diff_same, use_color=True)
+        out_same = capsys.readouterr().out
+        assert "(no differences)" in out_same.splitlines()
+        assert "--- Unchanged ---" in out_same
+        assert "= host.os: Linux" in out_same
+        assert "\x1b[2m" not in out_same
+
+    def test_render_inline_list_diff_minus_before_plus(self, capsys):
+        diff = {
+            "added": {},
+            "removed": {},
+            "modified": {
+                "python.sys_path": {
+                    "type": "list_diff",
+                    "added": ["/new"],
+                    "removed": ["/old"],
+                    "order_changed": False,
+                    "old": ["/old", "/keep"],
+                    "new": ["/keep", "/new"],
+                }
+            },
+            "same": {},
+        }
+        for depth in ("standard", "deep"):
+            _render_inline(diff, use_color=False, depth=depth)
+            out = capsys.readouterr().out
+            idx_minus = out.index("    - [-'/old', '/keep']")
+            idx_plus = out.index("    + ['/keep', +'/new']")
+            assert idx_minus < idx_plus
+
+    def test_render_table_ascii_ellipsis_fallback(self, monkeypatch):
+        raw = io.BytesIO()
+        ascii_stream = io.TextIOWrapper(raw, encoding="ascii")
+        monkeypatch.setattr(sys, "stdout", ascii_stream)
+        diff = {"added": {"k" * 60: "val"}, "removed": {}, "modified": {}, "same": {}}
+        _render_table(diff, use_color=False)
+        ascii_stream.flush()
+        text = raw.getvalue().decode("ascii")
+        assert ("k" * 45) + "..." in text
+        assert "\u2026" not in text
+
+    def test_print_diff_suppresses_ansi_when_piped(self, capsys, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
+        diff = {"added": {"k": "v"}, "removed": {}, "modified": {}, "same": {}}
+        print_diff(diff, no_color=False)
+        out = capsys.readouterr().out
+        assert "\x1b[" not in out
+
+    def test_format_array_diff_linear_scaling_and_nan(self):
+        n = 2000
+        common_a = [f"item_{i}" for i in range(n)]
+        common_b = list(reversed(common_a))
+        t0 = time.perf_counter()
+        rendered = _format_array_diff(
+            common_a + ["removed_item"],
+            False,
+            ["added_item"],
+            ["removed_item"],
+            common_a,
+            common_b,
+            use_color=False,
+        )
+        elapsed = time.perf_counter() - t0
+        assert elapsed < 2.0, f"_format_array_diff took {elapsed:.2f}s for N={n}"
+        assert "-'removed_item'" in rendered
+        assert "~'item_0'" in rendered
+
+        nan_val = float("nan")
+        nan_out = _format_array_diff(
+            [nan_val, "x"], False, [], [], [nan_val, "x"], [nan_val, "x"], use_color=False
+        )
+        assert "~nan" not in nan_out
+        assert "nan" in nan_out

@@ -2,8 +2,11 @@
 Diff report rendering -- plain-text ANSI output (git-style).
 """
 import json
-import os
-from typing import Any, Dict, Iterable
+import math
+import sys
+from typing import Any, Dict, Iterable, Optional, TextIO
+
+from pubrun.report.output import use_color as _output_use_color
 
 
 class Colors:
@@ -16,8 +19,20 @@ class Colors:
 
 
 def _tag(x: Any) -> Any:
-    """Type-tagged comparison key so ``True``/``1`` and ``False``/``0`` stay distinct."""
+    """Type-tagged comparison key so ``True``/``1`` stay distinct and ``NaN == NaN``."""
+    if isinstance(x, float) and math.isnan(x):
+        return ("float", "nan")
     return (type(x).__name__, x)
+
+
+def _can_encode(text: str, stream: Optional[TextIO] = None) -> bool:
+    target = stream if stream is not None else sys.stdout
+    encoding = getattr(target, "encoding", None) or "utf-8"
+    try:
+        text.encode(encoding)
+        return True
+    except (UnicodeEncodeError, LookupError):
+        return False
 
 
 def _format_array_diff(
@@ -35,14 +50,27 @@ def _format_array_diff(
     yel = Colors.BOLD + Colors.YELLOW if use_color else ""
     rst = Colors.RESET if use_color else ""
 
-    # Compare by a type-tagged key so bool/int do not alias (True == 1, False == 0).
+    # Compare by a type-tagged key so bool/int do not alias (True == 1, False == 0)
+    # and NaN == NaN. Precompute first-occurrence index dicts for O(N) formatting.
     added_tags = {_tag(x) for x in added_set}
     removed_tags = {_tag(x) for x in removed_set}
-    tags_a = [_tag(x) for x in common_a]
-    tags_b = [_tag(x) for x in common_b]
+    pos_a: Dict[Any, int] = {}
+    for idx, x in enumerate(common_a):
+        t = _tag(x)
+        if t not in pos_a:
+            pos_a[t] = idx
+    pos_b: Dict[Any, int] = {}
+    for idx, x in enumerate(common_b):
+        t = _tag(x)
+        if t not in pos_b:
+            pos_b[t] = idx
 
     def _moved(t: Any) -> bool:
-        return t in tags_a and t in tags_b and tags_a.index(t) != tags_b.index(t)
+        ia = pos_a.get(t)
+        if ia is None:
+            return False
+        ib = pos_b.get(t)
+        return ib is not None and ia != ib
 
     parts = []
     for x in elements:
@@ -66,13 +94,9 @@ def _format_array_diff(
     return "[" + ", ".join(parts) + "]"
 
 
-def _has_color(no_color_flag: bool) -> bool:
+def _has_color(no_color_flag: bool, stream: Optional[TextIO] = None) -> bool:
     """Determine if color output should be used."""
-    if no_color_flag:
-        return False
-    if os.environ.get("NO_COLOR", ""):
-        return False
-    return True
+    return _output_use_color(stream if stream is not None else sys.stdout, force_no_color=no_color_flag)
 
 
 def _fmt(val: Any, max_length: int, wrap: bool) -> str:
@@ -90,21 +114,26 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int
     grn = Colors.GREEN if use_color else ""
     red = Colors.RED if use_color else ""
     yel = Colors.YELLOW if use_color else ""
-    dim = Colors.DIM if use_color else ""
     rst = Colors.RESET if use_color else ""
 
     print("--- Pubrun Diagnostic Difference ---")
 
+    added = diff_report.get("added", {})
+    removed = diff_report.get("removed", {})
+    modified = diff_report.get("modified", {})
+    if not added and not removed and not modified:
+        print("(no differences)")
+
     # ADDED
-    for k, v in sorted(diff_report["added"].items()):
+    for k, v in sorted(added.items()):
         print(f"{grn}+ [ADDED] {k}: {_fmt(v, max_length, wrap)}{rst}")
 
     # REMOVED
-    for k, v in sorted(diff_report["removed"].items()):
+    for k, v in sorted(removed.items()):
         print(f"{red}- [REMOVED] {k}: {_fmt(v, max_length, wrap)}{rst}")
 
     # MODIFIED
-    for k, mod in sorted(diff_report["modified"].items()):
+    for k, mod in sorted(modified.items()):
         print(f"\n{yel}~ [CHANGED] {k}:{rst}")
 
         if mod["type"] == "path_split":
@@ -133,8 +162,8 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int
                 old_repr = _format_array_diff(val_a, False, added_set, removed_set, common_a, common_b, use_color)
                 new_repr = _format_array_diff(val_b, True, added_set, removed_set, common_a, common_b, use_color)
 
-                print(f"    {grn}+{rst} {_fmt(new_repr, max_length, wrap)}")
                 print(f"    {red}-{rst} {_fmt(old_repr, max_length, wrap)}")
+                print(f"    {grn}+{rst} {_fmt(new_repr, max_length, wrap)}")
             else:
                 # List-style: show added/removed elements, order change warning
                 for p_sub in mod.get("removed", []):
@@ -156,9 +185,9 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int
     # SAME (if present)
     same = diff_report.get("same", {})
     if same:
-        print(f"\n{dim}--- Unchanged ---{rst}")
+        print("\n--- Unchanged ---")
         for k, v in sorted(same.items()):
-            print(f"{dim}= {k}: {_fmt(v, max_length, wrap)}{rst}")
+            print(f"= {k}: {_fmt(v, max_length, wrap)}")
 
 
 def _summarize_change(mod: Dict[str, Any], max_length: int) -> str:
@@ -210,8 +239,6 @@ def _render_table(diff_report: Dict[str, Any], use_color: bool, max_length: int 
     bold = Colors.BOLD if use_color else ""
     rst = Colors.RESET if use_color else ""
 
-    dim = Colors.DIM if use_color else ""
-
     def _cell(v: Any) -> str:
         s = str(v)
         if len(s) > max_length:
@@ -227,7 +254,7 @@ def _render_table(diff_report: Dict[str, Any], use_color: bool, max_length: int 
         rows.append(("~", yel, k, _summarize_change(mod, max_length)))
     has_differences = bool(rows)
     for k, v in sorted(diff_report.get("same", {}).items()):
-        rows.append(("=", dim, k, _cell(v)))
+        rows.append(("=", "", k, _cell(v)))
 
     print("--- Pubrun Diagnostic Difference ---")
     if not has_differences:
@@ -237,12 +264,22 @@ def _render_table(diff_report: Dict[str, Any], use_color: bool, max_length: int 
 
     # Column widths (based on the uncolored text), capped so a huge key can't blow out.
     key_w = min(48, max(len("Field"), max(len(k) for _, _, k, _ in rows)))
+    use_unicode_ellipsis = _can_encode("\u2026", sys.stdout)
     print(f"{bold}{'':1}  {'Field'.ljust(key_w)}  Change{rst}")
     print(f"{'-' * (key_w + 12)}")
     for mark, color, k, detail in rows:
-        key_disp = k if len(k) <= key_w else k[: key_w - 1] + "\u2026"
+        if len(k) <= key_w:
+            key_disp = k
+        elif use_unicode_ellipsis:
+            key_disp = k[: key_w - 1] + "\u2026"
+        elif key_w >= 4:
+            key_disp = k[: key_w - 3] + "..."
+        else:
+            key_disp = k[:key_w]
         detail = detail.replace("\n", " ")
-        print(f"{color}{mark}{rst}  {key_disp.ljust(key_w)}  {color}{detail}{rst}")
+        mark_str = f"{color}{mark}{rst}" if color else mark
+        detail_str = f"{color}{detail}{rst}" if color else detail
+        print(f"{mark_str}  {key_disp.ljust(key_w)}  {detail_str}")
 
 
 def print_diff(diff_report: Dict[str, Any], no_color: bool = False, wrap: bool = False, max_length: int = 300, depth: str = "basic", table: bool = False) -> None:

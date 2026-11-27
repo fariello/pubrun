@@ -133,6 +133,19 @@ class TestOutStream:
         monkeypatch.delenv("NO_COLOR", raising=False)
         manifest_path = _create_run_fixture(tmp_path)
 
+        # Non-TTY without FORCE_COLOR must emit zero ANSI escapes.
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
+        plain_raw = io.BytesIO()
+        plain_out = io.TextIOWrapper(plain_raw, encoding="ascii")
+        print_report(str(manifest_path), "basic", out=plain_out)
+        print_resources_report(str(manifest_path), out=plain_out)
+        plain_out.flush()
+        plain_text = plain_raw.getvalue().decode("ascii")
+        assert "\x1b[" not in plain_text
+        assert "=================================================" in plain_text
+
+        # With FORCE_COLOR=1, ASCII streams get ASCII box headers and UTF-8 streams get Unicode.
+        monkeypatch.setenv("FORCE_COLOR", "1")
         ascii_raw = io.BytesIO()
         ascii_out = io.TextIOWrapper(ascii_raw, encoding="ascii")
         print_report(str(manifest_path), "basic", out=ascii_out)
@@ -140,6 +153,7 @@ class TestOutStream:
         ascii_out.flush()
         ascii_text = ascii_raw.getvalue().decode("ascii")
         assert "+-------------------------------------------------+" in ascii_text
+        assert "\x1b[2m" not in ascii_text
 
         utf8_raw = io.BytesIO()
         utf8_out = io.TextIOWrapper(utf8_raw, encoding="utf-8")
@@ -148,6 +162,104 @@ class TestOutStream:
         utf8_out.flush()
         utf8_text = utf8_raw.getvalue().decode("utf-8")
         assert "┌" in utf8_text
+        assert "\x1b[2m" not in utf8_text
+
+    def test_unknown_section_raises_exit_code_2(self, tmp_path):
+        manifest_path = _create_run_fixture(tmp_path)
+        buf = io.StringIO()
+        with pytest.raises(DiagnosticsError) as exc_info:
+            print_report(str(manifest_path), section="bogus", out=buf)
+        assert exc_info.value.exit_code == 2
+        assert "bogus" in str(exc_info.value)
+        for sec in ("logs", "env", "packages"):
+            assert sec in str(exc_info.value)
+
+    def test_show_logs_missing_files_emits_stderr_hint_and_empty_stdout(self, tmp_path, capsys):
+        manifest_path = _create_run_fixture(tmp_path)
+        (manifest_path.parent / "stdout.log").unlink()
+        buf = io.StringIO()
+        print_report(str(manifest_path), section="logs", out=buf)
+        assert buf.getvalue() == ""
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert 'capture_mode = "standard"' in captured.err
+        assert "pubrun.full" in captured.err
+
+    def test_show_logs_streams_multi_chunk_files(self, tmp_path):
+        manifest_path = _create_run_fixture(tmp_path)
+        big_stdout = "A" * 70000 + "\nEND_STDOUT\n"
+        big_stderr = "B" * 70000 + "\nEND_STDERR\n"
+        (manifest_path.parent / "stdout.log").write_text(big_stdout, encoding="utf-8")
+        (manifest_path.parent / "stderr.log").write_text(big_stderr, encoding="utf-8")
+        buf = io.StringIO()
+        print_report(str(manifest_path), section="logs", out=buf)
+        assert buf.getvalue() == big_stdout + big_stderr
+
+    def test_events_timeline_o1_truncation_corrupt_lines_and_no_dim(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        manifest_path = _create_run_fixture(tmp_path)
+        lines = []
+        for i in range(25):
+            lines.append(
+                json.dumps(
+                    {
+                        "type": "metric",
+                        "name": f"ev_{i:02d}",
+                        "timestamp_utc": 1000.0 + i,
+                        "payload": {"step": i},
+                    }
+                )
+            )
+        # Interleave blank lines, truncated JSON, and a non-dict JSON entry.
+        lines.insert(5, "")
+        lines.insert(12, '{"type": "truncated')
+        lines.insert(18, "[1, 2, 3]")
+        (manifest_path.parent / "events.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        buf = io.StringIO()
+        print_report(str(manifest_path), "basic", utc=True, out=buf)
+        rendered = buf.getvalue()
+        assert "ev_00" in rendered and "ev_09" in rendered
+        assert "ev_10" not in rendered and "ev_14" not in rendered
+        assert "ev_15" in rendered and "ev_24" in rendered
+        assert "... [ 5 events truncated ] ..." in rendered
+        assert "Skipped 2 corrupt or non-object event line(s)." in rendered
+        assert "\x1b[2m" not in rendered
+
+    def test_print_resources_report_utc_and_malformed_nested_dicts(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("NO_COLOR", "1")
+        run_dir = tmp_path / "pubrun-malformed"
+        run_dir.mkdir(parents=True)
+        manifest = {
+            "run": "not-a-dict",
+            "timing": None,
+            "status": ["bad"],
+            "invocation": {"script": "not-a-dict"},
+            "resources": {
+                "peak_rss_bytes": float("nan"),
+                "peak_cpu_percent": float("inf"),
+                "end_rss_bytes": True,
+                "system_memory": "bad",
+                "load_average": {"start": "bad", "max_1min": float("nan")},
+                "system_iowait_pct": "bad",
+                "io_counters": {"delta": "bad"},
+            },
+        }
+        manifest_path = run_dir / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest, allow_nan=True), encoding="utf-8")
+        events = [
+            {"type": "resource_sample", "timestamp_utc": 100.0, "payload": {"rss_bytes": 1024**2, "cpu_percent": 10.0}},
+            {"type": "resource_sample", "timestamp_utc": 130.0, "payload": {"rss_bytes": 2 * 1024**2, "cpu_percent": 30.0}},
+        ]
+        (run_dir / "events.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+
+        buf = io.StringIO()
+        print_resources_report(str(manifest_path), utc=True, width=40, out=buf)
+        rendered = buf.getvalue()
+        assert "RESOURCE MONITORING" in rendered
+        assert "1970-01-01 00:01:40Z" in rendered
+        assert "1970-01-01 00:02:10Z" in rendered
 
 
 class TestDiagnosticsError:

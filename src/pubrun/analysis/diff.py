@@ -1,7 +1,139 @@
-import os
-import json
+import collections
 import fnmatch
-from typing import Any, Dict, List, Optional, Tuple
+import json
+import math
+import ntpath
+import os
+import posixpath
+import re
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
+_POSIX_OS_TOKENS = (
+    "linux",
+    "darwin",
+    "mac",
+    "bsd",
+    "unix",
+    "posix",
+    "sunos",
+    "solaris",
+    "aix",
+    "ubuntu",
+    "debian",
+    "fedora",
+    "centos",
+    "rhel",
+    "rocky",
+    "alma",
+    "alpine",
+    "arch",
+    "suse",
+)
+
+
+def _infer_manifest_os_family(manifest: Any) -> Optional[str]:
+    """Infer ``'windows'``, ``'posix'``, or ``None`` from ``manifest['host']['os_name']``."""
+    if not isinstance(manifest, dict):
+        return None
+    host = manifest.get("host")
+    if not isinstance(host, dict):
+        return None
+    raw_os = host.get("os_name")
+    if isinstance(raw_os, dict):
+        rep = raw_os.get("representation")
+        if rep is None or rep == "plain":
+            raw_os = raw_os.get("value")
+        else:
+            return None
+    if not isinstance(raw_os, str) or not raw_os.strip():
+        return None
+    os_lower = raw_os.strip().lower()
+    if os_lower.startswith("win"):
+        return "windows"
+    if any(tok in os_lower for tok in _POSIX_OS_TOKENS):
+        return "posix"
+    return None
+
+
+def _infer_pathsep(manifest: Any) -> str:
+    family = _infer_manifest_os_family(manifest)
+    if family == "windows":
+        return ";"
+    if family == "posix":
+        return ":"
+    return os.pathsep
+
+
+def _infer_basename(manifest: Any, path_str: str) -> str:
+    family = _infer_manifest_os_family(manifest)
+    if family == "windows":
+        return ntpath.basename(path_str)
+    if family == "posix":
+        return posixpath.basename(path_str)
+    return os.path.basename(path_str)
+
+
+def _tag(x: Any) -> Any:
+    """Type-tagged comparison key preserving bool/int distinction and ``NaN == NaN``."""
+    if isinstance(x, float) and math.isnan(x):
+        return ("float", "nan")
+    return (type(x).__name__, x)
+
+
+def _values_equal(a: Any, b: Any) -> bool:
+    """Compare flattened manifest values with ``NaN == NaN`` and ``bool``/``int`` distinct."""
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return False
+        return all(_values_equal(x, y) for x, y in zip(a, b))
+    return bool(_tag(a) == _tag(b))
+
+
+def _compile_ignores(ignores: List[str]) -> Callable[[str], bool]:
+    """Pre-split ignores into exact set, dot-boundary prefix tuple, and case-sensitive glob regex."""
+    exact_set: Set[str] = set()
+    prefix_list: List[str] = []
+    glob_patterns: List[str] = []
+    for ig in ignores:
+        if not isinstance(ig, str) or not ig:
+            continue
+        if "*" in ig or "?" in ig or "[" in ig:
+            glob_patterns.append(fnmatch.translate(ig))
+        elif ig.endswith("."):
+            prefix_list.append(ig)
+        else:
+            exact_set.add(ig)
+            prefix_list.append(ig + ".")
+    prefix_tuple: Tuple[str, ...] = tuple(prefix_list)
+    glob_re = (
+        re.compile("|".join(f"(?:{pat})" for pat in glob_patterns))
+        if glob_patterns
+        else None
+    )
+
+    def _should_ignore(key: str) -> bool:
+        if key in exact_set:
+            return True
+        if prefix_tuple and key.startswith(prefix_tuple):
+            return True
+        if glob_re is not None and glob_re.match(key) is not None:
+            return True
+        return False
+
+    return _should_ignore
+
+
+def _sanitize_json_floats(val: Any) -> Any:
+    """Recursively replace non-finite floats (NaN/Inf/-Inf) with ``None``."""
+    if isinstance(val, float):
+        return None if not math.isfinite(val) else val
+    if isinstance(val, dict):
+        return {k: _sanitize_json_floats(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return [_sanitize_json_floats(item) for item in val]
+    if isinstance(val, tuple):
+        return [_sanitize_json_floats(item) for item in val]
+    return val
 
 
 def _is_path_var(key_path: str) -> bool:
@@ -37,15 +169,7 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str], depth: str
     """
     flat: Dict[str, Any] = {}
 
-    # Helper to check if a key matches any ignore pattern
-    def _should_ignore(key: str) -> bool:
-        for ig in ignores:
-            if "*" in ig:
-                if fnmatch.fnmatch(key, ig):
-                    return True
-            elif key == ig or key.startswith(ig if ig.endswith(".") else ig + "."):
-                return True
-        return False
+    _should_ignore = _compile_ignores(ignores)
 
     # 1. Environment variables expanded into individual keys. Guard against a
     # non-list `variables` or non-dict entries from a foreign/edited manifest.
@@ -56,6 +180,8 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str], depth: str
             if not isinstance(var, dict):
                 continue
             name = var.get("name")
+            if not isinstance(name, str) or not name:
+                continue
             val = var.get("value")
             if isinstance(val, dict):
                 rep = val.get("representation")
@@ -88,6 +214,8 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str], depth: str
             if not isinstance(p, dict):
                 continue
             name = p.get("name")
+            if not isinstance(name, str) or not name:
+                continue
             ver = p.get("version", "unknown")
             full_key = f"packages.{name}"
             if not _should_ignore(full_key):
@@ -100,14 +228,13 @@ def _normalize_manifest(manifest: Dict[str, Any], ignores: List[str], depth: str
     # second array code path.
     subs = manifest.get("subprocesses", [])
     if depth != "deep" and isinstance(subs, list) and subs and not _should_ignore("subprocesses"):
-        import os as _os
         counts: Dict[str, int] = {}
         for sp in subs:
             if not isinstance(sp, dict):
                 continue
             argv = sp.get("argv")
             if isinstance(argv, list) and argv:
-                ident = _os.path.basename(str(argv[0]))
+                ident = _infer_basename(manifest, str(argv[0]))
             else:
                 ident = "?"
             counts[ident] = counts.get(ident, 0) + 1
@@ -251,6 +378,9 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Opt
 
     all_keys = set(flat_a.keys()).union(set(flat_b.keys()))
 
+    sep_a = _infer_pathsep(raw_a)
+    sep_b = _infer_pathsep(raw_b)
+
     for k in sorted(list(all_keys)):
         val_a = flat_a.get(k)
         val_b = flat_b.get(k)
@@ -259,23 +389,35 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Opt
             diff_report["added"][k] = val_b
         elif k in flat_a and k not in flat_b:
             diff_report["removed"][k] = val_a
-        elif val_a != val_b:
+        elif not _values_equal(val_a, val_b):
             if isinstance(val_a, list) and isinstance(val_b, list):
-                # Diff lists of simple elements. Compare by a type-tagged key so
-                # bool/int do NOT alias (True == 1, False == 0 in plain ==),
-                # which would produce wrong added/removed/reordered markers.
-                # (IPD 20260705 EC-19.)
-                def _tag(x: Any) -> Any:
-                    return (type(x).__name__, x)
+                # Diff lists as multisets using type-tagged keys so bool/int do
+                # NOT alias, NaN == NaN, and duplicate multiplicity changes report
+                # exact added/removed elements without false reordering.
+                tags_a = [_tag(x) for x in val_a]
+                tags_b = [_tag(x) for x in val_b]
+                rem_a = collections.Counter(tags_a)
+                rem_b = collections.Counter(tags_b)
 
-                set_a = {_tag(x) for x in val_a}
-                set_b = {_tag(x) for x in val_b}
-                added_items = [x for x in val_b if _tag(x) not in set_a]
-                removed_items = [x for x in val_a if _tag(x) not in set_b]
+                added_items: List[Any] = []
+                common_b_tags: List[Any] = []
+                for x, t in zip(val_b, tags_b):
+                    if rem_a[t] > 0:
+                        rem_a[t] -= 1
+                        common_b_tags.append(t)
+                    else:
+                        added_items.append(x)
 
-                common_a = [x for x in val_a if _tag(x) in set_b]
-                common_b = [x for x in val_b if _tag(x) in set_a]
-                order_changed = [_tag(x) for x in common_a] != [_tag(x) for x in common_b]
+                removed_items: List[Any] = []
+                common_a_tags: List[Any] = []
+                for x, t in zip(val_a, tags_a):
+                    if rem_b[t] > 0:
+                        rem_b[t] -= 1
+                        common_a_tags.append(t)
+                    else:
+                        removed_items.append(x)
+
+                order_changed = common_a_tags != common_b_tags
 
                 diff_report["modified"][k] = {
                     "type": "list_diff",
@@ -285,10 +427,10 @@ def compare_manifests(raw_a: Dict[str, Any], raw_b: Dict[str, Any], ignores: Opt
                     "old": val_a,
                     "new": val_b
                 }
-            # PATH-style variable: split on OS path separator
+            # PATH-style variable: split on each manifest's inferred OS path separator
             elif _is_path_var(k) and isinstance(val_a, str) and isinstance(val_b, str):
-                seq_a = val_a.split(os.pathsep) if val_a else []
-                seq_b = val_b.split(os.pathsep) if val_b else []
+                seq_a = val_a.split(sep_a) if val_a else []
+                seq_b = val_b.split(sep_b) if val_b else []
                 parts_a = set(seq_a)
                 parts_b = set(seq_b)
                 common_seq_a = [p for p in seq_a if p in parts_b]
@@ -348,8 +490,8 @@ def export_manifest(raw: Dict[str, Any], ignores: List[str], fmt: str = "txt", d
     flat = _normalize_manifest(raw, ignores, depth)
 
     if fmt.lower() == "json":
-        nested = unflatten_manifest(flat)
-        return json.dumps(nested, indent=2, sort_keys=True)
+        nested = _sanitize_json_floats(unflatten_manifest(flat))
+        return json.dumps(nested, indent=2, sort_keys=True, allow_nan=False)
 
     # Text flattened line by line sorting optimally
     lines = []

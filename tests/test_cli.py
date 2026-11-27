@@ -534,13 +534,21 @@ class TestCliDiff:
         assert len({res_basic.stdout, res_standard.stdout, res_deep.stdout}) == 3
 
     def test_diff_no_color(self, two_runs, tmp_path):
-        res_color = run_pubrun("diff", two_runs[0], two_runs[1], cwd=str(tmp_path), env={"NO_COLOR": ""})
-        res_no_color = run_pubrun(
-            "diff", two_runs[0], two_runs[1], "--no-color", cwd=str(tmp_path), env={"NO_COLOR": ""}
+        res_piped = run_pubrun(
+            "diff", two_runs[0], two_runs[1], cwd=str(tmp_path), env={"NO_COLOR": "", "FORCE_COLOR": ""}
         )
+        res_color = run_pubrun(
+            "diff", two_runs[0], two_runs[1], cwd=str(tmp_path), env={"NO_COLOR": "", "FORCE_COLOR": "1"}
+        )
+        res_no_color = run_pubrun(
+            "diff", two_runs[0], two_runs[1], "--no-color", cwd=str(tmp_path), env={"NO_COLOR": "", "FORCE_COLOR": "1"}
+        )
+        assert res_piped.returncode == 0
         assert res_color.returncode == 0
         assert res_no_color.returncode == 0
+        assert "\x1b[" not in res_piped.stdout
         assert "\x1b[" in res_color.stdout
+        assert "\x1b[2m" not in res_color.stdout
         assert "\x1b[" not in res_no_color.stdout
 
     def test_diff_export_txt(self, two_runs, tmp_path):
@@ -1003,9 +1011,10 @@ class TestCliReportUsabilityDetails:
         with open(run_dir / "manifest.json", "w", encoding="utf-8") as f:
             json.dump(manifest, f)
 
-        # Print report WITH color
+        # Print report WITH color (FORCE_COLOR=1 because subprocess stdout is piped, not a TTY)
         env_with_color = os.environ.copy()
         env_with_color.pop("NO_COLOR", None)
+        env_with_color["FORCE_COLOR"] = "1"
         cmd = [sys.executable, "-m", "pubrun", "report", str(run_dir)]
         res_color = subprocess.run(cmd, capture_output=True, text=True, env=env_with_color)
         assert res_color.returncode == 0

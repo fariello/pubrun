@@ -35,9 +35,74 @@ def _failed_sections(manifest: Any) -> List[str]:
     return sorted(failed)
 
 
+_LATEX_ESCAPE_TABLE = str.maketrans({
+    "\\": r"\textbackslash{}",
+    "&": r"\&",
+    "%": r"\%",
+    "$": r"\$",
+    "#": r"\#",
+    "_": r"\_",
+    "{": r"\{",
+    "}": r"\}",
+    "~": r"\textasciitilde{}",
+    "^": r"\textasciicircum{}",
+})
+
+
 def _escape_latex(text: str) -> str:
-    """Escape LaTeX special characters used in generated methods notes."""
-    return text.replace("_", "\\_").replace("%", "\\%")
+    """Escape all 10 LaTeX special characters in a single pass."""
+    return text.translate(_LATEX_ESCAPE_TABLE)
+
+
+def _format_gpus(hw: Dict[str, Any]) -> str:
+    """Summarize captured ``hardware.gpus`` into a grouped human-readable string."""
+    raw_gpus = hw.get("gpus")
+    if not isinstance(raw_gpus, list):
+        return ""
+    counts: Dict[str, int] = {}
+    for gpu in raw_gpus:
+        if not isinstance(gpu, dict):
+            continue
+        raw_model = gpu.get("model")
+        if not isinstance(raw_model, str) or not raw_model.strip():
+            continue
+        model = raw_model.strip()
+        details: List[str] = []
+        vram_gb = bytes_to_gb(gpu.get("memory_total_bytes"))
+        if vram_gb > 0:
+            details.append(f"{vram_gb} GB VRAM")
+        raw_driver = gpu.get("driver_version")
+        if isinstance(raw_driver, str) and raw_driver.strip():
+            details.append(f"driver {raw_driver.strip()}")
+        desc = f"{model} ({', '.join(details)})" if details else model
+        counts[desc] = counts.get(desc, 0) + 1
+    if not counts:
+        return ""
+    return ", ".join(f"{cnt}x {desc}" if cnt > 1 else desc for desc, cnt in counts.items())
+
+
+def _extract_valid_packages(manifest: Dict[str, Any]) -> List[str]:
+    """Return formatted strings for all valid recorded packages in manifest order."""
+    found: List[str] = []
+    seen: set = set()
+    if not isinstance(manifest, dict):
+        return found
+    records = _as_dict(manifest.get("packages")).get("records")
+    if not isinstance(records, list):
+        return found
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        raw_name = record.get("name")
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            continue
+        norm_name = normalize_package_name(raw_name.strip())
+        if norm_name not in seen:
+            seen.add(norm_name)
+            raw_version = record.get("version")
+            version = str(raw_version) if raw_version not in (None, "") else "unknown"
+            found.append(f"{norm_name} (v{version})")
+    return found
 
 
 def _summarize_manifest_data_files(manifest: Any) -> Dict[str, int]:
@@ -185,12 +250,12 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
     host = _as_dict(m.get("host"))
     raw_os = host.get("os_name")
     os_name = raw_os if isinstance(raw_os, str) and raw_os else "an unknown OS"
-    if format_type == "latex":
-        os_name = os_name.replace("_", "\\_")
     hw = _as_dict(m.get("hardware"))
     raw_cpu = _as_dict(hw.get("cpu")).get("model")
     cpu_model = raw_cpu if isinstance(raw_cpu, str) and raw_cpu else "unknown CPU"
     ram_gb = bytes_to_gb(hw.get("memory_total_bytes", 0))
+    gpu_summary = _format_gpus(hw)
+    gpu_text = f", accelerated by {gpu_summary}" if gpu_summary else ""
 
     # Python
     py = _as_dict(m.get("python"))
@@ -217,8 +282,6 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
     else:
         remote = None
     git_repo_text = f" (origin: {remote})" if remote else ""
-    if format_type == "latex":
-        git_repo_text = git_repo_text.replace("_", "\\_")
 
     # Packages
     packages_status = _section_status(m, "packages")
@@ -231,7 +294,20 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
         if packages:
             packages_text = f"Key dependencies tracked include {', '.join(packages)}."
         else:
-            packages_text = "Standard library dependencies were utilized."
+            all_packages = _extract_valid_packages(m)
+            if all_packages:
+                if len(all_packages) <= 10:
+                    packages_text = f"Recorded third-party dependencies include {', '.join(all_packages)}."
+                else:
+                    top = all_packages[:10]
+                    rem = len(all_packages) - len(top)
+                    packages_text = (
+                        f"Recorded third-party dependencies include {', '.join(top)}, "
+                        f"and {rem} additional package{'s' if rem != 1 else ''} "
+                        f"({len(all_packages)} total)."
+                    )
+            else:
+                packages_text = "Standard library dependencies were utilized."
 
     # pubrun version/commit — the tool that produced this record. Recorded in the
     # manifest as run.library_version / run.library_commit. Naming the exact
@@ -250,16 +326,31 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
     else:
         pubrun_version_text = "pubrun (version unknown)"
 
+    short_commit = git_commit[:8] if len(git_commit) >= 8 else git_commit
+    python_impl_display = python_impl.capitalize()
+
+    if format_type == "latex":
+        os_name = _escape_latex(os_name)
+        cpu_model = _escape_latex(cpu_model)
+        gpu_text = _escape_latex(gpu_text)
+        python_version = _escape_latex(python_version)
+        python_impl_display = _escape_latex(python_impl_display)
+        packages_text = _escape_latex(packages_text)
+        short_commit = _escape_latex(short_commit)
+        git_repo_text = _escape_latex(git_repo_text)
+        pubrun_version_text = _escape_latex(pubrun_version_text)
+
     template = LATEX_TEMPLATE if format_type == "latex" else MARKDOWN_TEMPLATE
 
     rendered = template.format(
         os_name=os_name,
         cpu_model=cpu_model,
         ram_gb=ram_gb,
+        gpu_text=gpu_text,
         python_version=python_version,
-        python_impl=python_impl.capitalize(),
+        python_impl=python_impl_display,
         packages_text=packages_text,
-        git_commit=git_commit[:8] if len(git_commit) >= 8 else git_commit,
+        git_commit=short_commit,
         git_repo_text=git_repo_text,
         pubrun_version_text=pubrun_version_text
     ).strip()
@@ -276,7 +367,7 @@ def generate_report(manifest: Dict[str, Any], format_type: str = "markdown") -> 
     failed = _failed_sections(m)
     if failed:
         if format_type == "latex":
-            escaped = ", ".join(sec.replace("_", "\\_") for sec in failed)
+            escaped = ", ".join(_escape_latex(sec) for sec in failed)
             rendered = f"{rendered}\n\n% Note: partial provenance; capture failed for: {escaped}."
         else:
             rendered = f"{rendered}\n\n*Note: partial provenance; capture failed for: {', '.join(failed)}.*"
@@ -298,6 +389,11 @@ def _cpu_of(m: Dict[str, Any]) -> str:
 
 def _ram_of(m: Dict[str, Any]) -> str:
     return f"{bytes_to_gb(_as_dict(_as_dict(m).get('hardware')).get('memory_total_bytes', 0))} GB"
+
+
+def _gpus_of(m: Dict[str, Any]) -> str:
+    summary = _format_gpus(_as_dict(_as_dict(m).get("hardware")))
+    return summary if summary else "none"
 
 
 def _py_of(m: Dict[str, Any]) -> str:
@@ -325,13 +421,21 @@ def _packages_of(m: Dict[str, Any]) -> str:
     if status == "suppressed":
         return "(package capture disabled)"
     pkgs = extract_highlighted_packages(m)
-    return ", ".join(sorted(pkgs)) if pkgs else "(standard library only)"
+    if pkgs:
+        return ", ".join(sorted(pkgs))
+    all_pkgs = sorted(_extract_valid_packages(m))
+    if all_pkgs:
+        if len(all_pkgs) <= 10:
+            return ", ".join(all_pkgs)
+        return f"{', '.join(all_pkgs[:10])} (+{len(all_pkgs) - 10} more; {len(all_pkgs)} recorded)"
+    return "(standard library only)"
 
 
 _VARIANCE_FIELDS = [
     ("Operating system", _os_of),
     ("CPU", _cpu_of),
     ("RAM", _ram_of),
+    ("GPU", _gpus_of),
     ("Python", _py_of),
     ("Git commit", _commit_of),
     ("pubrun", _pubrun_of),
@@ -413,12 +517,12 @@ def generate_report_multi(manifests: List[Dict[str, Any]], format_type: str = "m
         if varying:
             parts.append("% Environment varied across the aggregated runs:")
             for label, values in varying:
-                joined = "; ".join(v.replace("_", "\\_") for v in values)
-                parts.append(f"%   {label}: {joined}")
+                joined = "; ".join(_escape_latex(v) for v in values)
+                parts.append(f"%   {_escape_latex(label)}: {joined}")
         if multi_fp_note:
             parts.append(multi_fp_note)
         if rest_has_failures and all_failed_sections:
-            escaped = ", ".join(sec.replace("_", "\\_") for sec in all_failed_sections)
+            escaped = ", ".join(_escape_latex(sec) for sec in all_failed_sections)
             parts.append(
                 f"% Note: partial provenance across {affected_runs} of {n} runs; "
                 f"capture failed for: {escaped}."

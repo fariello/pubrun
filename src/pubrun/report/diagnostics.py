@@ -1,8 +1,10 @@
 from __future__ import annotations
+import collections
 import json
 import math
 import re
-from typing import Optional, Dict, Any, List, TextIO, Tuple
+import shutil
+from typing import Deque, Optional, Dict, Any, List, TextIO, Tuple
 import os
 import sys
 from pathlib import Path
@@ -26,6 +28,12 @@ def _is_finite_number(val: Any) -> bool:
         and not isinstance(val, bool)
         and math.isfinite(val)
     )
+
+
+def _as_finite_float(val: Any) -> Optional[float]:
+    if isinstance(val, (int, float)) and not isinstance(val, bool) and math.isfinite(val):
+        return float(val)
+    return None
 
 
 def _as_dict(val: Any) -> Dict[str, Any]:
@@ -335,8 +343,9 @@ class Colors:
     DIM = '\033[2m'
     RESET = '\033[0m'
 
-def _has_color() -> bool:
-    return not os.environ.get("NO_COLOR", "")
+def _has_color(stream: Optional[TextIO] = None) -> bool:
+    from pubrun.report.output import use_color as _output_use_color
+    return _output_use_color(stream)
 
 class DiagnosticsError(Exception):
     """A diagnostics report could not be produced; the CLI prints ``message`` and exits."""
@@ -361,25 +370,31 @@ def read_resource_series(events_path) -> Dict[str, Any]:
     """
     out: Dict[str, List[Any]] = {"timestamps": [], "rss": [], "cpu": [], "tree_rss": [], "tree_cpu": []}
     try:
-        with open(events_path, "r", encoding="utf-8") as ef:
+        with open(events_path, "r", encoding="utf-8", errors="replace") as ef:
             for line in ef:
+                if '"resource_sample"' not in line:
+                    continue
                 try:
                     e = json.loads(line)
-                    if e.get("type") != "resource_sample":
+                    if not isinstance(e, dict) or e.get("type") != "resource_sample":
                         continue
-                    p = e.get("payload", {})
-                    ts = e.get("timestamp_utc")
-                    rss = p.get("rss_bytes")
-                    cpu = p.get("cpu_percent")
+                    p = e.get("payload")
+                    if not isinstance(p, dict):
+                        continue
+                    ts = _as_finite_float(e.get("timestamp_utc"))
+                    rss = _as_finite_float(p.get("rss_bytes"))
+                    cpu = _as_finite_float(p.get("cpu_percent"))
                     if ts is None or rss is None or cpu is None:
                         continue
                     out["timestamps"].append(ts)
                     out["rss"].append(rss)
                     out["cpu"].append(cpu)
-                    if p.get("tree_rss_bytes") is not None:
-                        out["tree_rss"].append(p["tree_rss_bytes"])
-                    if p.get("tree_cpu_percent") is not None:
-                        out["tree_cpu"].append(p["tree_cpu_percent"])
+                    tree_rss = _as_finite_float(p.get("tree_rss_bytes"))
+                    if tree_rss is not None:
+                        out["tree_rss"].append(tree_rss)
+                    tree_cpu = _as_finite_float(p.get("tree_cpu_percent"))
+                    if tree_cpu is not None:
+                        out["tree_cpu"].append(tree_cpu)
                 except Exception:
                     continue
     except Exception:
@@ -389,28 +404,49 @@ def read_resource_series(events_path) -> Dict[str, Any]:
 
 def _series_stats(values):
     """(peak, avg, min) for a numeric series, or None if empty."""
-    if not values:
+    clean = [float(v) for v in (values or []) if _is_finite_number(v)]
+    if not clean:
         return None
-    return (max(values), sum(values) / len(values), min(values))
+    return (max(clean), sum(clean) / len(clean), min(clean))
 
 
-def _sparkline(values, width: int = 40) -> str:
-    """A tiny unicode sparkline for a numeric series (no color, no deps). Empty -> ''."""
-    if not values:
+def _sparkline(
+    values,
+    width: int = 40,
+    *,
+    ascii_only: bool = False,
+    stream: Optional[TextIO] = None,
+) -> str:
+    """A tiny sparkline for a numeric series (no color, no deps). Empty or width < 1 -> ''."""
+    if width < 1:
         return ""
-    bars = "▁▂▃▄▅▆▇█"
-    lo = min(values)
-    hi = max(values)
+    clean = [float(v) for v in (values or []) if _is_finite_number(v)]
+    if not clean:
+        return ""
+    unicode_bars = "▁▂▃▄▅▆▇█"
+    ascii_bars = " .:-=+*#%@"
+    use_ascii = ascii_only
+    if not use_ascii and stream is not None:
+        try:
+            unicode_bars.encode(getattr(stream, "encoding", "utf-8") or "utf-8")
+        except (UnicodeEncodeError, LookupError):
+            use_ascii = True
+    bars = ascii_bars if use_ascii else unicode_bars
+    lo = min(clean)
+    hi = max(clean)
     span = (hi - lo) or 1.0
     # Downsample to width by simple bucketed max (keeps spikes visible).
-    n = len(values)
+    n = len(clean)
     if n > width:
         step = n / width
-        sampled = [max(values[int(i * step):int((i + 1) * step)] or [values[min(int(i * step), n - 1)]])
+        sampled = [max(clean[int(i * step):int((i + 1) * step)] or [clean[min(int(i * step), n - 1)]])
                    for i in range(width)]
     else:
-        sampled = values
-    return "".join(bars[min(len(bars) - 1, int((v - lo) / span * (len(bars) - 1)))] for v in sampled)
+        sampled = clean
+    return "".join(
+        bars[max(0, min(len(bars) - 1, int((v - lo) / span * (len(bars) - 1))))]
+        for v in sampled
+    )
 
 
 def format_resource_digest(series, width: int = 40) -> str:
@@ -497,6 +533,14 @@ def _print_packages_block(
     elif not pkgs:
         print("  (None captured)", file=stream)
 
+    term_cols = shutil.get_terminal_size((80, 24)).columns
+    if term_cols >= 96:
+        num_cols = 3
+    elif term_cols >= 60:
+        num_cols = 2
+    else:
+        num_cols = 1
+
     for i, p in enumerate(pkgs):
         raw_name = p.get("name")
         name = raw_name if isinstance(raw_name, str) and raw_name else "<unknown>"
@@ -506,10 +550,16 @@ def _print_packages_block(
         display_len = len(pkg_str)
         if use_color:
             pkg_str = f"{green}{name}{rst}=={ver}"
-        print(pkg_str.ljust(30 + (len(pkg_str) - display_len)), end="", file=stream)
-        if (i + 1) % 3 == 0:
-            print(file=stream)
-    if len(pkgs) % 3 != 0:
+        if num_cols == 1:
+            print(pkg_str, file=stream)
+        else:
+            is_row_end = (i + 1) % num_cols == 0
+            if is_row_end:
+                print(pkg_str, file=stream)
+            else:
+                pad_width = max(30, display_len + 1)
+                print(pkg_str.ljust(pad_width + (len(pkg_str) - display_len)), end="", file=stream)
+    if num_cols > 1 and len(pkgs) % num_cols != 0:
         print(file=stream)
 
     if unresolved:
@@ -554,6 +604,13 @@ def print_report(
         out: Optional output stream (defaults to ``sys.stdout`` at call time).
     """
     stream = out if out is not None else sys.stdout
+    if section is not None and section not in SHOW_SECTIONS:
+        valid_list = ", ".join(SHOW_SECTIONS)
+        raise DiagnosticsError(
+            f"Unknown section '{section}'. Valid sections: {valid_list}.",
+            exit_code=2,
+        )
+
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
@@ -575,16 +632,25 @@ def print_report(
         run_dir = Path(manifest_path).parent
         stdout_path = run_dir / "stdout.log"
         stderr_path = run_dir / "stderr.log"
+        if not stdout_path.exists() and not stderr_path.exists():
+            from pubrun.report import output as _out
+            _out.info(
+                "No captured stdout.log or stderr.log found for this run. "
+                'Enable console capture with [console].capture_mode = "standard" '
+                "(or `import pubrun.full`).",
+                stream=sys.stderr,
+            )
+            return
         if stdout_path.exists():
             try:
                 with open(stdout_path, "r", encoding="utf-8", errors="replace") as sf:
-                    print(sf.read(), end="", file=stream)
+                    shutil.copyfileobj(sf, stream, length=65536)
             except Exception as e:
                 raise DiagnosticsError(f"Failed to read stdout log: {e}") from e
         if stderr_path.exists():
             try:
                 with open(stderr_path, "r", encoding="utf-8", errors="replace") as se:
-                    print(se.read(), end="", file=stream)
+                    shutil.copyfileobj(se, stream, length=65536)
             except Exception as e:
                 raise DiagnosticsError(f"Failed to read stderr log: {e}") from e
         return
@@ -593,7 +659,7 @@ def print_report(
         env_sec = _as_dict(manifest.get("environment"))
         envs = _as_dict_list(env_sec.get("variables"))
         env_status = _section_status(manifest, "environment")
-        use_color = _has_color()
+        use_color = _has_color(stream)
         blue = Colors.BLUE if use_color else ""
         green = Colors.GREEN if use_color else ""
         yellow = Colors.YELLOW if use_color else ""
@@ -623,10 +689,10 @@ def print_report(
         return
 
     if section == "packages":
-        _print_packages_block(manifest, _has_color(), leading_newline=False, out=stream)
+        _print_packages_block(manifest, _has_color(stream), leading_newline=False, out=stream)
         return
 
-    use_color = _has_color()
+    use_color = _has_color(stream)
     bold = Colors.BOLD if use_color else ""
     rst = Colors.RESET if use_color else ""
     cyan = Colors.CYAN if use_color else ""
@@ -634,7 +700,6 @@ def print_report(
     green = Colors.GREEN if use_color else ""
     red = Colors.RED if use_color else ""
     yellow = Colors.YELLOW if use_color else ""
-    dim = Colors.DIM if use_color else ""
 
     if use_color:
         if _supports_unicode(stream):
@@ -812,41 +877,55 @@ def print_report(
             file=stream,
         )
 
-    # Read Events if available
+    # Read Events if available (O(1) memory: keep oldest 10 + newest 10)
     events_path = Path(manifest_path).parent / "events.jsonl"
     if events_path.exists():
         print(f"\n{blue}{bold}--- Event Timeline ---{rst}", file=stream)
         try:
-            with open(events_path, "r", encoding="utf-8") as ef:
-                # Show ALL events when <= 20; otherwise the OLDEST 10 + NEWEST 10 with a
-                # truncation marker between them.
-                all_lines = ef.readlines()
-                total_events = len(all_lines)
-                if total_events > 20:
-                    first_events = all_lines[:10]
-                    last_events = all_lines[-10:]
-                else:
-                    first_events = all_lines
-                    last_events = []
+            head_events: List[Dict[str, Any]] = []
+            tail_events: Deque[Dict[str, Any]] = collections.deque(maxlen=10)
+            total_events = 0
+            skipped_lines = 0
+            with open(events_path, "r", encoding="utf-8", errors="replace") as ef:
+                for raw_line in ef:
+                    if not raw_line.strip():
+                        continue
+                    try:
+                        parsed = json.loads(raw_line)
+                    except json.JSONDecodeError:
+                        skipped_lines += 1
+                        continue
+                    if not isinstance(parsed, dict):
+                        skipped_lines += 1
+                        continue
+                    total_events += 1
+                    if len(head_events) < 10:
+                        head_events.append(parsed)
+                    else:
+                        tail_events.append(parsed)
 
-                def _print_ev(raw_line: str) -> None:
-                    e = json.loads(raw_line)
-                    ts = e.get('timestamp_utc', 0.0)
-                    # Compact, human timestamp; honor UTC-vs-local like the rest of the report.
-                    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-                    if not utc:
-                        dt = dt.astimezone()  # local time
-                    ts_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-                    print(f"  [{cyan}{ts_str}{rst}] {green}{e.get('type')}{rst}: {e.get('name', '')} {e.get('payload', '')}", file=stream)
+            def _print_ev(e: Dict[str, Any]) -> None:
+                ts_str = _format_report_timestamp(e.get("timestamp_utc"), utc=utc)
+                print(
+                    f"  [{cyan}{ts_str}{rst}] {green}{e.get('type')}{rst}: "
+                    f"{e.get('name', '')} {e.get('payload', '')}",
+                    file=stream,
+                )
 
-                for line in first_events:
-                    _print_ev(line)
+            for ev in head_events:
+                _print_ev(ev)
 
-                if total_events > 20:
-                    print(f"  {dim}... [ {total_events - 20} events truncated ] ...{rst}", file=stream)
-                    for line in last_events:
-                        _print_ev(line)
-                del all_lines
+            if total_events > 20:
+                print(f"  ... [ {total_events - 20} events truncated ] ...", file=stream)
+
+            for ev in tail_events:
+                _print_ev(ev)
+
+            if skipped_lines > 0:
+                print(
+                    f"  {yellow}[WARN ] Skipped {skipped_lines} corrupt or non-object event line(s).{rst}",
+                    file=stream,
+                )
         except Exception:
             print("  (Events file corrupt or unreadable)", file=stream)
 
@@ -1068,20 +1147,37 @@ def format_elapsed_range(total_seconds: float) -> tuple[str, str]:
         return "00:00", f"{minutes:02d}:{secs:02d}"
 
 
+_DURATION_EXAMPLES = "valid examples: '30s', '10m', '2h', '1d'"
+
+
 def parse_duration(val: str) -> float:
-    val = val.strip().lower()
-    if not val:
-        raise ValueError("duration string is empty")
-    if val.endswith("d"):
-        return float(val[:-1]) * 86400
-    elif val.endswith("h"):
-        return float(val[:-1]) * 3600
-    elif val.endswith("m"):
-        return float(val[:-1]) * 60
-    elif val.endswith("s"):
-        return float(val[:-1])
+    if not isinstance(val, str):
+        raise ValueError(f"duration must be a string ({_DURATION_EXAMPLES})")
+    raw = val.strip().lower()
+    if not raw:
+        raise ValueError(f"duration string is empty ({_DURATION_EXAMPLES})")
+    multipliers = {"d": 86400.0, "h": 3600.0, "m": 60.0, "s": 1.0}
+    unit = raw[-1]
+    if unit in multipliers:
+        num_str = raw[:-1]
+        mult = multipliers[unit]
     else:
-        return float(val)
+        num_str = raw
+        mult = 1.0
+    try:
+        amount = float(num_str)
+    except ValueError as exc:
+        raise ValueError(f"invalid duration {val!r} ({_DURATION_EXAMPLES})") from exc
+    if not math.isfinite(amount) or amount <= 0:
+        raise ValueError(
+            f"duration {val!r} must be a positive finite value ({_DURATION_EXAMPLES})"
+        )
+    result = amount * mult
+    if not math.isfinite(result) or result <= 0:
+        raise ValueError(
+            f"duration {val!r} must be a positive finite value ({_DURATION_EXAMPLES})"
+        )
+    return result
 
 
 def draw_ascii_chart(
@@ -1094,11 +1190,27 @@ def draw_ascii_chart(
     color: str = "",
     use_color: bool = True,
     average: bool = False,
+    use_utc: bool = False,
     *,
     out: Optional[TextIO] = None,
 ) -> None:
     """Helper to render a standardized ASCII utilization area graph."""
     stream = out if out is not None else sys.stdout
+
+    valid_pairs = [
+        (float(ts), float(val))
+        for ts, val in zip(timestamps or [], data or [])
+        if _is_finite_number(ts) and _is_finite_number(val)
+    ]
+    if not valid_pairs:
+        print(f"\n{title}: No valid resource samples to plot.", file=stream)
+        return
+
+    timestamps = [p[0] for p in valid_pairs]
+    data = [p[1] for p in valid_pairs]
+    height = max(2, int(height))
+    width = max(1, int(width))
+
     min_val = 0.0
     max_val = max(0.1, max(data))
     if unit == "%":
@@ -1203,16 +1315,23 @@ def draw_ascii_chart(
 
     from pubrun.status import _format_elapsed
 
-    # Format dates
+    # Format dates (local time by default; UTC with trailing 'Z' when use_utc=True)
+    def _fmt_chart_ts(ts: float) -> str:
+        try:
+            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            if use_utc:
+                return dt.strftime("%Y-%m-%d %H:%M:%SZ")
+            return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        except (OverflowError, OSError, ValueError, TypeError):
+            return "unknown"
+
     t_start = timestamps[0]
     t_end = timestamps[-1]
-    start_dt = datetime.fromtimestamp(t_start, tz=timezone.utc)
-    end_dt = datetime.fromtimestamp(t_end, tz=timezone.utc)
-    start_time_str = start_dt.strftime("%Y-%m-%d %H:%M:%S")
-    end_time_str = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+    start_time_str = _fmt_chart_ts(t_start)
+    end_time_str = _fmt_chart_ts(t_end)
 
     # Format elapsed durations
-    duration = t_end - t_start
+    duration = max(0.0, t_end - t_start)
     elapsed_total_str = _format_elapsed(duration)
     start_elapsed_str = "0d 00:00:00" if "d " in elapsed_total_str else "00:00:00"
 
@@ -1251,6 +1370,8 @@ def draw_ascii_chart(
             lbl_str = _format_elapsed((idx / (width - 1)) * duration if width > 1 else 0.0)
 
         L = len(lbl_str)
+        if L > width:
+            continue
         if idx == 0:
             start_col = 0
         elif idx == width - 1:
@@ -1296,6 +1417,7 @@ def print_resources_report(
     last: Optional[str] = None,
     metric: str = "all",
     width: Optional[int] = None,
+    utc: bool = False,
     *,
     out: Optional[TextIO] = None,
 ) -> None:
@@ -1312,9 +1434,11 @@ def print_resources_report(
         ) from e
 
     # Hydrate!
+    manifest = _as_dict(manifest)
     manifest, warnings = hydrate_manifest(manifest_path, manifest)
+    manifest = _as_dict(manifest)
 
-    use_color = _has_color()
+    use_color = _has_color(stream)
     bold = Colors.BOLD if use_color else ""
     rst = Colors.RESET if use_color else ""
     cyan = Colors.CYAN if use_color else ""
@@ -1322,14 +1446,17 @@ def print_resources_report(
     yellow = Colors.YELLOW if use_color else ""
     red = Colors.RED if use_color else ""
 
-    run = manifest.get("run", {})
-    timing = manifest.get("timing", {})
-    status = manifest.get("status", {})
-    inv = manifest.get("invocation", {})
-    resources = manifest.get("resources", {})
+    run = _as_dict(manifest.get("run"))
+    timing = _as_dict(manifest.get("timing"))
+    status = _as_dict(manifest.get("status"))
+    inv = _as_dict(manifest.get("invocation"))
+    resources = _as_dict(manifest.get("resources"))
 
-    script_name = inv.get("script", {}).get("basename", "<interactive or module>")
-    outcome = status.get('outcome', 'unknown')
+    script_info = _as_dict(inv.get("script"))
+    raw_basename = script_info.get("basename")
+    script_name = raw_basename if isinstance(raw_basename, str) and raw_basename else "<interactive or module>"
+    raw_outcome = status.get("outcome")
+    outcome = str(raw_outcome) if raw_outcome not in (None, "") else "unknown"
 
     out_color = ""
     if use_color:
@@ -1362,16 +1489,15 @@ def print_resources_report(
     peak_cpu = resources.get("peak_cpu_percent")
     end_rss = resources.get("end_rss_bytes")
 
-    def _fmt_bytes(n):
-        try:
-            n = float(n)
-        except (TypeError, ValueError):
+    def _fmt_bytes(n: Any) -> Optional[str]:
+        if not _is_finite_number(n):
             return None
-        if n >= 1024**3:
-            return f"{n / (1024**3):.2f} GB"
-        if n >= 1024**2:
-            return f"{n / (1024**2):.2f} MB"
-        return f"{n / 1024:.2f} KB"
+        val = float(n)
+        if val >= 1024**3:
+            return f"{val / (1024**3):.2f} GB"
+        if val >= 1024**2:
+            return f"{val / (1024**2):.2f} MB"
+        return f"{val / 1024:.2f} KB"
 
     # Per-sample series (for avg/min/max). Read once here; reused for the charts below.
     _events_path = Path(manifest_path).parent / "events.jsonl"
@@ -1383,7 +1509,7 @@ def print_resources_report(
         if st:
             pk, avg, mn = st
             return f"peak {_fmt_bytes(pk)} / avg {_fmt_bytes(avg)} / min {_fmt_bytes(mn)}"
-        if peak_fallback:
+        if _is_finite_number(peak_fallback) and peak_fallback:
             return f"peak {_fmt_bytes(peak_fallback)}"  # no per-sample data (short/old run)
         return None
 
@@ -1392,8 +1518,8 @@ def print_resources_report(
         if st:
             pk, avg, mn = st
             return f"peak {pk:.1f}% / avg {avg:.1f}% / min {mn:.1f}%"
-        if peak_fallback is not None:
-            return f"peak {peak_fallback:.1f}%"
+        if _is_finite_number(peak_fallback):
+            return f"peak {float(peak_fallback):.1f}%"
         return None
 
     # --- Main process: RSS + CPU (peak/avg/min from samples, peak fallback otherwise) ---
@@ -1401,7 +1527,7 @@ def print_resources_report(
         line = _bytes_stat_line(series["rss"], peak_rss)
         if line:
             print(f"{cyan}RSS (main){rst}   : {line}", file=stream)
-        if end_rss:
+        if _is_finite_number(end_rss) and end_rss:
             print(f"{cyan}End RSS{rst}      : {_fmt_bytes(end_rss)}", file=stream)
 
     if metric in ("cpu", "all"):
@@ -1422,24 +1548,24 @@ def print_resources_report(
             print(f"{cyan}CPU (tree){rst}   : {tree_cpu_line} {yellow}(% of one core; may exceed 100%){rst}", file=stream)
 
         # System memory (free/available) at start and worst point.
-        sysmem = resources.get("system_memory")
-        if isinstance(sysmem, dict):
-            start = sysmem.get("start") or {}
-            worst = sysmem.get("min_available") or {}
+        sysmem = _as_dict(resources.get("system_memory"))
+        if sysmem:
+            start = _as_dict(sysmem.get("start"))
+            worst = _as_dict(sysmem.get("min_available"))
             avail = start.get("available_bytes")
             total = start.get("total_bytes")
-            if avail is not None and total:
+            if _is_finite_number(avail) and _is_finite_number(total) and total:
                 print(f"{cyan}System RAM{rst}   : {_fmt_bytes(avail)} available of "
                       f"{_fmt_bytes(total)} at start", file=stream)
             worst_avail = worst.get("available_bytes")
-            if worst_avail is not None:
+            if _is_finite_number(worst_avail):
                 print(f"{cyan}Min Avail RAM{rst}: {_fmt_bytes(worst_avail)} (lowest during run)", file=stream)
 
         # Load average (start / max 1-min).
-        load = resources.get("load_average")
-        if isinstance(load, dict):
-            start_l = (load.get("start") or {}).get("1min")
-            max_l = load.get("max_1min")
+        load = _as_dict(resources.get("load_average"))
+        if load:
+            start_l = _as_finite_float(_as_dict(load.get("start")).get("1min"))
+            max_l = _as_finite_float(load.get("max_1min"))
             parts = []
             if start_l is not None:
                 parts.append(f"{start_l:.2f} at start")
@@ -1449,26 +1575,30 @@ def print_resources_report(
                 print(f"{cyan}Load Average{rst} : {', '.join(parts)}", file=stream)
 
         # Node iowait (labeled node-wide / indicative only).
-        iowait = resources.get("system_iowait_pct")
-        if isinstance(iowait, dict):
+        iowait = _as_dict(resources.get("system_iowait_pct"))
+        if iowait:
             mx = iowait.get("max")
-            if mx is not None:
+            if _is_finite_number(mx):
                 print(f"{cyan}Node iowait{rst}  : {mx}% peak {yellow}(node-wide, indicative only){rst}", file=stream)
 
         # Per-process I/O byte volume (this run), from /proc/self/io.
-        io = resources.get("io_counters")
-        if isinstance(io, dict):
-            delta = io.get("delta") or {}
+        io = _as_dict(resources.get("io_counters"))
+        if io:
+            delta = _as_dict(io.get("delta"))
             rb = delta.get("read_bytes")
             wb = delta.get("write_bytes")
             rc = delta.get("rchar")
             wc = delta.get("wchar")
-            if rb is not None or wb is not None:
-                print(f"{cyan}Disk I/O{rst}     : read {_fmt_bytes(rb or 0)}, "
-                      f"wrote {_fmt_bytes(wb or 0)} (storage layer)", file=stream)
-            if rc is not None or wc is not None:
-                print(f"{cyan}Logical I/O{rst}  : read {_fmt_bytes(rc or 0)}, "
-                      f"wrote {_fmt_bytes(wc or 0)} (incl. cache)", file=stream)
+            if _is_finite_number(rb) or _is_finite_number(wb):
+                rb_val = rb if _is_finite_number(rb) else 0
+                wb_val = wb if _is_finite_number(wb) else 0
+                print(f"{cyan}Disk I/O{rst}     : read {_fmt_bytes(rb_val)}, "
+                      f"wrote {_fmt_bytes(wb_val)} (storage layer)", file=stream)
+            if _is_finite_number(rc) or _is_finite_number(wc):
+                rc_val = rc if _is_finite_number(rc) else 0
+                wc_val = wc if _is_finite_number(wc) else 0
+                print(f"{cyan}Logical I/O{rst}  : read {_fmt_bytes(rc_val)}, "
+                      f"wrote {_fmt_bytes(wc_val)} (incl. cache)", file=stream)
 
     if not _events_path.exists():
         print(f"\n{yellow}No events.jsonl file found. Cannot generate utilization graphs.{rst}\n", file=stream)
@@ -1479,7 +1609,7 @@ def print_resources_report(
     # Plot the process-tree RSS only when the run was recorded in tree scope AND every
     # sample carries a tree value (so it lines up with the timestamps); otherwise plot the
     # main-process RSS. The chart title below follows whichever series is plotted.
-    _scope = manifest.get("resources", {}).get("scope", "process")
+    _scope = resources.get("scope", "process")
     _tree_rss = list(series.get("tree_rss") or [])
     plot_tree = _scope == "tree" and bool(_tree_rss) and len(_tree_rss) == len(timestamps)
     rss_values = _tree_rss if plot_tree else list(series["rss"])
@@ -1508,6 +1638,16 @@ def print_resources_report(
         timestamps = filtered_timestamps
         rss_values = filtered_rss
         cpu_values = filtered_cpu
+
+    # Guard against any non-finite entries in case series was supplied or modified externally.
+    finite_triples = [
+        (float(ts), float(rss), float(cpu))
+        for ts, rss, cpu in zip(timestamps, rss_values, cpu_values)
+        if _is_finite_number(ts) and _is_finite_number(rss) and _is_finite_number(cpu)
+    ]
+    timestamps = [t[0] for t in finite_triples]
+    rss_values = [t[1] for t in finite_triples]
+    cpu_values = [t[2] for t in finite_triples]
 
     if not rss_values:
         print(f"\n{yellow}No resource samples found in events.jsonl.{rst}\n", file=stream)
@@ -1553,6 +1693,7 @@ def print_resources_report(
             color=Colors.YELLOW if use_color else "",
             use_color=use_color,
             average=average,
+            use_utc=utc,
             out=stream,
         )
 
@@ -1582,6 +1723,7 @@ def print_resources_report(
             color=Colors.GREEN if use_color else "",
             use_color=use_color,
             average=average,
+            use_utc=utc,
             out=stream,
         )
     print(file=stream)

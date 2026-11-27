@@ -82,10 +82,14 @@ class TestDiagnosticsNegativePaths:
     @pytest.mark.parametrize(
         "last_val,expected_err",
         [
-            ("bogus", "Invalid duration for --last: could not convert string to float: 'bogu'"),
-            ("", "Invalid duration for --last: duration string is empty"),
+            ("bogus", "Invalid duration for --last: invalid duration 'bogus' (valid examples: '30s', '10m', '2h', '1d')"),
+            ("", "Invalid duration for --last: duration string is empty (valid examples: '30s', '10m', '2h', '1d')"),
+            ("0s", "must be a positive finite value (valid examples: '30s', '10m', '2h', '1d')"),
+            ("-5m", "must be a positive finite value (valid examples: '30s', '10m', '2h', '1d')"),
+            ("nan", "must be a positive finite value (valid examples: '30s', '10m', '2h', '1d')"),
+            ("inf", "must be a positive finite value (valid examples: '30s', '10m', '2h', '1d')"),
         ],
-        ids=["bogus", "empty"],
+        ids=["bogus", "empty", "zero", "negative", "nan", "inf"],
     )
     def test_res_invalid_last_duration(self, tmp_path, last_val, expected_err):
         events = [
@@ -140,13 +144,22 @@ class TestDiagnosticsNegativePaths:
         assert res.returncode == 1
         assert "No readable manifests among the matching runs." in res.stderr
 
-    def test_show_unknown_section_matches_default_show(self, tmp_path):
+    def test_show_unknown_section_exits_2_and_lists_valid_sections(self, tmp_path):
         run_dir = _write_run(tmp_path / "runs", "pubrun-good", manifest=_good_manifest())
-        res_plain = run_pubrun("show", str(run_dir), cwd=str(tmp_path), env=_CLI_ENV)
         res_bogus = run_pubrun("show", str(run_dir), "bogus_section", cwd=str(tmp_path), env=_CLI_ENV)
-        assert res_plain.returncode == 0
-        assert res_bogus.returncode == 0
-        assert res_bogus.stdout == res_plain.stdout
+        assert res_bogus.returncode == 2
+        assert res_bogus.stdout == ""
+        assert "bogus_section" in res_bogus.stderr
+        assert "logs, env, packages" in res_bogus.stderr
+        assert "Traceback" not in res_bogus.stderr
+
+    def test_show_logs_missing_files_prints_hint_to_stderr(self, tmp_path):
+        run_dir = _write_run(tmp_path / "runs", "pubrun-nologs", manifest=_good_manifest())
+        res = run_pubrun("show", str(run_dir), "logs", cwd=str(tmp_path), env=_CLI_ENV)
+        assert res.returncode == 0
+        assert res.stdout == ""
+        assert 'capture_mode = "standard"' in res.stderr
+        assert "pubrun.full" in res.stderr
 
 
 # ---------------------------------------------------------------------------

@@ -287,7 +287,7 @@ def hydrate_manifest_with_report(
         resolved_path_str = str(meta_path)
 
         # 1. Sandbox check: reject if meta_ref does not point to a .json file.
-        if not meta_path.name.endswith(".json"):
+        if meta_path.suffix.lower() != ".json":
             warnings.append(
                 f"Security: meta_ref '{meta_ref}' does not point to a .json file. Rejected."
             )
@@ -413,8 +413,8 @@ def hydrate_manifest_with_report(
             if script_modified_after_parent:
                 warnings.append(
                     "Drift Detected: The script was modified after the parent meta.json "
-                    "snapshot was tracking structurally. Deep dependencies may be severely "
-                    "out of sync."
+                    "snapshot was captured, so inherited environment and package metadata "
+                    "may be out of sync. Regenerate the snapshot with `pubrun meta`."
                 )
 
         identity_mismatches = _compare_parent_child_identity(meta, manifest)

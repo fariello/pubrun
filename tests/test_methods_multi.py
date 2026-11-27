@@ -119,6 +119,47 @@ class TestAggregateGenerator:
         # Variance note lines are LaTeX comments so they never render into the doc.
         assert "% Environment varied" in r
 
+    def test_gpu_variance_and_non_highlighted_packages_in_multi(self):
+        from pubrun.report.methods import generate_report_multi
+        m1 = _manifest(
+            hardware={
+                "cpu": {"model": "Intel Core i7"},
+                "memory_total_bytes": 16 * 1024 ** 3,
+                "gpus": [
+                    {"model": "NVIDIA A100", "memory_total_bytes": 80 * 1024 ** 3, "driver_version": "535.104"},
+                    {"model": "NVIDIA A100", "memory_total_bytes": 80 * 1024 ** 3, "driver_version": "535.104"},
+                ],
+            },
+            packages={"records": [{"name": "polars", "version": "0.20.0"}, {"name": "biopython", "version": "1.83"}]},
+        )
+        m2 = _manifest(
+            hardware={"cpu": {"model": "Intel Core i7"}, "memory_total_bytes": 16 * 1024 ** 3},
+            packages={"records": [{"name": "polars", "version": "0.20.3"}]},
+        )
+        md = generate_report_multi([m1, m2], "markdown")
+        assert "2x NVIDIA A100 (80.0 GB VRAM, driver 535.104)" in md
+        assert "- GPU:" in md
+        assert "none" in md
+        assert "Standard library dependencies were utilized." not in md
+        assert "(standard library only)" not in md
+        assert "polars (v0.20.0)" in md
+        assert "biopython (v1.83)" in md
+        assert "polars (v0.20.3)" in md
+
+    def test_latex_multi_escapes_all_special_chars_single_pass(self):
+        from pubrun.report.methods import generate_report_multi
+        tricky = r"a\b&c%d$e#f_g{h}i~j^k"
+        ms = [
+            _manifest(host={"os_name": tricky}),
+            _manifest(host={"os_name": "PlainLinux"}),
+        ]
+        tex = generate_report_multi(ms, "latex")
+        assert r"\textbackslash{}" in tex
+        assert r"\textbackslash\{\}" not in tex
+        assert r"\&" in tex and r"\%" in tex and r"\$" in tex and r"\#" in tex
+        assert r"\_" in tex and r"\{" in tex and r"\}" in tex
+        assert r"\textasciitilde{}" in tex and r"\textasciicircum{}" in tex
+
 
 # ---------------------------------------------------------------------------
 # CLI: methods --all end-to-end + non-methods note

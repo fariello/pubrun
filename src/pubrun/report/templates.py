@@ -17,20 +17,20 @@ HIGHLIGHT_PACKAGES = {
 MARKDOWN_TEMPLATE = """
 ### Computational Methods
 
-Computational experiments were executed on a machine running {os_name} equipped with an {cpu_model} and {ram_gb} GB of RAM. The execution environment relied on Python {python_version} ({python_impl}).
+Computational experiments were executed on a machine running {os_name} equipped with an {cpu_model} and {ram_gb} GB of RAM{gpu_text}. The execution environment relied on Python {python_version} ({python_impl}).
 
 {packages_text}
 
 To facilitate computational reproducibility, the exact state of the source code was archived at Git commit `{git_commit}`{git_repo_text}. Environment and execution provenance were captured with {pubrun_version_text} [1].
 
 **References:**
-[1] Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research [Computer software]. https://github.com/fariello/pubrun
+[1] Fariello, G. (2026). pubrun: Low-friction execution provenance for Python research [Computer software]. https://github.com/fariello/pubrun. https://doi.org/10.5281/zenodo.20801582
 """
 
 LATEX_TEMPLATE = """
 \\subsection*{{Computational Methods}}
 
-Computational experiments were executed on a machine running {os_name} equipped with an {cpu_model} processor and {ram_gb} GB of RAM. The execution environment relied on Python {python_version} ({python_impl}).
+Computational experiments were executed on a machine running {os_name} equipped with an {cpu_model} processor and {ram_gb} GB of RAM{gpu_text}. The execution environment relied on Python {python_version} ({python_impl}).
 
 {packages_text}
 
@@ -41,6 +41,7 @@ To facilitate computational reproducibility, the exact state of the source code 
 %%   author    = {{Gabriele Fariello}},
 %%   title     = {{pubrun: Low-friction execution provenance for Python research}},
 %%   year      = {{2026}},
+%%   doi       = {{10.5281/zenodo.20801582}},
 %%   url       = {{https://github.com/fariello/pubrun}}
 %% }}
 """

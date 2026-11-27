@@ -372,7 +372,7 @@ class TestResourceMonitoring:
 
         data = [10.0, 20.0, 50.0, 90.0]
         timestamps = [100.0, 110.0, 120.0, 130.0]
-        draw_ascii_chart(data, timestamps, "Test Chart", "%", height=5, width=20, use_color=False)
+        draw_ascii_chart(data, timestamps, "Test Chart", "%", height=5, width=20, use_color=False, use_utc=True)
         output = capsys.readouterr().out
 
         # Verify title, labels and Unicode border characters
@@ -383,8 +383,8 @@ class TestResourceMonitoring:
         assert "█" in output
         assert "Timeline" in output
         assert "Elapsed" in output
-        assert "1970-01-01 00:01:40" in output
-        assert "1970-01-01 00:02:10" in output
+        assert "1970-01-01 00:01:40Z" in output
+        assert "1970-01-01 00:02:10Z" in output
         assert "00:00:00" in output
         assert "00:00:30" in output
 
@@ -395,7 +395,7 @@ class TestResourceMonitoring:
 
         data = [10.0, 20.0, 50.0, 90.0]
         timestamps = [100.0, 110.0, 120.0, 130.0]
-        draw_ascii_chart(data, timestamps, "Test Chart", "%", height=5, width=20, use_color=False)
+        draw_ascii_chart(data, timestamps, "Test Chart", "%", height=5, width=20, use_color=False, use_utc=True)
         output = capsys.readouterr().out
 
         assert "Test Chart" in output
@@ -405,10 +405,28 @@ class TestResourceMonitoring:
         assert "#" in output
         assert "Timeline" in output
         assert "Elapsed" in output
-        assert "1970-01-01 00:01:40" in output
-        assert "1970-01-01 00:02:10" in output
+        assert "1970-01-01 00:01:40Z" in output
+        assert "1970-01-01 00:02:10Z" in output
         assert "00:00:00" in output
         assert "00:00:30" in output
+
+    def test_draw_ascii_chart_local_default_vs_utc(self, capsys):
+        from datetime import datetime, timezone
+        from pubrun.report.diagnostics import draw_ascii_chart
+
+        data = [10.0, 50.0]
+        timestamps = [100.0, 130.0]
+        expected_local = datetime.fromtimestamp(100.0, tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+        draw_ascii_chart(data, timestamps, "Local Chart", "%", height=4, width=40, use_color=False)
+        local_out = capsys.readouterr().out
+        assert expected_local in local_out
+        assert "00:01:40Z" not in local_out
+
+        draw_ascii_chart(data, timestamps, "UTC Chart", "%", height=4, width=40, use_color=False, use_utc=True)
+        utc_out = capsys.readouterr().out
+        assert "1970-01-01 00:01:40Z" in utc_out
+        assert "1970-01-01 00:02:10Z" in utc_out
 
     def test_print_resources_report_no_samples(self, tmp_path, capsys):
         from pubrun.report.diagnostics import print_resources_report
@@ -1155,3 +1173,391 @@ class TestDiagnosticsDataFilesDisplay:
         assert "999900001111" not in rendered
         assert "[pending] out/pending.pt" in rendered
         assert "[changed] work/state.db" in rendered
+
+
+class TestMethodsGpuPackagesDoiAndLatex:
+    """Regression tests for caeqdz E-01: GPUs, honest packages, Zenodo DOI, 10-char LaTeX."""
+
+    def _base(self, **over):
+        m = {
+            "run": {"library_version": "1.4.0", "library_commit": "0123456789abcdef"},
+            "host": {"os_name": "Linux"},
+            "hardware": {"cpu": {"model": "AMD EPYC 7763"}, "memory_total_bytes": 64 * 1024**3},
+            "python": {"version": "3.11.6 final", "implementation": "cpython"},
+            "git": {"commit": "abcdef1234567890", "remote_url": {"value": "https://example.org/org/repo"}},
+            "packages": {"records": []},
+        }
+        m.update(over)
+        return m
+
+    def test_gpu_single_multi_identical_and_malformed(self):
+        # Single GPU
+        m_single = self._base(
+            hardware={
+                "cpu": {"model": "EPYC"},
+                "memory_total_bytes": 32 * 1024**3,
+                "gpus": [{"model": "NVIDIA H100", "memory_total_bytes": 80 * 1024**3, "driver_version": "550.54"}],
+            }
+        )
+        md_single = generate_report(m_single, "markdown")
+        tex_single = generate_report(m_single, "latex")
+        assert "NVIDIA H100 (80.0 GB VRAM, driver 550.54)" in md_single
+        assert "NVIDIA H100 (80.0 GB VRAM, driver 550.54)" in tex_single
+        assert "1x NVIDIA H100" not in md_single
+
+        # Multi identical GPUs grouped
+        m_multi = self._base(
+            hardware={
+                "cpu": {"model": "EPYC"},
+                "memory_total_bytes": 32 * 1024**3,
+                "gpus": [
+                    {"model": "NVIDIA A100", "memory_total_bytes": 80 * 1024**3, "driver_version": "535.104"},
+                    {"model": "NVIDIA A100", "memory_total_bytes": 80 * 1024**3, "driver_version": "535.104"},
+                ],
+            }
+        )
+        assert "2x NVIDIA A100 (80.0 GB VRAM, driver 535.104)" in generate_report(m_multi, "markdown")
+        assert "2x NVIDIA A100 (80.0 GB VRAM, driver 535.104)" in generate_report(m_multi, "latex")
+
+        # Missing / empty / malformed GPUs omit GPU text cleanly
+        baseline = generate_report(self._base(), "markdown")
+        for bad_gpus in ([], None, "not-a-list", [None, {}, {"model": ""}, {"model": 123}]):
+            m_bad = self._base(
+                hardware={"cpu": {"model": "AMD EPYC 7763"}, "memory_total_bytes": 64 * 1024**3, "gpus": bad_gpus}
+            )
+            assert generate_report(m_bad, "markdown") == baseline
+            assert "accelerated by" not in generate_report(m_bad, "markdown")
+
+    def test_non_highlighted_third_party_packages_honest_and_empty_preserved(self):
+        m_non_hl = self._base(
+            packages={"records": [{"name": "polars", "version": "0.20.0"}, {"name": "biopython", "version": "1.83"}]}
+        )
+        md = generate_report(m_non_hl, "markdown")
+        tex = generate_report(m_non_hl, "latex")
+        assert "Standard library dependencies were utilized." not in md
+        assert "Standard library dependencies were utilized." not in tex
+        assert "polars (v0.20.0)" in md and "biopython (v1.83)" in md
+        assert "polars (v0.20.0)" in tex and "biopython (v1.83)" in tex
+
+        # Empty packages preserves stdlib wording
+        md_empty = generate_report(self._base(packages={"records": []}), "markdown")
+        assert "Standard library dependencies were utilized." in md_empty
+
+    def test_zenodo_doi_in_markdown_and_latex(self):
+        m = self._base()
+        md = generate_report(m, "markdown")
+        tex = generate_report(m, "latex")
+        assert "https://doi.org/10.5281/zenodo.20801582" in md
+        assert "10.5281/zenodo.20801582" in tex
+        assert "doi" in tex and "{10.5281/zenodo.20801582}" in tex
+
+    def test_escape_latex_all_10_special_chars_single_pass(self):
+        from pubrun.report.methods import _escape_latex
+
+        raw = r"\&%$#_{}~^"
+        escaped = _escape_latex(raw)
+        assert escaped == r"\textbackslash{}\&\%\$\#\_\{\}\textasciitilde{}\textasciicircum{}"
+        assert r"\textbackslash\{\}" not in escaped
+
+        m = self._base(
+            host={"os_name": r"Linux\dev&100%"},
+            hardware={
+                "cpu": {"model": r"CPU_#1$2{3}~4^5"},
+                "memory_total_bytes": 16 * 1024**3,
+                "gpus": [{"model": r"GPU_A&B\C", "driver_version": "535_1^2"}],
+            },
+            packages={"records": [{"name": "my_pkg", "version": "1.0~rc1"}]},
+        )
+        tex = generate_report(m, "latex")
+        assert r"\textbackslash{}" in tex
+        assert r"\textbackslash\{\}" not in tex
+        assert r"CPU\_\#1\$2\{3\}\textasciitilde{}4\textasciicircum{}5" in tex
+        assert r"GPU\_A\&B\textbackslash{}C" in tex
+        assert r"1.0\textasciitilde{}rc1" in tex
+
+
+class TestDiffEngineCrossOsMultisetAndSanitize:
+    """Regression tests for caeqdz E-02: cross-OS diff, compiled ignores, NaN, Counter, strict JSON."""
+
+    def test_cross_os_path_and_subprocess_basename(self):
+        from pubrun.analysis.diff import compare_manifests
+
+        win_a = {
+            "host": {"os_name": "Windows"},
+            "environment": {"variables": [{"name": "PATH", "value": r"C:\Python311;C:\Tools"}]},
+            "subprocesses": [{"argv": [r"C:\Python311\python.exe", "run.py"]}],
+        }
+        win_b = {
+            "host": {"os_name": "Windows"},
+            "environment": {"variables": [{"name": "PATH", "value": r"C:\Python311;C:\Tools;C:\CUDA\bin"}]},
+            "subprocesses": [
+                {"argv": [r"C:\Python311\python.exe", "run.py"]},
+                {"argv": [r"D:\bin\git.exe", "status"]},
+            ],
+        }
+        diff = compare_manifests(win_a, win_b, depth="standard")
+        path_mod = diff["modified"]["environment.PATH"]
+        assert path_mod["type"] == "path_split"
+        assert path_mod["added"] == [r"C:\CUDA\bin"]
+        assert path_mod["removed"] == []
+        assert diff["added"]["subprocesses.by_command.git.exe"] == 1
+        assert "subprocesses.by_command.python.exe" not in diff["modified"]
+
+        posix_a = {
+            "host": {"os_name": "Linux"},
+            "environment": {"variables": [{"name": "PATH", "value": "/usr/bin:/bin"}]},
+            "subprocesses": [{"argv": ["/usr/bin/python3", "run.py"]}],
+        }
+        posix_b = {
+            "host": {"os_name": "Darwin"},
+            "environment": {"variables": [{"name": "PATH", "value": "/usr/bin:/opt/bin"}]},
+            "subprocesses": [{"argv": ["/opt/homebrew/bin/python3", "run.py"]}],
+        }
+        diff_posix = compare_manifests(posix_a, posix_b, depth="standard")
+        assert diff_posix["modified"]["environment.PATH"]["added"] == ["/opt/bin"]
+        assert diff_posix["modified"]["environment.PATH"]["removed"] == ["/bin"]
+        assert "subprocesses.by_command.python3" not in diff_posix["modified"]
+
+    def test_compiled_case_sensitive_wildcards_and_none_name_skip(self):
+        from pubrun.analysis.diff import _normalize_manifest
+
+        manifest = {
+            "environment": {
+                "variables": [
+                    {"name": None, "value": "x"},
+                    {"name": "", "value": "y"},
+                    {"name": 123, "value": "z"},
+                    {"name": "KEEP_VAR", "value": "1"},
+                    {"name": "DROP_1", "value": "2"},
+                    {"name": "drop_1", "value": "3"},
+                    {"name": "MATCH_a", "value": "4"},
+                ]
+            },
+            "packages": {
+                "records": [
+                    {"name": None, "version": "1.0"},
+                    {"name": "", "version": "1.0"},
+                    {"name": "numpy", "version": "1.26"},
+                ]
+            },
+        }
+        flat = _normalize_manifest(
+            manifest,
+            ignores=["environment.DROP_?", "environment.MATCH_[ab]"],
+            depth="standard",
+        )
+        assert "environment.None" not in flat
+        assert "packages.None" not in flat
+        assert "environment." not in flat
+        assert "packages." not in flat
+        assert "environment.DROP_1" not in flat
+        assert "environment.MATCH_a" not in flat
+        # Case-sensitive wildcard must NOT drop lowercase drop_1
+        assert flat["environment.drop_1"] == "3"
+        assert flat["environment.KEEP_VAR"] == "1"
+        assert flat["packages.numpy"] == "1.26"
+
+    def test_nan_equality_bool_int_distinction_and_multiset_list_diff(self):
+        from pubrun.analysis.diff import compare_manifests
+
+        nan1, nan2 = float("nan"), float("nan")
+        rep_nan = compare_manifests(
+            {"score": nan1, "vals": [1, nan1], "flag": True},
+            {"score": nan2, "vals": [1, nan2], "flag": 1},
+            show_same=True,
+        )
+        assert "score" in rep_nan["same"]
+        assert "vals" in rep_nan["same"]
+        assert "score" not in rep_nan["modified"]
+        assert "vals" not in rep_nan["modified"]
+        assert "flag" in rep_nan["modified"]
+
+        rep_dup = compare_manifests({"items": ["a", "a", "b"]}, {"items": ["a", "b"]})
+        mod = rep_dup["modified"]["items"]
+        assert mod["type"] == "list_diff"
+        assert mod["removed"] == ["a"]
+        assert mod["added"] == []
+        assert mod["order_changed"] is False
+
+    def test_export_manifest_sanitizes_non_finite_floats_strict_json(self):
+        from pubrun.analysis.diff import export_manifest
+
+        raw = {"metrics": {"a": float("nan"), "b": float("inf"), "c": float("-inf"), "ok": 1.5}}
+        exported = export_manifest(raw, [], fmt="json", depth="deep")
+        assert "NaN" not in exported
+        assert "Infinity" not in exported
+        parsed = json.loads(exported)
+        assert parsed["metrics"] == {"a": None, "b": None, "c": None, "ok": 1.5}
+
+
+class TestDiagnosticsGuardsAndResponsiveLayout:
+    """Regression tests for caeqdz E-03: read_resource_series, chart, sparkline, duration, packages grid."""
+
+    def test_read_resource_series_prefilter_and_finite_guards(self, tmp_path):
+        from pubrun.report.diagnostics import read_resource_series
+
+        ev_path = tmp_path / "events.jsonl"
+        rows = [
+            json.dumps({"type": "phase", "timestamp_utc": 100.0, "payload": {"name": "load"}}),
+            "{not-valid-json",
+            json.dumps({"type": "resource_sample", "timestamp_utc": 101.0, "payload": {"rss_bytes": True, "cpu_percent": 10.0}}),
+            json.dumps({"type": "resource_sample", "timestamp_utc": 102.0, "payload": {"rss_bytes": float("nan"), "cpu_percent": 10.0}}, allow_nan=True),
+            json.dumps({"type": "resource_sample", "timestamp_utc": 103.0, "payload": {"rss_bytes": 1024, "cpu_percent": 25.0, "tree_rss_bytes": float("inf")}}, allow_nan=True),
+            json.dumps({"type": "resource_sample", "timestamp_utc": 104.0, "payload": {"rss_bytes": 2048, "cpu_percent": 50.0, "tree_rss_bytes": 4096, "tree_cpu_percent": 60.0}}),
+        ]
+        ev_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        series = read_resource_series(ev_path)
+        assert series["timestamps"] == [103.0, 104.0]
+        assert series["rss"] == [1024.0, 2048.0]
+        assert series["cpu"] == [25.0, 50.0]
+        assert series["tree_rss"] == [4096.0]
+        assert series["tree_cpu"] == [60.0]
+
+    def test_draw_ascii_chart_edge_cases(self):
+        import io
+        from pubrun.report.diagnostics import draw_ascii_chart
+
+        # Empty / all-NaN
+        buf = io.StringIO()
+        draw_ascii_chart([], [], "Empty", "%", out=buf)
+        assert "No valid resource samples to plot." in buf.getvalue()
+
+        buf_nan = io.StringIO()
+        draw_ascii_chart([float("nan")], [100.0], "NaN", "%", out=buf_nan)
+        assert "No valid resource samples to plot." in buf_nan.getvalue()
+
+        # height=1, width=1, out-of-range timestamps, narrow width
+        buf_tiny = io.StringIO()
+        draw_ascii_chart([10.0, 20.0], [1e30, 1e30 + 10], "Tiny", "%", height=1, width=1, use_color=False, out=buf_tiny)
+        out_tiny = buf_tiny.getvalue()
+        assert "Tiny" in out_tiny
+        assert "unknown" in out_tiny
+
+        buf_narrow = io.StringIO()
+        draw_ascii_chart([10.0, 50.0], [100.0, 130.0], "Narrow", "%", height=3, width=4, use_color=False, use_utc=True, out=buf_narrow)
+        assert "Narrow" in buf_narrow.getvalue()
+
+    def test_sparkline_guards_and_ascii_fallback(self):
+        import io
+        from pubrun.report.diagnostics import _sparkline
+
+        assert _sparkline([]) == ""
+        assert _sparkline([float("nan"), float("inf"), True]) == ""
+        assert _sparkline([1.0, 2.0], width=0) == ""
+        ascii_spark = _sparkline([0.0, 5.0, 10.0], ascii_only=True)
+        assert ascii_spark and ascii_spark.isascii()
+
+        ascii_stream = io.TextIOWrapper(io.BytesIO(), encoding="ascii")
+        stream_spark = _sparkline([0.0, 5.0, 10.0], stream=ascii_stream)
+        assert stream_spark and stream_spark.isascii()
+
+    @pytest.mark.parametrize("bad", ["", "   ", "abc", "0", "0s", "-10s", "nan", "inf", "-inf", "infs"])
+    def test_parse_duration_rejects_invalid_values(self, bad):
+        from pubrun.report.diagnostics import parse_duration
+
+        with pytest.raises(ValueError) as exc_info:
+            parse_duration(bad)
+        assert "'30s'" in str(exc_info.value)
+
+    @pytest.mark.parametrize("term_cols,expected_data_lines", [(50, 6), (80, 3), (110, 2)])
+    def test_print_packages_block_responsive_columns(self, monkeypatch, term_cols, expected_data_lines):
+        import io
+        import shutil
+        from pubrun.report.diagnostics import _print_packages_block
+
+        monkeypatch.setattr(shutil, "get_terminal_size", lambda fallback=(80, 24): os.terminal_size((term_cols, 24)))
+        manifest = {
+            "packages": {
+                "records": [{"name": f"pkg{i}", "version": "1.0"} for i in range(6)],
+            }
+        }
+        buf = io.StringIO()
+        _print_packages_block(manifest, use_color=False, out=buf)
+        lines = [ln for ln in buf.getvalue().splitlines() if "==" in ln]
+        assert len(lines) == expected_data_lines
+
+
+class TestMetaSnapshotAndHydrationHardening:
+    """Regression tests for caeqdz E-04: atomic meta.json, next steps, .JSON case, drift prose."""
+
+    def test_generate_meta_snapshot_atomic_sanitized_and_next_steps(self, tmp_path, monkeypatch, capsys):
+        from pubrun.report import meta_snapshot
+
+        monkeypatch.setattr(
+            meta_snapshot,
+            "get_hardware",
+            lambda cfg: {"cpu": {"model": "EPYC", "freq_ghz": float("nan")}, "capture_state": {"status": "complete"}},
+        )
+        monkeypatch.setattr(
+            meta_snapshot,
+            "get_python_runtime",
+            lambda cfg: {"version": "3.11.8", "capture_state": {"status": "complete"}},
+        )
+        monkeypatch.setattr(
+            meta_snapshot,
+            "get_packages",
+            lambda cfg: {"records": [], "capture_state": {"status": "complete"}},
+        )
+        monkeypatch.setattr(
+            meta_snapshot,
+            "get_git",
+            lambda cfg: {"commit": "abc12345", "capture_state": {"status": "complete"}},
+        )
+        monkeypatch.setattr(
+            meta_snapshot,
+            "get_environment",
+            lambda cfg: {"variables": [], "capture_state": {"status": "complete"}},
+        )
+        monkeypatch.setattr(
+            meta_snapshot,
+            "get_host",
+            lambda cfg: {"hostname": "hpc-01", "os_name": "Linux", "capture_state": {"status": "complete"}},
+        )
+
+        out_path = tmp_path / "shared" / "meta.json"
+        meta_snapshot.generate_meta_snapshot(str(out_path), "basic")
+
+        # No leftover temp files and strict JSON (NaN -> null)
+        assert out_path.exists()
+        assert not list(out_path.parent.glob("*.tmp"))
+        raw = out_path.read_text(encoding="utf-8")
+        assert "NaN" not in raw
+        parsed = json.loads(raw)
+        assert parsed["hardware"]["cpu"]["freq_ghz"] is None
+
+        # Copy-pasteable next steps including valid TOML
+        stdout = capsys.readouterr().out
+        assert f'export PUBRUN_META_REF="{out_path.resolve()}"' in stdout
+        assert "[report]" in stdout
+        toml_line = [ln.strip() for ln in stdout.splitlines() if "meta_ref_allowed_dirs" in ln][0]
+        assert json.dumps(str(out_path.resolve().parent)) in toml_line
+
+    def test_uppercase_json_extension_preserves_security_order_and_drift_prose(self, tmp_path):
+        from pubrun.report.utils import hydrate_manifest_with_report
+
+        # 1. Uppercase .JSON inside manifest dir hydrates cleanly and emits clear drift prose.
+        parent_meta = {
+            "manifest_type": "pubrun-meta-snapshot",
+            "timing": {"started_at_utc": 1000.0},
+            "hardware": {"cpu": {"model": "Xeon"}, "capture_state": {"status": "complete"}},
+        }
+        (tmp_path / "META.JSON").write_text(json.dumps(parent_meta), encoding="utf-8")
+        child = {
+            "meta_ref": "META.JSON",
+            "timing": {"started_at_utc": 1200.0},
+            "invocation": {"script": {"mtime": 1100.0}},
+            "hardware": {"capture_state": {"status": "suppressed"}},
+        }
+        hydrated, warnings, report = hydrate_manifest_with_report(str(tmp_path / "manifest.json"), child)
+        assert report.status == "hydrated"
+        assert hydrated["hardware"]["cpu"]["model"] == "Xeon"
+        assert any(w.startswith("Drift Detected:") and "pubrun meta" in w for w in warnings)
+        assert all("was tracking structurally" not in w for w in warnings)
+
+        # 2. Security check order preserved: .TXT outside dir -> invalid_extension; .JSON outside dir -> blocked_by_policy.
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        _, _, rep_txt = hydrate_manifest_with_report(str(sub / "manifest.json"), {"meta_ref": "../SECRET.TXT"})
+        assert rep_txt.status == "invalid_extension"
+        _, _, rep_ext_json = hydrate_manifest_with_report(str(sub / "manifest.json"), {"meta_ref": "../META.JSON"})
+        assert rep_ext_json.status == "blocked_by_policy"

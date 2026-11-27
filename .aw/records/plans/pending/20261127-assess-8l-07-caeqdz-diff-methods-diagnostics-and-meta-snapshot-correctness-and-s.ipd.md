@@ -52,18 +52,18 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: `methods.py` and `templates.py` publication accuracy
 
-- [ ] E-01 Fix `src/pubrun/report/methods.py` and `src/pubrun/report/templates.py`:
+- [x] E-01 Fix `src/pubrun/report/methods.py` and `src/pubrun/report/templates.py`:
   - Add GPU formatting in `src/pubrun/report/methods.py` for captured `hardware.gpus` (list of dicts with `model`, optional `memory_total_bytes` video random-access memory (VRAM), and optional `driver_version`): group identical GPU descriptions cleanly (e.g. `2x NVIDIA A100 (80.0 GB VRAM, driver 535.104)`), render GPUs in both `MARKDOWN_TEMPLATE` and `LATEX_TEMPLATE` when present while omitting GPU text cleanly when `hardware.gpus` is absent, empty, or malformed (keeping CPU-only outputs compatible with existing tests), and add a `_gpus_of()` extractor to `_VARIANCE_FIELDS` in `generate_report_multi()`.
   - Fix the false `"Standard library dependencies were utilized."` branch in BOTH `generate_report()` and `_packages_of()` (for `generate_report_multi()`): distinguish (a) highlighted packages present (`extract_highlighted_packages(m)` non-empty), (b) non-highlighted third-party packages recorded (`packages.records` contains at least one valid package dict with a non-empty string `name`: list top packages or state the recorded package count accurately without claiming standard-library-only), and (c) zero third-party packages recorded (preserve `"Standard library dependencies were utilized."` in single-run output and `"(standard library only)"` in `_packages_of()` when `packages.records` is empty or `packages` is absent and not `failed`/`suppressed`, keeping `tests/test_templates.py` and `tests/test_reports.py` green).
   - Include the Zenodo concept DOI (`10.5281/zenodo.20801582`) in both `src/pubrun/report/templates.py::MARKDOWN_TEMPLATE` (`https://doi.org/10.5281/zenodo.20801582`) and `LATEX_TEMPLATE` (`doi = {10.5281/zenodo.20801582}` in the BibTeX comment), matching `src/pubrun/__main__.py::_run_cite` and `CITATION.cff`.
   - Rewrite `src/pubrun/report/methods.py::_escape_latex()` as a single-pass `str.translate()` table mapping all 10 LaTeX special characters (`\` -> `\textbackslash{}`, `&` -> `\&`, `%` -> `\%`, `$` -> `\$`, `#` -> `\#`, `_` -> `\_`, `{` -> `\{`, `}` -> `\}`, `~` -> `\textasciitilde{}`, `^` -> `\textasciicircum{}`) so replacing `\` never double-escapes its own `{}` braces. Apply `_escape_latex()` consistently to every interpolated field (`os_name`, `cpu_model`, GPU text, `python_version`, `python_impl`, `packages_text`, `git_commit`, `git_repo_text`, `pubrun_version_text`, failed section names, and `generate_report_multi()` variance values), replacing all ad-hoc `.replace("_", "\\_")` calls.
   - Depends on: none
   - Expected outcome: Generated Markdown and LaTeX methods paragraphs include GPUs when present, never emit false stdlib-only claims when non-highlighted packages exist, cite the Zenodo DOI, and escape all 10 LaTeX special characters in a single pass without double-escaping.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Cross-OS, linear-time `diff.py` and `render.py`
 
-- [ ] E-02 Fix `src/pubrun/analysis/diff.py` and `src/pubrun/analysis/render.py`:
+- [x] E-02 Fix `src/pubrun/analysis/diff.py` and `src/pubrun/analysis/render.py`:
   - In `src/pubrun/analysis/diff.py`:
     - Infer per-manifest `*PATH*` separator (`";"` vs `":"`) and subprocess `argv[0]` basename rules (`ntpath.basename` vs `posixpath.basename`) from each manifest's `host.os_name` (`win*` -> Windows `";"` / `ntpath`, known POSIX OS names -> `":"` / `posixpath`, absent/unknown -> `os.pathsep` / `os.path.basename` fallback so minimal unit-test manifests pass on all platforms); in `compare_manifests()`, split `val_a` with `raw_a`'s inferred separator and `val_b` with `raw_b`'s inferred separator.
     - Pre-split `ignores` once per `_normalize_manifest()` call into an exact-match `set`, a dot-boundary prefix `tuple` (preserving trailing-dot ignores such as `"git."` and dot-boundary isolation such as `"environment.FOO"` vs `"environment.FOO_BAR"`), and a single compiled `re.compile()` built from `fnmatch.translate()` for patterns containing `*`, `?`, or `[` using case-sensitive (`fnmatchcase`) semantics across all platforms.
@@ -78,11 +78,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Delegate `_has_color(no_color_flag, stream=None)` to `src/pubrun/report/output.py::use_color(stream or sys.stdout, force_no_color=no_color_flag)`, eliminate all `Colors.DIM` (`\033[2m`) American National Standards Institute (ANSI) escape codes from `_render_inline()` and `_render_table()`, and guard `"\u2026"` in `_render_table()` against the target stream encoding with `"..."` ASCII fallback (when `key_w >= 4`, else `k[:key_w]`).
   - Depends on: none
   - Expected outcome: Cross-OS diffs are deterministic across Linux, macOS, and Windows, `standard` diff ignore matching avoids per-key linear scans, `_format_array_diff()` scales linearly at N=2,000, `NaN` and duplicate multiset diffs behave accurately, and inline/table output emits zero `DIM` codes, zero ANSI when piped, and safe ASCII truncation on non-UTF-8 streams.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Streaming diagnostics, chart guards, and atomic `meta_snapshot`
 
-- [ ] E-03 Harden and stream `src/pubrun/report/diagnostics.py`:
+- [x] E-03 Harden and stream `src/pubrun/report/diagnostics.py`:
   - In `print_report()`: when `section is not None` and `section not in SHOW_SECTIONS`, raise `DiagnosticsError` with `exit_code=2` naming the invalid section and listing `SHOW_SECTIONS` (`logs`, `env`, `packages`). When `section == "logs"` finds neither `stdout.log` nor `stderr.log`, keep `out` empty and emit an informative note to `sys.stderr` pointing to `[console].capture_mode = "standard"` / `import pubrun.full`.
   - Stream `show logs` via 64 KiB chunks (`shutil.copyfileobj(sf, stream, length=65536)`) instead of `sf.read()` (preserving `DiagnosticsError("Failed to read stdout/stderr log: ...")` on read failure). Stream the `events.jsonl` timeline in `print_report()` using a 10-item head list plus `collections.deque(maxlen=10)` in `O(1)` memory: skip blank lines, catch per-line `json.JSONDecodeError` and non-dict JSON entries while tracking a skipped-line counter (emitting a concise skipped-lines note instead of discarding the timeline), format timestamps through `_format_report_timestamp(e.get("timestamp_utc"), utc=utc)`, and remove `Colors.DIM` from the truncation marker.
   - In `read_resource_series()`: pre-filter lines with `if '"resource_sample"' not in line: continue` before `json.loads()`, and accept only finite non-bool numeric values via `_is_finite_number()`.
@@ -93,19 +93,19 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Switch `_has_color(stream=None)` to `src/pubrun/report/output.py::use_color(stream)` (passing `stream` in `print_report`, `env`/`packages` sections, and `print_resources_report`, and removing all `Colors.DIM` usage). Size `_print_packages_block()` columns dynamically from terminal width (`shutil.get_terminal_size((80, 24)).columns`: 3 columns at `>= 96`, 2 columns at `60..95`, 1 column below `60`).
   - Depends on: none
   - Expected outcome: Large logs and `events.jsonl` files render in `O(1)` random-access memory (RAM), malformed values or truncated JSONL lines never crash diagnostics, unknown sections exit with code `2`, `print_resources_report(..., utc=...)` supports local and UTC chart axes, and terminal layout adapts cleanly with zero `DIM` or non-TTY ANSI leaks.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Harden `src/pubrun/report/meta_snapshot.py` and `src/pubrun/report/utils.py`:
+- [x] E-04 Harden `src/pubrun/report/meta_snapshot.py` and `src/pubrun/report/utils.py`:
   - In `src/pubrun/report/meta_snapshot.py::generate_meta_snapshot()`: sanitize non-finite floats (`NaN`/`Inf`/`-Inf` -> `None`) recursively and write `meta.json` atomically via a unique temporary file in `out_target.parent`, `json.dump(..., indent=2, allow_nan=False)`, `f.flush()`, `os.fsync(f.fileno())`, and `os.replace()` (with Windows `PermissionError` retry and `try/finally` temp-file cleanup matching `src/pubrun/writer.py::_atomic_json_write`).
   - Print exact, copy-pasteable next-step instructions at the end of `generate_meta_snapshot()` showing both `export PUBRUN_META_REF="<path>"` and the valid TOML `[report]\nmeta_ref_allowed_dirs = [<json-escaped-parent-dir>]` setting required when `meta.json` lives outside `manifest_dir`.
   - In `src/pubrun/report/utils.py::hydrate_manifest_with_report()`: check `meta_path.suffix.lower() != ".json"` (case-insensitive for Windows/macOS while keeping extension validation as check #1 before `_is_meta_ref_allowed()` and `exists()`), and rewrite the garbled `"was tracking structurally"` drift warning while preserving the `"Drift Detected:"` prefix (required by `tests/test_reproducibility_assessment.py`) to state the exact cause (script modified after the parent `meta.json` snapshot was captured) and recovery (`pubrun meta`).
   - Depends on: none
   - Expected outcome: Concurrent HPC jobs never read a truncated `meta.json`, users get immediate actionable setup steps with valid TOML quoting, `.JSON` filenames hydrate cleanly without weakening sandbox check ordering, and drift warnings read clearly.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Existing-test alignment and regression tests
 
-- [ ] E-05 Update affected existing tests and add regression tests in `tests/test_reports.py`, `tests/test_methods_multi.py`, `tests/test_render.py`, `tests/test_diagnostics_seams.py`, and `tests/test_cli_negative_paths.py`:
+- [x] E-05 Update affected existing tests and add regression tests in `tests/test_reports.py`, `tests/test_methods_multi.py`, `tests/test_render.py`, `tests/test_diagnostics_seams.py`, and `tests/test_cli_negative_paths.py`:
   - Update existing tests whose assertions intentionally change:
     - `tests/test_render.py::TestHasColor` (`test_default_with_no_env_var`, `test_no_color_env_empty_string`) and `TestRenderTableAndSummarize.test_render_table_with_color`: verify TTY-aware `use_color()` behavior (non-TTY -> `False`, `FORCE_COLOR=1` or TTY -> `True`, `NO_COLOR > FORCE_COLOR`) and assert zero `\x1b[2m` (`DIM`) in colored table output.
     - `tests/test_diagnostics_seams.py::TestOutStream.test_ascii_stream_gets_ascii_glyphs`: set `FORCE_COLOR=1` when testing colored ASCII/Unicode box headers on `BytesIO` wrappers and add a non-TTY zero-ANSI assertion when `FORCE_COLOR` is unset.
@@ -118,7 +118,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - `meta_snapshot.py` / `utils.py`: atomic `meta.json` write (no leftover `.tmp`, `NaN` sanitized), copy-pasteable `PUBRUN_META_REF` and `[report]` TOML next-step output, `.JSON` case-insensitive suffix preserving security check order, and updated `"Drift Detected:"` prose citing `pubrun meta`.
   - Depends on: E-01, E-02, E-03, E-04
   - Expected outcome: All updated and new tests plus existing diff, report, diagnostics, hydration, and CLI-negative suites pass, and three-platform `mypy` exits `0`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -172,30 +172,30 @@ None. Security confinement in `_is_meta_ref_allowed()` remains strict by default
 
 Validation-state rule: inspect evidence in a separate pass. Accepted validation results: blocked, failed, pass, pending; terminal gate demands `pass`.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest` output for `src/pubrun/report/methods.py::generate_report`, `generate_report_multi`, `_packages_of`, `_gpus_of`, and `_escape_latex` in `tests/test_reports.py`, `tests/test_methods_multi.py`, and `tests/test_templates.py` confirming GPU rendering and variance, honest non-highlighted package text in single- and multi-run reports, preserved empty-package stdlib text, Zenodo DOI `10.5281/zenodo.20801582`, and single-pass 10-char LaTeX escaping (no `\textbackslash\{\}`).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_reports.py tests/test_methods_multi.py tests/test_templates.py -k "Methods or GenerateReport or ExtractHighlighted or BytesToGb or Aggregate or SingleRunParity or latex" -q` -> `72 passed, 73 deselected in 0.98s` (covers `TestMethodsGpuPackagesDoiAndLatex`, `TestAggregateGenerator::test_gpu_variance_and_non_highlighted_packages_in_multi`, `TestAggregateGenerator::test_latex_multi_escapes_all_special_chars_single_pass`, and all existing methods/template suites).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest` output for `src/pubrun/analysis/diff.py::compare_manifests`, `_normalize_manifest`, `export_manifest` and `src/pubrun/analysis/render.py::_format_array_diff`, `_render_inline`, `_render_table`, `_has_color` in `tests/test_reports.py`, `tests/test_render.py`, `tests/test_diff_usability.py`, `tests/test_cli_diff_bugs.py`, and `tests/test_quality.py` confirming cross-OS `PATH`/basename diff, compiled case-sensitive ignores, `NaN == NaN` and `Counter` multiset handling, `allow_nan=False` export, inline `(no differences)` and `-/+` order, non-TTY ANSI suppression, zero `DIM`, ASCII ellipsis fallback, and linear N=2,000 `_format_array_diff` behavior.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_reports.py tests/test_render.py tests/test_diff_usability.py tests/test_cli_diff_bugs.py tests/test_quality.py -k "Diff or Render or HasColor or PrintDiff or ArrayDiff" -q` -> `127 passed, 139 deselected in 4.10s` (covers `TestDiffEngineCrossOsMultisetAndSanitize`, `TestHasColor`, `TestRenderInline`, `TestRenderTableAndSummarize`, and all existing diff/render suites).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `pytest` output for `src/pubrun/report/diagnostics.py::print_report`, `print_resources_report`, `read_resource_series`, `draw_ascii_chart`, `_sparkline`, `parse_duration`, and `_print_packages_block` in `tests/test_reports.py`, `tests/test_diagnostics_seams.py`, `tests/test_show_sections.py`, and `tests/test_cli_negative_paths.py` confirming unknown section exit code `2`, empty `show logs` stderr hint, streaming `show logs`, `O(1)` truncated/corrupt-JSONL timeline, `draw_ascii_chart`/`_sparkline`/`parse_duration` guards, local-vs-UTC (`utc=True`) chart timestamps, responsive package columns, and zero `DIM`/non-TTY ANSI leaks.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_reports.py tests/test_diagnostics_seams.py tests/test_show_sections.py tests/test_cli_negative_paths.py -k "Diagnostics or OutStream or Resource or PrintReport or Show or show_" -q` -> `114 passed, 89 deselected in 5.94s` (covers `TestDiagnosticsGuardsAndResponsiveLayout`, `TestOutStream`, `TestResourceMonitoring`, and `TestDiagnosticsNegativePaths`).
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest` output for `src/pubrun/report/meta_snapshot.py::generate_meta_snapshot` and `src/pubrun/report/utils.py::hydrate_manifest_with_report` in `tests/test_reports.py`, `tests/test_hpc_hydration_e2e.py`, `tests/test_report_checks_bugs.py`, and `tests/test_reproducibility_assessment.py` confirming atomic `allow_nan=False` `meta.json` write, `PUBRUN_META_REF` + `[report]` TOML next-step output, `.JSON` case-insensitive suffix preserving security check order, and updated `"Drift Detected:"` prose citing `pubrun meta`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_reports.py tests/test_hpc_hydration_e2e.py tests/test_report_checks_bugs.py tests/test_reproducibility_assessment.py -k "Meta or Hydrat" -q` -> `40 passed, 159 deselected in 1.02s` (covers `TestMetaSnapshotAndHydrationHardening`, `TestMetaSnapshotDepth`, `TestHostHydration`, `TestParentHydrationReport`, and `test_hpc_hydration_e2e`).
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted output of `pytest tests/test_reports.py tests/test_methods_multi.py tests/test_render.py tests/test_diff_usability.py tests/test_cli_diff_bugs.py tests/test_diagnostics_seams.py tests/test_show_sections.py tests/test_templates.py tests/test_cli_negative_paths.py tests/test_hpc_hydration_e2e.py tests/test_quality.py tests/test_timing_consumers.py tests/test_edge_cases.py tests/test_report_checks_bugs.py tests/test_reproducibility_assessment.py -v` (covering all updated and new test cases across the five modified test files plus regression suites) and three-platform `mypy && mypy --platform win32 && mypy --platform darwin` exiting `0`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_reports.py tests/test_methods_multi.py tests/test_render.py tests/test_diff_usability.py tests/test_cli_diff_bugs.py tests/test_diagnostics_seams.py tests/test_show_sections.py tests/test_templates.py tests/test_cli_negative_paths.py tests/test_hpc_hydration_e2e.py tests/test_quality.py tests/test_timing_consumers.py tests/test_edge_cases.py tests/test_report_checks_bugs.py tests/test_reproducibility_assessment.py -v` -> `480 passed in 19.10s`; `mypy && mypy --platform win32 && mypy --platform darwin` -> `Success: no issues found in 70 source files` (3/3 platforms, exit 0); full repository suite `aw suite` -> `2417 passed in 113.18s (0:01:53)` (after aligning `tests/test_report_checks_bugs.py::TestResourcesChartLabel::test_single_tree_sample_uses_tree_value` and `tests/test_cli.py::TestCliDiff::test_diff_no_color` / `TestCliReportUsabilityDetails::test_report_failed_run_with_details`); `aw sanitize --agent` -> `outcome: clean`, `checked: 1039`, `findings: 0`.
+  - Result: pass
 
 ## Approval and execution gate
 

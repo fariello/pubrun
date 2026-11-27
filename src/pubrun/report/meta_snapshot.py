@@ -1,7 +1,11 @@
-import sys
 import json
-from pathlib import Path
+import math
+import os
+import sys
+import uuid
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional, Set
 from pubrun.config import resolve_config
 from pubrun.capture.python_runtime import get_python_runtime
 from pubrun.capture.packages import get_packages
@@ -9,6 +13,46 @@ from pubrun.capture.environment import get_environment
 from pubrun.capture.git import get_git
 from pubrun.capture.hardware import get_hardware
 from pubrun.capture.host import get_host
+
+
+def _sanitize_json_value(value: Any, _seen: Optional[Set[int]] = None) -> Any:
+    """Recursively replace non-finite floats (NaN/Inf/-Inf) with ``None``."""
+    if isinstance(value, float):
+        return None if not math.isfinite(value) else value
+    if isinstance(value, dict):
+        obj_id = id(value)
+        seen = set() if _seen is None else _seen
+        if obj_id in seen:
+            raise ValueError("Circular reference detected")
+        seen.add(obj_id)
+        try:
+            return {
+                ("null" if isinstance(k, float) and not math.isfinite(k) else k): _sanitize_json_value(v, seen)
+                for k, v in value.items()
+            }
+        finally:
+            seen.discard(obj_id)
+    if isinstance(value, list):
+        obj_id = id(value)
+        seen = set() if _seen is None else _seen
+        if obj_id in seen:
+            raise ValueError("Circular reference detected")
+        seen.add(obj_id)
+        try:
+            return [_sanitize_json_value(item, seen) for item in value]
+        finally:
+            seen.discard(obj_id)
+    if isinstance(value, tuple):
+        obj_id = id(value)
+        seen = set() if _seen is None else _seen
+        if obj_id in seen:
+            raise ValueError("Circular reference detected")
+        seen.add(obj_id)
+        try:
+            return tuple(_sanitize_json_value(item, seen) for item in value)
+        finally:
+            seen.discard(obj_id)
+    return value
 
 _DEPTH_CAPTURE_OVERRIDES = {
     "basic": {
@@ -110,11 +154,37 @@ def generate_meta_snapshot(output_path: str, depth: str) -> None:
         "host": host_env
     }
 
-    # Drop to file (the JSON remains the source of truth; the console is a readable digest).
+    # Drop to file atomically (the JSON remains the source of truth; the console is a readable digest).
     out_target = Path(output_path) if output_path else Path.cwd() / "runs" / "meta.json"
     out_target.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_target, "w", encoding="utf-8") as f:
-        json.dump(meta_json, f, indent=2)
+    tmp_path = out_target.parent / f".{out_target.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+    sanitized = _sanitize_json_value(meta_json)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(sanitized, f, indent=2, allow_nan=False)
+            f.flush()
+            os.fsync(f.fileno())
+        for _attempt in range(10 if os.name == "nt" else 1):
+            try:
+                os.replace(str(tmp_path), str(out_target))
+                break
+            except PermissionError:
+                if os.name != "nt" or _attempt == 9:
+                    raise
+                time.sleep(0.005 * (_attempt + 1))
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     _out.ok(f"Meta snapshot saved to: {out_target}", stream=sys.stdout)
     print(f"\nGathered 6 environment sections in {total:.2f}s.")
+    resolved_target = out_target.resolve()
+    parent_toml = json.dumps(str(resolved_target.parent))
+    print("\nNext steps:")
+    print("  1. Set PUBRUN_META_REF before importing pubrun in child jobs:")
+    print(f'     export PUBRUN_META_REF="{resolved_target}"')
+    print("  2. If meta.json lives outside a run directory, add this to .pubrun.toml:")
+    print("     [report]")
+    print(f"     meta_ref_allowed_dirs = [{parent_toml}]")

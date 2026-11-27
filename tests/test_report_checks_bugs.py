@@ -507,7 +507,8 @@ class TestResourcesChartLabel:
         monkeypatch.setenv("NO_COLOR", "1")
         tree = [1 * 1024**2] * 4 + [77 * 1024**2]
         path = _resources_run(tmp_path, "tree", tree)
-        print_resources_report(path, metric="mem", last="0s", width=40)
+        # Samples are 1s apart; 0.5s retains only the final sample (parse_duration rejects <= 0).
+        print_resources_report(path, metric="mem", last="0.5s", width=40)
         out = capsys.readouterr().out
         assert "Memory: 77.00 MB" in out
 
