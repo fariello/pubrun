@@ -69,10 +69,12 @@ bench = [
 ]
 
 [tool.hatch.build.targets.wheel]
+core-metadata-version = "2.4"
 packages = ["src/pubrun"]
 exclude = ["src/pubrun/COMMIT", "src/pubrun/_build_meta.json"]
 
 [tool.hatch.build.targets.sdist]
+core-metadata-version = "2.4"
 include = [
     "/src",
     "/tests",
