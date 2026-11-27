@@ -6,7 +6,7 @@
 - Scope: Update `.github/workflows/ci.yml`, `.github/workflows/dependency-audit.yml`, `README.md`, `docs/cli.md`, `docs/configuration.md`, `benchmarks/README.md`, add new files `benchmarks/scaling_bench.py` and `tests/test_compatibility.py`, and execute the full Set `assess-8l` verification suite.
 - Scope-Paths: .github/workflows/ci.yml, .github/workflows/dependency-audit.yml, README.md, docs/cli.md, docs/configuration.md, benchmarks/scaling_bench.py, benchmarks/README.md, tests/test_compatibility.py
 - Item-Dependencies: executed:1o1cua, executed:76z7ww, executed:l596kn, executed:p4ueaj, executed:ameehy, executed:m5s3g8, executed:caeqdz, executed:2ge0ea, executed:3q5rd5
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Expand CI matrix for tomli/Windows packaging/[bench]/mypy --strict, add local scaling benchmarks, sync README/cli/configuration docs, and verify the complete assess-8l Set
@@ -17,12 +17,12 @@
 - Highest E allocated: 04
 - Author: Antigravity
 - Id: 6y55x4
-- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 6y55x4 verified (set assess-8l, attempt 1).
 - 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-27 /assess-all (Antigravity): created Child 10 of Set `assess-8l` covering CI matrix expansion, scaling benchmarks, doc accuracy fixes, and whole-Set verification (`ROLL-21`, `ROLL-37`).
