@@ -5,8 +5,9 @@
 - Concern: Eight-lens rollup findings `ROLL-05` (`EC-5`: `filter_runs` silently ignores `limit <= 0`, causing `pubrun clean --yes --limit 0` to delete all matching runs), `ROLL-18` (`PERF-4` / `MEM-7` / `UC-8`: `scan_runs()` retains every full `manifest.json` dict in RAM and `#1000+` recency index mismatches `_MAX_RECENCY_INDEX = 999`), `ROLL-21` (`SD-1` / `FUNC-2` / `UC-1`: empty `render_short_list` recommends `pubrun run -- python your_script.py` without `import pubrun`), `ROLL-24` (`UC-5`: remote-host crashed runs listed as clean candidates then unconditionally skipped with no `--force-remote-locks`), `ROLL-25` (`UX-8` / `SD-5`: invalid `--status` silently returns 0 runs and shows novice onboarding when runs exist), and `ROLL-35` (`FUNC-7`: dead `console.log` check and missing completed-run event/log stats; `UX-9`/`COMP-14`/`UX-16`: non-TTY ANSI leak, `DIM` styling, ASCII ellipsis fallback, dynamic `#` width, narrow terminal layout, `clean` re-prompting, and `find_run` prefix ambiguity), surfaced by `edge-cases`, `use-cases`, `performance`, `memory-resources`, `functionality`, `ui-ux`, `self-documentation`, and `compatibility`.
 - Scope: Harden and optimize `src/pubrun/status.py` and `src/pubrun/report/output.py` (including a shared safe-delete helper and centralized TTY-aware `use_color`), with regression tests in `tests/test_status.py`, `tests/test_status_bugs.py`, and `tests/test_output.py`.
 - Scope-Paths: src/pubrun/status.py, src/pubrun/report/output.py, tests/test_status.py, tests/test_status_bugs.py, tests/test_output.py
+- Scope-Exceeded: tests/test_cli.py (Align TestCliColorControl.test_status_no_color_env with E-03 non-TTY ANSI gating so piped default emits zero ANSI and FORCE_COLOR=1 exercises color suppression)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix fail-closed limit<=0 in filter_runs, remote-lock clean safety with --force-remote-locks, status validation, completed-run event/log stats, scandir/non-retaining scans, and TTY-aware color
@@ -17,12 +18,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: m5s3g8
-- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: m5s3g8 verified (set assess-8l, attempt 1). [Scope reconciliation - out-of-scope tests/test_cli.py: Align TestCliColorControl.test_status_no_color_env with E-03 non-TTY ANSI gating so piped default emits zero ANSI and FORCE_COLOR=1 exercises color suppression]
 - 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-27 /assess-all (Antigravity): created Child 06 of Set `assess-8l` covering status, clean, run-scanning safety/scalability, and terminal color/ASCII handling (`ROLL-05`, `ROLL-18`, `ROLL-21`, `ROLL-24`, `ROLL-25`, `ROLL-35`).
