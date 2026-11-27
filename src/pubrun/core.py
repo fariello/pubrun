@@ -26,6 +26,10 @@ from pubrun.tracker import Run, get_current_run
 # -- Thread locks for ref_count and Run construction safety ------------------
 _run_lock = threading.RLock()
 _start_lock = threading.Lock()
+_manual_subproc_lock = threading.Lock()
+_profilers_lock = threading.Lock()
+_profile_filename_lock = threading.Lock()
+_print_handle_init_lock = threading.Lock()
 
 
 def _append_manual_subprocess_record(current_run: Any, record: dict) -> None:
@@ -36,20 +40,26 @@ def _append_manual_subprocess_record(current_run: Any, record: dict) -> None:
     a tight loop grew the list without bound (OOM risk). Reuse the same
     configured cap here. (IPD 20260705 EC-09.)
     """
-    if not hasattr(current_run, "manual_subprocess_records"):
-        current_run.manual_subprocess_records = []
-    records = current_run.manual_subprocess_records
-    try:
-        cap = int(
-            current_run.config.get("capture", {})
-            .get("subprocesses", {})
-            .get("max_tracked_commands", 5000)
-        )
-    except Exception:
-        cap = 5000
-    if cap > 0 and len(records) >= cap:
-        return  # cap reached; stop recording to bound memory
-    records.append(record)
+    with _manual_subproc_lock:
+        if not hasattr(current_run, "manual_subprocess_records"):
+            current_run.manual_subprocess_records = []
+        records = current_run.manual_subprocess_records
+        try:
+            from pubrun.config import _section
+
+            raw_cap = _section(
+                _section(getattr(current_run, "config", None), "capture"),
+                "subprocesses",
+            ).get("max_tracked_commands", 5000)
+            if isinstance(raw_cap, bool):
+                cap = 5000
+            else:
+                cap = int(raw_cap)
+        except Exception:
+            cap = 5000
+        if cap <= 0 or len(records) >= cap:
+            return  # cap reached (or <= 0 disables recording); bound memory
+        records.append(record)
 
 
 # -- Internal helpers ---------------------------------------------------------
@@ -99,16 +109,26 @@ def _inactive_policy() -> str:
         _USER_CONFIG_PATH_MEMO = user_memo
     user_path = user_memo[1]
 
-    cwd = Path.cwd()
-    local_memo = _LOCAL_CONFIG_PATHS_MEMO
-    if local_memo is None or local_memo[0] != cwd:
-        cwd_str = str(cwd)
-        local_memo = (
-            cwd,
-            os.path.join(cwd_str, ".config", "pubrun", "config.toml"),
-            os.path.join(cwd_str, ".pubrun.toml"),
-        )
-        _LOCAL_CONFIG_PATHS_MEMO = local_memo
+    try:
+        cwd: Optional[Path] = Path.cwd()
+    except OSError:
+        cwd = None
+
+    if cwd is None:
+        deep_stat = None
+        root_stat = None
+    else:
+        local_memo = _LOCAL_CONFIG_PATHS_MEMO
+        if local_memo is None or local_memo[0] != cwd:
+            cwd_str = str(cwd)
+            local_memo = (
+                cwd,
+                os.path.join(cwd_str, ".config", "pubrun", "config.toml"),
+                os.path.join(cwd_str, ".pubrun.toml"),
+            )
+            _LOCAL_CONFIG_PATHS_MEMO = local_memo
+        deep_stat = _stat_identity(local_memo[1])
+        root_stat = _stat_identity(local_memo[2])
 
     resolver = _config.resolve_config
     signature = (
@@ -118,14 +138,17 @@ def _inactive_policy() -> str:
         user_path,
         _stat_identity(user_path),
         cwd,
-        _stat_identity(local_memo[1]),
-        _stat_identity(local_memo[2]),
+        deep_stat,
+        root_stat,
     )
     cached = _INACTIVE_POLICY_CACHE
     if cached is not None and cached[0] == signature:
         return cached[1]
 
-    policy = resolver().get("events", {}).get("on_inactive_annotate", "ignore")
+    raw_policy = _config._section(resolver(), "events").get(
+        "on_inactive_annotate", "ignore"
+    )
+    policy = raw_policy if isinstance(raw_policy, str) else "ignore"
     _INACTIVE_POLICY_CACHE = (signature, policy)
     return policy
 
@@ -141,9 +164,16 @@ def _handle_inactive(context: str) -> None:
     """
     action = _inactive_policy()
     if action == "error":
-        raise RuntimeError(f"{context} called but no run is active.")
+        raise RuntimeError(
+            f"{context} called but no run is active. "
+            "Start a run with pubrun.start() or 'with pubrun.tracked_run():', "
+            "or set [events].on_inactive_annotate = 'ignore' in .pubrun.toml."
+        )
     elif action == "warn":
-        logging.getLogger("pubrun").warning(f"{context} dropped: No active run.")
+        logging.getLogger("pubrun").warning(
+            f"{context} dropped: No active run. "
+            "Call pubrun.start() or use 'with pubrun.tracked_run():' to record events."
+        )
 
 
 # -- Public API ---------------------------------------------------------------
@@ -172,23 +202,73 @@ def annotate(message: Optional[str] = None, **kwargs: Any) -> None:
         _handle_inactive("pubrun.annotate()")
 
 
+_VALID_START_KEYS_CACHE: Optional[frozenset] = None
+
+
+def _valid_start_keys() -> frozenset:
+    """Return cached top-level config section keys plus flat ``[core]`` shortcuts."""
+    global _VALID_START_KEYS_CACHE
+    if _VALID_START_KEYS_CACHE is None:
+        from pubrun.config import _CORE_SHORTCUTS, load_default_config
+
+        _VALID_START_KEYS_CACHE = frozenset(load_default_config().keys()) | frozenset(
+            _CORE_SHORTCUTS
+        )
+    return _VALID_START_KEYS_CACHE
+
+
+def _warn_unknown_start_kwargs(kwargs: Dict[str, Any]) -> None:
+    """Log a warning for unrecognized top-level ``start()`` kwargs without raising."""
+    if not kwargs:
+        return
+    valid = _valid_start_keys()
+    unknown = [key for key in kwargs if key not in valid]
+    if not unknown:
+        return
+    import difflib
+
+    pubrun_logger = logging.getLogger("pubrun")
+    valid_sorted = sorted(valid)
+    for key in unknown:
+        matches = difflib.get_close_matches(key, valid_sorted, n=1, cutoff=0.6)
+        if matches:
+            pubrun_logger.warning(
+                "pubrun.start(): unrecognized config key %r (did you mean %r?); "
+                "passing through unchanged",
+                key,
+                matches[0],
+            )
+        else:
+            pubrun_logger.warning(
+                "pubrun.start(): unrecognized config key %r (valid top-level keys: %s); "
+                "passing through unchanged",
+                key,
+                ", ".join(valid_sorted),
+            )
+
+
 def start(**kwargs: Any) -> Run:
     """Start tracking a new execution context.
 
     Creates a unique run directory and initializes all configured capture
-    engines.  Not needed when ``auto_start = true`` (the default).
+    engines. Not needed when ``auto_start = true`` (the default).
 
     If a run is already active, increments its reference count and merges
-    the new overrides into the existing configuration.
+    the new overrides into the existing configuration. Unrecognized top-level
+    keyword arguments log a warning (with a close-match suggestion when
+    available) and are still passed through unchanged.
 
     .. note:: Threading model
 
        ``start()`` and ``stop()`` should be called from the **main thread**.
        ``annotate()``, ``phase()``, and ``get_current_run()`` are safe to
-       call from any thread.  Signal capture requires main-thread installation.
+       call from any thread. Signal capture requires main-thread installation.
 
     Args:
-        **kwargs: Configuration overrides (same keys as ``.pubrun.toml``).
+        **kwargs: Configuration overrides matching top-level ``.pubrun.toml``
+            sections (such as ``core``, ``capture``, ``console``, ``events``)
+            or flat ``[core]`` shortcuts (``output_dir``, ``auto_start``,
+            ``meta_ref``, ``profile``).
 
     Returns:
         The active ``Run`` instance. Useful attributes:
@@ -200,9 +280,11 @@ def start(**kwargs: Any) -> Run:
         - ``run.started_at_utc`` (float): POSIX start timestamp.
 
     Example:
-        >>> tracker = pubrun.start(capture={"hardware": {"depth": "deep"}})
+        >>> tracker = pubrun.start(output_dir="./runs", capture={"hardware": {"depth": "deep"}})
         >>> tracker.stop()
     """
+    if kwargs:
+        _warn_unknown_start_kwargs(kwargs)
     is_ghost_or_inactive = False
     with _run_lock:
         active = get_current_run()
@@ -238,43 +320,65 @@ def start(**kwargs: Any) -> Run:
 def stop() -> None:
     """Stop the active tracking session and write artifacts to disk.
 
-    Flushes all capture engines, writes ``manifest.json`` and
-    ``config.resolved.json``.  Called automatically at interpreter exit
-    if auto-start is enabled.  Safe to call when no run is active.
+    Flushes all capture engines, closes cached log handles, and writes
+    ``manifest.json`` and ``config.resolved.json``. Called automatically at
+    interpreter exit if auto-start is enabled. Safe to call when no run is
+    active.
     """
     current_run = get_current_run()
     if current_run:
         current_run.stop()
+        if not getattr(current_run, "is_active", False):
+            _close_print_log_handle(current_run)
 
 
-def diff(run_dir_a: str, run_dir_b: str, ignores: Optional[list] = None) -> dict:
+def diff(
+    run_dir_a: str,
+    run_dir_b: str,
+    ignores: Optional[list] = None,
+    *,
+    depth: str = "standard",
+    show_same: bool = False,
+) -> dict:
     """Compare two run manifests and return a structured diff.
 
     Args:
         run_dir_a: Path to the baseline run directory.
         run_dir_b: Path to the comparison run directory.
-        ignores: Manifest keys to exclude from comparison.
-            Defaults to the ``[diff].ignore_standard`` config list (or a
-            legacy ``[diff].ignore`` list when ``ignore_standard`` is absent).
+        ignores: Manifest key prefixes or globs to exclude from comparison.
+            When ``None``, selects ``[diff].ignore_{depth}`` from resolved
+            config (falling back to legacy ``[diff].ignore`` for
+            ``"standard"``).
+        depth: Comparison depth level (``"basic"``, ``"standard"``, or
+            ``"deep"``). Raises ``ValueError`` for any other value.
+        show_same: When ``True``, include identical keys in ``result["same"]``.
 
     Returns:
         Dict with ``added``, ``removed``, ``modified``, and ``same`` keys.
 
     Example:
-        >>> delta = pubrun.diff("runs/A", "runs/B")
+        >>> delta = pubrun.diff("runs/A", "runs/B", depth="basic", show_same=True)
         >>> print(delta["added"])
     """
     import json
     from pathlib import Path
-    from pubrun.config import resolve_config
+    from pubrun.config import _section, resolve_config
     from pubrun.report.utils import hydrate_manifest
     from pubrun.analysis.diff import compare_manifests
+
+    if depth not in ("basic", "standard", "deep"):
+        raise ValueError(
+            f"Invalid diff depth {depth!r}; expected one of 'basic', 'standard', 'deep'."
+        )
 
     def _load(d: str) -> dict:
         p = Path(d) / "manifest.json"
         if not p.exists():
-            raise FileNotFoundError(f"Missing: {p}")
-        with open(p, "r", encoding="utf-8") as f:
+            raise FileNotFoundError(
+                f"Missing: {p}. Pass a run directory containing manifest.json "
+                "(run 'pubrun status' to list available runs)."
+            )
+        with builtins.open(p, "r", encoding="utf-8") as f:
             obj = json.load(f)
         obj, _ = hydrate_manifest(str(p), obj)
         return obj
@@ -283,13 +387,18 @@ def diff(run_dir_a: str, run_dir_b: str, ignores: Optional[list] = None) -> dict
     manifest_b = _load(run_dir_b)
 
     if ignores is None:
-        diff_conf = resolve_config().get("diff", {})
-        if "ignore_standard" in diff_conf:
-            ignores = diff_conf.get("ignore_standard") or []
-        else:
+        diff_conf = _section(resolve_config(), "diff")
+        ignore_key = f"ignore_{depth}"
+        if ignore_key in diff_conf:
+            ignores = diff_conf.get(ignore_key) or []
+        elif depth == "standard":
             ignores = diff_conf.get("ignore", [])
+        else:
+            ignores = []
 
-    return compare_manifests(manifest_a, manifest_b, ignores)
+    return compare_manifests(
+        manifest_a, manifest_b, ignores, show_same=show_same, depth=depth
+    )
 
 
 def _classify_exit_outcome(exc: Optional[BaseException]) -> str:
@@ -368,16 +477,47 @@ def audit_run(func: Optional[Callable] = None, **kwargs: Any) -> Callable:
 class tracked_run:
     """Context manager that wraps a code block in a pubrun tracking session.
 
+    Exposes ``run_dir``, ``run_id``, ``config``, ``is_active``, and
+    ``started_at_utc`` directly as pass-through properties delegating to
+    ``self.run_tracker`` (returning ``None`` before ``__enter__``, except
+    ``is_active`` which returns ``False``).
+
     Args:
         **kwargs: Configuration overrides forwarded to ``start()``.
 
     Example:
-        >>> with pubrun.tracked_run(capture={"packages": {"mode": "off"}}):
+        >>> with pubrun.tracked_run(capture={"packages": {"mode": "off"}}) as ctx:
+        ...     print(ctx.run_dir)
         ...     model.train(epochs=5)
     """
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
         self.run_tracker: Optional[Run] = None
+
+    @property
+    def run_dir(self) -> Optional[Path]:
+        """Directory where this run writes artifacts, or ``None`` before entry."""
+        return self.run_tracker.run_dir if self.run_tracker is not None else None
+
+    @property
+    def run_id(self) -> Optional[str]:
+        """Unique identifier for this run, or ``None`` before entry."""
+        return self.run_tracker.run_id if self.run_tracker is not None else None
+
+    @property
+    def config(self) -> Optional[Dict[str, Any]]:
+        """Resolved configuration dict for this run, or ``None`` before entry."""
+        return self.run_tracker.config if self.run_tracker is not None else None
+
+    @property
+    def is_active(self) -> bool:
+        """Whether the underlying run is active (``False`` before entry)."""
+        return bool(self.run_tracker.is_active) if self.run_tracker is not None else False
+
+    @property
+    def started_at_utc(self) -> Optional[float]:
+        """POSIX start timestamp for this run, or ``None`` before entry."""
+        return self.run_tracker.started_at_utc if self.run_tracker is not None else None
 
     def __enter__(self) -> "tracked_run":
         self.run_tracker = start(**self.kwargs)
@@ -464,6 +604,35 @@ class phase:
         ...     df = pd.read_csv("huge.csv")
     """
     _yappi_active: bool = False
+    _yappi_lock = threading.Lock()
+
+    @classmethod
+    def _release_yappi_for_run(cls, run: Any) -> bool:
+        """Stop and clear yappi once if owned by ``run``.
+
+        Shared teardown contract with ``Run._rollback_owned_hooks`` so
+        ``yappi.stop()`` runs at most once even when ``run.stop()`` executes
+        inside an active ``phase`` block.
+        """
+        with cls._yappi_lock:
+            if not getattr(run, "_yappi_owned", False):
+                return False
+            run._yappi_owned = False
+            if not cls._yappi_active:
+                return False
+            cls._yappi_active = False
+            try:
+                import yappi as _yappi_imported  # type: ignore[import-not-found]
+                try:
+                    _yappi_imported.stop()
+                finally:
+                    try:
+                        _yappi_imported.clear_stats()
+                    except Exception:
+                        pass
+            except Exception as prof_err:
+                logging.getLogger("pubrun").debug(f"pubrun: yappi stop failed: {prof_err}")
+            return True
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -483,34 +652,54 @@ class phase:
             _handle_inactive(f"pubrun.phase('{self.name}')")
         # Phase-scoped profiling (opt-in via [capture.profiling].enabled)
         self._started_yappi = False
+        self._profiler = None
         if self.run_tracker and self.run_tracker.is_active:
-            prof_cfg = self.run_tracker.config.get("capture", {}).get("profiling", {})
+            from pubrun.config import _section
+
+            prof_cfg = _section(
+                _section(self.run_tracker.config, "capture"), "profiling"
+            )
             if prof_cfg.get("enabled", False):
                 backend = prof_cfg.get("backend", "cprofile")
                 try:
                     if backend == "cprofile":
                         import cProfile
-                        self._profiler = cProfile.Profile()
-                        self._profiler.enable()
-                        # Track on Run for orphan cleanup (BUG2-04)
-                        if not hasattr(self.run_tracker, "_active_profilers"):
-                            self.run_tracker._active_profilers = []
-                        self.run_tracker._active_profilers.append(self._profiler)
+
+                        prof = cProfile.Profile()
+                        prof.enable()
+                        try:
+                            with _profilers_lock:
+                                if not hasattr(self.run_tracker, "_active_profilers"):
+                                    self.run_tracker._active_profilers = []
+                                self.run_tracker._active_profilers.append(prof)
+                        except Exception:
+                            try:
+                                prof.disable()
+                            except Exception:
+                                pass
+                            raise
+                        self._profiler = prof
                     elif backend == "yappi":
                         import yappi  # type: ignore[import-not-found]
+
                         # BUG2-03: guard against concurrent/nested phases
-                        if not getattr(phase, "_yappi_active", False):
-                            yappi.start()
-                            phase._yappi_active = True
-                            self._started_yappi = True
-                            self._profiler = "yappi"
-                        else:
-                            logging.getLogger("pubrun").warning(
-                                "pubrun: yappi already active (nested/concurrent phase); "
-                                f"skipping profiling for phase '{self.name}'"
-                            )
+                        with phase._yappi_lock:
+                            if not getattr(phase, "_yappi_active", False):
+                                yappi.start()
+                                phase._yappi_active = True
+                                setattr(self.run_tracker, "_yappi_owned", True)
+                                self._started_yappi = True
+                                self._profiler = "yappi"
+                            else:
+                                logging.getLogger("pubrun").warning(
+                                    "pubrun: yappi already active (nested/concurrent phase); "
+                                    f"skipping profiling for phase '{self.name}'"
+                                )
                     else:
-                        raise ValueError("unknown backend")
+                        raise ValueError(
+                            f"unknown backend {backend!r} "
+                            "(valid backends: 'cprofile', 'yappi')"
+                        )
                 except Exception as prof_err:
                     logging.getLogger("pubrun").warning(
                         f"pubrun: profiling backend '{backend}' unavailable: {prof_err}"
@@ -520,52 +709,101 @@ class phase:
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         end_mono = time.perf_counter()
-        prof_name = f"profile-{_safe_phase_filename(self.name)}.prof"
         if self._profiler == "yappi" and self._started_yappi:
-            # Always stop yappi and release the class-wide latch, even when the
-            # run stopped inside the phase, so later phases can profile again.
-            yappi_mod: Any = None
-            try:
-                import yappi as _yappi_imported  # type: ignore[import-not-found]
-                yappi_mod = _yappi_imported
-                yappi_mod.stop()
-            except Exception as prof_err:
-                logging.getLogger("pubrun").debug(f"pubrun: yappi stop failed: {prof_err}")
-            finally:
-                phase._yappi_active = False
+            # Always stop yappi once and release the class-wide latch, even when
+            # the run stopped inside the phase, so later phases can profile again.
+            saved_prof_name: Optional[str] = None
+            with phase._yappi_lock:
                 self._started_yappi = False
-            try:
-                if yappi_mod is not None and self.run_tracker and self.run_tracker.is_active:
-                    prof_path = self.run_tracker.run_dir / prof_name
-                    stats = yappi_mod.get_func_stats()
-                    stats.save(str(prof_path), type="pstat")
-                    self._emit_profile_saved(prof_name)
-            except Exception as prof_err:
-                logging.getLogger("pubrun").debug(f"pubrun: profiling save failed: {prof_err}")
-            finally:
-                try:
-                    if yappi_mod is not None:
-                        yappi_mod.clear_stats()
-                except Exception:
-                    pass
+                run_owns_yappi = (
+                    True
+                    if self.run_tracker is None
+                    else getattr(self.run_tracker, "_yappi_owned", True)
+                )
+                should_stop = bool(phase._yappi_active and run_owns_yappi)
+                if should_stop:
+                    yappi_mod: Any = None
+                    try:
+                        import yappi as _yappi_imported  # type: ignore[import-not-found]
+
+                        yappi_mod = _yappi_imported
+                        yappi_mod.stop()
+                    except Exception as prof_err:
+                        logging.getLogger("pubrun").debug(
+                            f"pubrun: yappi stop failed: {prof_err}"
+                        )
+                    finally:
+                        phase._yappi_active = False
+                        if self.run_tracker is not None:
+                            setattr(self.run_tracker, "_yappi_owned", False)
+                    prof_path: Optional[Path] = None
+                    try:
+                        if (
+                            yappi_mod is not None
+                            and self.run_tracker
+                            and self.run_tracker.is_active
+                        ):
+                            prof_name = _allocate_profile_filename(
+                                self.run_tracker.run_dir, self.name
+                            )
+                            prof_path = self.run_tracker.run_dir / prof_name
+                            stats = yappi_mod.get_func_stats()
+                            stats.save(str(prof_path), type="pstat")
+                            saved_prof_name = prof_name
+                    except Exception as prof_err:
+                        if prof_path is not None:
+                            try:
+                                if prof_path.exists() and prof_path.stat().st_size == 0:
+                                    prof_path.unlink()
+                            except OSError:
+                                pass
+                        logging.getLogger("pubrun").debug(
+                            f"pubrun: profiling save failed: {prof_err}"
+                        )
+                    finally:
+                        try:
+                            if yappi_mod is not None:
+                                yappi_mod.clear_stats()
+                        except Exception:
+                            pass
             self._profiler = None
+            if saved_prof_name is not None:
+                self._emit_profile_saved(saved_prof_name)
         elif self._profiler and self._profiler != "yappi":
+            saved_prof_name = None
+            prof_path = None
             try:
                 # cProfile.Profile instance
                 self._profiler.disable()
                 if self.run_tracker and self.run_tracker.is_active:
+                    prof_name = _allocate_profile_filename(
+                        self.run_tracker.run_dir, self.name
+                    )
                     prof_path = self.run_tracker.run_dir / prof_name
                     self._profiler.dump_stats(str(prof_path))
-                    self._emit_profile_saved(prof_name)
+                    saved_prof_name = prof_name
             except Exception as prof_err:
-                logging.getLogger("pubrun").debug(f"pubrun: profiling save failed: {prof_err}")
-            finally:
-                if self.run_tracker is not None and hasattr(self.run_tracker, "_active_profilers"):
+                if prof_path is not None:
                     try:
-                        self.run_tracker._active_profilers.remove(self._profiler)
-                    except ValueError:
+                        if prof_path.exists() and prof_path.stat().st_size == 0:
+                            prof_path.unlink()
+                    except OSError:
                         pass
+                logging.getLogger("pubrun").debug(
+                    f"pubrun: profiling save failed: {prof_err}"
+                )
+            finally:
+                if self.run_tracker is not None and hasattr(
+                    self.run_tracker, "_active_profilers"
+                ):
+                    with _profilers_lock:
+                        try:
+                            self.run_tracker._active_profilers.remove(self._profiler)
+                        except ValueError:
+                            pass
             self._profiler = None
+            if saved_prof_name is not None:
+                self._emit_profile_saved(saved_prof_name)
 
         end_stream = getattr(self.run_tracker, "event_stream", None) if self.run_tracker else None
         if end_stream:
@@ -593,17 +831,51 @@ class phase:
 
 
 def _safe_phase_filename(name: Any) -> str:
-    """Reduce a phase name to a single safe filename component.
+    """Reduce a phase name to a single safe filename component capped at 80 characters.
 
     Every character outside ``[A-Za-z0-9_-]`` becomes ``_``, which removes path
     separators, drive colons, and dots (so ``..`` cannot survive). A name with
-    no usable characters falls back to ``"phase"``.
+    no usable characters falls back to ``"phase"``. Names longer than 80
+    characters are truncated to 71 characters plus ``"-"`` and an 8-hex-char
+    SHA-256 digest of ``str(name)``.
     """
+    import hashlib
     import re
-    safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(name))
+
+    raw = str(name)
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", raw)
     if not safe.strip("_"):
         return "phase"
+    if len(safe) > 80:
+        digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:8]
+        return f"{safe[:71]}-{digest}"
     return safe
+
+
+def _allocate_profile_filename(run_dir: Path, name: Any) -> str:
+    """Atomically allocate a unique ``profile-<name>.prof`` filename in ``run_dir``.
+
+    Appends ``-2``, ``-3``, and so on when a file of the same base name already
+    exists, preventing collisions across repeated or concurrent phases.
+    """
+    safe = _safe_phase_filename(name)
+    with _profile_filename_lock:
+        counter = 1
+        while True:
+            candidate = (
+                f"profile-{safe}.prof"
+                if counter == 1
+                else f"profile-{safe}-{counter}.prof"
+            )
+            candidate_path = run_dir / candidate
+            try:
+                with builtins.open(candidate_path, "xb"):
+                    pass
+                return candidate
+            except FileExistsError:
+                counter += 1
+            except OSError:
+                return candidate
 
 
 # -- Boot sequence ------------------------------------------------------------
@@ -702,65 +974,121 @@ import subprocess as _subprocess
 from pathlib import Path
 import builtins
 
+_RESERVED_RUN_FILES = frozenset(
+    {
+        "manifest.json",
+        "config.resolved.json",
+        ".pubrun.lock",
+        "events.jsonl",
+        "stdout.log",
+        "stderr.log",
+    }
+)
+
+
 def _resolve_within_run_dir(run_dir: Path, rel_name: str) -> Path:
     """Resolve a user-supplied filename strictly inside ``run_dir``.
 
-    Rejects absolute paths, ``..`` traversal, and symlink escapes outside
-    ``run_dir``.
+    Rejects empty or whitespace-only names, absolute paths, ``..`` traversal,
+    symlink escapes outside ``run_dir``, and case-insensitive matches against
+    reserved top-level run files.
     """
-    if not isinstance(rel_name, str) or not rel_name or Path(rel_name).is_absolute():
+    if (
+        not isinstance(rel_name, str)
+        or not rel_name.strip()
+        or Path(rel_name).is_absolute()
+    ):
         raise ValueError(f"Path must be relative to run directory: {rel_name!r}")
     base = run_dir.resolve()
     dest = (base / rel_name).resolve()
     try:
-        dest.relative_to(base)
+        rel = dest.relative_to(base)
     except ValueError as exc:
         raise ValueError(f"Path escapes run directory: {rel_name!r}") from exc
-    if dest == base:
+    if dest == base or not rel.parts:
         raise ValueError(f"Path must name a file inside run directory: {rel_name!r}")
+    if len(rel.parts) == 1 and rel.parts[0].lower() in _RESERVED_RUN_FILES:
+        raise ValueError(f"Cannot overwrite reserved run file: {rel.parts[0]!r}")
     return dest
 
 
 def report(name: str, data: Any) -> None:
-    """Save a custom structured report to the run directory.
+    """Save a custom structured report to the active run directory.
 
-    If data is a dict or list, it is serialized as JSON (to '{name}.json').
-    Otherwise, it is written as a plain string (to '{name}.txt').
+    If ``data`` is a ``dict`` or ``list``, serializes it as strict RFC 8259 JSON
+    to ``{name}.json`` (converting non-finite floats to ``null`` and stringifying
+    unknown objects via ``default=str``). Otherwise, writes UTF-8 text to
+    ``{name}.txt``. Emits an annotation event so the report appears in
+    ``pubrun show``. Rejects blank names and reserved top-level run files with
+    a warning without raising.
 
-    Emits an annotation event so the report is discoverable via `pubrun report`.
+    Args:
+        name: Base filename (without extension) relative to the active run
+            directory.
+        data: Report payload (``dict``/``list`` for JSON, or text-convertible
+            value).
+
+    Returns:
+        None.
+
+    Example:
+        >>> pubrun.report("eval_metrics", {"accuracy": 0.942, "loss": 0.108})
     """
     import json
+
     run = get_current_run()
     if not run or not run.is_active:
         _handle_inactive(f"pubrun.report('{name}')")
         return
 
     try:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"Report name must be a non-empty string: {name!r}")
+
         # Determine format and file name
         if isinstance(data, (dict, list)):
+            from pubrun.writer import _sanitize_json_value
+
             filename = f"{name}.json"
-            content = json.dumps(data, indent=2)
-            summary = data if isinstance(data, dict) else {"items": len(data)}
+            dest = _resolve_within_run_dir(run.run_dir, filename)
+            sanitized = _sanitize_json_value(data)
+            content = json.dumps(sanitized, indent=2, allow_nan=False, default=str)
+            summary: Dict[str, Any] = (
+                json.loads(content) if isinstance(data, dict) else {"items": len(data)}
+            )
         else:
             filename = f"{name}.txt"
+            dest = _resolve_within_run_dir(run.run_dir, filename)
             content = str(data)
             summary = {"preview": content[:100]}
 
-        # Write file safely within run_dir
-        dest = _resolve_within_run_dir(run.run_dir, filename)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
 
-        # Emit annotation to make it visible in `pubrun report`
+        # Emit annotation to make it visible in `pubrun show`
         annotate(f"report: {name}", filename=filename, summary=summary)
     except Exception as e:
         logging.getLogger("pubrun").warning(f"pubrun: failed to write report '{name}': {e}")
 
 
 def artifact(filename: str, content: Any) -> None:
-    """Write a file (e.g., text, csv, or binary bytes) to the run directory.
+    """Write a raw file (text, CSV, or binary bytes) to the active run directory.
 
-    Emits an annotation event so the file is recorded in the run's event timeline.
+    Emits an annotation event so the file appears in the run's event timeline
+    in ``pubrun show``. Rejects blank names, path escapes, and reserved
+    top-level run files with a warning without raising.
+
+    Args:
+        filename: Relative path inside the active run directory (including
+            extension, for example ``"predictions.csv"``).
+        content: File payload. ``bytes`` values are written in binary mode; all
+            other values are converted with ``str()`` and written as UTF-8.
+
+    Returns:
+        None.
+
+    Example:
+        >>> pubrun.artifact("predictions.csv", "id,pred\\n1,0.94\\n")
     """
     run = get_current_run()
     if not run or not run.is_active:
@@ -776,10 +1104,54 @@ def artifact(filename: str, content: Any) -> None:
         else:
             dest.write_text(str(content), encoding="utf-8")
 
-        # Emit annotation to make it visible in `pubrun report`
+        # Emit annotation to make it visible in `pubrun show`
         annotate(f"artifact: {filename}", filename=filename)
     except Exception as e:
         logging.getLogger("pubrun").warning(f"pubrun: failed to write artifact '{filename}': {e}")
+
+
+def _get_print_log_lock(run: Any) -> threading.Lock:
+    """Return or lazily initialize the per-run lock guarding ``_print_log_file``."""
+    lock: Optional[threading.Lock] = getattr(run, "_print_log_lock", None)
+    if lock is None:
+        with _print_handle_init_lock:
+            lock = getattr(run, "_print_log_lock", None)
+            if lock is None:
+                lock = threading.Lock()
+                run._print_log_lock = lock
+    return lock
+
+
+def _close_print_log_handle(run: Any) -> None:
+    """Close and clear any cached ``pubrun.print()`` append handle on ``run``.
+
+    Idempotent and thread-safe. Called from ``core.stop()``,
+    ``writer.ArtifactWriter.write_artifacts()``, and serves as the shared
+    teardown contract for ``tracker.Run._rollback_owned_hooks()`` and
+    ``tracker.Run._merge_and_migrate()``.
+    """
+    if run is None:
+        return
+    lock = getattr(run, "_print_log_lock", None)
+    if lock is None:
+        fh = getattr(run, "_print_log_file", None)
+        run._print_log_file = None
+        run._print_log_path = None
+        if fh is not None:
+            try:
+                fh.close()
+            except Exception:
+                pass
+        return
+    with lock:
+        fh = getattr(run, "_print_log_file", None)
+        run._print_log_file = None
+        run._print_log_path = None
+        if fh is not None:
+            try:
+                fh.close()
+            except Exception:
+                pass
 
 
 def _should_log_pubrun_print(run: Any, target: Any) -> bool:
@@ -810,6 +1182,8 @@ def print(*args: Any, **kwargs: Any) -> None:
     Respects all standard print arguments (sep, end, file, flush). Output sent
     to another stream with ``file=``, output inside ``pubrun.paused()``, and
     output already recorded by active console capture is not logged again.
+    Reuses one lock-guarded, flushed append handle per active run until run
+    stop or directory migration.
     """
     # 1. Capture the printed string. Builtin print() accepts sep=None/end=None
     # as "use the default", so normalize before joining to avoid an
@@ -830,14 +1204,22 @@ def print(*args: Any, **kwargs: Any) -> None:
     builtins.print(*args, **kwargs)
 
     run = get_current_run()
-    if run and run.is_active and _should_log_pubrun_print(run, kwargs.get("file")):
+    if (
+        run
+        and run.is_active
+        and os.getpid() == getattr(run, "pid", os.getpid())
+        and _should_log_pubrun_print(run, kwargs.get("file"))
+    ):
         try:
-            log_path = run.run_dir / "stdout.log"
-            timestamped = run.config.get("console", {}).get("capture_mode", "off") in {"standard", "deep"}
+            from pubrun.config import _section
+
+            timestamped = _section(getattr(run, "config", None), "console").get(
+                "capture_mode", "off"
+            ) in {"standard", "deep"}
 
             if timestamped:
                 from datetime import datetime, timezone
-                lines = msg.split('\n')
+                lines = msg.split("\n")
                 out_lines = []
                 for i, line in enumerate(lines):
                     if i < len(lines) - 1 or line:
@@ -845,12 +1227,41 @@ def print(*args: Any, **kwargs: Any) -> None:
                         out_lines.append(ts + line)
                     else:
                         out_lines.append("")
-                log_msg = '\n'.join(out_lines)
+                log_msg = "\n".join(out_lines)
             else:
                 log_msg = msg
 
-            with builtins.open(log_path, "a", encoding="utf-8", errors="backslashreplace") as f:
-                f.write(log_msg)
+            lock = _get_print_log_lock(run)
+            with lock:
+                if not run.is_active or os.getpid() != getattr(run, "pid", os.getpid()):
+                    return
+                log_path = run.run_dir / "stdout.log"
+                fh = getattr(run, "_print_log_file", None)
+                cached_path = getattr(run, "_print_log_path", None)
+                if fh is None or getattr(fh, "closed", False) or cached_path != log_path:
+                    if fh is not None:
+                        try:
+                            fh.close()
+                        except Exception:
+                            pass
+                        setattr(run, "_print_log_file", None)
+                        setattr(run, "_print_log_path", None)
+                    fh = builtins.open(
+                        log_path, "a", encoding="utf-8", errors="backslashreplace"
+                    )
+                    setattr(run, "_print_log_file", fh)
+                    setattr(run, "_print_log_path", log_path)
+                try:
+                    fh.write(log_msg)
+                    fh.flush()
+                except Exception:
+                    setattr(run, "_print_log_file", None)
+                    setattr(run, "_print_log_path", None)
+                    try:
+                        fh.close()
+                    except Exception:
+                        pass
+                    raise
         except Exception as e:
             logging.getLogger("pubrun").warning(f"pubrun.print: failed to write to stdout.log: {e}")
 
@@ -866,8 +1277,10 @@ _VALID_FILE_ROLES = ("input", "output", "input_output")
 def _file_io_level(run_instance: Any) -> str:
     """Resolve the effective [capture.file_io].level from the run's config (default 'stat')."""
     try:
-        cfg = getattr(run_instance, "config", {}) or {}
-        level = cfg.get("capture", {}).get("file_io", {}).get("level", "stat")
+        from pubrun.config import _section
+
+        cfg = getattr(run_instance, "config", None)
+        level = _section(_section(cfg, "capture"), "file_io").get("level", "stat")
         return level if level in _FILE_IO_LEVELS else "stat"
     except Exception:
         return "stat"
@@ -964,6 +1377,9 @@ def register_file(
     Returns:
         The recorded provenance dict, or ``None`` when no run is active or
         the effective detail level is ``"none"``.
+
+    Example:
+        >>> pubrun.register_file("data/input.parquet", role="input", level="hash")
     """
     _validate_file_registration_args(
         path,
@@ -1009,6 +1425,22 @@ def register_input(
     """Register an external input dataset path with the active run.
 
     Convenience wrapper around ``register_file(path, role="input", ...)``.
+
+    Args:
+        path: Local file path (``str`` or ``os.PathLike``).
+        label: Optional logical label (for example ``"training_data"``).
+        digest: Optional caller-supplied digest value.
+        digest_algorithm: Digest algorithm name (default ``"sha256"``).
+        level: Optional per-call override for ``[capture.file_io].level``.
+        verify_digest: If True, verify ``digest`` against on-disk bytes.
+        metadata: Optional JSON-serializable dict of extra file metadata.
+
+    Returns:
+        The recorded provenance dict, or ``None`` when no run is active or
+        the effective detail level is ``"none"``.
+
+    Example:
+        >>> pubrun.register_input("data/raw.parquet", label="raw", level="hash")
     """
     _validate_file_registration_args(
         path,
@@ -1057,6 +1489,23 @@ def register_output(
     Supports both pre-creation registration (automatic when missing or explicit
     via ``defer=True``) and post-creation registration. Convenience wrapper
     around ``register_file(path, role="output", ...)``.
+
+    Args:
+        path: Local file path (``str`` or ``os.PathLike``).
+        label: Optional logical label (for example ``"summary"``).
+        digest: Optional caller-supplied digest value.
+        digest_algorithm: Digest algorithm name (default ``"sha256"``).
+        level: Optional per-call override for ``[capture.file_io].level``.
+        verify_digest: If True, verify ``digest`` against on-disk bytes.
+        defer: If True, defer inspection until a later call or finalization.
+        metadata: Optional JSON-serializable dict of extra file metadata.
+
+    Returns:
+        The recorded provenance dict, or ``None`` when no run is active or
+        the effective detail level is ``"none"``.
+
+    Example:
+        >>> pubrun.register_output("results/summary.csv", label="summary", level="hash")
     """
     _validate_file_registration_args(
         path,
@@ -1090,11 +1539,28 @@ def register_output(
 
 
 def open(file: Any, mode: str = "r", **kwargs: Any) -> Any:
-    """Drop-in wrapper around the built-in ``open()`` that records file provenance for
-    a run at the configured ``[capture.file_io].level`` (default ``stat``: path + size +
-    mtime/ctime, no content hashing). Set the level to ``hash`` for content hashes, or
-    ``none`` to behave exactly like the builtin. pubrun never patches the global ``open``;
-    this only affects files you open via ``pubrun.open()``.
+    """Drop-in wrapper around ``builtins.open()`` that records file provenance.
+
+    Records files at the configured ``[capture.file_io].level`` (default
+    ``"stat"``: path, size, and mtime/ctime without content hashing). Set the
+    level to ``"hash"`` for SHA-256 content hashes, or ``"none"`` to behave
+    identically to ``builtins.open()``. ``pubrun`` never patches the global
+    ``open``; this only affects files opened via ``pubrun.open()``.
+
+    Args:
+        file: File path (``str``, ``bytes``, ``os.PathLike``) or integer file
+            descriptor.
+        mode: Standard Python file mode string (default ``"r"``).
+        **kwargs: Additional keyword arguments forwarded to ``builtins.open()``.
+
+    Returns:
+        A provenance-tracking file proxy when a run is active and the level is
+        not ``"none"`` (and ``file`` is not an integer FD), or the raw file
+        object from ``builtins.open()``.
+
+    Example:
+        >>> with pubrun.open("data/input.csv", "r") as fh:
+        ...     text = fh.read()
     """
     f_obj = builtins.open(file, mode, **kwargs)
 
@@ -1162,6 +1628,23 @@ class _PubrunSubprocessNamespace:
     """Explicit subprocess execution tracking wrappers."""
     @staticmethod
     def run(*args: Any, **kwargs: Any) -> _subprocess.CompletedProcess:
+        """Drop-in wrapper around ``subprocess.run()`` with provenance tracking.
+
+        Records redacted ``argv``, exit code, UTC timestamps, and monotonic
+        duration on the active run without relying on global monkey-patching.
+        Provenance recording errors never mask the child return value or host
+        exception.
+
+        Args:
+            *args: Positional arguments forwarded to ``subprocess.run()``.
+            **kwargs: Keyword arguments forwarded to ``subprocess.run()``.
+
+        Returns:
+            The ``subprocess.CompletedProcess`` instance from ``subprocess.run()``.
+
+        Example:
+            >>> res = pubrun.subprocess.run(["python", "step.py"], check=True)
+        """
         cmd = args[0] if args else kwargs.get("args")
 
         started_at = time.time()
@@ -1175,46 +1658,74 @@ class _PubrunSubprocessNamespace:
             # Record the failed invocation for provenance (parity with the
             # SubprocessSpy, which logs failures), then re-raise unchanged so
             # host semantics are untouched. (IPD 20260705 EC-25.)
+            try:
+                ended_at = time.time()
+                elapsed = max(0.0, time.perf_counter() - start_mono)
+                current_run = get_current_run()
+                if current_run and current_run.is_active:
+                    err_detail = _manual_error_detail(exc, current_run)
+                    _append_manual_subprocess_record(current_run, {
+                        "argv": _manual_argv(cmd, current_run),
+                        "exit_code": getattr(exc, "returncode", None),
+                        "started_at_utc": started_at,
+                        "ended_at_utc": ended_at,
+                        "elapsed_seconds": elapsed,
+                        "duration_clock": "monotonic",
+                        "pid": None,
+                        "error": err_detail,
+                        "capture_state": {"status": "failed", "detail": err_detail},
+                    })
+            except Exception as rec_err:
+                logging.getLogger("pubrun").debug(
+                    f"pubrun.subprocess.run: failed to record failed invocation: {rec_err}"
+                )
+            raise
+
+        try:
             ended_at = time.time()
             elapsed = max(0.0, time.perf_counter() - start_mono)
+
             current_run = get_current_run()
             if current_run and current_run.is_active:
-                err_detail = _manual_error_detail(exc, current_run)
-                _append_manual_subprocess_record(current_run, {
+                record = {
                     "argv": _manual_argv(cmd, current_run),
-                    "exit_code": getattr(exc, "returncode", None),
+                    "exit_code": res.returncode,
                     "started_at_utc": started_at,
                     "ended_at_utc": ended_at,
                     "elapsed_seconds": elapsed,
                     "duration_clock": "monotonic",
                     "pid": None,
-                    "error": err_detail,
-                    "capture_state": {"status": "failed", "detail": err_detail},
-                })
-            raise
-
-        ended_at = time.time()
-        elapsed = max(0.0, time.perf_counter() - start_mono)
-
-        current_run = get_current_run()
-        if current_run and current_run.is_active:
-            record = {
-                "argv": _manual_argv(cmd, current_run),
-                "exit_code": res.returncode,
-                "started_at_utc": started_at,
-                "ended_at_utc": ended_at,
-                "elapsed_seconds": elapsed,
-                "duration_clock": "monotonic",
-                "pid": None,
-                "capture_state": {
-                    "status": "complete" if res.returncode == 0 else "failed"
-                },
-            }
-            _append_manual_subprocess_record(current_run, record)
+                    "capture_state": {
+                        "status": "complete" if res.returncode == 0 else "failed"
+                    },
+                }
+                _append_manual_subprocess_record(current_run, record)
+        except Exception as rec_err:
+            logging.getLogger("pubrun").debug(
+                f"pubrun.subprocess.run: failed to record completed invocation: {rec_err}"
+            )
 
         return res
 
     class Popen(_subprocess.Popen):
+        """Drop-in ``subprocess.Popen`` subclass with provenance tracking.
+
+        Records redacted ``argv``, PID, exit code, UTC timestamps, and monotonic
+        duration when ``wait()``, ``communicate()``, or ``poll()`` first
+        observes completion, or when launch fails. Provenance recording errors
+        never alter host return values or exceptions.
+
+        Args:
+            *args: Positional arguments forwarded to ``subprocess.Popen``.
+            **kwargs: Keyword arguments forwarded to ``subprocess.Popen``.
+
+        Returns:
+            A ``Popen`` instance representing the spawned process.
+
+        Example:
+            >>> proc = pubrun.subprocess.Popen(["python", "worker.py"])
+            >>> proc.wait()
+        """
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             self._pubrun_cmd = args[0] if args else kwargs.get("args")
             self._pubrun_started_at = time.time()
@@ -1226,56 +1737,66 @@ class _PubrunSubprocessNamespace:
                 with disable_spy():
                     super().__init__(*args, **kwargs)
             except Exception as exc:
-                ended_at = time.time()
-                elapsed = max(0.0, time.perf_counter() - self._pubrun_start_mono)
-                current_run = get_current_run()
-                if current_run and current_run.is_active:
-                    err_detail = _manual_error_detail(exc, current_run)
-                    _append_manual_subprocess_record(current_run, {
-                        "argv": _manual_argv(self._pubrun_cmd, current_run),
-                        "exit_code": getattr(exc, "returncode", None),
-                        "started_at_utc": self._pubrun_started_at,
-                        "ended_at_utc": ended_at,
-                        "elapsed_seconds": elapsed,
-                        "duration_clock": "monotonic",
-                        "pid": None,
-                        "error": err_detail,
-                        "capture_state": {"status": "failed", "detail": err_detail},
-                    })
+                try:
+                    ended_at = time.time()
+                    elapsed = max(0.0, time.perf_counter() - self._pubrun_start_mono)
+                    current_run = get_current_run()
+                    if current_run and current_run.is_active:
+                        err_detail = _manual_error_detail(exc, current_run)
+                        _append_manual_subprocess_record(current_run, {
+                            "argv": _manual_argv(self._pubrun_cmd, current_run),
+                            "exit_code": getattr(exc, "returncode", None),
+                            "started_at_utc": self._pubrun_started_at,
+                            "ended_at_utc": ended_at,
+                            "elapsed_seconds": elapsed,
+                            "duration_clock": "monotonic",
+                            "pid": None,
+                            "error": err_detail,
+                            "capture_state": {"status": "failed", "detail": err_detail},
+                        })
+                except Exception as rec_err:
+                    logging.getLogger("pubrun").debug(
+                        f"pubrun.subprocess.Popen: failed to record launch failure: {rec_err}"
+                    )
                 raise
 
         def _log_pubrun_record(self) -> None:
             # Atomically claim the single log slot so concurrent wait()/poll()
             # from two threads cannot double-append. (IPD 20260705 EC-24.)
-            lock = getattr(self, "_pubrun_log_lock", None)
-            if lock is not None:
-                with lock:
-                    if self._pubrun_logged:
+            try:
+                lock = getattr(self, "_pubrun_log_lock", None)
+                if lock is not None:
+                    with lock:
+                        if self._pubrun_logged:
+                            return
+                        self._pubrun_logged = True
+                else:
+                    if getattr(self, "_pubrun_logged", False):
                         return
                     self._pubrun_logged = True
-            else:
-                if getattr(self, "_pubrun_logged", False):
-                    return
-                self._pubrun_logged = True
-            ended_at = time.time()
-            end_mono = time.perf_counter()
-            start_mono = getattr(self, "_pubrun_start_mono", None)
-            current_run = get_current_run()
-            if current_run and current_run.is_active:
-                record: Dict[str, Any] = {
-                    "argv": _manual_argv(self._pubrun_cmd, current_run),
-                    "exit_code": self.returncode,
-                    "started_at_utc": self._pubrun_started_at,
-                    "ended_at_utc": ended_at,
-                    "pid": self.pid,
-                    "capture_state": {
-                        "status": "complete" if self.returncode == 0 else "failed"
-                    },
-                }
-                if start_mono is not None:
-                    record["elapsed_seconds"] = max(0.0, end_mono - start_mono)
-                    record["duration_clock"] = "monotonic"
-                _append_manual_subprocess_record(current_run, record)
+                ended_at = time.time()
+                end_mono = time.perf_counter()
+                start_mono = getattr(self, "_pubrun_start_mono", None)
+                current_run = get_current_run()
+                if current_run and current_run.is_active:
+                    record: Dict[str, Any] = {
+                        "argv": _manual_argv(self._pubrun_cmd, current_run),
+                        "exit_code": self.returncode,
+                        "started_at_utc": self._pubrun_started_at,
+                        "ended_at_utc": ended_at,
+                        "pid": self.pid,
+                        "capture_state": {
+                            "status": "complete" if self.returncode == 0 else "failed"
+                        },
+                    }
+                    if start_mono is not None:
+                        record["elapsed_seconds"] = max(0.0, end_mono - start_mono)
+                        record["duration_clock"] = "monotonic"
+                    _append_manual_subprocess_record(current_run, record)
+            except Exception as rec_err:
+                logging.getLogger("pubrun").debug(
+                    f"pubrun.subprocess.Popen: failed to record completion: {rec_err}"
+                )
 
         def wait(self, timeout: Optional[float] = None) -> int:
             res = super().wait(timeout)
@@ -1298,7 +1819,24 @@ subprocess = _PubrunSubprocessNamespace()
 
 
 def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
-    """Wrapper around os.popen that tracks execution provenance."""
+    """Drop-in wrapper around ``os.popen()`` with provenance tracking.
+
+    Records redacted ``argv``, decoded exit code, UTC timestamps, and monotonic
+    duration when the returned pipe closes (or immediately if launch raises).
+    Provenance recording errors never alter host return values or exceptions.
+
+    Args:
+        cmd: Shell command string passed to ``os.popen()``.
+        mode: Pipe mode (``"r"`` or ``"w"``).
+        bufsize: Optional buffering parameter forwarded to ``os.popen()``.
+
+    Returns:
+        A pipe proxy wrapping the file-like object returned by ``os.popen()``.
+
+    Example:
+        >>> with pubrun.popen("uname -a") as pipe:
+        ...     info = pipe.read()
+    """
     started_at = time.time()
     start_mono = time.perf_counter()
     from pubrun.capture.subprocesses import disable_spy
@@ -1306,22 +1844,27 @@ def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
         with disable_spy():
             pipe = os.popen(cmd, mode, bufsize)
     except Exception as exc:
-        ended_at = time.time()
-        elapsed = max(0.0, time.perf_counter() - start_mono)
-        current_run = get_current_run()
-        if current_run and current_run.is_active:
-            err_detail = _manual_error_detail(exc, current_run)
-            _append_manual_subprocess_record(current_run, {
-                "argv": _manual_argv(cmd, current_run),
-                "exit_code": getattr(exc, "returncode", None),
-                "started_at_utc": started_at,
-                "ended_at_utc": ended_at,
-                "elapsed_seconds": elapsed,
-                "duration_clock": "monotonic",
-                "pid": None,
-                "error": err_detail,
-                "capture_state": {"status": "failed", "detail": err_detail},
-            })
+        try:
+            ended_at = time.time()
+            elapsed = max(0.0, time.perf_counter() - start_mono)
+            current_run = get_current_run()
+            if current_run and current_run.is_active:
+                err_detail = _manual_error_detail(exc, current_run)
+                _append_manual_subprocess_record(current_run, {
+                    "argv": _manual_argv(cmd, current_run),
+                    "exit_code": getattr(exc, "returncode", None),
+                    "started_at_utc": started_at,
+                    "ended_at_utc": ended_at,
+                    "elapsed_seconds": elapsed,
+                    "duration_clock": "monotonic",
+                    "pid": None,
+                    "error": err_detail,
+                    "capture_state": {"status": "failed", "detail": err_detail},
+                })
+        except Exception as rec_err:
+            logging.getLogger("pubrun").debug(
+                f"pubrun.popen: failed to record launch failure: {rec_err}"
+            )
         raise
 
     class _PopenPipeProxy:
@@ -1334,30 +1877,35 @@ def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
                 return None
             self._closed = True
             exit_status = self._pipe_obj.close()
-            ended_at = time.time()
-            end_mono = time.perf_counter()
-            rc = 0
-            if exit_status is not None:
-                if sys.platform == "win32":
-                    rc = exit_status
-                else:
-                    rc = os.WEXITSTATUS(exit_status) if os.WIFEXITED(exit_status) else exit_status
+            try:
+                ended_at = time.time()
+                end_mono = time.perf_counter()
+                rc = 0
+                if exit_status is not None:
+                    if sys.platform == "win32":
+                        rc = exit_status
+                    else:
+                        rc = os.WEXITSTATUS(exit_status) if os.WIFEXITED(exit_status) else exit_status
 
-            current_run = get_current_run()
-            if current_run and current_run.is_active:
-                record = {
-                    "argv": _manual_argv(cmd, current_run),
-                    "exit_code": rc,
-                    "started_at_utc": started_at,
-                    "ended_at_utc": ended_at,
-                    "elapsed_seconds": max(0.0, end_mono - start_mono),
-                    "duration_clock": "monotonic",
-                    "pid": None,
-                    "capture_state": {
-                        "status": "complete" if rc == 0 else "failed"
-                    },
-                }
-                _append_manual_subprocess_record(current_run, record)
+                current_run = get_current_run()
+                if current_run and current_run.is_active:
+                    record = {
+                        "argv": _manual_argv(cmd, current_run),
+                        "exit_code": rc,
+                        "started_at_utc": started_at,
+                        "ended_at_utc": ended_at,
+                        "elapsed_seconds": max(0.0, end_mono - start_mono),
+                        "duration_clock": "monotonic",
+                        "pid": None,
+                        "capture_state": {
+                            "status": "complete" if rc == 0 else "failed"
+                        },
+                    }
+                    _append_manual_subprocess_record(current_run, record)
+            except Exception as rec_err:
+                logging.getLogger("pubrun").debug(
+                    f"pubrun.popen: failed to record pipe close: {rec_err}"
+                )
             return exit_status
 
         def __getattr__(self, name: str) -> Any:

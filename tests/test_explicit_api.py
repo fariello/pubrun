@@ -587,7 +587,427 @@ def test_unknown_backend_warns_and_skips(active_run, caplog):
             pass
 
     messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
-    assert messages == [
-        "pubrun: profiling backend 'pyinstrument' unavailable: unknown backend"
-    ]
+    assert len(messages) == 1
+    assert messages[0].startswith("pubrun: profiling backend 'pyinstrument' unavailable:")
+    assert "'cprofile'" in messages[0] and "'yappi'" in messages[0]
     assert list(tracker.run_dir.glob("profile-*.prof")) == []
+
+
+def test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively(
+    active_run, caplog
+):
+    import logging
+
+    tracker = active_run()
+    orig_manifest = (tracker.run_dir / "manifest.json").read_text(encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING, logger="pubrun"):
+        for bad_name in ("", "   ", "manifest", "MANIFEST", "config.resolved", "./manifest"):
+            pubrun.report(bad_name, {"tamper": True})
+        for bad_file in (
+            "",
+            "   ",
+            "manifest.json",
+            "MANIFEST.JSON",
+            "config.resolved.json",
+            ".pubrun.lock",
+            "events.jsonl",
+            "STDOUT.LOG",
+            "Stderr.Log",
+            "./manifest.json",
+        ):
+            pubrun.artifact(bad_file, "tamper")
+
+    # Existing manifest untouched; warnings logged with expected prefixes.
+    assert (tracker.run_dir / "manifest.json").read_text(encoding="utf-8") == orig_manifest
+    warn_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(m.startswith("pubrun: failed to write report 'manifest':") for m in warn_msgs)
+    assert any(m.startswith("pubrun: failed to write report 'MANIFEST':") for m in warn_msgs)
+    assert any(m.startswith("pubrun: failed to write report '':") for m in warn_msgs)
+    assert any(m.startswith("pubrun: failed to write artifact 'MANIFEST.JSON':") for m in warn_msgs)
+    assert any(m.startswith("pubrun: failed to write artifact 'STDOUT.LOG':") for m in warn_msgs)
+
+    # Nested subdirectories using the same basename remain allowed.
+    pubrun.report("sub/manifest", {"nested": True})
+    pubrun.artifact("sub/events.jsonl", "ok\n")
+    assert json.loads((tracker.run_dir / "sub" / "manifest.json").read_text(encoding="utf-8")) == {
+        "nested": True
+    }
+    assert (tracker.run_dir / "sub" / "events.jsonl").read_text(encoding="utf-8") == "ok\n"
+
+
+def test_report_sanitizes_non_finite_floats_and_non_json_types(active_run, tmp_path, caplog):
+    import logging
+
+    def _reject_constant(token):
+        raise AssertionError(f"Non-standard JSON constant: {token}")
+
+    tracker = active_run()
+    pubrun.report(
+        "metrics_nan",
+        {"loss": float("nan"), "inf": float("inf"), "dir": tmp_path},
+    )
+    cyc: dict = {}
+    cyc["self"] = cyc
+    with caplog.at_level(logging.WARNING, logger="pubrun"):
+        pubrun.report("cyclic", cyc)
+    tracker.stop()
+
+    report_data = json.loads(
+        (tracker.run_dir / "metrics_nan.json").read_text(encoding="utf-8"),
+        parse_constant=_reject_constant,
+    )
+    assert report_data == {"loss": None, "inf": None, "dir": str(tmp_path)}
+
+    events = [
+        json.loads(line, parse_constant=_reject_constant)
+        for line in (tracker.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    rep_events = [e for e in events if e.get("name") == "report: metrics_nan"]
+    assert len(rep_events) == 1
+    assert rep_events[0]["payload"]["summary"] == {
+        "loss": None,
+        "inf": None,
+        "dir": str(tmp_path),
+    }
+    assert any("failed to write report 'cyclic'" in r.getMessage() for r in caplog.records)
+
+
+def test_manual_subprocess_provenance_isolation_cap_zero_bool_and_concurrency(
+    active_run, monkeypatch
+):
+    import subprocess as std_subprocess
+    import threading
+    import pubrun.core as core_mod
+
+    # 1. cap <= 0 disables recording; bool cap falls back to 5000.
+    class _FakeRun:
+        def __init__(self, cap):
+            self.config = {"capture": {"subprocesses": {"max_tracked_commands": cap}}}
+
+    r_zero = _FakeRun(0)
+    core_mod._append_manual_subprocess_record(r_zero, {"argv": ["a"]})
+    assert r_zero.manual_subprocess_records == []
+
+    r_neg = _FakeRun(-3)
+    core_mod._append_manual_subprocess_record(r_neg, {"argv": ["a"]})
+    assert r_neg.manual_subprocess_records == []
+
+    r_bool_false = _FakeRun(False)
+    core_mod._append_manual_subprocess_record(r_bool_false, {"argv": ["a"]})
+    assert len(r_bool_false.manual_subprocess_records) == 1
+
+    r_bool_true = _FakeRun(True)
+    for idx in range(5):
+        core_mod._append_manual_subprocess_record(r_bool_true, {"argv": [str(idx)]})
+    assert len(r_bool_true.manual_subprocess_records) == 5
+
+    # 2. Concurrent appends strictly honor cap without over-appending.
+    r_conc = _FakeRun(25)
+    barrier = threading.Barrier(8)
+
+    def _worker(tid):
+        barrier.wait()
+        for i in range(20):
+            core_mod._append_manual_subprocess_record(r_conc, {"argv": [f"{tid}-{i}"]})
+
+    threads = [threading.Thread(target=_worker, args=(t,)) for t in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(r_conc.manual_subprocess_records) == 25
+
+    # 3. Provenance errors never replace host return values or host exceptions.
+    active_run()
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("provenance recorder exploded")
+
+    monkeypatch.setattr(core_mod, "_append_manual_subprocess_record", _boom)
+
+    res = pubrun.subprocess.run(
+        [sys.executable, "-c", "print('ok')"], capture_output=True, text=True
+    )
+    assert res.returncode == 0
+    assert "ok" in res.stdout
+
+    with pytest.raises(std_subprocess.CalledProcessError):
+        pubrun.subprocess.run([sys.executable, "-c", "import sys; sys.exit(4)"], check=True)
+
+    proc = pubrun.subprocess.Popen([sys.executable, "-c", "pass"])
+    assert proc.wait(timeout=10) == 0
+
+    real_popen_init = std_subprocess.Popen.__init__
+    monkeypatch.setattr(
+        std_subprocess.Popen,
+        "__init__",
+        lambda self, *a, **kw: (_ for _ in ()).throw(FileNotFoundError("no binary")),
+    )
+    try:
+        with pytest.raises(FileNotFoundError, match="no binary"):
+            pubrun.subprocess.Popen(["__no_such_bin__"])
+    finally:
+        monkeypatch.setattr(std_subprocess.Popen, "__init__", real_popen_init)
+
+    with pubrun.popen(f"{sys.executable} -c \"print('pipe_ok')\"") as pipe:
+        assert "pipe_ok" in pipe.read()
+
+    monkeypatch.setattr(
+        os,
+        "popen",
+        lambda *a, **kw: (_ for _ in ()).throw(OSError("host popen failed")),
+    )
+    with pytest.raises(OSError, match="host popen failed"):
+        pubrun.popen("bad")
+
+
+def test_phase_profiling_hardening_cprofile_yappi_names_and_collisions(
+    active_run, monkeypatch
+):
+    import cProfile
+    import threading
+    import types
+    import pubrun.core as core_mod
+
+    # 1. >80-char phase name hash cap and distinctness
+    long_a = "stage_" + "x" * 90 + "_a"
+    long_b = "stage_" + "x" * 90 + "_b"
+    safe_a = core_mod._safe_phase_filename(long_a)
+    safe_b = core_mod._safe_phase_filename(long_b)
+    assert len(safe_a) == 80
+    assert len(safe_b) == 80
+    assert safe_a != safe_b
+    assert safe_a[71] == "-"
+
+    # 2. cProfile.enable failure leaves _profiler None and _active_profilers empty
+    tracker = active_run(capture={"profiling": {"enabled": True, "backend": "cprofile"}})
+    monkeypatch.setattr(
+        cProfile.Profile,
+        "enable",
+        lambda self: (_ for _ in ()).throw(RuntimeError("profiler busy")),
+    )
+    with pubrun.phase("enable_fails") as p:
+        assert p._profiler is None
+        assert getattr(tracker, "_active_profilers", []) == []
+    monkeypatch.undo()
+    tracker.stop()
+
+    # 3. Repeated and concurrent cProfile phases allocate collision-free filenames
+    tracker2 = active_run(capture={"profiling": {"enabled": True, "backend": "cprofile"}})
+    with pubrun.phase("train"):
+        sum(range(100))
+    with pubrun.phase("train"):
+        sum(range(100))
+
+    # Concurrent filename allocation directly under contention
+    alloc_barrier = threading.Barrier(6)
+    allocated = []
+    alloc_lock = threading.Lock()
+
+    def _alloc():
+        alloc_barrier.wait()
+        fname = core_mod._allocate_profile_filename(tracker2.run_dir, "concurrent")
+        with alloc_lock:
+            allocated.append(fname)
+
+    threads = [threading.Thread(target=_alloc) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(set(allocated)) == 6
+    assert "profile-concurrent.prof" in allocated
+    assert "profile-concurrent-2.prof" in allocated
+
+    tracker2.stop()
+    assert (tracker2.run_dir / "profile-train.prof").exists()
+    assert (tracker2.run_dir / "profile-train-2.prof").exists()
+    events = [
+        json.loads(line)
+        for line in (tracker2.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    saved_paths = [
+        e["payload"]["path"] for e in events if e.get("type") == "profile_saved"
+    ]
+    assert "profile-train.prof" in saved_paths
+    assert "profile-train-2.prof" in saved_paths
+
+    # 4. Yappi single-stop guard when _release_yappi_for_run runs inside an active phase
+    yappi_calls = []
+
+    class _FakeStats:
+        def save(self, path, type="pstat"):
+            yappi_calls.append("save")
+            Path(path).write_text("yappi", encoding="utf-8")
+
+    fake_yappi = types.ModuleType("yappi")
+    fake_yappi.start = lambda: yappi_calls.append("start")
+    fake_yappi.stop = lambda: yappi_calls.append("stop")
+    fake_yappi.clear_stats = lambda: yappi_calls.append("clear")
+    fake_yappi.get_func_stats = lambda: _FakeStats()
+    monkeypatch.setitem(sys.modules, "yappi", fake_yappi)
+
+    tracker3 = active_run(capture={"profiling": {"enabled": True, "backend": "yappi"}})
+    with pubrun.phase("stopped_inside"):
+        assert pubrun.phase._yappi_active is True
+        assert getattr(tracker3, "_yappi_owned", False) is True
+        # Simulate Run._rollback_owned_hooks releasing yappi mid-phase
+        assert pubrun.phase._release_yappi_for_run(tracker3) is True
+        assert pubrun.phase._release_yappi_for_run(tracker3) is False
+    assert pubrun.phase._yappi_active is False
+    assert getattr(tracker3, "_yappi_owned", False) is False
+    assert yappi_calls.count("stop") == 1
+    tracker3.stop()
+
+
+def test_cached_pubrun_print_handle_reuse_migration_fork_and_no_resource_warning(
+    active_run, tmp_path, capsys
+):
+    import gc
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ResourceWarning)
+
+        tracker = active_run()
+        pubrun.print("line one")
+        fh1 = getattr(tracker, "_print_log_file", None)
+        assert fh1 is not None and not fh1.closed
+        # Immediately flushed before stop()
+        assert "line one" in (tracker.run_dir / "stdout.log").read_text(encoding="utf-8")
+
+        # Second call reuses the exact same handle
+        pubrun.print("line two")
+        assert getattr(tracker, "_print_log_file", None) is fh1
+        assert "line two" in (tracker.run_dir / "stdout.log").read_text(encoding="utf-8")
+
+        # Fork PID mismatch skips logging to parent's stdout.log
+        orig_pid = tracker.pid
+        tracker.pid = orig_pid + 99999
+        try:
+            pubrun.print("child only")
+        finally:
+            tracker.pid = orig_pid
+        assert "child only" not in (tracker.run_dir / "stdout.log").read_text(encoding="utf-8")
+
+        # Directory migration closes old handle and reopens at new run_dir
+        new_dir = tmp_path / "migrated_run"
+        new_dir.mkdir()
+        tracker.run_dir = new_dir
+        pubrun.print("after migrate")
+        fh2 = getattr(tracker, "_print_log_file", None)
+        assert fh1.closed
+        assert fh2 is not None and fh2 is not fh1
+        assert "after migrate" in (new_dir / "stdout.log").read_text(encoding="utf-8")
+
+        # tracker.stop() closes handle via writer.write_artifacts()
+        tracker.stop()
+        assert fh2.closed
+        assert getattr(tracker, "_print_log_file", None) is None
+
+        # Also verify pubrun.stop() closes cached handle cleanly
+        tracker_b = active_run()
+        pubrun.print("via pubrun.stop")
+        fh_b = getattr(tracker_b, "_print_log_file", None)
+        assert fh_b is not None and not fh_b.closed
+        pubrun.stop()
+        assert fh_b.closed
+        assert getattr(tracker_b, "_print_log_file", None) is None
+
+        gc.collect()
+
+    capsys.readouterr()
+    resource_warnings = [w for w in caught if issubclass(w.category, ResourceWarning)]
+    assert resource_warnings == []
+
+
+def test_core_api_ergonomics_callable_module_tracked_run_start_kwargs_and_diff(
+    active_run, tmp_path, caplog
+):
+    import inspect
+    import logging
+
+    # 1. CallableModule docstring & signature
+    assert pubrun.report.__doc__ and "pubrun.report" in pubrun.report.__doc__
+    sig = inspect.signature(pubrun.report)
+    assert list(sig.parameters.keys()) == ["name", "data"]
+
+    # 2. tracked_run pass-through properties before, during, and after entry
+    ctx = pubrun.tracked_run(console={"capture_mode": "off"})
+    assert ctx.run_dir is None
+    assert ctx.run_id is None
+    assert ctx.config is None
+    assert ctx.started_at_utc is None
+    assert ctx.is_active is False
+
+    with ctx as entered:
+        assert entered is ctx
+        assert ctx.is_active is True
+        assert ctx.run_dir == ctx.run_tracker.run_dir
+        assert ctx.run_id == ctx.run_tracker.run_id
+        assert ctx.config == ctx.run_tracker.config
+        assert ctx.started_at_utc == ctx.run_tracker.started_at_utc
+    assert ctx.is_active is False
+    assert ctx.run_dir is not None
+
+    # 3. Unknown start() kwargs warn with suggestion while passing through
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="pubrun"):
+        tracker = active_run(output_dr=str(tmp_path), notes={"tag": "exp1"})
+    try:
+        warn_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("output_dr" in m and "output_dir" in m for m in warn_msgs)
+        assert any("notes" in m for m in warn_msgs)
+        assert tracker.config["notes"] == {"tag": "exp1"}
+    finally:
+        tracker.stop()
+
+    # 4. pubrun.diff depth & show_same & actionable FileNotFoundError
+    run_a = tmp_path / "run_a"
+    run_b = tmp_path / "run_b"
+    run_a.mkdir()
+    run_b.mkdir()
+    (run_a / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run": {"run_id": "aaaa1111"},
+                "invocation": {"argv": ["train.py", "--lr", "0.01"]},
+                "environment": {"variables": [{"name": "FOO", "value": "1"}]},
+                "packages": {"records": [{"name": "pkg", "version": "1.0"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_b / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run": {"run_id": "bbbb2222"},
+                "invocation": {"argv": ["train.py", "--lr", "0.01"]},
+                "environment": {"variables": [{"name": "FOO", "value": "2"}]},
+                "packages": {"records": [{"name": "pkg", "version": "1.0"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    basic = pubrun.diff(str(run_a), str(run_b), depth="basic", show_same=True)
+    assert "environment.FOO" not in basic["modified"]
+    assert "invocation.argv" in basic["same"]
+
+    standard = pubrun.diff(str(run_a), str(run_b), depth="standard", show_same=False)
+    assert "environment.FOO" in standard["modified"]
+    assert standard["same"] == {}
+
+    deep = pubrun.diff(str(run_a), str(run_b), depth="deep")
+    assert "run.run_id" in deep["modified"]
+    assert "environment.FOO" in deep["modified"]
+
+    with pytest.raises(ValueError, match="Invalid diff depth"):
+        pubrun.diff(str(run_a), str(run_b), depth="invalid")
+
+    with pytest.raises(FileNotFoundError, match="pubrun status"):
+        pubrun.diff(str(tmp_path / "missing_run"), str(run_b))

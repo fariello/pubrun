@@ -59,16 +59,16 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Config and strict JSON hardening
 
-- [ ] E-01 Harden `src/pubrun/config.py` for deleted CWD, non-UTF-8 TOML, and malformed section types:
+- [x] E-01 Harden `src/pubrun/config.py` for deleted CWD, non-UTF-8 TOML, and malformed section types:
   - In `src/pubrun/config.py::_safe_load_toml`, catch `(tomllib.TOMLDecodeError, UnicodeDecodeError)` in addition to `OSError`, log a warning, and return `None`.
   - In `src/pubrun/config.py::load_local_config`, wrap `Path.cwd()` in `try/except OSError` and return `None` when the CWD is unavailable.
   - Add a shared `src/pubrun/config.py::_section(cfg: Any, key: str) -> Dict[str, Any]` helper that returns `{}` when `cfg` is not a `dict` or `cfg.get(key)` is not a `dict`.
   - Apply `_section` in `src/pubrun/config.py::_resolve_layers` (building `core = dict(_section(overrides, "core"))`, calling `core.update(flat_core)`, and assigning `overrides["core"] = core`) and in `src/pubrun/config.py::profile_deprecation_notice`.
   - Depends on: none
   - Expected outcome: A deleted CWD, a UTF-16 byte-order mark (BOM) or invalid-UTF-8 `.pubrun.toml`, and scalar TOML sections (`core = "bad"`, `events = false`) degrade to defaults with warnings and zero uncaught exceptions.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Harden `src/pubrun/events.py` and `src/pubrun/writer.py` for strict RFC 8259 JSON, validated event bounds, refresh config-write avoidance, durability warning cap, and print-handle teardown:
+- [x] E-02 Harden `src/pubrun/events.py` and `src/pubrun/writer.py` for strict RFC 8259 JSON, validated event bounds, refresh config-write avoidance, durability warning cap, and print-handle teardown:
   - Add a shared cycle-safe `src/pubrun/writer.py::_sanitize_json_value(value: Any) -> Any` helper that replaces any `float` where `not math.isfinite(value)` (`NaN`, `Inf`, `-Inf`) with `None`, traverses `dict`, `list`, and `tuple` while tracking active container `id()`s (raising `ValueError("Circular reference detected")` on cycles), and returns all other objects untouched so `events.py::EventStream.emit` still raises `TypeError` on non-serializable payloads (`BUG-05`) while `writer.py` and `core.py::report` still stringify them via `default=str`.
   - Pass sanitized structures with `allow_nan=False` to `json.dumps`/`json.dump` in `src/pubrun/events.py::EventStream.emit`, `src/pubrun/writer.py::_atomic_json_write` (when `pre_serialized is None`), and `src/pubrun/writer.py::_serialize_config_and_digest`.
   - In `src/pubrun/events.py::EventStream.__init__`, read the `[events]` table via `pubrun.config._section(config, "events")`, validate `max_tracked_events` (`isinstance(v, int) and not isinstance(v, bool) and v >= 0`, fallback `1_000_000`) and `flush_interval_events` (`isinstance(v, int) and not isinstance(v, bool) and v >= 1`, fallback `100`), logging a warning on invalid values.
@@ -76,11 +76,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - In `src/pubrun/writer.py::_resolve_durability`, cap `_warned_invalid_durability` at 256 entries while keeping it a `set` (preserving `.discard()` calls in `tests/test_writer.py`). In `src/pubrun/writer.py::ArtifactWriter.write_artifacts`, read `[methods]` via `_section(cfg, "methods")` and call `pubrun.core._close_print_log_handle(self.run)` (from E-03) after `self.run._finalize_state()` so cached `pubrun.print()` file descriptors (FDs) close on every `tracker.stop()` and `atexit` even before Child 02 (`76z7ww`) lands.
   - Depends on: E-01
   - Expected outcome: Non-finite floats serialize as `null` under `allow_nan=False` in `events.py` and `writer.py`, circular references fail cleanly without `RecursionError`, malformed event bounds fall back safely, background hardware refresh skips redundant config serialization/hashing while startup/sync/finalize detect in-place `run.config` edits, `_warned_invalid_durability` stays a `set` capped at 256 entries, and `write_artifacts()` closes any cached print handle.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Core runtime safety, handle reuse, ergonomics, and `docs/api.md` sync
 
-- [ ] E-03 Harden core runtime safety, `_inactive_policy()`, and cached `pubrun.print()` handle in `src/pubrun/core.py`:
+- [x] E-03 Harden core runtime safety, `_inactive_policy()`, and cached `pubrun.print()` handle in `src/pubrun/core.py`:
   - In `src/pubrun/core.py::report` and `src/pubrun/core.py::artifact` (and `_resolve_within_run_dir`), reject empty or whitespace-only names before appending `.json`/`.txt`, and reject any resolved destination whose relative path to `run_dir` is a single component matching (case-insensitively) a reserved top-level run file (`manifest.json`, `config.resolved.json`, `.pubrun.lock`, `events.jsonl`, `stdout.log`, `stderr.log`). Log a warning without raising and preserve `"pubrun: failed to write report '{name}': {e}"` / `"pubrun: failed to write artifact '{filename}': {e}"` checked by `tests/test_explicit_api.py`. Serialize `report()` JSON via `pubrun.writer._sanitize_json_value` with `allow_nan=False, default=str`, and pass a JSON-safe summary (`json.loads(content)` for `dict`, `{"items": len(data)}` for `list`) to `annotate()`.
   - Wrap all provenance-recording blocks in `src/pubrun/core.py::_PubrunSubprocessNamespace.run` (exception and return paths), `_PubrunSubprocessNamespace.Popen.__init__` (exception path), `_PubrunSubprocessNamespace.Popen._log_pubrun_record`, `popen` (exception path), and `_PopenPipeProxy.close` (after `self._pipe_obj.close()`) in `try/except Exception` so host return values and exceptions are never replaced. Guard `src/pubrun/core.py::_append_manual_subprocess_record` with a lock, reject `bool` cap values (falling back to `5000`), and enforce `cap <= 0` as "record 0" (matching `src/pubrun/capture/subprocesses.py::SubprocessSpy`).
   - In `src/pubrun/core.py::phase`, read `[capture]`/`[profiling]` through `_section()`, add class-level `_yappi_lock = threading.Lock()` (preserving `phase._yappi_active: bool = False`) and module-level `_profilers_lock = threading.Lock()` (preserving `run._active_profilers` as a `list`), assign `self._profiler = prof` and append to `run._active_profilers` only after `prof.enable()` succeeds (disabling `prof` on append failure), and set `self.run_tracker._yappi_owned = True` when starting yappi under `phase._yappi_lock`. Expose `src/pubrun/core.py::phase._release_yappi_for_run(run)` (shared contract with Child 02 `76z7ww`'s `Run._rollback_owned_hooks`) and check `phase._yappi_active` under `phase._yappi_lock` in `phase.__exit__` before calling `yappi.stop()` (atomically clearing `phase._yappi_active = False` and `run._yappi_owned = False`) so `yappi.stop()` runs at most once even when `run.stop()` executes inside a `phase` block. Cap `src/pubrun/core.py::_safe_phase_filename` to 80 characters (when longer, truncate to 71 chars plus `"-"` and an 8-hex-char SHA-256 hash of `str(name)`), and allocate `.prof` filenames through a lock-guarded `_allocate_profile_filename` helper (`profile-<name>.prof`, `profile-<name>-2.prof`, ...), emitting the allocated filename in `_emit_profile_saved`.
@@ -88,9 +88,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - In `src/pubrun/core.py::print`, cache a lazily opened, lock-guarded append handle on the active `Run` (`run._print_log_lock`, `run._print_log_file`, `run._print_log_path`, initializing `_print_log_lock` under a module-level `_print_handle_init_lock`) when console tee is `"off"`: skip logging if `os.getpid() != getattr(run, "pid", os.getpid())`, read `[console]` via `_section()`, re-check `run.is_active` under `run._print_log_lock`, close and reopen if `run._print_log_path != log_path` (directory migration safety), call `f.flush()` after each write, and close/clear the handle on any write error. Expose `src/pubrun/core.py::_close_print_log_handle(run)` called from `core.py::stop` and `writer.py::ArtifactWriter.write_artifacts` (E-02) and documented as the teardown contract for Child 02 (`76z7ww`).
   - Depends on: E-01, E-02
   - Expected outcome: Reserved top-level run files cannot be clobbered on case-sensitive or case-insensitive filesystems; manual subprocess wrappers never mask host exceptions and honor `cap == 0`; `phase` profiling is race-free, double-stop-free, and collision-free; `_inactive_policy()` survives deleted CWD and scalar `[events]` while preserving immediate stat-based file-change detection (per resolved `OQ-01`); `pubrun.print()` reuses one flushed handle with zero FD leaks.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Improve core API ergonomics, `CallableModule`, docstrings, error hints, and `docs/api.md` in `src/pubrun/core.py`, `src/pubrun/report/__init__.py`, and `docs/api.md`:
+- [x] E-04 Improve core API ergonomics, `CallableModule`, docstrings, error hints, and `docs/api.md` in `src/pubrun/core.py`, `src/pubrun/report/__init__.py`, and `docs/api.md`:
   - Add pass-through properties (`run_dir`, `run_id`, `config`, `is_active`, `started_at_utc`) on `src/pubrun/core.py::tracked_run` delegating to `self.run_tracker` (returning `None` before `__enter__`, except `is_active` returning `False`), keeping `.run_tracker` intact.
   - In `src/pubrun/core.py::start`, when `kwargs` is non-empty, check top-level keys against the cached union of `pubrun.config.load_default_config().keys()` and `pubrun.config._CORE_SHORTCUTS`; log a `logging.getLogger("pubrun").warning(...)` for each unrecognized key (with a `difflib.get_close_matches` suggestion when available) without raising or dropping the key so existing callers such as `tests/test_core_lifecycle_bugs.py::TestWriterSerialization::test_path_and_date_config_values_write_all_artifacts` remain backward-compatible.
   - In `src/pubrun/core.py::diff`, add keyword parameters `depth: str = "standard"` and `show_same: bool = False`: validate `depth in ("basic", "standard", "deep")` (raising `ValueError` otherwise), read `diff_conf = _section(resolve_config(), "diff")`, select `ignore_{depth}` when `ignores is None` (falling back to legacy `ignore` for `"standard"`), and pass `show_same=show_same, depth=depth` to `src/pubrun/analysis/diff.py::compare_manifests`.
@@ -99,17 +99,17 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Synchronize `docs/api.md` (with zero em or en dashes in edited/added lines) to document `tracked_run` pass-through properties, `start()` unknown-key warnings, `pubrun.diff(run_dir_a, run_dir_b, ignores=None, *, depth="standard", show_same=False)`, and `report()`/`artifact()` reserved filename protection.
   - Depends on: E-03
   - Expected outcome: `help(pubrun.report)` and `inspect.signature(pubrun.report)` are accurate without eager core imports; `tracked_run`, `start`, and `diff` ergonomics and hints are consistent; `docs/api.md` matches the updated public API with zero added em or en dashes.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Regression tests and validation
 
-- [ ] E-05 Add behavioral unit and concurrency regression tests in `tests/test_edge_cases.py` and `tests/test_explicit_api.py`, and run all required validation checks:
+- [x] E-05 Add behavioral unit and concurrency regression tests in `tests/test_edge_cases.py` and `tests/test_explicit_api.py`, and run all required validation checks:
   - In `tests/test_edge_cases.py` and `tests/test_explicit_api.py`, add behavioral tests covering: deleted CWD (`resolve_config`, inactive `annotate`), UTF-16 BOM and invalid-UTF-8 `.pubrun.toml`, scalar TOML sections across `config.py`/`events.py`/`writer.py`/`core.py`, malformed `EventStream` bounds (including `bool`, `0`, negative, string), `NaN`/`Inf`/`-Inf` sanitization and circular-reference handling in `events.py`/`writer.py`/`report()`, `writer.py` refresh config-write skip plus `_warned_invalid_durability` 256-entry `set` cap, case-insensitive reserved filename and blank-name rejection in `report()`/`artifact()`, manual subprocess wrapper exception isolation and `max_tracked_commands == 0` plus concurrency, concurrent/nested/repeated `phase` profiling (`cProfile` enable failure, yappi lock and single-stop guard, >80-char phase name hash cap, `.prof` collision disambiguation), cached `pubrun.print()` handle reuse/flush/close (with zero `ResourceWarning`) and migration reopen, `CallableModule` docstring and `inspect.signature(pubrun.report)`, `tracked_run` properties (pre-enter and active), unknown `start()` kwarg warning, and `pubrun.diff(..., depth=..., show_same=...)`.
   - Update `tests/test_explicit_api.py::test_unknown_backend_warns_and_skips` to match the improved valid-backends hint from E-04.
   - Run the targeted `pytest` command, three-platform `mypy`, and the `docs/api.md` em/en dash check from `## Required tests / validation`.
   - Depends on: E-04
   - Expected outcome: All new and existing targeted tests pass, three-platform `mypy` exits `0`, and `docs/api.md` diff contains zero em or en dashes.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -180,30 +180,54 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 Validation-state rule: inspect evidence in a separate pass. Accepted validation results: blocked, failed, pass, pending; terminal gate demands `pass`.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest` output confirming `src/pubrun/config.py::load_local_config`, `src/pubrun/config.py::_safe_load_toml`, `src/pubrun/config.py::_resolve_layers`, `src/pubrun/config.py::profile_deprecation_notice`, and `src/pubrun/config.py::_section` pass deleted-CWD, UTF-16 BOM / invalid-UTF-8 `.pubrun.toml`, and scalar-section (`core = "bad"`, `events = false`) tests in `tests/test_edge_cases.py` and `tests/test_config.py`.
   - Observed evidence:
-  - Result: pending
+    - `tests/test_edge_cases.py::TestConfigCwdUtf8AndSections::test_deleted_cwd_degrades_safely_in_config_and_inactive_policy PASSED`
+    - `tests/test_edge_cases.py::TestConfigCwdUtf8AndSections::test_utf16_bom_and_invalid_utf8_local_toml_warn_and_fallback PASSED`
+    - `tests/test_edge_cases.py::TestConfigCwdUtf8AndSections::test_scalar_toml_sections_do_not_crash_config_events_writer_or_core PASSED`
+    - All tests in `tests/test_config.py` PASSED within `334 passed in 38.56s` (exit 0).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest` output confirming `src/pubrun/events.py::EventStream` (`emit` strict RFC 8259 JSON, circular-reference handling, non-serializable `TypeError` retention, and bound validation including `bool`/negative/string) and `src/pubrun/writer.py::ArtifactWriter` (`_sanitize_json_value`, `_atomic_json_write`, `_write_config_if_needed` refresh skip while `tests/test_timing_accuracy.py` and `tests/test_startup_overhead_writes.py` still detect in-place `run.config` edits, `_warned_invalid_durability` 256-entry `set` cap, and `write_artifacts()` print-handle close) pass.
   - Observed evidence:
-  - Result: pending
+    - `tests/test_edge_cases.py::TestStrictJsonEventBoundsAndWriterHardening::test_event_stream_bound_validation PASSED`
+    - `tests/test_edge_cases.py::TestStrictJsonEventBoundsAndWriterHardening::test_strict_json_sanitization_and_cycles_in_events_and_writer PASSED`
+    - `tests/test_edge_cases.py::TestStrictJsonEventBoundsAndWriterHardening::test_writer_refresh_skips_config_serialization_and_detects_finalize_mutations PASSED`
+    - `tests/test_edge_cases.py::TestStrictJsonEventBoundsAndWriterHardening::test_durability_warning_set_capped_at_256 PASSED`
+    - All tests in `tests/test_writer.py`, `tests/test_events.py`, `tests/test_timing_accuracy.py`, and `tests/test_startup_overhead_writes.py` PASSED within `334 passed in 38.56s` (exit 0).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `pytest` output confirming `src/pubrun/core.py` units pass: `report()`/`artifact()`/`_resolve_within_run_dir()` (case-insensitive reserved top-level filename rejection, blank-name rejection, JSON-safe `annotate` summary), `_PubrunSubprocessNamespace`/`popen()`/`_append_manual_subprocess_record()` (exception isolation, lock safety, `max_tracked_commands == 0`), `phase`/`_safe_phase_filename`/`_allocate_profile_filename` (yappi lock, `_release_yappi_for_run` single-stop guard, `cProfile` enable ordering, >80-char hash cap, `.prof` collision disambiguation), `_inactive_policy()` (deleted CWD and scalar `[events]`, plus `tests/test_api.py::TestInactivePolicyCache` passing unchanged per resolved `OQ-01`), and `print()`/`_close_print_log_handle()` (handle reuse, immediate flush, migration reopen, fork PID guard, zero `ResourceWarning` on `tracker.stop()` and `pubrun.stop()`).
   - Observed evidence:
-  - Result: pending
+    - `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively PASSED`
+    - `tests/test_explicit_api.py::test_report_sanitizes_non_finite_floats_and_non_json_types PASSED`
+    - `tests/test_explicit_api.py::test_manual_subprocess_provenance_isolation_cap_zero_bool_and_concurrency PASSED`
+    - `tests/test_explicit_api.py::test_phase_profiling_hardening_cprofile_yappi_names_and_collisions PASSED`
+    - `tests/test_explicit_api.py::test_cached_pubrun_print_handle_reuse_migration_fork_and_no_resource_warning PASSED`
+    - `tests/test_api.py::TestInactivePolicyCache` (all 5 tests) PASSED within `334 passed in 38.56s` (exit 0).
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest` output confirming `src/pubrun/report/__init__.py::CallableModule` (module docstring, `inspect.signature(pubrun.report)`, and `tests/test_report_subpackage_integrity.py`), `src/pubrun/core.py::tracked_run` (pre-enter and active properties), `src/pubrun/core.py::start` (unknown kwarg warning with `notes=` backward compatibility), `src/pubrun/core.py::diff` (`depth` `basic`/`standard`/`deep`/invalid and `show_same`), and updated `_handle_inactive`/`diff`/`phase.__enter__` hints pass, plus `git diff -U0 -- docs/api.md | grep '^+' | grep -c $'\u2014\|\u2013'` printing `0`.
   - Observed evidence:
-  - Result: pending
+    - `tests/test_explicit_api.py::test_core_api_ergonomics_callable_module_tracked_run_start_kwargs_and_diff PASSED`
+    - `tests/test_explicit_api.py::test_unknown_backend_warns_and_skips PASSED`
+    - All tests in `tests/test_report_subpackage_integrity.py` and `tests/test_core_lifecycle_bugs.py` PASSED within `334 passed in 38.56s` (exit 0).
+    - `git diff -U0 -- docs/api.md | grep '^+' | grep -c $'\u2014\|\u2013' || true` printed `0`.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted output of `pytest` across all 13 suites in `## Required tests / validation` (verifying new tests in `tests/test_edge_cases.py` and `tests/test_explicit_api.py`, including updated `test_unknown_backend_warns_and_skips`) and `mypy && mypy --platform win32 && mypy --platform darwin` all exiting `0`.
   - Observed evidence:
-  - Result: pending
+    - Targeted 13-suite `pytest`: `334 passed in 38.56s` (exit 0).
+    - Full suite (`aw suite`): `2320 passed in 119.43s (0:01:59)` (exit 0).
+    - `mypy`: `Success: no issues found in 70 source files` (exit 0).
+    - `mypy --platform win32`: `Success: no issues found in 70 source files` (exit 0).
+    - `mypy --platform darwin`: `Success: no issues found in 70 source files` (exit 0).
+  - Result: pass
 
 ## Approval and execution gate
 

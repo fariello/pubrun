@@ -94,6 +94,8 @@ pubrun.start(capture={"file_io": {"level": "hash"}})   # Any other section uses 
 
 Flat shortcuts: `output_dir`, `auto_start`, `meta_ref`, and `profile`. `profile` is accepted only for compatibility, changes nothing, and records a `profile_deprecated` entry in the manifest's `config.notices` when set to a non-default value (it is never raised). All other overrides use nested dicts matching the TOML structure (for example `console={"capture_mode": "off"}`).
 
+If you pass an unrecognized top-level keyword argument to `start()`, `pubrun` logs a warning on the `pubrun` logger (including a close-match suggestion when one exists) and passes the key through unchanged without raising, so custom metadata keys remain backward-compatible.
+
 > [!NOTE]
 > If both flat and nested forms are passed for the same key, the flat shortcut wins: `start(core={"output_dir": "./a"}, output_dir="./b")` results in `output_dir = "./b"`.
 
@@ -241,11 +243,13 @@ engines).
 
 A context manager that wraps `start()` and `stop()` for you. When the block exits, the run outcome follows the classification rules under [`pubrun.stop()`](#pubrunstop).
 
+The context object exposes pass-through properties (`run_dir`, `run_id`, `config`, `is_active`, and `started_at_utc`) that delegate to `ctx.run_tracker`. Before entering the `with` block, `is_active` returns `False` and the remaining properties return `None`. `ctx.run_tracker` remains available for full `Run` access.
+
 ```python
 from pubrun import tracked_run
 
 with tracked_run(events={"enabled": True}) as ctx:
-    # ctx.run_tracker is the active Run instance
+    print(ctx.run_id, ctx.run_dir)  # pass-through properties on the active Run
     train_model()
 ```
 
@@ -278,15 +282,23 @@ def entrypoint(): ...
 
 ## 6. Semantic Diffing
 
-### `pubrun.diff(run_dir_a, run_dir_b, ignores=None) → dict`
+### `pubrun.diff(run_dir_a, run_dir_b, ignores=None, *, depth="standard", show_same=False) → dict`
 
 Compare two run directories programmatically. Returns a dictionary with `added`, `removed`, `modified`, and `same` keys.
+
+*   `ignores`: List of manifest key prefixes or glob patterns to exclude. When `None`, `diff()` reads `[diff].ignore_{depth}` from the resolved configuration (falling back to legacy `[diff].ignore` when `depth="standard"`).
+*   `depth`: Comparison depth level: `"basic"`, `"standard"` (default), or `"deep"`. Any other value raises `ValueError`.
+*   `show_same`: When `True`, populates the `same` key with identical fields (default `False`).
 
 ```python
 import pubrun
 
-result = pubrun.diff("./runs/pubrun-A", "./runs/pubrun-B",
-                     ignores=["timing", "run", "capture"])
+result = pubrun.diff(
+    "./runs/pubrun-A",
+    "./runs/pubrun-B",
+    depth="basic",
+    show_same=True,
+)
 for key, detail in result["modified"].items():
     print(f"Changed: {key}")
 ```
@@ -307,8 +319,9 @@ if change and "note" in change:
 ### `pubrun.report(name: str, data: Any)`
 Saves a structured custom report directly to the run directory.
 *   **Arguments**:
-    *   `name`: The base filename (without extension).
-    *   `data`: The payload to write. If `data` is a `dict` or `list`, it is serialized as JSON (`{name}.json`). Otherwise, it is written as plain text (`{name}.txt`).
+    *   `name`: The base filename (without extension). Must be a non-empty relative path inside the run directory.
+    *   `data`: The payload to write. If `data` is a `dict` or `list`, it is serialized as strict RFC 8259 JSON (`{name}.json`, converting `NaN`, `Inf`, and `-Inf` to `null` and stringifying unknown types via `default=str`). Otherwise, it is written as plain text (`{name}.txt`).
+*   **Reserved filename protection**: Blank names, path escapes, and case-insensitive collisions with reserved top-level run files (`manifest.json`, `config.resolved.json`, `.pubrun.lock`, `events.jsonl`, `stdout.log`, `stderr.log`) are rejected with a warning without raising.
 *   **Return value**: None.
 *   **Example**:
     ```python
@@ -319,8 +332,9 @@ Saves a structured custom report directly to the run directory.
 ### `pubrun.artifact(filename: str, content: Any)`
 Writes a raw artifact file (such as CSV data, text, or binary bytes) directly to the active run directory.
 *   **Arguments**:
-    *   `filename`: The output filename (including extension, e.g., `"data.csv"`).
+    *   `filename`: The output filename (including extension, e.g., `"data.csv"`). Must be a non-empty relative path inside the run directory.
     *   `content`: The file content. If `content` is `bytes`, it is written using binary mode; otherwise, it is cast to `str` and written as UTF-8 text.
+*   **Reserved filename protection**: Blank names, path escapes, and case-insensitive collisions with reserved top-level run files (`manifest.json`, `config.resolved.json`, `.pubrun.lock`, `events.jsonl`, `stdout.log`, `stderr.log`) are rejected with a warning without raising.
 *   **Return value**: None.
 *   **Example**:
     ```python
@@ -587,7 +601,7 @@ other `fail_on` value raises `ValueError`.
 | `popen(cmd)` | Tracked os.popen replacement | Yes (falls back to popen) |
 | `tracked_run(**kw)` | Context manager lifecycle | N/A (creates run) |
 | `audit_run(**kw)` | Decorator lifecycle | N/A (creates run) |
-| `diff(a, b, ignores)` | Compare two runs | N/A (reads files) |
+| `diff(a, b, ignores, *, depth, show_same)` | Compare two runs | N/A (reads files) |
 | `__version__` | Installed package version string | N/A (attribute) |
 | `__commit__` | Commit SHA of the running build, read from packaged build metadata or live `HEAD` of a verified `pubrun` source checkout, or `None` when unknown (resolved on first access) | N/A (attribute) |
 | `report.checks.assess_run(manifest, ...)` | Post-hoc reproducibility assessment (optional offline preflight) | N/A (reads a manifest) |

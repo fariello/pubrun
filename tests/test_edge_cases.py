@@ -392,3 +392,285 @@ class TestDegradedPartialManifestConsumers:
         assert "(package capture failed)" in multi_tex
         assert "partial provenance across 1 of 2 runs" in multi_md
         assert "% Note: partial provenance across 1 of 2 runs;" in multi_tex
+
+
+class TestConfigCwdUtf8AndSections:
+    """1o1cua E-01: deleted CWD, non-UTF-8 TOML, and scalar TOML sections."""
+
+    def test_deleted_cwd_degrades_safely_in_config_and_inactive_policy(self, monkeypatch):
+        from pubrun import config as cfg_mod
+        from pubrun import core as core_mod
+
+        def _missing_cwd():
+            raise FileNotFoundError("No such file or directory")
+
+        monkeypatch.setattr(Path, "cwd", staticmethod(_missing_cwd))
+        monkeypatch.setattr(core_mod, "_INACTIVE_POLICY_CACHE", None)
+        monkeypatch.setattr(core_mod, "_LOCAL_CONFIG_PATHS_MEMO", None)
+
+        assert cfg_mod.load_local_config() is None
+        cfg = cfg_mod.resolve_config()
+        assert cfg["core"]["profile"] == "default"
+        # Inactive annotate must not raise when CWD is gone.
+        core_mod.annotate("deleted cwd test")
+
+    def test_utf16_bom_and_invalid_utf8_local_toml_warn_and_fallback(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        import logging
+        from pubrun.config import resolve_config
+
+        monkeypatch.setattr(Path, "cwd", staticmethod(lambda: tmp_path))
+        toml_path = tmp_path / ".pubrun.toml"
+
+        # UTF-16 BOM
+        toml_path.write_bytes('[core]\nprofile = "deep"\n'.encode("utf-16"))
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            cfg = resolve_config()
+        assert cfg["core"]["profile"] == "default"
+        assert any("ignoring malformed config file" in r.getMessage() for r in caplog.records)
+
+        # Invalid UTF-8 bytes
+        caplog.clear()
+        toml_path.write_bytes(b"\x80\x81\xfe\xff invalid bytes")
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            cfg2 = resolve_config()
+        assert cfg2["core"]["profile"] == "default"
+        assert any("ignoring malformed config file" in r.getMessage() for r in caplog.records)
+
+    def test_scalar_toml_sections_do_not_crash_config_events_writer_or_core(
+        self, tmp_path, monkeypatch
+    ):
+        from pubrun import config as cfg_mod
+        from pubrun import core as core_mod
+        from pubrun import writer as writer_mod
+        from pubrun.events import EventStream
+
+        assert cfg_mod._section("not-a-dict", "core") == {}
+        assert cfg_mod._section({"core": "bad"}, "core") == {}
+        assert cfg_mod._section({"core": {"a": 1}}, "core") == {"a": 1}
+
+        # _resolve_layers with scalar overrides["core"] + flat shortcut
+        resolved = cfg_mod.resolve_config({"core": "bad", "output_dir": str(tmp_path)})
+        assert isinstance(resolved["core"], dict)
+        assert resolved["core"]["output_dir"] == str(tmp_path)
+
+        # profile_deprecation_notice with scalar core
+        assert cfg_mod.profile_deprecation_notice({"core": "bad"}) is None
+
+        # .pubrun.toml with scalar sections
+        monkeypatch.setattr(Path, "cwd", staticmethod(lambda: tmp_path))
+        (tmp_path / ".pubrun.toml").write_text(
+            'core = "bad"\nevents = false\nmethods = "bad"\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(core_mod, "_INACTIVE_POLICY_CACHE", None)
+        assert core_mod._inactive_policy() == "ignore"
+
+        # Non-string on_inactive_annotate falls back to "ignore"
+        monkeypatch.setattr(
+            cfg_mod,
+            "resolve_config",
+            lambda overrides=None: {"events": {"on_inactive_annotate": 123}},
+        )
+        monkeypatch.setattr(core_mod, "_INACTIVE_POLICY_CACHE", None)
+        assert core_mod._inactive_policy() == "ignore"
+
+        # EventStream with scalar events section
+        stream = EventStream(tmp_path, config={"events": False})
+        assert stream._max_events == 1_000_000
+        assert stream._flush_interval == 100
+        stream.close()
+
+        # Writer durability + write_artifacts with scalar core/methods
+        assert writer_mod._resolve_durability({"core": "bad"}, stage="startup") == "fsync"
+
+        class _ScalarRun:
+            def __init__(self, rdir):
+                self.run_dir = rdir
+                self.config = {"core": "bad", "methods": "bad"}
+                self._finalized = False
+
+            def _finalize_state(self):
+                self._finalized = True
+
+            def to_manifest_dict(self):
+                return {"run": {"run_id": "scalar01"}}
+
+        run_dir = tmp_path / "scalar_run"
+        w = writer_mod.ArtifactWriter(_ScalarRun(run_dir))
+        assert w.write_artifacts() is True
+        assert (run_dir / "methods.md").exists()
+
+
+class TestStrictJsonEventBoundsAndWriterHardening:
+    """1o1cua E-02: strict RFC 8259 JSON, EventStream bounds, refresh skip, durability cap."""
+
+    def test_event_stream_bound_validation(self, tmp_path, caplog):
+        import logging
+        from pubrun.events import EventStream
+
+        for bad_max in (True, False, -1, "100", 1.5, None):
+            caplog.clear()
+            with caplog.at_level(logging.WARNING, logger="pubrun"):
+                s = EventStream(tmp_path, config={"events": {"max_tracked_events": bad_max}})
+            try:
+                assert s._max_events == 1_000_000
+                assert any("max_tracked_events" in r.getMessage() for r in caplog.records)
+            finally:
+                s.close()
+
+        # 0 is valid for max_tracked_events (no warning)
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            s0 = EventStream(tmp_path, config={"events": {"max_tracked_events": 0}})
+        try:
+            assert s0._max_events == 0
+            assert not any("max_tracked_events" in r.getMessage() for r in caplog.records)
+        finally:
+            s0.close()
+
+        for bad_flush in (True, False, 0, -5, "10", 2.5, None):
+            caplog.clear()
+            with caplog.at_level(logging.WARNING, logger="pubrun"):
+                s = EventStream(tmp_path, config={"events": {"flush_interval_events": bad_flush}})
+            try:
+                assert s._flush_interval == 100
+                assert any("flush_interval_events" in r.getMessage() for r in caplog.records)
+            finally:
+                s.close()
+
+    def test_strict_json_sanitization_and_cycles_in_events_and_writer(self, tmp_path, caplog):
+        import logging
+        from pubrun.events import EventStream
+        from pubrun.writer import (
+            _atomic_json_write,
+            _sanitize_json_value,
+            _serialize_config_and_digest,
+        )
+
+        def _reject_constant(token):
+            raise AssertionError(f"Non-standard JSON constant emitted: {token}")
+
+        # Shared non-cyclic DAG succeeds
+        shared = {"v": float("nan")}
+        dag = {"a": shared, "b": shared, "seq": [float("inf"), float("-inf"), (1.5, float("nan"))]}
+        sanitized = _sanitize_json_value(dag)
+        assert sanitized == {"a": {"v": None}, "b": {"v": None}, "seq": [None, None, (1.5, None)]}
+
+        # Cycle raises ValueError("Circular reference detected")
+        cyc_dict: dict = {}
+        cyc_dict["self"] = cyc_dict
+        with pytest.raises(ValueError, match="Circular reference detected"):
+            _sanitize_json_value(cyc_dict)
+
+        cyc_list: list = []
+        cyc_list.append(cyc_list)
+        with pytest.raises(ValueError, match="Circular reference detected"):
+            _sanitize_json_value(cyc_list)
+
+        # _atomic_json_write produces strict JSON and preserves default=str
+        target = tmp_path / "strict.json"
+        _atomic_json_write(
+            target,
+            {"nan": float("nan"), "inf": float("inf"), "ninf": float("-inf"), "p": tmp_path},
+        )
+        raw_text = target.read_text(encoding="utf-8")
+        loaded = json.loads(raw_text, parse_constant=_reject_constant)
+        assert loaded == {"nan": None, "inf": None, "ninf": None, "p": str(tmp_path)}
+
+        # _atomic_json_write cleans up tmp on circular reference
+        cyc_target = tmp_path / "cycle.json"
+        with pytest.raises(ValueError, match="Circular reference detected"):
+            _atomic_json_write(cyc_target, cyc_dict)
+        assert not cyc_target.exists()
+        assert list(tmp_path.glob("*.tmp")) == []
+
+        # _serialize_config_and_digest produces strict JSON
+        payload, _digest = _serialize_config_and_digest({"x": float("inf"), "p": tmp_path})
+        assert json.loads(payload, parse_constant=_reject_constant) == {
+            "x": None,
+            "p": str(tmp_path),
+        }
+
+        # EventStream.emit: NaN/Inf -> null; cycle -> warning; unserializable -> TypeError warning
+        stream = EventStream(tmp_path, config={"events": {"enabled": True}})
+        try:
+            stream.emit(
+                "annotation",
+                name="floats",
+                payload={"a": float("nan"), "b": [float("inf"), float("-inf")]},
+            )
+            with caplog.at_level(logging.WARNING, logger="pubrun"):
+                stream.emit("annotation", name="cycle", payload=cyc_dict)
+                stream.emit("annotation", name="bad_type", payload={"obj": object()})
+        finally:
+            stream.close()
+
+        lines = (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 1
+        rec = json.loads(lines[0], parse_constant=_reject_constant)
+        assert rec["payload"] == {"a": None, "b": [None, None]}
+        warn_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("Circular reference detected" in m for m in warn_msgs)
+        assert any("not JSON-serializable" in m for m in warn_msgs)
+
+    def test_writer_refresh_skips_config_serialization_and_detects_finalize_mutations(
+        self, tmp_path, monkeypatch
+    ):
+        from pubrun import writer as writer_mod
+
+        class _Run:
+            def __init__(self, rdir):
+                self.run_dir = rdir
+                self.config = {"core": {"artifact_durability": "fsync"}, "x": 1}
+                self._finalized = False
+
+            def _finalize_state(self):
+                self._finalized = True
+
+            def to_manifest_dict(self):
+                return {"run": {"run_id": "ref00001"}}
+
+        run_dir = tmp_path / "refresh_run"
+        run = _Run(run_dir)
+        w = writer_mod.ArtifactWriter(run)
+
+        calls = []
+        real_ser = writer_mod._serialize_config_and_digest
+
+        def _spy_ser(cfg):
+            calls.append(dict(cfg))
+            return real_ser(cfg)
+
+        monkeypatch.setattr(writer_mod, "_serialize_config_and_digest", _spy_ser)
+
+        assert w.write_startup_manifest() is True
+        assert len(calls) == 1
+
+        # Hardware refresh must skip _serialize_config_and_digest completely
+        assert w.write_startup_manifest(is_refresh=True) is True
+        assert len(calls) == 1
+
+        # In-place mutation must still be detected on finalize
+        run.config["x"] = 2
+        assert w.write_artifacts() is True
+        assert len(calls) == 2
+        assert json.loads((run_dir / "config.resolved.json").read_text(encoding="utf-8"))["x"] == 2
+
+    def test_durability_warning_set_capped_at_256(self, monkeypatch):
+        from pubrun import writer as writer_mod
+
+        monkeypatch.setattr(writer_mod, "_warned_invalid_durability", set())
+        for i in range(300):
+            assert (
+                writer_mod._resolve_durability(
+                    {"core": {"artifact_durability": f"invalid_{i}"}}, stage="startup"
+                )
+                == "fsync"
+            )
+        assert isinstance(writer_mod._warned_invalid_durability, set)
+        assert len(writer_mod._warned_invalid_durability) == 256
+        # .discard() compatibility preserved
+        writer_mod._warned_invalid_durability.discard("invalid_0")
+        assert len(writer_mod._warned_invalid_durability) == 255

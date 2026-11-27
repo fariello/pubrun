@@ -77,17 +77,30 @@ def get_global_config_dir() -> Path:
     return Path(config_dir) / "pubrun"
 
 
-def _safe_load_toml(path: Path) -> Optional[Dict[str, Any]]:
-    """Parse a TOML config file, tolerating malformed content.
+_CORE_SHORTCUTS = frozenset({"profile", "output_dir", "auto_start", "meta_ref"})
 
-    A syntactically-invalid ``.pubrun.toml`` (truncated, hand-edited, wrong
-    syntax) must not crash ``pubrun`` commands or the host script. On a parse
-    error, log a warning and skip the file (returning None) so the remaining
-    config layers still resolve. (IPD 20260705 EC-14.)
+
+def _section(cfg: Any, key: str) -> Dict[str, Any]:
+    """Return mapping ``cfg[key]`` when both ``cfg`` and ``cfg[key]`` are dicts, else ``{}``."""
+    if isinstance(cfg, dict):
+        val = cfg.get(key)
+        if isinstance(val, dict):
+            return val
+    return {}
+
+
+def _safe_load_toml(path: Path) -> Optional[Dict[str, Any]]:
+    """Parse a TOML config file, tolerating malformed or non-UTF-8 content.
+
+    A syntactically invalid or non-UTF-8 ``.pubrun.toml`` (truncated,
+    hand-edited, UTF-16 BOM, invalid bytes) must not crash ``pubrun`` commands
+    or the host script. On a parse or decode error, log a warning and skip the
+    file (returning None) so the remaining config layers still resolve.
+    (IPD 20260705 EC-14.)
     """
     try:
         return tomllib.loads(path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as e:
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         logger.warning(f"pubrun: ignoring malformed config file {path}: {e}")
         return None
     except OSError as e:
@@ -112,7 +125,11 @@ def load_local_config(start_dir: Optional[Path] = None) -> Optional[Dict[str, An
         start_dir: Directory to search. Defaults to the current working directory.
     """
     if start_dir is None:
-        start_dir = Path.cwd()
+        try:
+            start_dir = Path.cwd()
+        except OSError as e:
+            logger.debug(f"pubrun: current working directory unavailable: {e}")
+            return None
 
     merged: Dict[str, Any] = {}
 
@@ -171,10 +188,11 @@ def _resolve_layers(overrides: Optional[Dict[str, Any]] = None):
         # as shorthand for start(core={"profile": "deep", "output_dir": "./x"}).
         # Deep copy so neither this flattening nor later merges mutate the caller's dicts.
         overrides = copy.deepcopy(overrides)
-        _CORE_SHORTCUTS = {"profile", "output_dir", "auto_start", "meta_ref"}
         flat_core = {k: overrides.pop(k) for k in list(overrides) if k in _CORE_SHORTCUTS}
         if flat_core:
-            overrides.setdefault("core", {}).update(flat_core)
+            core = dict(_section(overrides, "core"))
+            core.update(flat_core)
+            overrides["core"] = core
         layers.append(("api", overrides))
 
     return layers
@@ -249,7 +267,7 @@ def profile_deprecation_notice(config: Dict[str, Any]) -> Optional[Dict[str, str
 
     Returns None when `profile` is unset or set to the inert default ``"default"``.
     """
-    profile = config.get("core", {}).get("profile")
+    profile = _section(config, "core").get("profile")
     if not profile or profile == _INERT_PROFILE_DEFAULT:
         return None
     return {

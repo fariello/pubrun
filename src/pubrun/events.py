@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional, TextIO
 from pathlib import Path
 
 from pubrun.capture.signals import finalization_lock
+from pubrun.config import _section
+from pubrun.writer import _sanitize_json_value
 
 logger = logging.getLogger("pubrun")
 
@@ -35,7 +37,20 @@ class EventStream:
         self._config: Optional[Dict[str, Any]] = config
         self._write_failed: bool = False
         self._last_error: Optional[str] = None
-        self._max_events = config.get("events", {}).get("max_tracked_events", 1_000_000)
+        events_cfg = _section(config, "events")
+        raw_max_events = events_cfg.get("max_tracked_events", 1_000_000)
+        if (
+            isinstance(raw_max_events, int)
+            and not isinstance(raw_max_events, bool)
+            and raw_max_events >= 0
+        ):
+            self._max_events = raw_max_events
+        else:
+            logger.warning(
+                "pubrun: invalid events.max_tracked_events %r; falling back to 1000000",
+                raw_max_events,
+            )
+            self._max_events = 1_000_000
         # Secondary cap for critical events (annotations, phases) to prevent
         # unbounded disk writes from scripts calling annotate() in tight loops.
         # Minimum of 10,000 ensures critical events always have headroom even
@@ -45,7 +60,19 @@ class EventStream:
 
         # PERF-06: Buffer non-critical events to reduce flush() syscalls.
         # Critical events still get immediate flush for crash safety.
-        self._flush_interval = config.get("events", {}).get("flush_interval_events", 100)
+        raw_flush_interval = events_cfg.get("flush_interval_events", 100)
+        if (
+            isinstance(raw_flush_interval, int)
+            and not isinstance(raw_flush_interval, bool)
+            and raw_flush_interval >= 1
+        ):
+            self._flush_interval = raw_flush_interval
+        else:
+            logger.warning(
+                "pubrun: invalid events.flush_interval_events %r; falling back to 100",
+                raw_flush_interval,
+            )
+            self._flush_interval = 100
         self._buffer: List[str] = []
         self._file: Optional[TextIO] = None
 
@@ -90,7 +117,7 @@ class EventStream:
 
         # Serialize outside the lock for reduced contention (PERF-06).
         try:
-            line = json.dumps(record) + "\n"
+            line = json.dumps(_sanitize_json_value(record), allow_nan=False) + "\n"
         except (TypeError, ValueError, OverflowError) as ser_err:
             # BUG-05: Non-serializable payload -- log at warning so user knows.
             logger.warning(

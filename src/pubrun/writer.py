@@ -3,21 +3,74 @@ import hashlib
 import inspect
 import json
 import logging
+import math
 import os
 import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 
 from pubrun.capture.signals import finalization_lock
+from pubrun.config import _section
 
 logger = logging.getLogger("pubrun")
 
 _VALID_DURABILITY_POLICIES = frozenset({"fsync", "finalize", "atomic", "strict"})
 _DURABILITY_RANK = {"atomic": 0, "fsync": 1, "strict": 2}
-_warned_invalid_durability: set = set()
+_MAX_WARNED_INVALID_DURABILITY = 256
+_warned_invalid_durability: Set[str] = set()
 _durability_warn_lock = threading.Lock()
+
+
+def _sanitize_json_value(value: Any, _seen: Optional[Set[int]] = None) -> Any:
+    """Recursively sanitize non-finite floats to ``None`` for strict RFC 8259 JSON.
+
+    Replaces any ``float`` where ``not math.isfinite(value)`` (``NaN``, ``Inf``,
+    ``-Inf``) with ``None``. Traverses ``dict``, ``list``, and ``tuple`` while
+    tracking active container IDs so circular references raise
+    ``ValueError("Circular reference detected")`` instead of recursing until
+    ``RecursionError``. Returns all other objects untouched so callers preserve
+    their own type-handling policy (``EventStream.emit`` rejects unknown types
+    with ``TypeError``, while ``writer`` and ``report`` stringify them via
+    ``default=str``).
+    """
+    if isinstance(value, float):
+        return None if not math.isfinite(value) else value
+    if isinstance(value, dict):
+        obj_id = id(value)
+        seen = set() if _seen is None else _seen
+        if obj_id in seen:
+            raise ValueError("Circular reference detected")
+        seen.add(obj_id)
+        try:
+            return {
+                ("null" if isinstance(k, float) and not math.isfinite(k) else k): _sanitize_json_value(v, seen)
+                for k, v in value.items()
+            }
+        finally:
+            seen.discard(obj_id)
+    if isinstance(value, list):
+        obj_id = id(value)
+        seen = set() if _seen is None else _seen
+        if obj_id in seen:
+            raise ValueError("Circular reference detected")
+        seen.add(obj_id)
+        try:
+            return [_sanitize_json_value(item, seen) for item in value]
+        finally:
+            seen.discard(obj_id)
+    if isinstance(value, tuple):
+        obj_id = id(value)
+        seen = set() if _seen is None else _seen
+        if obj_id in seen:
+            raise ValueError("Circular reference detected")
+        seen.add(obj_id)
+        try:
+            return tuple(_sanitize_json_value(item, seen) for item in value)
+        finally:
+            seen.discard(obj_id)
+    return value
 
 
 def _resolve_durability(config: Any, *, stage: str) -> str:
@@ -26,19 +79,19 @@ def _resolve_durability(config: Any, *, stage: str) -> str:
     Maps ``[core].artifact_durability`` (default ``"fsync"``) and ``stage``
     (``"startup"``, ``"refresh"``, or ``"finalize"``) onto one of
     ``"atomic"``, ``"fsync"``, or ``"strict"``. Logs one bounded warning per
-    distinct invalid value and falls back safely to ``"fsync"``.
+    distinct invalid value (capped at 256 tracked values) and falls back safely
+    to ``"fsync"``.
     """
-    raw: Any = "fsync"
-    if isinstance(config, dict):
-        core = config.get("core")
-        if isinstance(core, dict):
-            raw = core.get("artifact_durability", "fsync")
+    raw: Any = _section(config, "core").get("artifact_durability", "fsync")
 
     if not isinstance(raw, str) or raw not in _VALID_DURABILITY_POLICIES:
         warn_key = raw if isinstance(raw, str) else repr(raw)
         should_warn = False
         with _durability_warn_lock:
-            if warn_key not in _warned_invalid_durability:
+            if (
+                warn_key not in _warned_invalid_durability
+                and len(_warned_invalid_durability) < _MAX_WARNED_INVALID_DURABILITY
+            ):
                 _warned_invalid_durability.add(warn_key)
                 should_warn = True
         if should_warn:
@@ -105,7 +158,13 @@ def _atomic_json_write(
             if pre_serialized is not None:
                 f.write(pre_serialized)
             else:
-                json.dump(data, f, indent=2, default=str)
+                json.dump(
+                    _sanitize_json_value(data),
+                    f,
+                    indent=2,
+                    default=str,
+                    allow_nan=False,
+                )
             f.flush()
             if durability in ("fsync", "strict"):
                 os.fsync(f.fileno())
@@ -158,7 +217,13 @@ def _invoke_atomic_json_write(
 
 def _serialize_config_and_digest(config: Any) -> Tuple[str, str]:
     """Serialize config deterministically with sorted keys and return (payload, sha256)."""
-    payload = json.dumps(config, indent=2, sort_keys=True, default=str)
+    payload = json.dumps(
+        _sanitize_json_value(config),
+        indent=2,
+        sort_keys=True,
+        default=str,
+        allow_nan=False,
+    )
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return payload, digest
 
@@ -207,6 +272,17 @@ class ArtifactWriter:
         """
         config_path = out_dir / "config.resolved.json"
         effective_durability = _resolve_durability(self.run.config, stage=stage)
+
+        if (
+            stage == "refresh"
+            and self._last_config_target == config_path
+            and self._last_config_digest is not None
+            and config_path.exists()
+            and _DURABILITY_RANK.get(self._last_config_durability or "", -1)
+            >= _DURABILITY_RANK[effective_durability]
+        ):
+            return False
+
         payload, digest = _serialize_config_and_digest(self.run.config)
 
         if (
@@ -274,6 +350,12 @@ class ArtifactWriter:
             # holding _write_lock (prevents AB-BA deadlock with pubrun-hw) and
             # _write_lock is never held across _hardware_future_done.wait(2.0).
             self.run._finalize_state()
+            try:
+                from pubrun.core import _close_print_log_handle
+
+                _close_print_log_handle(self.run)
+            except Exception:
+                pass
 
             with finalization_lock(self._write_lock, 2.0):
                 if self._artifacts_written and getattr(self.run, "_finalized", False):
@@ -323,7 +405,7 @@ class ArtifactWriter:
                     from pubrun.report.methods import generate_report
 
                     cfg = getattr(self.run, "config", None) or {}
-                    methods_format = cfg.get("methods", {}).get("format", "markdown")
+                    methods_format = _section(cfg, "methods").get("format", "markdown")
                     ext = "tex" if methods_format == "latex" else "md"
                     methods_path = out_dir / f"methods.{ext}"
                     with open(methods_path, "w", encoding="utf-8") as f:
