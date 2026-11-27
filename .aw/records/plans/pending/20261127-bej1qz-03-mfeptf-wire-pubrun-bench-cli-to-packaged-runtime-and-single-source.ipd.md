@@ -6,7 +6,7 @@
 - Scope: Update `src/pubrun/__main__.py` to resolve `pubrun._bench` first, use `pubrun._bench.default_results_dir()` for writable output outside a checkout, pass packaged submit script paths and `PUBRUN_RESULTS_DIR` for HPC submission, invoke `python -m pubrun._bench.harness` locally, replace `_load_share_safety` and `_verify_redacted` with direct `pubrun._bench.share_safety.check_share_safe_text` in `_share_check`, and update the `bench` CLI subparser help text.
 - Scope-Paths: src/pubrun/__main__.py
 - Item-Dependencies: executed:29nsim, executed:c1zz3x
-- Status: to-review
+- Status: approved
 - Short-Description: Update src/pubrun/__main__.py to use src/pubrun/_bench, write to a writable default output directory, and remove duplicated share-safety logic
 - Work-Kind: bug
 - Priority: high
@@ -17,11 +17,13 @@
 - Highest E allocated: 04
 - Author: Antigravity
 - Id: mfeptf
+- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 to-review (aw set): Authored review-ready child plan from backlog item bej1qz
 - 2026-11-27 draft (Antigravity): created.
 

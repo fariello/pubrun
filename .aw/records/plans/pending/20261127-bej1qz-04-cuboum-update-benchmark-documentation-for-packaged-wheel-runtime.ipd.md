@@ -6,7 +6,7 @@
 - Scope: Update `docs/cli.md`, `docs/performance.md`, `benchmarks/README.md`, `docs/hpc.md`, `docs/functional_spec.md`, and `README.md` so all user-facing and benchmark documentation accurately describes wheel-installed `pubrun bench` execution, writable default output directory selection, packaged HPC scripts, direct checkout shims, and single-source `share_safety` validation.
 - Scope-Paths: docs/cli.md, docs/performance.md, benchmarks/README.md, docs/hpc.md, docs/functional_spec.md, README.md
 - Item-Dependencies: executed:29nsim, executed:c1zz3x, executed:mfeptf
-- Status: to-review
+- Status: approved
 - Short-Description: Update docs/cli.md, docs/performance.md, benchmarks/README.md, docs/hpc.md, docs/functional_spec.md, and README.md to document packaged pubrun bench support
 - Work-Kind: bug
 - Priority: high
@@ -17,11 +17,13 @@
 - Highest E allocated: 04
 - Author: Antigravity
 - Id: cuboum
+- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 to-review (aw set): Authored review-ready child plan from backlog item bej1qz
 - 2026-11-27 draft (Antigravity): created.
 
