@@ -344,20 +344,60 @@ def _assess_cli_run(
 def _format_rerun_cmd_for_platform(rerun_cmd: str) -> str:
     """Apply platform-specific formatting for printed rerun commands."""
     if sys.platform == "win32" and " && python " in rerun_cmd:
-        import shlex
         import subprocess
+
+        def _split_preserving_backslashes(part: str) -> list:
+            # Parse whitespace-separated tokens honoring POSIX single quotes
+            # (including '\'' escaped apostrophes) and double quotes without
+            # consuming Windows path backslashes.
+            tokens: list = []
+            buf: list = []
+            in_tok = False
+            i = 0
+            n = len(part)
+            while i < n:
+                ch = part[i]
+                if ch.isspace():
+                    if in_tok:
+                        tokens.append("".join(buf))
+                        buf.clear()
+                        in_tok = False
+                    i += 1
+                elif ch == "'":
+                    in_tok = True
+                    end = part.find("'", i + 1)
+                    if end == -1:
+                        buf.append(part[i + 1 :])
+                        break
+                    buf.append(part[i + 1 : end])
+                    i = end + 1
+                elif ch == "\\" and i + 1 < n and part[i + 1] == "'":
+                    in_tok = True
+                    buf.append("'")
+                    i += 2
+                elif ch == '"':
+                    in_tok = True
+                    end = part.find('"', i + 1)
+                    if end == -1:
+                        buf.append(part[i + 1 :])
+                        break
+                    buf.append(part[i + 1 : end])
+                    i = end + 1
+                else:
+                    in_tok = True
+                    buf.append(ch)
+                    i += 1
+            if in_tok:
+                tokens.append("".join(buf))
+            return tokens
+
+        def _to_win_line(part: str) -> str:
+            if "'" not in part:
+                return part
+            return subprocess.list2cmdline(_split_preserving_backslashes(part))
+
         cd_part, py_part = rerun_cmd.split(" && ", 1)
-        try:
-            cd_tokens = shlex.split(cd_part, posix=True)
-            py_tokens = shlex.split(py_part, posix=True)
-            if len(cd_tokens) == 2 and cd_tokens[0] == "cd":
-                cd_line = f"cd /d {subprocess.list2cmdline([cd_tokens[1]])}"
-            else:
-                cd_line = subprocess.list2cmdline(cd_tokens)
-            py_line = subprocess.list2cmdline(py_tokens)
-            return f"{cd_line}\n{py_line}"
-        except ValueError:
-            return rerun_cmd.replace(" && python ", "\npython ")
+        return f"{_to_win_line(cd_part)}\n{_to_win_line(py_part)}"
     return rerun_cmd
 
 

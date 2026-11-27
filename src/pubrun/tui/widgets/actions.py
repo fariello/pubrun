@@ -180,7 +180,7 @@ class ActionsPanel(Vertical):
             if sys.platform == "win32":
                 py_cmd = subprocess.list2cmdline(cmd_tokens)
                 rerun_cmd = (
-                    f"cd /d {subprocess.list2cmdline([cwd])} && {py_cmd}"
+                    f"cd {subprocess.list2cmdline([cwd])} && {py_cmd}"
                     if cwd
                     else py_cmd
                 )

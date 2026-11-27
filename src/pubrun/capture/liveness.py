@@ -464,8 +464,14 @@ def _get_win_kernel32() -> Any:
     import ctypes
     import ctypes.wintypes
 
-    if hasattr(ctypes, "WinDLL"):
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    windll_obj = getattr(ctypes, "windll", None)
+    windll_k32 = getattr(windll_obj, "kernel32", None)
+    win_dll_cls = getattr(ctypes, "WinDLL", None)
+    # Honor monkeypatched fake kernel32 objects in unit tests (on both Linux and
+    # Windows), while using a private WinDLL with explicit argtypes/restype in
+    # real Windows execution.
+    if win_dll_cls is not None and isinstance(windll_k32, win_dll_cls):
+        kernel32 = win_dll_cls("kernel32", use_last_error=True)
         kernel32.OpenProcess.argtypes = [
             ctypes.wintypes.DWORD,
             ctypes.wintypes.BOOL,

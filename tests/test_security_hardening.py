@@ -87,15 +87,20 @@ def test_meta_ref_allowed_dirs_fails_closed_on_string_and_empty_entries(
 
 
 def test_windows_rerun_cmd_formatting_uses_proper_quoting(monkeypatch) -> None:
-    """Windows rerun command formatting must handle apostrophes and spaces safely."""
+    """Windows rerun command formatting must handle apostrophes, spaces, and backslashes safely."""
     monkeypatch.setattr(sys, "platform", "win32")
     cmd = "cd '/tmp/it'\\''s a dir' && python train.py --msg 'hello world'"
     formatted = _format_rerun_cmd_for_platform(cmd)
     assert "\n" in formatted
     cd_line, py_line = formatted.split("\n", 1)
-    assert cd_line.startswith("cd /d ")
+    assert cd_line.startswith("cd ")
     assert "it's a dir" in cd_line
     assert '"hello world"' in py_line
+
+    # Unquoted Windows backslash paths must keep all backslashes intact
+    win_cmd = r"cd C:\work\project\runs && python C:\work\project\train.py --epochs 3"
+    win_fmt = _format_rerun_cmd_for_platform(win_cmd)
+    assert win_fmt == r"cd C:\work\project\runs" + "\n" + r"python C:\work\project\train.py --epochs 3"
 
 
 def test_share_safety_catches_sys_path_filesystem_and_forward_slash_windows() -> None:
