@@ -6,7 +6,7 @@
 - Scope: Harden and polish `src/pubrun/tui/app.py`, `src/pubrun/tui/css/style.css`, and `src/pubrun/tui/widgets/{actions,config,details,diff,resources,sidebar,viewer}.py`, with Textual pilot and unit tests in `tests/test_tui.py`, `tests/test_tui_bugs.py`, and `tests/test_tui_widgets.py`.
 - Scope-Paths: src/pubrun/tui/app.py, src/pubrun/tui/css/style.css, src/pubrun/tui/widgets/actions.py, src/pubrun/tui/widgets/config.py, src/pubrun/tui/widgets/details.py, src/pubrun/tui/widgets/diff.py, src/pubrun/tui/widgets/resources.py, src/pubrun/tui/widgets/sidebar.py, src/pubrun/tui/widgets/viewer.py, tests/test_tui.py, tests/test_tui_bugs.py, tests/test_tui_widgets.py
 - Item-Dependencies: executed:m5s3g8, executed:caeqdz
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Add bulk-prune confirmation and safe single-run delete guards, hydrate meta_ref across views, eliminate per-keystroke disk scans and full-log reads, fix Wrap/ConfigPanel/DiffView/layout
@@ -17,11 +17,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: 3q5rd5
+- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-27 /assess-all (Antigravity): created Child 09 of Set `assess-8l` covering TUI deletion safety, `meta_ref` hydration, memory/responsiveness, `ConfigPanel`, `LogViewer`, `DiffView`, and 80x24 layout (`ROLL-06`, `ROLL-19`).
 

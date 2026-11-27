@@ -6,7 +6,7 @@
 - Scope: Optimize `src/pubrun/__init__.py`, `src/pubrun/core.py`, `src/pubrun/tracker.py`, and `src/pubrun/capture/packages.py` to defer `__version__`, `pubrun.tracker`, capture-engine, and `_markers` imports cleanly without breaking monkeypatch seams or `tests/test_report_subpackage_integrity.py`; fix Python Enhancement Proposal 561 (PEP 561) exports, `__dir__`, and `__commit__` parity across `src/pubrun/{auto,full,noauto,nopatch,noconsole,minimal}.py`; fix `src/pubrun/nopatch.py` and `src/pubrun/__init__.py` docstrings plus `_resolve_checkout_commit` pipe cleanup; and add behavioral regression tests in `tests/test_import_modes.py`, `tests/test_commit_identity.py`, and `tests/test_package_resolution.py`.
 - Scope-Paths: src/pubrun/__init__.py, src/pubrun/core.py, src/pubrun/tracker.py, src/pubrun/capture/packages.py, src/pubrun/auto.py, src/pubrun/full.py, src/pubrun/noauto.py, src/pubrun/nopatch.py, src/pubrun/noconsole.py, src/pubrun/minimal.py, tests/test_import_modes.py, tests/test_commit_identity.py, tests/test_package_resolution.py
 - Item-Dependencies: executed:1o1cua, executed:76z7ww, executed:l596kn
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Defer __version__/tracker/capture imports, eliminate 3x METADATA reads and eager direct_url/RECORD overhead in packages.py, fix PEP 561 mode parity, and close git pipes
@@ -17,11 +17,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: p4ueaj
+- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-27 /assess-all (Antigravity): created Child 04 of Set `assess-8l` covering cold-start import latency, package-capture I/O reduction, PEP 561 mode parity, and `_resolve_checkout_commit` pipe cleanup (`ROLL-10`, `ROLL-11`, `ROLL-12`, `COMP-15`, `MEM-6`).
 

@@ -6,7 +6,7 @@
 - Scope: Harden `src/pubrun/capture/hardware.py`, `src/pubrun/capture/liveness.py`, `src/pubrun/capture/invocation.py`, `src/pubrun/capture/environment.py`, `src/pubrun/capture/git.py`, `src/pubrun/capture/filesystem.py`, `src/pubrun/capture/redaction.py`, and `src/pubrun/capture/system_metrics.py`; sync `docs/configuration.md` and `docs/manifest.md`; and update and add cross-platform regression tests in `tests/test_hardware.py`, `tests/test_capture_engines.py`, `tests/test_invocation.py`, `tests/test_capture_engine_bugs.py`, and `tests/test_config_capture_modes.py`.
 - Scope-Paths: src/pubrun/capture/hardware.py, src/pubrun/capture/liveness.py, src/pubrun/capture/invocation.py, src/pubrun/capture/environment.py, src/pubrun/capture/git.py, src/pubrun/capture/filesystem.py, src/pubrun/capture/redaction.py, src/pubrun/capture/system_metrics.py, docs/configuration.md, docs/manifest.md, tests/test_hardware.py, tests/test_capture_engines.py, tests/test_invocation.py, tests/test_capture_engine_bugs.py, tests/test_config_capture_modes.py
 - Item-Dependencies: executed:l596kn
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Replace removed Windows wmic probes, add ARM64 CPU and ROCm GPU capture, fix macOS locale/VRAM, Jupyter/module invocation, Windows env allowlist, UTF-8 git, and iterative redaction
@@ -17,11 +17,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: ameehy
+- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-27 /assess-all (Antigravity): created Child 05 of Set `assess-8l` covering cross-platform capture, hardware, liveness, invocation, environment, git, filesystem, and redaction compatibility (`ROLL-13`, `ROLL-16`, `ROLL-31`, `ROLL-34`).
 
