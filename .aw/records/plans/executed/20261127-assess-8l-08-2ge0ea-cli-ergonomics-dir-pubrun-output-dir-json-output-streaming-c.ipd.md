@@ -6,7 +6,7 @@
 - Scope: Update `src/pubrun/__main__.py`, `src/pubrun/config.py`, `src/pubrun/resources/default.toml`, `src/pubrun/report/reproducibility.py`, `src/pubrun/_bench/harness.py`, and `src/pubrun/capture/python_runtime.py`, with updated and new regression tests in `tests/test_cli.py`, `tests/test_cli_negative_paths.py`, and `tests/test_bench_command.py`.
 - Scope-Paths: src/pubrun/__main__.py, src/pubrun/config.py, src/pubrun/resources/default.toml, src/pubrun/report/reproducibility.py, src/pubrun/_bench/harness.py, src/pubrun/capture/python_runtime.py, tests/test_cli.py, tests/test_cli_negative_paths.py, tests/test_bench_command.py
 - Item-Dependencies: executed:1o1cua, executed:l596kn, executed:m5s3g8, executed:caeqdz
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Add consistent --dir and PUBRUN_OUTPUT_DIR, status/diff --json, streaming heapq combined logs, honest help/errors/bench tips, methods config format, and schema-version warnings
@@ -17,12 +17,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: 2ge0ea
-- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 2ge0ea verified (set assess-8l, attempt 1).
 - 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-27 /assess-all (Antigravity): created Child 08 of Set `assess-8l` covering CLI `--dir`/`PUBRUN_OUTPUT_DIR`, `--json`, streaming `combined`, self-documenting help, `default.toml` sync, and `reproducibility.py` compatibility (`ROLL-17`, `ROLL-18`, `ROLL-20`, `ROLL-21`, `ROLL-22`, `ROLL-23`, `ROLL-24`, `ROLL-25`, `ROLL-34`, `ROLL-35`).
