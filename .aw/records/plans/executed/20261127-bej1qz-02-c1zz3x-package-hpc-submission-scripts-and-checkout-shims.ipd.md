@@ -6,7 +6,7 @@
 - Scope: Create `src/pubrun/_bench/scripts/` (`__init__.py`, `run_bench.sbatch`, `submit_bench.sh`, `submit_bench_pbs.sh`, `submit_bench_lsf.sh`, `submit_bench_sge.sh`) invoking `python -m pubrun._bench.harness` with an explicit writable `PUBRUN_RESULTS_DIR`, and replace the five `benchmarks/` copies with checkout shims that preserve direct source-checkout invocation.
 - Scope-Paths: src/pubrun/_bench/scripts, benchmarks/run_bench.sbatch, benchmarks/submit_bench.sh, benchmarks/submit_bench_pbs.sh, benchmarks/submit_bench_lsf.sh, benchmarks/submit_bench_sge.sh
 - Item-Dependencies: executed:29nsim
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Package Slurm, PBS, LSF, and SGE benchmark submission scripts under src/pubrun/_bench/scripts and keep benchmarks/ shims working
@@ -19,12 +19,12 @@
 - Highest E allocated: 04
 - Author: Antigravity
 - Id: c1zz3x
-- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: c1zz3x verified (set bej1qz, attempt 1).
 - 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005; review record `.aw/records/reviews/20261127-bej1qz-02-c1zz3x-package-hpc-submission-scripts-and-checkout-shims.review.md`.
 - 2026-11-27 to-review (aw set): demoted approved -> to-review: APPROVAL WITHDRAWN: Demote to to-review so /plan-review writes Readiness attestations before execution
