@@ -1376,29 +1376,81 @@ _BENCH_SUBMIT_URL = (
     "https://github.com/fariello/pubrun/issues/new?template=benchmark-result.yml")
 
 
-def _find_bench_harness():
-    """Locate benchmarks/harness.py in a source checkout.
+def _find_bench_harness() -> Optional[Path]:
+    """Locate the benchmark harness module file.
 
-    The benchmark tooling is NOT packaged into the wheel (it is dev/reproducibility
-    tooling, kept out of every user install for zero-footprint). So `pubrun bench` requires
-    a source checkout. Returns the Path or None.
+    Resolves the packaged ``pubrun._bench.harness`` module first so ``pubrun bench``
+    works from a wheel installation without a source checkout. Falls back to
+    ``benchmarks/harness.py`` inside a verified source checkout or the current
+    working directory if the packaged module file is unavailable. Returns the
+    resolved ``Path`` or ``None``.
     """
-    candidates = []
-    # 1) alongside the installed package's repo (…/src/pubrun/__main__.py -> repo root)
     try:
-        here = Path(__file__).resolve()
-        # src/pubrun/__main__.py -> parents[2] == repo root
-        candidates.append(here.parents[2] / "benchmarks" / "harness.py")
+        import importlib.util as _ilu
+        spec = _ilu.find_spec("pubrun._bench.harness")
+        if spec is not None and spec.origin is not None and spec.origin != "built-in":
+            packaged = Path(spec.origin).resolve()
+            if packaged.is_file():
+                return packaged
     except Exception:
         pass
-    # 2) cwd (running from a checkout)
+
+    candidates: List[Path] = []
+    try:
+        from pubrun._bench import find_checkout_root
+        checkout_root = find_checkout_root()
+        if checkout_root is not None:
+            candidates.append(checkout_root / "benchmarks" / "harness.py")
+    except Exception:
+        pass
     candidates.append(Path.cwd() / "benchmarks" / "harness.py")
     for c in candidates:
         try:
             if c.is_file():
-                return c
+                return c.resolve()
         except Exception:
             continue
+    return None
+
+
+def _is_packaged_bench_harness(harness: Path) -> bool:
+    """Return True when *harness* is the packaged ``pubrun._bench.harness`` module."""
+    if harness.parent.name == "_bench" and harness.parent.parent.name == "pubrun":
+        return True
+    try:
+        import importlib.util as _ilu
+        spec = _ilu.find_spec("pubrun._bench.harness")
+        if spec is not None and spec.origin is not None and spec.origin != "built-in":
+            return harness.resolve() == Path(spec.origin).resolve()
+    except Exception:
+        pass
+    return False
+
+
+def _find_bench_submit_script(script_name: str) -> Optional[Path]:
+    """Locate a high-performance computing (HPC) benchmark submission script.
+
+    Checks the packaged ``pubrun._bench.scripts`` directory first, falling back
+    to ``<checkout_root>/benchmarks/<script_name>`` when running inside a
+    verified source checkout. Returns the script ``Path`` or ``None``.
+    """
+    try:
+        from pubrun._bench import get_submit_script_path
+        packaged = get_submit_script_path(script_name)
+        if packaged.is_file():
+            return packaged
+    except Exception:
+        pass
+
+    try:
+        from pubrun._bench import find_checkout_root
+        checkout_root = find_checkout_root()
+        if checkout_root is not None:
+            checkout_script = checkout_root / "benchmarks" / script_name
+            if checkout_script.is_file():
+                return checkout_script
+    except Exception:
+        pass
     return None
 
 
@@ -1475,119 +1527,25 @@ def _qsub_ambiguous() -> bool:
 
 _DEFAULT_BENCH_REPO = "fariello/pubrun"
 
-# Sensitive keys that a properly-redacted benchmark result must NOT expose as raw strings.
-# Kept in sync with benchmarks/harness.py `_REDACT_KEYS`/`_REDACT_LIST_KEYS`. Duplicated here
-# (not imported) because the benchmark tooling is NOT packaged in the wheel, so the CLI cannot
-# import from benchmarks/.
-_BENCH_SENSITIVE_KEYS = {
-    "hostname", "username", "executable", "prefix", "base_prefix", "virtual_env",
-    "python_executable", "path", "mount_point", "run_dir", "output_base_dir",
-    "results_dir", "pubrun_install", "tmpdir",
-}
-_BENCH_SENSITIVE_LIST_KEYS = {"sys_path", "source_files"}
 # A safe charset for an OWNER/NAME GitHub repo slug (blocks shell metacharacters / injection).
 _GH_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
-def _pii_needles() -> list:
-    """Home-dir prefix + OS username: the substrings a redacted file must never contain."""
-    needles = []
+def _share_check(redacted_path) -> Tuple[bool, List[str]]:
+    """Run the packaged structural share-safety validator on a redacted result file.
+
+    Returns ``(passed, reasons)`` by delegating directly to
+    ``pubrun._bench.share_safety.check_share_safe_text`` so the local command-line
+    interface (CLI) and server-side intake workflow enforce the same rules. Never
+    echoes a potential leak: reasons name fields rather than values.
+    """
+    from pubrun._bench.share_safety import check_share_safe_text
+
     try:
-        home = os.path.expanduser("~")
-        if home and home != "~":
-            needles.append(home)
-    except Exception:
-        pass
-    try:
-        import getpass
-        needles.append(getpass.getuser())
-    except Exception:
-        pass
-    return sorted({n for n in needles if n}, key=len, reverse=True)
-
-
-def _scan_for_pii(obj, needles) -> Optional[str]:
-    """Return the first offending substring found anywhere in the structure, else None."""
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            if k in _BENCH_SENSITIVE_LIST_KEYS and isinstance(v, list):
-                for item in v:
-                    if isinstance(item, str) and item and item != "<redacted>":
-                        return f"{k}[]={item!r}"
-            elif k in _BENCH_SENSITIVE_KEYS and isinstance(v, str) and v and v != "<redacted>":
-                return f"{k}={v!r}"
-            hit = _scan_for_pii(v, needles)
-            if hit:
-                return hit
-    elif isinstance(obj, list):
-        for item in obj:
-            hit = _scan_for_pii(item, needles)
-            if hit:
-                return hit
-    elif isinstance(obj, str):
-        for n in needles:
-            if n and n in obj:
-                return f"contains {n!r}"
-    return None
-
-
-def _verify_redacted(path) -> tuple:
-    """Return (ok, detail). ok=True iff the file parses as JSON and looks redacted:
-    no enumerated sensitive key holds a raw value and no home-dir/username substring leaks.
-    This gates EVERY transmit path (the never-publish-PII invariant)."""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError) as e:
-        return (False, f"could not read/parse {path} as JSON: {e}")
-    hit = _scan_for_pii(data, _pii_needles())
-    if hit:
-        return (False, f"file does not look redacted ({hit})")
-    return (True, "")
-
-
-def _load_share_safety():
-    """Import benchmarks/share_safety.py (the shared structural is-it-redacted validator).
-
-    That module lives under benchmarks/ (dev/reproducibility tooling), which is NOT packaged
-    into the wheel, so it cannot be imported normally from the installed package. Load it by
-    path from the source checkout, next to harness.py. Returns the module, or None if this is
-    not a checkout (the caller then falls back to the local key/needle verifier)."""
-    harness = _find_bench_harness()
-    if harness is None:
-        return None
-    ss = harness.parent / "share_safety.py"
-    if not ss.is_file():
-        return None
-    try:
-        import importlib.util as _ilu
-        spec = _ilu.spec_from_file_location("_pubrun_share_safety", ss)
-        if spec is None or spec.loader is None:
-            return None
-        mod = _ilu.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod
-    except Exception:
-        return None
-
-
-def _share_check(redacted_path):
-    """Run the shared structural share-safety check on a redacted result file.
-
-    Returns (passed, reasons). Prefers the shared benchmarks/share_safety.py validator (the
-    same rules the server-side Action enforces, so local and server agree). Falls back to the
-    local key/needle verifier (`_verify_redacted`) when the shared module is unavailable (e.g.
-    a non-checkout install). Never echoes a potential leak: reasons name fields, not values."""
-    ss = _load_share_safety()
-    if ss is not None:
-        try:
-            text = Path(redacted_path).read_text(encoding="utf-8")
-        except OSError as e:
-            return (False, [f"could not read {redacted_path}: {e}"])
-        return ss.check_share_safe_text(text)
-    # Fallback: the local verifier (returns a single reason string).
-    ok, detail = _verify_redacted(redacted_path)
-    return (ok, [] if ok else [detail])
+        text = Path(redacted_path).read_text(encoding="utf-8")
+    except OSError as e:
+        return (False, [f"could not read {redacted_path}: {e}"])
+    return check_share_safe_text(text)
 
 
 def _print_safe_file_block(unredacted_path, redacted_path) -> None:
@@ -2071,15 +2029,19 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
                submit_file=None, gh_repo=None, prepare_submission=False,
                no_submit=False, scheduler="auto", rigorous=False,
                no_baseline=False, contribute=None, wait_timeout=None) -> None:
-    """Friendly front-end over benchmarks/harness.py with optional HPC scheduler submission
-    (Slurm/PBS/LSF/SGE) and one-command GitHub contribution.
+    """Friendly front-end over ``pubrun._bench.harness`` with optional HPC scheduler
+    submission (Slurm/PBS/LSF/SGE) and one-command GitHub contribution.
 
-    By default only the redacted, share-safe file is written; `--unredacted` also writes the
-    identifying copy for local debugging. After a run pubrun prints the safe-file block and, on
-    an interactive terminal, OFFERS to contribute the redacted result to GitHub (gist-and-link,
-    inline fallback, browser fallback); `--contribute`/`--no-contribute` pre-decide, and
-    `--prepare-submission` stages a clean folder for a manual browser attach. `--submit`/`--yes`
-    govern HPC scheduler JOB submission only (NOT GitHub publication)."""
+    Works from a wheel installation without a source checkout, writing results by default
+    to ``./pubrun-bench-results/`` outside a verified checkout, ``benchmarks/results/``
+    inside one, or ``PUBRUN_RESULTS_DIR`` when set. By default only the redacted,
+    share-safe file is written; ``--unredacted`` also writes the identifying copy for
+    local debugging. After a run pubrun prints the safe-file block and, on an interactive
+    terminal, offers to contribute the redacted result to GitHub (gist-and-link, inline
+    fallback, browser fallback); ``--contribute``/``--no-contribute`` pre-decide, and
+    ``--prepare-submission`` stages a clean folder for a manual browser attach.
+    ``--submit``/``--yes`` govern HPC scheduler job submission only (not GitHub
+    publication)."""
     repo = gh_repo or _DEFAULT_BENCH_REPO
     if not _GH_REPO_RE.match(repo):
         _print_error(f"Invalid --gh-repo {repo!r}; expected OWNER/NAME.")
@@ -2108,12 +2070,12 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
     harness = _find_bench_harness()
     if harness is None:
         _print_error(
-            "Could not find benchmarks/harness.py. `pubrun bench` needs a source checkout "
-            "(the benchmark tooling is not shipped in the pip package). Clone the repo:\n"
-            "  git clone https://github.com/fariello/pubrun && cd pubrun\n"
-            "  python -m pubrun bench")
+            "Could not find the benchmark runtime (`pubrun._bench.harness`). "
+            "Reinstall pubrun (`pip install --force-reinstall pubrun`) or run from "
+            "a verified pubrun source checkout.")
         sys.exit(1)
-    repo_root = harness.parents[1]
+
+    from pubrun._bench import default_results_dir, find_checkout_root
 
     # --- HPC scheduler submission path (Slurm/PBS/LSF/SGE) ---
     # Pick the scheduler: an explicit --scheduler wins; else auto-detect (Slurm first).
@@ -2148,9 +2110,9 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
     want_submit = (submit or (not local and chosen is not None and not chosen.get("on_compute_node"))) \
         and scheduler != "local"
     if want_submit and chosen is not None:
-        submit_script = repo_root / "benchmarks" / chosen["submit_script"]
-        if not submit_script.is_file():
-            _print_error(f"{chosen['name']} detected but {submit_script} is missing; "
+        submit_script = _find_bench_submit_script(chosen["submit_script"])
+        if submit_script is None:
+            _print_error(f"{chosen['name']} detected but {chosen['submit_script']} is missing; "
                          f"re-run with --local.")
             sys.exit(1)
         # Build the exact command; pass args as discrete argv (never shell=True) so
@@ -2184,22 +2146,27 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
         import hashlib as _hashlib
         import platform as _pf
         from datetime import datetime, timezone
+        results_dir = default_results_dir()
+        results_dir.mkdir(parents=True, exist_ok=True)
+        resolved_results_dir = results_dir.resolve()
+        checkout_root = find_checkout_root()
         env = dict(os.environ)
-        env.setdefault("PUBRUN_REPO", str(repo_root))
-        env.setdefault("PUBRUN_PY", sys.executable)
+        if checkout_root is not None:
+            env.setdefault("PUBRUN_REPO", str(checkout_root))
+        env["PUBRUN_RESULTS_DIR"] = str(resolved_results_dir)
+        if not env.get("PUBRUN_PY"):
+            env["PUBRUN_PY"] = sys.executable
+        if unredacted:
+            env["PUBRUN_UNREDACTED"] = "1"
 
         # For Slurm submit-and-wait, pass a DETERMINISTIC redacted-out path (on the shared FS)
         # so this login-node process can find and contribute the result after the job finishes.
         redacted_target = None
         if is_slurm:
-            results_dir = repo_root / "benchmarks" / "results"
-            results_dir.mkdir(parents=True, exist_ok=True)
             _tok = _hashlib.sha256((_pf.node() or "unknown").encode("utf-8", "replace")).hexdigest()[:8]
             _ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            redacted_target = results_dir / f"pubrun-bench-{_tok}-{_ts}.redacted.json"
+            redacted_target = resolved_results_dir / f"pubrun-bench-{_tok}-{_ts}.redacted.json"
             env["PUBRUN_REDACTED_OUT"] = str(redacted_target)
-            if unredacted:
-                env["PUBRUN_UNREDACTED"] = "1"
         try:
             proc = _sp.run(cmd, env=env, check=False,
                            capture_output=is_slurm, text=True)  # argv list; no shell
@@ -2210,7 +2177,7 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
             if proc.returncode != 0:
                 _print_error(f"{label} submission failed (exit {proc.returncode}).")
                 sys.exit(proc.returncode if isinstance(proc.returncode, int) and proc.returncode > 0 else 1)
-            print("Submitted. Results will be written under benchmarks/results/ on the compute node.", file=sys.stderr)
+            print(f"Submitted. Results will be written under {results_dir} on the compute node.", file=sys.stderr)
             return
         if proc.returncode != 0:
             _print_error(f"Slurm submission failed: {(proc.stderr or proc.stdout or '').strip()[:200]}")
@@ -2236,8 +2203,7 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
 
     # --- Local path ---
     import subprocess as _sp
-    import tempfile as _tf
-    results_dir = repo_root / "benchmarks" / "results"
+    results_dir = default_results_dir()
     results_dir.mkdir(parents=True, exist_ok=True)
     import platform as _pf
     import hashlib as _hashlib
@@ -2250,7 +2216,10 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
     _host_token = _hashlib.sha256((_pf.node() or "unknown").encode("utf-8", "replace")).hexdigest()[:8]
     redacted_target = results_dir / f"pubrun-bench-{_host_token}-{ts}.redacted.json"
     out_path = results_dir / f"{host}-{ts}.unredacted.json" if unredacted else None
-    argv = [sys.executable, str(harness), "--redacted-out", str(redacted_target)]
+    if _is_packaged_bench_harness(harness):
+        argv = [sys.executable, "-m", "pubrun._bench.harness", "--redacted-out", str(redacted_target)]
+    else:
+        argv = [sys.executable, str(harness), "--redacted-out", str(redacted_target)]
     if unredacted:
         argv += ["--out", str(out_path)]
     if quick:
@@ -2959,14 +2928,17 @@ def main(argv: Optional[List[str]] = None) -> None:
     bench_parser = subparsers.add_parser(
         "bench",
         help="Run the pubrun overhead benchmark suite (auto-detects Slurm on HPC).",
-        description="Friendly front-end over the benchmark harness. Runs locally by "
-                    "default; on an HPC login node with Slurm it OFFERS to submit the JOB "
-                    "to a compute node (never submits without confirmation). Writes only a "
-                    "redacted, share-safe file by default (`--unredacted` also keeps the "
-                    "identifying copy), runs a share-safety check, and offers to contribute "
-                    "the redacted result to GitHub (via `gh` gist/inline, or browser Issue "
-                    "Form fallback). Requires a source checkout (the benchmark tooling is "
-                    "not shipped in the pip package).",
+        description="Run the pubrun overhead benchmark suite directly from a wheel "
+                    "installation or a source checkout. Runs locally by default; on a "
+                    "high-performance computing (HPC) login node with a supported "
+                    "scheduler it offers to submit the job to a compute node (never "
+                    "submits without confirmation). Writes results by default to "
+                    "./pubrun-bench-results/ outside a source checkout, "
+                    "benchmarks/results/ inside one, or PUBRUN_RESULTS_DIR when set. "
+                    "Writes only a redacted, share-safe file by default (`--unredacted` "
+                    "also keeps the identifying copy), runs a share-safety check, and "
+                    "offers to contribute the redacted result to GitHub (via `gh` "
+                    "gist/inline, or browser Issue Form fallback).",
         epilog=f"Examples:\n  {prog_name} bench --quick\n  {prog_name} bench --local --passes 3\n"
                f"  {prog_name} bench --prepare-submission\n"
                f"  {prog_name} bench --submit-file runs.redacted.json",

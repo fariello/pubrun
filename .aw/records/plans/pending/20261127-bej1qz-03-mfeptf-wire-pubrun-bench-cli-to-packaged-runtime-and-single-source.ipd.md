@@ -57,17 +57,17 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Remove duplicated share-safety verifier and migrate verifier unit tests
 
-- [ ] E-01 Replace `_load_share_safety` and `_verify_redacted` in `src/pubrun/__main__.py` with direct packaged `share_safety` validation, and update `TestSubmissionVerifier` in `tests/test_bench_command.py`:
+- [x] E-01 Replace `_load_share_safety` and `_verify_redacted` in `src/pubrun/__main__.py` with direct packaged `share_safety` validation, and update `TestSubmissionVerifier` in `tests/test_bench_command.py`:
   - Delete `_BENCH_SENSITIVE_KEYS`, `_BENCH_SENSITIVE_LIST_KEYS`, `_pii_needles`, `_scan_for_pii`, `_verify_redacted`, and `_load_share_safety` from `src/pubrun/__main__.py`.
   - Update `_share_check(redacted_path)` to import `check_share_safe_text` directly from `pubrun._bench.share_safety`, read `Path(redacted_path).read_text(encoding="utf-8")` (returning `(False, [f"could not read {redacted_path}: {e}"])` on `OSError`), and return `check_share_safe_text(text)`.
   - Update `TestSubmissionVerifier` in `tests/test_bench_command.py` (which currently calls the deleted `_verify_redacted`) to test `pubrun.__main__::_share_check` directly (verifying `_load_share_safety`, `_verify_redacted`, and `_scan_for_pii` are absent, and that `_share_check` passes a redacted `pubrun-benchmark/5` file and rejects an unredacted `machine.host.hostname` without echoing the leaked value, an embedded home path, and invalid JSON), keeping `pytest tests/test_bench_command.py` green before Order 05 (`1r585o`) adds the remaining new test classes.
   - Depends on: none
   - Expected outcome: `src/pubrun/__main__.py` has zero duplicated personally identifiable information (PII) key lists or fallback verifier functions, `_share_check` delegates exclusively to `pubrun._bench.share_safety.check_share_safe_text`, and `tests/test_bench_command.py::TestSubmissionVerifier` passes.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Resolve packaged runtime, writable output directory, and HPC scripts
 
-- [ ] E-02 Update harness, submit-script, and output-directory resolution in `src/pubrun/__main__.py`:
+- [x] E-02 Update harness, submit-script, and output-directory resolution in `src/pubrun/__main__.py`:
   - Update `_find_bench_harness()` (and its docstring) to resolve the packaged `pubrun._bench.harness` module file first (via `importlib.util.find_spec("pubrun._bench.harness")`, checking `spec is not None and spec.origin is not None and spec.origin != "built-in"` and `Path(spec.origin).resolve().is_file()`), falling back to a verified source checkout's `benchmarks/harness.py` (via `pubrun._bench.find_checkout_root()` or `Path.cwd() / "benchmarks" / "harness.py"`) only if the packaged file is unavailable.
   - Add helper `_find_bench_submit_script(script_name: str) -> Optional[Path]` that resolves `pubrun._bench.get_submit_script_path(script_name)` first (checking `.is_file()`), falling back to `<checkout_root>/benchmarks/<script_name>` when `find_checkout_root()` returns a path.
   - Remove the stale `repo_root = harness.parents[1]` derivation and unused `import tempfile as _tf` inside `_run_bench`, update `_run_bench`'s docstring, and use `pubrun._bench.default_results_dir()` and `pubrun._bench.find_checkout_root()` so:
@@ -77,21 +77,21 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - For local runs: create `results_dir.mkdir(parents=True, exist_ok=True)`, detect whether `harness` is the packaged module using cross-platform `Path` checks (`harness.parent.name == "_bench" and harness.parent.parent.name == "pubrun"` or matching the packaged spec origin, never forward-slash string matching), and invoke `[sys.executable, "-m", "pubrun._bench.harness", "--redacted-out", str(redacted_target), ...]` (falling back to `[sys.executable, str(harness), ...]` only if `harness` is outside `pubrun._bench`). Ensure the written redacted path continues to be printed in normal, `--no-submit`, and `--json` modes.
   - Depends on: E-01
   - Expected outcome: `_run_bench` works locally and on HPC without any source checkout and always writes to a writable results directory.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Update CLI subparser help text
 
-- [ ] E-03 Update the `bench` subparser description in `src/pubrun/__main__.py::main`:
+- [x] E-03 Update the `bench` subparser description in `src/pubrun/__main__.py::main`:
   - Remove the stale sentence `"Requires a source checkout (the benchmark tooling is not shipped in the pip package)."` from `bench_parser`'s `description`.
   - State clearly (using no em or en dashes in user-facing help prose) that `pubrun bench` runs out of the box from a wheel install, writing results by default to `./pubrun-bench-results/` outside a source checkout, `benchmarks/results/` inside one, or `PUBRUN_RESULTS_DIR` when set.
   - Keep all existing CLI flags and examples intact.
   - Depends on: E-02
   - Expected outcome: `pubrun bench --help` accurately describes packaged wheel execution and contains no source-checkout requirement.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Verify CLI behavior and static types
 
-- [ ] E-04 Run all verification checks listed in `## Required tests / validation`:
+- [x] E-04 Run all verification checks listed in `## Required tests / validation`:
   - Run `mypy`, `mypy --platform win32`, and `mypy --platform darwin`.
   - Confirm (with `PYTHONPATH=src`) that `_load_share_safety`, `_verify_redacted`, and `_scan_for_pii` no longer exist on `pubrun.__main__`, and `_share_check` passes safe JavaScript Object Notation (JSON) and rejects unredacted hostname and home-path JSON.
   - Run `PYTHONPATH=src python3 -m pubrun bench --help` and confirm it exits `0` without `"Requires a source checkout"`.
@@ -99,7 +99,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Run `python3 -m pubrun bench --iterations 1 --passes 1 --no-baseline --local` from an isolated temporary directory with `PYTHONPATH=<repo>/src` and ambient `PUBRUN_*` stripped in two modes: (a) default non-checkout output directory (`--no-submit`, confirming exit `0`, printed redacted path under `<tmp>/pubrun-bench-results/`, and `_share_check` passing), and (b) explicit `PUBRUN_RESULTS_DIR` with `--json` (confirming exit `0`, JSON stdout with `redacted` under `custom-results`, `unredacted` equal to `None`, and `_share_check` passing).
   - Depends on: E-01, E-02, E-03
   - Expected outcome: All checks pass with exit code `0` and zero stray temporary directories.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -245,25 +245,88 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted output of validation command 2 confirming `_load_share_safety`, `_verify_redacted`, and `_scan_for_pii` are absent from `src/pubrun/__main__.py` and `_share_check` (updated by E-01) returns `(True, [])` on safe JSON and `(False, [...])` naming `hostname` (without echoing the leaked value) and rejecting home paths on unsafe JSON, plus `tests/test_bench_command.py::TestSubmissionVerifier` passing inside validation command 4.
   - Observed evidence:
-  - Result: pending
+    - Validation command 2 (exit `0`):
+      ```text
+      ok
+      ```
+    - Validation command 4 (`TestSubmissionVerifier` excerpt, exit `0`):
+      ```text
+      tests/test_bench_command.py::TestSubmissionVerifier::test_duplicate_verifier_helpers_removed PASSED [ 28%]
+      tests/test_bench_command.py::TestSubmissionVerifier::test_verifier_passes_redacted PASSED [ 31%]
+      tests/test_bench_command.py::TestSubmissionVerifier::test_verifier_catches_sensitive_key PASSED [ 33%]
+      tests/test_bench_command.py::TestSubmissionVerifier::test_verifier_catches_embedded_home_path PASSED [ 35%]
+      tests/test_bench_command.py::TestSubmissionVerifier::test_verifier_rejects_unparseable PASSED [ 37%]
+      ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted output of validation command 5 exercising `src/pubrun/__main__.py::_run_bench` (updated by E-02) showing exit code `0` for both the default outside-checkout `<tmp>/pubrun-bench-results/` run (with printed path, `runs/` absent, and `_share_check` passing) and the explicit `PUBRUN_RESULTS_DIR` `--json` run (with `redacted` under `custom-results`, `unredacted` equal to `None`, and `_share_check` passing), plus `TestHarnessResolution`, `TestBenchNoBaselineFlag`, and `TestBenchScheduler` passing in validation command 4.
   - Observed evidence:
-  - Result: pending
+    - Validation command 5 (exit `0`):
+      ```text
+      default rc= 0
+      json rc= 0 out= {"redacted": "/tmp/pubrun-cli-bench-a5kt74px/custom-results/pubrun-bench-50687292-20261127T065646Z.redacted.json", "unredacted": null}
+      ok
+      ```
+    - Validation command 4 (`TestHarnessResolution`, `TestBenchNoBaselineFlag`, and `TestBenchScheduler` excerpts, exit `0`):
+      ```text
+      tests/test_bench_command.py::TestHarnessResolution::test_find_harness_in_checkout PASSED [  2%]
+      tests/test_bench_command.py::TestHarnessResolution::test_bench_errors_without_checkout PASSED [  4%]
+      tests/test_bench_command.py::TestBenchNoBaselineFlag::test_no_baseline_forwarded_to_harness_argv PASSED [ 88%]
+      tests/test_bench_command.py::TestBenchNoBaselineFlag::test_no_baseline_absent_by_default PASSED [ 91%]
+      tests/test_cli_diff_bugs.py::TestBenchScheduler::test_failed_pbs_submission_exits_nonzero PASSED [ 97%]
+      tests/test_cli_diff_bugs.py::TestBenchScheduler::test_ambiguous_qsub_warns_when_nothing_detected PASSED [100%]
+      ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted output of validation command 3 (`PYTHONPATH=src python3 -m pubrun bench --help`, updated by E-03) exiting `0` with no `"Requires a source checkout"` string.
   - Observed evidence:
-  - Result: pending
+    - Validation command 3 (exit `0`):
+      ```text
+      usage: pubrun bench [-h] [--quick | --full | --rigorous] [--no-baseline]
+                          [--iterations ITERATIONS] [--passes PASSES] [--local |
+                          --submit] [--scheduler {auto,slurm,pbs,lsf,sge,local}]
+                          [-y] [--unredacted] [--json] [--contribute |
+                          --no-contribute] [--prepare-submission]
+                          [--submit-file FILE] [--wait-timeout SECONDS]
+                          [--no-submit] [-
+      ```
+    - Verified full `PYTHONPATH=src python3 -m pubrun bench --help` description (exit `0`):
+      ```text
+      Run the pubrun overhead benchmark suite directly from a wheel installation or a source checkout. Runs locally by default; on a high-performance computing (HPC) login node with a supported scheduler it offers to submit the job to a compute node (never submits without confirmation). Writes results by default to ./pubrun-bench-results/ outside a source checkout, benchmarks/results/ inside one, or PUBRUN_RESULTS_DIR when set. Writes only a redacted, share-safe file by default (`--unredacted` also keeps the identifying copy), runs a share-safety check, and offers to contribute the redacted result to GitHub (via `gh` gist/inline, or browser Issue Form fallback).
+      ```
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted output of all five commands in `## Required tests / validation` exiting `0`, covering `src/pubrun/__main__.py::_share_check` (command 2), `src/pubrun/__main__.py::main` `bench_parser` (command 3), `tests/test_bench_command.py::TestSubmissionVerifier` and `tests/test_cli_diff_bugs.py::TestBenchScheduler` (command 4), `src/pubrun/__main__.py::_find_bench_harness`, `_find_bench_submit_script`, and `_run_bench` (command 5), and three-platform `mypy` (command 1).
   - Observed evidence:
-  - Result: pending
+    - Validation command 1 (`mypy && mypy --platform win32 && mypy --platform darwin`, exit `0`):
+      ```text
+      Success: no issues found in 70 source files
+      Success: no issues found in 70 source files
+      Success: no issues found in 70 source files
+      ```
+    - Validation command 2 (exit `0`): `ok`.
+    - Validation command 3 (exit `0`): `usage: pubrun bench ...` with `"Requires a source checkout"` absent.
+    - Validation command 4 (exit `0`; interpreter and worktree paths shown as `<venv>/bin/python` and `<repo>` for path-leak hygiene):
+      ```text
+      platform linux -- Python 3.14.6, pytest-8.2.2, pluggy-1.6.0 -- <venv>/bin/python
+      rootdir: <repo>
+      collected 45 items
+      ...
+      ============================== 45 passed in 1.58s ==============================
+      ```
+    - Validation command 5 (exit `0`):
+      ```text
+      default rc= 0
+      json rc= 0 out= {"redacted": "/tmp/pubrun-cli-bench-a5kt74px/custom-results/pubrun-bench-50687292-20261127T065646Z.redacted.json", "unredacted": null}
+      ok
+      ```
+  - Result: pass
 
 ## Approval and execution gate
 

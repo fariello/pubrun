@@ -423,42 +423,54 @@ class TestIoBaselineScenarios:
 # ------------------------------------------------------- IPD: result submission (2026-07-07)
 
 class TestSubmissionVerifier:
-    """The redaction verifier gates EVERY transmit path (never publish PII)."""
+    """The packaged share-safety validator gates every transmit path (never publish PII)."""
 
     def _m(self):
         import pubrun.__main__ as m
         return m
 
+    def test_duplicate_verifier_helpers_removed(self):
+        m = self._m()
+        for gone in ("_load_share_safety", "_verify_redacted", "_scan_for_pii"):
+            assert not hasattr(m, gone), (
+                f"{gone} should be removed in favor of pubrun._bench.share_safety"
+            )
+
     def test_verifier_passes_redacted(self, tmp_path):
         m = self._m()
         p = tmp_path / "g.redacted.json"
-        p.write_text(json.dumps({"schema": "pubrun-benchmark/3",
-                                 "machine": {"hostname": "<redacted>"}, "scenarios": []}))
-        ok, detail = m._verify_redacted(p)
-        assert ok, detail
+        p.write_text(json.dumps({"schema": "pubrun-benchmark/5",
+                                 "machine": {"host": {"hostname": "<redacted>"}}}),
+                     encoding="utf-8")
+        ok, reasons = m._share_check(p)
+        assert ok and reasons == []
 
     def test_verifier_catches_sensitive_key(self, tmp_path):
         m = self._m()
         p = tmp_path / "full.json"
-        p.write_text(json.dumps({"machine": {"hostname": "myhost123"}}))
-        ok, detail = m._verify_redacted(p)
-        assert not ok and "hostname" in detail
-
-    def test_verifier_catches_home_and_username_substring(self, tmp_path):
-        m = self._m()
-        home = os.path.expanduser("~")
-        p = tmp_path / "leak.json"
-        # A non-enumerated key still leaks the home dir -> deep substring scan must catch it.
-        p.write_text(json.dumps({"scenarios": [{"note": f"ran in {home}/proj"}]}))
-        ok, detail = m._verify_redacted(p)
+        p.write_text(json.dumps({"schema": "pubrun-benchmark/5",
+                                 "machine": {"host": {"hostname": "myhost123"}}}),
+                     encoding="utf-8")
+        ok, reasons = m._share_check(p)
         assert not ok
+        assert any("hostname" in r for r in reasons)
+        assert all("myhost123" not in r for r in reasons)
+
+    def test_verifier_catches_embedded_home_path(self, tmp_path):
+        m = self._m()
+        p = tmp_path / "leak.json"
+        p.write_text(json.dumps({"schema": "pubrun-benchmark/5",
+                                 "notes": "ran in /home/alice/proj"}),
+                     encoding="utf-8")
+        ok, reasons = m._share_check(p)
+        assert not ok and reasons
 
     def test_verifier_rejects_unparseable(self, tmp_path):
         m = self._m()
         p = tmp_path / "bad.json"
-        p.write_text("not json{{{")
-        ok, detail = m._verify_redacted(p)
-        assert not ok and "JSON" in detail
+        p.write_text("not json{{{", encoding="utf-8")
+        ok, reasons = m._share_check(p)
+        assert not ok and any("JSON" in r for r in reasons)
 
 
 class TestAttachFlowSubmitFile:
