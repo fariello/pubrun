@@ -5,8 +5,9 @@
 - Concern: Eight-lens rollup findings `ROLL-15` (`FUNC-1`/`UC-7`/`EC-21`: `pubrun methods` omits captured graphics processing units (GPUs), falsely claims `"Standard library dependencies were utilized"` for non-highlighted third-party packages, omits the Zenodo Digital Object Identifier (DOI), and lacks full 10-character LaTeX escaping), `ROLL-20` (`MEM-3`/`PERF-11`/`EC-13`: whole-file log and event reads in `diagnostics.py`, chart/sparkline/duration crashes, single corrupt JSON Lines (JSONL) line aborting the timeline), `ROLL-23` (`SD-3`/`UX-6`: `print_report` silently ignores unknown section names and outputs empty silence on `show logs`), `ROLL-27` (`UX-3`/`EC-18`/`SD-9`/`SD-12`/`COMP-13`: non-atomic `meta.json` write, missing setup instructions, case-sensitive `.json` check, garbled hydration prose), `ROLL-32` (`COMP-4`/`PERF-10`/`EC-12`/`UX-11`: cross-operating-system (cross-OS) diff `os.pathsep`/`fnmatch`/`basename`, slower `standard` diff from linear ignore scans, `O(N^2)` `_format_array_diff`, `NaN != NaN` and multiset list diff, silent empty inline diff and inverted `+/-`), and `ROLL-35` (`UX-9`/`COMP-14`/`UX-16`: teletypewriter (TTY)-aware color, no `DIM`, American Standard Code for Information Interchange (ASCII) fallbacks, responsive package columns, local-time chart axis with `--utc`), surfaced by `functionality`, `use-cases`, `compatibility`, `performance`, `memory-resources`, `edge-cases`, `ui-ux`, and `self-documentation`.
 - Scope: Fix `src/pubrun/analysis/diff.py`, `src/pubrun/analysis/render.py`, `src/pubrun/report/methods.py`, `src/pubrun/report/templates.py`, `src/pubrun/report/diagnostics.py`, `src/pubrun/report/meta_snapshot.py`, and `src/pubrun/report/utils.py`, with updated and new regression tests in `tests/test_reports.py`, `tests/test_methods_multi.py`, `tests/test_render.py`, `tests/test_diagnostics_seams.py`, and `tests/test_cli_negative_paths.py`.
 - Scope-Paths: src/pubrun/analysis/diff.py, src/pubrun/analysis/render.py, src/pubrun/report/methods.py, src/pubrun/report/templates.py, src/pubrun/report/diagnostics.py, src/pubrun/report/meta_snapshot.py, src/pubrun/report/utils.py, tests/test_reports.py, tests/test_methods_multi.py, tests/test_render.py, tests/test_diagnostics_seams.py, tests/test_cli_negative_paths.py
+- Scope-Exceeded: tests/test_cli.py (Align TestCliDiff.test_diff_no_color and TestCliReportUsabilityDetails.test_report_failed_run_with_details with E-02/E-03 non-TTY ANSI gating so piped default emits zero ANSI and FORCE_COLOR=1 tests c...); tests/test_report_checks_bugs.py (Align TestResourcesChartLabel.test_single_tree_sample_uses_tree_value from last=0s to last=0.5s because E-03 requires parse_duration to reject <= 0 durations)
 - Item-Dependencies: executed:m5s3g8
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix methods GPU/stdlib/DOI/LaTeX bugs, cross-OS and O(N) diff/render bugs, streaming logs and O(1) timelines, chart/duration guards, and atomic meta.json with setup guidance
@@ -17,12 +18,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: caeqdz
-- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: caeqdz verified (set assess-8l, attempt 1). [Scope reconciliation - out-of-scope tests/test_cli.py: Align TestCliDiff.test_diff_no_color and TestCliReportUsabilityDetails.test_report_failed_run_with_details with E-02/E-03 non-TTY ANSI gating so piped default emits zero ANSI and FORCE_COLOR=1 tests colored output; out-of-scope tests/test_report_checks_bugs.py: Align TestResourcesChartLabel.test_single_tree_sample_uses_tree_value from last=0s to last=0.5s because E-03 requires parse_duration to reject <= 0 durations]
 - 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-27 /assess-all (Antigravity): created Child 07 of Set `assess-8l` covering diff, methods, diagnostics, and meta-snapshot correctness, streaming, and cross-OS fidelity (`ROLL-15`, `ROLL-20`, `ROLL-23`, `ROLL-27`, `ROLL-32`, `ROLL-35`).
