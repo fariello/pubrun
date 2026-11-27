@@ -92,12 +92,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ## Deferred / out of scope (with reason)
 
-- Changing the default options of `tests/test_explicit_api.py::active_run`: out of scope for backlog item `7jd8g1`. `active_run` uses a shallow `opts.update(kwargs)` merge, so adding a default `"capture"` dictionary there would interact with callers that pass `capture={"profiling": ...}` and would alter hardware-capture behavior for unrelated tests that do not snapshot `manifest.json` while active.
-- Changing production code in `src/pubrun/tracker.py` or `src/pubrun/writer.py`: out of scope. Backlog item `7jd8g1` targets only the test race in `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively`, and the `capture.hardware.depth == "off"` path already provides the synchronous single-write contract.
+None. All requirements of backlog item `7jd8g1` are covered in this plan.
 
 ## Scope check
 
-- Over-scope: none. Only `tests/test_explicit_api.py` is modified, and only `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` is updated.
+- Over-scope: none. Only `tests/test_explicit_api.py` is modified, and only `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` is updated. Default options in `tests/test_explicit_api.py::active_run` and production code in `src/pubrun/tracker.py` and `src/pubrun/writer.py` remain unchanged: `active_run` uses a shallow `opts.update(kwargs)` merge whose callers pass `capture={"profiling": ...}`, and `capture.hardware.depth == "off"` already provides the synchronous single-write contract.
 - Under-scope: none. Passing `capture={"hardware": {"depth": "off"}}` fully removes the `pubrun-hw` thread and its asynchronous `write_startup_manifest(is_refresh=True)` refresh before `orig_manifest` is snapshotted, which completely satisfies backlog item `7jd8g1`.
 
 ## Required tests / validation
