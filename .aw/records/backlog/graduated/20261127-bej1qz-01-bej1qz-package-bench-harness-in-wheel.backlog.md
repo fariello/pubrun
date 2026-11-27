@@ -1,5 +1,6 @@
 - Id: bej1qz
-- Status: open
+- Status: graduated
+- Graduated-To: bej1qz
 - Set: bej1qz
 - Work-Kind: bug
 - Priority: high
@@ -10,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-27 graduated (aw backlog): graduated by run run-20261127T051342Z-1987922: 1r585o, 29nsim, c1zz3x, cuboum, mfeptf, s3y296
 - 2026-11-27 created (aw backlog): Package benchmark runtime harness in wheel so pip-installed pubrun bench works without a git checkout
 
 ## Problem
