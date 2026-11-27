@@ -132,7 +132,8 @@ def _bench_file_io(work_root: Path, file_count: int, rounds: int) -> Dict[str, A
                 with core.open(p, "r", encoding="utf-8") as fh:
                     fh.read()
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
-            tracked = len(getattr(run, "tracked_inputs", []))
+            data_files = getattr(run, "data_files", None) or {}
+            tracked = len(data_files.get("inputs", []))
             return elapsed_ms, tracked
         finally:
             core.stop()
@@ -146,7 +147,8 @@ def _bench_file_io(work_root: Path, file_count: int, rounds: int) -> Dict[str, A
             for p in paths:
                 core.register_input(p, level="stat")
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
-            tracked = len(getattr(run, "tracked_inputs", []))
+            data_files = getattr(run, "data_files", None) or {}
+            tracked = len(data_files.get("inputs", []))
             return elapsed_ms, tracked
         finally:
             core.stop()

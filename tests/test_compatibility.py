@@ -90,6 +90,8 @@ def test_scaling_benchmark_quick_smoke_and_share_safety(tmp_path: Path) -> None:
 
     fio = scenarios["file_io"]
     assert fio["file_count"] == 200
+    assert fio["open_tracked_records"] == 200
+    assert fio["register_input_tracked_records"] == 200
     assert fio["open_median_ms"] >= 0
     assert fio["register_input_median_ms"] >= 0
     assert fio["open_ms_per_1000"] >= 0
