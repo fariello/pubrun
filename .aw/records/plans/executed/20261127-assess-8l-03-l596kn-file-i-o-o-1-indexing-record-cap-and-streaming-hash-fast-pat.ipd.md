@@ -5,8 +5,9 @@
 - Concern: Eight-lens rollup findings `ROLL-09` (`PERF-1` / `MEM-1`: `O(N^2)` linear scans under `_data_files_lock` measured at 1,111 ms for N=2,000 and unbounded growth in `Run.data_files` and `_pending_file_registrations`), `ROLL-30` (`PERF-7`: streaming file hashing 8.2x slower than `stat` due to per-chunk `monotonic()`, lock, and 3-level `memoryview` wrappers even when caps are 0), and `MEM-9` (uncapped `_warned_invalid_algorithms`), surfaced by `performance` and `memory-resources`.
 - Scope: Replace linear scans in `src/pubrun/capture/file_io.py` with `O(1)` lookup indexes, add configurable `[capture.file_io].max_tracked_files` (default `5000`) with `records_truncated` accounting in `src/pubrun/capture/file_io.py`, `src/pubrun/tracker.py`, `src/pubrun/resources/default.toml`, and `schemas/manifest.schema.json`, fast-path uncapped streaming hashes and exact `bytes`/`bytearray` writes/reads, cap `_warned_invalid_algorithms`, synchronize `docs/configuration.md` and `docs/manifest.md`, and add scaling, bound, and streaming-hash regression tests in `tests/test_file_io_provenance.py`.
 - Scope-Paths: src/pubrun/capture/file_io.py, src/pubrun/tracker.py, src/pubrun/resources/default.toml, schemas/manifest.schema.json, tests/test_file_io_provenance.py, docs/configuration.md, docs/manifest.md
+- Scope-Exceeded: .aw/records/backlog/open/20261127-7jd8g1-01-7jd8g1-fix-background-pubrun-hw-manifest-refresh-race-in.backlog.md (Required defect-report backlog carrier filed for adjacent flaky test race discovered in tests/test_explicit_api.py during validation)
 - Item-Dependencies: executed:76z7ww
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Eliminate O(N^2) scans and unbounded growth in capture/file_io.py with O(1) indexes, configurable max_tracked_files cap, and zero-cap streaming hash fast path
@@ -17,12 +18,12 @@
 - Highest E allocated: 04
 - Author: Antigravity
 - Id: l596kn
-- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: l596kn verified (set assess-8l, attempt 1). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261127-7jd8g1-01-7jd8g1-fix-background-pubrun-hw-manifest-refresh-race-in.backlog.md: Required defect-report backlog carrier filed for adjacent flaky test race discovered in tests/test_explicit_api.py during validation]
 - 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-27 /assess-all (Antigravity): created Child 03 of Set `assess-8l` covering `file_io` O(1) indexing, record cap, and streaming-hash fast path (`ROLL-09`, `ROLL-30`, `MEM-9`).
