@@ -117,7 +117,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 ## Deferred / out of scope (with reason)
 
 - Updating `tests/test_bench_command.py` (which still tests the removed `_verify_redacted` helper and legacy checkout error) is deferred to child `1r585o` (Order 05) so test updates and end-to-end wheel tests land together after docs and code are complete.
+  - Carrier: 1r585o
 - Updating `docs/cli.md`, `docs/performance.md`, `benchmarks/README.md`, `docs/hpc.md`, `docs/functional_spec.md`, and `README.md` is deferred to child `cuboum` (Order 04).
+  - Carrier: cuboum
 
 ## Scope check
 

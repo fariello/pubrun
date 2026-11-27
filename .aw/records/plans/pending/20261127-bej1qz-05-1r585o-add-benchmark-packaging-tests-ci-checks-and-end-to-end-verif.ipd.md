@@ -132,7 +132,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ## Deferred / out of scope (with reason)
 
-- None. This child completes the final testing, CI hardening, and whole-Set verification for backlog item `bej1qz`.
+None. This child completes the final testing, CI hardening, and whole-Set verification for backlog item `bej1qz`.
 
 ## Scope check
 

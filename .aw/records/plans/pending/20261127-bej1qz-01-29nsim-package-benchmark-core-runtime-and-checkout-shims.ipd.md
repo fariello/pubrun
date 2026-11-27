@@ -170,9 +170,13 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 ## Deferred / out of scope (with reason)
 
 - Packaging the five HPC submission scripts (`run_bench.sbatch`, `submit_bench*.sh`) is deferred to child `c1zz3x` (Order 02) to keep Scope-Paths bounded.
+  - Carrier: c1zz3x
 - Wiring `src/pubrun/__main__.py` to `src/pubrun/_bench` and removing `_verify_redacted` is deferred to child `mfeptf` (Order 03).
+  - Carrier: mfeptf
 - Updating documentation is deferred to child `cuboum` (Order 04).
+  - Carrier: cuboum
 - Updating `tests/test_bench_command.py`, `tests/test_benchmark_intake_bugs.py`, `.github/workflows/ci.yml`, and running end-to-end wheel tests is deferred to child `1r585o` (Order 05).
+  - Carrier: 1r585o
 
 ## Scope check
 

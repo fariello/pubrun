@@ -128,7 +128,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 ## Deferred / out of scope (with reason)
 
 - Updating `src/pubrun/__main__.py::_run_bench` to resolve `src/pubrun/_bench/scripts/` and pass `PUBRUN_RESULTS_DIR` is deferred to child `mfeptf` (Order 03).
+  - Carrier: mfeptf
 - Updating `tests/test_bench_command.py` to add permanent automated stub-scheduler tests is deferred to child `1r585o` (Order 05).
+  - Carrier: 1r585o
 
 ## Scope check
 
