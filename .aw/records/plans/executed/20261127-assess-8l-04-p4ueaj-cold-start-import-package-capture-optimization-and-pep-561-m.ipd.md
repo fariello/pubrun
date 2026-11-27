@@ -5,8 +5,9 @@
 - Concern: Eight-lens rollup findings `ROLL-10` (`PERF-2`: `src/pubrun/capture/packages.py` reads `METADATA` three times per distribution and parses every `RECORD` Comma-Separated Values (CSV) file with `csv.reader` and `PurePosixPath` on startup even in `imported-only` mode), `ROLL-11` (`PERF-3`: high `import pubrun.minimal` cold-start latency from eager `importlib.metadata.version`, eager `pubrun.tracker` import in `src/pubrun/core.py`, and eager import of 14 capture/writer/config modules in `src/pubrun/tracker.py`), `ROLL-12` (`COMP-3`: all six import-mode submodules fail downstream `mypy --strict --no-implicit-reexport` and omit `__commit__`; `SD-4`: `src/pubrun/nopatch.py` docstring contradicts `src/pubrun/_modes.py`), `COMP-15` (stale fallback `__version__ = "1.0.0"` in `src/pubrun/__init__.py` and `src/pubrun/tracker.py`), and `MEM-6` (`src/pubrun/__init__.py::_resolve_checkout_commit` leaks subprocess pipes on timeout or exception), surfaced by `performance`, `compatibility`, `self-documentation`, and `memory-resources`.
 - Scope: Optimize `src/pubrun/__init__.py`, `src/pubrun/core.py`, `src/pubrun/tracker.py`, and `src/pubrun/capture/packages.py` to defer `__version__`, `pubrun.tracker`, capture-engine, and `_markers` imports cleanly without breaking monkeypatch seams or `tests/test_report_subpackage_integrity.py`; fix Python Enhancement Proposal 561 (PEP 561) exports, `__dir__`, and `__commit__` parity across `src/pubrun/{auto,full,noauto,nopatch,noconsole,minimal}.py`; fix `src/pubrun/nopatch.py` and `src/pubrun/__init__.py` docstrings plus `_resolve_checkout_commit` pipe cleanup; and add behavioral regression tests in `tests/test_import_modes.py`, `tests/test_commit_identity.py`, and `tests/test_package_resolution.py`.
 - Scope-Paths: src/pubrun/__init__.py, src/pubrun/core.py, src/pubrun/tracker.py, src/pubrun/capture/packages.py, src/pubrun/auto.py, src/pubrun/full.py, src/pubrun/noauto.py, src/pubrun/nopatch.py, src/pubrun/noconsole.py, src/pubrun/minimal.py, tests/test_import_modes.py, tests/test_commit_identity.py, tests/test_package_resolution.py
+- Scope-Exceeded: .aw/records/backlog/open/20261127-b3dejs-01-b3dejs-avoid-loading-pubrun-capture-packages-from-report.backlog.md (Defect report backlog item b3dejs filed per driver contract for adjacent eager import in src/pubrun/report/methods.py)
 - Item-Dependencies: executed:1o1cua, executed:76z7ww, executed:l596kn
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Defer __version__/tracker/capture imports, eliminate 3x METADATA reads and eager direct_url/RECORD overhead in packages.py, fix PEP 561 mode parity, and close git pipes
@@ -17,12 +18,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: p4ueaj
-- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md`, including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: p4ueaj verified (set assess-8l, attempt 1). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261127-b3dejs-01-b3dejs-avoid-loading-pubrun-capture-packages-from-report.backlog.md: Defect report backlog item b3dejs filed per driver contract for adjacent eager import in src/pubrun/report/methods.py]
 - 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-27 /assess-all (Antigravity): created Child 04 of Set `assess-8l` covering cold-start import latency, package-capture I/O reduction, PEP 561 mode parity, and `_resolve_checkout_commit` pipe cleanup (`ROLL-10`, `ROLL-11`, `ROLL-12`, `COMP-15`, `MEM-6`).
