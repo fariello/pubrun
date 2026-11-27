@@ -6,7 +6,7 @@
 - Scope: Coordination of five child plans for Set `bej1qz`: `29nsim` (package core benchmark runtime modules and workloads under `src/pubrun/_bench/` with checkout shims), `c1zz3x` (package high-performance computing (HPC) submission scripts under `src/pubrun/_bench/scripts/` with checkout shims), `mfeptf` (wire `src/pubrun/__main__.py` to the packaged runtime, writable default output directory, and single-source share-safety validator), `cuboum` (update documentation across `docs/`, `benchmarks/README.md`, and `README.md`), and `1r585o` (update benchmark tests, add non-checkout and wheel tests, update Continuous Integration (CI) packaging checks, and execute whole-Set acceptance verification). This orchestrator modifies no product code, scripts, tests, CI configuration, or documentation.
 - Scope-Paths: .aw/records/plans/pending/20261127-bej1qz-00-s3y296-package-benchmark-runtime-harness-in-wheel.ipd.md
 - Item-Dependencies: executed:29nsim, executed:c1zz3x, executed:mfeptf, executed:cuboum, executed:1r585o
-- Status: approved
+- Status: to-review
 - Coverage: pass
 - Coverage-Fingerprint: 40208be506dec1230fe57a4265735b117c8532d7516baec786e638f56e181bb0
 - Coverage-Checked: 2026-11-27 by uri/its_direct/pt3-claude-opus-5.5-1m-us
@@ -20,12 +20,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: s3y296
-- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 to-review (aw set): demoted approved -> to-review: APPROVAL WITHDRAWN: Demote to to-review so /plan-review writes Readiness attestations before execution
 - 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 to-review (aw set): Authored review-ready orchestrator plan from backlog item bej1qz
 - 2026-11-27 coverage pass (aw oc run): fingerprint 40208be506de, model uri/its_direct/pt3-claude-opus-5.5-1m-us

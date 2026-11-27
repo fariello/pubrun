@@ -6,7 +6,7 @@
 - Scope: Update `tests/test_bench_command.py` and `tests/test_benchmark_intake_bugs.py` to test `pubrun._bench` directly and add the new behavioral coverage, update `.github/workflows/ci.yml`'s `packaging` job to verify wheel inclusion of `pubrun/_bench/` and exclusion of non-runtime benchmark files, and execute the whole-Set acceptance and regression verification suite.
 - Scope-Paths: tests/test_bench_command.py, tests/test_benchmark_intake_bugs.py, .github/workflows/ci.yml
 - Item-Dependencies: executed:29nsim, executed:c1zz3x, executed:mfeptf, executed:cuboum
-- Status: approved
+- Status: to-review
 - Short-Description: Update benchmark tests, add non-checkout and wheel tests, update CI packaging checks, and verify the complete Set
 - Work-Kind: bug
 - Priority: high
@@ -17,12 +17,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: 1r585o
-- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 to-review (aw set): demoted approved -> to-review: APPROVAL WITHDRAWN: Demote to to-review so /plan-review writes Readiness attestations before execution
 - 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 to-review (aw set): Authored review-ready child plan from backlog item bej1qz
 - 2026-11-27 draft (Antigravity): created.
