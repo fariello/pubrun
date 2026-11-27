@@ -1,12 +1,15 @@
-"""Tests for IPD-C: `pubrun bench` (friendly runner + Slurm submit) and result redaction.
+"""Tests for `pubrun bench` (packaged runtime, scheduler submit, and result redaction).
 
-Focus: the SAFETY-critical bits — redaction actually removes PII (deep scan) while keeping
-analysis fields, `--no-redact` keeps detail, Slurm is detected but NEVER auto-submitted
-without confirmation, and harness resolution fails cleanly for a non-checkout install.
+Focus: the safety-critical behavior of the packaged `pubrun._bench` runtime — redaction removes
+personally identifiable information (PII) while preserving analysis fields, `--unredacted` is
+opt-in, schedulers are detected without auto-submitting, non-checkout installs resolve the
+packaged runtime and default to a writable results directory, and single-source share-safety
+validation gates submission paths.
 """
 import os
 import sys
 import json
+import shutil
 import getpass
 import subprocess
 import importlib.util
@@ -19,12 +22,9 @@ _REPO = Path(__file__).resolve().parents[1]
 
 
 def _load_harness():
-    """Import benchmarks/harness.py directly (it is not on the package path)."""
-    path = _REPO / "benchmarks" / "harness.py"
-    spec = importlib.util.spec_from_file_location("_bench_harness", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """Return the packaged benchmark harness module (pubrun._bench.harness)."""
+    from pubrun._bench import harness as bench_harness
+    return bench_harness
 
 
 def run_pubrun(*args, cwd=None, env=None, stdin=None, timeout=60):
@@ -129,13 +129,31 @@ class TestRedaction:
 class TestHarnessResolution:
 
     def test_find_harness_in_checkout(self):
+        from pubrun._bench import harness as bench_harness
         from pubrun.__main__ import _find_bench_harness
+
         found = _find_bench_harness()
         assert found is not None
-        assert found.name == "harness.py"
+        assert found == Path(bench_harness.__file__).resolve()
+
+    def test_find_harness_outside_checkout(self, tmp_path, monkeypatch):
+        """Packaged pubrun._bench.harness resolves even when cwd is outside any source checkout."""
+        import pubrun._bench as bench_pkg
+        from pubrun._bench import harness as bench_harness
+        from pubrun.__main__ import _find_bench_harness
+
+        outside = tmp_path / "outside-checkout"
+        outside.mkdir()
+        monkeypatch.chdir(outside)
+        monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: outside))
+        monkeypatch.setattr(bench_pkg, "find_checkout_root", lambda start=None: None)
+
+        found = _find_bench_harness()
+        assert found is not None
+        assert found == Path(bench_harness.__file__).resolve()
 
     def test_bench_errors_without_checkout(self, tmp_path, monkeypatch):
-        """When no harness can be found, bench must error clearly (not crash)."""
+        """When the benchmark runtime cannot be located, bench must exit 1 cleanly."""
         import pubrun.__main__ as m
         monkeypatch.setattr(m, "_find_bench_harness", lambda: None)
         with pytest.raises(SystemExit) as ei:
@@ -275,15 +293,72 @@ class TestSchedulerSubmitSafety:
             for a in calls
         )
 
-    def test_new_submit_scripts_exist_and_quote_vars(self):
-        for name in ("submit_bench_pbs.sh", "submit_bench_lsf.sh", "submit_bench_sge.sh"):
-            p = _REPO / "benchmarks" / name
-            assert p.is_file(), f"{name} missing"
-            text = p.read_text()
-            # argv-array options (no shell-string interpolation of user values).
-            assert "QSUB_OPTS=(" in text or "BSUB_OPTS=(" in text
-            # site-adaptation honesty note present.
-            assert "STARTING POINT" in text
+    @pytest.mark.skipif(
+        sys.platform == "win32" or shutil.which("bash") is None,
+        reason="POSIX bash required for HPC shell submit scripts",
+    )
+    @pytest.mark.parametrize(
+        "script_name,stub_bin_name",
+        [
+            ("submit_bench_pbs.sh", "qsub"),
+            ("submit_bench_lsf.sh", "bsub"),
+            ("submit_bench_sge.sh", "qsub"),
+        ],
+    )
+    def test_new_submit_scripts_forward_queue_literally(
+        self, script_name, stub_bin_name, tmp_path
+    ):
+        """Packaged PBS/LSF/SGE scripts pass PUBRUN_QUEUE verbatim as argv without shell expansion."""
+        from pubrun._bench import get_submit_script_path
+
+        script_path = get_submit_script_path(script_name)
+        assert script_path.is_file(), f"{script_name} missing from pubrun._bench.scripts"
+
+        stub_bin = tmp_path / "bin"
+        stub_bin.mkdir()
+        capture_file = tmp_path / f"{script_name}.capture.json"
+        helper_py = tmp_path / f"{script_name}.stub.py"
+        helper_py.write_text(
+            "import json, sys\n"
+            "payload = {\n"
+            "    'argv': sys.argv[1:],\n"
+            "    'stdin': sys.stdin.read(),\n"
+            "}\n"
+            f"with open({str(capture_file)!r}, 'w', encoding='utf-8') as f:\n"
+            "    json.dump(payload, f)\n"
+            "print('99999')\n",
+            encoding="utf-8",
+        )
+        stub_path = stub_bin / stub_bin_name
+        stub_path.write_text(
+            f"#!/bin/sh\nexec {PYTHON!r} {str(helper_py)!r} \"$@\"\n",
+            encoding="utf-8",
+        )
+        stub_path.chmod(0o755)
+
+        work_dir = tmp_path / "work"
+        work_dir.mkdir()
+        marker = tmp_path / "injected-marker"
+        malicious_queue = f"$(touch {marker})"
+        env = {k: v for k, v in os.environ.items() if not k.startswith("PUBRUN_")}
+        env["PATH"] = f"{stub_bin}{os.pathsep}{env.get('PATH', '')}"
+        env["PUBRUN_QUEUE"] = malicious_queue
+
+        proc = subprocess.run(
+            ["bash", str(script_path), "--quick"],
+            cwd=str(work_dir),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert not marker.exists(), "PUBRUN_QUEUE was evaluated by a shell"
+        recorded = json.loads(capture_file.read_text(encoding="utf-8"))
+        argv = recorded["argv"]
+        assert "-q" in argv
+        assert argv[argv.index("-q") + 1] == malicious_queue
 
 
 # ------------------------------------------------------------------------- CLI smoke
@@ -302,28 +377,20 @@ class TestBenchCLI:
         Kept as light as possible (1 iteration, 1 pass) but still launches many fresh
         Python subprocesses, so it is a slower end-to-end test (generous timeout).
         """
-        import importlib.util
-        ss_spec = importlib.util.spec_from_file_location(
-            "_share_safety_cli_test", _REPO / "benchmarks" / "share_safety.py"
-        )
-        assert ss_spec and ss_spec.loader
-        ss_mod = importlib.util.module_from_spec(ss_spec)
-        ss_spec.loader.exec_module(ss_mod)
+        from pubrun._bench import share_safety as ss_mod
 
-        # Run harness directly with --redacted-out under tmp_path so tests never write
-        # into the live benchmarks/results/ directory, and verify CLI JSON flow via a
-        # tmp checkout copy of results or cleanup.
         out_redacted = tmp_path / "quick.redacted.json"
         hres = subprocess.run(
             [
                 sys.executable,
-                str(_REPO / "benchmarks" / "harness.py"),
+                "-m",
+                "pubrun._bench.harness",
                 "--iterations", "1",
                 "--passes", "1",
                 "--no-baseline",
                 "--redacted-out", str(out_redacted),
             ],
-            cwd=str(_REPO),
+            cwd=str(tmp_path),
             capture_output=True,
             text=True,
             timeout=180,
@@ -345,14 +412,15 @@ class TestBenchCLI:
         hres = subprocess.run(
             [
                 sys.executable,
-                str(_REPO / "benchmarks" / "harness.py"),
+                "-m",
+                "pubrun._bench.harness",
                 "--iterations", "1",
                 "--passes", "1",
                 "--no-baseline",
                 "--redacted-out", str(out_redacted),
                 "--out", str(out_unredacted),
             ],
-            cwd=str(_REPO),
+            cwd=str(tmp_path),
             capture_output=True,
             text=True,
             timeout=180,
@@ -372,18 +440,8 @@ class TestIoBaselineScenarios:
     """IPD (2026-07-07): /dev/null + /dev/shm + tmpdir ground-truth I/O baselines."""
 
     def _scenarios(self):
-        import importlib.util
-        path = _REPO / "benchmarks" / "scenarios.py"
-        spec = importlib.util.spec_from_file_location("_bench_scenarios", path)
-        mod = importlib.util.module_from_spec(spec)
-        # Register before exec so the @dataclass decorator can resolve cls.__module__
-        # (Python 3.12+ dataclasses look up sys.modules[cls.__module__] during processing).
-        sys.modules[spec.name] = mod
-        try:
-            spec.loader.exec_module(mod)
-            return mod.all_scenarios()
-        finally:
-            sys.modules.pop(spec.name, None)
+        from pubrun._bench import scenarios
+        return scenarios.all_scenarios()
 
     def test_io_baseline_scenarios_registered(self):
         names = {s.name for s in self._scenarios()}
@@ -405,11 +463,8 @@ class TestIoBaselineScenarios:
 
     def test_io_sink_workload_null_and_tmpdir(self, tmp_path):
         """The io_sink workload handles both a null sink (write-only) and a dir target."""
-        import importlib.util
-        path = _REPO / "benchmarks" / "workloads" / "io_sink.py"
-        spec = importlib.util.spec_from_file_location("_io_sink", path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+        from pubrun._bench.workloads import io_sink as mod
+
         null = "NUL" if os.name == "nt" else "/dev/null"
         os.environ["PUBRUN_BENCH_IO_TARGET"] = null
         try:
@@ -471,6 +526,19 @@ class TestSubmissionVerifier:
         p.write_text("not json{{{", encoding="utf-8")
         ok, reasons = m._share_check(p)
         assert not ok and any("JSON" in r for r in reasons)
+
+    def test_verifier_rejects_non_object_json(self, tmp_path):
+        m = self._m()
+        p = tmp_path / "list.json"
+        p.write_text("[]", encoding="utf-8")
+        ok, reasons = m._share_check(p)
+        assert not ok and any("not an object" in r for r in reasons)
+
+    def test_verifier_rejects_missing_or_unreadable_file(self, tmp_path):
+        m = self._m()
+        missing = tmp_path / "does-not-exist.json"
+        ok, reasons = m._share_check(missing)
+        assert not ok and any("could not read" in r for r in reasons)
 
 
 class TestAttachFlowSubmitFile:
@@ -895,3 +963,424 @@ class TestBenchNoBaselineFlag:
         m._run_bench(None, None, False, True, False, False, True, True,
                      no_baseline=False)
         assert "--no-baseline" not in captured.get("argv", [])
+
+
+# ------------------------------------------- IPD bej1qz: packaged runtime & wheel E2E
+
+class TestDefaultResultsDir:
+    """Default writable benchmark output directory selection inside and outside a checkout."""
+
+    def test_env_var_takes_precedence(self, tmp_path, monkeypatch):
+        from pubrun._bench import default_results_dir
+
+        custom = tmp_path / "custom-results"
+        monkeypatch.setenv("PUBRUN_RESULTS_DIR", str(custom))
+        assert default_results_dir(_REPO) == custom
+        assert default_results_dir(tmp_path) == custom
+
+    def test_inside_verified_checkout_uses_benchmarks_results(self, monkeypatch):
+        from pubrun._bench import default_results_dir
+
+        monkeypatch.delenv("PUBRUN_RESULTS_DIR", raising=False)
+        assert default_results_dir(_REPO) == _REPO / "benchmarks" / "results"
+        assert default_results_dir(_REPO / "src") == _REPO / "benchmarks" / "results"
+
+    def test_outside_checkout_uses_cwd_pubrun_bench_results(self, tmp_path, monkeypatch):
+        from pubrun._bench import default_results_dir, find_checkout_root
+
+        monkeypatch.delenv("PUBRUN_RESULTS_DIR", raising=False)
+        outside = tmp_path / "outside-work"
+        outside.mkdir()
+        assert find_checkout_root(outside) is None
+        assert default_results_dir(outside) == outside / "pubrun-bench-results"
+
+        monkeypatch.chdir(outside)
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: outside)
+        assert default_results_dir() == outside / "pubrun-bench-results"
+
+    def test_run_bench_outside_checkout_creates_writable_results_dir_and_prints_path(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Outside a checkout, _run_bench writes under <cwd>/pubrun-bench-results/ and prints it."""
+        import subprocess as sp
+        import pubrun._bench as bench_pkg
+        import pubrun.__main__ as m
+
+        monkeypatch.delenv("PUBRUN_RESULTS_DIR", raising=False)
+        outside = tmp_path / "non-checkout-cwd"
+        outside.mkdir()
+        monkeypatch.chdir(outside)
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: outside)
+        monkeypatch.setattr(bench_pkg, "find_checkout_root", lambda start=None: None)
+
+        captured = {}
+
+        class _Res:
+            returncode = 0
+
+        def _fake_run(argv, *a, **k):
+            captured["argv"] = list(argv)
+            return _Res()
+
+        monkeypatch.setattr(sp, "run", _fake_run)
+        m._run_bench(
+            1, 1, False, True, False, False, False, False,
+            no_submit=True, no_baseline=True,
+        )
+
+        expected_dir = outside / "pubrun-bench-results"
+        assert expected_dir.is_dir()
+        argv = captured["argv"]
+        assert "--redacted-out" in argv
+        redacted_out = Path(argv[argv.index("--redacted-out") + 1])
+        assert redacted_out.parent == expected_dir
+        assert redacted_out.name.endswith(".redacted.json")
+        assert "site-packages" not in str(redacted_out)
+        assert "benchmarks/results" not in str(redacted_out).replace("\\", "/")
+        err = capsys.readouterr().err
+        assert str(redacted_out) in err
+
+
+class TestHpcNonCheckoutSubmission:
+    """HPC submit script command generation and execution without a source checkout."""
+
+    @pytest.mark.parametrize(
+        "scheduler,script_name",
+        [
+            ("slurm", "submit_bench.sh"),
+            ("pbs", "submit_bench_pbs.sh"),
+            ("lsf", "submit_bench_lsf.sh"),
+            ("sge", "submit_bench_sge.sh"),
+        ],
+    )
+    @pytest.mark.parametrize("unredacted", [False, True])
+    def test_cli_dispatch_outside_checkout_sets_writable_results_dir_and_env(
+        self, scheduler, script_name, unredacted, tmp_path, monkeypatch
+    ):
+        """Cross-platform CLI dispatch uses packaged submit scripts without PUBRUN_REPO."""
+        import subprocess as sp
+        import pubrun._bench as bench_pkg
+        import pubrun.__main__ as m
+
+        for key in list(os.environ.keys()):
+            if key.startswith("PUBRUN_"):
+                monkeypatch.delenv(key, raising=False)
+
+        outside = tmp_path / f"hpc-{scheduler}-{int(unredacted)}"
+        outside.mkdir()
+        monkeypatch.chdir(outside)
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: outside)
+        monkeypatch.setattr(bench_pkg, "find_checkout_root", lambda start=None: None)
+
+        captured = {}
+
+        def _fake_run(cmd, **kw):
+            captured["cmd"] = list(cmd)
+            captured["env"] = dict(kw.get("env", {}))
+            return sp.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(sp, "run", _fake_run)
+        m._run_bench(
+            None, None, True, False, True, False, False, unredacted,
+            scheduler=scheduler,
+        )
+
+        cmd = captured["cmd"]
+        env = captured["env"]
+        assert cmd[0] == "bash"
+        assert Path(cmd[1]) == bench_pkg.get_submit_script_path(script_name)
+        assert "--quick" in cmd
+        assert env["PUBRUN_RESULTS_DIR"] == str((outside / "pubrun-bench-results").resolve())
+        assert "PUBRUN_REPO" not in env
+        if unredacted:
+            assert env.get("PUBRUN_UNREDACTED") == "1"
+        else:
+            assert "PUBRUN_UNREDACTED" not in env
+
+    @pytest.mark.skipif(
+        sys.platform == "win32" or shutil.which("bash") is None,
+        reason="POSIX bash required for HPC shell submit scripts",
+    )
+    def test_packaged_hpc_scripts_and_sbatch_run_without_checkout(self, tmp_path):
+        """Packaged Slurm/PBS/LSF/SGE scripts and run_bench.sbatch invoke -m pubrun._bench.harness."""
+        from pubrun._bench import get_submit_script_path
+
+        stub_bin = tmp_path / "bin"
+        stub_bin.mkdir()
+
+        def _make_stub(name: str, capture_path: Path, stdout_line: str, read_stdin: bool) -> None:
+            helper = tmp_path / f"stub_{name}.py"
+            helper.write_text(
+                "import json, os, sys\n"
+                "payload = {\n"
+                "    'argv': sys.argv[1:],\n"
+                f"    'stdin': sys.stdin.read() if {read_stdin!r} else '',\n"
+                "    'PUBRUN_RESULTS_DIR': os.environ.get('PUBRUN_RESULTS_DIR'),\n"
+                "    'PUBRUN_REPO': os.environ.get('PUBRUN_REPO'),\n"
+                "    'PUBRUN_BENCH_ARGS': os.environ.get('PUBRUN_BENCH_ARGS'),\n"
+                "}\n"
+                f"with open({str(capture_path)!r}, 'w', encoding='utf-8') as f:\n"
+                "    json.dump(payload, f)\n"
+                f"print({stdout_line!r})\n",
+                encoding="utf-8",
+            )
+            stub = stub_bin / name
+            stub.write_text(
+                f"#!/bin/sh\nexec {PYTHON!r} {str(helper)!r} \"$@\"\n",
+                encoding="utf-8",
+            )
+            stub.chmod(0o755)
+
+        sinfo_stub = stub_bin / "sinfo"
+        sinfo_stub.write_text("#!/bin/sh\necho node01\n", encoding="utf-8")
+        sinfo_stub.chmod(0o755)
+
+        sbatch_cap = tmp_path / "sbatch.json"
+        qsub_cap = tmp_path / "qsub.json"
+        bsub_cap = tmp_path / "bsub.json"
+        _make_stub("sbatch", sbatch_cap, "424242", read_stdin=False)
+        _make_stub("qsub", qsub_cap, "424242.pbs", read_stdin=True)
+        _make_stub("bsub", bsub_cap, "Job <424242> is submitted", read_stdin=True)
+
+        work_dir = tmp_path / "non-checkout-hpc"
+        work_dir.mkdir()
+        expected_results = str((work_dir / "pubrun-bench-results").resolve())
+        base_env = {k: v for k, v in os.environ.items() if not k.startswith("PUBRUN_")}
+        base_env["PATH"] = f"{stub_bin}{os.pathsep}{base_env.get('PATH', '')}"
+
+        # 1. Slurm submit_bench.sh
+        slurm_proc = subprocess.run(
+            ["bash", str(get_submit_script_path("submit_bench.sh")), "--quick"],
+            cwd=str(work_dir),
+            env=base_env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert slurm_proc.returncode == 0, slurm_proc.stderr
+        sbatch_rec = json.loads(sbatch_cap.read_text(encoding="utf-8"))
+        assert sbatch_rec["PUBRUN_RESULTS_DIR"] == expected_results
+        assert sbatch_rec["PUBRUN_REPO"] == ""
+        assert str(get_submit_script_path("run_bench.sbatch")) in sbatch_rec["argv"]
+
+        # 2. PBS, LSF, SGE submit scripts
+        for script_name, cap_path in (
+            ("submit_bench_pbs.sh", qsub_cap),
+            ("submit_bench_lsf.sh", bsub_cap),
+            ("submit_bench_sge.sh", qsub_cap),
+        ):
+            if cap_path.exists():
+                cap_path.unlink()
+            proc = subprocess.run(
+                ["bash", str(get_submit_script_path(script_name)), "--quick"],
+                cwd=str(work_dir),
+                env=base_env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert proc.returncode == 0, f"{script_name} failed: {proc.stderr}"
+            rec = json.loads(cap_path.read_text(encoding="utf-8"))
+            assert rec["PUBRUN_RESULTS_DIR"] == expected_results
+            assert rec["PUBRUN_REPO"] == ""
+            job_body = rec["stdin"]
+            assert "import pubrun.minimal, pubrun._bench.harness" in job_body
+            assert "-m pubrun._bench.harness" in job_body
+            assert "benchmarks/harness.py" not in job_body
+            assert 'cd "$PUBRUN_REPO"' not in job_body
+
+        # 3. Direct execution of packaged run_bench.sbatch with a stub PUBRUN_PY
+        py_calls_log = tmp_path / "stub_py_calls.jsonl"
+        stub_py_helper = tmp_path / "stub_py_helper.py"
+        stub_py_helper.write_text(
+            "import json, sys\n"
+            f"with open({str(py_calls_log)!r}, 'a', encoding='utf-8') as f:\n"
+            "    f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            "if len(sys.argv) >= 3 and sys.argv[1] == '-c' and 'hashlib' in sys.argv[2]:\n"
+            "    print('abcd1234')\n",
+            encoding="utf-8",
+        )
+        stub_py = stub_bin / "stub_py"
+        stub_py.write_text(
+            f"#!/bin/sh\nexec {PYTHON!r} {str(stub_py_helper)!r} \"$@\"\n",
+            encoding="utf-8",
+        )
+        stub_py.chmod(0o755)
+
+        sbatch_env = dict(base_env)
+        sbatch_env["PUBRUN_PY"] = str(stub_py)
+        sbatch_env["PUBRUN_BENCH_ARGS"] = "--quick"
+        sbatch_run = subprocess.run(
+            ["bash", str(get_submit_script_path("run_bench.sbatch"))],
+            cwd=str(work_dir),
+            env=sbatch_env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert sbatch_run.returncode == 0, sbatch_run.stderr
+        assert (work_dir / "pubrun-bench-results").is_dir()
+        calls = [
+            json.loads(line)
+            for line in py_calls_log.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert any(
+            c[:2] == ["-c", "import pubrun.minimal, pubrun._bench.harness"]
+            for c in calls
+        ), calls
+        harness_calls = [c for c in calls if c[:2] == ["-m", "pubrun._bench.harness"]]
+        assert len(harness_calls) == 1, calls
+        hcall = harness_calls[0]
+        assert "--redacted-out" in hcall
+        redacted_arg = Path(hcall[hcall.index("--redacted-out") + 1])
+        assert redacted_arg.parent == Path(expected_results)
+        assert "--quick" in hcall
+        assert all("benchmarks/harness.py" not in arg for c in calls for arg in c)
+
+
+@pytest.mark.slow
+class TestWheelNonCheckoutBench:
+    """Build wheel, verify packaged runtime contents, and run pubrun bench in a clean venv."""
+
+    def test_wheel_install_runs_pubrun_bench_outside_checkout(self, tmp_path):
+        import zipfile
+        from pubrun._bench.share_safety import check_share_safe_text
+
+        pytest.importorskip("build")
+
+        dist_dir = tmp_path / "dist"
+        build_cmd = [PYTHON, "-m", "build", "--wheel", "--outdir", str(dist_dir)]
+        if importlib.util.find_spec("hatchling") is not None:
+            build_cmd.append("--no-isolation")
+        build_cmd.append(str(_REPO))
+        build_env = {
+            k: v for k, v in os.environ.items()
+            if k != "PYTHONPATH" and not k.startswith("PUBRUN_")
+        }
+        build_res = subprocess.run(
+            build_cmd,
+            env=build_env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=240,
+        )
+        assert build_res.returncode == 0, build_res.stderr or build_res.stdout
+
+        wheels = list(dist_dir.glob("pubrun-*.whl"))
+        assert len(wheels) == 1, wheels
+        whl = wheels[0]
+
+        with zipfile.ZipFile(whl) as zf:
+            names = zf.namelist()
+
+        required = [
+            "pubrun/_bench/__init__.py",
+            "pubrun/_bench/harness.py",
+            "pubrun/_bench/scenarios.py",
+            "pubrun/_bench/share_safety.py",
+            "pubrun/_bench/workloads/__init__.py",
+            "pubrun/_bench/workloads/noop.py",
+            "pubrun/_bench/workloads/cpu_burn.py",
+            "pubrun/_bench/workloads/file_read.py",
+            "pubrun/_bench/workloads/io_sink.py",
+            "pubrun/_bench/workloads/print_loop.py",
+            "pubrun/_bench/scripts/__init__.py",
+            "pubrun/_bench/scripts/run_bench.sbatch",
+            "pubrun/_bench/scripts/submit_bench.sh",
+            "pubrun/_bench/scripts/submit_bench_pbs.sh",
+            "pubrun/_bench/scripts/submit_bench_lsf.sh",
+            "pubrun/_bench/scripts/submit_bench_sge.sh",
+        ]
+        missing = [r for r in required if r not in names]
+        assert not missing, f"missing packaged runtime files in wheel: {missing}"
+
+        forbidden = (
+            "benchmarks/results/",
+            "benchmarks/data/",
+            ".aw/",
+            "plot.py",
+            "aggregate.py",
+            "pull_submissions.py",
+            "startup_breakdown.py",
+            "package_capture_bench.py",
+            "test_benchmarks.py",
+            "test_share_safety.py",
+        )
+        leaked = [n for n in names if any(part in n for part in forbidden)]
+        assert not leaked, f"forbidden non-runtime paths in wheel: {leaked}"
+
+        venv_dir = tmp_path / "venv"
+        subprocess.run(
+            [PYTHON, "-m", "venv", str(venv_dir)],
+            env=build_env,
+            stdin=subprocess.DEVNULL,
+            check=True,
+            timeout=120,
+        )
+        vpy = venv_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+        vcli = venv_dir / ("Scripts/pubrun.exe" if sys.platform == "win32" else "bin/pubrun")
+
+        pip_cmd = [str(vpy), "-m", "pip", "install", "--quiet"]
+        if sys.version_info >= (3, 11):
+            pip_cmd.append("--no-deps")
+        pip_cmd.append(str(whl))
+        subprocess.run(
+            pip_cmd,
+            env=build_env,
+            stdin=subprocess.DEVNULL,
+            check=True,
+            timeout=180,
+        )
+
+        work_dir = tmp_path / "outside-checkout"
+        work_dir.mkdir()
+        loc_proc = subprocess.run(
+            [
+                str(vpy),
+                "-c",
+                "import pathlib, pubrun.minimal; print(pathlib.Path(pubrun.__file__).resolve())",
+            ],
+            cwd=str(work_dir),
+            env=build_env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        )
+        pubrun_loc = Path(loc_proc.stdout.strip()).resolve()
+        venv_resolved = venv_dir.resolve()
+        assert venv_resolved in pubrun_loc.parents, f"pubrun resolved outside venv: {pubrun_loc}"
+        assert (_REPO / "src").resolve() not in pubrun_loc.parents
+
+        bench_res = subprocess.run(
+            [
+                str(vcli),
+                "bench",
+                "--iterations", "1",
+                "--passes", "1",
+                "--no-baseline",
+                "--local",
+                "--no-submit",
+            ],
+            cwd=str(work_dir),
+            env=build_env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=240,
+        )
+        assert bench_res.returncode == 0, bench_res.stderr or bench_res.stdout
+        assert not (work_dir / "runs").exists(), "unexpected runs/ directory created"
+
+        results_dir = work_dir / "pubrun-bench-results"
+        files = list(results_dir.glob("*.redacted.json"))
+        assert len(files) == 1, files
+        assert str(files[0]) in bench_res.stderr, bench_res.stderr
+        ok, reasons = check_share_safe_text(files[0].read_text(encoding="utf-8"))
+        assert ok and not reasons, reasons

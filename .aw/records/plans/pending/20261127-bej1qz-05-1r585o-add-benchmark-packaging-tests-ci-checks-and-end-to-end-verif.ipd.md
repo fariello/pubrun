@@ -55,15 +55,15 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Update existing benchmark tests for packaged runtime and single-source share safety
 
-- [ ] E-01 Update `tests/test_benchmark_intake_bugs.py` to import `pubrun._bench.share_safety` and `pubrun._bench.harness` directly:
+- [x] E-01 Update `tests/test_benchmark_intake_bugs.py` to import `pubrun._bench.share_safety` and `pubrun._bench.harness` directly:
   - Replace the file-path `_load("share_safety", _BENCH / "share_safety.py")` and `_load("_bugs_harness", _BENCH / "harness.py")` loaders with direct imports of `pubrun._bench.share_safety` and `pubrun._bench.harness` so monkeypatching `h.run`, `h.redact_result`, and `ss.check_share_safe` targets the real packaged modules and contributes to `--cov=src`.
   - Update the module docstring so it reflects that `share_safety` and `harness` are imported from `pubrun._bench`, while `.github/scripts/` and `benchmarks/aggregate.py` / `benchmarks/pull_submissions.py` remain loaded from their repository paths.
   - Add a behavioral parity test confirming `benchmarks/share_safety.py` (the checkout shim used by `.github/scripts/validate_benchmark_submission.py`) validates the same safe and unsafe fixtures as `pubrun._bench.share_safety`; load the shim under a unique temporary module name (cleaning up `sys.modules` in a `finally` block) so it never pollutes `sys.modules["share_safety"]`.
   - Depends on: none
   - Expected outcome: `pytest tests/test_benchmark_intake_bugs.py -v` passes with zero failures, exercises `src/pubrun/_bench/`, and confirms checkout shim parity without leaking `sys.modules` state.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update existing tests in `tests/test_bench_command.py` to target `pubrun._bench` and single-source `_share_check`:
+- [x] E-02 Update existing tests in `tests/test_bench_command.py` to target `pubrun._bench` and single-source `_share_check`:
   - Update the stale module docstring (which currently claims harness resolution fails for a non-checkout install) so it reflects packaged runtime execution.
   - Import `pubrun._bench.harness`, `pubrun._bench.scenarios`, `pubrun._bench.share_safety`, and `pubrun._bench.workloads.io_sink` directly in `_load_harness`, `TestIoBaselineScenarios`, and `TestBenchCLI::test_bench_quick_local_json` (while preserving a dedicated behavioral test in `TestBenchCLI` or `TestHarnessRedactedOnlyDefault` that invokes the `benchmarks/harness.py` checkout shim directly).
   - Verify and extend `TestSubmissionVerifier` (already migrated from `_verify_redacted` to `pubrun.__main__::_share_check` in `mfeptf` E-01) so it covers:
@@ -76,11 +76,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Replace source-text inspection in `TestSchedulerSubmitSafety::test_new_submit_scripts_exist_and_quote_vars` with behavioral execution of the packaged `submit_bench_pbs.sh` (Portable Batch System (PBS)), `submit_bench_lsf.sh` (Load Sharing Facility (LSF)), and `submit_bench_sge.sh` (Sun Grid Engine (SGE)) scripts (resolved via `pubrun._bench.get_submit_script_path`) against stub `qsub`/`bsub` binaries with `stdin=subprocess.DEVNULL`, verifying literal argument forwarding (for example shell metacharacters such as `$(touch <marker>)` in `PUBRUN_QUEUE` appear verbatim in the stub's argv and never create `<marker>`). Guard POSIX shell execution with `@pytest.mark.skipif(sys.platform == "win32" or shutil.which("bash") is None, reason="POSIX bash required for HPC shell submit scripts")` so the `windows-latest` CI matrix stays green.
   - Depends on: E-01
   - Expected outcome: All existing test classes in `tests/test_bench_command.py` pass cross-platform against `src/pubrun/_bench/` with zero code-pinning source-text checks.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Add new behavioral tests for non-checkout execution, output dir, and HPC commands
 
-- [ ] E-03 Add new behavioral test classes in `tests/test_bench_command.py` covering backlog item `bej1qz` acceptance criteria:
+- [x] E-03 Add new behavioral test classes in `tests/test_bench_command.py` covering backlog item `bej1qz` acceptance criteria:
   - **Default writable output directory selection**: test `pubrun._bench.default_results_dir()` when `PUBRUN_RESULTS_DIR` is set, when inside a verified source checkout (`<repo>/benchmarks/results`), and when outside a checkout (`<cwd>/pubrun-bench-results`, where `find_checkout_root` returns `None`). Test `_run_bench` outside a checkout (monkeypatching `pubrun._bench.find_checkout_root` to return `None` and stubbing `subprocess.run`) creates `<cwd>/pubrun-bench-results/`, targets a `*.redacted.json` path inside it, and prints the output path instead of attempting to write under `site-packages` or a nonexistent `benchmarks/results/`.
   - **HPC submit script command generation without a source checkout**:
     - Cross-platform CLI dispatch test (runs on Linux, macOS, and Windows): monkeypatch `pubrun._bench.find_checkout_root` to return `None` and `subprocess.run` to capture `argv` and `env`, strip ambient `PUBRUN_*` variables, and call `_run_bench(..., submit=True, scheduler=...)` for `slurm`, `pbs`, `lsf`, and `sge` from an isolated temp directory, verifying:
@@ -96,11 +96,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - strips BOTH `PYTHONPATH` and ambient `PUBRUN_*` from the subprocess environment, verifies `pubrun.__file__` resolves inside the virtual environment (not `_REPO / "src"`), runs `pubrun bench --iterations 1 --passes 1 --no-baseline --local --no-submit` with `stdin=subprocess.DEVNULL` from a clean temp working directory outside the repo, and asserts exit code `0`, no `runs/` directory created in the temp cwd, printed redacted result path under `<cwd>/pubrun-bench-results/`, and `check_share_safe_text` passing on the written file.
   - Depends on: E-02
   - Expected outcome: All four new coverage areas required by backlog item `bej1qz` are verified by cross-platform automated behavioral tests in `tests/test_bench_command.py`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Update CI packaging checks
 
-- [ ] E-04 Update `.github/workflows/ci.yml`'s `packaging` job (`check_wheel` function and `twine` step):
+- [x] E-04 Update `.github/workflows/ci.yml`'s `packaging` job (`check_wheel` function and `twine` step):
   - Extend the `required` list in `check_wheel` to assert the wheel includes all 16 packaged runtime files: `pubrun/_bench/__init__.py`, `pubrun/_bench/harness.py`, `pubrun/_bench/scenarios.py`, `pubrun/_bench/share_safety.py`, `pubrun/_bench/workloads/__init__.py`, `pubrun/_bench/workloads/noop.py`, `pubrun/_bench/workloads/cpu_burn.py`, `pubrun/_bench/workloads/file_read.py`, `pubrun/_bench/workloads/io_sink.py`, `pubrun/_bench/workloads/print_loop.py`, `pubrun/_bench/scripts/__init__.py`, `pubrun/_bench/scripts/run_bench.sbatch`, `pubrun/_bench/scripts/submit_bench.sh`, `pubrun/_bench/scripts/submit_bench_pbs.sh`, `pubrun/_bench/scripts/submit_bench_lsf.sh`, and `pubrun/_bench/scripts/submit_bench_sge.sh`.
   - Add a forbidden-path loop asserting the wheel listing contains none of `benchmarks/results/`, `benchmarks/data/`, `.aw/`, `plot.py`, `aggregate.py`, `pull_submissions.py`, `startup_breakdown.py`, `package_capture_bench.py`, `test_benchmarks.py`, or `test_share_safety.py`.
   - Add `--strict` to `twine check --strict dist/*`.
@@ -108,11 +108,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Inside `check_wheel`, create a per-label working directory `local bench_cwd="$WORK_DIR/bench-cwd-$label"; mkdir -p "$bench_cwd"` (so `direct` and `from-sdist` never share state or mask each other), strip `PYTHONPATH` and ambient `PUBRUN_*` variables, run `"$venv_dir/bin/pubrun" bench --iterations 1 --passes 1 --no-baseline --local --no-submit < /dev/null` from `"$bench_cwd"`, verify exit `0`, verify **exactly one** `*.redacted.json` file was created under `"$bench_cwd/pubrun-bench-results/"`, verify `"$bench_cwd/runs"` does not exist, and verify `check_share_safe_text` passes on that file using `"$venv_dir/bin/python"` (importing `pubrun.minimal` first).
   - Depends on: E-03
   - Expected outcome: CI permanently guards wheel inclusion of all `pubrun/_bench/` runtime files, exclusion of non-runtime benchmark artifacts, `twine check --strict`, zero-dependency installation, and independent clean-venv `pubrun bench` execution for both direct and from-sdist wheels.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Execute whole-Set end-to-end acceptance and regression suite
 
-- [ ] E-05 Run all whole-Set verification commands listed in `## Required tests / validation` (using `tempfile.TemporaryDirectory` so no untracked `dist/` or temp artifacts are left in the working tree even on failure):
+- [x] E-05 Run all whole-Set verification commands listed in `## Required tests / validation` (using `tempfile.TemporaryDirectory` so no untracked `dist/` or temp artifacts are left in the working tree even on failure):
   - Build sdist and wheel into a temporary `dist` directory, run `python3 -m twine check --strict`, verify sdist contains no `.aw/` and wheel zip contains all 16 required packaged runtime files and zero forbidden entries.
   - Install the built wheel into a clean temporary virtual environment (verifying `pubrun.__file__` resolves inside the venv) and run `pubrun bench --quick --local` with `stdin=subprocess.DEVNULL` and `PYTHONPATH` + ambient `PUBRUN_*` stripped from a clean temporary directory outside any `pubrun` source checkout; verify exit `0`, `"SAFE TO SUBMIT"` and `"PASSED"` and printed redacted path in `stderr`, exactly one `*.redacted.json` written under `./pubrun-bench-results/`, no `runs/` directory created, and `check_share_safe_text` passing inside the venv Python (`import pubrun.minimal` first).
   - Run `python3 benchmarks/harness.py --quick --redacted-out <tmp>/checkout-quick.redacted.json` inside the source checkout with ambient `PUBRUN_*` stripped, and verify exit `0` and share-safe output (using worktree `src/` on `sys.path` and `import pubrun.minimal` before importing `pubrun._bench.share_safety`).
@@ -121,7 +121,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Run `mypy`, `mypy --platform win32`, `mypy --platform darwin`, and `python3 scripts/sanitize_paths.py --check --all`.
   - Depends on: E-01, E-02, E-03, E-04
   - Expected outcome: Every acceptance criterion of backlog item `bej1qz` and every repository quality gate passes with pasted runner evidence.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -315,30 +315,245 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted output of `pytest tests/test_benchmark_intake_bugs.py -v` passing with exit code `0`, confirming all benchmark intake and self-check tests execute directly against `pubrun._bench.share_safety` and `pubrun._bench.harness` and the `benchmarks/share_safety.py` checkout shim parity test passes without `sys.modules` leakage.
   - Observed evidence:
-  - Result: pending
+    - `pytest tests/test_benchmark_intake_bugs.py -v` (exit `0`; local interpreter/worktree paths elided as `<venv>/bin/python` and `<repo>` for path-leak hygiene):
+      ```text
+      platform linux -- Python 3.14.6, pytest-8.2.2, pluggy-1.6.0 -- <venv>/bin/python
+      rootdir: <repo>
+      collected 73 items
+      tests/test_benchmark_intake_bugs.py::TestShareSafetyNone::test_virtual_env_none_is_safe PASSED [  1%]
+      tests/test_benchmark_intake_bugs.py::TestShareSafetyNone::test_every_must_be_redacted_field_may_be_none PASSED [  2%]
+      tests/test_benchmark_intake_bugs.py::TestShareSafetyNone::test_non_none_unredacted_value_still_rejected PASSED [  4%]
+      tests/test_benchmark_intake_bugs.py::TestShareSafetyCheckoutShimParity::test_checkout_shim_matches_packaged_share_safety_without_sys_modules_leak PASSED [  5%]
+      ...
+      tests/test_benchmark_intake_bugs.py::TestHarnessSelfCheckGate::test_failed_self_check_exits_nonzero_and_writes_nothing PASSED [ 26%]
+      tests/test_benchmark_intake_bugs.py::TestHarnessSelfCheckGate::test_self_check_exception_exits_nonzero PASSED [ 27%]
+      tests/test_benchmark_intake_bugs.py::TestHarnessSelfCheckGate::test_passing_self_check_writes_file PASSED [ 28%]
+      ...
+      ============================== 73 passed in 1.40s ==============================
+      ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted output of `pytest tests/test_bench_command.py -v` exiting `0`, confirming updated tests pin: (a) direct `pubrun._bench` runtime imports alongside direct `benchmarks/harness.py` checkout shim execution, (b) extended single-source `pubrun.__main__::_share_check` validation (including non-object JSON and `OSError`) and absence of `_load_share_safety`/`_verify_redacted`/`_scan_for_pii`, (c) `_find_bench_harness()` resolving `pubrun/_bench/harness.py` outside a checkout plus clean exit `1` when missing, and (d) behavioral literal-argument forwarding against stub `qsub`/`bsub` binaries with zero source-text inspection (non-binding pointers: `TestSubmissionVerifier`, `TestHarnessResolution`, `TestSchedulerSubmitSafety`, `TestIoBaselineScenarios`, `TestBenchCLI`).
   - Observed evidence:
-  - Result: pending
+    - `pytest tests/test_bench_command.py -v` (exit `0`; excerpt of updated classes):
+      ```text
+      collected 82 items
+      tests/test_bench_command.py::TestHarnessResolution::test_find_harness_in_checkout PASSED [  6%]
+      tests/test_bench_command.py::TestHarnessResolution::test_find_harness_outside_checkout PASSED [  7%]
+      tests/test_bench_command.py::TestHarnessResolution::test_bench_errors_without_checkout PASSED [  8%]
+      tests/test_bench_command.py::TestSchedulerSubmitSafety::test_new_submit_scripts_forward_queue_literally[submit_bench_pbs.sh-qsub] PASSED [ 20%]
+      tests/test_bench_command.py::TestSchedulerSubmitSafety::test_new_submit_scripts_forward_queue_literally[submit_bench_lsf.sh-bsub] PASSED [ 21%]
+      tests/test_bench_command.py::TestSchedulerSubmitSafety::test_new_submit_scripts_forward_queue_literally[submit_bench_sge.sh-qsub] PASSED [ 23%]
+      tests/test_bench_command.py::TestBenchCLI::test_bench_quick_local_json PASSED [ 25%]
+      tests/test_bench_command.py::TestBenchCLI::test_bench_unredacted_writes_both PASSED [ 26%]
+      tests/test_bench_command.py::TestIoBaselineScenarios::test_io_baseline_scenarios_registered PASSED [ 29%]
+      tests/test_bench_command.py::TestIoBaselineScenarios::test_io_sink_workload_null_and_tmpdir PASSED [ 32%]
+      tests/test_bench_command.py::TestSubmissionVerifier::test_duplicate_verifier_helpers_removed PASSED [ 34%]
+      tests/test_bench_command.py::TestSubmissionVerifier::test_verifier_passes_redacted PASSED [ 35%]
+      tests/test_bench_command.py::TestSubmissionVerifier::test_verifier_catches_sensitive_key PASSED [ 36%]
+      tests/test_bench_command.py::TestSubmissionVerifier::test_verifier_catches_embedded_home_path PASSED [ 37%]
+      tests/test_bench_command.py::TestSubmissionVerifier::test_verifier_rejects_unparseable PASSED [ 39%]
+      tests/test_bench_command.py::TestSubmissionVerifier::test_verifier_rejects_non_object_json PASSED [ 40%]
+      tests/test_bench_command.py::TestSubmissionVerifier::test_verifier_rejects_missing_or_unreadable_file PASSED [ 41%]
+      tests/test_bench_command.py::TestHarnessRedactedOnlyDefault::test_default_main_writes_only_redacted PASSED [ 56%]
+      tests/test_bench_command.py::TestHarnessRedactedOnlyDefault::test_unredacted_flag_writes_both PASSED [ 57%]
+      ======================== 82 passed in 163.85s (0:02:43) ========================
+      ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted output of `pytest tests/test_bench_command.py -v` exiting `0`, confirming new behavioral tests pin: (a) default writable output directory selection (`PUBRUN_RESULTS_DIR`, checkout `benchmarks/results`, non-checkout `<cwd>/pubrun-bench-results`), (b) cross-platform non-checkout HPC CLI dispatch (`slurm`, `pbs`, `lsf`, `sge` targeting packaged scripts with `PUBRUN_RESULTS_DIR`, absent `PUBRUN_REPO`, and `PUBRUN_UNREDACTED`) plus POSIX stub-scheduler execution emitting `-m pubrun._bench.harness`, and (c) clean-venv wheel build, zip inclusion/exclusion inspection, and non-checkout `pubrun bench` execution passing `check_share_safe_text` (or explicit clean skip only if `build` is absent, which must execute and pass in this environment where `build` is installed).
   - Observed evidence:
-  - Result: pending
+    - `pytest tests/test_bench_command.py -v` (exit `0`; new behavioral test classes):
+      ```text
+      tests/test_bench_command.py::TestDefaultResultsDir::test_env_var_takes_precedence PASSED [ 84%]
+      tests/test_bench_command.py::TestDefaultResultsDir::test_inside_verified_checkout_uses_benchmarks_results PASSED [ 85%]
+      tests/test_bench_command.py::TestDefaultResultsDir::test_outside_checkout_uses_cwd_pubrun_bench_results PASSED [ 86%]
+      tests/test_bench_command.py::TestDefaultResultsDir::test_run_bench_outside_checkout_creates_writable_results_dir_and_prints_path PASSED [ 87%]
+      tests/test_bench_command.py::TestHpcNonCheckoutSubmission::test_cli_dispatch_outside_checkout_sets_writable_results_dir_and_env[False-slurm-submit_bench.sh] PASSED [ 89%]
+      tests/test_bench_command.py::TestHpcNonCheckoutSubmission::test_cli_dispatch_outside_checkout_sets_writable_results_dir_and_env[False-pbs-submit_bench_pbs.sh] PASSED [ 90%]
+      tests/test_bench_command.py::TestHpcNonCheckoutSubmission::test_cli_dispatch_outside_checkout_sets_writable_results_dir_and_env[False-lsf-submit_bench_lsf.sh] PASSED [ 91%]
+      tests/test_bench_command.py::TestHpcNonCheckoutSubmission::test_cli_dispatch_outside_checkout_sets_writable_results_dir_and_env[False-sge-submit_bench_sge.sh] PASSED [ 92%]
+      tests/test_bench_command.py::TestHpcNonCheckoutSubmission::test_cli_dispatch_outside_checkout_sets_writable_results_dir_and_env[True-slurm-submit_bench.sh] PASSED [ 93%]
+      tests/test_bench_command.py::TestHpcNonCheckoutSubmission::test_cli_dispatch_outside_checkout_sets_writable_results_dir_and_env[True-pbs-submit_bench_pbs.sh] PASSED [ 95%]
+      tests/test_bench_command.py::TestHpcNonCheckoutSubmission::test_cli_dispatch_outside_checkout_sets_writable_results_dir_and_env[True-lsf-submit_bench_lsf.sh] PASSED [ 96%]
+      tests/test_bench_command.py::TestHpcNonCheckoutSubmission::test_cli_dispatch_outside_checkout_sets_writable_results_dir_and_env[True-sge-submit_bench_sge.sh] PASSED [ 97%]
+      tests/test_bench_command.py::TestHpcNonCheckoutSubmission::test_packaged_hpc_scripts_and_sbatch_run_without_checkout PASSED [ 98%]
+      tests/test_bench_command.py::TestWheelNonCheckoutBench::test_wheel_install_runs_pubrun_bench_outside_checkout PASSED [100%]
+      ======================== 82 passed in 163.85s (0:02:43) ========================
+      ```
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `git diff -- .github/workflows/ci.yml` and YAML parse check (`python3 -c 'import yaml; yaml.safe_load(open(".github/workflows/ci.yml")); print("ok")'`) showing valid YAML with `twine check --strict`, all 16 required `pubrun/_bench/` wheel entries, all 10 forbidden exclusions, `--no-deps` clean-venv install, and per-label `bench-cwd-$label` non-checkout `pubrun bench` + `check_share_safe_text` verification.
   - Observed evidence:
-  - Result: pending
+    - YAML parse check (exit `0`):
+      ```text
+      ci.yml yaml ok
+      ```
+    - `git diff -- .github/workflows/ci.yml` (exit `0`):
+      ```diff
+      diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+      index e96e259..7f97af5 100644
+      --- a/.github/workflows/ci.yml
+      +++ b/.github/workflows/ci.yml
+      @@ -82,7 +82,7 @@ jobs:
+             - name: Build sdist and wheel
+               run: python -m build --outdir dist .
+             - name: Check distribution metadata with twine
+      -        run: twine check dist/*
+      +        run: twine check --strict dist/*
+             - name: Verify sdist cleanliness, wheel contents, and commit stamp in clean environments
+               shell: bash
+               run: |
+      @@ -112,19 +112,58 @@ jobs:
+                   local label="$1"
+                   local whl="$2"
+                   local venv_dir="$WORK_DIR/venv-$label"
+      +            local bench_cwd="$WORK_DIR/bench-cwd-$label"
+                   local listing
+                   listing="$(python -m zipfile -l "$whl")"
+                   echo "=== zipfile listing ($label) ==="
+                   echo "$listing"
+      -            for required in "pubrun/_build_meta.json" "pubrun/COMMIT" "pubrun/py.typed" "pubrun/resources/default.toml" "licenses/LICENSE" "licenses/NOTICE"; do
+      +            for required in \
+      +              "pubrun/_build_meta.json" \
+      +              "pubrun/COMMIT" \
+      +              "pubrun/py.typed" \
+      +              "pubrun/resources/default.toml" \
+      +              "licenses/LICENSE" \
+      +              "licenses/NOTICE" \
+      +              "pubrun/_bench/__init__.py" \
+      +              "pubrun/_bench/harness.py" \
+      +              "pubrun/_bench/scenarios.py" \
+      +              "pubrun/_bench/share_safety.py" \
+      +              "pubrun/_bench/workloads/__init__.py" \
+      +              "pubrun/_bench/workloads/noop.py" \
+      +              "pubrun/_bench/workloads/cpu_burn.py" \
+      +              "pubrun/_bench/workloads/file_read.py" \
+      +              "pubrun/_bench/workloads/io_sink.py" \
+      +              "pubrun/_bench/workloads/print_loop.py" \
+      +              "pubrun/_bench/scripts/__init__.py" \
+      +              "pubrun/_bench/scripts/run_bench.sbatch" \
+      +              "pubrun/_bench/scripts/submit_bench.sh" \
+      +              "pubrun/_bench/scripts/submit_bench_pbs.sh" \
+      +              "pubrun/_bench/scripts/submit_bench_lsf.sh" \
+      +              "pubrun/_bench/scripts/submit_bench_sge.sh"; do
+                     if ! grep -Fq "$required" <<< "$listing"; then
+                       echo "Missing $required in $whl" >&2
+                       exit 1
+                     fi
+                   done
+      +            for forbidden in \
+      +              "benchmarks/results/" \
+      +              "benchmarks/data/" \
+      +              ".aw/" \
+      +              "plot.py" \
+      +              "aggregate.py" \
+      +              "pull_submissions.py" \
+      +              "startup_breakdown.py" \
+      +              "package_capture_bench.py" \
+      +              "test_benchmarks.py" \
+      +              "test_share_safety.py"; do
+      +              if grep -Fq "$forbidden" <<< "$listing"; then
+      +                echo "Forbidden path '$forbidden' found in $whl" >&2
+      +                exit 1
+      +              fi
+      +            done
 
-- [ ] V-05 validates E-05
+                   python -m venv "$venv_dir"
+      -            "$venv_dir/bin/pip" install --quiet "$whl"
+      +            "$venv_dir/bin/pip" install --no-deps --quiet "$whl"
+
+                   (
+                     cd "$WORK_DIR"
+      @@ -145,6 +184,27 @@ jobs:
+                       fi
+                     done
+                   )
+      +
+      +            mkdir -p "$bench_cwd"
+      +            (
+      +              cd "$bench_cwd"
+      +              unset PYTHONPATH
+      +              while IFS= read -r env_name; do
+      +                [ -n "$env_name" ] && unset "$env_name"
+      +              done < <(compgen -e PUBRUN_ || true)
+      +              "$venv_dir/bin/pubrun" bench --iterations 1 --passes 1 --no-baseline --local --no-submit < /dev/null
+      +              if [ -e "$bench_cwd/runs" ]; then
+      +                echo "[$label] Unexpected runs/ directory created in $bench_cwd" >&2
+      +                exit 1
+      +              fi
+      +              shopt -s nullglob
+      +              results=("$bench_cwd/pubrun-bench-results"/*.redacted.json)
+      +              if [ "${#results[@]}" -ne 1 ]; then
+      +                echo "[$label] Expected exactly 1 redacted result under $bench_cwd/pubrun-bench-results, found ${#results[@]}" >&2
+      +                exit 1
+      +              fi
+      +              "$venv_dir/bin/python" -c 'import sys; from pathlib import Path; import pubrun.minimal; from pubrun._bench.share_safety import check_share_safe_text; ok, reasons = check_share_safe_text(Path(sys.argv[1]).read_text(encoding="utf-8")); assert ok and not reasons, reasons; print("verified share-safe:", Path(sys.argv[1]).name)' "${results[0]}"
+      +            )
+                 }
+      ```
+  - Result: pass
+
+- [x] V-05 validates E-05
   - Required evidence: Pasted runner outputs of all five commands in `## Required tests / validation` exiting `0`, demonstrating: (1) wheel build, `twine check --strict`, sdist/wheel content inspection, and clean-venv non-checkout `pubrun bench --quick --local` via `src/pubrun/__main__.py::_run_bench` and `src/pubrun/_bench/harness.py::main` (from `29nsim`/`mfeptf`) printing `"SAFE TO SUBMIT"`, `"PASSED"`, and the redacted path under `pubrun-bench-results/` with `check_share_safe_text` passing and no `runs/` directory; (2) source-checkout `python3 benchmarks/harness.py --quick` via `benchmarks/harness.py` shim -> `src/pubrun/_bench/harness.py::main` (from `29nsim`); (3) targeted suites including `benchmarks/test_benchmarks.py` and `tests/test_bench_command.py`; (4) full `pytest tests/ -p randomly --cov=src --cov-fail-under=78`; and (5) three-platform `mypy` and `scripts/sanitize_paths.py --check --all`.
   - Observed evidence:
-  - Result: pending
+    - Command 1 (wheel/sdist build, `twine check --strict`, zip/tar inspection, clean-venv `--no-deps` `pubrun bench --quick --local`, exit `0`):
+      ```text
+      Successfully built pubrun-1.4.0.tar.gz and pubrun-1.4.0-py3-none-any.whl
+      Checking /tmp/pubrun-wheel-e2e-b82me5ss/dist/pubrun-1.4.0-py3-none-any.whl: PASSED
+      Checking /tmp/pubrun-wheel-e2e-b82me5ss/dist/pubrun-1.4.0.tar.gz: PASSED
+      Successfully installed pubrun-1.4.0
+      rc= 0
+      ==========================
+        Benchmark result written. To contribute it:
+
+        SAFE TO SUBMIT:         /tmp/pubrun-wheel-e2e-b82me5ss/outside/pubrun-bench-results/pubrun-bench-50687292-20261127T072505Z.redacted.json
+        Share check:            PASSED
+      ...
+      To contribute later: pubrun bench --submit-file "/tmp/pubrun-wheel-e2e-b82me5ss/outside/pubrun-bench-results/pubrun-bench-50687292-20261127T072505Z.redacted.json"
+
+      VERIFIED: pubrun-bench-50687292-20261127T072505Z.redacted.json
+      ```
+    - Command 2 (source-checkout `python3 benchmarks/harness.py --quick`, exit `0`):
+      ```text
+      rc= 0
+        [pass 2] hotpath-print-baseline: median=18.0 ms (n=15, fail=0)
+        [pass 2] hotpath-print-tee: median=240.9 ms (n=15, fail=0)
+        [pass 2] io-baseline-devnull: median=41.9 ms (n=15, fail=0)
+        [pass 2] io-baseline-devshm: median=46.0 ms (n=15, fail=0)
+        [pass 2] io-baseline-tmpdir: median=46.7 ms (n=15, fail=0)
+      Wrote redacted result /tmp/pubrun-checkout-quick-j16prssc/quick.redacted.json
+
+      VERIFIED checkout quick
+      ```
+    - Command 3 (`pytest tests/test_bench_command.py tests/test_benchmark_intake_bugs.py tests/test_report_subpackage_integrity.py benchmarks/test_benchmarks.py benchmarks/test_share_safety.py .github/scripts/ -v`, exit `0`):
+      ```text
+      collected 242 items
+      ...
+      ================== 239 passed, 3 skipped in 556.20s (0:09:16) ==================
+      ```
+    - Command 4 (`pytest tests/ -p randomly --cov=src --cov-fail-under=78`, exit `0`):
+      ```text
+      Using --randomly-seed=1413270313
+      collected 2307 items
+      ...
+      TOTAL                                       17236   3021    82%
+      Required test coverage of 78% reached. Total coverage: 82.47%
+      ======================= 2307 passed in 535.56s (0:08:55) =======================
+      ```
+    - Command 5 (`mypy && mypy --platform win32 && mypy --platform darwin && python3 scripts/sanitize_paths.py --check --all`, exit `0`):
+      ```text
+      Success: no issues found in 70 source files
+      Success: no issues found in 70 source files
+      Success: no issues found in 70 source files
+      ```
+  - Result: pass
 
 ## Approval and execution gate
 

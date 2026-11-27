@@ -82,7 +82,7 @@ jobs:
       - name: Build sdist and wheel
         run: python -m build --outdir dist .
       - name: Check distribution metadata with twine
-        run: twine check dist/*
+        run: twine check --strict dist/*
       - name: Verify sdist cleanliness, wheel contents, and commit stamp in clean environments
         shell: bash
         run: |
@@ -112,19 +112,58 @@ jobs:
             local label="$1"
             local whl="$2"
             local venv_dir="$WORK_DIR/venv-$label"
+            local bench_cwd="$WORK_DIR/bench-cwd-$label"
             local listing
             listing="$(python -m zipfile -l "$whl")"
             echo "=== zipfile listing ($label) ==="
             echo "$listing"
-            for required in "pubrun/_build_meta.json" "pubrun/COMMIT" "pubrun/py.typed" "pubrun/resources/default.toml" "licenses/LICENSE" "licenses/NOTICE"; do
+            for required in \
+              "pubrun/_build_meta.json" \
+              "pubrun/COMMIT" \
+              "pubrun/py.typed" \
+              "pubrun/resources/default.toml" \
+              "licenses/LICENSE" \
+              "licenses/NOTICE" \
+              "pubrun/_bench/__init__.py" \
+              "pubrun/_bench/harness.py" \
+              "pubrun/_bench/scenarios.py" \
+              "pubrun/_bench/share_safety.py" \
+              "pubrun/_bench/workloads/__init__.py" \
+              "pubrun/_bench/workloads/noop.py" \
+              "pubrun/_bench/workloads/cpu_burn.py" \
+              "pubrun/_bench/workloads/file_read.py" \
+              "pubrun/_bench/workloads/io_sink.py" \
+              "pubrun/_bench/workloads/print_loop.py" \
+              "pubrun/_bench/scripts/__init__.py" \
+              "pubrun/_bench/scripts/run_bench.sbatch" \
+              "pubrun/_bench/scripts/submit_bench.sh" \
+              "pubrun/_bench/scripts/submit_bench_pbs.sh" \
+              "pubrun/_bench/scripts/submit_bench_lsf.sh" \
+              "pubrun/_bench/scripts/submit_bench_sge.sh"; do
               if ! grep -Fq "$required" <<< "$listing"; then
                 echo "Missing $required in $whl" >&2
                 exit 1
               fi
             done
+            for forbidden in \
+              "benchmarks/results/" \
+              "benchmarks/data/" \
+              ".aw/" \
+              "plot.py" \
+              "aggregate.py" \
+              "pull_submissions.py" \
+              "startup_breakdown.py" \
+              "package_capture_bench.py" \
+              "test_benchmarks.py" \
+              "test_share_safety.py"; do
+              if grep -Fq "$forbidden" <<< "$listing"; then
+                echo "Forbidden path '$forbidden' found in $whl" >&2
+                exit 1
+              fi
+            done
 
             python -m venv "$venv_dir"
-            "$venv_dir/bin/pip" install --quiet "$whl"
+            "$venv_dir/bin/pip" install --no-deps --quiet "$whl"
 
             (
               cd "$WORK_DIR"
@@ -144,6 +183,27 @@ jobs:
                   exit 1
                 fi
               done
+            )
+
+            mkdir -p "$bench_cwd"
+            (
+              cd "$bench_cwd"
+              unset PYTHONPATH
+              while IFS= read -r env_name; do
+                [ -n "$env_name" ] && unset "$env_name"
+              done < <(compgen -e PUBRUN_ || true)
+              "$venv_dir/bin/pubrun" bench --iterations 1 --passes 1 --no-baseline --local --no-submit < /dev/null
+              if [ -e "$bench_cwd/runs" ]; then
+                echo "[$label] Unexpected runs/ directory created in $bench_cwd" >&2
+                exit 1
+              fi
+              shopt -s nullglob
+              results=("$bench_cwd/pubrun-bench-results"/*.redacted.json)
+              if [ "${#results[@]}" -ne 1 ]; then
+                echo "[$label] Expected exactly 1 redacted result under $bench_cwd/pubrun-bench-results, found ${#results[@]}" >&2
+                exit 1
+              fi
+              "$venv_dir/bin/python" -c 'import sys; from pathlib import Path; import pubrun.minimal; from pubrun._bench.share_safety import check_share_safe_text; ok, reasons = check_share_safe_text(Path(sys.argv[1]).read_text(encoding="utf-8")); assert ok and not reasons, reasons; print("verified share-safe:", Path(sys.argv[1]).name)' "${results[0]}"
             )
           }
 

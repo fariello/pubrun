@@ -1,8 +1,10 @@
 """Regression tests for the benchmark redaction, intake-validation, and aggregation bugs
 fixed by IPD 8k73qj (Set bugs-audit): BUG-18..24 and BUG-54..56.
 
-The modules under test live outside the package (benchmarks/ and .github/scripts/), so each
-is loaded from its file path, the same way their own test suites load them.
+The benchmark runtime modules (`pubrun._bench.share_safety` and `pubrun._bench.harness`)
+are imported directly from the packaged subpackage, while repository-only tools under
+`benchmarks/` (`aggregate.py`, `pull_submissions.py`) and `.github/scripts/` are loaded
+from their checkout file paths.
 """
 import copy
 import importlib.util
@@ -12,6 +14,9 @@ import urllib.error
 from pathlib import Path
 
 import pytest
+
+from pubrun._bench import harness as h
+from pubrun._bench import share_safety as ss
 
 _REPO = Path(__file__).resolve().parents[1]
 _BENCH = _REPO / "benchmarks"
@@ -32,8 +37,6 @@ def _load(name, path):
     return mod
 
 
-ss = _load("share_safety", _BENCH / "share_safety.py")
-h = _load("_bugs_harness", _BENCH / "harness.py")
 agg = _load("aggregate", _BENCH / "aggregate.py")
 x = _load("extract_attachment_url", _SCRIPTS / "extract_attachment_url.py")
 v = _load("validate_benchmark_submission", _SCRIPTS / "validate_benchmark_submission.py")
@@ -78,6 +81,43 @@ class TestShareSafetyNone:
         assert not ok
         assert any("machine.python.virtual_env" in m for m in reasons)
         assert all("venv-name" not in m for m in reasons)
+
+
+class TestShareSafetyCheckoutShimParity:
+    """Confirm benchmarks/share_safety.py matches pubrun._bench.share_safety on safe/unsafe fixtures."""
+
+    def test_checkout_shim_matches_packaged_share_safety_without_sys_modules_leak(self):
+        mod_name = "_test_checkout_share_safety_shim_parity"
+        before_share_safety = sys.modules.get("share_safety")
+        spec = importlib.util.spec_from_file_location(mod_name, _BENCH / "share_safety.py")
+        assert spec is not None and spec.loader is not None
+        shim = importlib.util.module_from_spec(spec)
+        sys.modules[mod_name] = shim
+        try:
+            spec.loader.exec_module(shim)
+
+            assert shim.SHARE_SAFETY_VERSION == ss.SHARE_SAFETY_VERSION
+
+            safe_fixture = _safe_result()
+            unredacted_host = _safe_result()
+            unredacted_host["machine"]["host"]["hostname"] = "login-node-02"
+            embedded_home = _safe_result()
+            embedded_home["notes"] = "ran in /home/alice/project"
+            unredacted_slurm = _safe_result()
+            unredacted_slurm["machine"]["slurm"] = {"node": "cn-09", "job_id": 98765}
+
+            for fixture in (safe_fixture, unredacted_host, embedded_home, unredacted_slurm):
+                assert shim.check_share_safe(fixture) == ss.check_share_safe(fixture)
+                text = json.dumps(fixture)
+                assert shim.check_share_safe_text(text) == ss.check_share_safe_text(text)
+
+            for raw_text in ("[]", "not valid json{{{"):
+                assert shim.check_share_safe_text(raw_text) == ss.check_share_safe_text(raw_text)
+        finally:
+            sys.modules.pop(mod_name, None)
+
+        assert mod_name not in sys.modules
+        assert sys.modules.get("share_safety") is before_share_safety
 
 
 # ------------------------------------------------- BUG-19: Slurm node / job id redaction
