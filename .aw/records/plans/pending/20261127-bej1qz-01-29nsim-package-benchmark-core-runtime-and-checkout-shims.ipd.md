@@ -6,7 +6,7 @@
 - Scope: Create the internal standard-library subpackage `src/pubrun/_bench/` (`__init__.py`, `share_safety.py`, `scenarios.py`, `harness.py`, and `workloads/`), convert `benchmarks/share_safety.py`, `benchmarks/scenarios.py`, `benchmarks/harness.py`, and `benchmarks/workloads/` into checkout shims, and update `benchmarks/startup_breakdown.py` to locate the canonical packaged workloads.
 - Scope-Paths: src/pubrun/_bench, benchmarks/share_safety.py, benchmarks/scenarios.py, benchmarks/harness.py, benchmarks/workloads, benchmarks/startup_breakdown.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Create src/pubrun/_bench core runtime modules and workloads and add checkout shims under benchmarks/
@@ -19,11 +19,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: 29nsim
+- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006; review record `.aw/records/reviews/20261127-bej1qz-01-29nsim-package-benchmark-core-runtime-and-checkout-shims.review.md`.
 - 2026-11-27 to-review (aw set): demoted approved -> to-review: APPROVAL WITHDRAWN: Demote to to-review so /plan-review writes Readiness attestations before execution
 - 2026-11-27 approved (aw set): status set to approved

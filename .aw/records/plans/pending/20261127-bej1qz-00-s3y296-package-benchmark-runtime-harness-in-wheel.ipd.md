@@ -6,7 +6,7 @@
 - Scope: Coordination of five child plans for Set `bej1qz`: `29nsim` (package core benchmark runtime modules and workloads under `src/pubrun/_bench/` with checkout shims), `c1zz3x` (package high-performance computing (HPC) submission scripts under `src/pubrun/_bench/scripts/` with checkout shims), `mfeptf` (wire `src/pubrun/__main__.py` to the packaged runtime, writable default output directory, and single-source share-safety validator, and migrate `tests/test_bench_command.py::TestSubmissionVerifier` to `_share_check` so tests stay green when `_verify_redacted` is deleted), `cuboum` (update documentation across `docs/`, `benchmarks/README.md`, and `README.md`), and `1r585o` (update remaining benchmark tests, add non-checkout, output-dir, HPC command-generation, and wheel tests, update Continuous Integration (CI) packaging checks, and execute whole-Set acceptance verification). This orchestrator modifies no product code, scripts, tests, CI configuration, or documentation.
 - Scope-Paths: .aw/records/plans/pending/20261127-bej1qz-00-s3y296-package-benchmark-runtime-harness-in-wheel.ipd.md
 - Item-Dependencies: executed:29nsim, executed:c1zz3x, executed:mfeptf, executed:cuboum, executed:1r585o
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: orchestrator
 - Coverage: pass
@@ -22,11 +22,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: s3y296
+- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 coverage pass (aw oc run): fingerprint d81c6ad61224, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004; review record `.aw/records/reviews/20261127-bej1qz-00-s3y296-package-benchmark-runtime-harness-in-wheel.review.md`.
 - 2026-11-27 to-review (aw set): demoted approved -> to-review: APPROVAL WITHDRAWN: Demote to to-review so /plan-review writes Readiness attestations before execution
