@@ -1,64 +1,13 @@
 #!/bin/bash
-# Submit the pubrun benchmark to PBS / Torque / OpenPBS (via `qsub`).
+# Source-checkout shim for the packaged PBS / Torque / OpenPBS submission script
+# (`src/pubrun/_bench/scripts/submit_bench_pbs.sh`).
 #
-# STARTING POINT — adapt to your site. Real clusters usually require an account/allocation
-# (`#PBS -A <acct>`) and often a specific queue/walltime. This script submits to the default
-# queue and lets the scheduler place the job (portable; no site-specific idle-node query).
-# It is NOT validated against a live PBS cluster in CI.
-#
-# Usage:
-#   benchmarks/submit_bench_pbs.sh                 # full run, default queue
-#   benchmarks/submit_bench_pbs.sh --quick         # args forwarded to harness.py
-#   PUBRUN_QUEUE=workq benchmarks/submit_bench_pbs.sh
-#
-# Configuration (environment; all optional):
-#   PUBRUN_QUEUE     PBS queue (`-q`), if your site requires one.
-#   PUBRUN_ACCOUNT   Account/allocation (`-A`), if required.
-#   PUBRUN_PY        Python with pubrun importable (default: python3).
-#   PUBRUN_REPO      Repo root (default: the repo containing this script).
+# STARTING POINT -- adapt to your site. Delegates to the canonical packaged PBS
+# script (which builds `qsub` flags via QSUB_OPTS=() argv-array option handling
+# and is not validated against a live PBS cluster in CI).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-command -v qsub >/dev/null 2>&1 || { echo "ERROR: qsub not found (is PBS/Torque loaded?)." >&2; exit 1; }
-
-export PUBRUN_BENCH_ARGS="${*:-}"
 export PUBRUN_REPO="${PUBRUN_REPO:-$(cd "$HERE/.." && pwd)}"
-export PUBRUN_PY="${PUBRUN_PY:-python3}"
-
-# Build qsub options as an argv array (no shell interpolation of user values into a string).
-QSUB_OPTS=(-N pubrun-bench -l "select=1:ncpus=4:mem=4gb" -l "walltime=00:30:00"
-           -j oe -V)
-[ -n "${PUBRUN_QUEUE:-}" ]   && QSUB_OPTS+=(-q "$PUBRUN_QUEUE")
-[ -n "${PUBRUN_ACCOUNT:-}" ] && QSUB_OPTS+=(-A "$PUBRUN_ACCOUNT")
-
-# Job body: run the harness on the assigned node, write a node-tagged result JSON.
-JOB_SCRIPT="$(cat <<'EOF'
-#!/bin/bash
-set -euo pipefail
-cd "$PUBRUN_REPO"
-RESULTS_DIR="$PUBRUN_REPO/benchmarks/results"
-mkdir -p "$RESULTS_DIR"
-NODE="$(hostname)"
-STAMP="$(date -u +%Y%m%d-%H%M%S)"
-PUBRUN_UNREDACTED="${PUBRUN_UNREDACTED:-}"
-ANON_ID="$(printf '%s' "$NODE" | "$PUBRUN_PY" -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.read().encode()).hexdigest()[:8])' 2>/dev/null || echo 'node')"
-REDACTED_OUT="${PUBRUN_REDACTED_OUT:-$RESULTS_DIR/pubrun-bench-${ANON_ID}-${STAMP}.redacted.json}"
-UNREDACTED_OUT="$RESULTS_DIR/${NODE}-${STAMP}.unredacted.json"
-if ! "$PUBRUN_PY" -c "import pubrun" 2>/dev/null; then
-    export PYTHONPATH="$PUBRUN_REPO/src${PYTHONPATH:+:$PYTHONPATH}"
-    "$PUBRUN_PY" -c "import pubrun" 2>/dev/null || {
-        echo "ERROR: 'pubrun' not importable with $PUBRUN_PY; run '$PUBRUN_PY -m pip install -e $PUBRUN_REPO'." >&2
-        exit 1; }
-fi
-HARNESS_OUT_ARGS=(--redacted-out "$REDACTED_OUT")
-if [ -n "$PUBRUN_UNREDACTED" ]; then
-    HARNESS_OUT_ARGS+=(--out "$UNREDACTED_OUT")
-fi
-# shellcheck disable=SC2086
-"$PUBRUN_PY" benchmarks/harness.py "${HARNESS_OUT_ARGS[@]}" $PUBRUN_BENCH_ARGS
-echo "Done. Redacted result: $REDACTED_OUT"
-EOF
-)"
-
-echo "Submitting pubrun benchmark to PBS (default placement)..."
-printf '%s\n' "$JOB_SCRIPT" | qsub "${QSUB_OPTS[@]}"
+export PUBRUN_RESULTS_DIR="${PUBRUN_RESULTS_DIR:-$PUBRUN_REPO/benchmarks/results}"
+exec bash "$PUBRUN_REPO/src/pubrun/_bench/scripts/submit_bench_pbs.sh" "$@"

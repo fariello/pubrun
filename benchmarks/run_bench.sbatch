@@ -1,15 +1,10 @@
 #!/bin/bash
-# pubrun benchmark harness — Slurm batch job.
+# Source-checkout shim for the packaged Slurm batch script
+# (`src/pubrun/_bench/scripts/run_bench.sbatch`).
 #
-# Runs benchmarks/harness.py on ONE node and writes a node-tagged result JSON to
-# benchmarks/results/ (persistent — NOT $TMPDIR, which is purged on job end).
-#
-# Submit via benchmarks/submit_bench.sh (which picks a random idle CPU node), or
-# directly with:  sbatch benchmarks/run_bench.sbatch
-#
-# Cluster-specific settings (partition/account) are read from the environment so
-# this file need not be edited; submit_bench.sh sets them, or export them
-# yourself. See the "# EDIT" defaults below.
+# Retains the #SBATCH directives at the top so `sbatch benchmarks/run_bench.sbatch`
+# parses them directly, and resolves the canonical packaged script safely even
+# when Slurm copies this file to a spool directory.
 #
 #SBATCH --job-name=pubrun-bench
 #SBATCH --nodes=1
@@ -21,56 +16,31 @@
 
 set -euo pipefail
 
-# --- Configuration (override via environment) --------------------------------
-# Repo root: default to the repo containing this script.
-PUBRUN_REPO="${PUBRUN_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
-# Python interpreter with pubrun importable (editable install or installed).
-PUBRUN_PY="${PUBRUN_PY:-python3}"     # EDIT default if you use a venv, e.g. $HOME/venv/p3.14/bin/python
-# Extra harness args (e.g. "--quick" or "--passes 3"); empty = full run.
-PUBRUN_BENCH_ARGS="${PUBRUN_BENCH_ARGS:-}"
+PUBRUN_REPO="${PUBRUN_REPO:-}"
+PUBRUN_RESULTS_DIR="${PUBRUN_RESULTS_DIR:-}"
+PUBRUN_PY="${PUBRUN_PY:-python3}"
 
-cd "$PUBRUN_REPO"
-
-RESULTS_DIR="$PUBRUN_REPO/benchmarks/results"
-mkdir -p "$RESULTS_DIR"
-
-NODE="${SLURMD_NODENAME:-$(hostname)}"
-STAMP="$(date -u +%Y%m%d-%H%M%S)"
-PUBRUN_UNREDACTED="${PUBRUN_UNREDACTED:-}"
-# Derive an opaque short hash for the default share-safe filename so raw cluster
-# node names do not leak via the filename itself.
-ANON_ID="$(printf '%s' "$NODE" | "$PUBRUN_PY" -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.read().encode()).hexdigest()[:8])' 2>/dev/null || echo 'node')"
-# Redacted-only by default (matches `pubrun bench`): always write a share-safe redacted file;
-# write the identifying unredacted copy only when PUBRUN_UNREDACTED is set. A caller (pubrun
-# bench submit-and-wait) may pin PUBRUN_REDACTED_OUT so it can find the result deterministically.
-REDACTED_OUT="${PUBRUN_REDACTED_OUT:-$RESULTS_DIR/pubrun-bench-${ANON_ID}-${STAMP}.redacted.json}"
-UNREDACTED_OUT="$RESULTS_DIR/${NODE}-${STAMP}.unredacted.json"
-
-echo "=== pubrun benchmark ==="
-echo "node          : $NODE"
-echo "repo          : $PUBRUN_REPO"
-echo "python        : $PUBRUN_PY"
-echo "harness args  : ${PUBRUN_BENCH_ARGS:-<full run>}"
-echo "redacted out  : $REDACTED_OUT"
-[ -n "$PUBRUN_UNREDACTED" ] && echo "unredacted out: $UNREDACTED_OUT"
-
-# Fail early with a clear message if pubrun isn't importable on this node.
-if ! "$PUBRUN_PY" -c "import pubrun" 2>/dev/null; then
-    # Try the repo's src/ (editable-style) before giving up.
-    export PYTHONPATH="$PUBRUN_REPO/src${PYTHONPATH:+:$PYTHONPATH}"
-    if ! "$PUBRUN_PY" -c "import pubrun" 2>/dev/null; then
-        echo "ERROR: 'pubrun' is not importable with $PUBRUN_PY (even with src/ on PYTHONPATH)." >&2
-        echo "       Install it on this node: '$PUBRUN_PY -m pip install -e $PUBRUN_REPO'." >&2
-        exit 1
+if [ -z "$PUBRUN_REPO" ]; then
+    _SCRIPT_CANDIDATE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd || true)"
+    if [ -n "$_SCRIPT_CANDIDATE" ] && [ -f "$_SCRIPT_CANDIDATE/src/pubrun/_bench/scripts/run_bench.sbatch" ]; then
+        PUBRUN_REPO="$_SCRIPT_CANDIDATE"
+    elif [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -f "$SLURM_SUBMIT_DIR/src/pubrun/_bench/scripts/run_bench.sbatch" ]; then
+        PUBRUN_REPO="$(cd "$SLURM_SUBMIT_DIR" && pwd)"
+    elif [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -f "$SLURM_SUBMIT_DIR/../src/pubrun/_bench/scripts/run_bench.sbatch" ]; then
+        PUBRUN_REPO="$(cd "$SLURM_SUBMIT_DIR/.." && pwd)"
     fi
 fi
 
-HARNESS_OUT_ARGS=(--redacted-out "$REDACTED_OUT")
-if [ -n "$PUBRUN_UNREDACTED" ]; then
-    HARNESS_OUT_ARGS+=(--out "$UNREDACTED_OUT")
+if [ -n "$PUBRUN_REPO" ] && [ -f "$PUBRUN_REPO/src/pubrun/_bench/scripts/run_bench.sbatch" ]; then
+    export PUBRUN_REPO
+    export PUBRUN_RESULTS_DIR="${PUBRUN_RESULTS_DIR:-$PUBRUN_REPO/benchmarks/results}"
+    exec bash "$PUBRUN_REPO/src/pubrun/_bench/scripts/run_bench.sbatch"
 fi
 
-# shellcheck disable=SC2086
-"$PUBRUN_PY" benchmarks/harness.py "${HARNESS_OUT_ARGS[@]}" $PUBRUN_BENCH_ARGS
+PACKAGED_SCRIPT="$("$PUBRUN_PY" -c "import pubrun.minimal, pubrun._bench; print(pubrun._bench.get_submit_script_path('run_bench.sbatch'))" 2>/dev/null || true)"
+if [ -n "$PACKAGED_SCRIPT" ] && [ -f "$PACKAGED_SCRIPT" ]; then
+    exec bash "$PACKAGED_SCRIPT"
+fi
 
-echo "Done. Redacted result: $REDACTED_OUT"
+echo "ERROR: could not locate packaged run_bench.sbatch; set PUBRUN_REPO to a pubrun source checkout or ensure pubrun is installed in $PUBRUN_PY." >&2
+exit 1

@@ -58,7 +58,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Package Slurm scripts under `src/pubrun/_bench/scripts/`
 
-- [ ] E-01 Create `src/pubrun/_bench/scripts/__init__.py`, `src/pubrun/_bench/scripts/run_bench.sbatch`, and `src/pubrun/_bench/scripts/submit_bench.sh`:
+- [x] E-01 Create `src/pubrun/_bench/scripts/__init__.py`, `src/pubrun/_bench/scripts/run_bench.sbatch`, and `src/pubrun/_bench/scripts/submit_bench.sh`:
   - Create empty `src/pubrun/_bench/scripts/__init__.py` so `hatchling` and `importlib.resources` treat `pubrun._bench.scripts` as a proper subpackage and `mypy` passes.
   - Author `src/pubrun/_bench/scripts/run_bench.sbatch` (executable mode `0755`):
     - Keep `set -euo pipefail` and the existing `#SBATCH` resource directives (`--job-name`, `--nodes=1`, `--ntasks=1`, `--cpus-per-task=4`, `--mem=4G`, `--time=00:30:00`, `--output=pubrun-bench-%N-%j.out`).
@@ -76,11 +76,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Export `ALL,PUBRUN_REPO,PUBRUN_PY,PUBRUN_RESULTS_DIR,PUBRUN_BENCH_ARGS,PUBRUN_REDACTED_OUT,PUBRUN_UNREDACTED` to `sbatch --export`.
   - Depends on: none
   - Expected outcome: Packaged Slurm scripts invoke `python -m pubrun._bench.harness` with an explicit absolute writable `PUBRUN_RESULTS_DIR`, safe `set -u` handling, zero auto-start during preflight, and no source-checkout requirement.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Package PBS, LSF, and SGE scripts under `src/pubrun/_bench/scripts/`
 
-- [ ] E-02 Create `src/pubrun/_bench/scripts/submit_bench_pbs.sh`, `src/pubrun/_bench/scripts/submit_bench_lsf.sh`, and `src/pubrun/_bench/scripts/submit_bench_sge.sh` (executable mode `0755`):
+- [x] E-02 Create `src/pubrun/_bench/scripts/submit_bench_pbs.sh`, `src/pubrun/_bench/scripts/submit_bench_lsf.sh`, and `src/pubrun/_bench/scripts/submit_bench_sge.sh` (executable mode `0755`):
   - Preserve each scheduler's `STARTING POINT` site-adaptation header note, environment knobs (`PUBRUN_QUEUE`, `PUBRUN_ACCOUNT`, `PUBRUN_PROJECT`, `PUBRUN_PE`, `PUBRUN_PY`, `PUBRUN_REPO`), and argv-array option construction (`QSUB_OPTS=(...)`, `BSUB_OPTS=(...)`).
   - Do NOT default `PUBRUN_REPO` to `$HERE/..`: initialize `export PUBRUN_REPO="${PUBRUN_REPO:-}"` (leaving it empty when unset).
   - Resolve and export absolute `PUBRUN_RESULTS_DIR` at submission time using the same rule and relative-path normalization as E-01 (`PUBRUN_RESULTS_DIR` if set, else `$PUBRUN_REPO/benchmarks/results` when `$PUBRUN_REPO` is non-empty and `-d "$PUBRUN_REPO/benchmarks"`, else `${PWD}/pubrun-bench-results`), and export `PUBRUN_REDACTED_OUT="${PUBRUN_REDACTED_OUT:-}"` and `PUBRUN_UNREDACTED="${PUBRUN_UNREDACTED:-}"`.
@@ -92,11 +92,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Invoke `"$PUBRUN_PY" -m pubrun._bench.harness "${HARNESS_OUT_ARGS[@]}" $PUBRUN_BENCH_ARGS`.
   - Depends on: E-01
   - Expected outcome: Packaged PBS, LSF, and SGE scripts run `python -m pubrun._bench.harness` with an explicit absolute writable results directory, safe `set -u` handling, zero auto-start during preflight, and no source-checkout requirement.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Convert checkout scripts in `benchmarks/` to shims
 
-- [ ] E-03 Convert `benchmarks/submit_bench.sh`, `benchmarks/submit_bench_pbs.sh`, `benchmarks/submit_bench_lsf.sh`, `benchmarks/submit_bench_sge.sh`, and `benchmarks/run_bench.sbatch` into source-checkout shims (preserving executable mode `0755`):
+- [x] E-03 Convert `benchmarks/submit_bench.sh`, `benchmarks/submit_bench_pbs.sh`, `benchmarks/submit_bench_lsf.sh`, `benchmarks/submit_bench_sge.sh`, and `benchmarks/run_bench.sbatch` into source-checkout shims (preserving executable mode `0755`):
   - For each of `benchmarks/submit_bench.sh`, `benchmarks/submit_bench_pbs.sh`, `benchmarks/submit_bench_lsf.sh`, and `benchmarks/submit_bench_sge.sh`: set `export PUBRUN_REPO="${PUBRUN_REPO:-$(cd "$HERE/.." && pwd)}"` and `export PUBRUN_RESULTS_DIR="${PUBRUN_RESULTS_DIR:-$PUBRUN_REPO/benchmarks/results}"` and `exec bash "$PUBRUN_REPO/src/pubrun/_bench/scripts/<same-name>" "$@"`.
   - For `benchmarks/submit_bench_pbs.sh`, `benchmarks/submit_bench_lsf.sh`, and `benchmarks/submit_bench_sge.sh`, retain the honest `# STARTING POINT` site-adaptation header comment noting delegation to the canonical packaged script (and its `QSUB_OPTS=()` or `BSUB_OPTS=()` argv-array option handling), so `tests/test_bench_command.py::TestSchedulerSubmitSafety::test_new_submit_scripts_exist_and_quote_vars` stays green before Order 05 (`1r585o`) replaces that legacy text check with behavioral stub-scheduler tests.
   - For `benchmarks/run_bench.sbatch`: retain the `#SBATCH` header lines at the top so `sbatch benchmarks/run_bench.sbatch` parses directives directly, and resolve the canonical packaged `run_bench.sbatch` safely even when Slurm copies the script to a spool directory (`/var/spool/slurmd/...`) where `BASH_SOURCE[0]` is not inside `benchmarks/`:
@@ -105,18 +105,18 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Otherwise (fallback when spooled from outside the repo), locate the packaged script via `"${PUBRUN_PY:-python3}" -c "import pubrun.minimal, pubrun._bench; print(pubrun._bench.get_submit_script_path('run_bench.sbatch'))"` and `exec bash` it (or print a clear error naming `PUBRUN_REPO` and exit `1`).
   - Depends on: E-01, E-02
   - Expected outcome: Direct checkout invocations of all five scripts (including spooled `sbatch benchmarks/run_bench.sbatch`) work identically to before, keep `TestSchedulerSubmitSafety` green, and execute the single canonical packaged implementation.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Validate syntax and stub-scheduler execution
 
-- [ ] E-04 Run all verification checks listed in `## Required tests / validation`:
+- [x] E-04 Run all verification checks listed in `## Required tests / validation`:
   - Run `bash -n` and executable-bit checks on all ten shell/sbatch files (`src/pubrun/_bench/scripts/*` and `benchmarks/{run_bench.sbatch,submit_bench*.sh}`).
   - Execute each packaged submit script from a temporary non-checkout directory with stub `sinfo`/`sbatch`/`qsub`/`bsub` binaries on `PATH` and `stdin=DEVNULL` and verify per script: exit code `0`, `PUBRUN_RESULTS_DIR` defaults to `<tmp>/pubrun-bench-results`, `PUBRUN_REPO` is empty (never `site-packages`), PBS/LSF/SGE job bodies check `import pubrun.minimal, pubrun._bench.harness` and invoke `-m pubrun._bench.harness` (never `benchmarks/harness.py` or `cd "$PUBRUN_REPO"`), and executing `src/pubrun/_bench/scripts/run_bench.sbatch` with a stub `PUBRUN_PY` runs the same preflight and `-m pubrun._bench.harness` without creating `<tmp>/runs`.
   - Execute all five checkout shim scripts (`benchmarks/submit_bench{,_pbs,_lsf,_sge}.sh` and `benchmarks/run_bench.sbatch`, including a spooled-copy simulation with `SLURM_SUBMIT_DIR=<repo>`) from the repository root with stub scheduler/Python binaries and verify `PUBRUN_RESULTS_DIR` defaults to `<repo>/benchmarks/results` and `PUBRUN_REPO` defaults to `<repo>`.
   - Run three-platform `mypy` (`mypy`, `mypy --platform win32`, `mypy --platform darwin`), `pytest tests/test_report_subpackage_integrity.py`, and `pytest tests/test_bench_command.py::TestSchedulerSubmitSafety`.
   - Depends on: E-01, E-02, E-03
   - Expected outcome: All syntax checks, stub-scheduler checks (packaged non-checkout, `run_bench.sbatch`, and all five checkout shims), three-platform `mypy`, subpackage integrity tests, and scheduler safety tests pass with zero stray temp dirs.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -315,25 +315,87 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted output of validation commands 1 and 2 showing `bash -n` and executable mode passing on `src/pubrun/_bench/scripts/{run_bench.sbatch,submit_bench.sh}`, `submit_bench.sh` (created by E-01) defaulting `PUBRUN_RESULTS_DIR` to `<tmp>/pubrun-bench-results` with empty `PUBRUN_REPO`, exporting `PUBRUN_RESULTS_DIR`, and printing bare job id `98765`, and `run_bench.sbatch` (created by E-01) running `import pubrun.minimal, pubrun._bench.harness` and `-m pubrun._bench.harness` without creating `<tmp>/runs`.
   - Observed evidence:
-  - Result: pending
+    - Validation command 1 (`bash -n` and `os.X_OK` across all 10 packaged and shim scripts, exit `0`): `ok`.
+    - Validation command 2 (Slurm `submit_bench.sh` and `run_bench.sbatch` excerpts, exit `0`; worktree root shown as `<repo>` for path-leak hygiene):
+      ```text
+      submit_bench.sh: ARGS=--parsable --nodelist=node01 --export=ALL,PUBRUN_REPO,PUBRUN_PY,PUBRUN_RESULTS_DIR,PUBRUN_BENCH_ARGS,PUBRUN_REDACTED_OUT,PUBRUN_UNREDACTED <repo>/src/pubrun/_bench/scripts/run_bench.sbatch RESULTS=/tmp/pubrun-hpc-stub-5395eeen/pubrun-bench-results REPO=
+      run_bench.sbatch: PY_ARGS=-c import hashlib,sys; print(hashlib.sha256(sys.stdin.read().encode()).hexdigest()[:8])
+      PY_ARGS=-c import pubrun.minimal, pubrun._bench.harness
+      PY_ARGS=-m pubrun._bench.harness --redacted-out /tmp/pubrun-hpc-stub-5395eeen/pubrun-bench-results/pubrun-bench-node-20261127-064416.redacted.json --quick
+      ok
+      ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted output of validation commands 1 and 2 showing `bash -n` and executable mode passing on `src/pubrun/_bench/scripts/submit_bench_{pbs,lsf,sge}.sh` (created by E-02), each script defaulting `PUBRUN_RESULTS_DIR` to `<tmp>/pubrun-bench-results` with empty `PUBRUN_REPO`, and each embedded job body running `import pubrun.minimal, pubrun._bench.harness` and `-m pubrun._bench.harness` without `benchmarks/harness.py` or `cd "$PUBRUN_REPO"`.
   - Observed evidence:
-  - Result: pending
+    - Validation command 1 (`bash -n` and `os.X_OK` across all 10 packaged and shim scripts, exit `0`): `ok`.
+    - Validation command 2 (PBS, LSF, and SGE excerpts, exit `0`, with all embedded-body assertions passing):
+      ```text
+      submit_bench_pbs.sh: ARGS=-N pubrun-bench -l select=1:ncpus=4:mem=4gb -l walltime=00:30:00 -j oe -V RESULTS=/tmp/pubrun-hpc-stub-5395eeen/pubrun-bench-results REPO=
+      submit_bench_lsf.sh: ARGS=-J pubrun-bench -n 4 -W 30 -o pubrun-bench-%J.out RESULTS=/tmp/pubrun-hpc-stub-5395eeen/pubrun-bench-results REPO=
+      submit_bench_sge.sh: ARGS=-N pubrun-bench -cwd -j y -V -l h_rt=00:30:00 RESULTS=/tmp/pubrun-hpc-stub-5395eeen/pubrun-bench-results REPO=
+      ok
+      ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted output of validation commands 1, 3, and 4 showing `bash -n` and executable mode passing on all five `benchmarks/` shims, all four `benchmarks/submit_bench*.sh` shims and the spooled `benchmarks/run_bench.sbatch` shim (updated by E-03) defaulting `PUBRUN_RESULTS_DIR` to `<repo>/benchmarks/results` and `PUBRUN_REPO` to `<repo>`, and `tests/test_bench_command.py::TestSchedulerSubmitSafety` passing.
   - Observed evidence:
-  - Result: pending
+    - Validation command 1 (exit `0`): `ok`.
+    - Validation command 3 (exit `0`; worktree root shown as `<repo>` for path-leak hygiene):
+      ```text
+      shim submit_bench.sh: RESULTS=<repo>/benchmarks/results REPO=<repo> ARGS=--parsable --nodelist=node01 --export=ALL,PUBRUN_REPO,PUBRUN_PY,PUBRUN_RESULTS_DIR,PUBRUN_BENCH_ARGS,PUBRUN_REDACTED_OUT,PUBRUN_UNREDACTED <repo>/src/pubrun/_bench/scripts/run_bench.sbatch
+      shim submit_bench_pbs.sh: RESULTS=<repo>/benchmarks/results REPO=<repo> ARGS=-N pubrun-bench -l select=1:ncpus=4:mem=4gb -l walltime=00:30:00 -j oe -V
+      shim submit_bench_lsf.sh: RESULTS=<repo>/benchmarks/results REPO=<repo> ARGS=-J pubrun-bench -n 4 -W 30 -o pubrun-bench-%J.out
+      shim submit_bench_sge.sh: RESULTS=<repo>/benchmarks/results REPO=<repo> ARGS=-N pubrun-bench -cwd -j y -V -l h_rt=00:30:00
+      shim spooled run_bench.sbatch: PY_ARGS=-c import hashlib,sys; print(hashlib.sha256(sys.stdin.read().encode()).hexdigest()[:8])
+      PY_ARGS=-c import pubrun.minimal, pubrun._bench.harness
+      PY_ARGS=-m pubrun._bench.harness --redacted-out <repo>/benchmarks/results/pubrun-bench-node-20261127-064416.redacted.json
+      ok
+      ```
+    - Validation command 4 (`TestSchedulerSubmitSafety` excerpt, exit `0`):
+      ```text
+      tests/test_bench_command.py::TestSchedulerSubmitSafety::test_pbs_detected_but_not_submitted_without_confirmation PASSED [ 87%]
+      tests/test_bench_command.py::TestSchedulerSubmitSafety::test_scheduler_local_forces_local_no_submit PASSED [ 93%]
+      tests/test_bench_command.py::TestSchedulerSubmitSafety::test_new_submit_scripts_exist_and_quote_vars PASSED [100%]
+      16 passed in 6.56s
+      ```
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted output of all four commands in `## Required tests / validation` exiting `0`.
   - Observed evidence:
-  - Result: pending
+    - Command 1 (`bash -n` and executable mode across all 10 scripts, exit `0`): `ok`.
+    - Command 2 (packaged non-checkout stub-scheduler and `run_bench.sbatch` check, exit `0`): `ok` (all four `submit_bench*.sh` scripts and `run_bench.sbatch` verified as pasted in V-01 and V-02).
+    - Command 3 (all five `benchmarks/` checkout shims including spooled `run_bench.sbatch`, exit `0`): `ok` (verified as pasted in V-03).
+    - Command 4 (`mypy && mypy --platform win32 && mypy --platform darwin && pytest tests/test_report_subpackage_integrity.py tests/test_bench_command.py::TestSchedulerSubmitSafety -v`, exit `0`):
+      ```text
+      Success: no issues found in 70 source files
+      Success: no issues found in 70 source files
+      Success: no issues found in 70 source files
+      tests/test_report_subpackage_integrity.py::test_report_is_callable_and_subpackage_under_every_mode[auto] PASSED [  6%]
+      tests/test_report_subpackage_integrity.py::test_report_is_callable_and_subpackage_under_every_mode[noauto] PASSED [ 12%]
+      tests/test_report_subpackage_integrity.py::test_report_is_callable_and_subpackage_under_every_mode[full] PASSED [ 18%]
+      tests/test_report_subpackage_integrity.py::test_report_is_callable_and_subpackage_under_every_mode[nopatch] PASSED [ 25%]
+      tests/test_report_subpackage_integrity.py::test_report_is_callable_and_subpackage_under_every_mode[noconsole] PASSED [ 31%]
+      tests/test_report_subpackage_integrity.py::test_report_is_callable_and_subpackage_under_every_mode[minimal] PASSED [ 37%]
+      tests/test_report_subpackage_integrity.py::test_no_mode_module_shadows_a_pubrun_subpackage[auto] PASSED [ 43%]
+      tests/test_report_subpackage_integrity.py::test_no_mode_module_shadows_a_pubrun_subpackage[noauto] PASSED [ 50%]
+      tests/test_report_subpackage_integrity.py::test_no_mode_module_shadows_a_pubrun_subpackage[full] PASSED [ 56%]
+      tests/test_report_subpackage_integrity.py::test_no_mode_module_shadows_a_pubrun_subpackage[nopatch] PASSED [ 62%]
+      tests/test_report_subpackage_integrity.py::test_no_mode_module_shadows_a_pubrun_subpackage[noconsole] PASSED [ 68%]
+      tests/test_report_subpackage_integrity.py::test_no_mode_module_shadows_a_pubrun_subpackage[minimal] PASSED [ 75%]
+      tests/test_report_subpackage_integrity.py::test_report_call_and_submodule_coexist_same_process PASSED [ 81%]
+      tests/test_bench_command.py::TestSchedulerSubmitSafety::test_pbs_detected_but_not_submitted_without_confirmation PASSED [ 87%]
+      tests/test_bench_command.py::TestSchedulerSubmitSafety::test_scheduler_local_forces_local_no_submit PASSED [ 93%]
+      tests/test_bench_command.py::TestSchedulerSubmitSafety::test_new_submit_scripts_exist_and_quote_vars PASSED [100%]
+      16 passed in 6.56s
+      ```
+  - Result: pass
 
 ## Approval and execution gate
 
