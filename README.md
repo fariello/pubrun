@@ -159,7 +159,7 @@ Or configure project-wide in `.pubrun.toml`:
 mode = "noauto"
 ```
 
-Or use the CLI wrapper for scripts you can't modify:
+Or use the CLI wrapper to override the import mode at launch time for scripts that already `import pubrun` (or `import pubrun.<mode>`). `pubrun run` does not inject `pubrun` into scripts that never import it:
 
 ```bash
 pubrun run --mode minimal -- python script.py
@@ -333,7 +333,7 @@ pubrun mem [RUN_DIR]
 ```
 
 ### `pubrun run`
-Spawn a command with a specific import mode. Useful for CI, Slurm, and scripts you can't modify.
+Spawn a command with a launch-time import-mode override (`PUBRUN_RUN_MODE_OVERRIDE` and `PUBRUN_IMPORT_MODE`). The target script must already `import pubrun` (or `import pubrun.<mode>`); `pubrun run` overrides its import mode without editing source code and does not inject `pubrun` into scripts that never import it. Useful for CI, Slurm, and switching modes at launch time.
 ```bash
 pubrun run --mode minimal -- python script.py
 pubrun run --mode nopatch -- python train.py
@@ -351,7 +351,7 @@ pubrun status --dir /path  # Scan a non-default output directory
 
 ### `pubrun ui`
 Launches the interactive terminal user interface (TUI) dashboard to browse, inspect, and manage runs.
-Note: Requires optional TUI dependencies (installable via `pip install "pubrun[tui]"` or `pip install textual rich`).
+Note: Requires optional TUI dependencies (installable via `pip install "pubrun[tui]"` or `pip install textual rich`). Optional `pubrun[tui]` requires Python `>=3.8.1`, while core `pubrun` remains compatible with Python `>=3.8`.
 ```bash
 pubrun ui              # Open the interactive TUI manager (aliases: tui, gui)
 pubrun ui --dir /path  # Scan a non-default output directory
@@ -415,7 +415,7 @@ Signal capture is configurable via `[capture.signals].enabled` in `.pubrun.toml`
 For running processes, `pubrun status <run-id>` shows live resource usage (RSS memory and CPU percent) queried cross-platform:
 - **Linux**: reads from `/proc/<pid>/status` and `/proc/<pid>/stat`
 - **macOS**: queries via `ps`
-- **Windows**: uses `ctypes` (`kernel32`) for liveness, start time, and CPU, and `wmic` for memory (RSS); where `wmic` is absent, RSS is reported as unavailable
+- **Windows**: uses `ctypes` (`kernel32` for liveness, start time, and CPU, and `K32GetProcessMemoryInfo` / `psapi.GetProcessMemoryInfo` for RSS memory), with a legacy `wmic` fallback only if the Win32 call fails
 
 No external dependencies are required.
 
@@ -468,7 +468,7 @@ alone does **not** suppress capture; use the explicit `capture.*` keys.
 `pubrun` supports a hierarchical configuration system (highest to lowest precedence):
 
 1. **API overrides**: `pubrun.start(output_dir="./runs")`
-2. **Environment variables**: `PUBRUN_AUTO_START=false`
+2. **Environment variables**: `PUBRUN_OUTPUT_DIR=/path/to/runs`, `PUBRUN_AUTO_START=false`
 3. **Local project config**: `.pubrun.toml` or `.config/pubrun/config.toml`
 4. **User home config**: `~/.config/pubrun/config.toml`
 5. **Built-in defaults**: `default.toml` (shipped with the library)

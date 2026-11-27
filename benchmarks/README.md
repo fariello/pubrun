@@ -12,7 +12,7 @@ packaged inside `src/pubrun/_bench/` so `pubrun bench` works directly from a `pi
 wheel with no extra dependencies. Matching checkout shims remain under `benchmarks/` for direct
 source-checkout use. Non-runtime analysis, plotting, archival, micro-benchmark, and test
 scripts (`aggregate.py`, `plot.py`, `pull_submissions.py`, `startup_breakdown.py`,
-`package_capture_bench.py`, `test_*.py`) together with `results/` and `data/` stay outside the
+`package_capture_bench.py`, `scaling_bench.py`, `test_*.py`) together with `results/` and `data/` stay outside the
 wheel.
 
 - **`harness.py`** - stdlib-only measurement core (packaged in `src/pubrun/_bench/harness.py`;
@@ -29,6 +29,12 @@ wheel.
   wheel). It times the startup package snapshot and the finalization refresh separately across
   all five package-capture modes, using two synthetic profiles and the ambient (real)
   interpreter profile.
+- **`scaling_bench.py`** - stdlib-only, local, non-publishing scaling benchmark (checkout
+  only, excluded from the wheel). Times high-volume `file_io` (`pubrun.open` and
+  `pubrun.register_input` over 1,000 files), run-directory scanning and lookup (`scan_runs`
+  and `find_run` over 1,000 runs), inactive hot-path overhead (`10,000` inactive `annotate`
+  and `print` calls), and large-manifest and array diffs (`compare_manifests` and
+  `_format_array_diff`).
 - **`scenarios.py`** - declarative scenario list (import mode, config overrides,
   workload) grouped into `startup`, `feature`, `hotpath`, and `io_baseline` (packaged in
   `src/pubrun/_bench/scenarios.py`; checkout shim at `benchmarks/scenarios.py`).
@@ -222,6 +228,48 @@ What it measures and reports:
 See the
 [performance documentation](../docs/performance.md#package-capture-startup-and-finalization-overhead-single-machine-local-measurements)
 for single-machine local measurements collected with this script.
+
+### Local scaling benchmark
+
+Use `benchmarks/scaling_bench.py` to measure high-volume scaling behavior locally using only
+the Python standard library (compatible with Python 3.8 through 3.14). The script is strictly
+local and non-publishing: it never invokes `gh`, `git push`, or batch schedulers.
+
+```bash
+python benchmarks/scaling_bench.py
+python benchmarks/scaling_bench.py --quick
+python benchmarks/scaling_bench.py --quick --workdir /path/to/scratch --json-out /tmp/scaling.json
+```
+
+CLI flags:
+
+- `--quick`: run scaled-down counts for a fast smoke check (`200` files, `100` synthetic run
+  directories, `1,000` inactive `annotate`/`print` calls, `100` packages/environment entries,
+  and `200`-element arrays). Full mode runs `1,000` files, `1,000` runs, `10,000` inactive
+  calls, `500` packages/environment entries, and `1,000`-element arrays.
+- `--workdir`: optional parent directory for ephemeral benchmark files. The script creates and
+  deletes only a dedicated temporary subdirectory inside `--workdir`, leaving `--workdir` and
+  pre-existing sibling files intact.
+- `--json-out`: optional local path for the redacted JSON report (`pubrun-scaling-bench/1`).
+  Standard output always prints a redacted Markdown summary.
+
+What it measures and reports:
+
+- **`file_io`**: times `pubrun.open` and `pubrun.register_input` over distinct files in an
+  ephemeral active run (`level="stat"`), reporting median and total milliseconds plus
+  milliseconds per 1,000 files.
+- **`run_scan_lookup`**: times `pubrun.status.scan_runs(..., keep_manifest=False)` and
+  `pubrun.status.find_run(..., runs=...)` over synthetic run directories, reporting scan
+  latency, lookup latency, and manifest parse counts.
+- **`inactive_hot_path`**: times inactive `pubrun.annotate` and `pubrun.print` calls (with
+  output redirected to `io.StringIO` and no active run), reporting total milliseconds and
+  microseconds per call.
+- **`large_manifest_diff`**: times `pubrun.analysis.diff.compare_manifests` at `"standard"`
+  and `"deep"` depth plus `pubrun.analysis.render._format_array_diff` on rearranged lists.
+- **Redaction and share-safety**: scrubs hostname, username, home directory, `--workdir`, and
+  repository root paths from both Markdown stdout and JSON output, and validates emitted output
+  with `benchmarks/share_safety.py::check_share_safe_text` before printing or writing (exiting
+  `1` if share-safety fails).
 
 ## Running on an HPC cluster
 

@@ -5,10 +5,25 @@ permissions:
 jobs:
   pip-audit:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
-      - run: pip install pip-audit
-      - run: pip-audit .
+          python-version: ${{ matrix.python-version }}
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: Audit core runtime dependencies
+        run: pip-audit .
+      - name: Audit optional [tui] dependencies in a clean venv
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/audit-venv"
+          "$RUNNER_TEMP/audit-venv/bin/pip" install -e ".[tui]"
+          "$RUNNER_TEMP/audit-venv/bin/pip" freeze --exclude-editable > "$RUNNER_TEMP/tui-reqs.txt"
+          pip-audit -r "$RUNNER_TEMP/tui-reqs.txt"

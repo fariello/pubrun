@@ -23,14 +23,12 @@ pubrun status lines use a consistent set of prefixes so output is easy to scan a
 | `[DEBUG]` | debug detail (light blue) - silent unless `PUBRUN_DEBUG` is set |
 | `[FAIL ]` | a failed built-in self-test (`--run-tests`) (red) |
 
-Color is optional reinforcement only, and the textual label is authoritative. The status-line
-prefixes (`[INFO ]`, `[ OK  ]`, `[WARN ]`, `[ERROR]`, `[DEBUG]`, `[FAIL ]`), `self-check`, and
-`inspect` disable color when `NO_COLOR` is set, `--no-color` is passed, or the output stream is
-not a terminal. By contrast, `show`, `status`, `res`/`cpu`/`mem`, and `diff` check only
-`NO_COLOR` and `--no-color` (not whether stdout is a terminal), and parts of the `status`
-summary, `show` report, and `diff` output use dim text. Pass `--no-color` or set `NO_COLOR=1`
-when piping or redirecting output from those commands. If you parse pubrun output in a script,
-match on the level word (for example `WARN`), not the exact bracketing.
+Color is optional reinforcement only, and the textual label is authoritative. All CLI commands
+share a centralized TTY-aware color helper (`use_color`) with zero `DIM` styling: color is
+suppressed when `--no-color` is passed, `NO_COLOR` is set, or the output stream is not a terminal
+(such as a pipe or redirect), and forced on when `FORCE_COLOR` is set to any non-empty value other
+than `"0"` (unless `--no-color` or `NO_COLOR` overrides it). If you parse pubrun output in a
+script, match on the level word (for example `WARN`), not the exact bracketing.
 
 ### Selecting a run
 
@@ -50,8 +48,8 @@ accept an arbitrary directory path or a `manifest.json` path. `show`/`report`, `
 `methods`, `inspect`, `rerun`, and `diff` accept those three selector forms and also accept a
 run directory path or a `manifest.json` path directly.
 
-The recency index counts within the current output directory (or the one given by `--dir`
-where that flag exists). `pubrun status` shows the index in its leading `#` column, so the
+The recency index counts within the active output directory (from `--dir`, `PUBRUN_OUTPUT_DIR`,
+configured `[core].output_dir`, or `./runs`). `pubrun status` shows the index in its leading `#` column, so the
 number you see is the number you pass. Omitting the argument entirely selects the most recent
 matching run (equivalent to `1`).
 
@@ -106,18 +104,22 @@ After init, add `import pubrun` to your script to begin tracking.
 
 ### `report-bug` / `feedback`: Report a Bug or Send Feedback
 
-Two commands (same behavior): open the GitHub issue tracker in your default browser and
-print system-configuration telemetry to the console for easy copy-paste. `report-bug` is
-for bug reports / feature requests; `feedback` is for general feedback - both land as GitHub
-issues.
+Prints system-configuration diagnostics for easy copy-paste and, on an interactive local
+graphical session, opens the GitHub issue tracker in your default browser. `feedback` is a
+hidden alias of `report-bug` with the same behavior. On non-TTY streams, headless Linux sessions
+without `DISPLAY`/`WAYLAND_DISPLAY`, or SSH sessions without display forwarding, opening a
+browser is skipped automatically and the GitHub issue URL is printed instead.
 
 ```bash
-pubrun report-bug
-pubrun feedback
+pubrun report-bug [--no-browser]
+pubrun feedback [--no-browser]
 ```
 
-> **Changed in 1.4.0:** the old `bug-report` command (and its `issue` alias) were renamed to
-> `report-bug`; `feedback` is now its own command rather than an alias.
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--no-browser` | Print diagnostics and the GitHub issue URL without opening a web browser. |
 
 ---
 
@@ -203,7 +205,7 @@ step, and the non-guarantee note); use `--show-suggestions` for per-category, pe
 and per-finding detail, or `--json` for the complete structured assessment.
 
 ```bash
-pubrun inspect [RUN_DIR] [--show-suggestions|-v] [--preflight] [--json] [--strict] [--fail-on {warn,mismatch,unknown}] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE]
+pubrun inspect [RUN_DIR] [--dir PATH] [--show-suggestions|-v] [--preflight] [--json] [--strict] [--fail-on {warn,mismatch,unknown}] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE]
 ```
 
 **Options:**
@@ -211,6 +213,7 @@ pubrun inspect [RUN_DIR] [--show-suggestions|-v] [--preflight] [--json] [--stric
 | Flag | Description |
 |---|---|
 | `RUN_DIR` | Run directory to inspect. Defaults to the most recent matching run. |
+| `--dir PATH` | Override the output directory to scan (default: configured `output_dir`, `PUBRUN_OUTPUT_DIR`, or `./runs`). |
 | `--show-suggestions`, `-v` | Show per-category status, preflight checks, and per-finding detail with next steps. |
 | `--preflight` | Also compare supported recorded requirements against the current machine (read-only and offline; see below). |
 | `--json` | Emit the full structured reproducibility assessment as JSON (top-level `findings` is preserved). |
@@ -423,7 +426,7 @@ pubrun bench --submit-file res.redacted.json           # contribute a previously
 Interactively delete old run directories. Lists candidates with their age and size, then prompts for confirmation before removal.
 
 ```bash
-pubrun clean [--dir PATH] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE] [-n N] [-y|--yes] [--dry-run]
+pubrun clean [--dir PATH] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE] [-n N] [-y|--yes] [--dry-run] [--force-remote-locks]
 ```
 
 **Options:**
@@ -436,6 +439,7 @@ pubrun clean [--dir PATH] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older
 | `-f`/`--filter`, `-F`/`--not-filter`, `-S`/`--not-status`, `--exit-code`, `-n`/`--limit` | See [Standard run filters](#standard-run-filters) |
 | `-y`, `--yes` | Skip confirmation prompt (non-interactive mode) |
 | `--dry-run` | Show what would be deleted without actually deleting |
+| `--force-remote-locks` | Allow deleting runs locked by a different host (never bypasses active local PID, unreadable lock, or symlink confinement checks) |
 
 Running processes are never deleted, even if explicitly included in `--status`.
 
@@ -489,7 +493,7 @@ Generates a structural comparison between two execution traces, filtering volati
 (timestamps, PIDs, per-run absolute paths) so the *meaningful* differences stand out.
 
 ```bash
-pubrun diff [RUN_DIR_A [RUN_DIR_B]] [OPTIONS]
+pubrun diff [RUN_DIR_A [RUN_DIR_B]] [--dir PATH] [OPTIONS]
 ```
 
 **Depth levels** - each level is nested: `--basic` hides the most, `--deep` hides nothing.
@@ -504,6 +508,8 @@ pubrun diff [RUN_DIR_A [RUN_DIR_B]] [OPTIONS]
 
 | Flag | Description |
 |---|---|
+| `--dir PATH` | Override the output directory to scan (default: configured `output_dir`, `PUBRUN_OUTPUT_DIR`, or `./runs`) |
+| `--json` | Emit the structured diff report (`run_a`, `run_b`, `depth`, `diff`) as strict JSON to stdout (cannot be combined with `--export`) |
 | `--table` | Render a compact aligned table (`change / field / A → B`) instead of the default git-style `+/-/~` lines. |
 | `--same` / `--no-same` | Show or hide unchanged values |
 | `--wrap` / `--no-wrap` | Wrap long strings or truncate with ellipsis |
@@ -516,7 +522,7 @@ pubrun diff [RUN_DIR_A [RUN_DIR_B]] [OPTIONS]
 - **Zero arguments:** compares the two most recent runs with a `manifest.json` (drawn from runs matching the standard run filters when given).
 - **One argument:** compares that run with the most recent other run that has a `manifest.json` (matching the standard run filters when given).
 - **Two arguments:** compares `RUN_DIR_A` and `RUN_DIR_B`.
-- **More than two arguments:** arguments after the second are ignored.
+- **More than two arguments:** prints an error to stderr and exits `2`.
 
 If a filter matches fewer than two runs (or no other run when one argument is given), `diff` reports a clear error and exits non-zero rather than silently ignoring the filter.
 
@@ -561,10 +567,12 @@ pubrun meta --out ./shared/meta.json --deep
 Compiles a run's manifest into a publication-ready "Computational Methods" paragraph in Markdown or LaTeX.
 
 ```bash
-pubrun methods [RUN_DIR] [--format markdown|latex] [--all] [-n N] [-f/-F/-s/-S ...]
+pubrun methods [RUN_DIR] [--dir PATH] [--format markdown|latex] [--all] [-n N] [-f/-F/-s/-S ...]
 ```
 
-- If `RUN_DIR` is omitted, automatically uses the **most recent** run in `./runs/` (the default, single-run behavior). Run filters (`-f`, `-F`, `-s`, `-S`, `--older-than`, `--exit-code`) still select the most-recent *matching* run.
+- Pass `--dir PATH` to scan a non-default output directory (defaults to configured `output_dir`, `PUBRUN_OUTPUT_DIR`, or `./runs`).
+- When `--format` is omitted, `pubrun methods` uses `[methods].format` from resolved configuration (defaulting to `markdown`). Decorative banners are printed to stderr so stdout stays pipe-clean Markdown or LaTeX.
+- If `RUN_DIR` is omitted, automatically uses the **most recent** run in the output directory (the default, single-run behavior). Run filters (`-f`, `-F`, `-s`, `-S`, `--older-than`, `--exit-code`) still select the most-recent *matching* run.
 - If the manifest references a `meta_ref`, the parent context is hydrated before generating the output.
 - When a run (or aggregated `--all` set) records tracked `data_files`, `methods` adds a concise file-provenance evidence breakdown that distinguishes independently verified content digests from caller-asserted digests, path or stat-only identifications, over-budget skips, pending outputs, and changed or failed hashes. When no `data_files` are recorded, the output is unchanged.
 
@@ -588,11 +596,11 @@ pubrun methods --all -n 20 -s completed      # aggregate the 20 most-recent comp
 Renders a human-readable diagnostic summary of one or more runs, including timing, hardware, dependencies, codebase drift, and an event timeline.
 
 ```bash
-pubrun show [RUN_DIR] [logs|env|packages] [--basic|--standard|--deep] [--utc] [run filters] [-n N]
-pubrun show config [--all] | show run config [<id>] [--all] | show default config
+pubrun show [RUN_DIR] [logs|env|packages] [--dir PATH] [--basic|--standard|--deep] [--utc] [run filters] [-n N]
+pubrun show config [--all] | show run config [<id>] [--dir PATH] [--all] | show default config
 ```
 
-**Alias:** `report` (hidden backward-compatible alias). `report` accepts the same depth flags (`--basic`, `--standard`, `--deep`), `--utc`, [Standard run filters](#standard-run-filters), and `-n`/`--limit`, as well as `logs`/`env`/`packages` section extracts. It does not accept `--all` and has no third positional argument, so `pubrun report run config <id>` is not accepted.
+**Alias:** `report` (hidden backward-compatible alias). `report` accepts `--dir PATH`, the same depth flags (`--basic`, `--standard`, `--deep`), `--utc`, [Standard run filters](#standard-run-filters), and `-n`/`--limit`, as well as `logs`/`env`/`packages` section extracts. It does not accept `--all` and has no third positional argument, so `pubrun report run config <id>` is not accepted.
 
 - With no `RUN_DIR`, run filter, or `-n`/`--limit`, `pubrun show` reports the single most recent run.
   When `RUN_DIR` is omitted, passing any run filter (`-f`, `-F`, `-s`, `-S`, `--older-than`, `--exit-code`)
@@ -643,11 +651,14 @@ pubrun show default config         # the shipped built-in defaults only
   higher-precedence layer are annotated, e.g.
   `capture.hardware.depth = 'off'    [local, overrides built-in 'basic']`. A config with no
   conflicts prints clean. Add `--all` to annotate every key with its source layer.
-- **`show run config [<id>]`** accepts the same run selectors as other commands (recency index,
-  id prefix, path). A run that **crashed before finalizing** shows its startup snapshot, labeled
+- **`show run config [<id>] [--dir PATH]`** accepts the same run selectors as other commands (recency index,
+  id prefix, path) and honors `--dir PATH`. A run that **crashed before finalizing** shows its startup snapshot, labeled
   `from startup snapshot (run did not finalize...)`; a **ghost** run (one that could not write to
   disk) has no recorded config and reports a clear error.
 - **`show default config`** is the canonical replacement for the deprecated `--show-config` flag.
+- **Shorthand redirects:** `pubrun show config default` is accepted as an equivalent of
+  `pubrun show default config`, and `pubrun show config <run>` logs an informational note and
+  redirects to `pubrun show run config <run>`.
 
 The keywords `config`, `run`, and `default` are recognized in these forms before run selection,
 so `pubrun show config` shows the current config rather than searching for a run named "config".
@@ -660,7 +671,7 @@ A run whose id genuinely starts with one of these words must be selected by its 
 Extracts the exact shell command needed to re-execute a recorded run.
 
 ```bash
-pubrun rerun [RUN_DIR] [--preflight [--strict] [--fail-on {warn,mismatch,unknown}] [--json]] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE]
+pubrun rerun [RUN_DIR] [--dir PATH] [--preflight [--strict] [--fail-on {warn,mismatch,unknown}] [--json]] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE]
 ```
 
 Prints the `rerun_command` from the manifest to stdout. Internal log messages go to stderr, so this is safe for piping:
@@ -676,6 +687,7 @@ pubrun never runs the recorded command itself. It only prints it.
 | Flag | Description |
 |---|---|
 | `RUN_DIR` | Run to read. Defaults to the most recent matching run. |
+| `--dir PATH` | Override the output directory to scan (default: configured `output_dir`, `PUBRUN_OUTPUT_DIR`, or `./runs`). |
 | `--preflight` | Before printing the command, run the same read-only, offline preflight comparison as `pubrun inspect --preflight`. Diagnostics go to stderr. |
 | `--strict` | Requires `--preflight`. If the strict threshold triggers, exit `1` and print nothing to stdout. The threshold is `warn` unless `--fail-on` is given. |
 | `--fail-on {warn,mismatch,unknown}` | Requires `--preflight`. Set the strict threshold; implies `--strict`. Thresholds are the same as for [`inspect`](#inspect--post-hoc-run-diagnosis). |
@@ -737,16 +749,18 @@ to the recorded peak:
   `/proc/self/io` (Linux).
 
 ```bash
-pubrun res [RUN_DIR] [--average] [-l LAST] [-w WIDTH] [run filters]
+pubrun res [RUN_DIR] [--dir PATH] [--average] [-l LAST] [-w WIDTH] [--utc] [run filters]
 ```
 
 **Options** (shared by `res`, `cpu`, and `mem`):
 
 | Flag | Description |
 |---|---|
+| `--dir PATH` | Override the output directory to scan (default: configured `output_dir`, `PUBRUN_OUTPUT_DIR`, or `./runs`). |
 | `--average` | Plot average/mean values instead of the default per-bucket maximum. |
 | `-l`, `--last DURATION` | Only chart the last window of the run (e.g. `10m`, `2h`, `30s`). |
 | `-w`, `--width N` | Override the chart width in columns. |
+| `--utc` | Display chart axis timestamps in UTC instead of local time. |
 | `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code` | Standard run selectors (pick which run to chart when no `RUN_DIR` is given). |
 
 - `RUN_DIR` may be a recency index (`1` = most recent), an id prefix, or a path; if omitted,
@@ -760,34 +774,34 @@ The `cpu` and `mem` commands show a single focused chart; `res` shows the full p
 ```bash
 pubrun res ./runs/pubrun-train-20260509-a1b2
 pubrun cpu                    # CPU chart only (most recent run)
-pubrun mem -w 120             # Memory chart, custom width
+pubrun mem -w 120 --utc       # Memory chart, custom width, UTC timestamps
 ```
 
 ---
 
 ### `cpu`: CPU Utilization Chart
 
-Renders the CPU utilization history for a run. Standalone shortcut for the CPU portion of `res`; takes the same options (`--average`, `-l/--last`, `-w/--width`, and the standard run selectors).
+Renders the CPU utilization history for a run. Standalone shortcut for the CPU portion of `res`; takes the same options (`--dir`, `--average`, `-l/--last`, `-w/--width`, `--utc`, and the standard run selectors).
 
 ```bash
-pubrun cpu [RUN_DIR] [--average] [-l LAST] [-w WIDTH] [run filters]
+pubrun cpu [RUN_DIR] [--dir PATH] [--average] [-l LAST] [-w WIDTH] [--utc] [run filters]
 ```
 
 ---
 
 ### `mem`: Memory Utilization Chart
 
-Renders the memory (RSS) utilization history for a run. Standalone shortcut for the memory portion of `res`; takes the same options (`--average`, `-l/--last`, `-w/--width`, and the standard run selectors).
+Renders the memory (RSS) utilization history for a run. Standalone shortcut for the memory portion of `res`; takes the same options (`--dir`, `--average`, `-l/--last`, `-w/--width`, `--utc`, and the standard run selectors).
 
 ```bash
-pubrun mem [RUN_DIR] [--average] [-l LAST] [-w WIDTH] [run filters]
+pubrun mem [RUN_DIR] [--dir PATH] [--average] [-l LAST] [-w WIDTH] [--utc] [run filters]
 ```
 
 ---
 
 ### `run`: Import Mode Wrapper
 
-Spawns a child process with `PUBRUN_RUN_MODE_OVERRIDE` and `PUBRUN_IMPORT_MODE` set in the environment so the launch-time `--mode` value overrides explicit in-code `import pubrun.<mode>` imports. Setting `PUBRUN_IMPORT_MODE` alone without `PUBRUN_RUN_MODE_OVERRIDE` still yields to explicit submodule imports. Useful for CI pipelines, shell scripts, Slurm submissions, and any case where you want to control pubrun behavior without modifying source code.
+Spawns a child process with `PUBRUN_RUN_MODE_OVERRIDE` and `PUBRUN_IMPORT_MODE` set in the environment so the launch-time `--mode` value overrides explicit in-code `import pubrun.<mode>` imports. Setting `PUBRUN_IMPORT_MODE` alone without `PUBRUN_RUN_MODE_OVERRIDE` still yields to explicit submodule imports. **Prerequisite:** the target Python script must already `import pubrun` (or `import pubrun.<mode>`); `pubrun run` overrides the import mode at launch time and does not inject `pubrun` into scripts that never import it. Useful for CI pipelines, shell scripts, Slurm submissions, and switching import modes without modifying source code.
 
 ```bash
 pubrun run [--mode MODE] -- COMMAND [ARGS...]
@@ -818,7 +832,7 @@ The wrapper returns the child process exit code. It does not create a run in the
 Lists all runs in the output directory with their current status, or inspects a specific run in detail. Classifies runs as completed, failed, interrupted, broken pipe, running, crashed, or ghost via lock-file PID liveness checks. When a crashed run still has a `.pubrun.lock` file (its process is no longer alive), `pubrun status` closes it out by writing or updating `manifest.json` and removing `.pubrun.lock`, so this command can modify run directories.
 
 ```bash
-pubrun status [RUN_ID] [--dir PATH] [-v|--verbose] [--utc] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE] [-n N]
+pubrun status [RUN_ID] [--dir PATH] [-v|--verbose] [--utc] [--json] [-f QUERY] [-F QUERY] [-s STATUS] [-S STATUS] [--older-than AGE] [--exit-code CODE] [-n N]
 ```
 
 **Modes:**
@@ -833,9 +847,10 @@ pubrun status [RUN_ID] [--dir PATH] [-v|--verbose] [--utc] [-f QUERY] [-F QUERY]
 
 | Flag | Description |
 |---|---|
-| `--dir PATH` | Override the output directory to scan (default: configured `output_dir` or `./runs`) |
+| `--dir PATH` | Override the output directory to scan (default: configured `output_dir`, `PUBRUN_OUTPUT_DIR`, or `./runs`) |
 | `-v`, `--verbose` | Show detailed information for each run in the listing |
-| `--utc` | Display timestamps in UTC (`YYYY-MM-DD HH:MM` with a trailing `Z` suffix) instead of local time. Timestamps are always stored as UTC epochs; this only affects display. Also available on `pubrun show` (which omits the `Z` suffix). |
+| `--utc` | Display timestamps in UTC (`YYYY-MM-DD HH:MM` with a trailing `Z` suffix) instead of local time. Timestamps are always stored as UTC epochs; this only affects display. Also available on `pubrun show` (which omits the `Z` suffix) and `pubrun res`/`cpu`/`mem`. |
+| `--json` | Emit strict JSON to stdout (`{"total_runs", "matched_runs", "runs"}` for a listing, or `{"run": {...}}` when `RUN_ID` is given). |
 | `-f`/`--filter`, `-F`/`--not-filter`, `-s`/`--status`, `-S`/`--not-status`, `--older-than`, `--exit-code`, `-n`/`--limit` | See [Standard run filters](#standard-run-filters). |
 
 **Status Values:**
@@ -876,7 +891,7 @@ For running processes, the inspect view also shows live RSS memory and CPU usage
 
 Launches the terminal user interface (TUI) dashboard to browse, inspect, and manage run records interactively. Tabs are `Run Details`, `Console Logs`, `Resources` (CPU/memory usage), `Semantic Diff`, `Actions & Citations`, and `TUI Settings`.
 
-Requires the optional TUI extra: `pip install "pubrun[tui]"`.
+Requires the optional TUI extra: `pip install "pubrun[tui]"` (requires Python `>=3.8.1`, while core `pubrun` requires Python `>=3.8`).
 
 ```bash
 pubrun ui [--dir PATH]

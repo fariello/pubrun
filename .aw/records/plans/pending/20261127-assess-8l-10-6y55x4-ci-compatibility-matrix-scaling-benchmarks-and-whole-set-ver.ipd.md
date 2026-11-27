@@ -50,7 +50,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: CI compatibility matrix and doc sync
 
-- [ ] E-01 Expand `.github/workflows/ci.yml` and `.github/workflows/dependency-audit.yml`:
+- [x] E-01 Expand `.github/workflows/ci.yml` and `.github/workflows/dependency-audit.yml`:
   - In `.github/workflows/ci.yml`:
     - `no-tui` job: convert to a matrix on `ubuntu-latest` with `python-version: ["3.10", "3.12"]` (using `"3.10"` rather than `"3.8"` because `ubuntu-latest` (Ubuntu 26.04) no longer ships Python `3.8`/`3.9` builds, matching the existing `test` job exclude note). Add a verification step on Python `"3.10"` asserting `python -c "import tomli"` succeeds so the conditional `tomli>=1.1.0; python_version < '3.11'` dependency in `pyproject.toml` is verified in isolation without `[tui]`.
     - `packaging` job: expand `runs-on` to a matrix over `os: [ubuntu-latest, windows-latest]` (`fail-fast: false`). Inside the existing `shell: bash` verification script (`check_wheel`), resolve the virtual-environment executable directory cross-platform (`if [ -d "$venv_dir/Scripts" ]; then venv_bin="$venv_dir/Scripts"; else venv_bin="$venv_dir/bin"; fi`) so `pip`, `python`, `pubrun`, and `pbr` work on both Linux and Windows (where `venv` writes executables under `Scripts/` instead of `bin/`). Keep the fast, non-prompting wheel smoke command `"$venv_bin/pubrun" bench --iterations 1 --passes 1 --no-baseline --local --no-submit < /dev/null` (not `--quick`, which runs 2x15 iterations and omits `--no-submit`) together with the existing `runs/` absence check and `check_share_safe_text` check. Add `"scaling_bench.py"` to the `forbidden` wheel-listing loop alongside `"startup_breakdown.py"` and `"package_capture_bench.py"` so the new checkout-only benchmark can never leak into the wheel.
@@ -60,9 +60,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Expand `pip-audit` to a matrix with `python-version: ["3.10", "3.12"]` (`fail-fast: false`), keep `pip-audit .` (which audits `tomli` from `pyproject.toml` on Python `3.10`), and add a clean-venv `[tui]` audit step (`python -m venv "$RUNNER_TEMP/audit-venv"`, `"$RUNNER_TEMP/audit-venv/bin/pip" install -e ".[tui]"`, `"$RUNNER_TEMP/audit-venv/bin/pip" freeze --exclude-editable > "$RUNNER_TEMP/tui-reqs.txt"`, `pip-audit -r "$RUNNER_TEMP/tui-reqs.txt"`) so `tomli` (on `3.10`) plus optional `[tui]` dependencies (`textual`, `rich`, and transitive packages) are audited cleanly without polluting the audit with `pip-audit`'s own dependencies.
   - Depends on: none
   - Expected outcome: CI catches Python `<3.11` `tomli`, Windows wheel packaging (`Scripts/` venv + CLI + bench smoke + wheel exclusion), `[bench]` extra, downstream PEP 561 `mypy --strict --no-implicit-reexport`, and `tomli`/`[tui]` dependency-audit regressions automatically.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Synchronize `README.md`, `docs/cli.md`, and `docs/configuration.md` with Set `assess-8l` changes (strictly zero em or en dashes across all three files):
+- [x] E-02 Synchronize `README.md`, `docs/cli.md`, and `docs/configuration.md` with Set `assess-8l` changes (strictly zero em or en dashes across all three files):
   - In `README.md`:
     - Update `README.md#Live Process Inspection` (Windows RSS bullet) to state accurately that Windows RSS uses `ctypes` (`K32GetProcessMemoryInfo` / `psapi.GetProcessMemoryInfo`, per `src/pubrun/capture/liveness.py::_get_rss_windows`) with a legacy `wmic` fallback only if the Win32 call fails.
     - Update `README.md#pubrun ui` (and the `[tui]` installation note) to document that optional `pubrun[tui]` requires Python `>=3.8.1` while core `pubrun` remains `>=3.8`.
@@ -80,11 +80,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Add `PUBRUN_OUTPUT_DIR` to `docs/configuration.md#Environment Variables` (noting whitespace stripping, `$VAR`/`~` expansion, and precedence above `.pubrun.toml` and below explicit API `output_dir=` / CLI `--dir`).
   - Depends on: none
   - Expected outcome: `README.md`, `docs/cli.md`, and `docs/configuration.md` accurately match shipped Set `assess-8l` behavior and contain zero em dashes (`\u2014`) or en dashes (`\u2013`).
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Local scaling benchmarks and whole-Set verification
 
-- [ ] E-03 Add stdlib-only local scaling benchmark `benchmarks/scaling_bench.py` (new file), document it in `benchmarks/README.md`, and add compatibility/workflow tests in `tests/test_compatibility.py` (new file):
+- [x] E-03 Add stdlib-only local scaling benchmark `benchmarks/scaling_bench.py` (new file), document it in `benchmarks/README.md`, and add compatibility/workflow tests in `tests/test_compatibility.py` (new file):
   - Create `benchmarks/scaling_bench.py` (Python 3.8+ compatible, standard library only, strictly local and non-publishing, never invokes `gh`, `git push`, or batch schedulers):
     - Support CLI flags `--quick` (scaled-down counts for fast smoke runs), `--workdir PATH` (optional parent directory; creates and cleans only a dedicated ephemeral subdirectory on exit, leaving `--workdir` and sibling files intact), and `--json-out PATH` (optional local redacted JavaScript Object Notation (JSON) output using schema `"pubrun-scaling-bench/1"`).
     - Benchmark four scaling scenarios with warm-up/timing metrics (median/elapsed ms and per-item throughput):
@@ -99,9 +99,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Validate `.github/workflows/ci.yml` and `.github/workflows/dependency-audit.yml`: run always-on stdlib structural checks verifying required jobs/steps (`no-tui` `"3.10"`, `packaging` `windows-latest` + `Scripts` + `scaling_bench.py` exclusion, `extra-suites` `[dev,bench]`, `typecheck` `--no-implicit-reexport`, `dependency-audit` `"3.10"` + `[tui]`), AND guard full YAML Ain't Markup Language (YAML) parsing behind `yaml = pytest.importorskip("yaml")` (matching `.github/scripts/test_benchmark_intake_workflow.py::test_pyyaml_crosscheck_when_available`) so `test` and `no-tui` CI jobs (which do not install `pyyaml`) never fail with `ModuleNotFoundError`, while `extra-suites` (which installs `pyyaml`) executes the full YAML parse assertions.
   - Depends on: E-01, E-02
   - Expected outcome: `python3 benchmarks/scaling_bench.py --quick` executes cleanly with share-safe output, `benchmarks/README.md` documents it with zero added dashes, and `pytest tests/test_compatibility.py -v` passes both with and without `pyyaml`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Execute whole-Set `assess-8l` regression, typing, packaging, benchmark, documentation-dash, and leak-sanitization verification:
+- [x] E-04 Execute whole-Set `assess-8l` regression, typing, packaging, benchmark, documentation-dash, and leak-sanitization verification:
   - Run all commands in `## Required tests / validation` in order:
     1. Full test suite with randomized order and coverage gate: `pytest tests/ -p randomly --cov=src --cov-fail-under=78`.
     2. Extra script and benchmark contract suites (matching CI `extra-suites`): `pytest .github/scripts/ benchmarks/test_*.py tests/test_compatibility.py -v -p randomly`.
@@ -112,7 +112,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     7. User-facing dash check confirming `0` em/en dashes in `README.md`, `docs/cli.md`, `docs/configuration.md`, and added lines of `benchmarks/README.md`.
   - Depends on: E-03
   - Expected outcome: Every check exits `0` with pasted runner output confirming zero regressions across the complete Set `assess-8l` and a clean working tree (`dist/` removed).
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -168,25 +168,92 @@ None. All CI, documentation, benchmark, and whole-Set verification changes are a
 
 Validation-state rule: inspect evidence in a separate pass. Accepted validation results: blocked, failed, pass, pending; terminal gate demands `pass`.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest tests/test_compatibility.py -v` output and diff summary confirming `.github/workflows/ci.yml` (`no-tui` Python `"3.10"`/`"3.12"` + `import tomli`, `packaging` `windows-latest` with cross-platform `Scripts/`/`bin/` venv resolution + fast `--iterations 1 --passes 1 --no-baseline --local --no-submit` smoke + `scaling_bench.py` wheel exclusion, `extra-suites` `[dev,bench]` + `tests/test_compatibility.py` + `plot.py` smoke, `typecheck` downstream `mypy --strict --no-implicit-reexport` check) and `.github/workflows/dependency-audit.yml` (Python `"3.10"`/`"3.12"` `pip-audit .` + clean-venv `[tui]` audit) parse cleanly.
   - Observed evidence:
-  - Result: pending
+    - `git diff --stat`: `.github/workflows/ci.yml | 48 +++++++++++++----`, `.github/workflows/dependency-audit.yml | 23 ++++++--`.
+    - `python3 -m pytest tests/test_compatibility.py -v` output (exit 0):
+      ```text
+      tests/test_compatibility.py::test_scaling_benchmark_quick_smoke_and_share_safety PASSED [ 25%]
+      tests/test_compatibility.py::test_ci_workflow_compatibility_matrix_structural PASSED [ 50%]
+      tests/test_compatibility.py::test_dependency_audit_workflow_structural PASSED [ 75%]
+      tests/test_compatibility.py::test_workflows_pyyaml_crosscheck_when_available PASSED [100%]
+      ============================== 4 passed in 0.84s ===============================
+      ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted diff summary and Command 7 dash-check output confirming `README.md`, `docs/cli.md`, and `docs/configuration.md` contain zero em/en dashes and accurately document Windows RSS (`ctypes` primary + legacy `wmic` fallback), `pubrun[tui]` Python `>=3.8.1`, `pubrun run` `import pubrun` prerequisite, `PUBRUN_OUTPUT_DIR` + `$VAR`/`~` expansion, `[methods].format` CLI default, TTY-aware color without `DIM`, and Set `assess-8l` CLI flags.
   - Observed evidence:
-  - Result: pending
+    - `git diff --stat`: `README.md | 10 ++--`, `docs/cli.md | 97 ++++++++++++++++++++--------------`, `docs/configuration.md | 11 ++--`.
+    - Command 7 zero-dash check output (exit 0): `zero em/en dashes verified`.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted output of `python3 benchmarks/scaling_bench.py --quick` (showing concrete metrics for all four scenarios: `file_io`, `scan_runs`/`find_run`, inactive `annotate`/`print`, and `compare_manifests`/`_format_array_diff`, plus share-safe redaction), Command 7 confirming zero added em/en dashes in `benchmarks/README.md`, and `pytest tests/test_compatibility.py -v` exiting `0` (verifying `--quick`/`--json-out`/`--workdir` cleanup, share-safety, and `pytest.importorskip("yaml")` workflow checks).
   - Observed evidence:
-  - Result: pending
+    - `python3 benchmarks/scaling_bench.py --quick` output (exit 0):
+      ```text
+      # pubrun scaling benchmark (quick, local, single machine)
 
-- [ ] V-04 validates E-04
+      - Schema: pubrun-scaling-bench/1
+      - Python: CPython 3.14.6
+      - Platform: Linux 6.8.0-151-generic
+      - CPU: Intel(R) Core(TM) i7-6800K CPU @ 3.40GHz (12 logical cores)
+      - Git revision: 6c854bc7054b
+      - Workdir filesystem: ext4 (network: no, temporary)
+
+      | scenario | scale | median (ms) | throughput / detail |
+      |---|---|---|---|
+      | file_io (open) | 200 files (stat) | 19.825 | 99.125 ms / 1,000 files |
+      | file_io (register_input) | 200 files (stat) | 11.803 | 59.015 ms / 1,000 files |
+      | run_scan_lookup (scan_runs) | 100 runs | 12.458 | 124.580 ms / 1,000 runs (parses: 100) |
+      | run_scan_lookup (find_run) | 100 runs | 0.010 | recency=0.004 ms, direct=0.251 ms (parses: cached=0, direct=1) |
+      | inactive_hot_path (annotate) | 1000 calls | 19.606 | 19.606 us / call |
+      | inactive_hot_path (print) | 1000 calls | 1.658 | 1.658 us / call |
+      | large_manifest_diff (standard) | 100 pkgs, 100 env, 200 array | 1.095 | changes=21 |
+      | large_manifest_diff (deep) | 100 pkgs, 100 env, 200 array | 0.805 | changes=24 |
+      | large_manifest_diff (_format_array_diff) | 200 elems | 0.258 | 1.290 us / elem |
+      ```
+    - `benchmarks/README.md | 50 +++++++++++++++++-`, Command 7: `zero em/en dashes verified`.
+    - `python3 -m pytest tests/test_compatibility.py -v`: `4 passed in 0.84s` (exit 0).
+  - Result: pass
+
+- [x] V-04 validates E-04
   - Required evidence: Pasted runner output of Commands 1 through 7 (full `pytest` with coverage `>=78%`, `.github/scripts/` + `benchmarks/test_*.py` + `tests/test_compatibility.py`, three-OS `mypy`, downstream PEP 561 `mypy --strict --no-implicit-reexport`, clean wheel/sdist build + `twine check --strict` + archive contents check + `dist/` cleanup, `benchmarks/scaling_bench.py --quick`, `scripts/sanitize_paths.py --check --all`, and zero-dash verification) all exiting `0`.
   - Observed evidence:
-  - Result: pending
+    - Command 1 (`pytest tests/ -p randomly --cov=src --cov-fail-under=78`, seed `3998257268`, exit 0):
+      ```text
+      TOTAL                                       20175   3551    82%
+      Required test coverage of 78% reached. Total coverage: 82.40%
+      ======================= 2525 passed in 503.55s (0:08:23) =======================
+      ```
+    - Command 2 (`pytest .github/scripts/ benchmarks/test_*.py tests/test_compatibility.py -v -p randomly`, seed `2237290698`, exit 0):
+      ```text
+      ================== 94 passed, 3 skipped in 325.21s (0:05:25) ===================
+      ```
+      (The 3 skipped tests are the optional `pytest-benchmark` micro-tests in `benchmarks/test_benchmarks.py` when `[bench]` is not installed in the local dev venv; CI `extra-suites` installs `.[dev,bench]`.)
+    - Command 3 (`mypy && mypy --platform win32 && mypy --platform darwin`, exit 0):
+      ```text
+      Success: no issues found in 70 source files
+      Success: no issues found in 70 source files
+      Success: no issues found in 70 source files
+      ```
+    - Command 4 (downstream PEP 561 `mypy --config-file /dev/null --strict --no-implicit-reexport --follow-imports=silent`, exit 0):
+      ```text
+      /dev/null: No [mypy] section in config file
+      Success: no issues found in 1 source file
+      ```
+    - Command 5 (wheel + sdist build, `twine check --strict`, archive contents check, and `rm -rf dist`, exit 0):
+      ```text
+      Successfully built pubrun-1.4.0.tar.gz and pubrun-1.4.0-py3-none-any.whl
+      Checking dist/pubrun-1.4.0-py3-none-any.whl: PASSED
+      Checking dist/pubrun-1.4.0.tar.gz: PASSED
+      dist clean: dist/pubrun-1.4.0-py3-none-any.whl dist/pubrun-1.4.0.tar.gz
+      ```
+    - Command 6 (`python3 benchmarks/scaling_bench.py --quick && python3 scripts/sanitize_paths.py --check --all`, exit 0): benchmark table pasted in `V-03`, leak check passed with exit `0`.
+    - Command 7 (dash check, exit 0): `zero em/en dashes verified`.
+  - Result: pass
 
 ## Approval and execution gate
 

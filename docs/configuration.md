@@ -13,7 +13,7 @@
 | Priority | Source | Example |
 |---|---|---|
 | 1 (highest) | API overrides | `pubrun.start(output_dir="./my_runs")` |
-| 2 | Environment variables | `PUBRUN_AUTO_START=false` |
+| 2 | Environment variables | `PUBRUN_OUTPUT_DIR=/scratch/runs`, `PUBRUN_AUTO_START=false` |
 | 3 | Local project config | `./.pubrun.toml` and/or `./.config/pubrun/config.toml` |
 | 4 | User home config | `$XDG_CONFIG_HOME/pubrun/config.toml`, else `~/.config/pubrun/config.toml` (`%APPDATA%/pubrun/config.toml` on Windows); an empty `XDG_CONFIG_HOME` or `APPDATA` is treated as unset |
 | 5 (lowest) | Built-in defaults | `default.toml` (shipped with the library) |
@@ -52,7 +52,7 @@ Core behaviors governing run initialization and storage.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `profile` | string | `"default"` | **Deprecated and inert.** Accepts `"minimal"`/`"default"`/`"deep"` but has **no effect** - `profile` never controlled capture depth and is not wired to any capture engine. Setting it to a non-default value records a deprecation notice in the run manifest (surfaced by `pubrun status`/`inspect`/`show`). To control capture depth, set the specific `capture.*` keys (e.g. `[capture.hardware].depth`, `[capture.packages].mode`). |
-| `output_dir` | string | `""` | Base directory for run output. Empty string defaults to `./runs/` in the current working directory. |
+| `output_dir` | string | `""` | Base directory for run output. Empty string defaults to `./runs/` in the current working directory. Supports `$VAR` environment-variable expansion and `~` home expansion (via `os.path.expandvars` and `os.path.expanduser`). Can be overridden by `PUBRUN_OUTPUT_DIR` (above `.pubrun.toml`) or by explicit `pubrun.start(output_dir=...)` / CLI `--dir`. |
 | `auto_start` | bool | `true` | If `true`, `import pubrun` automatically starts a trace. If `false`, you must call `pubrun.start()` explicitly. Equivalent to `[imports].mode = "noauto"` when set to `false`. |
 | `artifact_durability` | string | `"fsync"` | Explicit disk-synchronization policy for `manifest.json` and `config.resolved.json`, separate from atomic visibility. Valid values: `"fsync"` (default), `"finalize"`, `"atomic"`, `"strict"`. Invalid values log one warning per distinct value and fall back to `"fsync"`. See [Artifact durability policy](#artifact-durability-policy) below. |
 | `meta_ref` | string | *(none)* | Path to a parent `meta.json` snapshot for HPC hydration. Also set by `PUBRUN_META_REF` or `pubrun.start(meta_ref=...)`. |
@@ -221,14 +221,14 @@ When `mode` is not `"off"`, `pubrun` captures packages twice: a startup snapshot
 | `scope` | string | `"process"` | What process scope to measure: `"process"` (main process only) or `"tree"` (main process plus all descendant processes). Tree mode is useful for multiprocessing, Dask, and Ray workloads where the main process is a thin orchestrator. On Linux and macOS, `scope = "tree"` adds tree RSS (`peak_tree_rss_bytes` and `end_tree_rss_bytes` in the manifest, and `tree_rss_bytes` per `resource_sample` event). On Linux only, `scope = "tree"` also adds tree CPU (`peak_tree_cpu_percent` in the manifest and `tree_cpu_percent` per `resource_sample` event). Main-process CPU counts only the main process's own user and system time and excludes children. Windows records no tree values. |
 | `sample_interval_seconds` | int | `15` | How often the background thread samples CPU/memory. |
 | `max_consecutive_failures` | int | `3` | Kill the background thread after this many consecutive **unreadable** polls (errors/timeouts). A legitimate reading of 0 does not count, so a transient blip cannot permanently disable telemetry. |
-| `poll_timeout` | int | `3` | Per-poll timeout (seconds) for the macOS/Windows sampling subprocesses (`ps`/`wmic`). Bounds a hung tool so it cannot orphan the sampling thread. |
+| `poll_timeout` | int | `3` | Per-poll timeout (seconds) for subprocess sampling fallbacks (macOS `ps`, and the legacy Windows `wmic` fallback when primary `ctypes` `K32GetProcessMemoryInfo` / `psapi.GetProcessMemoryInfo` probing fails). Bounds a hung tool so it cannot orphan the sampling thread. |
 | `system_metrics` | bool | `true` | Also sample **system-wide** dynamic metrics and per-process I/O counters alongside per-process RSS/CPU: available memory, load average, and (Linux only) node iowait and cumulative I/O bytes from `/proc/self/io`. These make post-hoc I/O and contention diagnosis possible (for example whether a run was starved for RAM or on a busy node). Cheap (single `/proc` reads) and only sampled when the watcher is running (`depth != "off"`). Adds `system_memory`, `load_average`, `system_iowait_pct`, and (Linux only) `io_counters` to the `resources` manifest section. Note: `system_iowait_pct` is **node-wide, indicative only** (not run-scoped). Set `false` to omit. |
 
 #### Enabling process-tree memory capture
 
 `scope` is a nested key, so set it in a config file or pass it as a nested dict to the
 API (there is no environment-variable shortcut for nested `capture.*` keys - only
-`PUBRUN_PROFILE`, `PUBRUN_META_REF`, and the import-mode variables are wired to env).
+`PUBRUN_OUTPUT_DIR`, `PUBRUN_PROFILE`, `PUBRUN_META_REF`, and the import-mode variables are wired to env). On Windows, process memory capture uses `ctypes` (`K32GetProcessMemoryInfo` / `psapi.GetProcessMemoryInfo`) as primary with a legacy `wmic` fallback only if the Win32 call fails.
 
 **For a whole project** - add to the project's `.pubrun.toml` (or
 `.config/pubrun/config.toml`):
@@ -325,7 +325,7 @@ Controls `meta_ref` parent-snapshot hydration in every command and API that hydr
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `format` | string | `"markdown"` | Output format for the `methods.md` or `methods.tex` file written when a run finalizes (`"markdown"` or `"latex"`). The `pubrun methods` CLI command does not read this key and defaults to `markdown` unless `--format latex` is passed. |
+| `format` | string | `"markdown"` | Default output format (`"markdown"` or `"latex"`) for the `methods.md` or `methods.tex` file written when a run finalizes, and for the `pubrun methods` CLI command when `--format` is omitted. Passing `--format markdown` or `--format latex` on the CLI overrides this key. |
 
 ### `[diff]`
 
@@ -367,6 +367,7 @@ long); override any of them in your `.pubrun.toml`.
 | `PUBRUN_IMPORT_MODE` | Canonical import mode: `auto`, `noauto`, `nopatch`, `noconsole`, `minimal`, or `full`. Overrides `PUBRUN_AUTO_START` and config files (`[imports].mode`, `[core].auto_start`). `PUBRUN_RUN_MODE_OVERRIDE` and explicit in-code `import pubrun.<mode>` imports take precedence over it. Matching ignores case and surrounding whitespace; any other value is ignored. Consumed during the boot sequence (not in `resolve_config()`). |
 | `PUBRUN_PROFILE` | **Deprecated and inert.** Sets `[core].profile`, which has no effect on capture (see the `[core]` table). Use the `capture.*` keys instead. |
 | `PUBRUN_AUTO_START` | Legacy alias for import mode. `"1"`, `"true"`, `"yes"`, or `"on"` maps to `auto`; `"0"`, `"false"`, `"no"`, or `"off"` maps to `noauto` (case-insensitive). Other values are ignored. |
+| `PUBRUN_OUTPUT_DIR` | Override `[core].output_dir`. Surrounding whitespace is stripped (blank values are treated as unset) and `$VAR` / `~` paths are expanded via `os.path.expandvars` and `os.path.expanduser`. Takes precedence above `.pubrun.toml` and user config, and below explicit API `pubrun.start(output_dir=...)` or CLI `--dir`. |
 | `PUBRUN_META_REF` | Path to a parent `meta.json` for HPC hydration. Child runs will reference this. |
 | `PUBRUN_IMPORT_CONFLICT` | Override `[imports].on_conflict`. Set to `"ignore"`, `"warn"`, or `"error"`. |
 | `PUBRUN_DEBUG` | Any non-empty value shows `[DEBUG]` CLI diagnostic lines. |

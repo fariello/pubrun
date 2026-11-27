@@ -52,25 +52,40 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -e ".[dev]" pyyaml
+        run: pip install -e ".[dev,bench]" pyyaml
       - name: Run script and benchmark contract tests
-        run: pytest .github/scripts/ benchmarks/test_*.py -v -p randomly
+        run: pytest .github/scripts/ benchmarks/test_*.py tests/test_compatibility.py -v -p randomly
+      - name: Smoke test benchmarks/plot.py with headless matplotlib
+        run: |
+          python benchmarks/plot.py --help
+          python -c "import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot"
 
   no-tui:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v7
-      - name: Set up Python 3.12
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Install package without tui extra
         run: pip install -e ".[dev]"
+      - name: Verify conditional tomli dependency on Python <3.11
+        if: ${{ matrix.python-version == '3.10' }}
+        run: python -c "import tomli"
       - name: Run tests
         run: pytest tests/ -v -p randomly
 
   packaging:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
       - name: Set up Python 3.12
@@ -87,7 +102,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          EXPECTED_SHA="$(git rev-parse HEAD)"
+          EXPECTED_SHA="$(git rev-parse HEAD | tr -d '\r')"
           WORK_DIR="$(mktemp -d)"
           trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -154,6 +169,7 @@ jobs:
               "pull_submissions.py" \
               "startup_breakdown.py" \
               "package_capture_bench.py" \
+              "scaling_bench.py" \
               "test_benchmarks.py" \
               "test_share_safety.py"; do
               if grep -Fq "$forbidden" <<< "$listing"; then
@@ -163,12 +179,18 @@ jobs:
             done
 
             python -m venv "$venv_dir"
-            "$venv_dir/bin/pip" install --no-deps --quiet "$whl"
+            local venv_bin
+            if [ -d "$venv_dir/Scripts" ]; then
+              venv_bin="$venv_dir/Scripts"
+            else
+              venv_bin="$venv_dir/bin"
+            fi
+            "$venv_bin/pip" install --no-deps --quiet "$whl"
 
             (
               cd "$WORK_DIR"
               local py_commit
-              py_commit="$("$venv_dir/bin/python" -c 'import pubrun; print(pubrun.__commit__)')"
+              py_commit="$("$venv_bin/python" -c 'import pubrun; print(pubrun.__commit__)' | tr -d '\r')"
               echo "[$label] pubrun.__commit__=$py_commit"
               if [ "$py_commit" != "$EXPECTED_SHA" ]; then
                 echo "Expected pubrun.__commit__=$EXPECTED_SHA, got $py_commit" >&2
@@ -176,7 +198,7 @@ jobs:
               fi
               for cli in pubrun pbr; do
                 local first_line
-                first_line="$("$venv_dir/bin/$cli" --version | head -n 1)"
+                first_line="$("$venv_bin/$cli" --version | head -n 1 | tr -d '\r')"
                 echo "[$label] $cli --version: $first_line"
                 if [[ "$first_line" != *"(commit $EXPECTED_SHA)"* ]]; then
                   echo "Expected '(commit $EXPECTED_SHA)' in $cli --version line: $first_line" >&2
@@ -192,7 +214,7 @@ jobs:
               while IFS= read -r env_name; do
                 [ -n "$env_name" ] && unset "$env_name"
               done < <(compgen -e PUBRUN_ || true)
-              "$venv_dir/bin/pubrun" bench --iterations 1 --passes 1 --no-baseline --local --no-submit < /dev/null
+              "$venv_bin/pubrun" bench --iterations 1 --passes 1 --no-baseline --local --no-submit < /dev/null
               if [ -e "$bench_cwd/runs" ]; then
                 echo "[$label] Unexpected runs/ directory created in $bench_cwd" >&2
                 exit 1
@@ -203,7 +225,7 @@ jobs:
                 echo "[$label] Expected exactly 1 redacted result under $bench_cwd/pubrun-bench-results, found ${#results[@]}" >&2
                 exit 1
               fi
-              "$venv_dir/bin/python" -c 'import sys; from pathlib import Path; import pubrun.minimal; from pubrun._bench.share_safety import check_share_safe_text; ok, reasons = check_share_safe_text(Path(sys.argv[1]).read_text(encoding="utf-8")); assert ok and not reasons, reasons; print("verified share-safe:", Path(sys.argv[1]).name)' "${results[0]}"
+              "$venv_bin/python" -c 'import sys; from pathlib import Path; import pubrun.minimal; from pubrun._bench.share_safety import check_share_safe_text; ok, reasons = check_share_safe_text(Path(sys.argv[1]).read_text(encoding="utf-8")); assert ok and not reasons, reasons; print("verified share-safe:", Path(sys.argv[1]).name)' "${results[0]}"
             )
           }
 
@@ -228,3 +250,7 @@ jobs:
         run: mypy --platform win32
       - name: Type-check (macOS platform)
         run: mypy --platform darwin
+      - name: Type-check downstream PEP 561 mode submodules (--strict --no-implicit-reexport)
+        run: >-
+          MYPYPATH=src python -m mypy --config-file /dev/null --strict --no-implicit-reexport --follow-imports=silent -c
+          "from typing import Optional; import pubrun.auto, pubrun.full, pubrun.noauto, pubrun.nopatch, pubrun.noconsole, pubrun.minimal; v1: str = pubrun.auto.__version__; c1: Optional[str] = pubrun.auto.__commit__; v2: str = pubrun.full.__version__; c2: Optional[str] = pubrun.full.__commit__; v3: str = pubrun.noauto.__version__; c3: Optional[str] = pubrun.noauto.__commit__; v4: str = pubrun.nopatch.__version__; c4: Optional[str] = pubrun.nopatch.__commit__; v5: str = pubrun.noconsole.__version__; c5: Optional[str] = pubrun.noconsole.__commit__; v6: str = pubrun.minimal.__version__; c6: Optional[str] = pubrun.minimal.__commit__; pubrun.noauto.start(); pubrun.noauto.stop()"
