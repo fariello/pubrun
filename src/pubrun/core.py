@@ -18,9 +18,18 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
-from pubrun.tracker import Run, get_current_run
+if TYPE_CHECKING:
+    from pubrun.tracker import Run
+
+
+def get_current_run() -> Optional["Run"]:
+    """Return the globally active Run instance, or None without importing tracker."""
+    tracker_mod: Any = sys.modules.get("pubrun.tracker")
+    if tracker_mod is None:
+        return None
+    return tracker_mod.get_current_run()
 
 
 # -- Thread locks for ref_count and Run construction safety ------------------
@@ -258,7 +267,7 @@ def _warn_unknown_start_kwargs(kwargs: Dict[str, Any]) -> None:
             )
 
 
-def start(**kwargs: Any) -> Run:
+def start(**kwargs: Any) -> "Run":
     """Start tracking a new execution context.
 
     Creates a unique run directory and initializes all configured capture
@@ -325,7 +334,11 @@ def start(**kwargs: Any) -> Run:
             if not is_ghost_or_inactive and hasattr(active, "_merge_and_migrate"):
                 active._merge_and_migrate(kwargs)
             return active
-        return Run(overrides=kwargs)
+        run_cls: Any = globals().get("Run")
+        if run_cls is None:
+            from pubrun.tracker import Run as _Run
+            run_cls = _Run
+        return run_cls(overrides=kwargs)
 
 
 def stop() -> None:
@@ -503,7 +516,7 @@ class tracked_run:
     """
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
-        self.run_tracker: Optional[Run] = None
+        self.run_tracker: Optional["Run"] = None
 
     @property
     def run_dir(self) -> Optional[Path]:
@@ -647,7 +660,7 @@ class phase:
 
     def __init__(self, name: str) -> None:
         self.name = name
-        self.run_tracker: Optional[Run] = None
+        self.run_tracker: Optional["Run"] = None
         self._profiler: Any = None
         self._started_yappi = False
         self._start_mono: Optional[float] = None
@@ -1639,10 +1652,13 @@ def open(file: Any, mode: str = "r", **kwargs: Any) -> Any:
 
 
 def __getattr__(name: str) -> Any:
-    """PEP 562 lazy attribute lookup to avoid importing file_io on cold import."""
+    """PEP 562 lazy attribute lookup to avoid importing file_io or tracker on cold import."""
     if name == "ProvenanceFileProxy":
         from pubrun.capture.file_io import ProvenanceFileProxy
         return ProvenanceFileProxy
+    if name == "Run":
+        from pubrun.tracker import Run
+        return Run
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

@@ -13,7 +13,35 @@ default — ``[console].capture_mode`` defaults to ``"off"``. Subprocess and
 signal capture are on by default (their ``enabled`` keys default true), and the
 background resource watcher runs in every mode while a run is active.
 """
+from typing import Any as _Any, List as _List, Optional as _Optional, TYPE_CHECKING
 from pubrun._bootstrap import select_mode
+
+if TYPE_CHECKING:
+    __version__: str
+    __commit__: _Optional[str]
+
+__all__ = [
+    "start",
+    "stop",
+    "annotate",
+    "phase",
+    "paused",
+    "diff",
+    "audit_run",
+    "tracked_run",
+    "get_current_run",
+    "report",
+    "artifact",
+    "print",
+    "open",
+    "register_file",
+    "register_input",
+    "register_output",
+    "subprocess",
+    "popen",
+    "__version__",
+    "__commit__",
+]
 
 # Select mode before importing core
 _behavior = select_mode("auto", "pubrun.auto", "explicit")
@@ -42,15 +70,11 @@ from pubrun.core import (  # noqa: F401, E402
     _execute_boot_sequence,
 )
 
-# Also make __version__ available
-from pubrun import __version__  # noqa: F401, E402
-
 # Execute boot (auto-start since this is "auto" mode)
 _execute_boot_sequence(selected_by="pubrun.auto")
 del _execute_boot_sequence, _behavior
 
 # Populate the parent pubrun namespace
-from typing import Any as _Any  # noqa: E402
 import pubrun as _pkg_module  # noqa: E402
 _pkg: _Any = _pkg_module
 _pkg.start = start
@@ -77,4 +101,15 @@ _pkg.register_output = register_output
 _pkg.subprocess = subprocess
 _pkg.popen = popen
 _pkg._run_lock = _run_lock
-del _pkg, _pkg_module, _Any
+del _pkg, _pkg_module
+
+
+def __getattr__(name: str) -> _Any:
+    if name in ("__version__", "__commit__"):
+        import pubrun as _pkg_root
+        return _pkg_root.__getattr__(name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> _List[str]:
+    return sorted(set(globals()) | set(__all__))

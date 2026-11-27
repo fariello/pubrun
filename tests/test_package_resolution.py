@@ -799,3 +799,277 @@ def test_get_packages_schema_conformance_and_default_mode(tmp_path, monkeypatch)
             assert isinstance(rec["name"], str) and rec["name"]
         if jsonschema is not None:
             jsonschema.validate(result, pkg_subschema)
+
+
+# ---------------------------------------------------------------------------
+# E-02 / E-05: Single METADATA read, lazy direct_url/requires/_markers, RECORD fast path
+# ---------------------------------------------------------------------------
+
+
+def test_distribution_index_reads_metadata_once_and_defers_direct_url_and_requires(
+    tmp_path, monkeypatch
+):
+    site_dir = tmp_path / "site_counts"
+    for idx in range(8):
+        reqs = [f"synth-io-pkg-{(idx + 1) % 8}>=1.0"] if idx % 2 == 0 else None
+        _write_dist(
+            site_dir,
+            f"synth-io-pkg-{idx}",
+            f"1.0.{idx}",
+            top_levels=[f"synth_io_mod_{idx}"],
+            files={f"synth_io_mod_{idx}/__init__.py": f"VAL = {idx}\n"},
+            requires=reqs,
+            direct_url=json.dumps({"dir_info": {"editable": idx == 0}, "url": "file:///unused"}),
+        )
+
+    monkeypatch.syspath_prepend(str(site_dir))
+    _import_tracked(monkeypatch, "synth_io_mod_0")
+
+    metadata_reads: Dict[str, int] = {}
+    requires_txt_reads: Dict[str, int] = {}
+    direct_url_reads: Dict[str, int] = {}
+
+    class _CountingPathDistribution(importlib.metadata.PathDistribution):
+        @property
+        def metadata(self):
+            key = self._path.name
+            metadata_reads[key] = metadata_reads.get(key, 0) + 1
+            return super().metadata
+
+        def read_text(self, filename):
+            key = self._path.name
+            if filename == "requires.txt":
+                requires_txt_reads[key] = requires_txt_reads.get(key, 0) + 1
+            elif filename == "direct_url.json":
+                direct_url_reads[key] = direct_url_reads.get(key, 0) + 1
+            return super().read_text(filename)
+
+    counting_dists = [
+        _CountingPathDistribution(p)
+        for p in sorted(site_dir.glob("*.dist-info"))
+    ]
+    assert len(counting_dists) == 8
+
+    monkeypatch.setattr("importlib.metadata.distributions", lambda: list(counting_dists))
+    pkgs.invalidate_package_cache()
+
+    # Building the index reads METADATA at most once per distribution and reads
+    # zero requires.txt or direct_url.json files.
+    index = pkgs._get_distribution_index(use_cache=True)
+    assert len(index.by_normalized_name) == 8
+    assert all(count == 1 for count in metadata_reads.values())
+    assert sum(metadata_reads.values()) == 8
+    assert requires_txt_reads == {}
+    assert direct_url_reads == {}
+
+    # imported-only mode reads direct_url.json ONLY for the 1 imported distribution.
+    snap = pkgs.resolve_packages_snapshot({"capture": {"packages": {"mode": "imported-only"}}})
+    rec0 = _find_record(snap, "synth-io-pkg-0")
+    assert rec0 is not None
+    assert rec0["version"] == "1.0.0"
+    assert rec0["editable"] is True
+    assert list(direct_url_reads.keys()) == ["synth_io_pkg_0-1.0.0.dist-info"]
+    assert direct_url_reads["synth_io_pkg_0-1.0.0.dist-info"] == 1
+    assert requires_txt_reads == {}
+    assert sum(metadata_reads.values()) == 8
+
+    # Accessing info.requires on all .dist-info dists (e.g. top-level-installed)
+    # still performs zero requires.txt probes and zero extra METADATA reads.
+    top_snap = pkgs.resolve_packages_snapshot(
+        {"capture": {"packages": {"mode": "top-level-installed"}}}
+    )
+    assert top_snap["mode"] == "top-level-installed"
+    assert requires_txt_reads == {}
+    assert sum(metadata_reads.values()) == 8
+
+
+def test_legacy_egg_info_and_dict_mock_lazy_requires(tmp_path, monkeypatch):
+    requires_accessed = 0
+
+    class _LegacyMockDist:
+        _path = tmp_path / "legacy_pkg-1.0.0.egg-info"
+        version = "1.0.0"
+
+        @property
+        def metadata(self):
+            return {"Name": "legacy-pkg"}
+
+        @property
+        def requires(self):
+            nonlocal requires_accessed
+            requires_accessed += 1
+            return ["legacy-dep>=1.0"]
+
+        def locate_file(self, rel):
+            return tmp_path / str(rel)
+
+        def read_text(self, filename):
+            if filename == "top_level.txt":
+                return "legacy_pkg\n"
+            return None
+
+    class _DepMockDist:
+        _path = tmp_path / "legacy_dep-2.0.0.egg-info"
+        version = "2.0.0"
+
+        @property
+        def metadata(self):
+            return {"Name": "legacy-dep"}
+
+        @property
+        def requires(self):
+            return []
+
+        def locate_file(self, rel):
+            return tmp_path / str(rel)
+
+        def read_text(self, filename):
+            if filename == "top_level.txt":
+                return "legacy_dep\n"
+            return None
+
+    monkeypatch.setattr(
+        "importlib.metadata.distributions",
+        lambda: [_LegacyMockDist(), _DepMockDist()],
+    )
+    pkgs.invalidate_package_cache()
+
+    # Indexing does not touch .requires eagerly.
+    idx = pkgs._get_distribution_index(use_cache=True)
+    assert requires_accessed == 0
+    assert idx.by_normalized_name["legacy-pkg"].version == "1.0.0"
+
+    # top-level-installed resolves .requires lazily and caches it.
+    snap = pkgs.resolve_packages_snapshot(
+        {"capture": {"packages": {"mode": "top-level-installed"}}}
+    )
+    assert requires_accessed == 1
+    assert _find_record(snap, "legacy-pkg") is not None
+    assert _find_record(snap, "legacy-dep") is None
+    # Subsequent access reuses cached tuple on _DistInfo.
+    assert idx.by_normalized_name["legacy-pkg"].requires == ("legacy-dep>=1.0",)
+    assert requires_accessed == 1
+
+
+def test_imported_only_and_full_env_leave_markers_unloaded(tmp_path):
+    import subprocess
+
+    site_dir = tmp_path / "site_markers"
+    _write_dist(
+        site_dir,
+        "synth-markers-pkg",
+        "1.0.0",
+        top_levels=["synth_markers_mod"],
+        files={"synth_markers_mod/__init__.py": "M = 1\n"},
+    )
+    src_dir = Path(__file__).resolve().parents[1] / "src"
+    code = (
+        "import json, sys\n"
+        f"sys.path.insert(0, {str(src_dir)!r})\n"
+        f"sys.path.insert(0, {str(site_dir)!r})\n"
+        "import synth_markers_mod\n"
+        "import pubrun.capture.packages as pkgs\n"
+        "for mode in ('off', 'imported-only', 'full-environment'):\n"
+        "    pkgs.resolve_packages_snapshot({'capture': {'packages': {'mode': mode}}})\n"
+        "before_trans = 'pubrun.capture._markers' in sys.modules\n"
+        "pkgs.resolve_packages_snapshot({'capture': {'packages': {'mode': 'imported-transitive'}}})\n"
+        "after_trans = 'pubrun.capture._markers' in sys.modules\n"
+        "print(json.dumps({'before_trans': before_trans, 'after_trans': after_trans}))\n"
+    )
+    res = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert res.returncode == 0, f"stderr: {res.stderr}"
+    data = json.loads(res.stdout.strip())
+    assert data["before_trans"] is False
+    assert data["after_trans"] is True
+
+
+def test_symlinked_dist_info_directory_deduplicates(tmp_path, monkeypatch):
+    site_a = tmp_path / "site_a"
+    site_b = tmp_path / "site_b"
+    site_b.mkdir()
+    dist_dir = _write_dist(
+        site_a,
+        "synth-symdist-pkg",
+        "1.0.0",
+        top_levels=["synth_symdist"],
+        files={"synth_symdist/__init__.py": "S = 1\n"},
+    )
+    sym_dist = site_b / dist_dir.name
+    try:
+        os.symlink(dist_dir, sym_dist)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported in this environment")
+
+    monkeypatch.syspath_prepend(str(site_a))
+    monkeypatch.syspath_prepend(str(site_b))
+    pkgs.invalidate_package_cache()
+
+    idx = pkgs._get_distribution_index(use_cache=False)
+    assert len(idx.module_to_dists["synth_symdist"]) == 1
+
+
+def test_fast_path_record_parsing_matches_csv_pureposixpath():
+    import csv
+    import inspect
+    from pathlib import PurePosixPath
+
+    raw_record = "\n".join(
+        [
+            "",
+            ",sha256=empty,0",
+            "pkg_alpha/__init__.py,sha256=abc,10",
+            "pkg_alpha/sub/mod.py,sha256=def,20",
+            "pkg_alpha-1.0.0.dist-info/METADATA,sha256=meta,30",
+            "../bin/cli-tool,sha256=bin,40",
+            "__pycache__/single_mod.cpython-312.pyc,sha256=pyc,50",
+            '"comma,pkg/mod.py",sha256=q1,60',
+            '"comma,single.py",sha256=q2,70',
+            "./rel_pkg/mod.py,sha256=rel,80",
+            "/abs_pkg/mod.py,sha256=abs,90",
+            "trailing_dir/,,",
+            "dot_end_pkg/.,sha256=dot,100",
+            "nested_dot/sub/.,sha256=ndot,110",
+            "single_root_mod.py,sha256=single,120",
+            "single_root_ext.pth,sha256=pth,130",
+        ]
+    )
+
+    class _RecordOnlyDist:
+        def read_text(self, filename):
+            if filename == "RECORD":
+                return raw_record
+            return None
+
+    # Reference algorithm (csv.reader + PurePosixPath)
+    ref_inferred: List[str] = []
+    ref_seen = set()
+    for row in csv.reader(raw_record.splitlines()):
+        if not row or not row[0]:
+            continue
+        entry = row[0]
+        parts = PurePosixPath(entry).parts
+        if parts and len(parts) > 1:
+            candidate = parts[0]
+        else:
+            candidate = inspect.getmodulename(entry) or entry
+        if candidate and "." not in candidate and candidate != "__pycache__":
+            if candidate not in ref_seen:
+                ref_seen.add(candidate)
+                ref_inferred.append(candidate)
+
+    got = pkgs._extract_top_levels(_RecordOnlyDist())
+    assert got == tuple(ref_inferred)
+    assert "pkg_alpha" in got
+    assert "comma,pkg" in got
+    assert "comma,single" in got
+    assert "rel_pkg" in got
+    assert "nested_dot" in got
+    assert "single_root_mod" in got
+    assert "dot_end_pkg" not in got
+    assert ".." not in got
+    assert "__pycache__" not in got

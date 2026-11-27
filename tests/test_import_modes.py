@@ -1369,3 +1369,187 @@ print(json.dumps(out))
         assert "auto-start failed" not in result.stderr
         assert "cannot import name '_run_lock'" not in result.stderr
         assert data["hardware"] == "suppressed"
+
+
+class TestModePep561AndColdStart:
+    """PEP 561 export/dir/version/commit parity and cold-start import isolation."""
+
+    @staticmethod
+    def _clean_env():
+        env = {
+            k: v for k, v in os.environ.items()
+            if k not in ("PUBRUN_IMPORT_MODE", "PUBRUN_AUTO_START", "PUBRUN_RUN_MODE_OVERRIDE")
+        }
+        src_dir = pathlib.Path(__file__).resolve().parents[1] / "src"
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing}" if existing else str(src_dir)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return env
+
+    @pytest.mark.parametrize("mode", ["auto", "full", "noauto", "nopatch", "noconsole", "minimal"])
+    def test_mode_submodules_all_dir_version_commit_parity(self, mode, tmp_path):
+        script = f"""
+import json
+import pubrun.{mode} as mod
+import pubrun as base
+
+base_all = list(base.__all__)
+mod_all = list(mod.__all__)
+mod_dir = dir(mod)
+
+v_mod = mod.__version__
+v_base = base.__version__
+c_mod = mod.__commit__
+c_base = base.__commit__
+
+# __version__ and __commit__ must remain dynamic via PEP 562 (not pinned in mod.__dict__).
+version_in_dict = "__version__" in mod.__dict__
+commit_in_dict = "__commit__" in mod.__dict__
+
+unknown_raised = False
+try:
+    getattr(mod, "definitely_not_a_real_pubrun_symbol")
+except AttributeError:
+    unknown_raised = True
+
+# Resetting commit cache on pubrun must remain visible through the mode alias.
+base._reset_commit_cache()
+c_mod_after_reset = mod.__commit__
+
+print(json.dumps({{
+    "base_all_len": len(base_all),
+    "mod_all_len": len(mod_all),
+    "all_equal": set(mod_all) == set(base_all),
+    "paused_in_all": "paused" in mod_all,
+    "all_in_dir": set(mod_all).issubset(set(mod_dir)),
+    "version_in_dir": "__version__" in mod_dir,
+    "commit_in_dir": "__commit__" in mod_dir,
+    "version_equal": isinstance(v_mod, str) and v_mod == v_base,
+    "commit_equal": c_mod == c_base and c_mod_after_reset == base.__commit__,
+    "version_in_dict": version_in_dict,
+    "commit_in_dict": commit_in_dict,
+    "unknown_raised": unknown_raised,
+}}))
+if mod.get_current_run() is not None:
+    mod.stop()
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=30,
+            cwd=str(tmp_path), env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["base_all_len"] == 20
+        assert data["mod_all_len"] == 20
+        assert data["all_equal"] is True
+        assert data["paused_in_all"] is True
+        assert data["all_in_dir"] is True
+        assert data["version_in_dir"] is True
+        assert data["commit_in_dir"] is True
+        assert data["version_equal"] is True
+        assert data["commit_equal"] is True
+        assert data["version_in_dict"] is False
+        assert data["commit_in_dict"] is False
+        assert data["unknown_raised"] is True
+
+    @pytest.mark.parametrize("mode", ["minimal", "noauto"])
+    def test_cold_start_import_leaves_heavy_modules_unloaded(self, mode, tmp_path):
+        script = f"""
+import json, sys
+import pubrun.{mode} as mod
+active = mod.get_current_run() is not None
+capture_mods = sorted(
+    m for m in sys.modules if m == "pubrun.capture" or m.startswith("pubrun.capture.")
+)
+print(json.dumps({{
+    "active": active,
+    "importlib_metadata": "importlib.metadata" in sys.modules,
+    "tracker": "pubrun.tracker" in sys.modules,
+    "writer": "pubrun.writer" in sys.modules,
+    "events": "pubrun.events" in sys.modules,
+    "capture_mods": capture_mods,
+}}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=20,
+            cwd=str(tmp_path), env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["active"] is False
+        assert data["importlib_metadata"] is False
+        assert data["tracker"] is False
+        assert data["writer"] is False
+        assert data["events"] is False
+        assert data["capture_mods"] == []
+
+    def test_packages_mode_off_keeps_packages_module_unloaded(self, tmp_path):
+        script = f"""
+import json, sys
+import pubrun.minimal as pubrun
+run = pubrun.start(
+    output_dir={str(tmp_path / 'runs')!r},
+    capture={{"packages": {{"mode": "off"}}, "hardware": {{"depth": "off"}}}},
+)
+loaded_after_start = "pubrun.capture.packages" in sys.modules
+run._finalize_state()
+loaded_after_finalize = "pubrun.capture.packages" in sys.modules
+pubrun.stop()
+print(json.dumps({{
+    "loaded_after_start": loaded_after_start,
+    "loaded_after_finalize": loaded_after_finalize,
+}}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=20,
+            cwd=str(tmp_path), env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["loaded_after_start"] is False
+        assert data["loaded_after_finalize"] is False
+
+    def test_downstream_mypy_strict_no_implicit_reexport_all_modes(self):
+        mypy_check = subprocess.run(
+            [PYTHON, "-m", "mypy", "--version"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if mypy_check.returncode != 0:
+            pytest.skip("mypy not available in this environment")
+
+        src_dir = pathlib.Path(__file__).resolve().parents[1] / "src"
+        snippet = (
+            "from typing import Optional; "
+            "import pubrun.auto, pubrun.full, pubrun.noauto, pubrun.nopatch, "
+            "pubrun.noconsole, pubrun.minimal; "
+            "v1: str = pubrun.auto.__version__; c1: Optional[str] = pubrun.auto.__commit__; "
+            "v2: str = pubrun.full.__version__; c2: Optional[str] = pubrun.full.__commit__; "
+            "v3: str = pubrun.noauto.__version__; c3: Optional[str] = pubrun.noauto.__commit__; "
+            "v4: str = pubrun.nopatch.__version__; c4: Optional[str] = pubrun.nopatch.__commit__; "
+            "v5: str = pubrun.noconsole.__version__; c5: Optional[str] = pubrun.noconsole.__commit__; "
+            "v6: str = pubrun.minimal.__version__; c6: Optional[str] = pubrun.minimal.__commit__; "
+            "pubrun.noauto.start(); pubrun.noauto.stop()"
+        )
+        env = {**os.environ, "MYPYPATH": str(src_dir)}
+        result = subprocess.run(
+            [
+                PYTHON,
+                "-m",
+                "mypy",
+                "--config-file",
+                os.devnull,
+                "--strict",
+                "--no-implicit-reexport",
+                "--follow-imports=silent",
+                "-c",
+                snippet,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+        )
+        assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"

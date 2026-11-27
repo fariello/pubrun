@@ -52,7 +52,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Cold-start `__init__.py`, fallback version, and pipe cleanup
 
-- [ ] E-01 Defer `__version__`, implement deterministic fallback version resolution, update docstrings, and fix subprocess pipe cleanup in `src/pubrun/__init__.py` and `src/pubrun/tracker.py`:
+- [x] E-01 Defer `__version__`, implement deterministic fallback version resolution, update docstrings, and fix subprocess pipe cleanup in `src/pubrun/__init__.py` and `src/pubrun/tracker.py`:
   - In `src/pubrun/__init__.py`, replace eager `importlib.metadata.version("pubrun")` with a lock-guarded lazy resolver (`_VERSION_UNSET`, `_cached_version`, `_version_lock`, `_get_version()`, and `_reset_version_cache()`, mirroring `_get_commit()` and `_reset_commit_cache()`) exposed through Python Enhancement Proposal 562 (PEP 562) `src/pubrun/__init__.py::__getattr__(name: str) -> Any` so `import pubrun.minimal` and `import pubrun.noauto` never import `importlib.metadata` until `__version__` is accessed. Declare Python 3.8-compatible `if TYPE_CHECKING: __version__: str; __commit__: Optional[str]` (using `typing.Optional` and `typing.List`, never Python 3.10 union syntax) and annotate `def __dir__() -> List[str]:`.
   - Update `src/pubrun/__init__.py::_resolve_commit` to call `_get_version()` instead of referencing bare `__version__` (preventing `NameError` once `__version__` is resolved through `__getattr__`).
   - In `_get_version()`, when `importlib.metadata.version("pubrun")` fails (for example `PackageNotFoundError`), resolve the fallback deterministically in order: (1) read `[project].version` from a verified source checkout's `pyproject.toml` (reusing `src/pubrun/__init__.py::_is_verified_source_checkout` and its TOML/fallback reader), (2) read `"version"` from packaged `_build_meta.json` via `src/pubrun/__init__.py::_read_packaged_resource`, (3) return `"0.0.0+unknown"` instead of stale `"1.0.0"`. Update the `ImportError` fallback in `src/pubrun/tracker.py::Run.to_manifest_dict` from `"1.0.0"` to `"0.0.0+unknown"`.
@@ -60,11 +60,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Expand `src/pubrun/__init__.__doc__` with a concise quick-reference table of all 20 public symbols in `__all__`, noting that `[console].capture_mode` defaults to `"off"`, and correct the `pubrun.nopatch` comment in `src/pubrun/__init__.__doc__` to state that subprocess and console patches are skipped while signal hooks remain active (matching `src/pubrun/_modes.py`).
   - Depends on: none
   - Expected outcome: Importing `pubrun` without accessing `__version__` never imports `importlib.metadata`; accessing `pubrun.__version__` returns `"1.4.0"` in this checkout and `"0.0.0+unknown"` when no metadata source exists; `_resolve_commit()` succeeds without `NameError`; `_resolve_checkout_commit` closes pipes with zero `ResourceWarning` on timeout or error; and `pubrun.__doc__` documents all 20 `__all__` symbols accurately.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Package-capture input/output (I/O) and import reduction
 
-- [ ] E-02 Optimize `src/pubrun/capture/packages.py::_build_distribution_index`, `_extract_top_levels`, `_DistInfo`, `_resolve_imported_modules`, and `_markers` imports:
+- [x] E-02 Optimize `src/pubrun/capture/packages.py::_build_distribution_index`, `_extract_top_levels`, `_DistInfo`, `_resolve_imported_modules`, and `_markers` imports:
   - In `src/pubrun/capture/packages.py::_build_distribution_index`, read `meta = dist.metadata` once per distribution. Obtain `Version` via a helper checking `meta.get("Version")` (with case-insensitive `"version"` lookup on plain `dict` metadata), falling back to `getattr(dist, "version", None)` only when the metadata lookup returns `None` and `not hasattr(meta, "get_all")` so dict-based mocks (such as `tests/test_reproducibility_preflight.py::_FakeDist`) preserve their version while real `PathDistribution` objects never trigger a second `METADATA` read.
   - Extract `Requires-Dist` from the already-in-memory `meta` via `meta.get_all("Requires-Dist")` (zero extra disk reads). For `.dist-info` distributions where `meta.get_all("Requires-Dist")` is empty or `None`, cache `()` immediately so `requires.txt` missing-file (`ENOENT`) probes never run. For legacy `.egg-info` distributions or mocks lacking `get_all`, defer `getattr(dist, "requires", None)` lazily until `info.requires` is first accessed (in `imported-transitive` or `top-level-installed` mode), caching the result on `_DistInfo`.
   - Defer `src/pubrun/capture/packages.py::_is_editable_dist(dist)` (`direct_url.json`) lazily via a cached property on `_DistInfo.editable` so `direct_url.json` is read only when a distribution is selected for emission, returned by `get_installed_distribution_versions()`, or checked as an editable shim. In `src/pubrun/capture/packages.py::_resolve_imported_modules`, evaluate `bool(direct_info.top_levels) and all(t.startswith("__editable__") for t in direct_info.top_levels)` before reading `direct_info.editable` so non-shim distributions skip `direct_url.json`.
@@ -73,36 +73,36 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Defer `from pubrun.capture._markers import default_marker_environment, evaluate_marker, parse_requirement` from module top level into `src/pubrun/capture/packages.py::_parse_req_name` and `_resolve_transitive_closure` so `imported-only`, `full-environment`, and `off` modes never pay the `_markers` import cost.
   - Depends on: none
   - Expected outcome: `METADATA` reads drop from `3N` to `<= 1N` with zero `requires.txt` probes on `.dist-info` distributions, `direct_url.json` reads drop from `N` to `O(imported)` in `imported-only` mode, `pubrun.capture._markers` stays unloaded in `imported-only` mode, symlink deduplication and dict-mock compatibility remain intact, and cold `benchmarks/package_capture_bench.py` startup latency drops measurably.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: PEP 561 mode-submodule parity and lazy engine imports
 
-- [ ] E-03 Fix PEP 561 exports, `__dir__`, `__commit__` parity, and docstrings across all six mode submodules (`src/pubrun/{auto,full,noauto,nopatch,noconsole,minimal}.py`):
+- [x] E-03 Fix PEP 561 exports, `__dir__`, `__commit__` parity, and docstrings across all six mode submodules (`src/pubrun/{auto,full,noauto,nopatch,noconsole,minimal}.py`):
   - Define an explicit `__all__` in each of the six mode submodules matching `src/pubrun/__init__.py::__all__` (all 20 public symbols, including `paused`, `register_file`, `register_input`, `register_output`, `__version__`, and `__commit__`).
   - Remove eager `from pubrun import __version__` from all six mode submodules. Declare Python 3.8-compatible `if TYPE_CHECKING: __version__: str; __commit__: Optional[str]`, add PEP 562 `def __getattr__(name: str) -> Any:` forwarding `"__version__"` and `"__commit__"` to `pubrun.__getattr__(name)` (without caching `__commit__` in the submodule's own `globals()`, keeping `pubrun._reset_commit_cache()` consistent across aliases) and raising `AttributeError` otherwise, and add `def __dir__() -> List[str]: return sorted(set(globals()) | set(__all__))`.
   - Fix `src/pubrun/nopatch.py` module docstring to state accurately that subprocess interception and console wrapping are skipped while signal handlers remain active (matching `src/pubrun/_modes.py` and contrasting with `src/pubrun/minimal.py`).
   - Preserve `import pubrun.report` (never `_pkg.report = report`) so `tests/test_report_subpackage_integrity.py` stays green across all six modes.
   - Depends on: E-01
   - Expected outcome: Downstream `mypy --strict --no-implicit-reexport` passes across all six mode submodules, `set(mod.__all__) == set(pubrun.__all__)`, `'__version__' in dir(mod)` and `'__commit__' in dir(mod)` hold, `getattr(mod, "__commit__") == pubrun.__commit__` holds without eager `git` or `importlib.metadata` execution, and `tests/test_report_subpackage_integrity.py` passes.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Defer eager `pubrun.tracker` and capture-engine imports in `src/pubrun/core.py` and `src/pubrun/tracker.py`:
+- [x] E-04 Defer eager `pubrun.tracker` and capture-engine imports in `src/pubrun/core.py` and `src/pubrun/tracker.py`:
   - In `src/pubrun/core.py`, remove top-level `from pubrun.tracker import Run, get_current_run` and move `Run` under `if TYPE_CHECKING:`. Implement `src/pubrun/core.py::get_current_run() -> Optional["Run"]` to check `sys.modules.get("pubrun.tracker")` and return `None` without importing `pubrun.tracker` when unloaded (delegating to `tracker_mod.get_current_run()` once loaded). In `src/pubrun/core.py::start`, check `globals().get("Run")` before lazily importing `from pubrun.tracker import Run as run_cls`, and add PEP 562 `src/pubrun/core.py::__getattr__(name: str) -> Any` resolving `"Run"` lazily so existing monkeypatch seams (such as `tests/test_api.py::TestAutoStartResilience` assigning `pubrun.core.Run`) keep working.
   - In `src/pubrun/tracker.py`, replace the 14 eager top-level capture, writer, config, and event imports (`resolve_config`, `ArtifactWriter`, `EventStream`, `get_invocation`, `SubprocessSpy`, `ConsoleInterceptor`, `get_hardware`, `ResourceWatcher`, `get_process_info`, `get_python_runtime`, `get_packages`, `merge_package_snapshots`, `get_environment`, `get_git`, `get_host`, `SignalExitCapture`, `finalization_lock`) with a lazy import map, a `_get_dep(name)` helper that checks `globals().get(name)` first, PEP 562 `def __getattr__(name: str) -> Any:`, and `if TYPE_CHECKING:` type imports. Update `src/pubrun/tracker.py::_call_get_packages` to resolve the unmodified `get_packages` reference lazily so `pubrun.capture.packages` stays unloaded when `[capture.packages].mode == "off"`, while preserving all `monkeypatch.setattr(tracker_mod, ...)` seams in `tests/test_tracker.py`, `tests/test_capture_isolation.py`, `tests/test_startup_overhead_writes.py`, and `tests/test_timing_accuracy.py`.
   - Depends on: E-01, E-02, E-03
   - Expected outcome: `import pubrun.minimal` and `import pubrun.noauto` leave `importlib.metadata`, `pubrun.tracker`, `pubrun.writer`, `pubrun.events`, and all `pubrun.capture.*` modules out of `sys.modules`, cutting `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -X importtime -c "import pubrun.minimal"` cold-start latency by >70% with zero regressions in existing tests.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Regression and verification tests
 
-- [ ] E-05 Add PEP 561, `__commit__` parity, cold-start isolation, pipe-cleanup, and package-read-count tests in `tests/test_import_modes.py`, `tests/test_commit_identity.py`, and `tests/test_package_resolution.py`:
+- [x] E-05 Add PEP 561, `__commit__` parity, cold-start isolation, pipe-cleanup, and package-read-count tests in `tests/test_import_modes.py`, `tests/test_commit_identity.py`, and `tests/test_package_resolution.py`:
   - In `tests/test_import_modes.py`: assert exact `__all__`, `dir()`, `__version__`, and `__commit__` parity (all 20 public symbols, including `paused`) across all six mode submodules; assert in fresh subprocesses that `import pubrun.minimal` and `import pubrun.noauto` leave `importlib.metadata`, `pubrun.tracker`, `pubrun.writer`, `pubrun.events`, and `pubrun.capture.*` unloaded; and add a downstream `mypy --strict --no-implicit-reexport` test covering all six mode submodules.
   - In `tests/test_commit_identity.py`: test lazy `__version__` (zero `importlib.metadata` import before access), the fallback version chain (verified checkout `pyproject.toml`, packaged `_build_meta.json`, and `"0.0.0+unknown"`), `_resolve_commit()` working before external `__version__` access, and `_resolve_checkout_commit` under both `TimeoutExpired` and `RuntimeError` with `ResourceWarning` promoted to error.
   - In `tests/test_package_resolution.py`: add a read-count test on `_build_distribution_index` and `resolve_packages_snapshot` confirming `METADATA` is read at most once per distribution (`<= 1N`), zero `requires.txt` probes occur for `.dist-info` distributions, `direct_url.json` is not read for unimported distributions in `imported-only` mode, `pubrun.capture._markers` stays unloaded in `imported-only` mode, symlinked `.dist-info` directories still deduplicate, and fast-path `RECORD` parsing matches `PurePosixPath` + `csv.reader` across unquoted, quoted-comma, `./`, `/`, trailing-`/`, and root-level single-file lines.
   - Run all commands in `## Required tests / validation`.
   - Depends on: E-04
   - Expected outcome: All new and existing targeted tests pass cleanly, downstream `mypy --strict --no-implicit-reexport` and three-platform `mypy` exit `0`, and `-X importtime` plus `benchmarks/package_capture_bench.py` show the expected reductions.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -160,30 +160,49 @@ None. All design details (lazy PEP 562 `__version__` and deterministic fallback 
 
 Validation-state rule: inspect evidence in a separate pass. Accepted validation results: blocked, failed, pass, pending; terminal gate demands `pass`.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest tests/test_commit_identity.py -v` output confirming lazy `src/pubrun/__init__.py::__version__` (no `importlib.metadata` import before access), deterministic fallback version chain (`pyproject.toml`, `_build_meta.json`, `"0.0.0+unknown"` in `__init__.py` and `tracker.py`), `_resolve_commit()` working before external `__version__` access, updated `__init__.__doc__` (20 `__all__` symbols and accurate `nopatch` note), and zero `ResourceWarning` in `_resolve_checkout_commit` on `TimeoutExpired` and `RuntimeError`.
   - Observed evidence:
-  - Result: pending
+    `python3 -m pytest tests/test_commit_identity.py -v` exited `0` (`45 passed in 7.53s`), including:
+    `tests/test_commit_identity.py::TestLazyVersionAndPipeCleanup::test_lazy_version_defers_importlib_metadata_and_resolves_checkout PASSED`
+    `tests/test_commit_identity.py::TestLazyVersionAndPipeCleanup::test_resolve_commit_works_before_external_version_access PASSED`
+    `tests/test_commit_identity.py::TestLazyVersionAndPipeCleanup::test_fallback_version_chain_checkout_build_meta_and_unknown PASSED`
+    `tests/test_commit_identity.py::TestLazyVersionAndPipeCleanup::test_tracker_manifest_fallback_version_is_unknown PASSED`
+    `tests/test_commit_identity.py::TestLazyVersionAndPipeCleanup::test_resolve_checkout_commit_closes_pipes_on_timeout_and_runtime_error PASSED`
+    Docstring verification (`PYTHONPATH=src python3 -c "import pubrun.minimal, pubrun, pubrun.nopatch; assert all(s in pubrun.__doc__ for s in pubrun.__all__); assert 'signal hooks stay active' in pubrun.__doc__; assert 'signal handlers active' in pubrun.nopatch.__doc__; print('DOC_OK:', len(pubrun.__all__), 'symbols')"`) printed `DOC_OK: 20 symbols`.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest tests/test_package_resolution.py tests/test_package_lifecycle.py tests/test_package_transitive.py tests/test_reproducibility_preflight.py -v` output confirming `<= 1N` `METADATA` reads, zero `requires.txt` probes on `.dist-info`, zero `direct_url.json` reads for unimported distributions in `imported-only` mode, unloaded `pubrun.capture._markers` in `imported-only` mode, symlinked `.dist-info` deduplication, dict-mock `_FakeDist` compatibility, and fast-path `RECORD` equivalence (unquoted, quoted-comma, `./`, `/`, trailing `/`, single-file), plus pasted `python3 benchmarks/package_capture_bench.py --small-count 10 --large-count 100 --repetitions 3 --cold-runs 2` timing output.
   - Observed evidence:
-  - Result: pending
+    `python3 -m pytest tests/test_package_resolution.py tests/test_package_lifecycle.py tests/test_package_transitive.py tests/test_reproducibility_preflight.py -v` exited `0` (`61 passed in 14.62s`), including `test_distribution_index_reads_metadata_once_and_defers_direct_url_and_requires PASSED`, `test_legacy_egg_info_and_dict_mock_lazy_requires PASSED`, `test_imported_only_and_full_env_leave_markers_unloaded PASSED`, `test_symlinked_dist_info_directory_deduplicates PASSED`, `test_fast_path_record_parsing_matches_csv_pureposixpath PASSED`, and `TestPackageLookupHelpers::test_package_lookup_precedence_editable_null_and_no_import PASSED`.
+    `python3 benchmarks/package_capture_bench.py --small-count 10 --large-count 100 --repetitions 3 --cold-runs 2` exited `0`:
+    large (100 synthetic dists) `imported-only` startup cold dropped from `52.77 ms` to `34.17 ms` (`full-environment` `47.95 ms` -> `30.26 ms`); ambient (215 dists) `imported-only` startup cold dropped from `321.35 ms` to `134.73 ms` (`imported-transitive` `321.41 ms` -> `146.90 ms`, `top-level-installed` `332.88 ms` -> `139.90 ms`, `full-environment` `329.05 ms` -> `131.48 ms`).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted output of Command 2 (`mypy --strict --no-implicit-reexport` across all six mode submodules) exiting `0`, plus pasted `pytest tests/test_import_modes.py tests/test_full_mode.py tests/test_report_subpackage_integrity.py -v` output confirming exact 20-symbol `__all__`/`dir()`/`__version__`/`__commit__` parity, accurate `src/pubrun/nopatch.py` docstring, and zero shadowed subpackages.
   - Observed evidence:
-  - Result: pending
+    Command 2 (`MYPYPATH=src python3 -m mypy --config-file /dev/null --strict --no-implicit-reexport --follow-imports=silent -c ...`) exited `0`: `Success: no issues found in 1 source file`.
+    `pytest tests/test_import_modes.py tests/test_full_mode.py tests/test_report_subpackage_integrity.py` (within Command 1: `355 passed in 55.99s`; targeted `-k` subset: `43 passed, 90 deselected in 12.84s`) passed all 6 `test_mode_submodules_all_dir_version_commit_parity[auto|full|noauto|nopatch|noconsole|minimal]`, `test_downstream_mypy_strict_no_implicit_reexport_all_modes`, all 13 `tests/test_report_subpackage_integrity.py` tests, and `DOC_OK: 20 symbols` confirmed `src/pubrun/nopatch.py` docstring states signal handlers remain active.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted output of Command 3 (`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -X importtime -c "import pubrun.minimal" 2>&1 | tail -n 30`) showing >70% cold-start reduction with `importlib.metadata`, `pubrun.tracker`, and `pubrun.capture.*` absent, plus pasted `pytest tests/test_import_modes.py tests/test_api.py tests/test_tracker.py tests/test_capture_isolation.py tests/test_startup_overhead_writes.py -v` output confirming lazy isolation and preserved monkeypatch seams.
   - Observed evidence:
-  - Result: pending
+    Command 3 (`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -X importtime -c "import pubrun.minimal" 2>&1 | tail -n 30`) exited `0`, reducing cumulative import time from `196118 us` (~196.1 ms) baseline to `38772 us` (~38.8 ms, an 80.2% reduction), with `pubrun.core` at `29723 us`, `pubrun._config_boot` at `191 us`, `pubrun.report` at `153 us`, `pubrun.minimal` at `38772 us`, and `importlib.metadata`, `pubrun.tracker`, and `pubrun.capture.*` completely absent.
+    `python3 -m pytest tests/test_import_modes.py tests/test_api.py tests/test_tracker.py tests/test_capture_isolation.py tests/test_startup_overhead_writes.py -q` exited `0` (`215 passed in 30.60s`), and `python3 -m pytest tests/test_timing_accuracy.py -q` exited `0` (`17 passed in 1.66s`), confirming `test_cold_start_import_leaves_heavy_modules_unloaded[minimal|noauto]`, `test_packages_mode_off_keeps_packages_module_unloaded`, and all existing monkeypatch seams pass.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted output of Command 1 (all 12 targeted `pytest` suites), Command 2 (downstream `mypy --strict --no-implicit-reexport`), and Command 5 (`mypy && mypy --platform win32 && mypy --platform darwin`) all exiting `0`.
   - Observed evidence:
-  - Result: pending
+    Command 1 (`python3 -m pytest tests/test_import_modes.py tests/test_full_mode.py tests/test_commit_identity.py tests/test_package_resolution.py tests/test_package_lifecycle.py tests/test_package_transitive.py tests/test_reproducibility_preflight.py tests/test_report_subpackage_integrity.py tests/test_api.py tests/test_tracker.py tests/test_capture_isolation.py tests/test_startup_overhead_writes.py -v`) exited `0`: `355 passed in 55.99s`.
+    Command 2 exited `0`: `Success: no issues found in 1 source file`.
+    Command 5 (`mypy && mypy --platform win32 && mypy --platform darwin`) exited `0`: `Success: no issues found in 70 source files` on Linux, `win32`, and `darwin`.
+    Full suite (`aw suite`) exited `0`: `2464 passed in 99.16s (0:01:39)`.
+    Leak check (`aw sanitize --agent`) exited `0`: `outcome=clean, findings=0`.
+  - Result: pass
 
 ## Approval and execution gate
 

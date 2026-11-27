@@ -974,3 +974,178 @@ class TestConfigBootSingleRead:
 
         assert _read_local_toml_key("imports", "on_conflict") == "error"
         assert _read_local_toml_key("imports", "missing") is None
+
+
+# ---------------------------------------------------------------------------
+# 6. Lazy __version__, fallback chain, and _resolve_checkout_commit pipe cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestLazyVersionAndPipeCleanup:
+    """Lazy PEP 562 __version__, deterministic fallback chain, and safe git pipe cleanup."""
+
+    def test_lazy_version_defers_importlib_metadata_and_resolves_checkout(
+        self, tmp_path: Path
+    ) -> None:
+        code = (
+            "import json, sys\n"
+            "import pubrun.minimal as mod\n"
+            "import pubrun\n"
+            "before_meta = 'importlib.metadata' in sys.modules\n"
+            "v_root = pubrun.__version__\n"
+            "v_mod = mod.__version__\n"
+            "print(json.dumps({'before_meta': before_meta, 'v_root': v_root, 'v_mod': v_mod}))\n"
+        )
+        res = _run_python_isolated(
+            code,
+            pythonpath=REPO_ROOT / "src",
+            cwd=tmp_path,
+        )
+        assert res.returncode == 0, f"stderr: {res.stderr}"
+        data = json.loads(res.stdout.strip())
+        assert data["before_meta"] is False
+        assert data["v_root"] == "1.4.0"
+        assert data["v_mod"] == "1.4.0"
+
+    def test_resolve_commit_works_before_external_version_access(self, tmp_path: Path) -> None:
+        site_packages = tmp_path / "site-packages"
+        _create_simulated_wheel(
+            site_packages,
+            version="2.7.1",
+            build_meta=json.dumps({"commit": SHA_40_A, "version": "2.7.1"}) + "\n",
+        )
+        code = (
+            "import json\n"
+            "import pubrun.minimal\n"
+            "import pubrun\n"
+            "# Access __commit__ first without touching __version__ externally.\n"
+            "commit = pubrun.__commit__\n"
+            "print(json.dumps({'commit': commit}))\n"
+        )
+        res = _run_python_isolated(
+            code,
+            pythonpath=site_packages,
+            cwd=tmp_path,
+        )
+        assert res.returncode == 0, f"stderr: {res.stderr}"
+        assert json.loads(res.stdout.strip())["commit"] == SHA_40_A
+
+    def test_fallback_version_chain_checkout_build_meta_and_unknown(
+        self, tmp_path: Path
+    ) -> None:
+        # 1. Verified source checkout fallback via pyproject.toml (both TOML and regex fallback).
+        checkout_dir = tmp_path / "checkout_ver"
+        checkout_dir.mkdir()
+        (checkout_dir / "pyproject.toml").write_text(
+            '[project]\nname = "pubrun"\nversion = "9.8.7"\n',
+            encoding="utf-8",
+        )
+        _copy_pubrun_package(checkout_dir / "src" / "pubrun")
+        _init_git_repo(checkout_dir, filename="README.md", content="# ver test\n")
+
+        block_metadata_code = (
+            "import builtins, json\n"
+            "import pubrun.minimal\n"
+            "import pubrun\n"
+            "_real_import = builtins.__import__\n"
+            "def _block_meta(name, *a, **kw):\n"
+            "    if name in ('importlib.metadata', 'importlib_metadata', 'tomllib', 'tomli'):\n"
+            "        raise ImportError(name)\n"
+            "    return _real_import(name, *a, **kw)\n"
+            "builtins.__import__ = _block_meta\n"
+            "pubrun._reset_version_cache()\n"
+            "print(json.dumps({'version': pubrun.__version__}))\n"
+        )
+        res_checkout = _run_python_isolated(
+            block_metadata_code,
+            pythonpath=checkout_dir / "src",
+            cwd=tmp_path,
+        )
+        assert res_checkout.returncode == 0, f"stderr: {res_checkout.stderr}"
+        assert json.loads(res_checkout.stdout.strip())["version"] == "9.8.7"
+
+        # 2. Packaged _build_meta.json fallback when importlib.metadata fails and not a checkout.
+        meta_site = tmp_path / "site_build_meta"
+        meta_pkg = meta_site / "pubrun"
+        _copy_pubrun_package(meta_pkg)
+        (meta_pkg / "_build_meta.json").write_text(
+            json.dumps({"commit": SHA_40_A, "version": "7.6.5"}) + "\n",
+            encoding="utf-8",
+        )
+        res_meta = _run_python_isolated(
+            block_metadata_code,
+            pythonpath=meta_site,
+            cwd=tmp_path,
+        )
+        assert res_meta.returncode == 0, f"stderr: {res_meta.stderr}"
+        assert json.loads(res_meta.stdout.strip())["version"] == "7.6.5"
+
+        # 3. Deterministic "0.0.0+unknown" fallback when no metadata source exists.
+        empty_site = tmp_path / "site_empty"
+        _copy_pubrun_package(empty_site / "pubrun")
+        res_unknown = _run_python_isolated(
+            block_metadata_code,
+            pythonpath=empty_site,
+            cwd=tmp_path,
+        )
+        assert res_unknown.returncode == 0, f"stderr: {res_unknown.stderr}"
+        assert json.loads(res_unknown.stdout.strip())["version"] == "0.0.0+unknown"
+
+    def test_tracker_manifest_fallback_version_is_unknown(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pubrun.tracker import Run
+
+        run = Run(
+            overrides={
+                "output_dir": str(tmp_path / "runs"),
+                "capture": {"hardware": {"depth": "off"}, "packages": {"mode": "off"}},
+            }
+        )
+        try:
+            real_import = builtins.__import__
+
+            def _block_pubrun_root(name: str, globals_: Any = None, locals_: Any = None, fromlist: Any = (), level: int = 0) -> Any:
+                if name == "pubrun" and "__version__" in (fromlist or ()):
+                    raise ImportError("simulated missing pubrun root")
+                return real_import(name, globals_, locals_, fromlist, level)
+
+            monkeypatch.setattr(builtins, "__import__", _block_pubrun_root)
+            manifest = run.to_manifest_dict()
+            assert manifest["run"]["library_version"] == "0.0.0+unknown"
+            assert manifest["run"]["library_commit"] is None
+        finally:
+            run.stop()
+
+    def test_resolve_checkout_commit_closes_pipes_on_timeout_and_runtime_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import gc
+        import warnings
+        import pubrun
+
+        repo_dir = tmp_path / "pubrun_checkout"
+        _create_verified_checkout(repo_dir)
+        bin_dir = tmp_path / "bin"
+        _create_fake_git(bin_dir, "import time\ntime.sleep(5)\n")
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", ResourceWarning)
+            # 1. TimeoutExpired path closes stdout/stderr pipes cleanly.
+            assert pubrun._resolve_checkout_commit(repo_dir, timeout=0.1) is None
+            gc.collect()
+
+            # 2. Non-timeout RuntimeError during communicate kills child and closes pipes cleanly.
+            real_popen = subprocess.Popen
+
+            class _BoomCommunicatePopen(real_popen):
+                def communicate(self, *args: Any, **kwargs: Any) -> Any:
+                    raise RuntimeError("simulated communicate failure")
+
+            monkeypatch.setattr(subprocess, "Popen", _BoomCommunicatePopen)
+            start = time.monotonic()
+            assert pubrun._resolve_checkout_commit(repo_dir, timeout=2.0) is None
+            elapsed = time.monotonic() - start
+            gc.collect()
+            assert elapsed < 3.0

@@ -5,7 +5,6 @@ This module never imports target modules to identify them.
 """
 from collections import deque
 from dataclasses import dataclass, field
-import csv
 import importlib.machinery
 import importlib.metadata
 import inspect
@@ -19,12 +18,6 @@ import sys
 import sysconfig
 import threading
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
-
-from pubrun.capture._markers import (
-    default_marker_environment,
-    evaluate_marker,
-    parse_requirement,
-)
 
 # Keep references to the unmodified stdlib lookup functions so we can detect
 # monkeypatched test providers without triggering redundant site-packages scans.
@@ -75,19 +68,70 @@ _FINAL_NO_HOOK_COVERAGE_NOTE = (
 )
 
 
-@dataclass
 class _DistInfo:
     """Cached metadata summary for one installed Python distribution."""
 
-    name: str
-    normalized_name: str
-    version: Optional[str]
-    location: Optional[str]
-    editable: Optional[bool]
-    requires: Tuple[str, ...]
-    top_levels: Tuple[str, ...]
-    dist: Any
-    metadata_error: Optional[str] = None
+    __slots__ = (
+        "name",
+        "normalized_name",
+        "version",
+        "location",
+        "top_levels",
+        "dist",
+        "metadata_error",
+        "_editable",
+        "_editable_loaded",
+        "_requires",
+    )
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        normalized_name: str,
+        version: Optional[str],
+        location: Optional[str],
+        top_levels: Tuple[str, ...],
+        dist: Any,
+        editable: Optional[bool] = None,
+        editable_loaded: bool = False,
+        requires: Optional[Tuple[str, ...]] = None,
+        metadata_error: Optional[str] = None,
+    ) -> None:
+        self.name = name
+        self.normalized_name = normalized_name
+        self.version = version
+        self.location = location
+        self.top_levels = top_levels
+        self.dist = dist
+        self.metadata_error = metadata_error
+        self._editable = editable
+        self._editable_loaded = editable_loaded
+        self._requires = requires
+
+    @property
+    def editable(self) -> Optional[bool]:
+        if not self._editable_loaded:
+            val: Optional[bool] = _is_editable_dist(self.dist)
+            self._editable = val
+            self._editable_loaded = True
+            return val
+        return self._editable
+
+    @property
+    def requires(self) -> Tuple[str, ...]:
+        cached = self._requires
+        if cached is None:
+            try:
+                raw_requires = getattr(self.dist, "requires", None)
+                if raw_requires:
+                    cached = tuple(r for r in raw_requires if isinstance(r, str))
+                else:
+                    cached = ()
+            except Exception:
+                cached = ()
+            self._requires = cached
+        return cached
 
 
 @dataclass
@@ -119,6 +163,8 @@ def normalize_package_name(name: str) -> str:
 
 def _parse_req_name(req_str: str) -> str:
     """Extract the package name from a PEP 508 requirement string."""
+    from pubrun.capture._markers import parse_requirement
+
     parsed = parse_requirement(req_str)
     return parsed.name if parsed is not None else ""
 
@@ -387,6 +433,29 @@ def _read_metadata_name(meta: Any) -> Optional[str]:
         return None
 
 
+def _read_metadata_version(meta: Any) -> Optional[str]:
+    """Read the distribution ``Version`` field from a metadata mapping or message."""
+    if meta is None:
+        return None
+    if hasattr(meta, "get"):
+        value = meta.get("Version")
+        if value is None and isinstance(meta, dict):
+            for key, val in meta.items():
+                if isinstance(key, str) and key.lower() == "version":
+                    value = val
+                    break
+        if value is None:
+            return None
+        return value if isinstance(value, str) else str(value)
+    try:
+        value = meta["Version"]
+        if value is None:
+            return None
+        return value if isinstance(value, str) else str(value)
+    except KeyError:
+        return None
+
+
 def _get_dist_location(dist: Any) -> Optional[str]:
     """Return the distribution's base installation path, or None if unavailable."""
     locate_file = getattr(dist, "locate_file", None)
@@ -461,13 +530,34 @@ def _extract_top_levels(dist: Any) -> Tuple[str, ...]:
             raw_record = None
         if raw_record and isinstance(raw_record, str):
             parsed_record = True
-            for row in csv.reader(raw_record.splitlines()):
-                if not row:
+            csv_mod: Any = None
+            for line in raw_record.splitlines():
+                if not line:
                     continue
-                entry = row[0]
+                if '"' in line:
+                    if csv_mod is None:
+                        import csv as _csv
+                        csv_mod = _csv
+                    row = next(csv_mod.reader([line]), None)
+                    if not row:
+                        continue
+                    entry = row[0]
+                else:
+                    entry = line.split(",", 1)[0]
                 if not entry:
                     continue
-                _collect_from_parts(PurePosixPath(entry).parts, entry)
+                if (
+                    "/" in entry
+                    and not entry.startswith(("./", "/"))
+                    and not entry.endswith(("/", "/."))
+                ):
+                    candidate = entry.partition("/")[0]
+                    if candidate and "." not in candidate and candidate != "__pycache__":
+                        if candidate not in seen:
+                            seen.add(candidate)
+                            inferred.append(candidate)
+                else:
+                    _collect_from_parts(PurePosixPath(entry).parts, entry)
 
     if not parsed_record:
         try:
@@ -521,6 +611,8 @@ def _build_distribution_index(fingerprint: Tuple[Any, ...]) -> _DistributionInde
 
     seen_real_paths: Set[str] = set()
     seen_fallback_keys: Set[Tuple[str, Optional[str], Optional[str]]] = set()
+    parent_real_cache: Dict[str, str] = {}
+    sep_chars = os.sep + (os.altsep or "")
 
     def _record_error(dist_obj: Any, hint: str, err_entry: Dict[str, Any]) -> None:
         metadata_errors.append(err_entry)
@@ -536,9 +628,26 @@ def _build_distribution_index(fingerprint: Tuple[Any, ...]) -> _DistributionInde
     for dist in importlib.metadata.distributions():
         raw_path = _safe_getattr(dist, "_path", None)
         dist_real_path: Optional[str] = None
+        is_dist_info = False
         if raw_path is not None:
+            raw_str = str(raw_path)
+            raw_clean = raw_str.rstrip(sep_chars) or raw_str
+            is_dist_info = raw_clean.lower().endswith(".dist-info")
             try:
-                dist_real_path = os.path.normcase(os.path.realpath(str(raw_path)))
+                if os.path.islink(raw_clean):
+                    dist_real_path = os.path.normcase(os.path.realpath(raw_clean))
+                else:
+                    parent_dir, base_name = os.path.split(raw_clean)
+                    if parent_dir and base_name not in ("", ".", ".."):
+                        norm_parent = parent_real_cache.get(parent_dir)
+                        if norm_parent is None:
+                            norm_parent = os.path.normcase(os.path.realpath(parent_dir))
+                            parent_real_cache[parent_dir] = norm_parent
+                        dist_real_path = os.path.join(
+                            norm_parent, os.path.normcase(base_name)
+                        )
+                    else:
+                        dist_real_path = os.path.normcase(os.path.realpath(raw_str))
             except OSError:
                 dist_real_path = None
             if dist_real_path is not None and dist_real_path in seen_real_paths:
@@ -563,13 +672,16 @@ def _build_distribution_index(fingerprint: Tuple[Any, ...]) -> _DistributionInde
             name = raw_name.strip()
             norm_name = normalize_package_name(name)
 
-            raw_version = getattr(dist, "version", None)
-            if raw_version is None:
-                version: Optional[str] = None
-            elif isinstance(raw_version, str):
-                version = raw_version
-            else:
-                version = str(raw_version)
+            has_get_all = hasattr(meta, "get_all")
+            version = _read_metadata_version(meta)
+            if version is None and not has_get_all:
+                raw_version = getattr(dist, "version", None)
+                if raw_version is None:
+                    version = None
+                elif isinstance(raw_version, str):
+                    version = raw_version
+                else:
+                    version = str(raw_version)
 
             location = _get_dist_location(dist)
 
@@ -581,13 +693,13 @@ def _build_distribution_index(fingerprint: Tuple[Any, ...]) -> _DistributionInde
                     continue
                 seen_fallback_keys.add(fallback_key)
 
-            editable = _is_editable_dist(dist)
-
-            raw_requires = getattr(dist, "requires", None)
-            if raw_requires:
-                requires = tuple(r for r in raw_requires if isinstance(r, str))
-            else:
-                requires = ()
+            initial_requires: Optional[Tuple[str, ...]] = None
+            if has_get_all:
+                raw_reqs = meta.get_all("Requires-Dist")
+                if raw_reqs:
+                    initial_requires = tuple(r for r in raw_reqs if isinstance(r, str))
+                elif is_dist_info:
+                    initial_requires = ()
 
             top_levels = _extract_top_levels(dist)
 
@@ -596,8 +708,7 @@ def _build_distribution_index(fingerprint: Tuple[Any, ...]) -> _DistributionInde
                 normalized_name=norm_name,
                 version=version,
                 location=location,
-                editable=editable,
-                requires=requires,
+                requires=initial_requires,
                 top_levels=top_levels,
                 dist=dist,
                 metadata_error=None,
@@ -1085,9 +1196,11 @@ def _resolve_imported_modules(
         # (such as PEP 660 editable .pth installs or setuptools __editable__ finder
         # shims) in O(1).
         direct_info = index.by_normalized_name.get(norm_top)
-        has_only_editable_shims = direct_info is not None and (
-            direct_info.editable is True
+        has_only_editable_shims = (
+            direct_info is not None
+            and bool(direct_info.top_levels)
             and all(t.startswith("__editable__") for t in direct_info.top_levels)
+            and direct_info.editable is True
         )
         if direct_info is not None and (
             not direct_info.top_levels or in_site_packages or has_only_editable_shims
@@ -1253,6 +1366,12 @@ def _resolve_transitive_closure(
     ``dep[fast]``), and records missing applicable dependencies or unparseable
     markers as structured ``unresolved`` entries.
     """
+    from pubrun.capture._markers import (
+        default_marker_environment,
+        evaluate_marker,
+        parse_requirement,
+    )
+
     marker_env = default_marker_environment() if env is None else env
 
     imported_keys: Set[str] = set()

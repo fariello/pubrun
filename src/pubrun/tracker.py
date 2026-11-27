@@ -10,28 +10,62 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
 
-from pubrun.config import resolve_config
-from pubrun.writer import ArtifactWriter
-
-# Import our capture engines
-from pubrun.capture.invocation import get_invocation
-from pubrun.capture.subprocesses import SubprocessSpy
-from pubrun.capture.console import ConsoleInterceptor
-from pubrun.capture.hardware import get_hardware
-from pubrun.events import EventStream
-from pubrun.capture.resources import ResourceWatcher
-from pubrun.capture.process import get_process_info
-from pubrun.capture.python_runtime import get_python_runtime
-from pubrun.capture.packages import get_packages, merge_package_snapshots
-from pubrun.capture.environment import get_environment
-from pubrun.capture.git import get_git
-from pubrun.capture.host import get_host
-from pubrun.capture.signals import SignalExitCapture, finalization_lock
+if TYPE_CHECKING:
+    from pubrun.writer import ArtifactWriter
+    from pubrun.events import EventStream
+    from pubrun.capture.console import ConsoleInterceptor
+    from pubrun.capture.resources import ResourceWatcher
+    from pubrun.capture.signals import SignalExitCapture
 
 
-_REAL_GET_PACKAGES = get_packages
+_DEP_UNSET = object()
+
+# Deferred capture, writer, config, and event dependencies. Kept out of top-level
+# imports so importing pubrun.tracker (or running with disabled capture sections)
+# only loads the engines actually exercised, while PEP 562 __getattr__ preserves
+# monkeypatch.setattr(tracker_mod, ...) seams.
+_LAZY_DEPS: Dict[str, Tuple[str, str]] = {
+    "resolve_config": ("pubrun.config", "resolve_config"),
+    "ArtifactWriter": ("pubrun.writer", "ArtifactWriter"),
+    "EventStream": ("pubrun.events", "EventStream"),
+    "get_invocation": ("pubrun.capture.invocation", "get_invocation"),
+    "SubprocessSpy": ("pubrun.capture.subprocesses", "SubprocessSpy"),
+    "ConsoleInterceptor": ("pubrun.capture.console", "ConsoleInterceptor"),
+    "get_hardware": ("pubrun.capture.hardware", "get_hardware"),
+    "ResourceWatcher": ("pubrun.capture.resources", "ResourceWatcher"),
+    "get_process_info": ("pubrun.capture.process", "get_process_info"),
+    "get_python_runtime": ("pubrun.capture.python_runtime", "get_python_runtime"),
+    "get_packages": ("pubrun.capture.packages", "get_packages"),
+    "merge_package_snapshots": ("pubrun.capture.packages", "merge_package_snapshots"),
+    "get_environment": ("pubrun.capture.environment", "get_environment"),
+    "get_git": ("pubrun.capture.git", "get_git"),
+    "get_host": ("pubrun.capture.host", "get_host"),
+    "SignalExitCapture": ("pubrun.capture.signals", "SignalExitCapture"),
+    "finalization_lock": ("pubrun.capture.signals", "finalization_lock"),
+}
+
+
+def _get_dep(name: str) -> Any:
+    """Resolve a deferred dependency lazily, honoring module-level monkeypatches."""
+    existing = globals().get(name, _DEP_UNSET)
+    if existing is not _DEP_UNSET:
+        return existing
+    spec = _LAZY_DEPS.get(name)
+    if spec is None:
+        raise KeyError(name)
+    module_name, attr_name = spec
+    import importlib
+    mod = importlib.import_module(module_name)
+    return getattr(mod, attr_name)
+
+
+def __getattr__(name: str) -> Any:
+    """PEP 562 lazy attribute lookup preserving monkeypatch seams on deferred deps."""
+    if name in _LAZY_DEPS:
+        return _get_dep(name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _call_get_packages(
@@ -41,8 +75,18 @@ def _call_get_packages(
     include_transitive: bool = True,
 ) -> Dict[str, Any]:
     """Invoke ``get_packages`` while tolerating test mocks with narrower signatures."""
-    fn = get_packages
-    if fn is _REAL_GET_PACKAGES:
+    fn = globals().get("get_packages", _DEP_UNSET)
+    if fn is _DEP_UNSET:
+        pkg_cfg = (config.get("capture") or {}).get("packages") or {}
+        if isinstance(pkg_cfg, dict) and pkg_cfg.get("mode", "imported-only") == "off":
+            return {"capture_state": {"status": "suppressed"}}
+        fn = _get_dep("get_packages")
+        real_get_packages: Any = fn
+    else:
+        pkg_mod = sys.modules.get("pubrun.capture.packages")
+        real_get_packages = getattr(pkg_mod, "get_packages", None) if pkg_mod is not None else None
+
+    if fn is real_get_packages:
         if include_transitive:
             return fn(config, stage=stage)
         return fn(config, stage=stage, include_transitive=False)
@@ -151,7 +195,13 @@ def _after_fork_in_child() -> None:
         pass
 
     try:
-        SubprocessSpy._disarm_in_child()
+        spy_cls = globals().get("SubprocessSpy")
+        if spy_cls is None:
+            subproc_mod: Any = sys.modules.get("pubrun.capture.subprocesses")
+            if subproc_mod is not None:
+                spy_cls = getattr(subproc_mod, "SubprocessSpy", None)
+        if spy_cls is not None:
+            spy_cls._disarm_in_child()
     except Exception:
         pass
 
@@ -315,7 +365,7 @@ class Run:
         except Exception:
             self._api_overrides = {}
         try:
-            self.config = resolve_config(self._api_overrides or overrides)
+            self.config = _get_dep("resolve_config")(self._api_overrides or overrides)
         except Exception as config_err:
             from pubrun.capture.redaction import format_safe_error_detail
             detail = format_safe_error_detail(config_err, None)
@@ -372,7 +422,7 @@ class Run:
         self._spy_owner_token = object()
         self._spying_subprocesses = False
         self._subprocesses_was_enabled = False
-        self.writer: Optional[ArtifactWriter] = None
+        self.writer: Optional["ArtifactWriter"] = None
 
         self.invocation_data: Dict[str, Any] = {}
         self.git_data: Dict[str, Any] = {}
@@ -393,10 +443,10 @@ class Run:
         self._pending_file_registrations: list = []
         self.manual_subprocess_records: list = []
         self._active_profilers: list = []
-        self.console_interceptor: Optional[ConsoleInterceptor] = None
-        self.event_stream: Optional[EventStream] = None
-        self.resource_watcher: Optional[ResourceWatcher] = None
-        self.signal_capture: Optional[SignalExitCapture] = None
+        self.console_interceptor: Optional["ConsoleInterceptor"] = None
+        self.event_stream: Optional["EventStream"] = None
+        self.resource_watcher: Optional["ResourceWatcher"] = None
+        self.signal_capture: Optional["SignalExitCapture"] = None
         self._hardware_thread: Optional[threading.Thread] = None
         self._hardware_future_done: Optional[threading.Event] = None
         self._print_log_lock: Optional[threading.Lock] = None
@@ -444,7 +494,7 @@ class Run:
 
         # Wire up crash-safety and verify startup output is writable before
         # registering atexit or publishing the active run.
-        self.writer = ArtifactWriter(self)
+        self.writer = _get_dep("ArtifactWriter")(self)
         startup_ok: Any = False
         startup_err: Optional[str] = None
         try:
@@ -493,7 +543,7 @@ class Run:
         if isinstance(data, dict):
             cs = data.get("capture_state")
             if isinstance(cs, dict) and cs.get("status") == "failed":
-                with finalization_lock(self._errors_lock, 0.25):
+                with _get_dep("finalization_lock")(self._errors_lock, 0.25):
                     self._failed_sections.add(section)
 
     def _store_capture_error_detail(
@@ -513,7 +563,7 @@ class Run:
             prefix = detail.split(":", 1)[0].strip()
             if prefix:
                 exc_type = prefix
-        with finalization_lock(self._errors_lock, 0.25):
+        with _get_dep("finalization_lock")(self._errors_lock, 0.25):
             if (
                 not self._finalized
                 or not getattr(self, "_hardware_write_closed", True)
@@ -705,7 +755,7 @@ class Run:
         from pubrun.capture.redaction import format_safe_error_detail
 
         try:
-            hw_res = get_hardware(self.config)
+            hw_res = _get_dep("get_hardware")(self.config)
             with _run_lock:
                 if not self._hardware_write_closed:
                     self.hardware_data = hw_res
@@ -734,7 +784,7 @@ class Run:
         from pubrun.capture.redaction import format_safe_error_detail
 
         try:
-            host_res = get_host(self.config)
+            host_res = _get_dep("get_host")(self.config)
             with _run_lock:
                 if not self._hardware_write_closed:
                     self.host_data = host_res
@@ -793,7 +843,7 @@ class Run:
 
         # 1. Invocation canonical path extraction
         try:
-            self.invocation_data = get_invocation(self.config)
+            self.invocation_data = _get_dep("get_invocation")(self.config)
             self._check_section_failed("invocation", self.invocation_data)
         except Exception as exc:
             detail = self._record_capture_error("invocation", "bootstrap", exc)
@@ -809,7 +859,7 @@ class Run:
 
         # 2. Get Git provenance before subprocess tracking to prevent logging ourselves
         try:
-            self.git_data = get_git(self.config)
+            self.git_data = _get_dep("get_git")(self.config)
             self._check_section_failed("git", self.git_data)
         except Exception as exc:
             detail = self._record_capture_error("git", "bootstrap", exc)
@@ -820,14 +870,14 @@ class Run:
 
         # 3. Process, Python runtime, Packages, and Environment snapshotting
         try:
-            self.process_data = get_process_info(self.config)
+            self.process_data = _get_dep("get_process_info")(self.config)
             self._check_section_failed("process", self.process_data)
         except Exception as exc:
             detail = self._record_capture_error("process", "bootstrap", exc)
             self.process_data = {"capture_state": {"status": "failed", "detail": detail}}
 
         try:
-            self.python_data = get_python_runtime(self.config)
+            self.python_data = _get_dep("get_python_runtime")(self.config)
             self._check_section_failed("python", self.python_data)
         except Exception as exc:
             detail = self._record_capture_error("python", "bootstrap", exc)
@@ -844,7 +894,7 @@ class Run:
             self.packages_data = failed_pkg
 
         try:
-            self.environment_data = get_environment(self.config)
+            self.environment_data = _get_dep("get_environment")(self.config)
             self._check_section_failed("environment", self.environment_data)
         except Exception as exc:
             detail = self._record_capture_error("environment", "bootstrap", exc)
@@ -959,7 +1009,7 @@ class Run:
         if _patch_subprocesses and self.config.get("capture", {}).get("subprocesses", {}).get("enabled", False):
             try:
                 max_tracked = self.config.get("capture", {}).get("subprocesses", {}).get("max_tracked_commands", 5000)
-                installed = SubprocessSpy.install(
+                installed = _get_dep("SubprocessSpy").install(
                     max_tracked, config=self.config, owner=self._spy_owner_token
                 )
                 self._spying_subprocesses = bool(installed)
@@ -979,7 +1029,7 @@ class Run:
                 )
                 if resolved_mode in ("off", "basic", "standard", "deep"):
                     console_mode = resolved_mode
-            interceptor = ConsoleInterceptor(self.run_dir, console_mode, config=self.config)
+            interceptor = _get_dep("ConsoleInterceptor")(self.run_dir, console_mode, config=self.config)
             started = interceptor.start()
             if not started:
                 failed_detail = (
@@ -1012,7 +1062,7 @@ class Run:
         # 7. Event Stream (not a global hook -- safe in all modes)
         if self.config.get("events", {}).get("enabled", False):
             try:
-                stream = EventStream(self.run_dir, config=self.config)
+                stream = _get_dep("EventStream")(self.run_dir, config=self.config)
                 if getattr(stream, "_file", None) is None:
                     err_detail = (
                         getattr(stream, "_last_error", None)
@@ -1037,7 +1087,7 @@ class Run:
                 system_metrics = res_cfg.get("system_metrics", True)
                 from pubrun.capture.resources import set_poll_timeout
                 set_poll_timeout(res_cfg.get("poll_timeout", 3))
-                watcher = ResourceWatcher(
+                watcher = _get_dep("ResourceWatcher")(
                     self, interval, max_fails, scope=scope, system_metrics=system_metrics
                 )
                 watcher.start()
@@ -1055,7 +1105,7 @@ class Run:
         # 9. Signal and exit-code capture (standard registration hook)
         if _signal_hooks and self.config.get("capture", {}).get("signals", {}).get("enabled", True):
             try:
-                sig_cap = SignalExitCapture(config=self.config)
+                sig_cap = _get_dep("SignalExitCapture")(config=self.config)
                 sig_cap.install()
                 self.signal_capture = sig_cap
             except Exception as exc:
@@ -1080,7 +1130,7 @@ class Run:
                 getattr(self, "_api_overrides", None) or {},
                 _normalize_overrides(overrides),
             )
-            merged = resolve_config(accumulated)
+            merged = _get_dep("resolve_config")(accumulated)
         except Exception as exc:
             from pubrun.capture.redaction import format_safe_error_detail
             detail = format_safe_error_detail(exc, getattr(self, "config", None))
@@ -1233,7 +1283,7 @@ class Run:
                     max_tracked = _section(_section(merged, "capture"), "subprocesses").get(
                         "max_tracked_commands", 5000
                     )
-                    installed = SubprocessSpy.install(
+                    installed = _get_dep("SubprocessSpy").install(
                         max_tracked, config=merged, owner=self._spy_owner_token
                     )
                     self._spying_subprocesses = bool(installed)
@@ -1263,19 +1313,20 @@ class Run:
 
         # 1. SubprocessSpy (separated so finalize_all / get_records failures never skip uninstall)
         if self._spying_subprocesses:
+            spy_cls = _get_dep("SubprocessSpy")
             if is_finalization:
                 try:
-                    SubprocessSpy.finalize_all()
+                    spy_cls.finalize_all()
                 except Exception as exc:
                     self._record_capture_error("subprocesses", stage, exc)
                 try:
-                    self._saved_subprocess_records = list(SubprocessSpy.get_records())
+                    self._saved_subprocess_records = list(spy_cls.get_records())
                 except Exception as exc:
                     self._record_capture_error("subprocesses", stage, exc)
                     if not hasattr(self, "_saved_subprocess_records"):
                         self._saved_subprocess_records = []
             try:
-                SubprocessSpy.uninstall(owner=self._spy_owner_token)
+                spy_cls.uninstall(owner=self._spy_owner_token)
             except Exception as exc:
                 self._record_capture_error("subprocesses", stage, exc)
             finally:
@@ -1354,7 +1405,7 @@ class Run:
             except Exception:
                 _profilers_lock = None
             if _profilers_lock is not None:
-                with finalization_lock(_profilers_lock, 0.25):
+                with _get_dep("finalization_lock")(_profilers_lock, 0.25):
                     snapshot = list(profilers)
                     try:
                         profilers.clear()
@@ -1434,9 +1485,10 @@ class Run:
         # async hardware thread cannot overwrite a finalized manifest
         # (IPD 20260721-1425-01, IPD 3aalwv).
         from pubrun.core import _run_lock
+        fin_lock = _get_dep("finalization_lock")
         end_mono = time.perf_counter()
         end_utc = time.time()
-        with finalization_lock(_run_lock, 2.0):
+        with fin_lock(_run_lock, 2.0):
             if self._finalized:
                 return
             self._finalized = True
@@ -1460,10 +1512,10 @@ class Run:
                 self._record_capture_error("hardware", "finalization", exc)
             finally:
                 self._hardware_wait_seconds = max(0.0, time.perf_counter() - hw_wait_start)
-                with finalization_lock(_run_lock, 2.0):
+                with fin_lock(_run_lock, 2.0):
                     self._hardware_write_closed = True
         else:
-            with finalization_lock(_run_lock, 2.0):
+            with fin_lock(_run_lock, 2.0):
                 self._hardware_write_closed = True
 
         if self._outcome in ("unknown", "running"):
@@ -1573,7 +1625,7 @@ class Run:
                 stage="final",
                 include_transitive=(pkg_mode != "imported-transitive"),
             )
-            self.packages_data = merge_package_snapshots(
+            self.packages_data = _get_dep("merge_package_snapshots")(
                 getattr(self, "_startup_packages_data", None),
                 final_pkg,
                 config=self.config,
@@ -1788,7 +1840,7 @@ class Run:
         if spy_records is None:
             if self._spying_subprocesses:
                 try:
-                    spy_records = list(SubprocessSpy.get_records())
+                    spy_records = list(_get_dep("SubprocessSpy").get_records())
                 except Exception as exc:
                     self._record_capture_error("subprocesses", "runtime", exc)
                     spy_records = []
@@ -1800,12 +1852,12 @@ class Run:
         try:
             from pubrun import __version__, __commit__
         except ImportError:
-            __version__ = "1.0.0"
+            __version__ = "0.0.0+unknown"
             __commit__ = None
 
         data_files_lock = getattr(self, "_data_files_lock", None)
         if data_files_lock is not None:
-            with finalization_lock(data_files_lock, 0.25):
+            with _get_dep("finalization_lock")(data_files_lock, 0.25):
                 raw_data_files = getattr(self, "data_files", None) or {}
                 data_files_snapshot: Dict[str, Any] = {
                     "inputs": list(raw_data_files.get("inputs", [])),
@@ -1866,7 +1918,7 @@ class Run:
         # iteration races with the background hardware thread.
         errors_lock = getattr(self, "_errors_lock", None)
         if errors_lock is not None:
-            with finalization_lock(errors_lock, 0.25):
+            with _get_dep("finalization_lock")(errors_lock, 0.25):
                 errors_copy = [dict(rec) for rec in list(getattr(self, "_capture_errors", []))]
                 truncated = getattr(self, "_capture_errors_truncated", 0)
                 failed_sections = set(getattr(self, "_failed_sections", set()))

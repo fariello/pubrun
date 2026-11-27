@@ -15,7 +15,35 @@ set (it defaults to ``"off"``). To auto-start while suppressing hooks, use
 ``pubrun.nopatch``; to auto-start while skipping only the console tee, use
 ``pubrun.noconsole``.
 """
+from typing import Any as _Any, List as _List, Optional as _Optional, TYPE_CHECKING
 from pubrun._bootstrap import select_mode
+
+if TYPE_CHECKING:
+    __version__: str
+    __commit__: _Optional[str]
+
+__all__ = [
+    "start",
+    "stop",
+    "annotate",
+    "phase",
+    "paused",
+    "diff",
+    "audit_run",
+    "tracked_run",
+    "get_current_run",
+    "report",
+    "artifact",
+    "print",
+    "open",
+    "register_file",
+    "register_input",
+    "register_output",
+    "subprocess",
+    "popen",
+    "__version__",
+    "__commit__",
+]
 
 # Select mode before importing core — prevents auto-start
 _behavior = select_mode("noauto", "pubrun.noauto", "explicit")
@@ -43,7 +71,6 @@ from pubrun.core import (  # noqa: F401, E402
     _run_lock,
 )
 from pubrun.core import _execute_boot_sequence as _boot  # noqa: E402
-from pubrun import __version__  # noqa: F401, E402
 
 # Execute boot but with noauto mode already selected — will NOT auto-start
 _boot(selected_by="pubrun.noauto")
@@ -51,7 +78,6 @@ del _boot, _behavior
 
 # Populate the parent pubrun namespace so `from pubrun import X` works
 # after `import pubrun.noauto`. This is needed because __init__.py deferred.
-from typing import Any as _Any  # noqa: E402
 import pubrun as _pkg_module  # noqa: E402
 _pkg: _Any = _pkg_module
 _pkg.start = start
@@ -78,4 +104,15 @@ _pkg.register_output = register_output
 _pkg.subprocess = subprocess
 _pkg.popen = popen
 _pkg._run_lock = _run_lock
-del _pkg, _pkg_module, _Any
+del _pkg, _pkg_module
+
+
+def __getattr__(name: str) -> _Any:
+    if name in ("__version__", "__commit__"):
+        import pubrun as _pkg_root
+        return _pkg_root.__getattr__(name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> _List[str]:
+    return sorted(set(globals()) | set(__all__))
