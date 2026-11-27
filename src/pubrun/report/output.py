@@ -63,13 +63,31 @@ def debug_enabled() -> bool:
     return bool(os.environ.get("PUBRUN_DEBUG", ""))
 
 
-def _use_color(stream: TextIO) -> bool:
+def use_color(stream: Optional[TextIO] = None, force_no_color: bool = False) -> bool:
+    """Determine whether ANSI color escapes should be emitted to ``stream``.
+
+    Precedence:
+    1. ``force_no_color=True`` -> ``False``
+    2. Non-empty ``NO_COLOR`` environment variable -> ``False``
+    3. ``FORCE_COLOR`` environment variable set to any non-empty value other than ``"0"`` -> ``True``
+    4. ``(stream or sys.stdout).isatty()`` (falling back to ``False`` on error)
+    """
+    if force_no_color:
+        return False
     if os.environ.get("NO_COLOR", ""):
         return False
+    force_color = os.environ.get("FORCE_COLOR", "")
+    if force_color and force_color != "0":
+        return True
+    target = stream if stream is not None else sys.stdout
     try:
-        return bool(stream.isatty())
+        return bool(target.isatty())
     except Exception:
         return False
+
+
+def _use_color(stream: TextIO) -> bool:
+    return use_color(stream)
 
 
 def _prefix(level: str, stream: TextIO) -> str:

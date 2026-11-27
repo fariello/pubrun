@@ -811,18 +811,26 @@ class TestFilterFindAndCleanEdgeCases:
         assert [r.run_id for r in filter_runs(runs, exit_code=0)] == ["aaaa1111"]
 
     def test_find_run_ambiguous_prefix_and_dirname_substring(self, tmp_path):
-        from pubrun.status import find_run
+        from pubrun.status import AmbiguousRunSelectorError, find_run
 
         runs_dir = tmp_path / "runs"
         _write_manifest(runs_dir, "pubrun-alpha", "abcd1111", 1000.0)
         _write_manifest(runs_dir, "pubrun-beta", "abcd2222", 2000.0)
         od = str(runs_dir)
 
-        assert find_run("abcd", od) is None
+        with pytest.raises(AmbiguousRunSelectorError) as exc_prefix:
+            find_run("abcd", od)
+        assert {c.run_id for c in exc_prefix.value.candidates} == {"abcd1111", "abcd2222"}
+        assert "abcd1111" in str(exc_prefix.value)
+        assert "abcd2222" in str(exc_prefix.value)
+
         matched = find_run("lph", od)
         assert matched is not None
         assert matched.run_id == "abcd1111"
-        assert find_run("pubrun-", od) is None
+
+        with pytest.raises(AmbiguousRunSelectorError) as exc_sub:
+            find_run("pubrun-", od)
+        assert {c.run_id for c in exc_sub.value.candidates} == {"abcd1111", "abcd2222"}
 
     @pytest.mark.parametrize(
         "answers,expected_msg",
@@ -831,8 +839,11 @@ class TestFilterFindAndCleanEdgeCases:
             ([EOFError()], "\nCleanup cancelled.\n"),
             (["n"], "Cleanup cancelled.\n"),
             (["none"], "Cleanup cancelled.\n"),
-            (["abc"], "No valid selections. Cleanup cancelled.\n"),
-            (["9"], "No valid selections. Cleanup cancelled.\n"),
+            (["abc", "xyz"], "No valid selections. Cleanup cancelled.\n"),
+            (["9", "9"], "No valid selections. Cleanup cancelled.\n"),
+            (["abc", ""], "Cleanup cancelled.\n"),
+            (["abc", "n"], "Cleanup cancelled.\n"),
+            (["abc", EOFError()], "\nCleanup cancelled.\n"),
             (["all", KeyboardInterrupt()], "\nCleanup cancelled.\n"),
             (["all", EOFError()], "\nCleanup cancelled.\n"),
             (["all", "n"], "Cleanup cancelled.\n"),
@@ -858,6 +869,23 @@ class TestFilterFindAndCleanEdgeCases:
         assert deleted == 0
         assert run_dir.exists()
         assert out.endswith(expected_msg), f"Expected stdout to end with {expected_msg!r}, got {out!r}"
+
+    def test_clean_runs_interactive_reprompt_recovery_and_ignored_tokens(self, tmp_path, monkeypatch, capsys):
+        from pubrun.status import clean_runs
+
+        runs_dir = tmp_path / "runs"
+        run_dir = _write_manifest(runs_dir, "pubrun-del", "del11111", 1000.0)
+
+        seq = iter(["abc", "1,99", "y"])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(seq))
+
+        deleted = clean_runs(output_dir=str(runs_dir), yes=False)
+        out = capsys.readouterr().out
+        assert deleted == 1
+        assert not run_dir.exists()
+        assert "Ignored invalid selection token(s): abc" in out
+        assert "Please try again." in out
+        assert "Ignored invalid selection token(s): 99" in out
 
     def test_clean_runs_removal_failure(self, tmp_path, monkeypatch, capsys):
         import shutil
@@ -966,15 +994,26 @@ class TestStatusFormattingHelpers:
         assert _truncate("hello", 10) == "hello"
         assert _truncate("hello world", 5) == "hell…"
 
-    def test_status_marker(self):
+    def test_status_marker(self, monkeypatch):
         from pubrun.status import _status_marker, STATUS_COMPLETED, STATUS_FAILED
+
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("FORCE_COLOR", "1")
         completed_marker = _status_marker(STATUS_COMPLETED)
         assert STATUS_COMPLETED in completed_marker
         assert "\033[" in completed_marker  # verify ANSI code present
+        assert "\033[2m" not in completed_marker
 
         failed_marker = _status_marker(STATUS_FAILED)
         assert STATUS_FAILED in failed_marker
         assert "\033[" in failed_marker
+
+        # Non-TTY piped output (no FORCE_COLOR) emits zero ANSI escapes
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+        piped_marker = _status_marker(STATUS_COMPLETED)
+        assert piped_marker == STATUS_COMPLETED
+        assert "\x1b[" not in piped_marker
 
     def test_dir_size(self, tmp_path):
         from pubrun.status import _dir_size
@@ -1169,3 +1208,434 @@ pubrun.stop()
         for rid in run_ids:
             assert rid in final
             assert final[rid].status != STATUS_RUNNING
+
+
+class TestFilterRunsValidationAndLimit:
+    """Regression tests for fail-closed limit and status validation in filter_runs."""
+
+    def test_limit_zero_returns_empty(self, tmp_path):
+        from pubrun.status import filter_runs, scan_runs
+
+        runs_dir = tmp_path / "runs"
+        _write_manifest(runs_dir, "pubrun-a", "aaaa1111", 1000.0)
+        _write_manifest(runs_dir, "pubrun-b", "bbbb2222", 2000.0)
+        runs = scan_runs(str(runs_dir))
+
+        assert filter_runs(runs, limit=0) == []
+        assert len(filter_runs(runs, limit=1)) == 1
+
+    @pytest.mark.parametrize("bad_limit", [-1, -100, True, False, 1.5, "2"])
+    def test_invalid_limits_raise_even_on_empty_runs(self, bad_limit):
+        from pubrun.status import filter_runs
+
+        with pytest.raises(ValueError, match="limit must be a non-negative integer"):
+            filter_runs([], limit=bad_limit)
+
+    @pytest.mark.parametrize("kwarg", ["status_filter", "not_status_filter"])
+    def test_unknown_status_raises_listing_all_valid_statuses(self, tmp_path, kwarg):
+        from pubrun.status import VALID_STATUSES, filter_runs, scan_runs
+
+        runs_dir = tmp_path / "runs"
+        _write_manifest(runs_dir, "pubrun-a", "aaaa1111", 1000.0)
+        runs = scan_runs(str(runs_dir))
+
+        with pytest.raises(ValueError) as exc_info:
+            filter_runs(runs, **{kwarg: "completed,bogus_state"})
+        msg = str(exc_info.value)
+        assert "bogus_state" in msg
+        for valid in VALID_STATUSES:
+            assert valid in msg
+
+    def test_all_seven_valid_statuses_accepted(self, tmp_path):
+        from pubrun.status import VALID_STATUSES, filter_runs
+
+        assert len(VALID_STATUSES) == 7
+        for status in VALID_STATUSES:
+            assert filter_runs([], status_filter=status) == []
+            assert filter_runs([], not_status_filter=status) == []
+
+
+class TestSafeDeleteAndRemoteLocks:
+    """Regression tests for safe_delete_run_dir, remote-host lock handling, and clean_runs."""
+
+    def _make_remote_crashed(self, runs_dir: Path, name: str, run_id: str) -> Path:
+        run_dir = runs_dir / name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        lock_data = {
+            "pid": 424242,
+            "started_at_utc": time.time() - 200000,  # >48h -> classified crashed
+            "script": "hpc.py",
+            "run_id": run_id,
+            "hostname": "remote-node-99.cluster.invalid",
+        }
+        (run_dir / ".pubrun.lock").write_text(json.dumps(lock_data), encoding="utf-8")
+        return run_dir
+
+    def test_clean_runs_limit_zero_deletes_nothing(self, tmp_path):
+        from pubrun.status import clean_runs
+
+        runs_dir = tmp_path / "runs"
+        d1 = _write_manifest(runs_dir, "pubrun-a", "aaaa1111", 1000.0)
+        d2 = _write_manifest(runs_dir, "pubrun-b", "bbbb2222", 2000.0)
+
+        deleted = clean_runs(output_dir=str(runs_dir), limit=0, yes=True)
+        assert deleted == 0
+        assert d1.exists() and d2.exists()
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"limit": -1},
+            {"limit": True},
+            {"status_filter": "bogus"},
+            {"status_filter": "running,bogus"},
+            {"not_status_filter": "bogus"},
+        ],
+    )
+    def test_clean_runs_invalid_limit_or_status_raises_and_deletes_nothing(self, tmp_path, kwargs):
+        from pubrun.status import clean_runs
+
+        runs_dir = tmp_path / "runs"
+        d1 = _write_manifest(runs_dir, "pubrun-a", "aaaa1111", 1000.0)
+        with pytest.raises(ValueError):
+            clean_runs(output_dir=str(runs_dir), yes=True, **kwargs)
+        assert d1.exists()
+
+    def test_clean_runs_remote_locks_excluded_by_default_and_overridden_with_force(self, tmp_path, capsys):
+        from pubrun.status import clean_runs
+
+        runs_dir = tmp_path / "runs"
+        local_old = _write_manifest(runs_dir, "pubrun-local", "loc00001", time.time() - 300000)
+        remote_new = self._make_remote_crashed(runs_dir, "pubrun-remote", "rem00001")
+
+        # Default: remote lock excluded up front before limit, so limit=1 deletes the local run
+        deleted = clean_runs(output_dir=str(runs_dir), limit=1, yes=True)
+        out = capsys.readouterr().out
+        assert deleted == 1
+        assert not local_old.exists()
+        assert remote_new.exists()
+        assert "skipped 1 run" in out
+        assert "--force-remote-locks" in out
+
+        # Default again with only the remote lock remaining: nothing deleted
+        deleted_again = clean_runs(output_dir=str(runs_dir), yes=True)
+        assert deleted_again == 0
+        assert remote_new.exists()
+
+        # Opt-in escape hatch: force_remote_locks=True deletes the remote-locked run
+        deleted_forced = clean_runs(output_dir=str(runs_dir), force_remote_locks=True, yes=True)
+        assert deleted_forced == 1
+        assert not remote_new.exists()
+
+    def test_safe_delete_run_dir_guards_never_bypassed_by_force_remote_locks(self, tmp_path, monkeypatch):
+        from pubrun.capture.liveness import get_hostname
+        from pubrun.status import safe_delete_run_dir
+
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        outside = tmp_path / "outside_dir"
+        outside.mkdir()
+        (outside / "important.txt").write_text("keep", encoding="utf-8")
+
+        # 1. Symlinked run_dir refused even with force_remote_locks=True
+        sym_run = runs_dir / "pubrun-sym"
+        sym_run.symlink_to(outside, target_is_directory=True)
+        ok, reason = safe_delete_run_dir(sym_run, runs_dir, force_remote_locks=True)
+        assert ok is False and reason is not None
+        assert (outside / "important.txt").exists()
+
+        # 2. Path escaping base_dir refused even with force_remote_locks=True
+        ok, reason = safe_delete_run_dir(outside, runs_dir, force_remote_locks=True)
+        assert ok is False and reason is not None and "escapes" in reason
+        assert outside.exists()
+
+        # 3. Corrupt/unreadable lock refused even with force_remote_locks=True
+        corrupt_dir = runs_dir / "pubrun-corrupt"
+        corrupt_dir.mkdir()
+        (corrupt_dir / ".pubrun.lock").write_text("{not valid json", encoding="utf-8")
+        ok, reason = safe_delete_run_dir(corrupt_dir, runs_dir, force_remote_locks=True)
+        assert ok is False and reason is not None
+        assert corrupt_dir.exists()
+
+        # 4. Symlinked lock (including broken symlink) refused even with force_remote_locks=True
+        symlock_dir = runs_dir / "pubrun-symlock"
+        symlock_dir.mkdir()
+        (symlock_dir / ".pubrun.lock").symlink_to(tmp_path / "nonexistent-target")
+        ok, reason = safe_delete_run_dir(symlock_dir, runs_dir, force_remote_locks=True)
+        assert ok is False and reason is not None
+        assert symlock_dir.exists()
+
+        # 5. Active local PID lock refused even with force_remote_locks=True
+        active_dir = runs_dir / "pubrun-active"
+        active_dir.mkdir()
+        active_lock = {
+            "pid": os.getpid(),
+            "started_at_utc": time.time() - 5,
+            "script": "pytest",
+            "run_id": "act00001",
+            "hostname": get_hostname(),
+        }
+        (active_dir / ".pubrun.lock").write_text(json.dumps(active_lock), encoding="utf-8")
+        monkeypatch.setattr("pubrun.status.is_same_process", lambda *a, **kw: True)
+        ok, reason = safe_delete_run_dir(active_dir, runs_dir, force_remote_locks=True)
+        assert ok is False and reason is not None
+        assert active_dir.exists()
+
+        # 6. Remote-host lock refused by default, deleted when force_remote_locks=True
+        remote_dir = self._make_remote_crashed(runs_dir, "pubrun-remote-only", "rem00002")
+        ok, reason = safe_delete_run_dir(remote_dir, runs_dir, force_remote_locks=False)
+        assert ok is False and reason is not None and "--force-remote-locks" in reason
+        assert remote_dir.exists()
+        ok, reason = safe_delete_run_dir(remote_dir, runs_dir, force_remote_locks=True)
+        assert ok is True and reason is None
+        assert not remote_dir.exists()
+
+    def test_parse_selection_detailed_reports_ignored_tokens(self):
+        from pubrun.status import _parse_selection, _parse_selection_detailed
+
+        items = ["a", "b", "c", "d"]
+        selected, ignored = _parse_selection_detailed("1, 99, 2-3, abc, 4-2, 0", items)
+        assert selected == ["a", "b", "c"]
+        assert ignored == ["99", "abc", "4-2", "0"]
+        assert _parse_selection("1, 99, 2-3, abc", items) == ["a", "b", "c"]
+
+
+class TestScalableScanningAndSelectors:
+    """Regression tests for keep_manifest=False, load_manifest, artifact sizes, and find_run."""
+
+    def test_completed_run_populates_event_count_and_console_log_size(self, tmp_path):
+        from pubrun.status import RunInfo
+
+        runs_dir = tmp_path / "runs"
+
+        # 1. Completed run with events.jsonl + split stdout.log/stderr.log (plus legacy console.log ignored)
+        d1 = _write_manifest(runs_dir, "pubrun-split", "spl00001", 1000.0)
+        (d1 / "events.jsonl").write_bytes(b"x" * 360)  # 360 // 120 = 3
+        (d1 / "stdout.log").write_bytes(b"a" * 100)
+        (d1 / "stderr.log").write_bytes(b"b" * 50)
+        (d1 / "console.log").write_bytes(b"c" * 999)
+        info1 = RunInfo(d1)
+        assert info1.event_count == 3
+        assert info1.console_log_size == 150
+
+        # 2. Completed run with empty events.jsonl and legacy console.log fallback only
+        d2 = _write_manifest(runs_dir, "pubrun-legacy", "leg00002", 2000.0)
+        (d2 / "events.jsonl").write_bytes(b"")
+        (d2 / "console.log").write_bytes(b"legacy-log")
+        info2 = RunInfo(d2)
+        assert info2.event_count == 0
+        assert info2.console_log_size == len(b"legacy-log")
+
+        # 3. Completed run with tiny non-empty events.jsonl (<120 bytes -> estimate 1)
+        d3 = _write_manifest(runs_dir, "pubrun-tiny", "tin00003", 3000.0)
+        (d3 / "events.jsonl").write_bytes(b"{}\n")
+        info3 = RunInfo(d3)
+        assert info3.event_count == 1
+        assert info3.console_log_size is None
+
+    def test_keep_manifest_false_and_load_manifest_on_demand(self, tmp_path):
+        from pubrun.status import scan_runs
+
+        runs_dir = tmp_path / "runs"
+        _write_manifest(runs_dir, "pubrun-a", "aaaa1111", 1000.0)
+
+        # Default keep_manifest=True preserves backward compatibility
+        retained = scan_runs(str(runs_dir))
+        assert len(retained) == 1
+        assert retained[0].manifest is not None
+        assert retained[0].load_manifest() is retained[0].manifest
+
+        # keep_manifest=False drops manifest dict after extracting scalar fields
+        lean = scan_runs(str(runs_dir), keep_manifest=False)
+        assert len(lean) == 1
+        assert lean[0].run_id == "aaaa1111"
+        assert lean[0].manifest is None
+        loaded = lean[0].load_manifest()
+        assert loaded is not None
+        assert loaded["run"]["run_id"] == "aaaa1111"
+        # load_manifest() does not retain the dict on the RunInfo
+        assert lean[0].manifest is None
+
+    def test_find_run_with_runs_arg_fast_path_and_recency_1000(self, tmp_path, monkeypatch):
+        from pubrun.status import RunInfo, find_run, scan_runs
+
+        runs_dir = tmp_path / "runs"
+        _write_manifest(runs_dir, "pubrun-train-20260101T000000Z-123-deadbeef", "deadbeef", 1000.0)
+        _write_manifest(runs_dir, "pubrun-custom-name", "cafebabe", 2000.0)
+
+        # Fast path locates standard full run ID without invoking scan_runs
+        scan_calls = []
+        orig_scan = scan_runs
+
+        def spy_scan(*args, **kwargs):
+            scan_calls.append((args, kwargs))
+            return orig_scan(*args, **kwargs)
+
+        monkeypatch.setattr("pubrun.status.scan_runs", spy_scan)
+        found_fast = find_run("deadbeef", str(runs_dir))
+        assert found_fast is not None and found_fast.run_id == "deadbeef"
+        assert found_fast.manifest is None
+        assert scan_calls == []
+
+        # Custom directory name falls back cleanly to scan_runs
+        found_custom = find_run("cafebabe", str(runs_dir))
+        assert found_custom is not None and found_custom.run_id == "cafebabe"
+        assert len(scan_calls) == 1
+
+        # Pre-scanned runs= searches without calling scan_runs
+        scan_calls.clear()
+        pre_scanned = orig_scan(str(runs_dir), keep_manifest=False)
+        found_mem = find_run("1", runs=pre_scanned)
+        assert found_mem is not None and found_mem.run_id == "cafebabe"
+        assert scan_calls == []
+
+        # #1000+ recency index resolves beyond the removed 999 cap
+        many_runs = []
+        for idx in range(1005):
+            r = RunInfo(None)  # type: ignore[arg-type]
+            r.run_dir = tmp_path / f"pubrun-r-{idx:04d}"
+            r.run_id = f"id{idx:06x}"
+            r.started_at_utc = 10000.0 - idx
+            many_runs.append(r)
+
+        run_1000 = find_run("1000", runs=many_runs)
+        assert run_1000 is not None and run_1000.run_id == many_runs[999].run_id
+        run_1005 = find_run("1005", runs=many_runs)
+        assert run_1005 is not None and run_1005.run_id == many_runs[1004].run_id
+        assert find_run("1006", runs=many_runs) is None
+
+
+class TestTerminalRenderingAndLayout:
+    """Regression tests for color/DIM, ASCII ellipsis, onboarding, filtered-empty, and responsive width."""
+
+    def test_render_summary_tty_no_dim_and_piped_no_ansi(self, tmp_path, monkeypatch):
+        from pubrun.status import _render_summary, scan_runs
+
+        runs_dir = tmp_path / "runs"
+        _write_manifest(runs_dir, "pubrun-a", "aaaa1111", 1000.0, outcome="failed", exit_code=2)
+        _write_manifest(runs_dir, "pubrun-b", "bbbb2222", 2000.0, outcome="completed", exit_code=0)
+        runs = scan_runs(str(runs_dir))
+
+        # TTY / FORCE_COLOR mode: ANSI present, ZERO DIM (\x1b[2m)
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        colored = _render_summary(runs)
+        assert "\x1b[" in colored
+        assert "\x1b[2m" not in colored
+
+        # Piped non-TTY mode: ZERO ANSI
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+        piped = _render_summary(runs)
+        assert "\x1b[" not in piped
+
+    def test_truncate_ascii_stream_fallback_and_edge_lengths(self):
+        import io
+        from pubrun.status import _truncate
+
+        class AsciiStream(io.StringIO):
+            encoding = "ascii"
+
+        ascii_stream = AsciiStream()
+        assert _truncate("hello world", 0, stream=ascii_stream) == ""
+        assert _truncate("hello world", -5, stream=ascii_stream) == ""
+        assert _truncate("hello world", 1, stream=ascii_stream) == "h"
+        assert _truncate("hello world", 2, stream=ascii_stream) == "he"
+        assert _truncate("hello world", 3, stream=ascii_stream) == "..."
+        res = _truncate("hello world", 6, stream=ascii_stream)
+        assert res == "hel..."
+        # Confirm strictly ASCII-encodable (no UnicodeEncodeError)
+        res.encode("ascii")
+
+    def test_empty_and_filtered_empty_short_and_verbose_lists(self, tmp_path):
+        from pubrun.status import render_short_list, render_verbose_list, scan_runs
+
+        runs_dir = tmp_path / "runs"
+        _write_manifest(runs_dir, "pubrun-a", "aaaa1111", 1000.0)
+        _write_manifest(runs_dir, "pubrun-b", "bbbb2222", 2000.0)
+        all_runs = scan_runs(str(runs_dir))
+
+        # Empty directory onboarding: accurate, no misleading 'pubrun run -- python your_script.py'
+        for render_fn in (render_short_list, render_verbose_list):
+            empty_msg = render_fn([])
+            assert "No runs found." in empty_msg
+            assert "import pubrun" in empty_msg
+            assert "pubrun init" in empty_msg
+            assert "pubrun run -- python your_script.py" not in empty_msg
+
+            # Filtered-empty state distinguishes 0 matched from empty directory
+            filtered_msg = render_fn([], all_runs=all_runs)
+            assert filtered_msg == (
+                "0 of 2 runs matched the filter criteria. "
+                "Run 'pubrun status' to list all runs."
+            )
+
+    def test_narrow_and_wide_terminal_layout_and_footer_tip(self, tmp_path, monkeypatch):
+        from pubrun.status import render_short_list, scan_runs
+
+        monkeypatch.setenv("NO_COLOR", "1")
+        runs_dir = tmp_path / "runs"
+        _write_manifest(runs_dir, "pubrun-a", "aaaa1111", 1000.0, argv=["train_model.py"])
+        runs = scan_runs(str(runs_dir))
+
+        # 60-col terminal drops COMMIT so SCRIPT stays readable
+        monkeypatch.setattr("pubrun.status._get_terminal_width", lambda: 60)
+        out_60 = render_short_list(runs)
+        hdr_60 = out_60.splitlines()[0]
+        assert "COMMIT" not in hdr_60
+        assert "SCRIPT" in hdr_60
+        assert "Tip: pass a # index (e.g. 'pubrun show 1' or 'pubrun diff 1 2') to any command." in out_60
+
+        # 80-col terminal retains COMMIT
+        monkeypatch.setattr("pubrun.status._get_terminal_width", lambda: 80)
+        out_80 = render_short_list(runs)
+        hdr_80 = out_80.splitlines()[0]
+        assert "COMMIT" in hdr_80
+        assert len(hdr_80) <= 80
+
+        # 120-col terminal retains COMMIT with wider SCRIPT column
+        monkeypatch.setattr("pubrun.status._get_terminal_width", lambda: 120)
+        out_120 = render_short_list(runs)
+        hdr_120 = out_120.splitlines()[0]
+        assert "COMMIT" in hdr_120
+        assert hdr_120.index("COMMIT") - hdr_120.index("SCRIPT") > hdr_80.index("COMMIT") - hdr_80.index("SCRIPT")
+
+    def test_dynamic_hash_column_width_for_1000_runs(self, tmp_path, monkeypatch, capsys):
+        from pubrun.status import RunInfo, clean_runs, render_short_list
+
+        monkeypatch.setenv("NO_COLOR", "1")
+        monkeypatch.setattr("pubrun.status._get_terminal_width", lambda: 100)
+
+        many_runs = []
+        for idx in range(1000):
+            r = RunInfo(None)  # type: ignore[arg-type]
+            r.run_dir = tmp_path / f"pubrun-r-{idx:04d}"
+            r.run_id = f"aa{idx:06d}"
+            r.script = "train.py"
+            r.status = "completed"
+            r.started_at_utc = 10000.0 - idx
+            r.exit_code = 0
+            r.elapsed = 1.0
+            many_runs.append(r)
+
+        # Render just the 1000th run with all_runs=many_runs so recency #1000 appears
+        out = render_short_list([many_runs[999]], all_runs=many_runs)
+        lines = out.splitlines()
+        header = lines[0]
+        row = lines[2]
+        run_id_col = header.index("RUN ID")
+        assert run_id_col == 6  # len("1000") + 2
+        assert row[:run_id_col] == "1000  "
+        assert row[run_id_col:run_id_col + 8] == many_runs[999].run_id
+
+        # clean_runs dry-run table also expands '#' column width for 1000 candidates
+        monkeypatch.setattr("pubrun.status.scan_runs", lambda *a, **kw: list(many_runs))
+        monkeypatch.setattr("pubrun.status._dir_size", lambda p: 0)
+        deleted = clean_runs(output_dir=str(tmp_path), dry_run=True)
+        assert deleted == 0
+        clean_lines = capsys.readouterr().out.splitlines()
+        clean_hdr = next(ln for ln in clean_lines if "RUN ID" in ln and "SIZE" in ln)
+        clean_run_id_col = clean_hdr.index("RUN ID")
+        assert clean_run_id_col == 6
+        last_row = next(ln for ln in clean_lines if many_runs[999].run_id in ln)
+        assert last_row[:clean_run_id_col] == "1000  "

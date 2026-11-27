@@ -51,7 +51,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Fail-closed filtering, safe deletion, and remote-lock handling
 
-- [ ] E-01 Harden `filter_runs()`, `clean_runs()`, and `safe_delete_run_dir()` in `src/pubrun/status.py`:
+- [x] E-01 Harden `filter_runs()`, `clean_runs()`, and `safe_delete_run_dir()` in `src/pubrun/status.py`:
   - Define canonical `VALID_STATUSES = (STATUS_COMPLETED, STATUS_FAILED, STATUS_INTERRUPTED, STATUS_BROKEN_PIPE, STATUS_RUNNING, STATUS_CRASHED, STATUS_GHOST)` and validate non-empty tokens in `status_filter` and `not_status_filter` inside `filter_runs()`, raising `ValueError` naming the unknown status token(s) and listing all seven valid statuses.
   - Fix `limit` handling in `filter_runs()`: reject `bool`, non-`int`, or `limit < 0` with `ValueError("limit must be a non-negative integer")` (even when `runs` is empty), and return `[]` when `limit == 0` (never silently dropping the limit).
   - Extract a reusable `safe_delete_run_dir(run_dir: Path, base_dir: Path, force_remote_locks: bool = False) -> Tuple[bool, Optional[str]]` helper (returning `(True, None)` on successful `shutil.rmtree(run_dir)` or `(False, reason)` when skipped or when `OSError` occurs). Enforce: (1) symlink rejection (`run_dir.is_symlink() or not run_dir.is_dir()`), (2) parent-directory confinement (`run_dir.resolve().parent != base_dir.resolve()`), (3) active local process identifier (PID) lock refusal and unreadable/corrupt/symlinked lock refusal (NEVER bypassed by `force_remote_locks`), and (4) remote-host lock refusal (readable JSON lock whose `hostname` is non-empty and differs from `get_hostname()`) bypassed ONLY when `force_remote_locks=True`.
@@ -63,11 +63,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Keep `_parse_selection(response, candidates) -> List[Any]` backward-compatible for direct callers; add `_parse_selection_detailed(response, candidates) -> Tuple[List[Any], List[str]]` returning `(selected, ignored_tokens)` so `clean_runs()` reports ignored invalid tokens and re-prompts once in interactive mode on an invalid selection (cancelling cleanly on empty input, `n`/`no`/`none`, `EOFError`/`KeyboardInterrupt`, or a second invalid selection).
   - Depends on: none
   - Expected outcome: `pubrun clean --yes --limit 0` deletes 0 runs; negative/bool limits or unknown statuses fail closed with clear `ValueError` messages; remote-locked runs are excluded from candidate tables up front with an opt-in `force_remote_locks=True` escape hatch that never bypasses symlink, confinement, unreadable-lock, or active-local-PID guards.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Scalable run scanning, completed-run stats, and selector consistency
 
-- [ ] E-02 Optimize `scan_runs()`, `RunInfo`, and `find_run()` in `src/pubrun/status.py`:
+- [x] E-02 Optimize `scan_runs()`, `RunInfo`, and `find_run()` in `src/pubrun/status.py`:
   - Replace `base.iterdir()` + `is_symlink()`/`is_dir()` in `scan_runs()` with `with os.scandir(base) as it:` checking `entry.is_dir(follow_symlinks=False)` and `entry.name.startswith("pubrun-")`.
   - Add `keep_manifest: bool = True` as a backward-compatible keyword parameter on `RunInfo.__init__(run_dir, *, keep_manifest: bool = True)` and `scan_runs(output_dir: Optional[str] = None, *, keep_manifest: bool = True)` so existing callers that read `RunInfo.manifest` directly (including TUI `RunsSidebar`/`RunDetailsView`/`ActionsPanel` before Child 09 `3q5rd5` and `_run_methods_aggregate` in Child 08 `2ge0ea`) stay unbroken; when `keep_manifest=False`, release the parsed `manifest.json` dict immediately after extracting summary scalar fields (`self.manifest = None`). Add `RunInfo.load_manifest() -> Optional[Dict[str, Any]]` to read `manifest.json` on demand (returning `self.manifest` when already retained, or reading `self.run_dir / "manifest.json"` without retaining it when `self.manifest is None`). Use `keep_manifest=False` internally in `clean_runs()` and `find_run()`.
   - Extend `AmbiguousRunSelectorError` with optional keyword parameter `candidates: Optional[List[RunInfo]] = None` (preserving existing 3-arg `(selector, by_recency, by_id)` calls and messages) and clear `str(e)` listing matching run IDs when multiple runs match an ID prefix or directory substring.
@@ -79,19 +79,19 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Extract `RunInfo._populate_artifact_sizes()` called from both `_load_from_manifest()` and `_load_from_lock()`: compute `event_count` via a single `os.stat(events.jsonl)` `O(1)` estimate (`0` if empty, else `max(1, st_size // 120)`), and compute `console_log_size` by summing `os.stat()` sizes of `stdout.log` and `stderr.log` (if either exists), falling back to legacy `console.log` only when neither split log exists.
   - Depends on: E-01
   - Expected outcome: `scan_runs(..., keep_manifest=False)` releases full manifest dicts and drops peak random-access memory (RAM) by >90% while preserving backward compatibility for callers expecting `RunInfo.manifest`, completed runs populate `event_count` and `console_log_size`, `#1000+` recency indices work consistently, and `find_run()` distinguishes missing runs from ambiguous prefixes.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Centralized color, ASCII fallback, onboarding copy, and responsive tables
 
-- [ ] E-03 Centralize TTY-aware color gating in `src/pubrun/report/output.py` and apply it in `src/pubrun/status.py`:
+- [x] E-03 Centralize TTY-aware color gating in `src/pubrun/report/output.py` and apply it in `src/pubrun/status.py`:
   - Export `use_color(stream: Optional[TextIO] = None, force_no_color: bool = False) -> bool` from `src/pubrun/report/output.py` with explicit precedence: (1) `force_no_color=True` -> `False`, (2) non-empty `NO_COLOR` env var -> `False`, (3) `FORCE_COLOR` env var set to any non-empty value other than `"0"` -> `True`, (4) `(stream or sys.stdout).isatty()` (catching exceptions -> `False`). Delegate internal `_use_color(stream)` to `use_color(stream)`.
   - Route `status.py::_status_marker()` and `_render_summary()` through `report/output.py::use_color(sys.stdout)` (accepting optional keyword `color: Optional[bool] = None` for testability) and remove all `\033[2m` (`DIM`) American National Standards Institute (ANSI) escape codes.
   - Update `status.py::_truncate(s: str, max_len: int, *, stream: Optional[TextIO] = None) -> str`: guard `max_len <= 0` -> `""`, test whether the target stream encoding (`getattr(stream or sys.stdout, "encoding", None) or "utf-8"`) can encode `"\u2026"`, and fall back to `"..."` (when `max_len >= 3`, else `s[:max_len]`) when it cannot.
   - Depends on: E-02
   - Expected outcome: Piped `pubrun status` emits zero ANSI escape codes (unless `FORCE_COLOR` is set), TTY mode emits zero `DIM` codes, `NO_COLOR` always overrides `FORCE_COLOR`, and ASCII-encoded streams render without `UnicodeEncodeError`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Fix empty-state onboarding copy, filtered-empty messaging, and narrow-terminal layout in `src/pubrun/status.py`:
+- [x] E-04 Fix empty-state onboarding copy, filtered-empty messaging, and narrow-terminal layout in `src/pubrun/status.py`:
   - Update `render_short_list(runs, all_runs=None)` and add optional `all_runs: Optional[List[RunInfo]] = None` to `render_verbose_list(runs, all_runs=None)`:
     - When `runs` is empty and `all_runs` is non-empty, return `"0 of {len(all_runs)} runs matched the filter criteria. Run 'pubrun status' to list all runs."`
     - When both are empty (or `all_runs is None`), return `"No runs found."` followed by accurate onboarding guidance (`import pubrun` in your script and run it normally, or run `pubrun init`; remove the misleading `pubrun run -- python your_script.py` claim).
@@ -99,11 +99,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - In `render_short_list()`: drop the low-priority `COMMIT` column when `term_width < 76` so `SCRIPT` stays readable on 60-column terminals while keeping 80-column tables unchanged; append a concise footer tip (`"Tip: pass a # index (e.g. 'pubrun show 1' or 'pubrun diff 1 2') to any command."`).
   - Depends on: E-03
   - Expected outcome: Empty vs filtered-empty states are clear, onboarding copy matches actual `pubrun` behavior, `#1000+` tables align cleanly, and 60-col to 120-col terminals render without squashing script names.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Regression tests and existing-test alignment
 
-- [ ] E-05 Update affected existing tests and add regression tests in `tests/test_status.py`, `tests/test_status_bugs.py`, and `tests/test_output.py`:
+- [x] E-05 Update affected existing tests and add regression tests in `tests/test_status.py`, `tests/test_status_bugs.py`, and `tests/test_output.py`:
   - Update existing tests whose assertions intentionally change:
     - `tests/test_status.py::TestFilterFindAndCleanEdgeCases.test_find_run_ambiguous_prefix_and_dirname_substring`: assert `pytest.raises(AmbiguousRunSelectorError)` (checking `exc.candidates`) for ambiguous prefix `"abcd"` and substring `"pubrun-"`.
     - `tests/test_status.py::TestFilterFindAndCleanEdgeCases.test_clean_runs_interactive_cancel`: update single-answer invalid-selection cases (`["abc"]`, `["9"]`) to exercise the single re-prompt (both invalid->cancel and invalid->valid recovery).
@@ -114,7 +114,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Completed-run `event_count` and `stdout.log`+`stderr.log` sizing (plus legacy `console.log` fallback), `scan_runs(..., keep_manifest=False)` releasing `manifest` with `load_manifest()` on-demand loading and default `keep_manifest=True` preservation, `find_run(..., runs=...)`, `#1000` recency lookup, `report/output.py::use_color` precedence (`force_no_color`, `NO_COLOR > FORCE_COLOR`, `FORCE_COLOR=0`, `isatty`), zero `\x1b[2m` (`DIM`) in TTY mode, ASCII stream `_truncate()` fallback, empty vs filtered-empty `render_short_list` / `render_verbose_list`, and 60/80/120-column terminal layout + `#1000` column width.
   - Depends on: E-04
   - Expected outcome: All updated and new tests pass, existing status/output/runtime/TUI suites pass with zero regressions, and three-platform `mypy` exits `0`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -172,30 +172,30 @@ None. All fixes preserve existing run directory formats and backward-compatible 
 
 Validation-state rule: inspect evidence in a separate pass. Accepted validation results: blocked, failed, pass, pending; terminal gate demands `pass`.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest` output for `src/pubrun/status.py::filter_runs`, `clean_runs`, `safe_delete_run_dir`, and `_parse_selection_detailed` in `tests/test_status.py`, `tests/test_status_bugs.py`, and `tests/test_runtime_safety.py` confirming `limit=0` returns `[]` / deletes 0 runs, `limit=-1`/`True` and unknown statuses raise `ValueError`, empty/`"running"`-only filters return `0`, remote-host locks are skipped by default and deleted with `force_remote_locks=True` (while symlink/confinement/active-local-PID/unreadable locks still refuse), and interactive re-prompting works cleanly.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_status.py -k "TestFilterRunsValidationAndLimit or TestSafeDeleteAndRemoteLocks or test_clean_runs_interactive or test_clean_runs_removal_failure" -v` -> `33 passed, 73 deselected in 0.19s` (including `test_limit_zero_returns_empty`, `test_invalid_limits_raise_even_on_empty_runs[-1..-100..True..False..1.5..2]`, `test_unknown_status_raises_listing_all_valid_statuses[status_filter|not_status_filter]`, `test_all_seven_valid_statuses_accepted`, `test_clean_runs_limit_zero_deletes_nothing`, `test_clean_runs_invalid_limit_or_status_raises_and_deletes_nothing`, `test_clean_runs_remote_locks_excluded_by_default_and_overridden_with_force`, `test_safe_delete_run_dir_guards_never_bypassed_by_force_remote_locks`, `test_parse_selection_detailed_reports_ignored_tokens`, `test_clean_runs_interactive_reprompt_recovery_and_ignored_tokens`, `test_clean_runs_interactive_cancel`, `test_clean_runs_removal_failure`); `python3 -m pytest tests/test_status_bugs.py tests/test_runtime_safety.py -v` -> `65 passed in 1.76s` (including `TestBug01EmptyStatusFilter` and `test_clean_skips_symlinks_and_remote_host_locks`).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest` output for `src/pubrun/status.py::scan_runs`, `RunInfo` (`load_manifest`, `_populate_artifact_sizes`), `find_run`, and `AmbiguousRunSelectorError` in `tests/test_status.py` and `tests/test_status_bugs.py` confirming `keep_manifest=False` drops `manifest` and `load_manifest()` reloads it, default `keep_manifest=True` preserves TUI compatibility, completed-run `event_count` & `console_log_size` (`stdout.log`+`stderr.log` and legacy `console.log`) populate, ambiguous prefixes raise `AmbiguousRunSelectorError` with `candidates`, and `#1000` recency selection passes.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_status.py -k "TestScalableScanningAndSelectors or test_find_run_ambiguous" -v` -> `4 passed, 102 deselected in 0.38s` (`test_find_run_ambiguous_prefix_and_dirname_substring PASSED`, `test_completed_run_populates_event_count_and_console_log_size PASSED`, `test_keep_manifest_false_and_load_manifest_on_demand PASSED`, `test_find_run_with_runs_arg_fast_path_and_recency_1000 PASSED`).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `pytest` output for `src/pubrun/report/output.py::use_color` and `src/pubrun/status.py` (`_status_marker`, `_render_summary`, `_truncate`) in `tests/test_output.py`, `tests/test_status.py`, and `tests/test_status_bugs.py` confirming `NO_COLOR > FORCE_COLOR` precedence, non-TTY output has zero `\x1b[`, TTY output has zero `\x1b[2m`, and ASCII-encoded stream `_truncate()` falls back to `"..."` without `UnicodeEncodeError`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_output.py tests/test_status.py tests/test_status_bugs.py -k "TestUseColorPolicy or test_status_marker or test_render_summary_tty or test_truncate_ascii or TestBug67Display" -v` -> `13 passed, 163 deselected in 0.47s` (`TestUseColorPolicy` 5/5 PASSED, `test_status_marker PASSED`, `test_render_summary_tty_no_dim_and_piped_no_ansi PASSED`, `test_truncate_ascii_stream_fallback_and_edge_lengths PASSED`, `TestBug67Display` 5/5 PASSED); `python3 -m pytest tests/test_cli.py -k TestCliColorControl -v` -> `4 passed, 104 deselected in 3.18s`.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest` output for `src/pubrun/status.py::render_short_list` and `render_verbose_list` in `tests/test_status.py` and `tests/test_status_bugs.py` confirming empty-dir onboarding accuracy (without misleading `pubrun run`), filtered-empty `0 of N runs matched`, `#1000` dynamic column width, 60/80/120-column rendering, and footer tip pass.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_status.py -k "test_empty_and_filtered_empty or test_narrow_and_wide or test_dynamic_hash_column" -v` -> `3 passed, 103 deselected in 0.32s` (`test_empty_and_filtered_empty_short_and_verbose_lists PASSED`, `test_narrow_and_wide_terminal_layout_and_footer_tip PASSED`, `test_dynamic_hash_column_width_for_1000_runs PASSED`).
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted output of `pytest tests/test_status.py tests/test_status_bugs.py tests/test_status_clean_table.py tests/test_output.py tests/test_runtime_safety.py tests/test_new_features.py tests/test_cli_negative_paths.py tests/test_timing_consumers.py tests/test_profile_deprecation.py tests/test_tui.py tests/test_tui_bugs.py tests/test_tui_widgets.py -v` (covering all updated and new test classes in `tests/test_status.py`, `tests/test_status_bugs.py`, and `tests/test_output.py` plus TUI/CLI regression suites) and three-platform `mypy && mypy --platform win32 && mypy --platform darwin` exiting `0`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_status.py tests/test_status_bugs.py tests/test_status_clean_table.py tests/test_output.py tests/test_runtime_safety.py tests/test_new_features.py tests/test_cli_negative_paths.py tests/test_timing_consumers.py tests/test_profile_deprecation.py tests/test_tui.py tests/test_tui_bugs.py tests/test_tui_widgets.py -v` -> `402 passed in 88.08s (0:01:28)`; full suite `aw suite` -> `2357 passed in 110.23s (0:01:50)` (with `tests/test_cli.py::TestCliColorControl::test_status_no_color_env` updated for E-03 non-TTY ANSI gating); `mypy && mypy --platform win32 && mypy --platform darwin` -> `Success: no issues found in 70 source files` (3/3 platforms, exit 0); `aw sanitize --agent` -> `outcome: clean`, `findings: 0`.
+  - Result: pass
 
 ## Approval and execution gate
 

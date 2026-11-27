@@ -39,7 +39,8 @@ class TestPrefixes:
         assert "\033[32m" in s and "[INFO ]" in s  # green, non-DIM
 
     def test_no_ansi_when_not_a_tty(self, monkeypatch):
-        # Piped output (isatty False) never colors, regardless of NO_COLOR.
+        # Piped output (isatty False) never colors unless FORCE_COLOR is set.
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
         s = self._capture("info", "x", monkeypatch, no_color=False, tty=False)
         assert "\033[" not in s
 
@@ -48,6 +49,47 @@ class TestPrefixes:
         s = self._capture("debug", "x", monkeypatch, no_color=False, tty=True)
         assert "\033[94m" in s  # bright blue, never code 2 (DIM)
         assert "\033[2m" not in s
+
+
+class TestUseColorPolicy:
+    def _stream(self, tty: bool):
+        buf = io.StringIO()
+        buf.isatty = lambda: tty  # type: ignore[attr-defined]
+        return buf
+
+    def test_force_no_color_wins_over_everything(self, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        assert out.use_color(self._stream(True), force_no_color=True) is False
+
+    def test_no_color_overrides_force_color_and_tty(self, monkeypatch):
+        monkeypatch.setenv("NO_COLOR", "1")
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        assert out.use_color(self._stream(True)) is False
+        assert out.use_color(self._stream(False)) is False
+
+    def test_force_color_enables_ansi_on_non_tty(self, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        assert out.use_color(self._stream(False)) is True
+
+    def test_force_color_zero_does_not_force_on_non_tty(self, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("FORCE_COLOR", "0")
+        assert out.use_color(self._stream(False)) is False
+        assert out.use_color(self._stream(True)) is True
+
+    def test_isatty_default_and_error_fallback(self, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
+        assert out.use_color(self._stream(True)) is True
+        assert out.use_color(self._stream(False)) is False
+
+        class BrokenStream(io.StringIO):
+            def isatty(self):
+                raise OSError("closed")
+
+        assert out.use_color(BrokenStream()) is False
 
 
 class TestDebugGate:

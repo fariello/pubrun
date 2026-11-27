@@ -911,23 +911,31 @@ class TestCliColorControl:
         finally:
             pubrun.tracker._active_run = None
 
-        # Run pubrun status WITH color (default)
-        env_with_color = os.environ.copy()
-        env_with_color.pop("NO_COLOR", None)
+        # Run pubrun status in a piped subprocess (non-TTY): default emits zero ANSI
+        env_piped = os.environ.copy()
+        env_piped.pop("NO_COLOR", None)
+        env_piped.pop("FORCE_COLOR", None)
         cmd = [sys.executable, "-m", "pubrun", "status", "--dir", str(tmp_path / "runs")]
+        res_piped = subprocess.run(cmd, capture_output=True, text=True, env=env_piped, cwd=str(tmp_path))
+
+        # Run pubrun status WITH color via FORCE_COLOR=1 (piped stdout is not a TTY)
+        env_with_color = env_piped.copy()
+        env_with_color["FORCE_COLOR"] = "1"
         res_color = subprocess.run(cmd, capture_output=True, text=True, env=env_with_color, cwd=str(tmp_path))
 
-        # Run pubrun status WITHOUT color (env var)
-        env_no_color = os.environ.copy()
+        # Run pubrun status WITHOUT color (NO_COLOR overrides FORCE_COLOR)
+        env_no_color = env_with_color.copy()
         env_no_color["NO_COLOR"] = "1"
         res_no_color = subprocess.run(cmd, capture_output=True, text=True, env=env_no_color, cwd=str(tmp_path))
 
-        # Run pubrun status WITHOUT color (global flag)
+        # Run pubrun status WITHOUT color (global flag overrides FORCE_COLOR)
         cmd_flag = [sys.executable, "-m", "pubrun", "--no-color", "status", "--dir", str(tmp_path / "runs")]
         res_flag = subprocess.run(cmd_flag, capture_output=True, text=True, env=env_with_color, cwd=str(tmp_path))
 
-        # Check that ANSI escape sequences are present in res_color and NOT in res_no_color/res_flag
+        # Check ANSI gating: piped default has none, FORCE_COLOR enables it, NO_COLOR/--no-color disable it
+        assert "\033[" not in res_piped.stdout
         assert "\033[" in res_color.stdout
+        assert "\033[2m" not in res_color.stdout
         assert "\033[" not in res_no_color.stdout
         assert "\033[" not in res_flag.stdout
 

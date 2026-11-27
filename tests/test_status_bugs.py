@@ -317,14 +317,19 @@ class TestBug67Display:
     def test_exit_and_elapsed_align_with_header(self, runs_base, monkeypatch, no_color):
         if no_color:
             monkeypatch.setenv("NO_COLOR", "1")
+            monkeypatch.delenv("FORCE_COLOR", raising=False)
         else:
             monkeypatch.delenv("NO_COLOR", raising=False)
+            monkeypatch.setenv("FORCE_COLOR", "1")
         _make_completed(runs_base, "algn0001", age_seconds=100)
         _make_running(runs_base, "algn0002")
         runs = scan_runs(str(runs_base))
         output = render_short_list(runs)
         if not no_color:
             assert "\x1b[" in output
+            assert "\x1b[2m" not in output
+        else:
+            assert "\x1b[" not in output
         header, rows = self._col_offsets(output)
         exit_col = header.index("EXIT")
         elapsed_col = header.index("ELAPSED")
@@ -337,6 +342,17 @@ class TestBug67Display:
             assert row[exit_col] != " "
             assert row[elapsed_col - 1] == " "
             assert row[elapsed_col] != " "
+
+    def test_non_tty_piped_status_emits_no_ansi(self, runs_base, monkeypatch):
+        import sys as _sys
+
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
+        monkeypatch.setattr(_sys.stdout, "isatty", lambda: False)
+        _make_completed(runs_base, "pipe0001", age_seconds=60)
+        runs = scan_runs(str(runs_base))
+        output = render_short_list(runs)
+        assert "\x1b[" not in output
 
     def test_parse_dir_name_preserves_hyphenated_script(self, runs_base):
         run_dir = runs_base / "pubrun-my-train-script-20260101T000000Z-4242-abcd1234"

@@ -12,7 +12,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, TextIO, Tuple
 
 from pubrun.capture.liveness import (
     get_cpu_percent,
@@ -21,6 +21,7 @@ from pubrun.capture.liveness import (
     is_same_process,
 )
 from pubrun.config import resolve_config
+from pubrun.report.output import use_color
 from pubrun.tracker import Run
 
 
@@ -36,6 +37,38 @@ STATUS_BROKEN_PIPE = "broken pipe"
 STATUS_RUNNING = "running"
 STATUS_CRASHED = "crashed"
 STATUS_GHOST = "ghost"
+
+VALID_STATUSES: Tuple[str, ...] = (
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+    STATUS_INTERRUPTED,
+    STATUS_BROKEN_PIPE,
+    STATUS_RUNNING,
+    STATUS_CRASHED,
+    STATUS_GHOST,
+)
+_VALID_STATUS_SET = frozenset(VALID_STATUSES)
+
+
+def _validate_status_tokens(tokens: List[str], *, flag_name: str = "--status") -> None:
+    """Raise ValueError if any non-empty status token is not in VALID_STATUSES."""
+    invalid = [t for t in tokens if t not in _VALID_STATUS_SET]
+    if invalid:
+        bad = ", ".join(repr(t) for t in invalid)
+        valid_list = ", ".join(VALID_STATUSES)
+        raise ValueError(
+            f"Unknown status {bad} in {flag_name}. "
+            f"Valid statuses are: {valid_list}."
+        )
+
+
+def _validate_limit(limit: Optional[int]) -> Optional[int]:
+    """Validate limit is None or a non-negative integer (rejecting bool and < 0)."""
+    if limit is None:
+        return None
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+        raise ValueError("limit must be a non-negative integer")
+    return limit
 
 
 def _as_float(value: Any) -> Optional[float]:
@@ -166,8 +199,9 @@ def classify_timing_semantics(
 class RunInfo:
     """Lightweight descriptor for a single run directory."""
 
-    def __init__(self, run_dir: Path) -> None:
+    def __init__(self, run_dir: Path, *, keep_manifest: bool = True) -> None:
         self.run_dir = run_dir
+        self._keep_manifest = keep_manifest
         self.run_id: Optional[str] = None
         self.script: Optional[str] = None
         self.args: Optional[str] = None  # Command-line arguments (after script name)
@@ -204,6 +238,47 @@ class RunInfo:
         if run_dir is not None:
             self._classify()
 
+    def load_manifest(self) -> Optional[Dict[str, Any]]:
+        """Return the manifest dict, reading manifest.json on demand without retaining it."""
+        if self.manifest is not None:
+            return self.manifest
+        if self.run_dir is None:
+            return None
+        manifest_path = self.run_dir / "manifest.json"
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else None
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def _populate_artifact_sizes(self) -> None:
+        """Populate event_count and console_log_size via O(1) os.stat() calls."""
+        events_path = self.run_dir / "events.jsonl"
+        try:
+            file_size = os.stat(events_path).st_size
+            # Use 120 bytes per line as a fast O(1) estimate for JSONL event records.
+            self.event_count = max(1, file_size // 120) if file_size > 0 else 0
+        except OSError:
+            pass
+
+        split_total = 0
+        found_split = False
+        for log_name in ("stdout.log", "stderr.log"):
+            try:
+                split_total += os.stat(self.run_dir / log_name).st_size
+                found_split = True
+            except OSError:
+                pass
+
+        if found_split:
+            self.console_log_size = split_total
+        else:
+            try:
+                self.console_log_size = os.stat(self.run_dir / "console.log").st_size
+            except OSError:
+                pass
+
     @classmethod
     def _make_degraded(cls, run_dir: Path) -> Optional["RunInfo"]:
         """Build a RunInfo with only defaults + the directory, skipping the
@@ -227,7 +302,8 @@ class RunInfo:
         try:
             with open(manifest_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.manifest = data
+            if self._keep_manifest:
+                self.manifest = data
 
             git = data.get("git", {})
             if not self.git_commit:
@@ -276,7 +352,8 @@ class RunInfo:
         try:
             with open(manifest_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.manifest = data
+            if self._keep_manifest:
+                self.manifest = data
             self.run_id = data.get("run", {}).get("run_id")
             self.outcome = data.get("status", {}).get("outcome", "unknown")
 
@@ -364,6 +441,7 @@ class RunInfo:
                 self.status = STATUS_COMPLETED
 
             self.timing_semantics = classify_timing_semantics(timing, status=self.status)
+            self._populate_artifact_sizes()
 
         except (json.JSONDecodeError, OSError):
             self._parse_dir_name()
@@ -421,30 +499,7 @@ class RunInfo:
                 self.status = STATUS_CRASHED
 
             self.timing_semantics = classify_timing_semantics({}, status=self.status)
-
-            # Count events if available.
-            # PERF-10: estimate from file size instead of reading every line.
-            # Average JSONL event line is ~120 bytes; this gives a fast O(1) estimate.
-            events_path = self.run_dir / "events.jsonl"
-            if events_path.exists():
-                try:
-                    file_size = events_path.stat().st_size
-                    if file_size > 0:
-                        # Use 120 bytes per line as a reasonable estimate for
-                        # JSON event records. Accurate within ~20% for typical runs.
-                        self.event_count = max(1, file_size // 120)
-                    else:
-                        self.event_count = 0
-                except OSError:
-                    pass
-
-            # Console log size
-            console_path = self.run_dir / "console.log"
-            if console_path.exists():
-                try:
-                    self.console_log_size = console_path.stat().st_size
-                except OSError:
-                    pass
+            self._populate_artifact_sizes()
 
         except (json.JSONDecodeError, OSError):
             self._parse_dir_name()
@@ -523,15 +578,23 @@ def filter_runs(
     not_status_filter: Optional[str] = None,
 ) -> List[RunInfo]:
     """Filter a list of runs by search pattern, status, age limit, limit count, and exit code."""
-    # 1. Filter by status
-    if status_filter:
-        allowed = [s.strip().lower() for s in status_filter.split(",")]
-        runs = [r for r in runs if r.status.lower() in allowed]
+    _validate_limit(limit)
 
-    # 1b. Exclude by status
+    # 1. Filter by status (validate non-empty tokens against VALID_STATUSES)
+    if status_filter:
+        allowed = [s.strip().lower() for s in status_filter.split(",") if s.strip()]
+        _validate_status_tokens(allowed, flag_name="--status")
+        if allowed:
+            runs = [r for r in runs if r.status.lower() in allowed]
+        else:
+            runs = []
+
+    # 1b. Exclude by status (validate non-empty tokens against VALID_STATUSES)
     if not_status_filter:
-        excluded = [s.strip().lower() for s in not_status_filter.split(",")]
-        runs = [r for r in runs if r.status.lower() not in excluded]
+        excluded = [s.strip().lower() for s in not_status_filter.split(",") if s.strip()]
+        _validate_status_tokens(excluded, flag_name="--not-status")
+        if excluded:
+            runs = [r for r in runs if r.status.lower() not in excluded]
 
     # 2. Filter by search string/regex
     if filter_str:
@@ -587,8 +650,10 @@ def filter_runs(
     if exit_code is not None:
         runs = [r for r in runs if r.exit_code == exit_code]
 
-    # 5. Limit
-    if limit is not None and limit > 0:
+    # 5. Limit (fail closed: limit == 0 returns [])
+    if limit is not None:
+        if limit == 0:
+            return []
         runs = runs[:limit]
 
     return runs
@@ -826,94 +891,182 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
 # Scanning
 # --------------------------------------------------------------------------
 
-def scan_runs(output_dir: Optional[str] = None) -> List[RunInfo]:
+def _resolve_output_dir(output_dir: Optional[str] = None) -> Path:
+    """Resolve the runs output directory from an override, config, or ./runs."""
+    if output_dir:
+        return Path(output_dir)
+    config = resolve_config()
+    base_str = config.get("core", {}).get("output_dir", "")
+    return Path(base_str) if base_str else Path.cwd() / "runs"
+
+
+def scan_runs(
+    output_dir: Optional[str] = None,
+    *,
+    keep_manifest: bool = True,
+) -> List[RunInfo]:
     """Scan the output directory and return RunInfo for each run found.
 
     Args:
         output_dir: Override the configured output directory.  If None,
             uses the resolved config's ``[core].output_dir`` or ``./runs``.
+        keep_manifest: When True (default), retain each run's parsed
+            ``manifest.json`` dict on ``RunInfo.manifest`` for backward
+            compatibility. When False, release the dict immediately after
+            extracting summary fields (use ``RunInfo.load_manifest()`` to
+            reload on demand).
 
     Returns:
         List of RunInfo objects, sorted by start time (most recent first).
     """
-    if output_dir:
-        base = Path(output_dir)
-    else:
-        config = resolve_config()
-        base_str = config.get("core", {}).get("output_dir", "")
-        base = Path(base_str) if base_str else Path.cwd() / "runs"
-
+    base = _resolve_output_dir(output_dir)
     if not base.exists():
         return []
 
     runs: List[RunInfo] = []
-    for entry in base.iterdir():
-        if not entry.is_symlink() and entry.is_dir() and entry.name.startswith("pubrun-"):
-            try:
-                runs.append(RunInfo(entry))
-            except Exception:
-                # Backstop: a single malformed/foreign run directory must never
-                # crash the whole listing. Numeric fields are coerced at the
-                # source (see _as_float/_as_int), but this guards any unforeseen
-                # bad field so the other runs still render. (IPD 20260705 EC-01.)
-                degraded = RunInfo._make_degraded(entry)
-                if degraded is not None:
-                    runs.append(degraded)
+    try:
+        with os.scandir(base) as it:
+            for entry in it:
+                try:
+                    if not entry.name.startswith("pubrun-"):
+                        continue
+                    if not entry.is_dir(follow_symlinks=False):
+                        continue
+                except OSError:
+                    continue
+                entry_path = Path(entry.path)
+                try:
+                    runs.append(RunInfo(entry_path, keep_manifest=keep_manifest))
+                except Exception:
+                    # Backstop: a single malformed/foreign run directory must never
+                    # crash the whole listing. Numeric fields are coerced at the
+                    # source (see _as_float/_as_int), but this guards any unforeseen
+                    # bad field so the other runs still render. (IPD 20260705 EC-01.)
+                    degraded = RunInfo._make_degraded(entry_path)
+                    if degraded is not None:
+                        runs.append(degraded)
+    except OSError:
+        return []
 
     # Sort by start time (most recent first), with None/non-numeric start last.
     runs.sort(key=lambda r: r.started_at_utc if isinstance(r.started_at_utc, (int, float)) else 0, reverse=True)
     return runs
 
 
-# A bare positive integer up to this bound is interpreted as a recency INDEX
-# (1 = most recent, 2 = second most recent, ...). Larger integers fall through to
-# id/path resolution (a genuinely numeric id would be far longer than this).
-_MAX_RECENCY_INDEX = 999
-
-
 class AmbiguousRunSelectorError(Exception):
-    """A bare integer matched BOTH a recency index and an existing run id — refuse to guess.
+    """A run selector matched multiple runs; refuse to guess.
 
-    Carries the two candidate RunInfos so the CLI can print a clear message pointing the user
-    at the full id / directory path (the unambiguous escape hatch)."""
-    def __init__(self, selector: str, by_recency, by_id):
+    Carries either ``(by_recency, by_id)`` for recency-index vs exact-ID collisions
+    or ``candidates`` for ambiguous ID-prefix / directory-substring matches.
+    """
+
+    def __init__(
+        self,
+        selector: str,
+        by_recency: Optional[RunInfo] = None,
+        by_id: Optional[RunInfo] = None,
+        *,
+        candidates: Optional[List[RunInfo]] = None,
+    ) -> None:
         self.selector = selector
         self.by_recency = by_recency
         self.by_id = by_id
-        super().__init__(f"run selector {selector!r} is ambiguous (recency index vs run id)")
+        if candidates is not None:
+            self.candidates: List[RunInfo] = list(candidates)
+        else:
+            self.candidates = [c for c in (by_recency, by_id) if c is not None]
+
+        if by_recency is not None and by_id is not None:
+            msg = f"run selector {selector!r} is ambiguous (recency index vs run id)"
+        else:
+            ids = [c.run_id or c.run_dir.name for c in self.candidates]
+            listed = ", ".join(ids[:10])
+            if len(ids) > 10:
+                listed += f", ... ({len(ids)} total)"
+            msg = (
+                f"run selector {selector!r} is ambiguous; "
+                f"matched {len(self.candidates)} runs: {listed}"
+            )
+        super().__init__(msg)
 
 
-def find_run(run_id_or_prefix: str, output_dir: Optional[str] = None) -> Optional[RunInfo]:
-    """Find a specific run by recency index, ID, or ID prefix.
+def find_run(
+    run_id_or_prefix: str,
+    output_dir: Optional[str] = None,
+    *,
+    runs: Optional[List[RunInfo]] = None,
+) -> Optional[RunInfo]:
+    """Find a specific run by recency index, ID, ID prefix, or directory substring.
 
     Resolution order:
-      1. A bare positive integer 1..999 is a RECENCY INDEX (1 = most recent). If that same
-         integer ALSO prefix-matches an existing run id, raise ``AmbiguousRunSelectorError``
-         rather than silently guessing (the collision guard). This is practically impossible
-         since run ids are timestamp+hash, never a bare small integer.
-      2. Otherwise: exact/prefix match on ``run_id`` (single match wins).
-      3. Otherwise: directory-name substring match (single match wins).
+      1. A bare positive integer ``1 <= n <= len(all_runs)`` is a RECENCY INDEX
+         (1 = most recent). If a run is literally named the exact integer and is
+         not that recency entry, raise ``AmbiguousRunSelectorError``. Values above
+         ``len(all_runs)`` fall through to ID/directory lookup.
+      2. Exact/prefix match on ``run_id`` (unique match wins; multiple ambiguous
+         matches raise ``AmbiguousRunSelectorError`` with ``candidates``).
+      3. Directory-name substring match (unique match wins; multiple matches
+         raise ``AmbiguousRunSelectorError`` with ``candidates``).
 
     Args:
-        run_id_or_prefix: Recency index, full run ID, or a unique prefix.
+        run_id_or_prefix: Recency index, full run ID, unique prefix, or directory substring.
         output_dir: Override the configured output directory.
+        runs: Optional pre-scanned list of ``RunInfo`` objects to search without
+            rescanning disk.
 
     Returns:
-        RunInfo for the matched run, or None if not found / ambiguous by id.
-    """
-    all_runs = scan_runs(output_dir)
+        RunInfo for the matched run, or None if not found.
 
-    # (1) Recency index: a bare positive integer within the bound is ALWAYS the recency
-    # meaning (1 = most recent). A run id merely *starting* with the digit does not block
-    # this — run ids are long timestamp+hash strings and many begin with a digit, so a
-    # prefix collision on a single digit is expected and not ambiguous (the user would type
-    # more characters to select by id). The collision guard fires ONLY when a run id is
-    # EXACTLY the integer (a genuine "is this the run literally named '3' or the 3rd run?"),
-    # which is practically impossible for real pubrun ids.
+    Raises:
+        AmbiguousRunSelectorError: When the selector matches multiple runs.
+    """
     sel = run_id_or_prefix.strip()
+    if not sel:
+        return None
+
+    if runs is not None:
+        all_runs = runs
+    else:
+        # Fast path for non-digit full run IDs (>= 8 chars): scan directory names
+        # without opening every manifest.json, falling back to full scan if ambiguous
+        # or if the run uses a custom directory name.
+        if not sel.isdigit() and len(sel) >= 8:
+            base = _resolve_output_dir(output_dir)
+            if base.exists():
+                suffix = "-" + sel
+                suffix_matches: List[Path] = []
+                substr_hits = 0
+                try:
+                    with os.scandir(base) as it:
+                        for entry in it:
+                            try:
+                                if not entry.name.startswith("pubrun-"):
+                                    continue
+                                if not entry.is_dir(follow_symlinks=False):
+                                    continue
+                            except OSError:
+                                continue
+                            if sel in entry.name:
+                                substr_hits += 1
+                            if entry.name.endswith(suffix):
+                                suffix_matches.append(Path(entry.path))
+                except OSError:
+                    suffix_matches = []
+                if len(suffix_matches) == 1 and substr_hits == 1:
+                    try:
+                        candidate = RunInfo(suffix_matches[0], keep_manifest=False)
+                        if candidate.run_id == sel:
+                            return candidate
+                    except Exception:
+                        pass
+
+        all_runs = scan_runs(output_dir, keep_manifest=False)
+
+    # (1) Recency index: any bare positive integer 1 <= n <= len(all_runs) resolves
+    # to all_runs[n - 1], with exact-ID collision guard.
     if sel.isdigit():
         n = int(sel)
-        if 1 <= n <= _MAX_RECENCY_INDEX:
+        if n >= 1:
             by_recency = all_runs[n - 1] if n <= len(all_runs) else None
             exact_id = [r for r in all_runs if r.run_id == sel]
             if by_recency is not None and len(exact_id) == 1 and exact_id[0] is not by_recency:
@@ -921,17 +1074,24 @@ def find_run(run_id_or_prefix: str, output_dir: Optional[str] = None) -> Optiona
                 raise AmbiguousRunSelectorError(sel, by_recency, exact_id[0])
             if by_recency is not None:
                 return by_recency
-            # Out of range: fall through to id/path resolution (may still match an id).
+            # Out of range: fall through to id/dirname resolution.
 
     # (2) id / prefix match.
     matches = [r for r in all_runs if r.run_id and r.run_id.startswith(run_id_or_prefix)]
     if len(matches) == 1:
         return matches[0]
+    if len(matches) > 1:
+        exact = [r for r in matches if r.run_id == run_id_or_prefix]
+        if len(exact) == 1:
+            return exact[0]
+        raise AmbiguousRunSelectorError(run_id_or_prefix, None, None, candidates=matches)
+
     # (3) directory-name substring match.
-    if not matches:
-        matches = [r for r in all_runs if run_id_or_prefix in r.run_dir.name]
+    matches = [r for r in all_runs if run_id_or_prefix in r.run_dir.name]
     if len(matches) == 1:
         return matches[0]
+    if len(matches) > 1:
+        raise AmbiguousRunSelectorError(run_id_or_prefix, None, None, candidates=matches)
     return None
 
 
@@ -1022,11 +1182,21 @@ def _format_bytes(nbytes: Optional[int]) -> str:
         return f"{nbytes / (1024 * 1024 * 1024):.2f}GB"
 
 
-def _truncate(s: str, max_len: int) -> str:
-    """Truncate a string with ellipsis if too long."""
+def _truncate(s: str, max_len: int, *, stream: Optional[TextIO] = None) -> str:
+    """Truncate a string with ellipsis if too long, using ASCII '...' when needed."""
+    if max_len <= 0:
+        return ""
     if len(s) <= max_len:
         return s
-    return s[:max_len - 1] + "\u2026"
+    target = stream if stream is not None else sys.stdout
+    encoding = getattr(target, "encoding", None) or "utf-8"
+    try:
+        "\u2026".encode(encoding)
+        return s[:max_len - 1] + "\u2026"
+    except (UnicodeEncodeError, LookupError):
+        if max_len >= 3:
+            return s[:max_len - 3] + "..."
+        return s[:max_len]
 
 
 def _get_terminal_width() -> int:
@@ -1037,9 +1207,10 @@ def _get_terminal_width() -> int:
         return 80
 
 
-def _status_marker(status: str) -> str:
+def _status_marker(status: str, *, color: Optional[bool] = None) -> str:
     """Return a colored/styled status string for terminal output."""
-    if os.environ.get("NO_COLOR", ""):
+    use_ansi = use_color(sys.stdout) if color is None else bool(color)
+    if not use_ansi:
         return status
     # ANSI color codes (works on most terminals including Windows 10+)
     colors = {
@@ -1052,23 +1223,29 @@ def _status_marker(status: str) -> str:
         STATUS_GHOST: "\033[90m",       # gray
     }
     reset = "\033[0m"
-    color = colors.get(status, "")
-    return f"{color}{status}{reset}"
+    code = colors.get(status, "")
+    return f"{code}{status}{reset}" if code else status
 
 
 # --------------------------------------------------------------------------
 # Public rendering functions
 # --------------------------------------------------------------------------
 
-def _render_summary(runs: List[RunInfo]) -> str:
+_NO_RUNS_GUIDANCE = (
+    "No runs found.\n"
+    "  To start tracking: add 'import pubrun' to your script and run it normally,\n"
+    "  or run 'pubrun init' to create a .pubrun.toml configuration file."
+)
+
+
+def _render_summary(runs: List[RunInfo], *, color: Optional[bool] = None) -> str:
     """Render a 2-line summary: count, date range, status/exit frequencies."""
     from collections import Counter
 
-    no_color = os.environ.get("NO_COLOR", "")
-    bold = "" if no_color else "\033[1m"
-    dim = "" if no_color else "\033[2m"
-    red = "" if no_color else "\033[31m"
-    reset = "" if no_color else "\033[0m"
+    use_ansi = use_color(sys.stdout) if color is None else bool(color)
+    bold = "\033[1m" if use_ansi else ""
+    red = "\033[31m" if use_ansi else ""
+    reset = "\033[0m" if use_ansi else ""
 
     count = len(runs)
     # Date range (runs are sorted most-recent-first)
@@ -1083,19 +1260,19 @@ def _render_summary(runs: List[RunInfo]) -> str:
 
     date_range = ""
     if earliest and latest:
-        date_range = f" {dim}|{reset} {_format_timestamp(earliest)} to {_format_timestamp(latest)}"
+        date_range = f" | {_format_timestamp(earliest)} to {_format_timestamp(latest)}"
 
     # Status frequencies (colored per status)
     statuses = Counter(r.status for r in runs)
-    status_parts = [f"{c} {_status_marker(s)}" for s, c in statuses.most_common()]
-    status_str = f"{dim},{reset} ".join(status_parts)
+    status_parts = [f"{c} {_status_marker(s, color=use_ansi)}" for s, c in statuses.most_common()]
+    status_str = ", ".join(status_parts)
 
     # Exit code frequencies (non-zero only, to keep it concise)
     exit_codes = Counter(r.exit_code for r in runs if r.exit_code is not None and r.exit_code != 0)
     exit_str = ""
     if exit_codes:
         exit_parts = [f"{red}exit {code}{reset}: {c}" for code, c in exit_codes.most_common(5)]
-        exit_str = f" {dim}|{reset} " + f"{dim},{reset} ".join(exit_parts)
+        exit_str = " | " + ", ".join(exit_parts)
 
     line1 = f"{bold}{count} runs{reset}{date_range}"
     line2 = f"  {status_str}{exit_str}"
@@ -1110,23 +1287,17 @@ def render_short_list(runs: List[RunInfo], all_runs: Optional[List[RunInfo]] = N
         all_runs: The full unfiltered run set for the summary line. If None,
             uses ``runs`` for both the table and the summary.
 
-    Columns: RUN ID, SCRIPT, COMMIT, STARTED, STATUS, EXIT, ELAPSED
+    Columns: #, RUN ID, SCRIPT, [COMMIT when width >= 76], STARTED, STATUS, EXIT, ELAPSED
     """
     if not runs:
-        return (
-            "No runs found.\n"
-            "  To start tracking: import pubrun in your script,\n"
-            "  or run: pubrun run -- python your_script.py"
-        )
+        if all_runs:
+            return (
+                f"0 of {len(all_runs)} runs matched the filter criteria. "
+                "Run 'pubrun status' to list all runs."
+            )
+        return _NO_RUNS_GUIDANCE
 
     term_width = _get_terminal_width()
-
-    # Calculate script column width: at least 8, flexible based on terminal.
-    # Fixed columns take ~69 chars. Remaining space goes to script name,
-    # capped at 40% of terminal width to keep the table balanced.
-    fixed_width = 10 + 9 + 18 + 12 + 6 + 8 + 6  # spacers between columns
-    available = term_width - fixed_width
-    script_max = max(8, min(available, int(term_width * 0.4)))
 
     # Recency index (#1 = most recent) from the FULL run set, so the number a user passes
     # to any command (`pubrun show 2`) matches what this column shows even when filtered.
@@ -1135,12 +1306,22 @@ def render_short_list(runs: List[RunInfo], all_runs: Optional[List[RunInfo]] = N
     for i, r in enumerate(_order, start=1):
         recency_of[id(r)] = i
 
+    idx_width = max(4, len(str(len(_order))) + 2)
+    show_commit = term_width >= 76
+
+    # Calculate script column width: at least 8, flexible based on terminal.
+    # Remaining space goes to script name, capped at 40% of terminal width.
+    fixed_width = idx_width + 10 + (9 if show_commit else 0) + 18 + 12 + 6 + 8 + 2
+    available = term_width - fixed_width
+    script_max = max(8, min(available, int(term_width * 0.4)))
+
     # Header
+    commit_hdr = f"{'COMMIT':<9}" if show_commit else ""
     hdr = (
-        f"{'#':<4}"
+        f"{'#':<{idx_width}}"
         f"{'RUN ID':<10}"
         f"{'SCRIPT':<{script_max}}"
-        f"{'COMMIT':<9}"
+        f"{commit_hdr}"
         f"{'STARTED':<18}"
         f"{'STATUS':<12}"
         f"{'EXIT':<6}"
@@ -1160,18 +1341,19 @@ def render_short_list(runs: List[RunInfo], all_runs: Optional[List[RunInfo]] = N
             script_with_args = script_name
         script = _truncate(script_with_args, script_max - 2)
         commit = (r.git_commit or "-")[:7]
+        commit_cell = f"{commit:<9}" if show_commit else ""
         started = _format_timestamp(r.started_at_utc)
         # Pad from the visible status text so ANSI escapes (absent under
-        # NO_COLOR) never shift the following columns.
+        # NO_COLOR / non-TTY) never shift the following columns.
         status = _status_marker(r.status) + " " * max(1, 12 - len(r.status))
         exit_code = str(r.exit_code) if r.exit_code is not None else "-"
         elapsed = _format_elapsed(r.elapsed)
 
         line = (
-            f"{idx_str:<4}"
+            f"{idx_str:<{idx_width}}"
             f"{run_id:<10}"
             f"{script:<{script_max}}"
-            f"{commit:<9}"
+            f"{commit_cell}"
             f"{started:<18}"
             f"{status}"
             f"{exit_code:<6}"
@@ -1193,20 +1375,29 @@ def render_short_list(runs: List[RunInfo], all_runs: Optional[List[RunInfo]] = N
     if notice_runs:
         plural = "run has" if notice_runs == 1 else "runs have"
         lines.append(
-            f"[WARN ] {notice_runs} {plural} config notices — see `pubrun status <id>` "
+            f"[WARN ] {notice_runs} {plural} config notices -- see `pubrun status <id>` "
             f"or `pubrun inspect`."
         )
+
+    lines.append(
+        "Tip: pass a # index (e.g. 'pubrun show 1' or 'pubrun diff 1 2') to any command."
+    )
 
     return "\n".join(lines)
 
 
-def render_verbose_list(runs: List[RunInfo]) -> str:
+def render_verbose_list(runs: List[RunInfo], all_runs: Optional[List[RunInfo]] = None) -> str:
     """Render a detailed table with additional columns.
 
     Adds: PID, HOSTNAME, RSS (for running), CPU% (for running), EVENTS, SIGNALS
     """
     if not runs:
-        return "No runs found."
+        if all_runs:
+            return (
+                f"0 of {len(all_runs)} runs matched the filter criteria. "
+                "Run 'pubrun status' to list all runs."
+            )
+        return _NO_RUNS_GUIDANCE
 
     lines = []
     for r in runs:
@@ -1392,14 +1583,105 @@ def _format_age(seconds: Optional[float]) -> str:
         return f"{days} days ago"
 
 
-def _parse_selection(response: str, candidates: List[Any]) -> List[Any]:
-    """Parse a selection string like '1-3,5,7-9' into a list of items.
+def _inspect_run_lock(run_dir: Path) -> Tuple[str, Optional[str]]:
+    """Inspect a run directory's lock file and classify its deletion safety.
+
+    Returns a tuple ``(state, remote_hostname)`` where ``state`` is one of:
+    - ``"none"``: no lock file present
+    - ``"symlink"``: lock file is a symlink (including broken symlink)
+    - ``"unreadable"``: lock file cannot be parsed as a valid dict or lacks local PID/start time
+    - ``"remote"``: readable lock owned by a non-empty hostname different from ``get_hostname()``
+    - ``"active_local"``: local PID is still alive for this run
+    - ``"stale_local"``: local PID is verified dead
+    """
+    lock_path = run_dir / Run.LOCK_FILENAME
+    if lock_path.is_symlink():
+        return "symlink", None
+    if not lock_path.exists():
+        return "none", None
+
+    try:
+        with open(lock_path, "r", encoding="utf-8") as f:
+            disk_lock = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return "unreadable", None
+
+    if not isinstance(disk_lock, dict):
+        return "unreadable", None
+
+    hostname = disk_lock.get("hostname")
+    if isinstance(hostname, str) and hostname and hostname != get_hostname():
+        return "remote", hostname
+
+    pid = _as_int(disk_lock.get("pid"))
+    started_at = _as_float(disk_lock.get("started_at_utc"))
+    script = disk_lock.get("script")
+    if not pid or pid <= 0 or started_at is None:
+        return "unreadable", None
+
+    if is_same_process(
+        pid,
+        started_at,
+        expected_script=script if isinstance(script, str) else None,
+    ):
+        return "active_local", None
+    return "stale_local", None
+
+
+def safe_delete_run_dir(
+    run_dir: Path,
+    base_dir: Path,
+    force_remote_locks: bool = False,
+) -> Tuple[bool, Optional[str]]:
+    """Safely delete a run directory after symlink, confinement, and lock checks.
+
+    Returns ``(True, None)`` when ``run_dir`` is deleted, or ``(False, reason)``
+    when deletion is refused or ``shutil.rmtree`` raises ``OSError``.
+
+    Safety guards enforced (and whether ``force_remote_locks`` can override):
+    1. Symlink / non-directory rejection (NEVER bypassed).
+    2. Parent-directory confinement ``run_dir.resolve().parent == base_dir.resolve()`` (NEVER bypassed).
+    3. Symlinked, unreadable/corrupt, or active-local-PID lock refusal (NEVER bypassed).
+    4. Remote-host lock refusal (bypassed ONLY when ``force_remote_locks=True``).
+    """
+    try:
+        if run_dir.is_symlink() or not run_dir.is_dir():
+            return False, "not a regular directory."
+        if run_dir.resolve().parent != base_dir.resolve():
+            return False, "path escapes output directory."
+    except OSError as e:
+        return False, str(e)
+
+    lock_state, lock_host = _inspect_run_lock(run_dir)
+    if lock_state == "symlink":
+        return False, "lock file is a symlink."
+    if lock_state == "unreadable":
+        return False, "lock is unreadable or corrupt."
+    if lock_state == "active_local":
+        return False, "lock belongs to an active local process."
+    if lock_state == "remote" and not force_remote_locks:
+        host_note = f" ({lock_host})" if lock_host else ""
+        return (
+            False,
+            f"lock belongs to a remote host{host_note}; re-run with --force-remote-locks to override.",
+        )
+
+    try:
+        shutil.rmtree(run_dir)
+    except OSError as e:
+        return False, f"Failed to remove {run_dir.name}: {e}"
+    return True, None
+
+
+def _parse_selection_detailed(response: str, candidates: List[Any]) -> Tuple[List[Any], List[str]]:
+    """Parse a selection string like '1-3,5,7-9' into ``(selected, ignored_tokens)``.
 
     Supports individual numbers, comma-separated numbers, and ranges.
-    Invalid indices are silently skipped, and each candidate is selected at
-    most once (first-seen order is preserved).
+    Each candidate is selected at most once (first-seen order is preserved).
+    Invalid or out-of-range tokens are collected in ``ignored_tokens``.
     """
     selected: List[Any] = []
+    ignored: List[str] = []
     seen: set = set()
     n = len(candidates)
 
@@ -1408,15 +1690,22 @@ def _parse_selection(response: str, candidates: List[Any]) -> List[Any]:
             seen.add(idx)
             selected.append(candidates[idx])
 
-    parts = [p.strip() for p in response.replace(" ", "").split(",")]
-    for part in parts:
-        if "-" in part and not part.startswith("-"):
+    for raw_part in response.split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        compact = part.replace(" ", "")
+        if "-" in compact and not compact.startswith("-"):
             # Range: "1-3"
             try:
-                start_s, end_s = part.split("-", 1)
+                start_s, end_s = compact.split("-", 1)
                 start_i = int(start_s) - 1
                 end_i = int(end_s) - 1
             except ValueError:
+                ignored.append(part)
+                continue
+            if start_i > end_i or end_i < 0 or start_i >= n:
+                ignored.append(part)
                 continue
             # Clamp before iterating so a huge range cannot hang.
             for idx in range(max(0, start_i), min(n - 1, end_i) + 1):
@@ -1426,8 +1715,23 @@ def _parse_selection(response: str, candidates: List[Any]) -> List[Any]:
             try:
                 idx = int(part) - 1
             except ValueError:
+                ignored.append(part)
                 continue
-            _add(idx)
+            if 0 <= idx < n:
+                _add(idx)
+            else:
+                ignored.append(part)
+    return selected, ignored
+
+
+def _parse_selection(response: str, candidates: List[Any]) -> List[Any]:
+    """Parse a selection string like '1-3,5,7-9' into a list of items.
+
+    Supports individual numbers, comma-separated numbers, and ranges.
+    Invalid indices are silently skipped, and each candidate is selected at
+    most once (first-seen order is preserved).
+    """
+    selected, _ = _parse_selection_detailed(response, candidates)
     return selected
 
 
@@ -1444,6 +1748,7 @@ def clean_runs(
     older_than_days: Optional[float] = None,
     not_filter_str: Optional[str] = None,
     not_status_filter: Optional[str] = None,
+    force_remote_locks: bool = False,
 ) -> int:
     """Interactively or automatically clean up old run directories.
 
@@ -1454,17 +1759,26 @@ def clean_runs(
         yes: Skip confirmation prompt (non-interactive mode).
         dry_run: Show what would be deleted without deleting.
         filter_str: Regex or string query filter.
-        limit: Limit number of runs to consider.
+        limit: Limit number of runs to consider (0 deletes nothing; negative raises).
         exit_code: Filter by exit code.
         older_than_days: Backward-compatible float for age.
+        not_filter_str: Exclude runs matching regex or substring.
+        not_status_filter: Exclude runs with these comma-separated statuses.
+        force_remote_locks: When True, allow deleting runs locked by a different host.
+            Never bypasses symlink, directory-confinement, unreadable-lock, or
+            active-local-PID checks.
 
     Returns:
         Number of run directories deleted.
     """
-    all_runs = scan_runs(output_dir)
-    now = time.time()
+    # 0. Validate limit and status filters up front (fail closed).
+    _validate_limit(limit)
 
-    # 1. Resolve status filter (must never include STATUS_RUNNING). An explicit
+    if not_status_filter:
+        not_tokens = [s.strip().lower() for s in not_status_filter.split(",") if s.strip()]
+        _validate_status_tokens(not_tokens, flag_name="--not-status")
+
+    # 1. Resolve status filter (validate BEFORE stripping STATUS_RUNNING). An explicit
     # filter that normalizes to nothing deletes nothing: passing an empty filter
     # on to filter_runs would disable status filtering and match every run.
     if status_filter is not None:
@@ -1475,17 +1789,26 @@ def clean_runs(
                 raw_tokens = list(status_filter)
             except TypeError:
                 raw_tokens = [status_filter]
-        status_filter_list = []
+        parsed_tokens: List[str] = []
         for token in raw_tokens:
             for piece in str(token).split(","):
                 s = piece.strip().lower()
-                if s and s != STATUS_RUNNING and s not in status_filter_list:
-                    status_filter_list.append(s)
+                if s and s not in parsed_tokens:
+                    parsed_tokens.append(s)
+        _validate_status_tokens(parsed_tokens, flag_name="--status")
+        status_filter_list = [s for s in parsed_tokens if s != STATUS_RUNNING]
         if not status_filter_list:
             print("No deletable statuses selected (running runs are never deleted). Nothing to clean.")
             return 0
     else:
-        status_filter_list = [STATUS_COMPLETED, STATUS_FAILED, STATUS_INTERRUPTED, STATUS_BROKEN_PIPE, STATUS_CRASHED, STATUS_GHOST]
+        status_filter_list = [
+            STATUS_COMPLETED,
+            STATUS_FAILED,
+            STATUS_INTERRUPTED,
+            STATUS_BROKEN_PIPE,
+            STATUS_CRASHED,
+            STATUS_GHOST,
+        ]
 
     status_filter_str = ",".join(status_filter_list)
 
@@ -1502,12 +1825,16 @@ def clean_runs(
     if older_than is None and older_than_days is not None:
         older_than = f"{float(older_than_days)!r}d"
 
-    # 3. Apply standard filter_runs
+    all_runs = scan_runs(output_dir, keep_manifest=False)
+    now = time.time()
+
+    # 3. Apply standard filter_runs without slicing limit yet so excluded running
+    # or remote-locked runs do not consume the user's requested limit.
     candidates = filter_runs(
         all_runs,
         filter_str=filter_str,
         status_filter=status_filter_str,
-        limit=limit,
+        limit=None,
         older_than=older_than,
         exit_code=exit_code,
         not_filter_str=not_filter_str,
@@ -1516,18 +1843,42 @@ def clean_runs(
     # Defense in depth: a running run is never eligible, whatever the filters.
     candidates = [r for r in candidates if r.status != STATUS_RUNNING]
 
+    # Exclude unverified remote-host locks up front unless explicitly overridden.
+    if not force_remote_locks:
+        eligible: List[RunInfo] = []
+        skipped_remote = 0
+        for r in candidates:
+            lock_state, _ = _inspect_run_lock(r.run_dir)
+            if lock_state == "remote":
+                skipped_remote += 1
+            else:
+                eligible.append(r)
+        candidates = eligible
+        if skipped_remote:
+            plural = "run" if skipped_remote == 1 else "runs"
+            print(
+                f"Note: skipped {skipped_remote} {plural} with an unverified remote-host lock "
+                f"(re-run with --force-remote-locks if the remote job is confirmed dead)."
+            )
+
+    if limit is not None:
+        if limit == 0:
+            print("No runs match the cleanup criteria.")
+            return 0
+        candidates = candidates[:limit]
+
     if not candidates:
         print("No runs match the cleanup criteria.")
         return 0
 
     # Display candidates with terminal-width-adaptive columns
     term_width = _get_terminal_width()
-    # Fixed columns: #(4) + RUN_ID(10) + STATUS(13) + EXIT(6) + AGE(14) + SIZE(10) = 57
-    fixed_cols = 4 + 10 + 13 + 6 + 14 + 10
+    idx_width = max(4, len(str(len(candidates))) + 2)
+    fixed_cols = idx_width + 10 + 13 + 6 + 14 + 10
     script_max = max(8, min(term_width - fixed_cols, int(term_width * 0.4)))
 
     hdr = (
-        f"{'#':<4}"
+        f"{'#':<{idx_width}}"
         f"{'RUN ID':<10}"
         f"{'SCRIPT':<{script_max}}"
         f"{'STATUS':<13}"
@@ -1552,7 +1903,7 @@ def clean_runs(
         age = _format_age(age_seconds)
         size = _format_bytes(_dir_size(r.run_dir))
         print(
-            f"{i:<4}"
+            f"{i:<{idx_width}}"
             f"{run_id:<10}"
             f"{script:<{script_max}}"
             f"{status:<13}"
@@ -1570,32 +1921,42 @@ def clean_runs(
 
     # Confirmation -- nothing is selected by default, requires explicit choice
     if not yes:
-        try:
-            prompt = "\nSelect runs to delete [numbers/ranges (e.g. 1-3,5), 'all', or Enter to cancel]: "
-            response = input(prompt).strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\nCleanup cancelled.")
-            return 0
+        to_delete: List[RunInfo] = []
+        prompt = "\nSelect runs to delete [numbers/ranges (e.g. 1-3,5), 'all', or Enter to cancel]: "
+        for attempt in range(2):
+            try:
+                response = input(prompt).strip()
+            except (KeyboardInterrupt, EOFError):
+                print("\nCleanup cancelled.")
+                return 0
 
-        if response == "":
-            print("Cleanup cancelled.")
-            return 0
-        elif response.lower() in ("n", "no", "none"):
-            print("Cleanup cancelled.")
-            return 0
-        elif response.lower() == "all":
-            to_delete = candidates
-        else:
-            # Parse comma-separated numbers and ranges (e.g. "1-3,5,7-9")
-            to_delete = _parse_selection(response, candidates)
-            if not to_delete:
+            if response == "" or response.lower() in ("n", "no", "none"):
+                print("Cleanup cancelled.")
+                return 0
+            if response.lower() == "all":
+                to_delete = candidates
+                break
+
+            selected, ignored = _parse_selection_detailed(response, candidates)
+            if ignored:
+                print(f"Ignored invalid selection token(s): {', '.join(ignored)}")
+            if selected:
+                to_delete = selected
+                break
+            if attempt == 0:
+                print(
+                    f"No valid selections (enter 1-{len(candidates)}, a range like 1-3, 'all', or Enter to cancel). "
+                    "Please try again."
+                )
+                prompt = "Select runs to delete: "
+            else:
                 print("No valid selections. Cleanup cancelled.")
                 return 0
 
         # Show what will be deleted
         print(f"\nThe following {len(to_delete)} run(s) will be permanently deleted:\n")
-        print(
-            f"{'#':<4}"
+        confirm_hdr = (
+            f"{'#':<{idx_width}}"
             f"{'RUN ID':<10}"
             f"{'SCRIPT':<{script_max}}"
             f"{'STATUS':<13}"
@@ -1603,7 +1964,8 @@ def clean_runs(
             f"{'AGE':<14}"
             f"{'SIZE':<10}"
         )
-        print("-" * min(term_width, 4 + 10 + script_max + 13 + 6 + 14 + 10))
+        print(confirm_hdr)
+        print("-" * min(term_width, len(confirm_hdr)))
         for i, r in enumerate(to_delete, 1):
             run_id = (r.run_id or "-")[:8]
             script_name = r.script or "-"
@@ -1618,7 +1980,7 @@ def clean_runs(
             age_d = _format_age(age_s)
             size_d = _format_bytes(_dir_size(r.run_dir))
             print(
-                f"{i:<4}"
+                f"{i:<{idx_width}}"
                 f"{run_id:<10}"
                 f"{script_d:<{script_max}}"
                 f"{status_d:<13}"
@@ -1643,41 +2005,22 @@ def clean_runs(
     print(f"\nDeleting {len(to_delete)} run(s) ({_format_bytes(total_size)})...")
 
     # Resolve base output directory for symlink / parent-confinement checks before deletion.
-    if output_dir:
-        _clean_base = Path(output_dir)
-    else:
-        _cfg = resolve_config()
-        _base_str = _cfg.get("core", {}).get("output_dir", "")
-        _clean_base = Path(_base_str) if _base_str else Path.cwd() / "runs"
-    _clean_base_resolved = _clean_base.resolve()
+    _clean_base_resolved = _resolve_output_dir(output_dir).resolve()
 
     # Delete
     deleted = 0
     for r in to_delete:
-        try:
-            if r.run_dir.is_symlink() or not r.run_dir.is_dir():
-                print(
-                    f"  Skipped {r.run_dir.name}: not a regular directory.",
-                    file=sys.stderr,
-                )
-                continue
-            if r.run_dir.resolve().parent != _clean_base_resolved:
-                print(
-                    f"  Skipped {r.run_dir.name}: path escapes output directory.",
-                    file=sys.stderr,
-                )
-                continue
-            lock_path = r.run_dir / Run.LOCK_FILENAME
-            if lock_path.exists() and not can_safely_auto_close_crashed_run(r.run_dir, r.lock_data):
-                print(
-                    f"  Skipped {r.run_dir.name}: lock is active, unreadable, or belongs to a remote host.",
-                    file=sys.stderr,
-                )
-                continue
-            shutil.rmtree(r.run_dir)
+        ok, reason = safe_delete_run_dir(
+            r.run_dir,
+            _clean_base_resolved,
+            force_remote_locks=force_remote_locks,
+        )
+        if ok:
             deleted += 1
-        except OSError as e:
-            print(f"  Failed to remove {r.run_dir.name}: {e}", file=sys.stderr)
+        elif reason and reason.startswith("Failed to remove "):
+            print(f"  {reason}", file=sys.stderr)
+        else:
+            print(f"  Skipped {r.run_dir.name}: {reason}", file=sys.stderr)
 
     print(f"\nDeleted {deleted} run(s).")
     return deleted
