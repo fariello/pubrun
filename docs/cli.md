@@ -308,15 +308,21 @@ pubrun inspect runs/pubrun-XYZ --preflight --json | jq '.preflight.status'
 
 ### `bench`: Overhead Benchmark Runner
 
-Friendly front-end over the benchmark harness (`benchmarks/harness.py`). Runs the suite
-locally by default; on an HPC login node it detects the batch scheduler (**Slurm, PBS/Torque,
-LSF, or SGE/Grid Engine**) and **offers** to submit to a compute node (and never submits
-without confirmation; on Slurm it can wait for completion and then contribute from the login
-node). By default it writes **only a redacted, share-safe** result file (`*.redacted.json`)
-and, on an interactive terminal, offers to contribute it to `fariello/pubrun`.
+Command-line front-end over the packaged standard-library benchmark harness
+(`pubrun._bench.harness`, with source-checkout shim `benchmarks/harness.py`). The benchmark
+runtime ships in the `pubrun` wheel and works from any working directory after
+`pip install pubrun` with no extra runtime dependencies. It runs locally by default; on a
+high-performance computing (HPC) login node it detects the batch scheduler (**Slurm,
+PBS/Torque, LSF, or SGE/Grid Engine**) and **offers** to submit to a compute node (and never
+submits without confirmation; on Slurm it can wait for completion and then contribute from the
+login node). By default it writes **only a redacted, share-safe** result file
+(`*.redacted.json`) and, on an interactive terminal, offers to contribute it to
+`fariello/pubrun`.
 
-**Requires a source checkout** (the benchmark tooling is intentionally not shipped in the
-pip package to keep installs lightweight). Clone the repo and run from it.
+**Default output directory.** `pubrun bench` resolves the results directory in this order:
+`PUBRUN_RESULTS_DIR` when set in the environment, `benchmarks/results/` when run inside a
+`pubrun` source checkout, or `./pubrun-bench-results/` under the current working directory
+outside a checkout.
 
 ```bash
 pubrun bench [--quick | --full | --rigorous] [--no-baseline] [--iterations N] [--passes N]
@@ -369,25 +375,29 @@ or an interactive "y"). On Slurm, after submission, the login-node process polls
 (bounded by `--wait-timeout`), then runs the share-check and contribution offer from the login
 node; if interrupted or timed out, finish later with `--submit-file`. Because PBS and SGE both
 use `qsub`, an ambiguous environment is reported and you resolve it with `--scheduler pbs|sge`.
-The per-scheduler submit scripts under `benchmarks/` (`submit_bench.sh`, `submit_bench_pbs.sh`,
-`submit_bench_lsf.sh`, `submit_bench_sge.sh`) are starting points to adapt to your site.
+The packaged per-scheduler submit scripts live under `src/pubrun/_bench/scripts/`
+(`submit_bench.sh`, `run_bench.sbatch`, `submit_bench_pbs.sh`, `submit_bench_lsf.sh`,
+`submit_bench_sge.sh`), with source-checkout shims under `benchmarks/`; treat them as starting
+points to adapt to your site.
 
-**Contributing a result (consent-gated).** After a run, `pubrun bench` runs a structural
-share-safety check (`benchmarks/share_safety.py`), prints a safe-file block, and on an
-interactive terminal offers to publish the redacted result to `fariello/pubrun` (Enter accepts;
-pass `--contribute` or `--no-contribute` to pre-decide). When publishing, it uses the GitHub
-CLI (`gh`): it creates an unlisted Gist of the redacted file and opens an issue linking the raw
-URL, falling back to embedding the JSON inline when under GitHub's ~65 KB body cap, and finally
-to the browser Issue Form (`https://github.com/fariello/pubrun/issues/new?template=benchmark-result.yml`)
-when `gh` is unavailable. A validate-only GitHub Actions workflow checks the submission as data
-only and posts a pass/fail receipt; maintainers collect accepted results locally via
+**Contributing a result (consent-gated).** After a run, `pubrun bench` runs the packaged
+structural share-safety check (`pubrun._bench.share_safety`, with source-checkout shim
+`benchmarks/share_safety.py`), prints a safe-file block, and on an interactive terminal offers
+to publish the redacted result to `fariello/pubrun` (Enter accepts; pass `--contribute` or
+`--no-contribute` to pre-decide). When publishing, it uses the GitHub CLI (`gh`): it creates an
+unlisted Gist of the redacted file and opens an issue linking the raw URL, falling back to
+embedding the JSON inline when under GitHub's ~65 KB body cap, and finally to the browser Issue
+Form (`https://github.com/fariello/pubrun/issues/new?template=benchmark-result.yml`) when `gh`
+is unavailable. A validate-only GitHub Actions workflow checks the submission as data only and
+posts a pass/fail receipt; maintainers collect accepted results locally via
 `benchmarks/pull_submissions.py` into `benchmarks/data/`.
 
-**"Submit later" / HPC recovery.** Because the redacted file persists on disk, you can submit
-it later without re-running:
+**"Submit later" / HPC recovery.** Because the redacted file persists on disk (under
+`./pubrun-bench-results/` outside a checkout, `benchmarks/results/` inside a checkout, or
+`PUBRUN_RESULTS_DIR`), you can submit it later without re-running:
 
 ```bash
-pubrun bench --submit-file benchmarks/results/pubrun-bench-<hash>-<ts>.redacted.json
+pubrun bench --submit-file pubrun-bench-results/pubrun-bench-<hash>-<ts>.redacted.json
 ```
 
 **Safety.** pubrun never auto-transmits an unredacted result: by default only `*.redacted.json`

@@ -25,7 +25,18 @@ median of a scenario minus its group baseline:
   `[capture.file_io].level = "stat"` and `"hash"` vs `builtins.open()` (pubrun
   never patches `open()`), and the console tee vs plain `print()`.
 
-See [`benchmarks/README.md`](../benchmarks/README.md) to run it:
+You can run the benchmark suite directly from a `pip`-installed wheel without cloning the
+repository (`src/pubrun/_bench/` ships the standard-library runtime harness):
+
+```bash
+pip install pubrun                    # includes packaged benchmark runtime (stdlib only)
+pubrun bench                          # run from any working directory
+```
+
+In a source checkout, `python benchmarks/harness.py` (checkout shim over
+`pubrun._bench.harness`) and the non-runtime analysis scripts (`aggregate.py`, `plot.py`,
+`startup_breakdown.py`, `package_capture_bench.py`) remain available. See
+[`benchmarks/README.md`](../benchmarks/README.md) for full instructions:
 
 ```bash
 python benchmarks/harness.py          # collect (stdlib only)
@@ -34,17 +45,23 @@ python benchmarks/aggregate.py benchmarks/results/*.json
 
 ### Result files (schema `pubrun-benchmark/5`)
 
-Each run writes a **compact** (no-indent) JSON file. By default, `benchmarks/harness.py`
-writes only the shareable, redacted copy:
-`benchmarks/results/pubrun-bench-<hostname-hash>-<UTC-timestamp>.redacted.json` (the filename
-embeds a non-identifying hostname hash, never the hostname; pass `--redacted-out <path>` to
-override its path). The identifying local copy
-(`benchmarks/results/<host>-<UTC-timestamp>.unredacted.json`) is written only when you pass
-`--unredacted` or `--out <path>`. Neither `benchmarks/harness.py` default output,
-`pubrun bench`, nor Slurm (`benchmarks/run_bench.sbatch`) ever writes a bare `*.json` (the
-PBS/LSF/SGE template scripts `benchmarks/submit_bench_{pbs,lsf,sge}.sh` currently pass
-`--out "$RESULTS_DIR/${NODE}-${STAMP}.json"`, which writes a gitignored unredacted bare
-`.json` file alongside the default `.redacted.json` file; see
+Each run writes a **compact** (no-indent) JSON file. When you run `pubrun bench` or the
+packaged harness (`python -m pubrun._bench.harness`, also invoked via the
+`benchmarks/harness.py` checkout shim) without an explicit output path, results go to
+`PUBRUN_RESULTS_DIR` when set in the environment, `benchmarks/results/` inside a `pubrun`
+source checkout, or `./pubrun-bench-results/` under the current working directory outside a
+checkout.
+
+By default, every invocation writes only the shareable, redacted copy:
+`pubrun-bench-<hostname-hash>-<UTC-timestamp>.redacted.json` (the filename embeds a
+non-identifying hostname hash, never the hostname; pass `--redacted-out <path>` to the harness
+to override its path). The identifying local copy
+(`<host>-<UTC-timestamp>.unredacted.json`) is written only when you pass `--unredacted`, pass
+`--out <path>` to the harness, or set `PUBRUN_UNREDACTED=1` for a high-performance computing
+(HPC) submit script. Neither `pubrun bench`, the harness default output, nor any packaged HPC
+submit script (`run_bench.sbatch`, `submit_bench_pbs.sh`, `submit_bench_lsf.sh`,
+`submit_bench_sge.sh`) writes a bare `*.json` file; all of them write only the redacted
+`.redacted.json` file by default (see
 [`benchmarks/README.md`](../benchmarks/README.md#running-on-an-hpc-cluster)).
 
 Schema `/5` is a compact, non-redundant reshape of `/4` with **zero analytical data loss**:

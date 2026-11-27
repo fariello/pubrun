@@ -142,24 +142,28 @@ Each suggestion comes with an honest performance note; see [Performance](perform
 
 ## Running the benchmark suite on a cluster
 
-The benchmark harness and scheduler submission scripts live under `benchmarks/` (see
+`pubrun bench` runs directly from a `pip`-installed wheel using the packaged standard-library
+benchmark runtime (`src/pubrun/_bench/`) and packaged scheduler submission scripts
+(`src/pubrun/_bench/scripts/`, with source-checkout shims under `benchmarks/`; see
 `benchmarks/README.md`). Result JSONs capture filesystem type and scheduler allocation context
-so results are comparable across nodes.
+so results are comparable across nodes. By default, results are written to
+`./pubrun-bench-results/` outside a source checkout, `benchmarks/results/` inside a checkout,
+or `PUBRUN_RESULTS_DIR` when set in the environment.
 
-`pubrun bench` requires a source checkout (`git clone`), because `benchmarks/harness.py` is
-not shipped in the pip wheel. It auto-detects the batch scheduler (**Slurm, PBS/Torque,
-LSF, or SGE/Grid Engine**, precedence Slurm > PBS > LSF > SGE) from environment variables
-and submit tools on `PATH`, and **offers** to submit to a compute node (never without
-confirmation). Because PBS and SGE both use `qsub`, an ambiguous environment is reported;
-pick one with `--scheduler pbs|sge`.
+`pubrun bench` auto-detects the batch scheduler (**Slurm, PBS/Torque, LSF, or SGE/Grid
+Engine**, precedence Slurm > PBS > LSF > SGE) from environment variables and submit tools on
+`PATH`, and **offers** to submit to a compute node (never without confirmation). Because PBS
+and SGE both use `qsub`, an ambiguous environment is reported; pick one with
+`--scheduler pbs|sge`.
 
-Scheduler placement differs by script: `benchmarks/submit_bench.sh` queries `sinfo` and
-pins the Slurm job to a random idle node via `--nodelist` when idle nodes are available
-(falling back to unpinned scheduler placement when none are idle), whereas
-`submit_bench_pbs.sh`, `submit_bench_lsf.sh`, and `submit_bench_sge.sh` submit to the
-default queue and let the scheduler place the job. Treat all submit scripts as **starting
-points** and set your site's account, queue, and walltime (only the Slurm path is exercised
-in CI).
+Scheduler placement differs by script: `submit_bench.sh` queries `sinfo` and pins the Slurm
+job to a random idle node via `--nodelist` when idle nodes are available (falling back to
+unpinned scheduler placement when none are idle), whereas `submit_bench_pbs.sh`,
+`submit_bench_lsf.sh`, and `submit_bench_sge.sh` submit to the default queue and let the
+scheduler place the job. All four scheduler scripts write only the redacted `.redacted.json`
+result file by default (set `PUBRUN_UNREDACTED=1` or pass `--unredacted` to also write the
+identifying copy). Treat all submit scripts as **starting points** and set your site's account,
+queue, and walltime (only the Slurm path is exercised in CI).
 
 On a Slurm login node, `pubrun bench` runs a submit-and-wait flow that polls until the
 compute-node job completes or `--wait-timeout` expires (default about 1800s; `0` waits

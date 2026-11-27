@@ -646,14 +646,15 @@ pubrun self-check [-v|--show-suggestions] [--json] [--strict] [-q|--quiet]
 
 ### 11.18 Overhead Benchmarks (`bench`)
 
-Front-end over the overhead benchmark harness under `benchmarks/` (requires a source checkout; `benchmarks/harness.py` is not shipped in the pip wheel).
+Front-end over the packaged standard-library overhead benchmark runtime under `src/pubrun/_bench/` (with source-checkout shims under `benchmarks/`). Works directly from a `pip`-installed wheel in any working directory with no extra runtime dependencies.
 
 ```
 pubrun bench [--quick|--full|--rigorous] [--no-baseline] [--iterations N] [--passes N] [--local|--submit] [--scheduler auto|slurm|pbs|lsf|sge|local] [-y|--yes] [--unredacted] [--json] [--contribute|--no-contribute] [--prepare-submission] [--submit-file FILE] [--wait-timeout SECONDS] [--no-submit] [--gh-repo OWNER/NAME]
 ```
 
-- Runs locally by default or auto-detects HPC schedulers (Slurm, PBS, LSF, SGE) and offers to submit to a compute node (never submitting without confirmation unless `--submit` or `-y`/`--yes` is passed).
-- Writes only a redacted, share-safe result JSON by default (`--unredacted` also writes the identifying copy) and runs a share-safety check.
+- Resolves the default writable results directory to `PUBRUN_RESULTS_DIR` when set in the environment, `benchmarks/results/` inside a `pubrun` source checkout, or `./pubrun-bench-results/` under the current working directory outside a checkout.
+- Runs locally by default or auto-detects high-performance computing (HPC) schedulers (Slurm, PBS, LSF, SGE) and offers to submit to a compute node using packaged scripts under `src/pubrun/_bench/scripts/` (never submitting without confirmation unless `--submit` or `-y`/`--yes` is passed).
+- Writes only a redacted, share-safe result JSON by default (`--unredacted` also writes the identifying copy) and validates it with the packaged `pubrun._bench.share_safety` validator.
 - On Slurm login nodes, supports submit-and-wait polling controlled by `--wait-timeout` (default about 1800s; `0` waits indefinitely), and `--submit-file FILE` contributes an existing redacted result without running benchmarks.
 
 ### 11.19 Resource Utilization Charts (`res`, `cpu`, `mem`)

@@ -74,7 +74,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Update primary benchmark and command-line interface (CLI) documentation
 
-- [ ] E-01 Update `docs/cli.md` (`` ### `bench`: Overhead Benchmark Runner `` section):
+- [x] E-01 Update `docs/cli.md` (`` ### `bench`: Overhead Benchmark Runner `` section):
   - Remove the paragraph stating `**Requires a source checkout** (the benchmark tooling is intentionally not shipped in the pip package to keep installs lightweight). Clone the repo and run from it.`
   - Update the opening line (`benchmarks/harness.py`) to note the packaged standard-library runtime (`pubrun._bench.harness`, with checkout shim `benchmarks/harness.py`) shipped in the wheel, working from any working directory after `pip install pubrun` with no extra dependencies.
   - Document default output directory selection: `./pubrun-bench-results/` under the current working directory outside a source checkout, `benchmarks/results/` inside a source checkout, or `PUBRUN_RESULTS_DIR` when set in the environment.
@@ -82,9 +82,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Use no em or en dashes in edited or added prose.
   - Depends on: none
   - Expected outcome: `docs/cli.md` accurately documents wheel-installed `pubrun bench` and contains no source-checkout requirement.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update `docs/performance.md` and `benchmarks/README.md`:
+- [x] E-02 Update `docs/performance.md` and `benchmarks/README.md`:
   - In `docs/performance.md`:
     - Note under `## How overhead is measured` and `` ### Result files (schema `pubrun-benchmark/5`) `` that users can run `pubrun bench` directly from a `pip`-installed wheel without cloning the repository (writing to `./pubrun-bench-results/` by default outside a checkout, `benchmarks/results/` inside a checkout, or `PUBRUN_RESULTS_DIR` when set), while `python benchmarks/harness.py` and analysis scripts (`aggregate.py`, `plot.py`, `startup_breakdown.py`, `package_capture_bench.py`) remain available in a source checkout.
     - Correct the stale note claiming `benchmarks/submit_bench_{pbs,lsf,sge}.sh` pass `--out "$RESULTS_DIR/${NODE}-${STAMP}.json"` so it matches the actual redacted-only default behavior of those scripts.
@@ -95,28 +95,28 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Use no em or en dashes in edited or added prose.
   - Depends on: E-01
   - Expected outcome: `docs/performance.md` and `benchmarks/README.md` agree with the packaged runtime, HPC script defaults, and checkout shims.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Update secondary references for cross-doc consistency
 
-- [ ] E-03 Update `docs/hpc.md`, `docs/functional_spec.md`, and `README.md`:
+- [x] E-03 Update `docs/hpc.md`, `docs/functional_spec.md`, and `README.md`:
   - In `docs/hpc.md` (`## Running the benchmark suite on a cluster`): remove "`pubrun bench` requires a source checkout (`git clone`), because `benchmarks/harness.py` is not shipped in the pip wheel" and explain that `pubrun bench` runs directly from a wheel install using packaged submit scripts (`src/pubrun/_bench/scripts/`, with checkout shims under `benchmarks/`) and writes to `./pubrun-bench-results/` (or `PUBRUN_RESULTS_DIR`, or `benchmarks/results/` inside a checkout).
   - In `docs/functional_spec.md` (`` ### 11.18 Overhead Benchmarks (`bench`) ``): replace `(requires a source checkout; benchmarks/harness.py is not shipped in the pip wheel)` with the packaged `src/pubrun/_bench/` runtime and writable default output directory behavior (`./pubrun-bench-results/` outside a checkout, `benchmarks/results/` inside one, or `PUBRUN_RESULTS_DIR`).
   - In `README.md` (`` ### `pubrun bench` ``): remove `"Requires a source checkout."` and note that it works directly from a `pip`-installed wheel.
   - Use no em or en dashes in edited or added prose.
   - Depends on: E-01, E-02
   - Expected outcome: Zero documentation files in the repository claim `pubrun bench` requires a source checkout.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Verify documentation consistency and hygiene
 
-- [ ] E-04 Run all verification checks listed in `## Required tests / validation`:
+- [x] E-04 Run all verification checks listed in `## Required tests / validation`:
   - Run negative `grep` across all six updated documentation files (`docs/cli.md`, `docs/performance.md`, `benchmarks/README.md`, `docs/hpc.md`, `docs/functional_spec.md`, `README.md`) and across `docs/` for stale source-checkout requirements, "not shipped in the", stale PBS/LSF/SGE `--out ...json` notes, and stale `pubrun-bench-${NODE}` filename claims.
   - Check `git diff HEAD --unified=0` of the six documentation files for any newly introduced em or en dashes (`\u2014`, `\u2013`).
   - Run `python3 scripts/sanitize_paths.py --check --all`.
   - Depends on: E-01, E-02, E-03
   - Expected outcome: Negative grep finds zero stale bench-checkout or filename claims, added lines have zero em/en dashes, and path sanitization exits `0`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -180,25 +180,192 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition)—as distinct from items demanding a diff, a file's content, or a test result, which are reachable by construction—name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `git diff -- docs/cli.md` showing removal of the source-checkout requirement and documentation of `pubrun._bench.harness`, `./pubrun-bench-results/`, `PUBRUN_RESULTS_DIR`, packaged HPC scripts, and `pubrun._bench.share_safety`.
   - Observed evidence:
-  - Result: pending
+    - `git diff -- docs/cli.md` (exit `0`):
+      ````diff
+      diff --git a/docs/cli.md b/docs/cli.md
+      index b810a1d..fdf7bd8 100644
+      --- a/docs/cli.md
+      +++ b/docs/cli.md
+      @@ -308,15 +308,21 @@ pubrun inspect runs/pubrun-XYZ --preflight --json | jq '.preflight.status'
 
-- [ ] V-02 validates E-02
+       ### `bench`: Overhead Benchmark Runner
+
+      -Friendly front-end over the benchmark harness (`benchmarks/harness.py`). Runs the suite
+      -locally by default; on an HPC login node it detects the batch scheduler (**Slurm, PBS/Torque,
+      -LSF, or SGE/Grid Engine**) and **offers** to submit to a compute node (and never submits
+      -without confirmation; on Slurm it can wait for completion and then contribute from the login
+      -node). By default it writes **only a redacted, share-safe** result file (`*.redacted.json`)
+      -and, on an interactive terminal, offers to contribute it to `fariello/pubrun`.
+      -
+      -**Requires a source checkout** (the benchmark tooling is intentionally not shipped in the
+      -pip package to keep installs lightweight). Clone the repo and run from it.
+      +Command-line front-end over the packaged standard-library benchmark harness
+      +(`pubrun._bench.harness`, with source-checkout shim `benchmarks/harness.py`). The benchmark
+      +runtime ships in the `pubrun` wheel and works from any working directory after
+      +`pip install pubrun` with no extra runtime dependencies. It runs locally by default; on a
+      +high-performance computing (HPC) login node it detects the batch scheduler (**Slurm,
+      +PBS/Torque, LSF, or SGE/Grid Engine**) and **offers** to submit to a compute node (and never
+      +submits without confirmation; on Slurm it can wait for completion and then contribute from the
+      +login node). By default it writes **only a redacted, share-safe** result file
+      +(`*.redacted.json`) and, on an interactive terminal, offers to contribute it to
+      +`fariello/pubrun`.
+      +
+      +**Default output directory.** `pubrun bench` resolves the results directory in this order:
+      +`PUBRUN_RESULTS_DIR` when set in the environment, `benchmarks/results/` when run inside a
+      +`pubrun` source checkout, or `./pubrun-bench-results/` under the current working directory
+      +outside a checkout.
+      @@ -369,25 +375,29 @@ or an interactive "y"). On Slurm, after submission, the login-node process polls
+      -The per-scheduler submit scripts under `benchmarks/` (`submit_bench.sh`, `submit_bench_pbs.sh`,
+      -`submit_bench_lsf.sh`, `submit_bench_sge.sh`) are starting points to adapt to your site.
+      -
+      -**Contributing a result (consent-gated).** After a run, `pubrun bench` runs a structural
+      -share-safety check (`benchmarks/share_safety.py`), prints a safe-file block, ...
+      +The packaged per-scheduler submit scripts live under `src/pubrun/_bench/scripts/`
+      +(`submit_bench.sh`, `run_bench.sbatch`, `submit_bench_pbs.sh`, `submit_bench_lsf.sh`,
+      +`submit_bench_sge.sh`), with source-checkout shims under `benchmarks/`; treat them as starting
+      +points to adapt to your site.
+      +
+      +**Contributing a result (consent-gated).** After a run, `pubrun bench` runs the packaged
+      +structural share-safety check (`pubrun._bench.share_safety`, with source-checkout shim
+      +`benchmarks/share_safety.py`), prints a safe-file block, ...
+      +**"Submit later" / HPC recovery.** Because the redacted file persists on disk (under
+      +`./pubrun-bench-results/` outside a checkout, `benchmarks/results/` inside a checkout, or
+      +`PUBRUN_RESULTS_DIR`), you can submit it later without re-running:
+      +
+      +```bash
+      +pubrun bench --submit-file pubrun-bench-results/pubrun-bench-<hash>-<ts>.redacted.json
+      +```
+      ````
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Pasted `git diff -- docs/performance.md benchmarks/README.md` showing packaged wheel execution, writable default output directory (`./pubrun-bench-results/`, `PUBRUN_RESULTS_DIR`), `${ANON_ID}`/`<hostname-hash>` redacted filename pattern, `pubrun._bench.share_safety`, and accurate PBS/LSF/SGE redacted-only defaults.
   - Observed evidence:
-  - Result: pending
+    - `git diff --stat -- docs/performance.md benchmarks/README.md` (exit `0`):
+      ```text
+       benchmarks/README.md | 189 +++++++++++++++++++++++++++++++--------------------
+       docs/performance.md  |  41 +++++++----
+       2 files changed, 143 insertions(+), 87 deletions(-)
+      ```
+    - `git diff -- docs/performance.md` (exit `0`):
+      ````diff
+      diff --git a/docs/performance.md b/docs/performance.md
+      index 2d55a26..318d852 100644
+      --- a/docs/performance.md
+      +++ b/docs/performance.md
+      @@ -25,7 +25,18 @@ median of a scenario minus its group baseline:
+      -See [`benchmarks/README.md`](../benchmarks/README.md) to run it:
+      +You can run the benchmark suite directly from a `pip`-installed wheel without cloning the
+      +repository (`src/pubrun/_bench/` ships the standard-library runtime harness):
+      +
+      +```bash
+      +pip install pubrun                    # includes packaged benchmark runtime (stdlib only)
+      +pubrun bench                          # run from any working directory
+      +```
+      +
+      +In a source checkout, `python benchmarks/harness.py` (checkout shim over
+      +`pubrun._bench.harness`) and the non-runtime analysis scripts (`aggregate.py`, `plot.py`,
+      +`startup_breakdown.py`, `package_capture_bench.py`) remain available. See
+      +[`benchmarks/README.md`](../benchmarks/README.md) for full instructions:
+      @@ -34,17 +45,23 @@ python benchmarks/aggregate.py benchmarks/results/*.json
+      -Each run writes a **compact** (no-indent) JSON file. By default, `benchmarks/harness.py`
+      -...
+      -PBS/LSF/SGE template scripts `benchmarks/submit_bench_{pbs,lsf,sge}.sh` currently pass
+      -`--out "$RESULTS_DIR/${NODE}-${STAMP}.json"`, which writes a gitignored unredacted bare
+      -`.json` file alongside the default `.redacted.json` file; see
+      +Each run writes a **compact** (no-indent) JSON file. When you run `pubrun bench` or the
+      +packaged harness (`python -m pubrun._bench.harness`, also invoked via the
+      +`benchmarks/harness.py` checkout shim) without an explicit output path, results go to
+      +`PUBRUN_RESULTS_DIR` when set in the environment, `benchmarks/results/` inside a `pubrun`
+      +source checkout, or `./pubrun-bench-results/` under the current working directory outside a
+      +checkout.
+      +
+      +By default, every invocation writes only the shareable, redacted copy:
+      +`pubrun-bench-<hostname-hash>-<UTC-timestamp>.redacted.json` (the filename embeds a
+      +non-identifying hostname hash, never the hostname; pass `--redacted-out <path>` to the harness
+      +to override its path). The identifying local copy
+      +(`<host>-<UTC-timestamp>.unredacted.json`) is written only when you pass `--unredacted`, pass
+      +`--out <path>` to the harness, or set `PUBRUN_UNREDACTED=1` for a high-performance computing
+      +(HPC) submit script. Neither `pubrun bench`, the harness default output, nor any packaged HPC
+      +submit script (`run_bench.sbatch`, `submit_bench_pbs.sh`, `submit_bench_lsf.sh`,
+      +`submit_bench_sge.sh`) writes a bare `*.json` file; all of them write only the redacted
+      +`.redacted.json` file by default (see
+      ````
+    - `git diff -- benchmarks/README.md` (key hunks, exit `0`):
+      - `## Design`: replaces em dash on `harness.py` bullet with `-`, documents `src/pubrun/_bench/` packaging (`harness.py`, `scenarios.py`, `share_safety.py`, `workloads/`, `scripts/`) with `benchmarks/` checkout shims and confirms `aggregate.py`, `plot.py`, `pull_submissions.py`, `startup_breakdown.py`, `package_capture_bench.py`, `test_*.py`, `results/`, and `data/` remain outside the wheel.
+      - `## Running`, `## Running on an HPC cluster`, `### Slurm details`, `## Contributing a result from a new machine`: removes `(from a source checkout)`, documents `pip install pubrun` + `pubrun bench`, documents `PUBRUN_RESULTS_DIR` / `benchmarks/results/` / `./pubrun-bench-results/`, updates filename pattern to `$RESULTS_DIR/pubrun-bench-${ANON_ID}-${STAMP}.redacted.json` (`<hostname-hash>`), updates share-safety reference to `pubrun._bench.share_safety` (checkout shim `benchmarks/share_safety.py`), and removes both stale PBS/LSF/SGE `--out "$RESULTS_DIR/${NODE}-${STAMP}.json"` notes.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `git diff -- docs/hpc.md docs/functional_spec.md README.md` showing removal of all remaining source-checkout claims for `pubrun bench`.
   - Observed evidence:
-  - Result: pending
+    - `git diff -- docs/hpc.md docs/functional_spec.md README.md` (exit `0`):
+      ````diff
+      diff --git a/README.md b/README.md
+      index 4e8f97e..d6a18c5 100644
+      --- a/README.md
+      +++ b/README.md
+      @@ -247,7 +247,7 @@ pubrun inspect [RUN_DIR] [--show-suggestions] [--preflight]
+       ### `pubrun bench`
+      -Run the pubrun overhead benchmark suite (auto-detects an HPC scheduler, Slurm/PBS/LSF/SGE, and offers to submit the job to a compute node). Every run starts with an uncaptured **baseline pass** (pubrun absent), then N measured passes: `--quick` (2x15), `--full`/default (3x30), or `--rigorous` (5x50). Requires a source checkout.
+      +Run the pubrun overhead benchmark suite directly from a `pip`-installed wheel in any working directory with no extra runtime dependencies (auto-detects a high-performance computing (HPC) scheduler, Slurm/PBS/LSF/SGE, and offers to submit the job to a compute node). Every run starts with an uncaptured **baseline pass** (pubrun absent), then N measured passes: `--quick` (2x15), `--full`/default (3x30), or `--rigorous` (5x50). Results default to `./pubrun-bench-results/` outside a source checkout, `benchmarks/results/` inside one, or `PUBRUN_RESULTS_DIR` when set.
 
-- [ ] V-04 validates E-04
+      diff --git a/docs/functional_spec.md b/docs/functional_spec.md
+      index 1bf4598..035e862 100644
+      --- a/docs/functional_spec.md
+      +++ b/docs/functional_spec.md
+      @@ -647,12 +647,13 @@ pubrun self-check [-v|--show-suggestions] [--json] [--strict] [-q|--quiet]
+       ### 11.18 Overhead Benchmarks (`bench`)
+      -Front-end over the overhead benchmark harness under `benchmarks/` (requires a source checkout; `benchmarks/harness.py` is not shipped in the pip wheel).
+      +Front-end over the packaged standard-library overhead benchmark runtime under `src/pubrun/_bench/` (with source-checkout shims under `benchmarks/`). Works directly from a `pip`-installed wheel in any working directory with no extra runtime dependencies.
+      +- Resolves the default writable results directory to `PUBRUN_RESULTS_DIR` when set in the environment, `benchmarks/results/` inside a `pubrun` source checkout, or `./pubrun-bench-results/` under the current working directory outside a checkout.
+      +- Runs locally by default or auto-detects high-performance computing (HPC) schedulers (Slurm, PBS, LSF, SGE) and offers to submit to a compute node using packaged scripts under `src/pubrun/_bench/scripts/` (never submitting without confirmation unless `--submit` or `-y`/`--yes` is passed).
+      +- Writes only a redacted, share-safe result JSON by default (`--unredacted` also writes the identifying copy) and validates it with the packaged `pubrun._bench.share_safety` validator.
+
+      diff --git a/docs/hpc.md b/docs/hpc.md
+      index ca66633..3c12a1d 100644
+      --- a/docs/hpc.md
+      +++ b/docs/hpc.md
+      @@ -142,24 +142,28 @@ Each suggestion comes with an honest performance note; see [Performance](perform
+       ## Running the benchmark suite on a cluster
+      -`pubrun bench` requires a source checkout (`git clone`), because `benchmarks/harness.py` is
+      -not shipped in the pip wheel. ...
+      +`pubrun bench` runs directly from a `pip`-installed wheel using the packaged standard-library
+      +benchmark runtime (`src/pubrun/_bench/`) and packaged scheduler submission scripts
+      +(`src/pubrun/_bench/scripts/`, with source-checkout shims under `benchmarks/`; see
+      +`benchmarks/README.md`). Result JSONs capture filesystem type and scheduler allocation context
+      +so results are comparable across nodes. By default, results are written to
+      +`./pubrun-bench-results/` outside a source checkout, `benchmarks/results/` inside a checkout,
+      +or `PUBRUN_RESULTS_DIR` when set in the environment.
+      ````
+  - Result: pass
+
+- [x] V-04 validates E-04
   - Required evidence: Pasted output of all three commands in `## Required tests / validation` across `docs/cli.md`, `docs/performance.md`, `benchmarks/README.md`, `docs/hpc.md`, `docs/functional_spec.md`, and `README.md` showing `exit=1` (zero matches) for the negative grep, `ok` for the `git diff HEAD` dash check, and exit `0` for `scripts/sanitize_paths.py --check --all`.
   - Observed evidence:
-  - Result: pending
+    - Command 1 (negative grep across all six updated documentation files, and across `docs/`):
+      ```text
+      === CMD1: six files ===
+      exit=1
+      === CMD1b: docs/ ===
+      exit=1
+      ```
+    - Command 2 (`git diff HEAD --unified=0` em/en dash check across all six files, exit `0`):
+      ```text
+      === CMD2: em/en dash check ===
+      bad= []
+      ok
+      ```
+    - Command 3 (`python3 scripts/sanitize_paths.py --check --all`, exit `0`, plus `aw sanitize --agent`, exit `0`):
+      ```text
+      === CMD3: sanitize_paths ===
+      === CMD4: aw sanitize ===
+      {"schema":"aw.agent/v1","kind":"result","cmd":"check-local-leaks","outcome":"clean","exit":0,"verified":true,"complete":true,"checked":1017,"findings":0,"evidence":["leak-scan"],"next":null}
+      ```
+  - Result: pass
 
 ## Approval and execution gate
 

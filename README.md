@@ -247,7 +247,7 @@ pubrun inspect [RUN_DIR] [--show-suggestions] [--preflight]
 ```
 
 ### `pubrun bench`
-Run the pubrun overhead benchmark suite (auto-detects an HPC scheduler, Slurm/PBS/LSF/SGE, and offers to submit the job to a compute node). Every run starts with an uncaptured **baseline pass** (pubrun absent), then N measured passes: `--quick` (2x15), `--full`/default (3x30), or `--rigorous` (5x50). Requires a source checkout.
+Run the pubrun overhead benchmark suite directly from a `pip`-installed wheel in any working directory with no extra runtime dependencies (auto-detects a high-performance computing (HPC) scheduler, Slurm/PBS/LSF/SGE, and offers to submit the job to a compute node). Every run starts with an uncaptured **baseline pass** (pubrun absent), then N measured passes: `--quick` (2x15), `--full`/default (3x30), or `--rigorous` (5x50). Results default to `./pubrun-bench-results/` outside a source checkout, `benchmarks/results/` inside one, or `PUBRUN_RESULTS_DIR` when set.
 ```bash
 pubrun bench                        # default: baseline + 3 passes x 30 iterations
 pubrun bench --quick                # baseline + 2 x 15
