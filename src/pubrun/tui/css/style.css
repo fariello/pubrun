@@ -21,7 +21,9 @@ Footer {
 
 /* Sidebar Styling */
 #sidebar {
-    width: 35;
+    width: 30%;
+    min-width: 20;
+    max-width: 35;
     background: #181825;
     border-right: double #313244;
     dock: left;
@@ -161,18 +163,34 @@ Button.-error:hover {
     grid-rows: auto;
     grid-gutter: 1 2;
     padding: 1 2;
+    height: auto;
 }
 
 .panel-card {
     background: #181825;
     border: round #313244;
     padding: 1 2;
+    height: auto;
 }
 
 .panel-card-title {
     color: #cba6f7;
     text-style: bold;
     margin-bottom: 1;
+}
+
+#actions-scroll {
+    height: 1fr;
+}
+
+.button-row,
+#cleanup-inputs,
+#viewer-controls,
+#diff-dropdowns,
+#diff-settings,
+#diff-actions-row,
+.horizontal-buttons {
+    height: auto;
 }
 
 /* DataTable Custom Styles */
@@ -201,7 +219,13 @@ DataTable:focus > .datatable--cursor {
     border: round #313244;
     padding: 1 2;
     height: 1fr;
+    min-height: 6;
     overflow-y: scroll;
+}
+
+#cleanup-log-output {
+    height: 10;
+    min-height: 6;
 }
 
 .transcript-area {
@@ -209,7 +233,8 @@ DataTable:focus > .datatable--cursor {
     color: #cdd6f4;
     border: round #313244;
     padding: 1 2;
-    height: 1fr;
+    height: 8;
+    min-height: 5;
     overflow-y: scroll;
 }
 
@@ -230,6 +255,7 @@ ModalScreen {
 
 #dialog-container {
     width: 60;
+    max-width: 90%;
     height: auto;
     background: #1e1e2e;
     border: round #cba6f7;

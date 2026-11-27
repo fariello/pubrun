@@ -369,6 +369,10 @@ class TestDiffView:
             async with app.run_test() as pilot:
                 await _show_tab(app, pilot, "tab-diff")
                 view = app.query_one("#diff-view", DiffView)
+                # Explicitly clear auto-preselected runs to exercise the blank guard.
+                view.query_one("#select-diff-a", Select).value = _SELECT_EMPTY_VALUE
+                view.query_one("#select-diff-b", Select).value = _SELECT_EMPTY_VALUE
+                await pilot.pause()
                 assert view.query_one("#select-diff-a", Select).value == _SELECT_EMPTY_VALUE
                 view.run_difference()
                 await pilot.pause()
@@ -390,7 +394,7 @@ class TestDiffView:
         seen_depth = []
         real_compare = diff_mod.compare_manifests
 
-        def _compare(ma, mb, ignores, show_same=False, depth="basic"):
+        def _compare(ma, mb, ignores, show_same=False, depth="standard"):
             seen_depth.append(depth)
             return real_compare(ma, mb, ignores, show_same=show_same, depth=depth)
 
@@ -417,7 +421,7 @@ class TestDiffView:
                 assert "[Warning] hydration note for pubrun-diffb002" in out
 
         asyncio.run(_drive())
-        expected = "basic" if depth == _SELECT_EMPTY_VALUE else depth
+        expected = "standard" if depth == _SELECT_EMPTY_VALUE else depth
         assert seen_depth == [expected]
 
 
@@ -717,5 +721,206 @@ class TestLogViewer:
                 assert str(_SELECT_EMPTY_VALUE) not in [str(p) for p in loaded]
                 out = _log_text(viewer.query_one("#log-content-area", RichLog))
                 assert "does not exist" not in out
+
+        asyncio.run(_drive())
+
+
+# --------------------------------------------------------------------------- #
+# 3q5rd5: LogViewer single bounded tail read, wrap toggle, priority sort
+# --------------------------------------------------------------------------- #
+
+class TestLogViewerHardening:
+    def test_single_load_per_selection_and_log_priority(self, tmp_path, monkeypatch):
+        from pubrun.tui.app import PubrunTUIApp
+        from pubrun.tui.widgets.viewer import LogViewer
+
+        runs = tmp_path / "runs"
+        run_dir = _write_manifest(runs / "pubrun-prio0001", "prio0001")
+        (run_dir / "console.log").write_text("legacy console\n", encoding="utf-8")
+        (run_dir / "stderr.log").write_text("stderr line\n", encoding="utf-8")
+        (run_dir / "stdout.log").write_text("stdout line\n", encoding="utf-8")
+        (run_dir / "alpha.txt").write_text("alpha line\n", encoding="utf-8")
+
+        async def _drive():
+            app = PubrunTUIApp(output_dir=str(runs))
+            async with app.run_test() as pilot:
+                await _show_tab(app, pilot, "tab-logs")
+                viewer = app.query_one("#logs-view", LogViewer)
+                loaded = []
+                orig_load = viewer.load_log_file
+
+                def _spy_load(path_str):
+                    loaded.append(path_str)
+                    return orig_load(path_str)
+
+                monkeypatch.setattr(viewer, "load_log_file", _spy_load)
+
+                viewer.display_run_logs(run_dir)
+                await pilot.pause()
+                await pilot.pause()
+
+                # Exactly ONE read per run selection (no duplicate via Select.Changed).
+                assert len(loaded) == 1
+                assert loaded[0].endswith("stdout.log")
+                assert [p.name for p in viewer.log_files] == [
+                    "stdout.log",
+                    "stderr.log",
+                    "console.log",
+                    "alpha.txt",
+                ]
+
+        asyncio.run(_drive())
+
+    def test_bounded_tail_truncation_banner_and_wrap_toggle_reloads(self, tmp_path, monkeypatch):
+        from textual.widgets import Button
+        from pubrun.tui.app import PubrunTUIApp
+        from pubrun.tui.widgets import viewer as viewer_mod
+        from pubrun.tui.widgets.viewer import LogViewer
+
+        runs = tmp_path / "runs"
+        run_dir = _write_manifest(runs / "pubrun-huge0001", "huge0001")
+        # Write a >2 MiB log file with >5,000 lines to trigger bounded tail truncation.
+        chunk = ("x" * 400) + "\n"
+        huge_path = run_dir / "stdout.log"
+        with open(huge_path, "w", encoding="utf-8") as f:
+            f.write("FIRST_LINE_SHOULD_BE_TRUNCATED\n")
+            for i in range(6000):
+                f.write(f"line-{i:05d} {chunk}")
+            f.write("FINAL_TAIL_MARKER\n")
+
+        # Unit check on _read_bounded_tail
+        text, truncated, file_size = viewer_mod._read_bounded_tail(huge_path)
+        assert truncated is True
+        assert file_size > viewer_mod.MAX_LOG_BYTES
+        assert "FIRST_LINE_SHOULD_BE_TRUNCATED" not in text
+        assert "FINAL_TAIL_MARKER" in text
+        assert len(text.splitlines()) <= viewer_mod.MAX_LOG_LINES
+
+        async def _drive():
+            app = PubrunTUIApp(output_dir=str(runs))
+            async with app.run_test() as pilot:
+                await _show_tab(app, pilot, "tab-logs")
+                viewer = app.query_one("#logs-view", LogViewer)
+                log_area = viewer.query_one("#log-content-area", RichLog)
+                wrap_btn = viewer.query_one("#btn-toggle-wrap", Button)
+
+                out = _log_text(log_area)
+                assert "[Truncated:" in out
+                assert "FINAL_TAIL_MARKER" in out
+                assert "FIRST_LINE_SHOULD_BE_TRUNCATED" not in out
+
+                # Wrap button updates label, toggles wrap, and reloads current file.
+                reloads = []
+                orig_load = viewer.load_log_file
+
+                def _spy(path_str):
+                    reloads.append(path_str)
+                    return orig_load(path_str)
+
+                monkeypatch.setattr(viewer, "load_log_file", _spy)
+
+                assert str(wrap_btn.label) == "Wrap: OFF"
+                assert log_area.wrap is False
+
+                wrap_btn.press()
+                await pilot.pause()
+                assert log_area.wrap is True
+                assert str(wrap_btn.label) == "Wrap: ON"
+                assert len(reloads) == 1
+
+                wrap_btn.press()
+                await pilot.pause()
+                assert log_area.wrap is False
+                assert str(wrap_btn.label) == "Wrap: OFF"
+                assert len(reloads) == 2
+
+        asyncio.run(_drive())
+
+
+# --------------------------------------------------------------------------- #
+# 3q5rd5: DiffView standard default, pre-selection, path_split & list_diff
+# --------------------------------------------------------------------------- #
+
+class TestDiffViewHardening:
+    def test_defaults_to_standard_excludes_non_manifest_and_preselects_latest_two(self, tmp_path):
+        from pubrun.tui.app import PubrunTUIApp
+        from pubrun.tui.widgets.diff import DiffView
+
+        runs = tmp_path / "runs"
+        oldest = _write_manifest(runs / "pubrun-diff1", "diff1", started_at=1000.0)
+        middle = _write_manifest(runs / "pubrun-diff2", "diff2", started_at=2000.0)
+        newest = _write_manifest(runs / "pubrun-diff3", "diff3", started_at=3000.0)
+        # Lock-only run with no manifest.json must be excluded from diff dropdowns.
+        lock_only = runs / "pubrun-nomani"
+        lock_only.mkdir(parents=True)
+        (lock_only / ".pubrun.lock").write_text(
+            json.dumps({"run_id": "nomani", "pid": 999999, "started_at_utc": 4000.0}),
+            encoding="utf-8",
+        )
+
+        async def _drive():
+            app = PubrunTUIApp(output_dir=str(runs))
+            async with app.run_test() as pilot:
+                await _show_tab(app, pilot, "tab-diff")
+                view = app.query_one("#diff-view", DiffView)
+                depth_sel = view.query_one("#select-diff-depth", Select)
+                sel_a = view.query_one("#select-diff-a", Select)
+                sel_b = view.query_one("#select-diff-b", Select)
+
+                assert depth_sel.value == "standard"
+                # Older baseline A = middle, newer comparison B = newest
+                assert sel_a.value == str(middle)
+                assert sel_b.value == str(newest)
+
+                raw_legal = getattr(sel_a, "_legal_values", None)
+                if raw_legal is None:
+                    raw_legal = [val for _, val in getattr(sel_a, "_options", [])]
+                legal = {opt for opt in raw_legal if opt != _SELECT_EMPTY_VALUE}
+                assert str(lock_only) not in legal
+                assert {str(oldest), str(middle), str(newest)} == legal
+
+        asyncio.run(_drive())
+
+    def test_renders_path_split_reorder_and_list_diff_deltas(self, tmp_path):
+        from pubrun.tui.app import PubrunTUIApp
+        from pubrun.tui.widgets.diff import DiffView
+
+        runs = tmp_path / "runs"
+
+        async def _drive():
+            app = PubrunTUIApp(output_dir=str(runs))
+            async with app.run_test() as pilot:
+                await _show_tab(app, pilot, "tab-diff")
+                view = app.query_one("#diff-view", DiffView)
+                view.render_diff_report(
+                    {
+                        "added": {},
+                        "removed": {},
+                        "modified": {
+                            "env.PATH": {
+                                "type": "path_split",
+                                "added": [],
+                                "removed": [],
+                                "order_changed": True,
+                                "old": "/usr/bin:/opt/bin",
+                                "new": "/opt/bin:/usr/bin",
+                            },
+                            "invocation.argv": {
+                                "type": "list_diff",
+                                "removed": ["--old-flag"],
+                                "added": ["--new-flag"],
+                                "order_changed": True,
+                            },
+                        },
+                        "same": {},
+                    }
+                )
+                await pilot.pause()
+                out = _log_text(view.query_one("#diff-output-area", RichLog))
+                assert "~ [ORDER CHANGED]" in out
+                assert "- /usr/bin:/opt/bin" in out
+                assert "+ /opt/bin:/usr/bin" in out
+                assert "- --old-flag" in out
+                assert "+ --new-flag" in out
 
         asyncio.run(_drive())

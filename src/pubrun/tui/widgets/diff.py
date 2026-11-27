@@ -5,23 +5,24 @@ Semantic diff widget for comparing two runs.
 from __future__ import annotations
 import json
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from textual.app import ComposeResult
-from textual.containers import Vertical, Horizontal
-from textual.widgets import Select, Checkbox, Button, RichLog, Label
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Button, Checkbox, Label, RichLog, Select
 from rich.text import Text
 
-from pubrun.status import scan_runs, RunInfo
+from pubrun.status import RunInfo
 from pubrun.report.utils import hydrate_manifest
 from pubrun.analysis.diff import compare_manifests
 from pubrun.config import resolve_config
 from pubrun.tui.widgets.config import _is_select_empty
 
+
 class DiffView(Vertical):
     """Component to select, execute, and display semantic differences between two runs."""
 
-    def __init__(self, output_dir: Optional[str] = None, **kwargs) -> None:
+    def __init__(self, output_dir: Optional[str] = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.output_dir = output_dir
 
@@ -33,12 +34,14 @@ class DiffView(Vertical):
                 yield Select([], id="select-diff-b", prompt="Comparison Run B...")
             with Horizontal(id="diff-settings"):
                 yield Select(
-                    [("Basic (Ignore Jitter & Env)", "basic"),
-                     ("Standard (Compare dependencies)", "standard"),
-                     ("Deep (Compare full environment)", "deep")],
+                    [
+                        ("Basic (Script & config summary; hides env/packages/hardware)", "basic"),
+                        ("Standard (Default; hides volatile jitter, compares code/env/packages)", "standard"),
+                        ("Deep (Full comparison; hides nothing)", "deep"),
+                    ],
                     id="select-diff-depth",
-                    value="basic",
-                    prompt="Select Depth..."
+                    value="standard",
+                    prompt="Select Depth...",
                 )
                 yield Checkbox("Show Identical Keys", value=False, id="check-show-same")
             with Horizontal(id="diff-actions-row"):
@@ -49,25 +52,37 @@ class DiffView(Vertical):
         yield RichLog(id="diff-output-area", max_lines=5000, classes="log-area")
 
     def populate_dropdowns(self, runs: List[RunInfo]) -> None:
-        """Populate the Run A and Run B dropdowns with the current list of runs."""
+        """Populate Run A/B dropdowns with manifest-bearing runs and pre-select latest two."""
         select_a = self.query_one("#select-diff-a", Select)
         select_b = self.query_one("#select-diff-b", Select)
 
-        # Build options list
-        options = [(f"{r.script or 'unknown'} ({(r.run_id or 'unknown')[:8]})", str(r.run_dir)) for r in runs]
+        # Only include runs that have a manifest.json file to compare.
+        comparable = [r for r in runs if (Path(r.run_dir) / "manifest.json").is_file()]
+        options = [
+            (f"{r.script or 'unknown'} ({(r.run_id or 'unknown')[:8]})", str(r.run_dir))
+            for r in comparable
+        ]
+        option_values = {opt[1] for opt in options}
 
-        # Save previous selections if any
         prev_a = select_a.value
         prev_b = select_b.value
 
         select_a.set_options(options)
         select_b.set_options(options)
 
-        # Restore previous selection if still valid
-        if prev_a and any(opt[1] == prev_a for opt in options):
+        valid_a = (not _is_select_empty(prev_a)) and prev_a in option_values
+        valid_b = (not _is_select_empty(prev_b)) and prev_b in option_values
+
+        if valid_a:
             select_a.value = prev_a
-        if prev_b and any(opt[1] == prev_b for opt in options):
+        if valid_b:
             select_b.value = prev_b
+
+        # When both selections are empty/invalid and at least two comparable runs exist,
+        # pre-select the two most recent comparable runs (older baseline A, newer B).
+        if not valid_a and not valid_b and len(comparable) >= 2:
+            select_a.value = str(comparable[1].run_dir)
+            select_b.value = str(comparable[0].run_dir)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-execute-diff":
@@ -119,9 +134,9 @@ class DiffView(Vertical):
 
             warnings = list(warn_a or []) + list(warn_b or [])
 
-            # Determine ignores list
+            # Determine ignores list (default matches CLI/API "standard")
             depth_val = self.query_one("#select-diff-depth", Select).value
-            depth = "basic" if _is_select_empty(depth_val) or not depth_val else str(depth_val)
+            depth = "standard" if _is_select_empty(depth_val) or not depth_val else str(depth_val)
             conf = resolve_config().get("diff", {})
             if depth == "basic":
                 ignores = conf.get("ignore_basic", [])
@@ -151,7 +166,6 @@ class DiffView(Vertical):
         for w in warnings or []:
             output.write(Text(f"[Warning] {w}", style="#f9e2af"))
 
-        # Formatting values helper
         def _fmt_val(val: Any) -> str:
             return json.dumps(val, indent=2) if isinstance(val, (dict, list)) else str(val)
 
@@ -184,11 +198,24 @@ class DiffView(Vertical):
             output.write(Text("MODIFIED KEYS (~):", style="bold #f9e2af"))
             for k, mod in sorted(modified.items()):
                 output.write(Text(f"  ~ {k}:", style="#f9e2af"))
-                if mod.get("type") == "path_split":
+                mod_type = mod.get("type")
+                if mod_type == "path_split":
                     for p_add in mod.get("added", []):
                         output.write(Text(f"      + {p_add}", style="#a6e3a1"))
                     for p_sub in mod.get("removed", []):
                         output.write(Text(f"      - {p_sub}", style="#f38ba8"))
+                    if mod.get("order_changed") or (not mod.get("added") and not mod.get("removed")):
+                        output.write(Text("      ~ [ORDER CHANGED]", style="#f9e2af"))
+                        if "old" in mod and "new" in mod:
+                            output.write(Text(f"      - {_fmt_val(mod.get('old', ''))}", style="#f38ba8"))
+                            output.write(Text(f"      + {_fmt_val(mod.get('new', ''))}", style="#a6e3a1"))
+                elif mod_type == "list_diff":
+                    for item in mod.get("removed", []):
+                        output.write(Text(f"      - {_fmt_val(item)}", style="#f38ba8"))
+                    for item in mod.get("added", []):
+                        output.write(Text(f"      + {_fmt_val(item)}", style="#a6e3a1"))
+                    if mod.get("order_changed"):
+                        output.write(Text("      ~ [ORDER CHANGED]", style="#f9e2af"))
                 else:
                     old_str = _fmt_val(mod.get("old", ""))
                     new_str = _fmt_val(mod.get("new", ""))

@@ -167,12 +167,23 @@ class TestAppWiring:
             assert app.selected_run_info is not None
             assert app.selected_run_info.run_id == "bbbb2222"
             assert "  Run ID:        bbbb2222" in _general_text(app).splitlines()
+
+            # Inactive tabs stay lazy until activated.
+            assert app.query_one("#logs-view", LogViewer).run_dir is None
+            assert app.query_one("#resources-view", RunResourcesView).run_info is None
+            assert app.query_one("#actions-view", ActionsPanel).run_info is None
+
+            await _show_tab(app, pilot, "tab-logs")
             assert [p.name for p in app.query_one("#logs-view", LogViewer).log_files] == [
                 "console.log"
             ]
+
+            await _show_tab(app, pilot, "tab-resources")
             assert str(app.query_one("#resources-body").render()).startswith(
                 "No resource samples recorded for this run"
             )
+
+            await _show_tab(app, pilot, "tab-actions")
             assert app.query_one("#actions-view", ActionsPanel).rerun_command == "python eval.py"
 
         res = _run_app(runs, _body, monkeypatch)
@@ -247,7 +258,7 @@ class TestRunsSidebar:
         _run_app(runs, _body, monkeypatch)
 
     def test_scan_failure_is_shown_as_a_tree_leaf(self, tmp_path, monkeypatch):
-        def _boom(_output_dir):
+        def _boom(_output_dir, **_kwargs):
             raise RuntimeError("disk on fire")
 
         monkeypatch.setattr(sidebar_mod, "scan_runs", _boom)
@@ -589,8 +600,8 @@ class TestCopyToClipboard:
         calls = []
         outcomes = outcomes or {}
 
-        def _run(cmd, input=None, text=None, check=None):
-            calls.append((cmd, input, text, check))
+        def _run(cmd, input=None, text=None, check=None, timeout=None, stdout=None, stderr=None):
+            calls.append((cmd, input, text, check, timeout, stdout, stderr))
             err = outcomes.get(cmd[0])
             if err is not None:
                 raise err
@@ -599,47 +610,63 @@ class TestCopyToClipboard:
         monkeypatch.setattr(
             actions_mod,
             "subprocess",
-            types.SimpleNamespace(run=_run, CalledProcessError=subprocess.CalledProcessError),
+            types.SimpleNamespace(
+                run=_run,
+                DEVNULL=subprocess.DEVNULL,
+                CalledProcessError=subprocess.CalledProcessError,
+                TimeoutExpired=subprocess.TimeoutExpired,
+            ),
         )
         return calls
 
     def test_darwin_uses_pbcopy(self, monkeypatch):
         calls = self._patch(monkeypatch, "darwin")
         assert copy_to_clipboard("hi") is True
-        assert calls == [(["pbcopy"], "hi", True, True)]
+        assert calls == [(["pbcopy"], "hi", True, True, 5, subprocess.DEVNULL, subprocess.DEVNULL)]
 
     def test_win32_uses_clip(self, monkeypatch):
         calls = self._patch(monkeypatch, "win32")
         assert copy_to_clipboard("hi") is True
-        assert calls == [(["clip"], "hi", True, True)]
+        assert calls == [(["clip"], "hi", True, True, 5, subprocess.DEVNULL, subprocess.DEVNULL)]
 
-    def test_linux_uses_xclip_first(self, monkeypatch):
+    def test_linux_uses_wl_copy_first(self, monkeypatch):
         calls = self._patch(monkeypatch, "linux")
         assert copy_to_clipboard("hi") is True
-        assert calls == [(["xclip", "-selection", "clipboard"], "hi", True, True)]
+        assert calls == [(["wl-copy"], "hi", True, True, 5, subprocess.DEVNULL, subprocess.DEVNULL)]
 
-    def test_linux_falls_back_to_xsel(self, monkeypatch):
-        calls = self._patch(monkeypatch, "linux", {"xclip": FileNotFoundError("no xclip")})
-        assert copy_to_clipboard("hi") is True
-        assert [cmd for cmd, *_ in calls] == [
-            ["xclip", "-selection", "clipboard"],
-            ["xsel", "--clipboard", "--input"],
-        ]
-
-    def test_linux_both_missing_returns_false(self, monkeypatch):
+    def test_linux_falls_back_to_xclip_then_xsel(self, monkeypatch):
         calls = self._patch(
             monkeypatch,
             "linux",
             {
+                "wl-copy": FileNotFoundError("no wl-copy"),
                 "xclip": FileNotFoundError("no xclip"),
+            },
+        )
+        assert copy_to_clipboard("hi") is True
+        assert [cmd for cmd, *_ in calls] == [
+            ["wl-copy"],
+            ["xclip", "-selection", "clipboard"],
+            ["xsel", "--clipboard", "--input"],
+        ]
+
+    def test_linux_all_missing_returns_false(self, monkeypatch):
+        calls = self._patch(
+            monkeypatch,
+            "linux",
+            {
+                "wl-copy": FileNotFoundError("no wl-copy"),
+                "xclip": subprocess.TimeoutExpired(["xclip"], 5),
                 "xsel": subprocess.CalledProcessError(1, ["xsel"]),
             },
         )
         assert copy_to_clipboard("hi") is False
-        assert len(calls) == 2
+        assert len(calls) == 3
 
-    def test_darwin_failure_returns_false(self, monkeypatch):
+    def test_darwin_failure_and_timeout_return_false(self, monkeypatch):
         self._patch(monkeypatch, "darwin", {"pbcopy": FileNotFoundError("no pbcopy")})
+        assert copy_to_clipboard("hi") is False
+        self._patch(monkeypatch, "darwin", {"pbcopy": subprocess.TimeoutExpired(["pbcopy"], 5)})
         assert copy_to_clipboard("hi") is False
 
 
@@ -852,7 +879,11 @@ class TestLogViewerStates:
 
             viewer.display_run_logs(empty_run)
             await pilot.pause()
-            assert _log_lines(log_area) == ["No log files found in this run directory."]
+            lines = _log_lines(log_area)
+            assert lines[0] == "No log files found in this run directory."
+            joined = "\n".join(lines)
+            assert '[console].capture_mode = "standard"' in joined
+            assert "import pubrun.full" in joined
 
         _run_app(runs, _body, monkeypatch)
 
@@ -1179,14 +1210,14 @@ class TestRunDetailsStates:
 
             seen = []
 
-            def _fail_run_info(path):
-                seen.append(path)
+            def _fail_run_info(path, **kwargs):
+                seen.append((path, kwargs))
                 raise OSError("transient read error")
 
             monkeypatch.setattr(details_mod, "RunInfo", _fail_run_info)
             details.refresh_live_metrics()
             await pilot.pause()
-            assert seen == [live_dir]
+            assert seen == [(live_dir, {"keep_manifest": False})]
             assert "  Arguments:     --step 2" in _general_text(app).splitlines()
 
             seen.clear()
@@ -1242,3 +1273,520 @@ class TestRunResourcesStates:
             )
 
         _run_app(runs, _body, monkeypatch)
+
+
+# --------------------------------------------------------------------------- #
+# 3q5rd5: Bulk prune modal + stderr capture, safe_delete_run_dir, hydration,
+#         in-memory sidebar, lazy tabs, keybindings, and atomic ConfigPanel
+# --------------------------------------------------------------------------- #
+
+
+class TestBulkPruneConfirmationAndStderr:
+    def test_execute_prune_opens_modal_cancel_preserves_confirm_deletes_and_captures_stderr(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from pubrun.tui.widgets.actions import ConfirmBulkPruneModal
+
+        runs = tmp_path / "runs"
+        old1 = _write_run(runs, "prun0001", age=30 * 86400, logs={"stdout.log": "A" * 2048})
+        old2 = _write_run(runs, "prun0002", age=40 * 86400, logs={"stdout.log": "B" * 2048})
+        recent = _write_run(runs, "keep0001", age=60)
+
+        real_clean = actions_mod.clean_runs
+
+        def _clean_with_stderr(*args, **kwargs):
+            import sys as _sys
+
+            print("Simulated stderr warning from clean_runs", file=_sys.stderr)
+            return real_clean(*args, **kwargs)
+
+        monkeypatch.setattr(actions_mod, "clean_runs", _clean_with_stderr)
+
+        async def _body(app, pilot, notes):
+            await _show_tab(app, pilot, "tab-actions")
+            panel = app.query_one("#actions-view", ActionsPanel)
+
+            # 1. Invalid age reports error and does NOT open modal.
+            panel.query_one("#input-clean-older", Input).value = "2w"
+            await pilot.pause()
+            notes.clear()
+            panel.query_one("#btn-prune-execute", Button).press()
+            await pilot.pause()
+            assert not isinstance(app.screen, ConfirmBulkPruneModal)
+            assert any(sev == "error" for _, sev in notes)
+
+            # 2. Zero matching runs notifies without opening modal.
+            panel.query_one("#input-clean-older", Input).value = "365d"
+            await pilot.pause()
+            notes.clear()
+            panel.query_one("#btn-prune-execute", Button).press()
+            await pilot.pause()
+            assert not isinstance(app.screen, ConfirmBulkPruneModal)
+            assert any("No runs match" in msg for msg, _ in notes)
+
+            # 3. Valid criteria opens modal with exact count & disk size; cancel deletes nothing.
+            panel.query_one("#input-clean-older", Input).value = "7d"
+            await pilot.pause()
+            panel.query_one("#btn-prune-execute", Button).press()
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmBulkPruneModal)
+            modal = app.screen
+            assert modal.matched_count == 2
+            assert modal.total_size_bytes >= 4096
+            rendered = " ".join(str(lbl.render()) for lbl in modal.query("Label"))
+            assert "2 run(s)" in rendered
+
+            modal.query_one("#btn-cancel-bulk-prune", Button).press()
+            await pilot.pause()
+            assert not isinstance(app.screen, ConfirmBulkPruneModal)
+            assert old1.exists() and old2.exists() and recent.exists()
+
+            # 4. Re-open and confirm -> deletes old1/old2, keeps recent, captures stderr cleanly.
+            panel.query_one("#btn-prune-execute", Button).press()
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmBulkPruneModal)
+            app.screen.query_one("#btn-confirm-bulk-prune", Button).press()
+            await pilot.pause()
+            await pilot.pause()
+
+            assert not old1.exists()
+            assert not old2.exists()
+            assert recent.exists()
+            log_text = "\n".join(_log_lines(panel.query_one("#cleanup-log-output", RichLog)))
+            assert "Simulated stderr warning from clean_runs" in log_text
+
+        _run_app(runs, _body, monkeypatch)
+        # No raw stderr bled outside the TUI.
+        assert "Simulated stderr warning from clean_runs" not in capsys.readouterr().err
+
+
+class TestSafeDeleteGuardsAndLabels:
+    def test_handle_deletion_and_archive_delete_raw_refuse_symlink_escape_and_remote_lock(
+        self, tmp_path, monkeypatch
+    ):
+        import os
+
+        runs = tmp_path / "runs"
+        runs.mkdir(parents=True)
+
+        # 1. Symlink run directory
+        real_target = tmp_path / "outside_real"
+        real_target.mkdir()
+        (real_target / "secret.txt").write_text("keep", encoding="utf-8")
+        sym_dir = runs / "pubrun-sym00001"
+        sym_dir.symlink_to(real_target)
+        sym_info = RunInfo(sym_dir, keep_manifest=False)
+
+        # 2. Out-of-output-dir path
+        outside_run = _write_run(tmp_path / "other_runs", "esc00001")
+        outside_info = RunInfo(outside_run, keep_manifest=False)
+
+        # 3. Remote-locked run directory
+        remote_dir = _write_run(runs, "rem00001")
+        (remote_dir / ".pubrun.lock").write_text(
+            json.dumps(
+                {
+                    "pid": 424242,
+                    "run_id": "rem00001",
+                    "hostname": "other-hpc-node-never-local",
+                    "started_at_utc": time.time(),
+                }
+            ),
+            encoding="utf-8",
+        )
+        remote_info = RunInfo(remote_dir, keep_manifest=False)
+
+        # 4. Active local-locked run directory
+        active_dir = _write_run(runs, "act00001")
+        (active_dir / ".pubrun.lock").write_text(
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "run_id": "act00001",
+                    "script": "train.py",
+                    "hostname": "",
+                    "started_at_utc": time.time(),
+                }
+            ),
+            encoding="utf-8",
+        )
+        from pubrun import status as status_mod
+
+        monkeypatch.setattr(status_mod, "is_same_process", lambda pid, *a, **kw: pid == os.getpid())
+        active_info = RunInfo(active_dir, keep_manifest=False)
+
+        async def _body(app, pilot, notes):
+            await _show_tab(app, pilot, "tab-actions")
+            panel = app.query_one("#actions-view", ActionsPanel)
+
+            # Check archive destination label and cleanup hints
+            dest_text = str(panel.query_one("#lbl-archive-dest").render())
+            assert "<output_dir>/archive/<run_id>.zip" in dest_text
+            hint_text = str(panel.query_one("#lbl-cleanup-hints").render())
+            for st in ("completed", "failed", "interrupted", "broken pipe", "running", "crashed", "ghost"):
+                assert st in hint_text
+
+            # Verify handle_deletion_result refuses all 4 unsafe targets and keeps run_info intact.
+            for unsafe_info in (sym_info, outside_info, remote_info, active_info):
+                panel.display_run(unsafe_info)
+                await pilot.pause()
+                notes.clear()
+                panel.handle_deletion_result(True)
+                await pilot.pause()
+                assert any(sev == "error" and msg.startswith("Deletion failed: ") for msg, sev in notes)
+                assert panel.run_info is unsafe_info
+                assert unsafe_info.run_dir.exists()
+
+            # Verify archive_selected_run(delete_raw=True) also enforces safe_delete_run_dir.
+            panel.query_one("#check-delete-raw", Checkbox).value = True
+            for unsafe_info in (outside_info, remote_info, active_info):
+                panel.display_run(unsafe_info)
+                await pilot.pause()
+                notes.clear()
+                panel.archive_selected_run()
+                await pilot.pause()
+                assert any(sev == "error" and msg.startswith("Deletion failed: ") for msg, sev in notes)
+                assert unsafe_info.run_dir.exists()
+
+            assert real_target.exists() and (real_target / "secret.txt").exists()
+
+        _run_app(runs, _body, monkeypatch)
+
+
+class TestHydrationSidebarLazyAndKeybindings:
+    def test_hpc_meta_ref_hydration_once_dirty_none_pkg_search_and_actions_under_keep_manifest_false(
+        self, tmp_path, monkeypatch
+    ):
+        from textual.widgets import DataTable
+        from pubrun.report import utils as report_utils
+
+        runs = tmp_path / "runs"
+        child_dir = runs / "pubrun-hpc00001"
+        child_dir.mkdir(parents=True)
+        # Parent meta.json inside child run dir (allowed under default confinement).
+        (child_dir / "meta.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "manifest_type": "pubrun-meta-snapshot",
+                    "host": {
+                        "hostname": "hpc-node-42",
+                        "os_name": "Linux",
+                        "os_release": "6.6.0",
+                        "capture_state": {"status": "complete"},
+                    },
+                    "hardware": {
+                        "cpu": {"model": "AMD EPYC 9654", "logical_cores": 96, "architecture": "x86_64"},
+                        "memory_total_bytes": 512 * 1024**3,
+                        "capture_state": {"status": "complete"},
+                    },
+                    "git": {
+                        "commit": "deadbeef" * 5,
+                        "branch": "hpc-main",
+                        "dirty": None,
+                        "capture_state": {"status": "complete"},
+                    },
+                    "packages": {
+                        "records": [
+                            {"name": "numpy", "version": "1.26.4", "editable": False},
+                            {"name": "scipy", "version": "1.13.0", "editable": False},
+                        ],
+                        "capture_state": {"status": "complete"},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        (child_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "meta_ref": "meta.json",
+                    "run": {"run_id": "hpc00001"},
+                    "status": {"outcome": "completed", "exit_code": 0},
+                    "timing": {"started_at_utc": time.time() - 10, "elapsed_seconds": 2.0},
+                    "invocation": {
+                        "script": {"basename": "hpc_train.py"},
+                        "argv": ["hpc_train.py", "--batch", "64"],
+                        "rerun_command": "python hpc_train.py --batch 64",
+                    },
+                    "host": {"capture_state": {"status": "suppressed"}},
+                    "hardware": {"capture_state": {"status": "suppressed"}},
+                    "git": {"capture_state": {"status": "suppressed"}},
+                    "packages": {"capture_state": {"status": "suppressed"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        other_dir = _write_run(
+            runs,
+            "hpc00002",
+            script="other.py",
+            age=100,
+            extra={
+                "git": {"commit": "1" * 40, "branch": "main", "dirty": False},
+                "packages": {
+                    "records": [
+                        {"name": "numpy", "version": "2.0.0", "editable": False},
+                        {"name": "pandas", "version": "2.2.0", "editable": False},
+                    ]
+                },
+            },
+        )
+
+        hydrate_calls = []
+        real_hydrate = report_utils.hydrate_manifest_with_report
+
+        def _spy_hydrate(path, manifest):
+            hydrate_calls.append(path)
+            return real_hydrate(path, manifest)
+
+        monkeypatch.setattr(report_utils, "hydrate_manifest_with_report", _spy_hydrate)
+
+        async def _body(app, pilot, notes):
+            await pilot.pause()
+            # Auto-selected newest run (hpc00001) on mount with keep_manifest=False.
+            assert app.selected_run_info is not None
+            assert app.selected_run_info.run_id == "hpc00001"
+            assert app.selected_run_info.manifest is None
+            # Hydrated exactly ONCE per display_run!
+            assert len(hydrate_calls) == 1
+
+            gen = _general_text(app)
+            assert "AMD EPYC 9654" in gen
+            assert "hpc-node-42" in gen
+            assert "hpc-main" in gen
+            assert "Repo Dirty:     not checked" in gen
+
+            # Hydrated parent packages are populated in #packages-table.
+            pkg_table = app.query_one("#packages-table", DataTable)
+            assert pkg_table.row_count == 2
+
+            # Set #pkg-search filter and switch runs -> filter reapplies automatically.
+            details = app.query_one("#details-view", RunDetailsView)
+            details.query_one("#pkg-search", Input).value = "numpy"
+            await pilot.pause()
+            assert pkg_table.row_count == 1
+
+            details.display_run(RunInfo(other_dir, keep_manifest=False))
+            await pilot.pause()
+            assert pkg_table.row_count == 1
+            assert pkg_table.get_row_at(0)[0] == "numpy"
+            assert pkg_table.get_row_at(0)[1] == "2.0.0"
+            assert "Repo Dirty:     False" in _general_text(app)
+
+            # Switch back to hpc00001 and activate Actions tab -> citations work under keep_manifest=False.
+            app._select_run(RunInfo(child_dir, keep_manifest=False))
+            await _show_tab(app, pilot, "tab-actions")
+            actions = app.query_one("#actions-view", ActionsPanel)
+            assert actions.rerun_command == "python hpc_train.py --batch 64"
+            assert actions.raw_manifest is not None
+            citation_text = str(actions.query_one("#lbl-methods-citation").render())
+            assert "AMD EPYC 9654" in citation_text
+
+        _run_app(runs, _body, monkeypatch)
+
+    def test_in_memory_search_zero_scans_args_status_leaf_nodes_and_onboarding(self, tmp_path, monkeypatch):
+        # 1. Zero-run onboarding guidance
+        empty_runs = tmp_path / "empty_runs"
+
+        async def _empty_body(app, pilot, notes):
+            await pilot.pause()
+            gen = _general_text(app)
+            assert "import pubrun" in gen
+            assert "pubrun init" in gen
+
+        _run_app(empty_runs, _empty_body, monkeypatch)
+
+        # 2. In-memory search with zero disk scans, matching args & status, and leaf nodes
+        runs = tmp_path / "runs"
+        _write_run(
+            runs,
+            "srch0001",
+            script="train.py",
+            age=10,
+            extra={
+                "invocation": {
+                    "script": {"basename": "train.py"},
+                    "argv": ["train.py", "--lr", "0.001", "--model", "resnet"],
+                }
+            },
+        )
+        _write_run(
+            runs,
+            "srch0002",
+            script="eval.py",
+            age=20,
+            extra={"status": {"outcome": "failed", "exit_code": 1}},
+        )
+
+        scan_calls = []
+        real_scan = sidebar_mod.scan_runs
+
+        def _spy_scan(*args, **kwargs):
+            scan_calls.append((args, kwargs))
+            return real_scan(*args, **kwargs)
+
+        monkeypatch.setattr(sidebar_mod, "scan_runs", _spy_scan)
+
+        async def _body(app, pilot, notes):
+            await pilot.pause()
+            # Exactly 1 scan on mount, using keep_manifest=False.
+            assert len(scan_calls) == 1
+            assert scan_calls[0][1].get("keep_manifest") is False
+
+            tree = app.query_one("#runs-tree", Tree)
+            assert all(child.allow_expand is False for child in tree.root.children)
+
+            search = app.query_one("#runs-search", Input)
+            search.value = "resnet"
+            await pilot.pause()
+            assert _tree_labels(app) == ["train.py [srch0001] • COMPLETED"]
+
+            search.value = "FAILED"
+            await pilot.pause()
+            assert _tree_labels(app) == ["eval.py [srch0002] • FAILED"]
+
+            search.value = ""
+            await pilot.pause()
+            assert len(_tree_labels(app)) == 2
+
+            # Zero additional scan_runs() calls during typing!
+            assert len(scan_calls) == 1
+
+        _run_app(runs, _body, monkeypatch)
+
+    def test_keybindings_project_config_tab_and_yield_to_focused_input(self, tmp_path, monkeypatch):
+        from pubrun.tui.app import KeybindHelpModal
+
+        runs = tmp_path / "runs"
+        _write_run(runs, "keys0001", script="train.py", age=10)
+
+        async def _body(app, pilot, notes):
+            await pilot.pause()
+            tabs = app.query_one("#workspace-tabs", TabbedContent)
+
+            # Tab 6 is renamed from "TUI Settings" to "Project Config".
+            cfg_tab = tabs.get_tab("tab-config")
+            assert str(cfg_tab.label) == "Project Config"
+
+            # Unfocused number keys 2..6 and 1 switch tabs.
+            await pilot.press("2")
+            await pilot.pause()
+            assert tabs.active == "tab-logs"
+
+            await pilot.press("6")
+            await pilot.pause()
+            assert tabs.active == "tab-config"
+
+            await pilot.press("1")
+            await pilot.pause()
+            assert tabs.active == "tab-details"
+
+            # '?' opens KeybindHelpModal when unfocused.
+            await pilot.press("?")
+            await pilot.pause()
+            assert isinstance(app.screen, KeybindHelpModal)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, KeybindHelpModal)
+
+            # '/' focuses #runs-search; once focused, 1-6, /, ? go into the Input, NOT bindings!
+            await pilot.press("/")
+            await pilot.pause()
+            search = app.query_one("#runs-search", Input)
+            assert app.focused is search
+
+            await pilot.press("2", "?", "/")
+            await pilot.pause()
+            assert tabs.active == "tab-details"
+            assert not isinstance(app.screen, KeybindHelpModal)
+            assert search.value == "2?/"
+
+        _run_app(runs, _body, monkeypatch)
+
+
+class TestConfigPanelHardening:
+    def test_target_path_imports_mode_regex_rejection_nondict_guard_and_sidebar_refresh(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        runs_a = tmp_path / "runs_a"
+        runs_b = tmp_path / "runs_b"
+        _write_run(runs_a, "aaaa1111", script="a.py")
+        _write_run(runs_b, "bbbb2222", script="b.py")
+
+        # Write a .pubrun.toml with a non-dict section ("events" as scalar) to verify guard.
+        (tmp_path / ".pubrun.toml").write_text(
+            '[core]\noutput_dir = "runs_a"\n\n[imports]\nmode = "noauto"\n\nevents = "broken"\n',
+            encoding="utf-8",
+        )
+
+        async def _drive():
+            # Unpinned output_dir=None (no explicit --dir) so changing output_dir refreshes sidebar!
+            app = PubrunTUIApp(output_dir=None)
+            notes = _capture_notifications(app, monkeypatch)
+            async with app.run_test() as pilot:
+                await _show_tab(app, pilot, "tab-config")
+                panel = app.query_one("#config-view", ConfigPanel)
+                sidebar = app.query_one("#sidebar", RunsSidebar)
+                assert [r.run_id for r in sidebar.all_runs] == ["aaaa1111"]
+
+                # Target path header displays resolved .pubrun.toml
+                header_text = str(panel.query_one("#cfg-target-path").render())
+                assert str(tmp_path / ".pubrun.toml") in header_text
+
+                # [imports].mode initialized from resolved config + precedence hint present
+                imports_sel = panel.query_one("#cfg-imports-mode", Select)
+                assert imports_sel.value == "noauto"
+                assert "takes precedence" in str(panel.query_one("#cfg-imports-mode-hint").render())
+
+                # Invalid regex aborts save, notifies error, preserves user input AND disk file!
+                regex_input = panel.query_one("#cfg-sensitive-regex", Input)
+                orig_disk = (tmp_path / ".pubrun.toml").read_text(encoding="utf-8")
+                regex_input.value = "[unclosed"
+                await pilot.pause()
+                notes.clear()
+                panel.save_settings()
+                await pilot.pause()
+                assert any(sev == "error" and "regex" in msg.lower() for msg, sev in notes)
+                assert regex_input.value == "[unclosed"
+                assert (tmp_path / ".pubrun.toml").read_text(encoding="utf-8") == orig_disk
+
+                # Fix regex, switch imports.mode and output_dir -> saves atomically and refreshes sidebar!
+                regex_input.value = "(?i)token"
+                imports_sel.value = "minimal"
+                panel.query_one("#cfg-output-dir", Input).value = "runs_b"
+                await pilot.pause()
+                notes.clear()
+                panel.save_settings()
+                await pilot.pause()
+                await pilot.pause()
+
+                assert notes[0] == ("Configuration saved to: .pubrun.toml", "information")
+                # No leftover .tmp files in tmp_path
+                assert not list(tmp_path.glob("*.tmp"))
+                # Saved TOML parses cleanly and preserves non-dict section recovery
+                saved = tomllib.loads((tmp_path / ".pubrun.toml").read_text(encoding="utf-8"))
+                assert saved["imports"]["mode"] == "minimal"
+                assert saved["core"]["output_dir"] == "runs_b"
+                assert saved["events"]["enabled"] is True
+                assert saved["redaction"]["sensitive_keys_regex"] == "(?i)token"
+                # Sidebar refreshed to runs_b!
+                assert [r.run_id for r in sidebar.all_runs] == ["bbbb2222"]
+
+        asyncio.run(_drive())
+
+    def test_atomic_write_cleans_up_temp_file_on_replace_failure(self, tmp_path, monkeypatch):
+        from pubrun.tui.widgets import config as config_mod
+
+        def _boom(_src, _dst):
+            raise OSError("simulated replace failure")
+
+        monkeypatch.setattr(config_mod.os, "replace", _boom)
+        target = tmp_path / ".pubrun.toml"
+        with pytest.raises(OSError, match="simulated replace failure"):
+            config_mod._atomic_write_text(target, "[core]\nauto_start = true\n")
+        assert not target.exists()
+        assert not list(tmp_path.glob("*.tmp"))

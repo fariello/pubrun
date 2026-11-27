@@ -56,7 +56,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Destructive action safety, clipboard, and rerun parity
 
-- [ ] E-01 Harden `src/pubrun/tui/widgets/actions.py`:
+- [x] E-01 Harden `src/pubrun/tui/widgets/actions.py`:
   - Add a `ConfirmBulkPruneModal` confirmation modal pushed by `ActionsPanel.on_button_pressed()` when `#btn-prune-execute` is pressed: first validate age/status criteria and compute matched run count and total disk space to be freed using `scan_runs(self.output_dir, keep_manifest=False)` and `filter_runs(...)` (reporting invalid criteria without opening the modal, and notifying without deleting when 0 runs match); invoke `self.run_bulk_prune(dry_run=False)` only when confirmed (keeping direct `panel.run_bulk_prune(dry_run=...)` calls functional for unit tests). Capture both `stdout` and `stderr` (`contextlib.redirect_stdout` + `contextlib.redirect_stderr`) during `clean_runs()` so no raw terminal output bleeds into the live TUI.
   - Route BOTH `ActionsPanel.handle_deletion_result()` AND `ActionsPanel.archive_selected_run()`'s `delete_raw=True` branch through `src/pubrun/status.py::safe_delete_run_dir(run_dir, base_dir)` using the configured `output_dir` as `base_dir` (never `run_dir.parent`, which would defeat confinement). When `safe_delete_run_dir()` returns `(False, reason)`, notify `f"Deletion failed: {reason}"` with `severity="error"` (preserving error messages such as read-only filesystem errors) and leave `self.run_info` intact.
   - Update `ActionsPanel.display_run()` to load the manifest on demand via `run_info.load_manifest()` when `run_info.manifest is None` (required once `RunsSidebar` scans with `keep_manifest=False`), populating `self.raw_manifest`, rerun command, and methods citations cleanly.
@@ -65,11 +65,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Extract a pure `_build_rerun_command(lock_data: Dict[str, Any]) -> str` helper from `ActionsPanel.display_run()`: on Windows (`sys.platform == "win32"`), emit PowerShell 5.1-safe two-line output (`cd <quoted_cwd>\n<py_cmd>`, never `&&`); on POSIX, preserve `cd <quoted_cwd> && <py_cmd>`; avoid duplicating `script` when `lock_data["argv"]` already starts with `script` or when `sys_argv` is present.
   - Depends on: none
   - Expected outcome: Clicking `Execute Prune` opens a confirmation modal with matched count and disk size and zero `stderr` bleed; single-run delete and archive `delete_raw` enforce all `safe_delete_run_dir` guards; `ActionsPanel` works with `keep_manifest=False` runs; clipboard never hangs and supports Wayland; and Windows rerun commands work in PowerShell 5.1.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Hydration, in-memory sidebar, lazy tabs, and bounded `LogViewer`
 
-- [ ] E-02 Fix `src/pubrun/tui/widgets/sidebar.py`, `src/pubrun/tui/widgets/details.py`, `src/pubrun/tui/widgets/resources.py`, and `src/pubrun/tui/app.py`:
+- [x] E-02 Fix `src/pubrun/tui/widgets/sidebar.py`, `src/pubrun/tui/widgets/details.py`, `src/pubrun/tui/widgets/resources.py`, and `src/pubrun/tui/app.py`:
   - In `src/pubrun/tui/widgets/sidebar.py::RunsSidebar`: load runs via `scan_runs(self.output_dir, keep_manifest=False)` only on mount and explicit refresh (`load_runs()`, triggered by `Ctrl+R` / `RefreshSidebar`), extract `_render_tree(filter_text)` to filter `self.all_runs` purely in memory on `on_input_changed()` (case-insensitively matching `run_id`, `script`, `args`, and `status`), and add run nodes via `tree.root.add_leaf()` so leaf rows do not show empty expand carets.
   - In `src/pubrun/tui/app.py::PubrunTUIApp`:
     - Auto-select the most recent run on mount when `sidebar.all_runs` is non-empty (displaying it in the active tab while leaving inactive tabs marked dirty). When `0` runs exist, show an onboarding panel in `RunDetailsView` with accurate `import pubrun` / `pubrun init` guidance.
@@ -85,9 +85,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Load `manifest = run_info.load_manifest()` on demand and render populated `manifest.resources` summary fields (`peak_rss_bytes`, `peak_cpu_percent`, `system_memory`, `load_average`, `system_iowait_pct`, `io_counters`) alongside per-sample `events.jsonl` digests, or as a fallback summary when `events.jsonl` has no samples. When BOTH `events.jsonl` has no samples AND `manifest.resources` has no recorded summary fields, preserve the `"No resource samples recorded for this run ..."` message (preserving existing tests). Keep `read_resource_series()` exceptions caught and rendered as `"Could not render resource usage: <Type>: <msg>"`.
   - Depends on: E-01
   - Expected outcome: Typing in `#runs-search` executes zero `scan_runs()` calls, HPC `meta_ref` runs show hydrated hardware/git/packages across all detail panes with `keep_manifest=False`, inactive tabs render lazily on activation, live refresh stays lightweight, and `RunResourcesView` surfaces `manifest.resources` metrics without breaking empty-run tests.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Fix `src/pubrun/tui/widgets/viewer.py`:
+- [x] E-03 Fix `src/pubrun/tui/widgets/viewer.py`:
   - Eliminate double-reading by updating `#select-log-file` inside `with select_widget.prevent(Select.Changed):` (or an equivalent suppression guard) before calling `self.load_log_file(default_val)` exactly once per run selection.
   - Sort discovered log files deterministically by filename, prioritizing `"stdout.log"` first, then `"stderr.log"`, and falling back to legacy `"console.log"` only when it exists on disk (keeping existing legacy `console.log` runs readable).
   - Read only a bounded tail window (last 5,000 lines within a 2 MiB byte window from end of file (EOF) via binary `seek()`) and prepend a clear truncation banner when truncated so multi-hundred-MB logs never freeze or run out of memory (OOM).
@@ -95,11 +95,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - When no log files exist in `run_dir`, display `"No log files found in this run directory."` plus an inline hint explaining `[console].capture_mode = "standard"` in `.pubrun.toml` or `import pubrun.full`.
   - Depends on: E-02
   - Expected outcome: Selecting a run reads its default log file once in bounded random-access memory (RAM), `"Wrap: ON"`/`"Wrap: OFF"` visibly re-wraps loaded lines with explicit state feedback, and empty log views teach how to enable console capture.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Atomic `ConfigPanel`, `DiffView`, and responsive CSS
 
-- [ ] E-04 Fix `src/pubrun/tui/widgets/config.py`, `src/pubrun/tui/widgets/diff.py`, and `src/pubrun/tui/css/style.css`:
+- [x] E-04 Fix `src/pubrun/tui/widgets/config.py`, `src/pubrun/tui/widgets/diff.py`, and `src/pubrun/tui/css/style.css`:
   - In `src/pubrun/tui/widgets/config.py`:
     - Display the resolved target file path (`Path.cwd() / ".pubrun.toml"`) in the panel header.
     - Remove dead `"cfg-profile"` from `_SELECT_OPTIONS`.
@@ -117,11 +117,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Make `DataTable` column widths in `RunDetailsView` fit narrow terminals cleanly while preserving `subprocesses-table` `"Elapsed"` column `width=18` (pinned by `tests/test_timing_consumers.py`).
   - Depends on: E-02, E-03
   - Expected outcome: `ConfigPanel` writes validated TOML atomically with inline regex validation and `[imports].mode` visibility, `DiffView` defaults to `"standard"` with pre-selected comparable runs and full `path_split`/`list_diff` rendering, and 80x24 terminals render without clipping.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 4: Existing-test alignment and Textual pilot / unit tests
 
-- [ ] E-05 Align affected existing tests and add Textual pilot and unit tests in `tests/test_tui.py`, `tests/test_tui_bugs.py`, and `tests/test_tui_widgets.py`:
+- [x] E-05 Align affected existing tests and add Textual pilot and unit tests in `tests/test_tui.py`, `tests/test_tui_bugs.py`, and `tests/test_tui_widgets.py`:
   - Update existing tests whose assertions intentionally change:
     - `tests/test_tui_widgets.py::TestAppWiring.test_tree_selection_updates_details_logs_resources_and_actions`: activate `tab-logs`, `tab-resources`, and `tab-actions` via `_show_tab()` to verify lazy tab rendering updates each tab on activation.
     - `tests/test_tui_widgets.py::TestRunsSidebar.test_scan_failure_is_shown_as_a_tree_leaf`: accept `**_kwargs` (for `keep_manifest=False`) in `_boom`.
@@ -140,7 +140,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - `DiffView` defaults to `"standard"`, excludes non-manifest runs, pre-selects the two most recent comparable runs, and renders `path_split` reorder and `list_diff` deltas; 80x24 pilot mount (`size=(80, 24)`) renders without error or clipping.
   - Depends on: E-04
   - Expected outcome: All updated and new TUI tests plus `tests/test_timing_consumers.py` pass and three-platform `mypy` exits `0`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -188,30 +188,95 @@ None. `ConfigPanel` remains an explicit `.pubrun.toml` editor with clear target-
 
 Validation-state rule: inspect evidence in a separate pass. Accepted validation results: blocked, failed, pass, pending; terminal gate demands `pass`.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest` output for `src/pubrun/tui/widgets/actions.py::ActionsPanel` (`ConfirmBulkPruneModal`, `run_bulk_prune`, `handle_deletion_result`, `archive_selected_run`, `display_run`), `copy_to_clipboard`, and `_build_rerun_command` in `tests/test_tui.py`, `tests/test_tui_bugs.py`, and `tests/test_tui_widgets.py` confirming bulk-prune confirmation modal & stderr capture, `safe_delete_run_dir` guards on both delete and archive `delete_raw`, `load_manifest()` support, `wl-copy`/timeout clipboard, and Windows PowerShell-safe rerun command pass.
   - Observed evidence:
-  - Result: pending
+    ```text
+    tests/test_tui.py::TestTuiReproducibilityAndActions::test_actions_panel_redacted_advisory_clearing_and_clean_clipboard PASSED [  7%]
+    tests/test_tui.py::TestBuildRerunCommand::test_win32_emits_powershell_newline_and_no_double_ampersand PASSED [  8%]
+    tests/test_tui.py::TestBuildRerunCommand::test_avoids_duplicating_script_from_argv_or_sys_argv PASSED [  8%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_rerun_copy_for_lock_only_run PASSED [ 11%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_delete_degraded_run_with_none_run_id PASSED [ 12%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_bulk_prune_invalid_age_reports_error_and_deletes_nothing[2w..inf] PASSED [ 13%-15%]
+    tests/test_tui_bugs.py::TestActionsPanel::test_bulk_prune_accepts_canonical_age_units[60m-True..7-True] PASSED [ 16%-18%]
+    tests/test_tui_widgets.py::TestActionsArchive::test_archive_creates_zip_and_keeps_raw_dir PASSED [ 43%]
+    tests/test_tui_widgets.py::TestActionsArchive::test_archive_with_delete_raw_removes_dir_and_refreshes_sidebar PASSED [ 44%]
+    tests/test_tui_widgets.py::TestConfirmDeleteModal::test_delete_error_is_reported_and_run_kept PASSED [ 52%]
+    tests/test_tui_widgets.py::TestBulkPruneDryRun::test_dry_run_lists_candidates_and_deletes_nothing PASSED [ 52%]
+    tests/test_tui_widgets.py::TestCopyToClipboard::test_darwin_uses_pbcopy PASSED [ 53%]
+    tests/test_tui_widgets.py::TestCopyToClipboard::test_win32_uses_clip PASSED [ 54%]
+    tests/test_tui_widgets.py::TestCopyToClipboard::test_linux_uses_wl_copy_first PASSED [ 54%]
+    tests/test_tui_widgets.py::TestCopyToClipboard::test_linux_falls_back_to_xclip_then_xsel PASSED [ 55%]
+    tests/test_tui_widgets.py::TestCopyToClipboard::test_linux_all_missing_returns_false PASSED [ 55%]
+    tests/test_tui_widgets.py::TestCopyToClipboard::test_darwin_failure_and_timeout_return_false PASSED [ 56%]
+    tests/test_tui_widgets.py::TestBulkPruneConfirmationAndStderr::test_execute_prune_opens_modal_cancel_preserves_confirm_deletes_and_captures_stderr PASSED [ 81%]
+    tests/test_tui_widgets.py::TestSafeDeleteGuardsAndLabels::test_handle_deletion_and_archive_delete_raw_refuse_symlink_escape_and_remote_lock PASSED [ 81%]
+    ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest` output for `src/pubrun/tui/widgets/details.py::RunDetailsView`, `sidebar.py::RunsSidebar`, `resources.py::RunResourcesView`, and `tui/app.py::PubrunTUIApp` in `tests/test_tui.py`, `tests/test_tui_bugs.py`, and `tests/test_tui_widgets.py` confirming hydrated HPC `RunDetailsView` under `keep_manifest=False`, zero `scan_runs` calls during search typing, auto-selection on mount, lazy tab activation, non-priority `1`–`6`/`/`/`?` bindings, lightweight live refresh, and `RunResourcesView` `manifest.resources` fallback pass.
   - Observed evidence:
-  - Result: pending
+    ```text
+    tests/test_tui.py::TestTuiResourceView::test_resource_view_populates_and_degrades PASSED [  5%]
+    tests/test_tui.py::TestTuiManifestResourcesFallback::test_manifest_resources_rendered_without_and_with_events PASSED [  9%]
+    tests/test_tui_widgets.py::TestAppWiring::test_tree_selection_updates_details_logs_resources_and_actions PASSED [ 40%]
+    tests/test_tui_widgets.py::TestRunsSidebar::test_search_filters_by_script_and_run_id_case_insensitively PASSED [ 42%]
+    tests/test_tui_widgets.py::TestRunsSidebar::test_scan_failure_is_shown_as_a_tree_leaf PASSED [ 43%]
+    tests/test_tui_widgets.py::TestRunDetailsStates::test_refresh_live_metrics_reloads_running_run_only PASSED [ 79%]
+    tests/test_tui_widgets.py::TestRunResourcesStates::test_corrupt_events_file_shows_no_samples PASSED [ 80%]
+    tests/test_tui_widgets.py::TestRunResourcesStates::test_reader_exception_is_rendered_not_raised PASSED [ 80%]
+    tests/test_tui_widgets.py::TestHydrationSidebarLazyAndKeybindings::test_hpc_meta_ref_hydration_once_dirty_none_pkg_search_and_actions_under_keep_manifest_false PASSED [ 82%]
+    tests/test_tui_widgets.py::TestHydrationSidebarLazyAndKeybindings::test_in_memory_search_zero_scans_args_status_leaf_nodes_and_onboarding PASSED [ 83%]
+    tests/test_tui_widgets.py::TestHydrationSidebarLazyAndKeybindings::test_keybindings_project_config_tab_and_yield_to_focused_input PASSED [ 83%]
+    ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `pytest` output for `src/pubrun/tui/widgets/viewer.py::LogViewer` (`display_run_logs`, `load_log_file`, `on_button_pressed`) in `tests/test_tui_bugs.py` and `tests/test_tui_widgets.py` confirming single bounded tail read (1 `load_log_file` call per selection + truncation banner), working `#btn-toggle-wrap` reload + `"Wrap: ON"`/`"Wrap: OFF"` label state, deterministic log priority, and missing-console-log capture hint pass.
   - Observed evidence:
-  - Result: pending
+    ```text
+    tests/test_tui_bugs.py::TestLogViewer::test_blank_selection_ignored_on_change_and_refresh PASSED [ 37%]
+    tests/test_tui_bugs.py::TestLogViewerHardening::test_single_load_per_selection_and_log_priority PASSED [ 38%]
+    tests/test_tui_bugs.py::TestLogViewerHardening::test_bounded_tail_truncation_banner_and_wrap_toggle_reloads PASSED [ 38%]
+    tests/test_tui_widgets.py::TestLogViewerStates::test_missing_dir_and_dir_without_logs PASSED [ 61%]
+    tests/test_tui_widgets.py::TestLogViewerStates::test_select_switches_file_and_wrap_toggles PASSED [ 62%]
+    tests/test_tui_widgets.py::TestLogViewerStates::test_missing_and_unreadable_log_file PASSED [ 62%]
+    ```
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest` output for `src/pubrun/tui/widgets/config.py::ConfigPanel`/`dict_to_toml`, `diff.py::DiffView`, and `css/style.css` in `tests/test_tui.py`, `tests/test_tui_bugs.py`, `tests/test_tui_widgets.py`, and `tests/test_timing_consumers.py` confirming regex rejection preserving input, `[imports].mode` select, atomic `tomllib`-validated `dict_to_toml`, `DiffView` `"standard"` default/pre-selection/`path_split`/`list_diff`, 80x24 pilot layout, and `Elapsed` `width=18` preservation pass.
   - Observed evidence:
-  - Result: pending
+    ```text
+    tests/test_tui.py::TestConfigTomlHardening::test_dict_to_toml_omits_none_quotes_non_bare_keys_and_round_trips PASSED [  9%]
+    tests/test_tui.py::TestTuiLayout80x24::test_80x24_pilot_mount_all_tabs_and_help_modal PASSED [ 10%]
+    tests/test_tui_bugs.py::TestConfigPanel::test_save_never_writes_select_null PASSED [ 19%]
+    tests/test_tui_bugs.py::TestDiffView::test_blank_runs_report_selection_error PASSED [ 20%]
+    tests/test_tui_bugs.py::TestDiffView::test_depth_fallback_and_warnings_preserved[depth0] PASSED [ 21%]
+    tests/test_tui_bugs.py::TestDiffViewHardening::test_defaults_to_standard_excludes_non_manifest_and_preselects_latest_two PASSED [ 39%]
+    tests/test_tui_bugs.py::TestDiffViewHardening::test_renders_path_split_reorder_and_list_diff_deltas PASSED [ 40%]
+    tests/test_tui_widgets.py::TestConfigPanelHardening::test_target_path_imports_mode_regex_rejection_nondict_guard_and_sidebar_refresh PASSED [ 84%]
+    tests/test_tui_widgets.py::TestConfigPanelHardening::test_atomic_write_cleans_up_temp_file_on_replace_failure PASSED [ 84%]
+    tests/test_timing_consumers.py::TestTuiTimingViews::test_tui_details_legacy_monotonic_incomplete_and_lock_only PASSED [ 99%]
+    tests/test_timing_consumers.py::TestTuiTimingViews::test_tui_diff_view_passes_depth_and_renders_timing_note PASSED [100%]
+    ```
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted output of `pytest tests/test_tui.py tests/test_tui_bugs.py tests/test_tui_widgets.py tests/test_timing_consumers.py -v` (covering all updated and new test classes across all three TUI test files plus timing-consumer TUI tests) and three-platform `mypy && mypy --platform win32 && mypy --platform darwin` exiting `0`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    $ pytest tests/test_tui.py tests/test_tui_bugs.py tests/test_tui_widgets.py tests/test_timing_consumers.py -v
+    collected 172 items
+    ======================= 172 passed in 103.18s (0:01:43) ========================
+
+    $ mypy && mypy --platform win32 && mypy --platform darwin
+    Success: no issues found in 70 source files
+    Success: no issues found in 70 source files
+    Success: no issues found in 70 source files
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 

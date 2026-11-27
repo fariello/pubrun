@@ -422,3 +422,229 @@ class TestTuiReproducibilityAndActions:
                 assert any(sev == "information" for _, sev in notifications)
 
         asyncio.run(_drive())
+
+
+class TestBuildRerunCommand:
+    """Unit tests for the pure _build_rerun_command helper (E-01)."""
+
+    def test_win32_emits_powershell_newline_and_no_double_ampersand(self, monkeypatch):
+        pytest.importorskip("textual")
+        import types
+        from pubrun.tui.widgets import actions as actions_mod
+
+        monkeypatch.setattr(actions_mod, "sys", types.SimpleNamespace(platform="win32"))
+        cmd = actions_mod._build_rerun_command(
+            {
+                "script": "train.py",
+                "argv": ["--epochs", "5"],
+                "cwd": r"C:\work\my project",
+            }
+        )
+        assert "&&" not in cmd
+        lines = cmd.splitlines()
+        assert len(lines) == 2
+        assert lines[0].startswith("cd ")
+        assert "my project" in lines[0]
+        assert lines[1] == "python train.py --epochs 5"
+
+    def test_avoids_duplicating_script_from_argv_or_sys_argv(self, monkeypatch):
+        pytest.importorskip("textual")
+        import types
+        from pubrun.tui.widgets import actions as actions_mod
+
+        monkeypatch.setattr(actions_mod, "sys", types.SimpleNamespace(platform="linux"))
+        cmd_dup = actions_mod._build_rerun_command(
+            {"script": "train.py", "argv": ["train.py", "--lr", "0.01"], "cwd": "/tmp/work"}
+        )
+        assert cmd_dup == "cd /tmp/work && python train.py --lr 0.01"
+
+        cmd_sys = actions_mod._build_rerun_command(
+            {
+                "script": "train.py",
+                "argv": ["--lr", "0.01"],
+                "sys_argv": ["src/train.py", "--lr", "0.01"],
+                "cwd": "",
+            }
+        )
+        assert cmd_sys == "python src/train.py --lr 0.01"
+
+
+class TestConfigTomlHardening:
+    """Unit tests for dict_to_toml hardening and _SELECT_OPTIONS cleanup (E-04)."""
+
+    def test_dict_to_toml_omits_none_quotes_non_bare_keys_and_round_trips(self):
+        pytest.importorskip("textual")
+        import sys as _sys
+
+        if _sys.version_info >= (3, 11):
+            import tomllib
+        else:
+            import tomli as tomllib  # type: ignore[no-redef]
+
+        from pubrun.tui.widgets.config import _SELECT_OPTIONS, dict_to_toml
+
+        assert "cfg-profile" not in _SELECT_OPTIONS
+        assert [val for _, val in _SELECT_OPTIONS["cfg-imports-mode"]] == [
+            "auto",
+            "full",
+            "noauto",
+            "nopatch",
+            "noconsole",
+            "minimal",
+        ]
+
+        data = {
+            "core": {
+                "output_dir": "./runs",
+                "nullable": None,
+                "key with spaces": "v1",
+                "tags": ["a", None, "b", True, 3],
+            },
+            "only_none": {"empty_val": None},
+            "dotted.section": {"x.y": 42},
+        }
+        toml_str = dict_to_toml(data)
+        assert "nullable" not in toml_str
+        assert "only_none" not in toml_str
+        parsed = tomllib.loads(toml_str)
+        assert parsed == {
+            "core": {
+                "output_dir": "./runs",
+                "key with spaces": "v1",
+                "tags": ["a", "b", True, 3],
+            },
+            "dotted.section": {"x.y": 42},
+        }
+
+
+class TestTuiManifestResourcesFallback:
+    """Verify RunResourcesView renders manifest.resources fields with and without events.jsonl (E-02)."""
+
+    def test_manifest_resources_rendered_without_and_with_events(self, tmp_path):
+        pytest.importorskip("textual")
+        import asyncio
+        from pubrun.status import RunInfo
+        from pubrun.tui.app import PubrunTUIApp
+        from pubrun.tui.widgets.resources import RunResourcesView
+
+        runs = tmp_path / "runs"
+        summary_only = runs / "pubrun-resm0001"
+        summary_only.mkdir(parents=True)
+        (summary_only / "manifest.json").write_text(
+            _json.dumps(
+                {
+                    "run": {"run_id": "resm0001"},
+                    "status": {"outcome": "completed"},
+                    "timing": {"started_at_utc": 1000.0},
+                    "resources": {
+                        "peak_rss_bytes": 256 * 1024 * 1024,
+                        "peak_cpu_percent": 82.5,
+                        "system_memory": {
+                            "start": {"available_bytes": 8 * 1024**3, "total_bytes": 16 * 1024**3},
+                            "min_available": {"available_bytes": 6 * 1024**3},
+                        },
+                        "load_average": {"start": {"1min": 1.25}, "max_1min": 3.5},
+                        "system_iowait_pct": {"max": 12.4},
+                        "io_counters": {
+                            "delta": {
+                                "read_bytes": 4 * 1024 * 1024,
+                                "write_bytes": 2 * 1024 * 1024,
+                                "rchar": 10 * 1024 * 1024,
+                                "wchar": 5 * 1024 * 1024,
+                            }
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with_events = _make_run_with_samples(tmp_path)
+        ev_manifest = _json.loads((with_events / "manifest.json").read_text(encoding="utf-8"))
+        ev_manifest["resources"]["peak_rss_bytes"] = 64 * 1024 * 1024
+        ev_manifest["resources"]["load_average"] = {"start": {"1min": 0.5}, "max_1min": 1.0}
+        (with_events / "manifest.json").write_text(_json.dumps(ev_manifest), encoding="utf-8")
+
+        async def _drive():
+            app = PubrunTUIApp(output_dir=str(runs))
+            async with app.run_test() as pilot:
+                view = app.query_one("#resources-view", RunResourcesView)
+
+                # Fallback when events.jsonl is absent but manifest.resources is populated
+                # (uses keep_manifest=False to verify on-demand load_manifest()).
+                info_summary = RunInfo(summary_only, keep_manifest=False)
+                assert info_summary.manifest is None
+                view.display_run(info_summary)
+                await pilot.pause()
+                text = str(app.query_one("#resources-body").render())
+                assert "Peak RSS:" in text and "256.0MB" in text
+                assert "Peak CPU:" in text and "82.5%" in text
+                assert "System RAM:" in text and "Min Avail RAM:" in text
+                assert "Load Average:" in text and "3.50 peak (1-min)" in text
+                assert "Node iowait:" in text and "12.4%" in text
+                assert "Disk I/O:" in text and "Logical I/O:" in text
+
+                # Alongside per-sample events.jsonl digest
+                view.display_run(RunInfo(with_events, keep_manifest=False))
+                await pilot.pause()
+                both_text = str(app.query_one("#resources-body").render())
+                assert "RSS (main)" in both_text
+                assert "Manifest Resource Summary:" in both_text
+                assert "Load Average:" in both_text
+
+        asyncio.run(_drive())
+
+
+class TestTuiLayout80x24:
+    """Verify 80x24 terminal layout renders all tabs and modals without error or clipping (E-04)."""
+
+    def test_80x24_pilot_mount_all_tabs_and_help_modal(self, tmp_path):
+        pytest.importorskip("textual")
+        import asyncio
+        from textual.widgets import DataTable, TabbedContent
+        from pubrun.tui.app import KeybindHelpModal, PubrunTUIApp
+        from pubrun.tui.widgets.actions import ActionsPanel
+
+        run = _make_run_with_samples(tmp_path)
+        (run / "stdout.log").write_text("line 1\nline 2\n", encoding="utf-8")
+
+        async def _drive():
+            app = PubrunTUIApp(output_dir=str(tmp_path / "runs"))
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                sidebar = app.query_one("#sidebar")
+                assert 20 <= sidebar.size.width <= 35
+
+                # Verify subprocesses-table Elapsed column retains width=18
+                sub_table = app.query_one("#subprocesses-table", DataTable)
+                elapsed_cols = [c for c in sub_table.columns.values() if str(c.label) == "Elapsed"]
+                assert elapsed_cols and elapsed_cols[0].width == 18
+
+                tabs = app.query_one("#workspace-tabs", TabbedContent)
+                for tab_id in (
+                    "tab-details",
+                    "tab-logs",
+                    "tab-resources",
+                    "tab-diff",
+                    "tab-actions",
+                    "tab-config",
+                ):
+                    tabs.active = tab_id
+                    await pilot.pause()
+                    assert tabs.active == tab_id
+
+                # ActionsPanel wraps content in ScrollableContainer so bottom controls are reachable
+                panel = app.query_one("#actions-view", ActionsPanel)
+                assert panel.query_one("#actions-scroll") is not None
+                assert panel.query_one("#btn-prune-execute") is not None
+
+                # Help modal fits within 80x24 viewport (max-width: 90%)
+                app.action_show_help()
+                await pilot.pause()
+                assert isinstance(app.screen, KeybindHelpModal)
+                dialog = app.screen.query_one("#dialog-container")
+                assert dialog.size.width <= 72
+                app.screen.dismiss(None)
+                await pilot.pause()
+
+        asyncio.run(_drive())

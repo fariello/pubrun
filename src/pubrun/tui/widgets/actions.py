@@ -3,32 +3,43 @@ Actions and Citations panel for managing runs (deleting, archiving, and methods 
 """
 
 from __future__ import annotations
-import json
+import contextlib
+import io
 import re
 import shlex
 import shutil
-import zipfile
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from textual.app import ComposeResult
-from textual.containers import Vertical, Horizontal, ScrollableContainer
+from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.message import Message
-from textual.widgets import Static, Button, Label, RichLog, Input, Checkbox
 from textual.screen import ModalScreen
+from textual.widgets import Button, Checkbox, Input, Label, RichLog, Static
 from rich.text import Text
 
 from pubrun.status import (
     RunInfo,
-    clean_runs,
-    can_safely_auto_close_crashed_run,
     STATUS_RUNNING,
+    VALID_STATUSES,
+    _dir_size,
+    _format_bytes,
+    _inspect_run_lock,
+    _resolve_output_dir,
+    clean_runs,
+    filter_runs,
+    safe_delete_run_dir,
+    scan_runs,
 )
 from pubrun.report.diagnostics import format_redacted_rerun_advisory
 from pubrun.report.methods import generate_report
 from pubrun.report.utils import hydrate_manifest
+
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _refresh_sidebar_message(app: Any) -> Message:
@@ -40,24 +51,106 @@ def _refresh_sidebar_message(app: Any) -> Message:
     return PubrunTUIApp.RefreshSidebar()
 
 
+def _format_delete_reason(run_dir: Path, reason: Optional[str]) -> str:
+    """Normalize ``safe_delete_run_dir`` error messages to avoid redundant prefixes."""
+    detail = reason or "unknown error"
+    prefix = f"Failed to remove {run_dir.name}: "
+    if detail.startswith(prefix):
+        detail = detail[len(prefix):]
+    return detail
+
+
+def _build_rerun_command(lock_data: Dict[str, Any]) -> str:
+    """Reconstruct a shell-safe rerun command from a run's ``.pubrun.lock`` payload.
+
+    On Windows (``sys.platform == "win32"``), emits PowerShell 5.1-safe two-line
+    output (``cd <cwd>\\n<py_cmd>``) instead of ``&&``. On POSIX, preserves
+    ``cd <cwd> && <py_cmd>``. Avoids duplicating ``script`` when ``sys_argv`` is
+    present or ``argv`` already begins with ``script``.
+    """
+    sys_argv = lock_data.get("sys_argv")
+    if isinstance(sys_argv, list) and sys_argv:
+        tokens = [str(a) for a in sys_argv]
+    else:
+        raw_argv = lock_data.get("argv", [])
+        argv = [str(a) for a in raw_argv] if isinstance(raw_argv, list) else []
+        script = str(lock_data.get("script") or "")
+        if script:
+            if argv and (
+                argv[0] == script
+                or Path(argv[0]).name == script
+                or Path(argv[0]).stem == script
+            ):
+                tokens = argv
+            else:
+                tokens = [script] + argv
+        else:
+            tokens = argv
+
+    cmd_tokens = ["python"] + tokens
+    cwd = str(lock_data.get("cwd") or "")
+    if sys.platform == "win32":
+        py_cmd = subprocess.list2cmdline(cmd_tokens)
+        if cwd:
+            return f"cd {subprocess.list2cmdline([cwd])}\n{py_cmd}"
+        return py_cmd
+
+    py_cmd = shlex.join(cmd_tokens)
+    return f"cd {shlex.quote(cwd)} && {py_cmd}" if cwd else py_cmd
+
+
 # Dynamic clipboard helper
 def copy_to_clipboard(text: str) -> bool:
     """Attempt to copy text to system clipboard using native commands."""
     try:
         if sys.platform == "darwin":
-            subprocess.run(["pbcopy"], input=text, text=True, check=True)
+            subprocess.run(
+                ["pbcopy"],
+                input=text,
+                text=True,
+                check=True,
+                timeout=5,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
             return True
         elif sys.platform == "win32":
-            subprocess.run(["clip"], input=text, text=True, check=True)
+            subprocess.run(
+                ["clip"],
+                input=text,
+                text=True,
+                check=True,
+                timeout=5,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
             return True
         else:
-            # Linux / BSD: try xclip or xsel
-            for cmd in [["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]:
+            # Linux / BSD: try wl-copy (Wayland), xclip, then xsel
+            for cmd in [
+                ["wl-copy"],
+                ["xclip", "-selection", "clipboard"],
+                ["xsel", "--clipboard", "--input"],
+            ]:
                 try:
-                    subprocess.run(cmd, input=text, text=True, check=True)
+                    subprocess.run(
+                        cmd,
+                        input=text,
+                        text=True,
+                        check=True,
+                        timeout=5,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
                     return True
-                except (FileNotFoundError, subprocess.CalledProcessError):
+                except (
+                    FileNotFoundError,
+                    subprocess.CalledProcessError,
+                    subprocess.TimeoutExpired,
+                ):
                     continue
+    except subprocess.TimeoutExpired:
+        return False
     except Exception:
         pass
     return False
@@ -99,10 +192,59 @@ class ConfirmDeleteModal(ModalScreen[bool]):
             self.dismiss(True)
 
 
+class ConfirmBulkPruneModal(ModalScreen[bool]):
+    """Safety modal confirming permanent bulk deletion of matched runs."""
+
+    def __init__(
+        self,
+        matched_count: int,
+        total_size_bytes: int,
+        older_than: str = "",
+        status_filter: str = "",
+    ) -> None:
+        super().__init__()
+        self.matched_count = matched_count
+        self.total_size_bytes = total_size_bytes
+        self.older_than = older_than
+        self.status_filter = status_filter
+
+    def compose(self) -> ComposeResult:
+        size_str = _format_bytes(self.total_size_bytes)
+        criteria_parts: List[str] = []
+        if self.older_than:
+            criteria_parts.append(f"older than {self.older_than}")
+        if self.status_filter:
+            criteria_parts.append(f"statuses: {self.status_filter}")
+        criteria_note = f"Criteria: {'; '.join(criteria_parts)}." if criteria_parts else "Criteria: all deletable runs."
+        yield Vertical(
+            Label("CONFIRM BULK PRUNE", id="dialog-title"),
+            Label(
+                f"Permanently delete {self.matched_count} run(s) freeing {size_str}?",
+                classes="info-label",
+            ),
+            Label(
+                f"{criteria_note} This action cannot be undone!",
+                id="dialog-message",
+            ),
+            Horizontal(
+                Button("Cancel", id="btn-cancel-bulk-prune"),
+                Button("CONFIRM PRUNE", id="btn-confirm-bulk-prune", variant="error"),
+                classes="horizontal-buttons",
+            ),
+            id="dialog-container",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-cancel-bulk-prune":
+            self.dismiss(False)
+        elif event.button.id == "btn-confirm-bulk-prune":
+            self.dismiss(True)
+
+
 class ActionsPanel(Vertical):
     """Component handling citations compiler, rerun command, archive compress, and deletions."""
 
-    def __init__(self, output_dir: Optional[str] = None, **kwargs) -> None:
+    def __init__(self, output_dir: Optional[str] = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.output_dir = output_dir
         self.run_info: Optional[RunInfo] = None
@@ -110,42 +252,62 @@ class ActionsPanel(Vertical):
         self.rerun_command: Optional[str] = None
 
     def compose(self) -> ComposeResult:
-        with Horizontal(classes="grid-container"):
-            # Left Card: Citation & Rerun
-            with Vertical(classes="panel-card"):
-                yield Label("CITATION & REPLICABILITY", classes="panel-card-title")
-                yield Label("Rerun Command:", classes="info-label")
-                yield Static("Select a run to view rerun command.", id="lbl-rerun-command", classes="info-value")
-                yield Static("", id="lbl-rerun-advisory", classes="info-value")
-                yield Button("Copy Rerun Command", id="btn-copy-rerun", variant="primary")
-                yield Label("Academic Methods Citation:", classes="info-label")
-                yield ScrollableContainer(Static("", id="lbl-methods-citation"), classes="transcript-area")
-                with Horizontal():
-                    yield Button("Copy Markdown", id="btn-copy-md", variant="primary")
-                    yield Button("Copy LaTeX", id="btn-copy-latex", variant="primary")
+        all_statuses = ", ".join(VALID_STATUSES)
+        with ScrollableContainer(id="actions-scroll"):
+            with Horizontal(classes="grid-container"):
+                # Left Card: Citation & Rerun
+                with Vertical(classes="panel-card"):
+                    yield Label("CITATION & REPLICABILITY", classes="panel-card-title")
+                    yield Label("Rerun Command:", classes="info-label")
+                    yield Static("Select a run to view rerun command.", id="lbl-rerun-command", classes="info-value")
+                    yield Static("", id="lbl-rerun-advisory", classes="info-value")
+                    yield Button("Copy Rerun Command", id="btn-copy-rerun", variant="primary")
+                    yield Label("Academic Methods Citation:", classes="info-label")
+                    yield ScrollableContainer(Static("", id="lbl-methods-citation"), classes="transcript-area")
+                    with Horizontal(classes="button-row"):
+                        yield Button("Copy Markdown", id="btn-copy-md", variant="primary")
+                        yield Button("Copy LaTeX", id="btn-copy-latex", variant="primary")
 
-            # Right Card: Run Archiving & Deletion
-            with Vertical(classes="panel-card"):
-                yield Label("RUN MANAGEMENT", classes="panel-card-title")
-                yield Label("Archive / Compress Run Folder:", classes="info-label")
-                yield Static("Packs current run folder into zip under run_dir/archive/.", classes="info-value")
-                yield Button("Archive Run (ZIP)", id="btn-archive-run", variant="success")
-                yield Checkbox("Delete raw directory after archiving", value=False, id="check-delete-raw")
-                yield Label("Danger Zone:", classes="info-label")
-                yield Button("Delete Selected Run", id="btn-delete-selected", variant="error")
+                # Right Card: Run Archiving & Deletion
+                with Vertical(classes="panel-card"):
+                    yield Label("RUN MANAGEMENT", classes="panel-card-title")
+                    yield Label("Archive / Compress Run Folder:", classes="info-label")
+                    yield Static(
+                        "Packs current run folder into <output_dir>/archive/<run_id>.zip.",
+                        id="lbl-archive-dest",
+                        classes="info-value",
+                    )
+                    yield Button("Archive Run (ZIP)", id="btn-archive-run", variant="success")
+                    yield Checkbox("Delete raw directory after archiving", value=False, id="check-delete-raw")
+                    yield Label("Danger Zone:", classes="info-label")
+                    yield Button("Delete Selected Run", id="btn-delete-selected", variant="error")
 
-        # Bottom section: Bulk cleanup
-        with Vertical(classes="panel-card margin-vertical"):
-            yield Label("BULK RUN CLEANUP", classes="panel-card-title")
-            with Horizontal(id="cleanup-inputs"):
-                yield Label("Older Than:", classes="info-label")
-                yield Input("7d", id="input-clean-older", placeholder="e.g. 7d, 24h")
-                yield Label("Statuses (comma separated):", classes="info-label")
-                yield Input("completed,failed,crashed,ghost", id="input-clean-status")
-            with Horizontal():
-                yield Button("Preview Prune (Dry Run)", id="btn-prune-dry", variant="primary")
-                yield Button("Execute Prune", id="btn-prune-execute", variant="error")
-            yield RichLog(id="cleanup-log-output", max_lines=500, classes="log-area")
+            # Bottom section: Bulk cleanup
+            with Vertical(classes="panel-card margin-vertical"):
+                yield Label("BULK RUN CLEANUP", classes="panel-card-title")
+                with Horizontal(id="cleanup-inputs"):
+                    yield Label("Older Than:", classes="info-label")
+                    yield Input(
+                        "7d",
+                        id="input-clean-older",
+                        placeholder="Units: d, h, m, s, or bare days (e.g. 7d, 24h, 30m, 90s, 3)",
+                    )
+                    yield Label("Statuses (comma separated):", classes="info-label")
+                    yield Input(
+                        "completed,failed,crashed,ghost",
+                        id="input-clean-status",
+                        placeholder="completed,failed,interrupted,broken pipe,running,crashed,ghost",
+                    )
+                yield Static(
+                    f"Valid statuses: {all_statuses} (running runs are never deleted). "
+                    "Age units: d, h, m, s, or bare days.",
+                    id="lbl-cleanup-hints",
+                    classes="info-value",
+                )
+                with Horizontal(classes="button-row"):
+                    yield Button("Preview Prune (Dry Run)", id="btn-prune-dry", variant="primary")
+                    yield Button("Execute Prune", id="btn-prune-execute", variant="error")
+                yield RichLog(id="cleanup-log-output", max_lines=500, classes="log-area")
 
     def display_run(self, run_info: Optional[RunInfo]) -> None:
         """Update display citation, rerun, and manifest fields."""
@@ -163,30 +325,17 @@ class ActionsPanel(Vertical):
             citation_lbl.update("")
             return
 
+        manifest = run_info.manifest if run_info.manifest is not None else run_info.load_manifest()
+
         # Fetch Rerun Command
         rerun_cmd = "-"
-        if run_info.manifest:
-            self.raw_manifest = run_info.manifest
-            inv = run_info.manifest.get("invocation")
+        if isinstance(manifest, dict):
+            self.raw_manifest = manifest
+            inv = manifest.get("invocation")
             raw_cmd = inv.get("rerun_command") if isinstance(inv, dict) else None
             rerun_cmd = raw_cmd if isinstance(raw_cmd, str) and raw_cmd else "-"
         elif run_info.lock_data:
-            # Reconstruct shell-safe rerun command if locked
-            raw_argv = run_info.lock_data.get("argv", [])
-            argv = [str(a) for a in raw_argv] if isinstance(raw_argv, list) else []
-            script = str(run_info.lock_data.get("script") or "")
-            cwd = str(run_info.lock_data.get("cwd") or "")
-            cmd_tokens = ["python"] + ([script] if script else []) + argv
-            if sys.platform == "win32":
-                py_cmd = subprocess.list2cmdline(cmd_tokens)
-                rerun_cmd = (
-                    f"cd {subprocess.list2cmdline([cwd])} && {py_cmd}"
-                    if cwd
-                    else py_cmd
-                )
-            else:
-                py_cmd = shlex.join(cmd_tokens)
-                rerun_cmd = f"cd {shlex.quote(cwd)} && {py_cmd}" if cwd else py_cmd
+            rerun_cmd = _build_rerun_command(run_info.lock_data)
 
         self.rerun_command = None if rerun_cmd == "-" else rerun_cmd
         rerun_lbl.update(Text(rerun_cmd))
@@ -199,19 +348,44 @@ class ActionsPanel(Vertical):
 
         # Generate Methods Citation
         methods_str = "(No citation available - manifest not complete)"
-        if run_info.manifest:
+        if isinstance(manifest, dict):
             try:
-                # Hydrate manifest
                 path = Path(run_info.run_dir) / "manifest.json"
-                hydrated, _ = hydrate_manifest(str(path), run_info.manifest)
+                hydrated, _ = hydrate_manifest(str(path), manifest)
                 methods_str = generate_report(hydrated, "markdown")
             except Exception as e:
                 methods_str = f"Failed to compile citation: {e}"
 
         citation_lbl.update(methods_str)
 
+    def _preview_prune_candidates(
+        self, older_val: str, status_val: str
+    ) -> List[RunInfo]:
+        """Validate prune criteria and return the runs eligible for bulk deletion."""
+        all_runs = scan_runs(self.output_dir, keep_manifest=False)
+        candidates = filter_runs(
+            all_runs,
+            status_filter=status_val or None,
+            older_than=older_val or None,
+        )
+        eligible: List[RunInfo] = []
+        for r in candidates:
+            if r.status == STATUS_RUNNING:
+                continue
+            lock_state, _ = _inspect_run_lock(r.run_dir)
+            if lock_state == "remote":
+                continue
+            eligible.append(r)
+        return eligible
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if not self.run_info and event.button.id in ("btn-copy-rerun", "btn-copy-md", "btn-copy-latex", "btn-archive-run", "btn-delete-selected"):
+        if not self.run_info and event.button.id in (
+            "btn-copy-rerun",
+            "btn-copy-md",
+            "btn-copy-latex",
+            "btn-archive-run",
+            "btn-delete-selected",
+        ):
             self.app.notify("Please select a run first.", severity="error")
             return
 
@@ -263,12 +437,50 @@ class ActionsPanel(Vertical):
                 self.handle_deletion_result,
             )
 
-        elif event.button.id in ("btn-prune-dry", "btn-prune-execute"):
-            dry_run = (event.button.id == "btn-prune-dry")
-            self.run_bulk_prune(dry_run)
+        elif event.button.id == "btn-prune-dry":
+            self.run_bulk_prune(dry_run=True)
+
+        elif event.button.id == "btn-prune-execute":
+            older_val = self.query_one("#input-clean-older", Input).value.strip()
+            status_val = self.query_one("#input-clean-status", Input).value.strip()
+            log = self.query_one("#cleanup-log-output", RichLog)
+            try:
+                candidates = self._preview_prune_candidates(older_val, status_val)
+            except ValueError as e:
+                log.clear()
+                log.write(f"Pruning failed: {e}")
+                self.app.notify(f"Invalid prune criteria: {e}", severity="error")
+                return
+            except Exception as e:
+                log.clear()
+                log.write(f"Pruning failed: {e}")
+                self.app.notify(f"Prune failed: {e}", severity="error")
+                return
+
+            if not candidates:
+                log.clear()
+                log.write("No runs match the cleanup criteria.")
+                self.app.notify("No runs match the cleanup criteria.", severity="information")
+                return
+
+            total_bytes = sum(_dir_size(r.run_dir) for r in candidates)
+            self.app.push_screen(
+                ConfirmBulkPruneModal(
+                    matched_count=len(candidates),
+                    total_size_bytes=total_bytes,
+                    older_than=older_val,
+                    status_filter=status_val,
+                ),
+                self.handle_bulk_prune_confirm,
+            )
+
+    def handle_bulk_prune_confirm(self, confirmed: Optional[bool]) -> None:
+        """Execute bulk prune only after explicit modal confirmation."""
+        if confirmed:
+            self.run_bulk_prune(dry_run=False)
 
     def archive_selected_run(self) -> None:
-        """Create zip archive in runs_dir/archive/ and optionally delete original folder."""
+        """Create zip archive in <output_dir>/archive/ and optionally delete original folder."""
         r = self.run_info
         if not r:
             return
@@ -276,14 +488,14 @@ class ActionsPanel(Vertical):
             self.app.notify(f"Archive failed: run directory {r.run_dir.name} no longer exists.", severity="error")
             return
 
-        runs_dir = r.run_dir.parent
-        archive_dir = runs_dir / "archive"
+        base_dir = _resolve_output_dir(self.output_dir)
+        archive_dir = base_dir / "archive"
         raw_stem = str(r.run_id or r.run_dir.name)
         safe_stem = re.sub(r"[^A-Za-z0-9._-]", "_", raw_stem).strip("._") or "run"
         zip_path = archive_dir / f"{safe_stem}.zip"
 
         try:
-            archive_dir.mkdir(exist_ok=True)
+            archive_dir.mkdir(parents=True, exist_ok=True)
             resolved_archive = archive_dir.resolve()
             resolved_zip = zip_path.resolve()
             if resolved_zip.parent != resolved_archive:
@@ -305,21 +517,14 @@ class ActionsPanel(Vertical):
             # Check if deleting raw
             delete_raw = self.query_one("#check-delete-raw", Checkbox).value
             if delete_raw:
-                lock_path = r.run_dir / ".pubrun.lock"
-                if (
-                    r.status == STATUS_RUNNING
-                    or r.run_dir.is_symlink()
-                    or (lock_path.exists() and not can_safely_auto_close_crashed_run(r.run_dir, r.lock_data))
-                ):
-                    self.app.notify(
-                        "Archive created; skipped deleting raw directory because the run is active or has a remote/unverified lock.",
-                        severity="warning",
-                    )
-                else:
-                    shutil.rmtree(r.run_dir)
+                ok, reason = safe_delete_run_dir(r.run_dir, base_dir)
+                if ok:
                     self.app.notify("Deleted original uncompressed directory.", severity="information")
-                    # Post refresh to main app
+                    self.display_run(None)
                     self.app.post_message(_refresh_sidebar_message(self.app))
+                else:
+                    detail = _format_delete_reason(r.run_dir, reason)
+                    self.app.notify(f"Deletion failed: {detail}", severity="error")
 
         except Exception as e:
             self.app.notify(f"Archive failed: {e}", severity="error")
@@ -328,14 +533,17 @@ class ActionsPanel(Vertical):
         if not confirmed or not self.run_info:
             return
 
-        label = (self.run_info.run_id or self.run_info.run_dir.name)[:8]
-        try:
-            shutil.rmtree(self.run_info.run_dir)
+        run_dir = self.run_info.run_dir
+        label = (self.run_info.run_id or run_dir.name)[:8]
+        base_dir = _resolve_output_dir(self.output_dir)
+        ok, reason = safe_delete_run_dir(run_dir, base_dir)
+        if ok:
             self.app.notify(f"Successfully deleted run {label}", severity="information")
             self.display_run(None)
             self.app.post_message(_refresh_sidebar_message(self.app))
-        except Exception as e:
-            self.app.notify(f"Deletion failed: {e}", severity="error")
+        else:
+            detail = _format_delete_reason(run_dir, reason)
+            self.app.notify(f"Deletion failed: {detail}", severity="error")
 
     def run_bulk_prune(self, dry_run: bool) -> None:
         """Execute or dry-run a bulk cleanup pruning candidates."""
@@ -352,30 +560,21 @@ class ActionsPanel(Vertical):
 
         log.write(f"Scanning runs for pruning (dry_run={dry_run})...")
 
-        # Redirect print functions to our TUI Log area
-        import io
-        import contextlib
+        # Redirect both stdout and stderr so no raw terminal output bleeds into the live TUI.
         buffer = io.StringIO()
 
         try:
-            with contextlib.redirect_stdout(buffer):
-                # Run the status.py clean_runs logic
+            with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
                 clean_runs(
                     output_dir=self.output_dir,
                     older_than=older_val or None,
                     status_filter=status_filter,
                     yes=True,
-                    dry_run=dry_run
+                    dry_run=dry_run,
                 )
 
-            # Print output to textual widget
             output_str = buffer.getvalue()
-
-            # Strip color escape codes if any
-            clean_str = output_str.replace("\033[32m", "").replace("\033[31m", "")
-            clean_str = clean_str.replace("\033[35m", "").replace("\033[33m", "")
-            clean_str = clean_str.replace("\033[90m", "").replace("\033[0m", "")
-
+            clean_str = _ANSI_ESCAPE_RE.sub("", output_str)
             log.write(clean_str)
 
             if not dry_run:
