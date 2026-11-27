@@ -1,5 +1,5 @@
 - Id: bej1qz
-- Status: graduated
+- Status: done
 - Graduated-To: bej1qz
 - Set: bej1qz
 - Work-Kind: bug
@@ -11,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-27 done (aw backlog): closed by aw agy run: IPD s3y296 executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261127-bej1qz-00-s3y296-package-benchmark-runtime-harness-in-wheel.ipd.md, .aw/records/plans/executed/20261127-bej1qz-01-29nsim-package-benchmark-core-runtime-and-checkout-shims.ipd.md, .aw/records/plans/executed/20261127-bej1qz-02-c1zz3x-package-hpc-submission-scripts-and-checkout-shims.ipd.md, .aw/records/plans/executed/20261127-bej1qz-03-mfeptf-wire-pubrun-bench-cli-to-packaged-runtime-and-single-source.ipd.md, .aw/records/plans/executed/20261127-bej1qz-04-cuboum-update-benchmark-documentation-for-packaged-wheel-runtime.ipd.md, .aw/records/plans/executed/20261127-bej1qz-05-1r585o-add-benchmark-packaging-tests-ci-checks-and-end-to-end-verif.ipd.md); evidence .aw/records/plans/executed/20261127-bej1qz-00-s3y296-package-benchmark-runtime-harness-in-wheel.ipd.md
 - 2026-11-27 graduated (aw backlog): graduated by run run-20261127T051342Z-1987922: 1r585o, 29nsim, c1zz3x, cuboum, mfeptf, s3y296
 - 2026-11-27 created (aw backlog): Package benchmark runtime harness in wheel so pip-installed pubrun bench works without a git checkout
 
