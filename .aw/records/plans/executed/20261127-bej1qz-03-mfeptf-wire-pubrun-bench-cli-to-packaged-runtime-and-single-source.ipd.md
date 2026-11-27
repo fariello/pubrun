@@ -6,7 +6,7 @@
 - Scope: Update `src/pubrun/__main__.py` to resolve `pubrun._bench` first, use `pubrun._bench.default_results_dir()` for writable output outside a checkout, pass packaged submit script paths and `PUBRUN_RESULTS_DIR` for high-performance computing (HPC) submission, invoke `python -m pubrun._bench.harness` locally, replace `_load_share_safety` and `_verify_redacted` with direct `pubrun._bench.share_safety.check_share_safe_text` in `_share_check`, update `TestSubmissionVerifier` in `tests/test_bench_command.py` to target `_share_check` so the test suite stays green after `_verify_redacted` is deleted, and update the `bench` command-line interface (CLI) subparser help text.
 - Scope-Paths: src/pubrun/__main__.py, tests/test_bench_command.py
 - Item-Dependencies: executed:29nsim, executed:c1zz3x
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Update src/pubrun/__main__.py to use src/pubrun/_bench, write to a writable default output directory, and remove duplicated share-safety logic
@@ -19,12 +19,12 @@
 - Highest E allocated: 04
 - Author: Antigravity
 - Id: mfeptf
-- Approval: 2026-11-27, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-27 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: mfeptf verified (set bej1qz, attempt 1).
 - 2026-11-27 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004; review record `.aw/records/reviews/20261127-bej1qz-03-mfeptf-wire-pubrun-bench-cli-to-packaged-runtime-and-single-source.review.md`.
 - 2026-11-27 to-review (aw set): demoted approved -> to-review: APPROVAL WITHDRAWN: Demote to to-review so /plan-review writes Readiness attestations before execution
