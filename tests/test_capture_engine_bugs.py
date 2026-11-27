@@ -143,14 +143,77 @@ class TestArgvRedaction:
 
 class TestSecretPattern:
     def test_invalid_regex_falls_back_without_raising(self, caplog):
+        redaction._compile_secret_pattern.cache_clear()
         cfg = {"redaction": {"sensitive_keys_regex": "[unclosed"}}
         with caplog.at_level(logging.WARNING, logger="pubrun"):
             pat = redaction._get_secret_pattern(cfg)
         assert pat.pattern == redaction.DEFAULT_SECRET_REGEX
-        assert "[unclosed" not in redaction._PATTERN_CACHE
+        # Only DEFAULT_SECRET_REGEX should be cached, never the invalid regex.
+        assert redaction._compile_secret_pattern.cache_info().currsize == 1
         assert any("sensitive_keys_regex" in r.getMessage() for r in caplog.records)
         out = redaction.redact_argv(["x", "--password", "S3CRET"], cfg)
         assert "S3CRET" not in out
+
+    def test_pattern_lru_cache_is_bounded_at_64(self):
+        redaction._compile_secret_pattern.cache_clear()
+        for i in range(80):
+            pat = redaction._get_secret_pattern(
+                {"redaction": {"sensitive_keys_regex": f"custom_secret_{i}"}}
+            )
+            assert pat.search(f"custom_secret_{i}") is not None
+        info = redaction._compile_secret_pattern.cache_info()
+        assert info.maxsize == 64
+        assert info.currsize == 64
+
+    def test_iterative_deep_json_and_cycle_redaction(self, monkeypatch):
+        import json as _json
+
+        # 1. Direct _redact_any handles 1,500 levels of nesting without RecursionError.
+        deep: dict = {"password": "TOP_SECRET_VALUE", "safe": "ok"}
+        for _ in range(1500):
+            deep = {"nested": deep}
+        redacted = redaction._redact_any(deep, {})
+        cur = redacted
+        for _ in range(1500):
+            cur = cur["nested"]
+        assert cur["password"] == "[REDACTED]"
+        assert cur["safe"] == "ok"
+
+        # 2. Cyclic container references terminate cleanly and still redact secrets.
+        cyc: dict = {"api_key": "CYCLE_SECRET"}
+        cyc["self"] = cyc
+        cyc_out = redaction._redact_any(cyc, {})
+        assert cyc_out["api_key"] == "[REDACTED]"
+        assert cyc_out["self"] is cyc_out
+
+        # 3. 1,500-level JSON string redacts secrets on every Python version
+        # (via iterative _redact_any on Python 3.12+ or RecursionError fallback on <3.12).
+        deep_json_str = (
+            '{"a":' * 1500
+            + '{"password":"DEEP_JSON_PW","credentials":{"raw":"NESTED_OBJ_SECRET"},"ok":"https://u:uri_pw@db/x"}'
+            + "}" * 1500
+        )
+        out_str = redaction._redact_value_string_heuristics(deep_json_str, {})
+        assert "DEEP_JSON_PW" not in out_str
+        assert "NESTED_OBJ_SECRET" not in out_str
+        assert "uri_pw" not in out_str
+        assert '"password": "[REDACTED]"' in out_str or '"password":"[REDACTED]"' in out_str
+        assert '"credentials": "[REDACTED]"' in out_str or '"credentials":"[REDACTED]"' in out_str
+
+        # 4. Simulated json.loads RecursionError explicitly exercises fallback even on shallow JSON.
+        def raise_rec(*a, **k):
+            raise RecursionError("simulated recursion limit")
+
+        monkeypatch.setattr(_json, "loads", raise_rec)
+        shallow_out = redaction._redact_value_string_heuristics(
+            '{"token": "FALLBACK_TOK", "credentials": {"raw": "OBJ_SEC"}, "note": "Bearer MY_BEARER_123"}',
+            {},
+        )
+        assert "FALLBACK_TOK" not in shallow_out
+        assert "OBJ_SEC" not in shallow_out
+        assert "MY_BEARER_123" not in shallow_out
+        assert '"token": "[REDACTED]"' in shallow_out
+        assert '"credentials": "[REDACTED]"' in shallow_out
 
     def test_non_string_regex_falls_back_without_raising(self):
         for bad in (123, ["a"], {"x": 1}):
@@ -489,6 +552,8 @@ class TestGpuFallback:
             raise AssertionError(cmd)
 
         monkeypatch.setattr(hw.sys, "platform", platform)
+        if platform == "win32":
+            monkeypatch.setattr(hw, "_get_windows_gpus_native", lambda: [])
         monkeypatch.setattr(hw.subprocess, "check_output", fake_check_output)
         return hw._get_gpus({}, 1.0)
 
@@ -517,4 +582,193 @@ class TestGpuFallback:
         gpus = self._run(monkeypatch, "darwin", sp_out=out)
         assert [g["model"] for g in gpus] == ["Intel UHD Graphics 630", "AMD Radeon Pro 5500M"]
         assert "memory_total_bytes" not in gpus[0]
-        assert gpus[1]["memory_total_bytes"] is None
+        assert gpus[1]["memory_total_bytes"] == 4 * 1024 ** 3
+
+
+# ---------------------------------------------------------------------------
+# ROLL-31 / ROLL-34: liveness caching/locale/guards, iowait clamping, filesystem
+# ---------------------------------------------------------------------------
+
+class TestLivenessCrossPlatformHardening:
+    def test_win_dll_and_struct_caching_and_fake_precedence(self, monkeypatch):
+        import ctypes
+        from types import SimpleNamespace
+
+        created = []
+
+        class FakeFunc:
+            def __init__(self, fn):
+                self._fn = fn
+                self.argtypes = None
+                self.restype = None
+
+            def __call__(self, *args):
+                return self._fn(*args)
+
+        class FakeWinDLL:
+            def __init__(self, name, use_last_error=False):
+                created.append((name, use_last_error))
+                self.name = name
+                if name == "kernel32":
+                    self.OpenProcess = FakeFunc(lambda access, inherit, pid: 77)
+                    self.GetExitCodeProcess = FakeFunc(lambda h, ptr: 1)
+                    self.GetProcessTimes = FakeFunc(lambda h, c, e, k, u: 1)
+                    self.CloseHandle = FakeFunc(lambda h: 1)
+                elif name == "psapi":
+                    def _get_mem(handle, counters_ptr, cb):
+                        counters_ptr._obj.WorkingSetSize = 987654
+                        return 1
+                    self.GetProcessMemoryInfo = FakeFunc(_get_mem)
+
+        monkeypatch.setattr(liveness, "_WIN_KERNEL32", None)
+        monkeypatch.setattr(liveness, "_WIN_PSAPI", None)
+        monkeypatch.setattr(liveness, "_PROCESS_MEMORY_COUNTERS_CLS", None)
+        monkeypatch.setattr(ctypes, "WinDLL", FakeWinDLL, raising=False)
+        real_sentinel = FakeWinDLL("kernel32")
+        created.clear()
+        monkeypatch.setattr(
+            ctypes, "windll", SimpleNamespace(kernel32=real_sentinel), raising=False
+        )
+
+        # Two consecutive polls instantiate kernel32 and psapi once and reuse struct class.
+        assert liveness._get_rss_windows(100) == 987654
+        cls1 = liveness._PROCESS_MEMORY_COUNTERS_CLS
+        k32_1 = liveness._WIN_KERNEL32
+        psapi_1 = liveness._WIN_PSAPI
+        assert liveness._get_rss_windows(100) == 987654
+        assert liveness._PROCESS_MEMORY_COUNTERS_CLS is cls1
+        assert liveness._WIN_KERNEL32 is k32_1
+        assert liveness._WIN_PSAPI is psapi_1
+        assert created == [("kernel32", True), ("psapi", True)]
+
+        # A monkeypatched non-WinDLL fake kernel32 ALWAYS wins over cached _WIN_KERNEL32
+        # and never has argtypes/restype mutated on it.
+        class PlainFakeKernel32:
+            def OpenProcess(self, access, inherit, pid):
+                return 88
+
+            def K32GetProcessMemoryInfo(self, handle, counters_ptr, cb):
+                counters_ptr._obj.WorkingSetSize = 123456
+                return 1
+
+            def CloseHandle(self, handle):
+                return 1
+
+        plain_fake = PlainFakeKernel32()
+        monkeypatch.setattr(
+            ctypes, "windll", SimpleNamespace(kernel32=plain_fake), raising=False
+        )
+        assert liveness._get_win_kernel32() is plain_fake
+        assert liveness._get_rss_windows(100) == 123456
+        assert not hasattr(plain_fake.K32GetProcessMemoryInfo, "argtypes")
+
+    def test_macos_cpu_passes_lc_all_c(self, monkeypatch):
+        captured = {}
+
+        class R:
+            returncode = 0
+            stdout = "23.4\n"
+
+        def fake_run(cmd, **kw):
+            captured.update(kw)
+            return R()
+
+        monkeypatch.setattr(liveness.subprocess, "run", fake_run)
+        assert liveness._get_cpu_macos(123) == 23.4
+        assert captured["env"]["LC_ALL"] == "C"
+
+    def test_linux_proc_stat_malformed_and_nonpositive_clk_tck(self, monkeypatch):
+        stat_text = {"content": "no parens at all 1 2 3\n"}
+
+        def fake_open(path, *a, **k):
+            if path == "/proc/99/stat":
+                return StringIO(stat_text["content"])
+            if path == "/proc/stat":
+                return StringIO("btime 1000\n")
+            if path == "/proc/uptime":
+                return StringIO("500.0 100.0\n")
+            raise FileNotFoundError(path)
+
+        monkeypatch.setattr(liveness, "open", fake_open, raising=False)
+        monkeypatch.setattr(liveness.os, "sysconf", lambda name: 100, raising=False)
+
+        # Missing right paren -> None (must not slice from index 1)
+        assert liveness._get_start_time_linux(99) is None
+        assert liveness._get_cpu_linux(99) is None
+
+        # Valid stat line but clock_ticks <= 0 -> None (no ZeroDivisionError)
+        stat_text["content"] = "99 (py) S " + " ".join(["0"] * 18) + " 500 0\n"
+        monkeypatch.setattr(liveness.os, "sysconf", lambda name: 0, raising=False)
+        assert liveness._get_start_time_linux(99) is None
+        assert liveness._get_cpu_linux(99) is None
+
+        monkeypatch.setattr(liveness.os, "sysconf", lambda name: -1, raising=False)
+        assert liveness._get_start_time_linux(99) is None
+        assert liveness._get_cpu_linux(99) is None
+
+        # Missing os.sysconf raises AttributeError -> caught and returns None
+        monkeypatch.delattr(liveness.os, "sysconf", raising=False)
+        assert liveness._get_start_time_linux(99) is None
+        assert liveness._get_cpu_linux(99) is None
+
+    def test_iowait_pct_between_clamped_to_0_100(self):
+        from pubrun.capture import system_metrics as sm
+
+        assert sm.iowait_pct_between((50, 100), (40, 200)) == 0.0
+        assert sm.iowait_pct_between((10, 100), (200, 200)) == 100.0
+        assert sm.iowait_pct_between((10, 100), (35, 200)) == 25.0
+
+
+class TestFilesystemCrossPlatformFixes:
+    def test_windows_dynamic_volume_buffer_for_long_path(self, monkeypatch):
+        import ctypes
+        from types import SimpleNamespace
+
+        seen_sizes = []
+
+        class FakeKernel32:
+            def GetVolumePathNameW(self, path_ptr, buf, size):
+                seen_sizes.append(size)
+                buf.value = "C:\\"
+                return 1
+
+            def GetVolumeInformationW(self, root_ptr, vol_buf, vol_size, s, m, f, fs_buf, fs_size):
+                fs_buf.value = "NTFS"
+                return 1
+
+            def GetDriveTypeW(self, root_ptr):
+                return 3
+
+        monkeypatch.setattr(
+            ctypes, "windll", SimpleNamespace(kernel32=FakeKernel32()), raising=False
+        )
+        long_path = "C:\\" + ("nested_dir\\" * 120) + "file.txt"
+        assert len(long_path) > 1024
+        res = fs._classify_windows_path(long_path)
+        assert res["mount_point"] == "C:\\"
+        assert res["fstype"] == "NTFS"
+        assert seen_sizes == [len(long_path) + 2]
+
+    def test_posix_leading_double_slash_normalized(self):
+        entries = [("/", "ext4"), ("/scratch", "nfs4")]
+        assert fs._longest_prefix_fstype("//scratch/run", entries) == ("/scratch", "nfs4")
+        classified = fs._classify_path_linux("//scratch/run", entries)
+        assert classified["mount_point"] == "/scratch"
+        assert classified["fstype"] == "nfs4"
+        assert classified["is_network"] is True
+
+    def test_macos_case_insensitive_mount_prefix_preserves_casing(self, monkeypatch):
+        entries = [("/", "apfs"), ("/Volumes/DataDrive", "nfs")]
+        assert fs._longest_prefix_fstype(
+            "/volumes/datadrive/runs/1", entries, case_insensitive=False
+        ) == ("/", "apfs")
+        assert fs._longest_prefix_fstype(
+            "/volumes/datadrive/runs/1", entries, case_insensitive=True
+        ) == ("/Volumes/DataDrive", "nfs")
+
+        monkeypatch.setattr(fs.sys, "platform", "darwin")
+        monkeypatch.setattr(fs, "_mac_mount_table", lambda: entries)
+        res = fs.get_filesystem({}, {"out": "/volumes/datadrive/runs/1"})
+        assert res["out"]["mount_point"] == "/Volumes/DataDrive"
+        assert res["out"]["fstype"] == "nfs"
+        assert res["out"]["is_network"] is True

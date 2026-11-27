@@ -55,7 +55,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Hardware, liveness, and system metrics cross-platform fixes
 
-- [ ] E-01 Modernize `src/pubrun/capture/hardware.py`:
+- [x] E-01 Modernize `src/pubrun/capture/hardware.py`:
   - On Windows (`sys.platform == "win32"`, using direct `sys.platform == "win32"` guards where needed so three-platform `mypy` passes cleanly):
     - Total random-access memory (RAM) via testable helper `_get_windows_memory_bytes_native()` using `ctypes` `GlobalMemoryStatusEx` (`_MEMORYSTATUSEX.ullTotalPhys` with `dwLength = ctypes.sizeof(...)`), falling back to legacy `wmic OS get TotalVisibleMemorySize` only if native `ctypes` fails.
     - Central processing unit (CPU) model via testable helper `_get_windows_cpu_model_native()` reading `winreg` `HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0\ProcessorNameString`, falling back to legacy `wmic cpu get Name`, and finally falling back to `platform.processor()` only if both fail (so `platform.processor()` never shadows legacy `wmic` fallback when `winreg` is absent).
@@ -67,9 +67,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Add a binary (`1024`-based) VRAM parser helper `_parse_vram_bytes(text: str) -> Optional[int]` supporting `B`, `KB`/`KiB`, `MB`/`MiB`, `GB`/`GiB`, and `TB`/`TiB` (including decimal numbers such as `"1.5 GB"` and `"4096 MB"`), returning `None` on unparseable values. Apply it to `VRAM (Total):` lines in `_get_gpus()` (leaving `VRAM (Dynamic, Max):` unparsed as today).
   - Depends on: none
   - Expected outcome: Windows 11 24H2+ (no `wmic`), Linux ARM64, Linux AMD ROCm, and macOS VRAM capture all report accurate, schema-valid hardware metadata within `_CaptureBudget`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Harden `src/pubrun/capture/liveness.py` and `src/pubrun/capture/system_metrics.py`:
+- [x] E-02 Harden `src/pubrun/capture/liveness.py` and `src/pubrun/capture/system_metrics.py`:
   - In `src/pubrun/capture/liveness.py`:
     - Lazily create and cache `_PROCESS_MEMORY_COUNTERS_CLS`, private `_WIN_KERNEL32` (`WinDLL("kernel32", use_last_error=True)`), and private `_WIN_PSAPI` (`WinDLL("psapi", use_last_error=True)`) once under a module-level `threading.Lock()` (preserving zero `ctypes` import overhead on Linux/macOS at module import time).
     - Configure `argtypes`/`restype` once on cached `_WIN_KERNEL32` (including `OpenProcess`, `GetExitCodeProcess`, `GetProcessTimes`, `CloseHandle`, and optional `K32GetProcessMemoryInfo`) and `_WIN_PSAPI` (`GetProcessMemoryInfo`).
@@ -79,11 +79,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - In `src/pubrun/capture/system_metrics.py::iowait_pct_between()`, clamp the returned percentage to `[0.0, 100.0]` (`round(max(0.0, min(100.0, 100.0 * iowait_delta / total_delta)), 2)`).
   - Depends on: none
   - Expected outcome: Windows liveness polling stops leaking `ctypes` structure types and reloading dynamic-link libraries (DLLs), stays thread-safe and monkeypatch-friendly, macOS CPU polling succeeds under comma-decimal locales, and malformed `/proc` stat lines or non-monotonic iowait deltas never miscalculate or raise.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Invocation, environment, git, filesystem, redaction, and doc sync
 
-- [ ] E-03 Fix `src/pubrun/capture/invocation.py::get_invocation()`:
+- [x] E-03 Fix `src/pubrun/capture/invocation.py::get_invocation()`:
   - Use quoted `sys.executable` (falling back to `"python"` if `sys.executable` is empty: `shlex.quote(exe)` on Portable Operating System Interface (POSIX) and `subprocess.list2cmdline([exe])` on `win32`) in `rerun_command` instead of hardcoded bare `"python"`.
   - Detect Jupyter kernels without importing `IPython` eagerly: inspect `sys.modules.get("IPython")`, call `get_ipython()`, and check `type(shell).__name__ == "ZMQInteractiveShell"`. When running inside a Jupyter kernel, set `entrypoint_type = "notebook"`, keep `script = {}`, set `rerun_command = None`, and omit `ipykernel_launcher.py` and kernel connection arguments (`-f <kernel.json>`, `--f=<kernel.json>`, `--ConnectionFile=...`) from `invocation.inputs`.
   - Detect `python -m <pkg.mod>` via `main_spec = getattr(sys.modules.get("__main__"), "__spec__", None)` when `main_spec` has a non-empty `.name` other than `"__main__"` AND either `main_file == "-m"` or `main_file` matches `main_spec.origin` (comparing resolved/normalized paths when both exist, or raw strings) so running `pytest` via `python -m pytest` never hijacks tests that monkeypatch `sys.argv`. Strip trailing `.__main__` from `spec_name` for the module name, set `entrypoint_type = "module"`, preserve `script` metadata if `main_file` is an existing file, and build `rerun_command` as `<exe> -m <modname> <redacted_argv[1:]>` (avoiding duplicate `-m -m` when `main_file == "-m"`).
@@ -96,9 +96,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Enforce a size cap on `[capture.inputs].compute_md5` hashing using `_DEFAULT_MAX_INPUT_MD5_BYTES = 100 * 1024 * 1024` (100 MiB), overridable via `[capture.inputs].max_md5_bytes` (non-negative int; `0` disables the cap matching `[capture.file_io].max_hash_bytes`; invalid/negative/bool falls back to default). When `max_md5_bytes > 0 and st.st_size > max_md5_bytes`, skip opening/hashing and omit the latency warning, setting `arg_data["md5_skipped"] = f"file exceeds {max_md5_bytes} bytes"`.
   - Depends on: none
   - Expected outcome: Module runs, `-c`/interactive runs, `--flag=path` inputs, virtual-environment interpreters, Jupyter notebooks, and large CLI dataset arguments are captured accurately, safely, and within bounded startup I/O.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Harden `src/pubrun/capture/environment.py`, `src/pubrun/capture/git.py`, `src/pubrun/capture/filesystem.py`, and `src/pubrun/capture/redaction.py`, and sync `docs/configuration.md` and `docs/manifest.md`:
+- [x] E-04 Harden `src/pubrun/capture/environment.py`, `src/pubrun/capture/git.py`, `src/pubrun/capture/filesystem.py`, and `src/pubrun/capture/redaction.py`, and sync `docs/configuration.md` and `docs/manifest.md`:
   - In `src/pubrun/capture/environment.py`: import `sys`; on `sys.platform == "win32"`, match allowlist patterns case-insensitively (`fnmatch.fnmatchcase(k.upper(), pat.upper())`), preserving case-sensitive `fnmatch.fnmatchcase(k, pat)` on POSIX.
   - In `src/pubrun/capture/git.py::_run_git_raw()`: pass `encoding="utf-8", errors="replace"` and `env={**os.environ, "LC_ALL": "C"}` to `subprocess.run()` so non-ASCII branch/path names decode cleanly and non-English locales still trigger the `"not a git repository"` fast-exit path.
   - In `src/pubrun/capture/filesystem.py`:
@@ -114,11 +114,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - In `docs/manifest.md`: update `invocation.rerun_command` (`string | null`, quoted `sys.executable`, `null` for `-c`/interactive/notebook), `invocation.entrypoint_type` (include `"notebook"`), `invocation.inputs` (note `--flag=path` and `md5_skipped`), and `hardware.gpus[]` (`"AMD"` from `amd-smi`/`rocm-smi`, parsed macOS `VRAM (Total):` integer bytes).
   - Depends on: none
   - Expected outcome: Non-UTF-8 locales, Windows environment allowlists and long paths, macOS mixed-case mounts, POSIX `//` paths, and 1,500-level nested JavaScript Object Notation (JSON) secrets across Python 3.8 through 3.14 are handled deterministically, and user-facing docs match shipped behavior with zero em or en dashes.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Regression tests and existing-test alignment
 
-- [ ] E-05 Update affected existing tests and add cross-platform unit tests in `tests/test_hardware.py`, `tests/test_capture_engines.py`, `tests/test_invocation.py`, `tests/test_capture_engine_bugs.py`, and `tests/test_config_capture_modes.py`:
+- [x] E-05 Update affected existing tests and add cross-platform unit tests in `tests/test_hardware.py`, `tests/test_capture_engines.py`, `tests/test_invocation.py`, `tests/test_capture_engine_bugs.py`, and `tests/test_config_capture_modes.py`:
   - Update existing tests whose assertions intentionally change:
     - `tests/test_hardware.py::test_windows_wmic_cpu_model_and_total_memory`: stub native Windows helpers (`_get_windows_cpu_model_native`, `_get_windows_memory_bytes_native`) to return `None` when testing the legacy `wmic` fallback so it stays deterministic on Windows CI as well as Linux/macOS.
     - `tests/test_capture_engine_bugs.py`: update `TestSecretPattern.test_invalid_regex_falls_back_without_raising` (replace removed `_PATTERN_CACHE` check with `_compile_secret_pattern.cache_info()`), update `TestGpuFallback.test_windows_*` to stub `_get_windows_gpus_native` returning `[]` when exercising legacy `wmic` fallback, and update `TestGpuFallback.test_macos_multi_gpu` to assert `gpus[1]["memory_total_bytes"] == 4 * 1024 ** 3`.
@@ -131,7 +131,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - `git.py` UTF-8 + `LC_ALL=C` decoding and fast-exit, `filesystem.py` Win32 `> 260`-char dynamic buffer + POSIX `//` normalization + macOS case-insensitive mount-prefix matching, and `redaction.py` 1,500-level nested JSON secret redaction (both direct `_redact_any` and string heuristic + simulated `json.loads` `RecursionError` fallback) plus 64-entry least-recently-used (LRU) cache cap.
   - Depends on: E-01, E-02, E-03, E-04
   - Expected outcome: All updated and new tests pass, existing capture/security/liveness suites pass with zero regressions, three-platform `mypy` exits `0`, and `docs/configuration.md` + `docs/manifest.md` contain zero em or en dashes.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -190,30 +190,30 @@ None. All fixes preserve existing manifest v1.0 schemas and fallbacks, and all t
 
 Validation-state rule: inspect evidence in a separate pass. Accepted validation results: blocked, failed, pass, pending; terminal gate demands `pass`.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `pytest` output for `src/pubrun/capture/hardware.py` (`_get_cpu_model`, `_get_total_memory_bytes`, `_get_gpus`, `_get_windows_cpu_model_native`, `_get_windows_memory_bytes_native`, `_get_windows_gpus_native`, `_parse_vram_bytes`) in `tests/test_hardware.py` and `tests/test_capture_engine_bugs.py` confirming Windows `wmic`-absent capture, legacy `wmic` fallback, Linux ARM64 CPU, Linux AMD ROCm GPU (schema-valid `$defs.gpu_record`), and macOS binary VRAM parsing pass.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest tests/test_hardware.py tests/test_capture_engines.py tests/test_invocation.py tests/test_capture_engine_bugs.py tests/test_config_capture_modes.py tests/test_liveness.py tests/test_redaction.py tests/test_env_capture.py tests/test_platform_capture_seams.py tests/test_platform_type_guards.py tests/test_security_hardening.py tests/test_capture.py tests/test_manifest_schema.py -v` exited `0` (`452 passed in 22.48s`), including `tests/test_hardware.py::test_windows_wmic_cpu_model_and_total_memory PASSED`, `test_windows_native_hardware_capture_without_wmic PASSED`, `test_windows_cpu_fallback_order_and_enum_display_devices PASSED`, `test_linux_arm64_cpu_fallbacks PASSED`, `test_linux_amd_rocm_gpu_fallbacks_validate_against_schema PASSED`, `test_parse_vram_bytes_binary_units_and_invalid PASSED`, and `tests/test_capture_engine_bugs.py::TestGpuFallback` (`test_windows_negative_adapter_ram`, `test_windows_blank_adapter_ram`, `test_macos_multi_gpu`) PASSED.
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `pytest` output for `src/pubrun/capture/liveness.py` (`_get_win_kernel32`, `_get_rss_windows`, `_get_cpu_macos`, `_get_start_time_linux`, `_get_cpu_linux`) and `src/pubrun/capture/system_metrics.py::iowait_pct_between` in `tests/test_liveness.py`, `tests/test_capture_engines.py`, and `tests/test_env_capture.py` confirming cached `WinDLL`/`_PROCESS_MEMORY_COUNTERS_CLS` reuse, fake-`kernel32` precedence, macOS `LC_ALL=C`, `/proc` `right_paren == -1` and `clock_ticks <= 0` guards, and `[0.0, 100.0]` iowait clamping pass.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Within the same post-edit run (`452 passed in 22.48s`), all tests in `tests/test_liveness.py`, `tests/test_capture_engines.py`, `tests/test_env_capture.py`, and `tests/test_capture_engine_bugs.py::TestLivenessCrossPlatformHardening` (`test_win_dll_and_struct_caching_and_fake_precedence`, `test_macos_cpu_passes_lc_all_c`, `test_linux_proc_stat_malformed_and_nonpositive_clk_tck`, `test_iowait_pct_between_clamped_to_0_100`) PASSED.
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `pytest` output for `src/pubrun/capture/invocation.py::get_invocation` in `tests/test_invocation.py` and `tests/test_capture.py` confirming quoted `sys.executable` (plus empty-executable fallback), `python -m` module detection with `__spec__.origin` guard, `-c`/interactive `rerun_command is None`, Jupyter `ZMQInteractiveShell` (`notebook`) without `ipykernel_launcher.py`/`kernel.json`, `--flag=path` discovery with redacted-value suppression, single `os.stat()`, missing-stat `main_file` guard, and `[capture.inputs].max_md5_bytes` cap (`md5_skipped` + `0` uncapped) pass.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Within `452 passed in 22.48s`, all tests in `tests/test_invocation.py` (`TestCommandFormattingAndSecurity` including `test_posix_commands_use_redacted_argv`, `test_win32_commands_use_redacted_argv`, `test_empty_sys_executable_falls_back_to_python`; `TestModuleNotebookAndInputHardening` including `test_python_m_module_and_package_detection_and_origin_guard`, `test_dash_c_and_interactive_rerun_command_is_none`, `test_jupyter_zmq_kernel_detected_and_omits_kernel_files`, `test_flag_eq_path_discovered_and_redacted_flag_eq_suppressed`, `test_input_discovery_uses_single_os_stat_call`, `test_missing_stat_skips_main_file_hashing`, `test_compute_md5_max_md5_bytes_cap_and_zero_uncapped`) and `tests/test_capture.py` (`TestInvocationCapture::test_rerun_command_present`, aligned for `pytest-xdist` `-c` worker argv) PASSED.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest` output for `src/pubrun/capture/environment.py::get_environment`, `src/pubrun/capture/git.py::get_git`, `src/pubrun/capture/filesystem.py` (`_classify_windows_path`, `_classify_path_linux`, `_longest_prefix_fstype`, `get_filesystem`), and `src/pubrun/capture/redaction.py` (`_redact_any`, `_redact_value_string_heuristics`, `_compile_secret_pattern`, `redact_argv`) in `tests/test_capture_engines.py`, `tests/test_capture_engine_bugs.py`, `tests/test_config_capture_modes.py`, `tests/test_redaction.py`, and `tests/test_platform_capture_seams.py`, plus pasted dash-check output confirming zero em/en dashes in `docs/configuration.md` and `docs/manifest.md`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Within `452 passed in 22.48s`, `tests/test_config_capture_modes.py::TestEnvironmentCapture` (`test_allowlist_glob_is_case_sensitive`, `test_allowlist_glob_is_case_insensitive_on_windows`), `tests/test_capture_engines.py::TestGit::test_git_passes_utf8_and_lc_all_c_and_handles_non_ascii`, `tests/test_capture_engine_bugs.py::TestFilesystemCrossPlatformFixes` (`test_windows_dynamic_volume_buffer_for_long_path`, `test_posix_leading_double_slash_normalized`, `test_macos_case_insensitive_mount_prefix_preserves_casing`), `tests/test_capture_engine_bugs.py::TestSecretPattern` (`test_invalid_regex_falls_back_without_raising`, `test_pattern_lru_cache_is_bounded_at_64`, `test_iterative_deep_json_and_cycle_redaction`), `tests/test_redaction.py`, and `tests/test_platform_capture_seams.py` all PASSED. Dash check `python3 -c "import pathlib; print({p: (pathlib.Path(p).read_text(encoding='utf-8').count('\u2014'), pathlib.Path(p).read_text(encoding='utf-8').count('\u2013')) for p in ['docs/configuration.md', 'docs/manifest.md']})"` printed `{'docs/configuration.md': (0, 0), 'docs/manifest.md': (0, 0)}`.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted output of `pytest tests/test_hardware.py tests/test_capture_engines.py tests/test_invocation.py tests/test_capture_engine_bugs.py tests/test_config_capture_modes.py tests/test_liveness.py tests/test_redaction.py tests/test_env_capture.py tests/test_platform_capture_seams.py tests/test_platform_type_guards.py tests/test_security_hardening.py tests/test_capture.py tests/test_manifest_schema.py -v` (covering all updated and new test classes across all five modified test files) and three-platform `mypy && mypy --platform win32 && mypy --platform darwin` exiting `0`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Targeted 13-file suite exited `0` (`452 passed in 22.48s`); `mypy && mypy --platform win32 && mypy --platform darwin` exited `0` (`Success: no issues found in 70 source files` on Linux, `win32`, and `darwin`); full repository suite `aw suite` exited `0` (`2488 passed in 92.04s (0:01:32)`); `aw sanitize --agent` exited `0` (`outcome: clean`, `checked: 1041`, `findings: 0`).
+  - Result: pass
 
 ## Approval and execution gate
 

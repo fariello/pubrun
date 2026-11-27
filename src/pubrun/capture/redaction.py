@@ -1,8 +1,9 @@
-import re
+import functools
 import hashlib
 import json
 import logging
-from typing import Dict, Any, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("pubrun")
 
@@ -15,15 +16,19 @@ DEFAULT_SECRET_REGEX = (
     r'|conn_str|connection_string|database_url|dsn|signing|bearer)'
 )
 
-# Compiled pattern cache: keyed by pattern string to avoid re.compile() per call.
-_PATTERN_CACHE: Dict[str, re.Pattern] = {}
+
+@functools.lru_cache(maxsize=64)
+def _compile_secret_pattern(pattern_str: str) -> re.Pattern:
+    """Compile and cache a secret-detection regex (bounded to 64 entries)."""
+    return re.compile(pattern_str)
 
 
 def _get_secret_pattern(config: Optional[Dict[str, Any]] = None) -> re.Pattern:
     """Returns the compiled secret-detection regex from config, or the default.
 
-    Results are cached by pattern string so re.compile() is called at most once
-    per unique pattern across the lifetime of the process.
+    Results are cached with a bounded LRU cache so re.compile() is avoided on
+    repeated lookups while preventing unbounded cache growth. Invalid or
+    non-string patterns fall back to the default pattern and are never cached.
     """
     if config:
         pattern_str = config.get("redaction", {}).get(
@@ -31,25 +36,22 @@ def _get_secret_pattern(config: Optional[Dict[str, Any]] = None) -> re.Pattern:
         )
     else:
         pattern_str = DEFAULT_SECRET_REGEX
+    if not isinstance(pattern_str, str):
+        logger.warning(
+            "pubrun: invalid [redaction].sensitive_keys_regex (%s); using the default pattern",
+            "TypeError",
+        )
+        return _compile_secret_pattern(DEFAULT_SECRET_REGEX)
     try:
-        cached = _PATTERN_CACHE.get(pattern_str)
-    except TypeError:
-        # Unhashable value (e.g. a list from a malformed config).
-        cached = None
-    if cached is not None:
-        return cached
-    try:
-        compiled = re.compile(pattern_str)
-    except (re.error, TypeError) as e:
+        return _compile_secret_pattern(pattern_str)
+    except re.error as e:
         # A bad user regex must never crash the host (this runs inside the
         # patched Popen); fall back to the default pattern and do not cache it.
         logger.warning(
             "pubrun: invalid [redaction].sensitive_keys_regex (%s); using the default pattern",
             type(e).__name__,
         )
-        return _get_secret_pattern(None)
-    _PATTERN_CACHE[pattern_str] = compiled
-    return compiled
+        return _compile_secret_pattern(DEFAULT_SECRET_REGEX)
 
 
 def _get_representation(config: Optional[Dict[str, Any]] = None) -> str:
@@ -113,28 +115,141 @@ def is_secret_key(key: str, config: Optional[Dict[str, Any]] = None) -> bool:
 
 
 def _redact_dict_keys(d: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    res = {}
-    pattern = _get_secret_pattern(config)
-    for k, v in d.items():
-        if isinstance(k, str) and pattern.search(k):
-            res[k] = "[REDACTED]"
-        else:
-            res[k] = _redact_any(v, config)
-    return res
+    res = _redact_any(d, config)
+    return res if isinstance(res, dict) else {}
 
 
 def _redact_any(val: Any, config: Optional[Dict[str, Any]] = None) -> Any:
-    if isinstance(val, dict):
-        return _redact_dict_keys(val, config)
-    elif isinstance(val, list):
-        return [_redact_any(item, config) for item in val]
-    elif isinstance(val, str):
+    """Iteratively redact nested dicts, lists, and strings without recursion."""
+    if isinstance(val, str):
         return _redact_value_string_heuristics(val, config)
-    return val
+    if not isinstance(val, (dict, list)):
+        return val
+
+    pattern = _get_secret_pattern(config)
+    root_holder: List[Any] = [None]
+    # Active ancestor map (id(orig) -> redacted container) breaks cyclic references.
+    active: Dict[int, Any] = {}
+    stack: List[Tuple[Any, ...]] = [("enter", val, root_holder, 0)]
+
+    while stack:
+        frame = stack.pop()
+        if frame[0] == "exit":
+            active.pop(frame[1], None)
+            continue
+
+        _, node, parent, slot = frame
+        node_id = id(node)
+        if node_id in active:
+            parent[slot] = active[node_id]
+            continue
+
+        if isinstance(node, dict):
+            out_dict: Dict[Any, Any] = {}
+            parent[slot] = out_dict
+            active[node_id] = out_dict
+            stack.append(("exit", node_id))
+            pending_children: List[Tuple[Any, ...]] = []
+            for k, v in node.items():
+                if isinstance(k, str) and pattern.search(k):
+                    out_dict[k] = "[REDACTED]"
+                elif isinstance(v, (dict, list)):
+                    out_dict[k] = None
+                    pending_children.append(("enter", v, out_dict, k))
+                elif isinstance(v, str):
+                    out_dict[k] = _redact_value_string_heuristics(v, config)
+                else:
+                    out_dict[k] = v
+            for child_frame in reversed(pending_children):
+                stack.append(child_frame)
+        elif isinstance(node, list):
+            out_list: List[Any] = [None] * len(node)
+            parent[slot] = out_list
+            active[node_id] = out_list
+            stack.append(("exit", node_id))
+            for idx in range(len(node) - 1, -1, -1):
+                item = node[idx]
+                if isinstance(item, (dict, list)):
+                    stack.append(("enter", item, out_list, idx))
+                elif isinstance(item, str):
+                    out_list[idx] = _redact_value_string_heuristics(item, config)
+                else:
+                    out_list[idx] = item
+
+    return root_holder[0]
 
 
 # Covers hyphenated prefixed keys such as sk-proj-...
 _PREFIXED_KEY_VALUE_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{20,}")
+_OPENAI_KEY_RE = re.compile(r"sk-[a-zA-Z0-9]{20,}")
+_BEARER_TOKEN_RE = re.compile(r"(?i)(bearer|token|auth)\s+([a-zA-Z0-9._~+/-]+=*)")
+_NONFLAG_KV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
+_NEWLINE_RE = re.compile(r"[\r\n]+")
+_JSON_KEY_COLON_RE = re.compile(r'"(?P<key>(?:\\.|[^"\\])*)"(?P<sep>\s*:\s*)')
+_JSON_SCALAR_VAL_RE = re.compile(
+    r'"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null'
+)
+
+
+def _skip_json_container(text: str, start: int) -> int:
+    """Iteratively find the end index (exclusive) of a JSON object or array."""
+    depth = 0
+    in_string = False
+    escaped = False
+    n = len(text)
+    i = start
+    while i < n:
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        else:
+            if ch == '"':
+                in_string = True
+            elif ch in "{[":
+                depth += 1
+            elif ch in "}]":
+                depth -= 1
+                if depth <= 0:
+                    return i + 1
+        i += 1
+    return n
+
+
+def _redact_json_text_fallback(text: str, pattern: re.Pattern) -> str:
+    """Iteratively redact JSON `"key": value` pairs when json.loads/dumps hits RecursionError."""
+    out: List[str] = []
+    pos = 0
+    n = len(text)
+    while pos < n:
+        match = _JSON_KEY_COLON_RE.search(text, pos)
+        if match is None:
+            out.append(text[pos:])
+            break
+        key_text = match.group("key")
+        if pattern.search(key_text):
+            val_start = match.end()
+            if val_start < n:
+                ch = text[val_start]
+                if ch in "{[":
+                    val_end = _skip_json_container(text, val_start)
+                    out.append(text[pos:val_start])
+                    out.append('"[REDACTED]"')
+                    pos = val_end
+                    continue
+                scalar_match = _JSON_SCALAR_VAL_RE.match(text, val_start)
+                if scalar_match is not None:
+                    out.append(text[pos:val_start])
+                    out.append('"[REDACTED]"')
+                    pos = scalar_match.end()
+                    continue
+        out.append(text[pos : match.end()])
+        pos = match.end()
+    return "".join(out)
 
 
 def _redact_value_string_heuristics(val: str, config: Optional[Dict[str, Any]] = None) -> str:
@@ -148,6 +263,8 @@ def _redact_value_string_heuristics(val: str, config: Optional[Dict[str, Any]] =
             data = json.loads(stripped)
             redacted_data = _redact_any(data, config)
             return json.dumps(redacted_data)
+        except RecursionError:
+            val = _redact_json_text_fallback(val, _get_secret_pattern(config))
         except Exception:
             pass
 
@@ -159,12 +276,9 @@ def _redact_value_string_heuristics(val: str, config: Optional[Dict[str, Any]] =
     val = _DIAG_URI_TOKEN_RE.sub(r"\1://[REDACTED]@\3", val)
 
     # 3. Known API keys / Tokens
-    openai_pattern = re.compile(r"sk-[a-zA-Z0-9]{20,}")
-    val = openai_pattern.sub("[REDACTED]", val)
+    val = _OPENAI_KEY_RE.sub("[REDACTED]", val)
     val = _PREFIXED_KEY_VALUE_RE.sub("[REDACTED]", val)
-
-    bearer_pattern = re.compile(r"(?i)(bearer|token|auth)\s+([a-zA-Z0-9._~+/-]+=*)")
-    val = bearer_pattern.sub(r"\1 [REDACTED]", val)
+    val = _BEARER_TOKEN_RE.sub(r"\1 [REDACTED]", val)
 
     return val
 
@@ -250,7 +364,7 @@ def redact_argv(argv: list, config: Optional[Dict[str, Any]] = None) -> list:
         if "=" in arg_str and not any(ch.isspace() for ch in arg_str.split("=", 1)[0]):
             parts = arg_str.split("=", 1)
             key_part, val_part = parts[0], parts[1]
-            if re.match(r"^[A-Za-z_][A-Za-z0-9_.-]*$", key_part):
+            if _NONFLAG_KV_KEY_RE.match(key_part):
                 if pattern.search(key_part):
                     result.append(f"{key_part}=[REDACTED]")
                     continue
@@ -374,7 +488,7 @@ def format_safe_error_detail(
     except Exception:
         raw_msg = ""
 
-    collapsed = re.sub(r"[\r\n]+", " ", raw_msg).strip()
+    collapsed = _NEWLINE_RE.sub(" ", raw_msg).strip()
     if not collapsed:
         return _truncate_detail(exc_type, max_len)
 
@@ -391,7 +505,7 @@ def format_safe_error_detail(
     if redacted_msg is None:
         return _truncate_detail(exc_type, max_len)
 
-    redacted_msg = re.sub(r"[\r\n]+", " ", redacted_msg).strip()
+    redacted_msg = _NEWLINE_RE.sub(" ", redacted_msg).strip()
     if not redacted_msg:
         return _truncate_detail(exc_type, max_len)
 

@@ -111,30 +111,49 @@ def _unescape_mount_field(field: str) -> str:
     return "".join(out)
 
 
-def _longest_prefix_fstype(resolved_path: str, entries: List[Tuple[str, str]]) -> Optional[Tuple[str, str]]:
+def _longest_prefix_fstype(
+    resolved_path: str,
+    entries: List[Tuple[str, str]],
+    *,
+    case_insensitive: bool = False,
+) -> Optional[Tuple[str, str]]:
     """Return (mount_point, fstype) of the longest mount point that prefixes the path.
 
     On a tie the LATER entry wins: the mount table lists mounts in mount order, so a
     later mount on the same point (e.g. nfs4 over an autofs trigger) shadows it.
     """
+    norm_path = resolved_path
+    if norm_path.startswith("//"):
+        norm_path = "/" + norm_path.lstrip("/")
+    cmp_path = norm_path.lower() if case_insensitive else norm_path
     best: Optional[Tuple[str, str]] = None
     best_len = -1
     for mount_point, fstype in entries:
         mp = mount_point.rstrip("/") or "/"
+        if mp.startswith("//"):
+            mp = "/" + mp.lstrip("/")
+        cmp_mp = mp.lower() if case_insensitive else mp
         # A mount matches if the path equals it or sits under it.
-        if resolved_path == mp or resolved_path.startswith(mp + "/") or mp == "/":
-            if len(mp) >= best_len:
-                best_len = len(mp)
+        if cmp_path == cmp_mp or cmp_path.startswith(cmp_mp + "/") or cmp_mp == "/":
+            if len(cmp_mp) >= best_len:
+                best_len = len(cmp_mp)
                 best = (mount_point, fstype)
     return best
 
 
-def _classify_path_linux(path: str, entries: List[Tuple[str, str]]) -> Dict[str, Any]:
+def _classify_path_linux(
+    path: str,
+    entries: List[Tuple[str, str]],
+    *,
+    case_insensitive: bool = False,
+) -> Dict[str, Any]:
     # os.path.realpath resolves symlinks lexically on the string where possible, but
     # can stat components; to stay non-blocking we use os.path.abspath (pure string) and
     # normpath. This is sufficient for mount-prefix matching and never touches the mount.
     resolved = os.path.normpath(os.path.abspath(path))
-    match = _longest_prefix_fstype(resolved, entries)
+    if resolved.startswith("//"):
+        resolved = "/" + resolved.lstrip("/")
+    match = _longest_prefix_fstype(resolved, entries, case_insensitive=case_insensitive)
     if match is None:
         return {"path": path, "capture_state": {"status": "failed", "detail": "no matching mount"}}
     mount_point, fstype = match
@@ -181,8 +200,9 @@ def _classify_windows_path(path: str) -> Dict[str, Any]:
     from ctypes import wintypes
     DRIVE_REMOTE = 4
     k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-    buf = ctypes.create_unicode_buffer(260)
-    if not k32.GetVolumePathNameW(ctypes.c_wchar_p(path), buf, 260):
+    buf_len = max(1024, len(path) + 2)
+    buf = ctypes.create_unicode_buffer(buf_len)
+    if not k32.GetVolumePathNameW(ctypes.c_wchar_p(path), buf, buf_len):
         return {"path": path, "capture_state": {"status": "failed", "detail": "GetVolumePathNameW failed"}}
     volume_root = buf.value
     fs_name = ctypes.create_unicode_buffer(260)
@@ -247,11 +267,14 @@ def get_filesystem(config: Dict[str, Any], paths: Dict[str, str]) -> Dict[str, A
             return {"capture_state": {"status": "failed",
                                       "detail": f"filesystem classification not supported on {sys_plat}"}}
 
+        case_insensitive = sys_plat == "darwin"
         for label, path in paths.items():
             if not path:
                 continue
             try:
-                res[label] = _classify_path_linux(path, entries)
+                res[label] = _classify_path_linux(
+                    path, entries, case_insensitive=case_insensitive
+                )
             except Exception as e:  # per-path failure must not abort the rest
                 res[label] = {"path": path, "capture_state": {"status": "failed", "detail": str(e)}}
 

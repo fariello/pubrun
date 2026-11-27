@@ -118,4 +118,4 @@ def iowait_pct_between(prev: Optional[Tuple[int, int]],
     total_delta = curr[1] - prev[1]
     if total_delta <= 0:
         return None
-    return round(100.0 * iowait_delta / total_delta, 2)
+    return round(max(0.0, min(100.0, 100.0 * iowait_delta / total_delta)), 2)

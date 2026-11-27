@@ -8,11 +8,17 @@ import os
 import platform
 import subprocess
 import sys
+import threading
 import time
 from typing import Any, Optional, Tuple
 
 
 _PLATFORM = sys.platform  # 'linux', 'darwin', 'win32'
+
+_WIN_CTYPES_LOCK = threading.Lock()
+_PROCESS_MEMORY_COUNTERS_CLS: Optional[Any] = None
+_WIN_KERNEL32: Optional[Any] = None
+_WIN_PSAPI: Optional[Any] = None
 
 
 def _sysconf(name: str) -> int:
@@ -315,10 +321,14 @@ def _get_start_time_linux(pid: int) -> Optional[float]:
         # Fields are space-separated, but comm (field 2) can contain spaces
         # and is enclosed in parentheses.
         right_paren = stat_line.rfind(")")
+        if right_paren == -1:
+            return None
         fields = stat_line[right_paren + 2:].split()
         # Field index 19 (0-based after comm) = starttime in clock ticks
         starttime_ticks = int(fields[19])
         clock_ticks = _sysconf("SC_CLK_TCK")
+        if clock_ticks <= 0:
+            return None
 
         # Get system boot time
         with open("/proc/stat", "r") as f:
@@ -330,7 +340,7 @@ def _get_start_time_linux(pid: int) -> Optional[float]:
                 return None
 
         return boot_time + (starttime_ticks / clock_ticks)
-    except (OSError, IndexError, ValueError):
+    except (OSError, IndexError, ValueError, ZeroDivisionError, AttributeError):
         return None
 
 
@@ -354,6 +364,8 @@ def _get_cpu_linux(pid: int) -> Optional[float]:
         with open(f"/proc/{pid}/stat", "r") as f:
             stat_line = f.read()
         right_paren = stat_line.rfind(")")
+        if right_paren == -1:
+            return None
         fields = stat_line[right_paren + 2:].split()
 
         # utime (field 11) + stime (field 12), in clock ticks
@@ -362,6 +374,8 @@ def _get_cpu_linux(pid: int) -> Optional[float]:
         starttime_ticks = int(fields[19])
 
         clock_ticks = _sysconf("SC_CLK_TCK")
+        if clock_ticks <= 0:
+            return None
         total_cpu_seconds = (utime + stime) / clock_ticks
 
         # Elapsed time since process start
@@ -374,7 +388,7 @@ def _get_cpu_linux(pid: int) -> Optional[float]:
 
         # Percent of one core
         return (total_cpu_seconds / process_elapsed) * 100.0
-    except (OSError, IndexError, ValueError, ZeroDivisionError):
+    except (OSError, IndexError, ValueError, ZeroDivisionError, AttributeError):
         return None
 
 
@@ -446,7 +460,10 @@ def _get_cpu_macos(pid: int) -> Optional[float]:
     try:
         result = subprocess.run(
             ["ps", "-o", "%cpu=", "-p", str(pid)],
-            capture_output=True, text=True, timeout=5
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env={**os.environ, "LC_ALL": "C"},
         )
         if result.returncode != 0 or not result.stdout.strip():
             return None
@@ -459,8 +476,43 @@ def _get_cpu_macos(pid: int) -> Optional[float]:
 # Windows implementations (ctypes / wmic)
 # ==========================================================================
 
+def _ensure_process_memory_counters_cls_locked() -> Any:
+    """Create and cache _PROCESS_MEMORY_COUNTERS while _WIN_CTYPES_LOCK is held."""
+    global _PROCESS_MEMORY_COUNTERS_CLS
+    if _PROCESS_MEMORY_COUNTERS_CLS is None:
+        import ctypes
+        import ctypes.wintypes
+
+        class _PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("cb", ctypes.wintypes.DWORD),
+                ("PageFaultCount", ctypes.wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        _PROCESS_MEMORY_COUNTERS_CLS = _PROCESS_MEMORY_COUNTERS
+    return _PROCESS_MEMORY_COUNTERS_CLS
+
+
+def _get_process_memory_counters_cls() -> Any:
+    """Return the lazily created, cached _PROCESS_MEMORY_COUNTERS ctypes Structure."""
+    cached = _PROCESS_MEMORY_COUNTERS_CLS
+    if cached is not None:
+        return cached
+    with _WIN_CTYPES_LOCK:
+        return _ensure_process_memory_counters_cls_locked()
+
+
 def _get_win_kernel32() -> Any:
     """Return a kernel32 DLL handle with explicit argtypes/restype on Windows."""
+    global _WIN_KERNEL32
     import ctypes
     import ctypes.wintypes
 
@@ -468,33 +520,74 @@ def _get_win_kernel32() -> Any:
     windll_k32 = getattr(windll_obj, "kernel32", None)
     win_dll_cls = getattr(ctypes, "WinDLL", None)
     # Honor monkeypatched fake kernel32 objects in unit tests (on both Linux and
-    # Windows), while using a private WinDLL with explicit argtypes/restype in
+    # Windows), while caching a private WinDLL with explicit argtypes/restype in
     # real Windows execution.
     if win_dll_cls is not None and isinstance(windll_k32, win_dll_cls):
-        kernel32 = win_dll_cls("kernel32", use_last_error=True)
-        kernel32.OpenProcess.argtypes = [
-            ctypes.wintypes.DWORD,
-            ctypes.wintypes.BOOL,
-            ctypes.wintypes.DWORD,
-        ]
-        kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
-        kernel32.GetExitCodeProcess.argtypes = [
-            ctypes.wintypes.HANDLE,
-            ctypes.POINTER(ctypes.wintypes.DWORD),
-        ]
-        kernel32.GetExitCodeProcess.restype = ctypes.wintypes.BOOL
-        kernel32.GetProcessTimes.argtypes = [
-            ctypes.wintypes.HANDLE,
-            ctypes.POINTER(ctypes.wintypes.FILETIME),
-            ctypes.POINTER(ctypes.wintypes.FILETIME),
-            ctypes.POINTER(ctypes.wintypes.FILETIME),
-            ctypes.POINTER(ctypes.wintypes.FILETIME),
-        ]
-        kernel32.GetProcessTimes.restype = ctypes.wintypes.BOOL
-        kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
-        kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
-        return kernel32
+        cached = _WIN_KERNEL32
+        if cached is not None:
+            return cached
+        with _WIN_CTYPES_LOCK:
+            if _WIN_KERNEL32 is None:
+                counters_cls = _ensure_process_memory_counters_cls_locked()
+                kernel32 = win_dll_cls("kernel32", use_last_error=True)
+                kernel32.OpenProcess.argtypes = [
+                    ctypes.wintypes.DWORD,
+                    ctypes.wintypes.BOOL,
+                    ctypes.wintypes.DWORD,
+                ]
+                kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
+                kernel32.GetExitCodeProcess.argtypes = [
+                    ctypes.wintypes.HANDLE,
+                    ctypes.POINTER(ctypes.wintypes.DWORD),
+                ]
+                kernel32.GetExitCodeProcess.restype = ctypes.wintypes.BOOL
+                kernel32.GetProcessTimes.argtypes = [
+                    ctypes.wintypes.HANDLE,
+                    ctypes.POINTER(ctypes.wintypes.FILETIME),
+                    ctypes.POINTER(ctypes.wintypes.FILETIME),
+                    ctypes.POINTER(ctypes.wintypes.FILETIME),
+                    ctypes.POINTER(ctypes.wintypes.FILETIME),
+                ]
+                kernel32.GetProcessTimes.restype = ctypes.wintypes.BOOL
+                kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+                kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
+                k32_get_mem = getattr(kernel32, "K32GetProcessMemoryInfo", None)
+                if k32_get_mem is not None:
+                    k32_get_mem.argtypes = [
+                        ctypes.wintypes.HANDLE,
+                        ctypes.POINTER(counters_cls),
+                        ctypes.wintypes.DWORD,
+                    ]
+                    k32_get_mem.restype = ctypes.wintypes.BOOL
+                _WIN_KERNEL32 = kernel32
+            return _WIN_KERNEL32
     return ctypes.windll.kernel32  # type: ignore[attr-defined]
+
+
+def _get_win_psapi() -> Any:
+    """Return a cached private psapi WinDLL handle with GetProcessMemoryInfo configured."""
+    global _WIN_PSAPI
+    cached = _WIN_PSAPI
+    if cached is not None:
+        return cached
+    import ctypes
+    import ctypes.wintypes
+
+    win_dll_cls = getattr(ctypes, "WinDLL", None)
+    if win_dll_cls is None:
+        raise AttributeError("ctypes.WinDLL is unavailable")
+    with _WIN_CTYPES_LOCK:
+        if _WIN_PSAPI is None:
+            counters_cls = _ensure_process_memory_counters_cls_locked()
+            psapi = win_dll_cls("psapi", use_last_error=True)
+            psapi.GetProcessMemoryInfo.argtypes = [
+                ctypes.wintypes.HANDLE,
+                ctypes.POINTER(counters_cls),
+                ctypes.wintypes.DWORD,
+            ]
+            psapi.GetProcessMemoryInfo.restype = ctypes.wintypes.BOOL
+            _WIN_PSAPI = psapi
+        return _WIN_PSAPI
 
 
 def _is_pid_alive_windows(pid: int) -> bool:
@@ -575,21 +668,8 @@ def _get_rss_windows(pid: int) -> Optional[int]:
         return None
     try:
         import ctypes
-        import ctypes.wintypes
 
-        class _PROCESS_MEMORY_COUNTERS(ctypes.Structure):
-            _fields_ = [
-                ("cb", ctypes.wintypes.DWORD),
-                ("PageFaultCount", ctypes.wintypes.DWORD),
-                ("PeakWorkingSetSize", ctypes.c_size_t),
-                ("WorkingSetSize", ctypes.c_size_t),
-                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-                ("PagefileUsage", ctypes.c_size_t),
-                ("PeakPagefileUsage", ctypes.c_size_t),
-            ]
+        counters_cls = _get_process_memory_counters_cls()
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         PROCESS_VM_READ = 0x0010
@@ -603,15 +683,9 @@ def _get_rss_windows(pid: int) -> Optional[int]:
             try:
                 get_mem = getattr(kernel32, "K32GetProcessMemoryInfo", None)
                 if get_mem is None:
-                    psapi = ctypes.WinDLL("psapi", use_last_error=True)  # type: ignore[attr-defined]
+                    psapi = _get_win_psapi()
                     get_mem = psapi.GetProcessMemoryInfo
-                get_mem.argtypes = [
-                    ctypes.wintypes.HANDLE,
-                    ctypes.POINTER(_PROCESS_MEMORY_COUNTERS),
-                    ctypes.wintypes.DWORD,
-                ]
-                get_mem.restype = ctypes.wintypes.BOOL
-                counters = _PROCESS_MEMORY_COUNTERS()
+                counters = counters_cls()
                 counters.cb = ctypes.sizeof(counters)
                 if get_mem(handle, ctypes.byref(counters), counters.cb):
                     return int(counters.WorkingSetSize)

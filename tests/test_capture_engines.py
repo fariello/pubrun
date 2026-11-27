@@ -473,3 +473,50 @@ class TestGit:
         assert result["capture_state"]["status"] == "complete"
         assert seen_timeouts
         assert all(0 < t <= 5.0 for t in seen_timeouts)
+
+    def test_git_passes_utf8_and_lc_all_c_and_handles_non_ascii(self, monkeypatch):
+        """git subprocess runs with UTF-8 decoding and LC_ALL=C for non-ASCII names and fast-exit."""
+        import pubrun.capture.git as git_mod
+
+        seen_kwargs = []
+
+        def fake_run(args, **kwargs):
+            seen_kwargs.append(kwargs)
+            if "rev-parse" in args:
+                return MagicMock(
+                    returncode=0,
+                    stdout="/proj/caf\u00e9\n" + ("c" * 40) + "\nfeat/na\u00efve-\u03b1\n",
+                    stderr="",
+                )
+            if "status" in args:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=1, stdout="", stderr="")
+
+        monkeypatch.setattr(git_mod.subprocess, "run", fake_run)
+        result = get_git({"capture": {"git": {"enabled": True}}})
+        assert result["capture_state"]["status"] == "complete"
+        assert result["repo_root"] == "/proj/caf\u00e9"
+        assert result["branch"] == "feat/na\u00efve-\u03b1"
+        assert seen_kwargs
+        for kw in seen_kwargs:
+            assert kw.get("encoding") == "utf-8"
+            assert kw.get("errors") == "replace"
+            assert (kw.get("env") or {}).get("LC_ALL") == "C"
+
+        # Verify fast-exit outside a repo uses LC_ALL=C even when caller env has a non-English locale.
+        calls = []
+
+        def fake_outside(args, **kwargs):
+            calls.append((args, kwargs))
+            return MagicMock(
+                returncode=128,
+                stdout="",
+                stderr="fatal: not a git repository (or any of the parent directories): .git\n",
+            )
+
+        monkeypatch.setenv("LC_ALL", "de_DE.UTF-8")
+        monkeypatch.setattr(git_mod.subprocess, "run", fake_outside)
+        out = get_git({"capture": {"git": {"enabled": True}}})
+        assert out["capture_state"]["status"] == "unavailable"
+        assert len(calls) == 1
+        assert calls[0][1]["env"]["LC_ALL"] == "C"

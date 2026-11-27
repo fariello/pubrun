@@ -146,7 +146,7 @@ Security policies for preventing secret leakage into manifest files.
 |---|---|---|---|
 | `mode` | string | `"filtered"` | `"off"`: suppress the section (`capture_state.status = "suppressed"`); `"allowlist"`: capture only variables matching `allowlist`; `"filtered"`: capture all variables; `"full"`: capture all variables. `"filtered"`, `"full"`, and `"allowlist"` all pass values through the secret redaction controlled by `[redaction].env_enabled`, so `"full"` and `"filtered"` currently produce the same values. |
 | `depth` | string | `"standard"` | Capture depth for this category. `"off"` suppresses the section (`capture_state.status = "suppressed"`) without reading the environment. |
-| `allowlist` | list | `[]` | Variable names captured when `mode = "allowlist"`. Each entry is an exact name or a case-sensitive shell-style glob matched with `fnmatch.fnmatchcase` (for example `["PATH", "SLURM_*"]`). An empty or missing list captures no variables. Secret redaction from `[redaction]` still applies to matched variables, so `SLURM_API_TOKEN` matched by `SLURM_*` is still redacted. Ignored in other modes. |
+| `allowlist` | list | `[]` | Variable names captured when `mode = "allowlist"`. Each entry is an exact name or a shell-style glob matched with `fnmatch.fnmatchcase` (for example `["PATH", "SLURM_*"]`). Matching is case-insensitive on Windows (`win32`) and case-sensitive on POSIX systems. An empty or missing list captures no variables. Secret redaction from `[redaction]` still applies to matched variables, so `SLURM_API_TOKEN` matched by `SLURM_*` is still redacted. Ignored in other modes. |
 
 ### `[capture.packages]`
 
@@ -196,20 +196,21 @@ When `mode` is not `"off"`, `pubrun` captures packages twice: a startup snapshot
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `true` | Whether to scan `sys.argv` for input file paths. |
-| `ignore_extensions` | list | `[]` | File extensions to skip (e.g., `["pyc", "log"]`). |
-| `compute_md5` | bool | `false` | If `true`, hash all detected input files (slow for large files). If `false`, record only mtime/size. |
+| `enabled` | bool | `true` | Whether to scan `sys.argv` (including unredacted `--flag=path` tokens) for input file paths. |
+| `ignore_extensions` | list | `[]` | File extensions to skip (for example `["pyc", "log"]`). |
+| `compute_md5` | bool | `false` | If `true`, hash detected regular input files up to `max_md5_bytes` (larger files record `md5_skipped` without hashing). If `false`, record only size and timestamps. |
+| `max_md5_bytes` | int | `104857600` | Maximum file size in bytes (default `100 MiB`) hashed when `compute_md5 = true`. Set to `0` to disable the size cap (matching `[capture.file_io].max_hash_bytes`). Negative, boolean, or invalid values fall back to `104857600`. |
 
 ### `[capture.hardware]`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `depth` | string | `"basic"` | Capture depth for hardware introspection. |
+| `depth` | string | `"basic"` | Capture depth for hardware introspection. Uses `/proc` and bounded `lscpu` fallback on Linux, `sysctl` and `system_profiler` on macOS, `ctypes` and `winreg` (with legacy `wmic` fallback) on Windows, and `nvidia-smi` plus Linux `amd-smi`/`rocm-smi` for GPUs. |
 | `capture_gpu_clock_speed` | bool | `false` | Add `clocks.max.sm` to the `nvidia-smi` query to record maximum GPU SM clock speeds (does not use NVML). |
 | `capture_gpu_fp_precision` | bool | `false` | **Reserved (currently without effect).** Intended to query GPU floating-point precision support. |
 | `capture_cpu_clock_speed` | bool | `false` | **Reserved (currently without effect).** Intended to query CPU clock speeds. |
 | `capture_cpu_fp_precision` | bool | `false` | **Reserved (currently without effect).** Intended to query CPU floating-point precision support. |
-| `timeout` | int | `10` | Per-command timeout (seconds) for hardware-inspection subprocesses (`nvidia-smi`, `system_profiler`, `sysctl`, `wmic`). Bounds a hung tool (e.g. a wedged GPU driver) so it cannot orphan the background hardware thread. |
+| `timeout` | int | `10` | Per-command timeout (seconds) for hardware-inspection subprocesses (`nvidia-smi`, `amd-smi`, `rocm-smi`, `lscpu`, `system_profiler`, `sysctl`, and legacy `wmic`). Bounds a hung tool (for example a wedged GPU driver) so it cannot orphan the background hardware thread. |
 | `total_timeout` | number | `10` | Total monotonic wall-clock budget (seconds) across all hardware-inspection subprocess probes in a single capture (defaults to `timeout` if omitted or invalid; accepts finite non-negative numbers). Once the budget expires, remaining subprocess probes are skipped; if any probe timed out or the budget expired, `capture_state.status` is recorded as `"timeout"` if zero probed fields succeeded (`cpu.model`, `memory_total_bytes`, and `gpus` are all absent or empty) or `"partial"` if at least one probed field succeeded. |
 
 ### `[capture.resources]`

@@ -402,10 +402,13 @@ class TestCliMethods:
 class TestCliRerun:
 
     @pytest.fixture
-    def run_dir(self, tmp_path):
+    def run_dir(self, tmp_path, monkeypatch):
         """Create a real run to test rerun command against."""
         from pubrun import start as pubrun_start
         import pubrun.tracker
+        script = tmp_path / "train.py"
+        script.write_text("print('ok')\n", encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", [str(script)])
         pubrun.tracker._active_run = None
         try:
             tracker = pubrun_start()

@@ -1,5 +1,6 @@
 import fnmatch
 import os
+import sys
 from typing import Dict, Any, List
 from pubrun.capture.redaction import redact_env_vars
 
@@ -27,13 +28,21 @@ def get_environment(config: Dict[str, Any]) -> Dict[str, Any]:
     raw_env = dict(os.environ)
 
     if mode == "allowlist":
-        # Exact names or case-sensitive shell-style globs; an empty, omitted, or
-        # malformed allowlist captures nothing.
+        # Exact names or shell-style globs (case-insensitive on Windows,
+        # case-sensitive on POSIX); an empty, omitted, or malformed allowlist
+        # captures nothing.
         patterns = _allowlist_patterns(cfg.get("allowlist"))
-        raw_env = {
-            k: v for k, v in raw_env.items()
-            if any(fnmatch.fnmatchcase(k, pat) for pat in patterns)
-        }
+        if sys.platform == "win32":
+            upper_patterns = [pat.upper() for pat in patterns]
+            raw_env = {
+                k: v for k, v in raw_env.items()
+                if any(fnmatch.fnmatchcase(k.upper(), pat) for pat in upper_patterns)
+            }
+        else:
+            raw_env = {
+                k: v for k, v in raw_env.items()
+                if any(fnmatch.fnmatchcase(k, pat) for pat in patterns)
+            }
 
     # Send through the engine to destructively redact matching keys
     variables = redact_env_vars(raw_env, config)

@@ -400,9 +400,17 @@ class TestEnvironmentCapture:
         assert values["PRT_JOB_ID"] == {"representation": "plain", "value": "1"}
 
     def test_allowlist_glob_is_case_sensitive(self, isolated_home, monkeypatch):
+        monkeypatch.setattr("sys.platform", "linux")
         monkeypatch.setenv("PRT_UPPER", "1")
         cfg = _env_config(mode="allowlist", allowlist=["prt_*", "prt_upper"])
         assert get_environment(cfg)["variables"] == []
+
+    def test_allowlist_glob_is_case_insensitive_on_windows(self, isolated_home, monkeypatch):
+        monkeypatch.setattr("sys.platform", "win32")
+        monkeypatch.setenv("PRT_UPPER", "1")
+        monkeypatch.setenv("Prt_Mixed", "2")
+        cfg = _env_config(mode="allowlist", allowlist=["prt_upper", "prt_m*"])
+        assert _names(get_environment(cfg)) == ["PRT_UPPER", "Prt_Mixed"]
 
     def test_allowlist_tuple_and_set_accepted(self, isolated_home, monkeypatch):
         monkeypatch.setenv("PRT_ONE", "1")

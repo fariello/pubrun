@@ -98,11 +98,11 @@ What was run and how.
 |---|---|---|
 | `argv` | list[string] | `sys.argv` at invocation time. Sensitive values may be redacted. |
 | `command_line` | string | Joined `argv` string. |
-| `rerun_command` | string | Shell command to reproduce the run (e.g., `cd /path && python script.py`). |
-| `entrypoint_type` | string | `"script"`, `"module"`, `"interactive"`, or `"unknown"`. |
+| `rerun_command` | string \| null | Shell command to reproduce the run using the quoted Python executable (`sys.executable`, or `python` when empty), including `-m <module>` for module runs (for example `cd /path && /path/to/python script.py`). `null` for `-c`, interactive, and notebook runs. |
+| `entrypoint_type` | string | `"script"`, `"module"`, `"interactive"`, `"notebook"`, or `"unknown"`. |
 | `script` | object | Script file metadata (see below). |
 | `working_directory` | object | `{"path": "/abs/path", "real_path": "/resolved/path"}`. |
-| `inputs` | list[object] | Detected input files from `sys.argv` (path, size, mtime, optional md5). An argument whose value is redacted in `argv` is not recorded. |
+| `inputs` | list[object] | Detected input files from `sys.argv`, including unredacted `--flag=path` values (path, size, mtime, optional `md5`, or `md5_skipped` when `[capture.inputs].compute_md5` skips a file exceeding `max_md5_bytes`). Redacted arguments and Jupyter kernel launcher/connection files are not recorded. |
 | `capture_state` | object | See [Capture State](#capture-state). |
 
 ### `invocation.script`
@@ -377,9 +377,9 @@ Physical hardware details.
 
 | Field | Type | Description |
 |---|---|---|
-| `vendor` | string | `"NVIDIA"` from `nvidia-smi`, `"Generic"` from Windows WMI, or `"Apple / Generic"` from macOS `system_profiler`. |
+| `vendor` | string | `"NVIDIA"` from `nvidia-smi`, `"AMD"` from Linux `amd-smi` or `rocm-smi`, `"Generic"` from Windows registry/`EnumDisplayDevicesW`/WMI, or `"Apple / Generic"` from macOS `system_profiler`. |
 | `model` | string \| null | GPU model name. |
-| `memory_total_bytes` | int \| null | Dedicated GPU memory in bytes; `null` on macOS or when unavailable. |
+| `memory_total_bytes` | int \| null | Dedicated GPU memory in bytes (including binary 1024-based `VRAM (Total):` values parsed on macOS); `null` when unavailable or when macOS reports only dynamic VRAM. |
 | `driver_version` | string \| null | GPU driver version string; absent on macOS. |
 | `clock_speed_mhz` | int | Present for `nvidia-smi` only when `[capture.hardware].capture_gpu_clock_speed = true`. |
 

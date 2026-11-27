@@ -78,6 +78,9 @@ def get_git(config: Dict[str, Any]) -> Dict[str, Any]:
                     stderr=subprocess.PIPE,
                     timeout=cmd_timeout,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env={**os.environ, "LC_ALL": "C"},
                 )
             stdout_str = res.stdout if isinstance(res.stdout, str) else ""
             stderr_str = res.stderr if isinstance(res.stderr, str) else ""

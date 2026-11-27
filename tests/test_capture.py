@@ -36,7 +36,10 @@ def _wait_with_orig_poll(proc: subprocess.Popen, orig_poll, timeout: float = 15.
 
 class TestInvocationCapture:
 
-    def test_rerun_command_present(self):
+    def test_rerun_command_present(self, tmp_path, monkeypatch):
+        script = tmp_path / "train.py"
+        script.write_text("print('ok')\n", encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", [str(script)])
         tracker = start()
         tracker.stop()
         manifest_path = tracker.run_dir / "manifest.json"
@@ -44,6 +47,7 @@ class TestInvocationCapture:
             data = json.load(f)
         inv = data["invocation"]
         assert "rerun_command" in inv
+        assert inv["rerun_command"] is not None
         assert "cd " in inv["rerun_command"]
         assert "python" in inv["rerun_command"]
         assert inv["capture_state"]["status"] == "complete"
