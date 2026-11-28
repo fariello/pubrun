@@ -6,7 +6,7 @@
 - Scope: Update `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` to pass `capture={"hardware": {"depth": "off"}}` to `active_run(...)`, document the reason with a brief inline comment, and assert that `orig_manifest` records suppressed hardware capture before testing rejected report and artifact names. No production source files change.
 - Scope-Paths: tests/test_explicit_api.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Short-Description: Pass capture.hardware.depth='off' in test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively to prevent background pubrun-hw manifest refresh races
@@ -19,12 +19,12 @@
 - Highest E allocated: 02
 - Author: Antigravity
 - Id: 8o6o83
-- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 8o6o83 verified (set 7jd8g1, attempt 1).
 - 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-27 to-review (Antigravity): Authored review-ready Implementation Plan Document (IPD) graduating backlog item 7jd8g1.
