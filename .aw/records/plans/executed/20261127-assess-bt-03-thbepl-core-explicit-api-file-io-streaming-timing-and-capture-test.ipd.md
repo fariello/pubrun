@@ -6,7 +6,7 @@
 - Scope: Fix `src/pubrun/core.py::_PopenPipeProxy.close` and `src/pubrun/capture/file_io.py::ProvenanceFileProxy._update_stream_hash`, and harden `tests/test_explicit_api.py` (leaving `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` untouched for pending plan `8o6o83`), `tests/test_runtime_safety.py`, `tests/test_file_io_provenance.py`, and `tests/test_file_registration.py`.
 - Scope-Paths: src/pubrun/core.py, src/pubrun/capture/file_io.py, tests/test_explicit_api.py, tests/test_runtime_safety.py, tests/test_file_io_provenance.py, tests/test_file_registration.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix pubrun.popen POSIX signal decoding and small-chunk stream hash timing; close explicit API, symlink-escape, and file_io coverage gaps
@@ -17,12 +17,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: thbepl
-- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: thbepl verified (set assess-bt, attempt 1).
 - 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-27 to-review (Antigravity): Authored review-ready child IPD from parallel `/assess bugs` and `/assess testing` audits on HEAD `512ee68` / `8f2aacd`.
