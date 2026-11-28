@@ -1,5 +1,5 @@
 - Id: wvdr46
-- Status: graduated
+- Status: done
 - Graduated-To: wvdr46
 - Set: wvdr46
 - Work-Kind: bug
@@ -11,6 +11,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-28 done (aw backlog): closed by aw agy run: IPD 3ed2o4 executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261127-wvdr46-01-3ed2o4-avoid-import-lock-deadlock-when-coverage-py-probes-pubrun-su.ipd.md); evidence .aw/records/plans/executed/20261127-wvdr46-01-3ed2o4-avoid-import-lock-deadlock-when-coverage-py-probes-pubrun-su.ipd.md
 - 2026-11-28 graduated (aw backlog): graduated by run run-20261128T034305Z-475903: 3ed2o4
 - 2026-11-28 created (aw backlog): Avoid import-lock deadlock when coverage.py probes pubrun submodules during auto-start
 
