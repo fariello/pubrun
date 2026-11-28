@@ -6,7 +6,7 @@
 - Scope: Fix `src/pubrun/capture/redaction.py`, `src/pubrun/capture/subprocesses.py`, `src/pubrun/capture/console.py`, and `src/pubrun/capture/liveness.py`, and add deterministic behavioral regression tests in `tests/test_security_hardening.py`, `tests/test_capture_engine_bugs.py`, and `tests/test_liveness.py`.
 - Scope-Paths: src/pubrun/capture/redaction.py, src/pubrun/capture/subprocesses.py, src/pubrun/capture/console.py, src/pubrun/capture/liveness.py, tests/test_security_hardening.py, tests/test_capture_engine_bugs.py, tests/test_liveness.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix boolean-flag redaction leaks, Windows mid-token quote splitting, post-migration console error tracking, and liveness spy/Windows parity
@@ -17,12 +17,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: ndobra
-- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: ndobra verified (set assess-bt, attempt 1).
 - 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005
 - 2026-11-27 to-review (Antigravity): Authored review-ready child IPD from `/assess bugs` Slice 2 audit on HEAD `512ee68` / `8f2aacd`.
@@ -58,15 +58,15 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Fix redaction and Windows subprocess splitting security defects
 
-- [ ] E-01 Fix boolean-flag secret leaks and `[REDACTED]]` corruption in `src/pubrun/capture/redaction.py` (`BUG-E1`):
+- [x] E-01 Fix boolean-flag secret leaks and `[REDACTED]]` corruption in `src/pubrun/capture/redaction.py` (`BUG-E1`):
   - Update `src/pubrun/capture/redaction.py::_BEARER_TOKEN_RE` to require a leading non-flag boundary and disallow values beginning with `-` (for example `r"(?i)(?<![A-Za-z0-9_-])(bearer|token|auth)\s+(?!-)([a-zA-Z0-9._~+/-]+=*)"`).
   - Update `src/pubrun/capture/redaction.py::_redact_flag_space_values` to skip consuming `val_match` when `val_match.group(0).startswith("-")`, matching `redact_argv`'s boolean-flag guard so `--use-key --password supersecret` redacts `supersecret` instead of swallowing `--password`.
   - Share an atomic `\[REDACTED\]|` value-token subpattern (`r"\[REDACTED\]|\"[^\"]*\"|'[^']*'|[^\s,)\];]+"`) across `_DIAG_TOKEN_VAL_RE`, `_DIAG_KV_EQ_RE`, and `_DIAG_KV_COLON_RE` so already-redacted markers are never rewritten to `[REDACTED]]` in space-separated flags (`--password [REDACTED]`), key-equals pairs (`--password=[REDACTED]`), or colon-separated diagnostic messages (`password: [REDACTED]`).
   - Depends on: none
   - Expected outcome: `redact_argv` and `format_safe_error_detail` redact secrets following boolean sensitive flags and bare subcommands (`--use-auth --password supersecret`, `--use-key --password supersecret`, `--token --secret supersecret`, `auth --password supersecret`), preserve `Bearer tok123 -> Bearer [REDACTED]`, and never produce `[REDACTED]]` for `--password [REDACTED]`, `--password=[REDACTED]`, or `password: [REDACTED]`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Fix Windows mid-token quote splitting in `src/pubrun/capture/subprocesses.py::SubprocessSpy._safe_shlex_split` (`BUG-E2`):
+- [x] E-02 Fix Windows mid-token quote splitting in `src/pubrun/capture/subprocesses.py::SubprocessSpy._safe_shlex_split` (`BUG-E2`):
   - Replace the `shlex.split(args, posix=False)` branch in `SubprocessSpy._safe_shlex_split` with a dedicated Windows quote-aware splitter that:
     - splits on unquoted whitespace and returns `[]` for empty or whitespace-only strings;
     - preserves all backslashes verbatim (never treating `\` as an escape character, so `"C:\Program Files\a.csv"` and `"C:\dir\"` keep backslashes intact and close cleanly);
@@ -77,21 +77,21 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - falls back to `[args]` when a quoted span is unterminated at end of input.
   - Depends on: none
   - Expected outcome: `SubprocessSpy._safe_shlex_split(cmd, posix=False)` keeps `--password="my secret"`, `--password='my secret'`, `API_KEY="foo bar"`, and `--data="C:\Program Files\a.csv"` as single tokens with intact backslashes, handles trailing backslashes, nested opposite quotes, empty quoted tokens, and unquoted apostrophes cleanly, falls back to `[args]` on unterminated quotes, and allows `redact_argv()` to redact multi-word secret values completely.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Fix console post-migration failure reporting and liveness spy/Windows parity
 
-- [ ] E-03 Fix `src/pubrun/capture/console.py::ConsoleInterceptor.resume_after_migration` and `src/pubrun/capture/liveness.py` (`BUG-E4`, `BUG-E9`):
+- [x] E-03 Fix `src/pubrun/capture/console.py::ConsoleInterceptor.resume_after_migration` and `src/pubrun/capture/liveness.py` (`BUG-E4`, `BUG-E9`):
   - In `ConsoleInterceptor.resume_after_migration`, update `self.run_dir = new_dir` and return early when `self.mode == "off" or not self._started`. Reopen `stdout.log` and `stderr.log` in independent `try/except` blocks; on failure for either stream, close any handle opened during that attempt, set `self.stdout_log = None` / `self.stderr_log = None`, detach `tee.log_file = None` and set `tee._log_write_failed = True` under `finalization_lock(tee._lock, 0.25)` when the tee is present, and log via `format_safe_error_detail(err, self._config)` outside the tee lock so `stop()` accurately reports `capture_state.status == "partial"` while the unaffected stream still captures and re-enables `faulthandler` when `stderr.log` succeeds.
   - In `src/pubrun/capture/liveness.py`, wrap all six `subprocess.run` calls (`_check_command_macos`, `_check_command_windows`, `_get_start_time_macos`, `_get_rss_macos`, `_get_cpu_macos`, `_get_rss_windows`) with lazy `from pubrun.capture.subprocesses import disable_spy` and `with disable_spy():` (matching sibling capture modules).
   - In `src/pubrun/capture/liveness.py::_is_pid_alive_windows`, define `ERROR_ACCESS_DENIED = 5`, retrieve `get_last_error = getattr(ctypes, "get_last_error", None)` (since `ctypes.get_last_error` exists only on Windows and must pass Linux/macOS `mypy`), and return `True` when `not handle` and `get_last_error is not None and get_last_error() == ERROR_ACCESS_DENIED`.
   - Depends on: none
   - Expected outcome: Failed console log reopen after migration marks the failing stream partial without preventing the sibling stream from reopening, logs only redacted error details outside tee locks, and never opens log files when `self._started` is `False`; all six `liveness.py` `subprocess.run` probes bypass `SubprocessSpy`, and Windows `ERROR_ACCESS_DENIED` reports alive parity with POSIX `PermissionError` while passing 3-OS `mypy`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Add regression tests and validate
 
-- [ ] E-04 Add behavioral regression tests in `tests/test_security_hardening.py`, `tests/test_capture_engine_bugs.py`, and `tests/test_liveness.py`:
+- [x] E-04 Add behavioral regression tests in `tests/test_security_hardening.py`, `tests/test_capture_engine_bugs.py`, and `tests/test_liveness.py`:
   - In `tests/test_security_hardening.py`, add tests covering:
     - `redact_argv` and `format_safe_error_detail` on `--use-auth --password supersecret`, `--use-key --password supersecret`, `--token --secret supersecret`, `auth --password supersecret`, `--password [REDACTED]`, `--password=[REDACTED]`, `password: [REDACTED]`, and `Bearer tok123`;
     - `SubprocessSpy._safe_shlex_split(..., posix=False)` followed by `redact_argv(...)` on Windows commands with backslashes and mid-token quoted spaces (`--password="my secret"`, `--password='my secret'`, `--data="C:\Program Files\a.csv"`, `"C:\dir\"`, `KEY="top secret"`, `--password="it's secret"`, `C:\work\O'Brien\train.py --password supersecret`, empty quoted tokens, empty string, and unterminated quotes).
@@ -103,13 +103,13 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - `_is_pid_alive_windows` returns `True` when `OpenProcess` returns `0` and `ctypes.get_last_error` (patched with `raising=False`) returns `5` (`ERROR_ACCESS_DENIED`), and returns `False` when it returns `87` (`ERROR_INVALID_PARAMETER`).
   - Depends on: E-01, E-02, E-03
   - Expected outcome: Every defect and edge case in this child has a deterministic, platform-independent behavioral regression test.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Run targeted `pytest -p randomly` and 3-OS `mypy` validation and capture output:
+- [x] E-05 Run targeted `pytest -p randomly` and 3-OS `mypy` validation and capture output:
   - Run all commands listed in `## Required tests / validation` and verify exit `0`.
   - Depends on: E-04
   - Expected outcome: All targeted pytest suites pass under `-p randomly` and 3-OS `mypy` exits `0`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -167,30 +167,30 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `git diff -- src/pubrun/capture/redaction.py` and passing pytest output from `tests/test_security_hardening.py` and `tests/test_redaction.py` exercising `redact_argv` and `format_safe_error_detail` on boolean-flag/subcommand combinations, `Bearer tok123`, and `[REDACTED]` preservation across `--password [REDACTED]`, `--password=[REDACTED]`, and `password: [REDACTED]`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff -- src/pubrun/capture/redaction.py` (`_BEARER_TOKEN_RE` updated to `r"(?i)(?<![A-Za-z0-9_-])(bearer|token|auth)\s+(?!-)([a-zA-Z0-9._~+/-]+=*)"`; `redact_argv` Heuristic 1 and Heuristic 2 guarded with `not any(ch.isspace() for ch in arg_str.split("=", 1)[0])` and `not any(ch.isspace() for ch in arg_str)` so unsplit flag-led strings reach the whitespace redaction branch; shared `_DIAG_VAL_SUBPATTERN = r"\[REDACTED\]|\"[^\"]*\"|'[^']*'|[^\s,)\];]+"` wired into `_DIAG_KV_EQ_RE`, `_DIAG_KV_COLON_RE`, and `_DIAG_TOKEN_VAL_RE`; `_redact_flag_space_values` guarded with `and not val_match.group(0).startswith("-")`). Randomized pytest run (`--randomly-seed=614799824`) passed all tests in `tests/test_security_hardening.py` (including `test_boolean_sensitive_flags_subcommands_and_redacted_marker_preservation PASSED`) and `tests/test_redaction.py` (`285 passed in 11.43s`, exit `0`).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `git diff -- src/pubrun/capture/subprocesses.py` and passing pytest output from `tests/test_security_hardening.py`, `tests/test_capture.py`, and `tests/test_runtime_safety.py` exercising `SubprocessSpy._safe_shlex_split(..., posix=False)` + `redact_argv(...)` on Windows backslashes, trailing backslashes before quotes, mid-token quoted spaces, nested opposite quotes, unquoted apostrophes, empty quoted tokens, and unterminated quotes.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff -- src/pubrun/capture/subprocesses.py` (added `_split_windows_cmdline(command: str) -> List[str]` and routed `SubprocessSpy._safe_shlex_split` when `not use_posix` to `_split_windows_cmdline(args)`, preserving backslashes verbatim, allowing mid-token double quotes and token-start/post-`=` single quotes, keeping opposite quotes literal inside spans, preserving empty quoted tokens, keeping unquoted apostrophes literal, and returning `[command]` on unterminated quotes). Randomized pytest run (`--randomly-seed=614799824`) passed `tests/test_security_hardening.py::test_windows_mid_token_quote_splitting_and_redaction PASSED`, `tests/test_capture.py::TestSubprocessInterceptor::test_shlex_fallback_on_bad_quotes PASSED`, `tests/test_runtime_safety.py::test_subprocess_spy_windows_shlex_and_drain_reaping PASSED`, and all sibling tests (`285 passed in 11.43s`, exit `0`).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `git diff -- src/pubrun/capture/console.py src/pubrun/capture/liveness.py` and passing pytest output from `tests/test_capture_engine_bugs.py` and `tests/test_liveness.py` exercising `resume_after_migration` (single-stream failure isolation, full failure `partial` status, failed-`start()` no-op), all six `liveness.py` `subprocess.run` helpers under `disable_spy()`, and `_is_pid_alive_windows` (`ERROR_ACCESS_DENIED` vs `ERROR_INVALID_PARAMETER`).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff -- src/pubrun/capture/console.py src/pubrun/capture/liveness.py` (`ConsoleInterceptor.resume_after_migration` returns early when `self.mode == "off" or not self._started`, reopens `stdout.log` and `stderr.log` independently, closes any handle opened on failure, sets `log_attr = None`, detaches `tee.log_file = None` and sets `tee._log_write_failed = True` under `finalization_lock(tee._lock, 0.25)`, logs via `format_safe_error_detail(reopen_err, self._config)` outside the tee lock, and re-enables `faulthandler` when `stderr_log` succeeds; `liveness.py` wraps all six `subprocess.run` calls in `_check_command_macos`, `_check_command_windows`, `_get_start_time_macos`, `_get_rss_macos`, `_get_cpu_macos`, and `_get_rss_windows` with lazy `from pubrun.capture.subprocesses import disable_spy` + `with disable_spy():`, and `_is_pid_alive_windows` checks `getattr(ctypes, "get_last_error", None) == ERROR_ACCESS_DENIED` (`5`) when `not handle`). Randomized pytest run (`--randomly-seed=614799824`) passed all tests in `tests/test_capture_engine_bugs.py` and `tests/test_liveness.py` (`285 passed in 11.43s`, exit `0`).
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `python3 -m pytest -v` output (re-derived at execution time) showing all newly added behavioral tests passing across `tests/test_security_hardening.py`, `tests/test_capture_engine_bugs.py`, and `tests/test_liveness.py` for every behavior listed in `E-04` (boolean-flag and `[REDACTED]` preservation, Windows mid-token quote splitting + redaction, `resume_after_migration` partial/failed handling, all six `liveness.py` helpers bypassing `SubprocessSpy`, and `_is_pid_alive_windows` error-code parity).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: `python3 -m pytest -v tests/test_security_hardening.py tests/test_capture_engine_bugs.py tests/test_liveness.py -k "boolean_sensitive_flags or windows_mid_token or TestConsoleResumeAfterMigration or bypass_subprocess_spy or access_denied_vs_invalid_parameter"` exited `0` (`collected 102 items / 95 deselected / 7 selected`, `7 passed, 95 deselected in 0.45s`): `tests/test_security_hardening.py::test_boolean_sensitive_flags_subcommands_and_redacted_marker_preservation PASSED`, `tests/test_security_hardening.py::test_windows_mid_token_quote_splitting_and_redaction PASSED`, `tests/test_capture_engine_bugs.py::TestConsoleResumeAfterMigration::test_single_stream_reopen_failure_marks_partial_and_keeps_sibling PASSED`, `tests/test_capture_engine_bugs.py::TestConsoleResumeAfterMigration::test_both_streams_reopen_failure_marks_partial PASSED`, `tests/test_capture_engine_bugs.py::TestConsoleResumeAfterMigration::test_resume_after_failed_start_opens_no_files_and_stays_failed PASSED`, `tests/test_liveness.py::TestLivenessPlatformBranches::test_all_six_subprocess_helpers_bypass_subprocess_spy PASSED`, `tests/test_liveness.py::TestLivenessPlatformBranches::test_windows_openprocess_access_denied_vs_invalid_parameter PASSED`.
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted complete output of both commands in `## Required tests / validation` (re-derived at execution time), both exiting `0` with zero failures.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Command 1 (`python3 -m pytest -p randomly tests/test_security_hardening.py tests/test_redaction.py tests/test_capture_engine_bugs.py tests/test_liveness.py tests/test_capture.py tests/test_capture_engines.py tests/test_runtime_safety.py tests/test_hook_ownership_rollback.py -v`) exited `0` (`Using --randomly-seed=614799824`, `collected 285 items`, `285 passed in 11.43s`); Command 2 (`python3 -m mypy && python3 -m mypy --platform win32 && python3 -m mypy --platform darwin`) exited `0` with `Success: no issues found in 71 source files` on Linux, `Success: no issues found in 71 source files` on `win32`, and `Success: no issues found in 71 source files` on `darwin`. Full repository suite (`aw suite`) also exited `0` (`2583 passed in 113.49s (0:01:53)`).
+  - Result: pass
 
 ## Approval and execution gate
 

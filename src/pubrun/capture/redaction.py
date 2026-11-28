@@ -182,7 +182,9 @@ def _redact_any(val: Any, config: Optional[Dict[str, Any]] = None) -> Any:
 # Covers hyphenated prefixed keys such as sk-proj-...
 _PREFIXED_KEY_VALUE_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{20,}")
 _OPENAI_KEY_RE = re.compile(r"sk-[a-zA-Z0-9]{20,}")
-_BEARER_TOKEN_RE = re.compile(r"(?i)(bearer|token|auth)\s+([a-zA-Z0-9._~+/-]+=*)")
+_BEARER_TOKEN_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])(bearer|token|auth)\s+(?!-)([a-zA-Z0-9._~+/-]+=*)"
+)
 _NONFLAG_KV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 _NEWLINE_RE = re.compile(r"[\r\n]+")
 _JSON_KEY_COLON_RE = re.compile(r'"(?P<key>(?:\\.|[^"\\])*)"(?P<sep>\s*:\s*)')
@@ -339,8 +341,8 @@ def redact_argv(argv: list, config: Optional[Dict[str, Any]] = None) -> list:
             # token is another option, so process it as a flag instead of
             # consuming it, or the value of a following --password would leak.
 
-        # Heuristic 1: --flag=value or -flag=value
-        if "=" in arg_str and arg_str.startswith("-"):
+        # Heuristic 1: --flag=value or -flag=value (single flag token; key has no whitespace)
+        if "=" in arg_str and arg_str.startswith("-") and not any(ch.isspace() for ch in arg_str.split("=", 1)[0]):
             parts = arg_str.split("=", 1)
             key_part = parts[0].lstrip("-")
             val_part = parts[1]
@@ -352,8 +354,8 @@ def redact_argv(argv: list, config: Optional[Dict[str, Any]] = None) -> list:
                 result.append(f"{parts[0]}={redacted_val}")
                 continue
 
-        # Heuristic 2: --flag (next arg is the secret value)
-        if arg_str.startswith("-"):
+        # Heuristic 2: --flag (single flag token without whitespace; next arg is the secret value)
+        if arg_str.startswith("-") and not any(ch.isspace() for ch in arg_str):
             flag_name = arg_str.lstrip("-")
             if pattern.search(flag_name):
                 result.append(arg_str)
@@ -397,22 +399,23 @@ _DIAG_URI_TOKEN_RE = re.compile(
     r"([a-zA-Z0-9+.-]+)://([^\s/:@]+)@([^\s/]+)"
 )
 _DIAG_PREFIXED_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
+_DIAG_VAL_SUBPATTERN = r"\[REDACTED\]|\"[^\"]*\"|'[^']*'|[^\s,)\];]+"
 _DIAG_KV_EQ_RE = re.compile(
     r"(?P<prefix>(?:^|[\s,(\[{;]))"
     r"(?P<key>-{0,2}[A-Za-z_][A-Za-z0-9_.-]*)"
     r"(?P<sep>\s*=\s*)"
-    r"(?P<val>\"[^\"]*\"|'[^']*'|[^\s,)\];]+)"
+    rf"(?P<val>{_DIAG_VAL_SUBPATTERN})"
 )
 _DIAG_KV_COLON_RE = re.compile(
     r"(?P<prefix>(?:^|[\s,(\[{;]))"
     r"(?P<key>[A-Za-z_][A-Za-z0-9_.-]*)"
     r"(?P<sep>:(?!//)\s*)"
-    r"(?P<val>\"[^\"]*\"|'[^']*'|[^\s,)\];]+)"
+    rf"(?P<val>{_DIAG_VAL_SUBPATTERN})"
 )
 _DIAG_FLAG_PREFIX_RE = re.compile(
     r"(?:^|(?<=[\s,(\[{;]))(-{1,2}[A-Za-z_][A-Za-z0-9_.-]*)(\s+)"
 )
-_DIAG_TOKEN_VAL_RE = re.compile(r"\"[^\"]*\"|'[^']*'|[^\s,)\];]+")
+_DIAG_TOKEN_VAL_RE = re.compile(_DIAG_VAL_SUBPATTERN)
 
 
 def _truncate_detail(text: str, max_len: int) -> str:
@@ -438,7 +441,7 @@ def _redact_flag_space_values(text: str, pattern: re.Pattern) -> str:
         key_name = match.group(1).lstrip("-")
         if pattern.search(key_name):
             val_match = _DIAG_TOKEN_VAL_RE.match(text, match.end())
-            if val_match is not None:
+            if val_match is not None and not val_match.group(0).startswith("-"):
                 out.append(text[pos : match.end()])
                 out.append("[REDACTED]")
                 pos = val_match.end()

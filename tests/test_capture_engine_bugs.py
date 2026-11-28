@@ -23,7 +23,7 @@ from pubrun.capture import hardware as hw
 from pubrun.capture import liveness
 from pubrun.capture import redaction
 from pubrun.capture import resources
-from pubrun.capture.console import TqdmSafeTee
+from pubrun.capture.console import ConsoleInterceptor, TqdmSafeTee
 from pubrun.capture.subprocesses import SubprocessSpy
 
 
@@ -117,6 +117,107 @@ class TestTeeCrlf:
         assert log.getvalue() == ""
         tee.flush()
         assert log.getvalue() == "recorded-partial\n"
+
+
+class TestConsoleResumeAfterMigration:
+    def test_single_stream_reopen_failure_marks_partial_and_keeps_sibling(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        dir1 = tmp_path / "d1"
+        dir2 = tmp_path / "d2"
+        dir1.mkdir()
+        dir2.mkdir()
+
+        interceptor = ConsoleInterceptor(dir1, mode="basic")
+        assert interceptor.start() is True
+        real_open = open
+
+        def fail_stdout_in_dir2(path, *args, **kwargs):
+            if str(path) == str(dir2 / "stdout.log"):
+                raise PermissionError(
+                    "cannot open https://user:topsecret@host/stdout.log"
+                )
+            return real_open(path, *args, **kwargs)
+
+        try:
+            sys.stdout.write("before out\n")
+            sys.stderr.write("before err\n")
+            was_fh = interceptor.suspend_for_migration()
+
+            monkeypatch.setattr("builtins.open", fail_stdout_in_dir2)
+            with caplog.at_level(logging.DEBUG, logger="pubrun"):
+                interceptor.resume_after_migration(dir2, reenable_faulthandler=was_fh)
+            monkeypatch.undo()
+
+            assert interceptor.run_dir == dir2
+            assert interceptor.stdout_log is None
+            assert interceptor.stdout_tee is not None
+            assert interceptor.stdout_tee.log_file is None
+            assert interceptor.stdout_tee._log_write_failed is True
+
+            assert interceptor.stderr_log is not None
+            assert interceptor.stderr_tee is not None
+            assert interceptor.stderr_tee.log_file is interceptor.stderr_log
+            assert interceptor.stderr_tee._log_write_failed is False
+            assert interceptor._faulthandler_owned is was_fh
+
+            sys.stdout.write("after out\n")
+            sys.stderr.write("after err\n")
+        finally:
+            monkeypatch.undo()
+            result = interceptor.stop()
+
+        assert result["capture_state"]["status"] == "partial"
+        assert "after err" in (dir2 / "stderr.log").read_text(encoding="utf-8")
+        debug_msgs = [r.getMessage() for r in caplog.records]
+        assert any("stdout.log" in msg and "[REDACTED]" in msg for msg in debug_msgs)
+        assert all("topsecret" not in msg for msg in debug_msgs)
+
+    def test_both_streams_reopen_failure_marks_partial(self, tmp_path):
+        dir1 = tmp_path / "d1"
+        dir1.mkdir()
+        missing_dir = tmp_path / "missing_dir"
+
+        interceptor = ConsoleInterceptor(dir1, mode="basic")
+        assert interceptor.start() is True
+        try:
+            was_fh = interceptor.suspend_for_migration()
+            interceptor.resume_after_migration(
+                missing_dir, reenable_faulthandler=was_fh
+            )
+            assert interceptor.stdout_log is None
+            assert interceptor.stderr_log is None
+            assert interceptor.stdout_tee is not None
+            assert interceptor.stderr_tee is not None
+            assert interceptor.stdout_tee.log_file is None
+            assert interceptor.stderr_tee.log_file is None
+            assert interceptor.stdout_tee._log_write_failed is True
+            assert interceptor.stderr_tee._log_write_failed is True
+            assert interceptor._faulthandler_owned is False
+        finally:
+            result = interceptor.stop()
+
+        assert result["capture_state"]["status"] == "partial"
+
+    def test_resume_after_failed_start_opens_no_files_and_stays_failed(self, tmp_path):
+        missing_initial = tmp_path / "no_such_initial_dir"
+        dir2 = tmp_path / "d2"
+        dir2.mkdir()
+
+        interceptor = ConsoleInterceptor(missing_initial, mode="basic")
+        assert interceptor.start() is False
+        try:
+            interceptor.resume_after_migration(dir2, reenable_faulthandler=True)
+            assert interceptor.run_dir == dir2
+            assert interceptor.stdout_log is None
+            assert interceptor.stderr_log is None
+            assert not (dir2 / "stdout.log").exists()
+            assert not (dir2 / "stderr.log").exists()
+            assert interceptor._faulthandler_owned is False
+        finally:
+            result = interceptor.stop()
+
+        assert result["capture_state"]["status"] == "failed"
 
 
 # ---------------------------------------------------------------------------
