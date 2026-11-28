@@ -1,6 +1,6 @@
 import math
 from typing import Dict, Any, List, Optional
-from pubrun.capture.packages import normalize_package_name
+from pubrun._pep503 import normalize_package_name
 from pubrun.report.templates import MARKDOWN_TEMPLATE, LATEX_TEMPLATE, HIGHLIGHT_PACKAGES
 from pubrun.report.file_evidence import _classify_file_record
 

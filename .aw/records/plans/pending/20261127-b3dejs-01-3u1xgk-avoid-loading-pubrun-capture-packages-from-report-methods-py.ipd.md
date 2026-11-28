@@ -56,32 +56,32 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Shared PEP 503 helper and import decoupling
 
-- [ ] E-01 Create the lightweight standard-library helper module `src/pubrun/_pep503.py`:
+- [x] E-01 Create the lightweight standard-library helper module `src/pubrun/_pep503.py`:
   - Import only `re` from the Python standard library. Do not import `importlib.metadata` or any `pubrun.capture.*` module.
   - Define `_PEP503_RE = re.compile(r"[-_.]+")` and `def normalize_package_name(name: str) -> str:` returning `_PEP503_RE.sub("-", name).lower()`.
   - Keep type annotations compatible with Python 3.8 through 3.14 (matching `pyproject.toml` `requires-python = ">=3.8"` and `src/pubrun/py.typed`), and add concise module and function docstrings.
   - Depends on: none
   - Expected outcome: `src/pubrun/_pep503.py` exists, exposes `_PEP503_RE` and `normalize_package_name`, loads without importing `importlib.metadata` or `pubrun.capture.packages`, and passes `mypy`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Re-export `normalize_package_name` and `_PEP503_RE` in `src/pubrun/capture/packages.py` from `src/pubrun/_pep503.py`:
+- [x] E-02 Re-export `normalize_package_name` and `_PEP503_RE` in `src/pubrun/capture/packages.py` from `src/pubrun/_pep503.py`:
   - Remove the local `_PEP503_RE = re.compile(r"[-_.]+")` definition and the local `def normalize_package_name(name: str) -> str:` definition from `src/pubrun/capture/packages.py`.
   - Import them with explicit Python Enhancement Proposal 561 (PEP 561) re-export aliases: `from pubrun._pep503 import _PEP503_RE as _PEP503_RE, normalize_package_name as normalize_package_name`.
   - Keep all internal calls to `normalize_package_name` in `src/pubrun/capture/packages.py` unchanged so existing downstream callers (`src/pubrun/report/reproducibility.py`, `tests/test_package_resolution.py`, `tests/test_package_lifecycle.py`, `tests/test_package_transitive.py`, and `tests/test_reproducibility_preflight.py`) keep identical behavior and strict typing under `mypy --no-implicit-reexport`.
   - Depends on: E-01
   - Expected outcome: `pubrun.capture.packages.normalize_package_name is pubrun._pep503.normalize_package_name`, `pubrun.capture.packages._PEP503_RE is pubrun._pep503._PEP503_RE`, and all existing package-capture and preflight tests pass without edits.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Update `src/pubrun/report/methods.py` to import `normalize_package_name` from `pubrun._pep503`:
+- [x] E-03 Update `src/pubrun/report/methods.py` to import `normalize_package_name` from `pubrun._pep503`:
   - Replace `from pubrun.capture.packages import normalize_package_name` at the top of `src/pubrun/report/methods.py` with `from pubrun._pep503 import normalize_package_name`.
   - Leave `_NORMALIZED_HIGHLIGHTS`, `_extract_valid_packages`, `extract_highlighted_packages`, `generate_report`, and `generate_report_multi` behavior unchanged.
   - Depends on: E-01
   - Expected outcome: Importing `pubrun.report.methods` under a non-auto-start import mode (`pubrun.minimal`, `pubrun.noauto`, or `PUBRUN_IMPORT_MODE=minimal`) and calling `generate_report` or `extract_highlighted_packages` leaves both `pubrun.capture.packages` and `importlib.metadata` out of `sys.modules`; running `pubrun.start()` followed by `pubrun.stop()` with `[capture.packages].mode == "off"` writes `methods.md` while keeping `pubrun.capture.packages` out of `sys.modules`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Subprocess and unit regression tests
 
-- [ ] E-04 Add regression tests in `tests/test_import_modes.py` and `tests/test_package_resolution.py`:
+- [x] E-04 Add regression tests in `tests/test_import_modes.py` and `tests/test_package_resolution.py`:
   - Update `tests/test_import_modes.py::TestModePep561AndColdStart::test_packages_mode_off_keeps_packages_module_unloaded` so the fresh-subprocess script also captures `"pubrun.capture.packages" in sys.modules` after `pubrun.stop()` and asserts that `loaded_after_stop` is `False`. Verify in the same test that `methods.md` exists inside `run.run_dir` and contains `"Package capture was disabled by configuration."`, proving `src/pubrun/writer.py::ArtifactWriter.write_artifacts` imported and ran `pubrun.report.methods::generate_report`.
   - Add a fresh-subprocess test in `tests/test_import_modes.py::TestModePep561AndColdStart` that imports `pubrun.minimal` first (preventing `src/pubrun/__init__.py::_execute_boot_sequence` from auto-starting a run under default `auto` mode), then imports `pubrun.report.methods` and calls `extract_highlighted_packages` and `generate_report` on (a) a manifest containing highlighted `"Scikit_Learn"` (`v1.5.0`) and (b) a manifest containing only non-highlighted `"zope.interface"` (`v6.0`). Assert `"pubrun.capture.packages" not in sys.modules`, `"importlib.metadata" not in sys.modules`, `"scikit-learn (v1.5.0)"` in the highlighted report, and `"zope-interface (v6.0)"` in the non-highlighted report.
   - Update `tests/test_package_resolution.py::test_normalize_package_name_pep503` (or add a companion test beside it) to assert `pubrun._pep503.normalize_package_name is pubrun.capture.packages.normalize_package_name` and check PEP 503 normalization directly on `pubrun._pep503.normalize_package_name`.
@@ -89,7 +89,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Run all commands in `## Required tests / validation`.
   - Depends on: E-02, E-03
   - Expected outcome: All targeted `pytest` suites, subpackage integrity tests, three-platform `mypy`, and downstream `mypy --strict --no-implicit-reexport` pass with exit `0`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -141,25 +141,37 @@ None. Backlog item `b3dejs` specifies moving the PEP 503 helper to a lightweight
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted output of a fresh-subprocess check under non-auto-start mode (`PUBRUN_IMPORT_MODE=minimal PUBRUN_RUN_MODE_OVERRIDE="" PYTHONPATH=src python3 -c "import sys; from pubrun._pep503 import normalize_package_name; assert normalize_package_name('Scikit_Learn') == 'scikit-learn'; assert normalize_package_name('zope.interface') == 'zope-interface'; assert normalize_package_name('Foo__Bar--Baz..Qux') == 'foo-bar-baz-qux'; assert 'importlib.metadata' not in sys.modules; assert 'pubrun.capture.packages' not in sys.modules; print('PEP503_OK')"`) printing `PEP503_OK` with exit `0` (exercising `src/pubrun/_pep503.py::normalize_package_name` created in `E-01`), plus `python3 -m mypy src/pubrun/_pep503.py` exiting `0`.
   - Observed evidence:
-  - Result: pending
+    - Fresh-subprocess check exited `0`: `PEP503_OK`
+    - `python3 -m mypy src/pubrun/_pep503.py` exited `0`: `Success: no issues found in 1 source file`
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted output of `PUBRUN_IMPORT_MODE=minimal PUBRUN_RUN_MODE_OVERRIDE="" PYTHONPATH=src python3 -c "import pubrun._pep503 as p, pubrun.capture.packages as pkg; assert pkg.normalize_package_name is p.normalize_package_name; assert pkg._PEP503_RE is p._PEP503_RE; print('REEXPORT_OK')"` printing `REEXPORT_OK` with exit `0` (exercising the re-export in `src/pubrun/capture/packages.py` updated in `E-02`), pasted output of `python3 -m pytest tests/test_package_resolution.py tests/test_package_lifecycle.py tests/test_package_transitive.py tests/test_reproducibility_preflight.py -v` exiting `0`, and Command 3 (`mypy --strict --no-implicit-reexport`) exiting `0`.
   - Observed evidence:
-  - Result: pending
+    - Re-export identity check exited `0`: `REEXPORT_OK`
+    - `python3 -m pytest tests/test_package_resolution.py tests/test_package_lifecycle.py tests/test_package_transitive.py tests/test_reproducibility_preflight.py -v` exited `0`: `61 passed in 12.73s` (including `tests/test_package_resolution.py::test_normalize_package_name_pep503 PASSED`).
+    - Command 3 (`MYPYPATH=src python3 -m mypy --config-file /dev/null --strict --no-implicit-reexport --follow-imports=silent -c ...`) exited `0`: `Success: no issues found in 1 source file`
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted output of two fresh-subprocess checks exiting `0` without leaving `runs/` artifacts in the workspace: (1) `PUBRUN_RUN_MODE_OVERRIDE="" PYTHONPATH=src python3 -c "import pathlib, sys, tempfile; import pubrun.minimal as pubrun; td = tempfile.TemporaryDirectory(); run = pubrun.start(output_dir=td.name, capture={'packages': {'mode': 'off'}, 'hardware': {'depth': 'off'}}); pubrun.stop(); assert 'pubrun.capture.packages' not in sys.modules; methods_text = (pathlib.Path(run.run_dir) / 'methods.md').read_text(encoding='utf-8'); assert 'Package capture was disabled by configuration.' in methods_text; td.cleanup(); print('STOP_ISOLATED_OK')"` (exercising `src/pubrun/writer.py::ArtifactWriter.write_artifacts` -> `src/pubrun/report/methods.py::generate_report` -> `src/pubrun/_pep503.py::normalize_package_name` updated in `E-03`), (2) `PUBRUN_IMPORT_MODE=minimal PUBRUN_RUN_MODE_OVERRIDE="" PYTHONPATH=src python3 -c "import sys; import pubrun.report.methods as m; assert m.extract_highlighted_packages({'packages': {'records': [{'name': 'Scikit_Learn', 'version': '1.5.0'}]}}) == ['scikit-learn (v1.5.0)']; assert 'zope-interface (v6.0)' in m.generate_report({'packages': {'records': [{'name': 'zope.interface', 'version': '6.0'}]}}); assert 'pubrun.capture.packages' not in sys.modules; assert 'importlib.metadata' not in sys.modules; print('METHODS_ISOLATED_OK')"` (exercising direct `src/pubrun/report/methods.py` import isolation under non-auto-start mode), plus `python3 -m pytest tests/test_reports.py tests/test_methods_multi.py tests/test_report_subpackage_integrity.py tests/test_writer.py -v` exiting `0`.
   - Observed evidence:
-  - Result: pending
+    - Fresh-subprocess check (1) exited `0`: `STOP_ISOLATED_OK`
+    - Fresh-subprocess check (2) exited `0`: `METHODS_ISOLATED_OK`
+    - `python3 -m pytest tests/test_reports.py tests/test_methods_multi.py tests/test_report_subpackage_integrity.py tests/test_writer.py -v` exited `0`: `164 passed in 5.29s`
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted output of Command 1 (all nine targeted `pytest` test files exiting `0`, pinning (a) fresh-subprocess `[capture.packages].mode == "off"` lifecycle isolation through `pubrun.stop()` with `methods.md` containing `"Package capture was disabled by configuration."`, (b) fresh-subprocess direct `pubrun.report.methods` import isolation under `pubrun.minimal` keeping `pubrun.capture.packages` and `importlib.metadata` unloaded while rendering normalized highlighted and non-highlighted package names, and (c) shared callable identity and PEP 503 unit assertions in `tests/test_package_resolution.py`; re-deriving the active test node names at execution time, e.g. `test_packages_mode_off_keeps_packages_module_unloaded` and `test_normalize_package_name_pep503`), Command 2 (`mypy` on Linux, `win32`, and `darwin`), and Command 3 (downstream `mypy --strict --no-implicit-reexport`) all exiting `0`.
   - Observed evidence:
-  - Result: pending
+    - Command 1 (`python3 -m pytest tests/test_import_modes.py tests/test_package_resolution.py tests/test_package_lifecycle.py tests/test_package_transitive.py tests/test_reports.py tests/test_methods_multi.py tests/test_reproducibility_preflight.py tests/test_report_subpackage_integrity.py tests/test_writer.py -v`) exited `0`: `325 passed in 38.44s`, including `tests/test_import_modes.py::TestModePep561AndColdStart::test_packages_mode_off_keeps_packages_module_unloaded PASSED`, `tests/test_import_modes.py::TestModePep561AndColdStart::test_report_methods_import_keeps_packages_and_metadata_unloaded PASSED`, and `tests/test_package_resolution.py::test_normalize_package_name_pep503 PASSED`.
+    - Command 2 (`python3 -m mypy && python3 -m mypy --platform win32 && python3 -m mypy --platform darwin`) exited `0`: `Success: no issues found in 71 source files` (all 3 platforms).
+    - Command 3 (`MYPYPATH=src python3 -m mypy --config-file /dev/null --strict --no-implicit-reexport --follow-imports=silent -c ...`) exited `0`: `Success: no issues found in 1 source file`.
+    - Full repository suite (`aw suite`) exited `0`: `2526 passed in 101.74s (0:01:41)`.
+  - Result: pass
 
 ## Approval and execution gate
 

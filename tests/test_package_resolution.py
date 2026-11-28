@@ -105,6 +105,16 @@ def _find_record(result: dict, name: str) -> Optional[dict]:
 
 
 def test_normalize_package_name_pep503():
+    import pubrun._pep503 as pep503
+
+    assert pep503.normalize_package_name is pkgs.normalize_package_name
+    assert pep503._PEP503_RE is pkgs._PEP503_RE
+
+    assert pep503.normalize_package_name("Scikit_Learn") == "scikit-learn"
+    assert pep503.normalize_package_name("zope.interface") == "zope-interface"
+    assert pep503.normalize_package_name("Foo__Bar--Baz..Qux") == "foo-bar-baz-qux"
+    assert pep503.normalize_package_name("Pillow") == "pillow"
+
     assert pkgs.normalize_package_name("Scikit_Learn") == "scikit-learn"
     assert pkgs.normalize_package_name("zope.interface") == "zope-interface"
     assert pkgs.normalize_package_name("Foo__Bar--Baz..Qux") == "foo-bar-baz-qux"

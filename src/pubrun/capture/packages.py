@@ -19,13 +19,15 @@ import sysconfig
 import threading
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
+from pubrun._pep503 import (
+    _PEP503_RE as _PEP503_RE,
+    normalize_package_name as normalize_package_name,
+)
+
 # Keep references to the unmodified stdlib lookup functions so we can detect
 # monkeypatched test providers without triggering redundant site-packages scans.
 _ORIG_DISTRIBUTION = importlib.metadata.distribution
 _ORIG_VERSION = importlib.metadata.version
-
-# PEP 503 normalization pattern collapsing runs of '-', '_', and '.' to '-'.
-_PEP503_RE = re.compile(r"[-_.]+")
 
 # Detects marker clauses gated on a positive `extra` comparison (used by
 # `top-level-installed` so optional extra dependencies do not hide root packages).
@@ -154,11 +156,6 @@ _CACHE_LOCK = threading.Lock()
 _CACHED_FINGERPRINT: Optional[Tuple[Any, ...]] = None
 _CACHED_INDEX: Optional[_DistributionIndex] = None
 _CACHED_PROVIDER: Any = None
-
-
-def normalize_package_name(name: str) -> str:
-    """Return the PEP 503 normalized form of a Python distribution name."""
-    return _PEP503_RE.sub("-", name).lower()
 
 
 def _parse_req_name(req_str: str) -> str:

@@ -1487,7 +1487,7 @@ print(json.dumps({{
 
     def test_packages_mode_off_keeps_packages_module_unloaded(self, tmp_path):
         script = f"""
-import json, sys
+import json, pathlib, sys
 import pubrun.minimal as pubrun
 run = pubrun.start(
     output_dir={str(tmp_path / 'runs')!r},
@@ -1497,9 +1497,16 @@ loaded_after_start = "pubrun.capture.packages" in sys.modules
 run._finalize_state()
 loaded_after_finalize = "pubrun.capture.packages" in sys.modules
 pubrun.stop()
+loaded_after_stop = "pubrun.capture.packages" in sys.modules
+methods_path = pathlib.Path(run.run_dir) / "methods.md"
+methods_exists = methods_path.is_file()
+methods_text = methods_path.read_text(encoding="utf-8") if methods_exists else ""
 print(json.dumps({{
     "loaded_after_start": loaded_after_start,
     "loaded_after_finalize": loaded_after_finalize,
+    "loaded_after_stop": loaded_after_stop,
+    "methods_exists": methods_exists,
+    "methods_text": methods_text,
 }}))
 """
         result = subprocess.run(
@@ -1511,6 +1518,47 @@ print(json.dumps({{
         data = json.loads(result.stdout.strip().splitlines()[-1])
         assert data["loaded_after_start"] is False
         assert data["loaded_after_finalize"] is False
+        assert data["loaded_after_stop"] is False
+        assert data["methods_exists"] is True
+        assert "Package capture was disabled by configuration." in data["methods_text"]
+
+    def test_report_methods_import_keeps_packages_and_metadata_unloaded(self, tmp_path):
+        script = """
+import json, sys
+import pubrun.minimal
+import pubrun.report.methods as methods
+
+highlighted_manifest = {
+    "packages": {"records": [{"name": "Scikit_Learn", "version": "1.5.0"}]}
+}
+non_highlighted_manifest = {
+    "packages": {"records": [{"name": "zope.interface", "version": "6.0"}]}
+}
+
+highlighted = methods.extract_highlighted_packages(highlighted_manifest)
+highlighted_report = methods.generate_report(highlighted_manifest)
+non_highlighted_report = methods.generate_report(non_highlighted_manifest)
+
+print(json.dumps({
+    "packages_loaded": "pubrun.capture.packages" in sys.modules,
+    "importlib_metadata_loaded": "importlib.metadata" in sys.modules,
+    "highlighted": highlighted,
+    "highlighted_report": highlighted_report,
+    "non_highlighted_report": non_highlighted_report,
+}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=20,
+            cwd=str(tmp_path), env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["packages_loaded"] is False
+        assert data["importlib_metadata_loaded"] is False
+        assert data["highlighted"] == ["scikit-learn (v1.5.0)"]
+        assert "scikit-learn (v1.5.0)" in data["highlighted_report"]
+        assert "zope-interface (v6.0)" in data["non_highlighted_report"]
 
     def test_downstream_mypy_strict_no_implicit_reexport_all_modes(self):
         mypy_check = subprocess.run(
