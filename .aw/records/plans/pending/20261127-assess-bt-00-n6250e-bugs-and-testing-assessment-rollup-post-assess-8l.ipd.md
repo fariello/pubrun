@@ -163,6 +163,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Carrier: 8o6o83
 - Eager top-level import of `pubrun.capture.packages` from `src/pubrun/report/methods.py` when `capture.packages.mode == "off"`: already graduated from backlog item `b3dejs` into pending plan `3u1xgk`.
   - Carrier: 3u1xgk
+  - Carrier-Evidence: .aw/records/plans/executed/20261127-b3dejs-01-3u1xgk-avoid-loading-pubrun-capture-packages-from-report-methods-py.ipd.md
 - `ResourceWarning: Implicitly cleaning up <HTTPError 302 ...>` observed once during `pytest tests/ -p randomly` (unclosed synthetic `urllib.error.HTTPError` collected during `tests/test_commit_identity.py`): non-failing warning from an existing mock object, low risk and outside the audited bug/testing rubric.
   - Carrier-Declined: Single non-failing garbage-collection warning from an existing mock `HTTPError`; zero functional or test-flakiness impact and not worth expanding test-suite scope outside the audited findings.
 
