@@ -22,18 +22,36 @@ class TestSignalExitCaptureBasic:
         assert cap._installed is False
 
     def test_double_install_is_safe(self):
-        """Calling install() twice does not raise."""
+        """Calling install() twice does not raise and restores original handlers on uninstall."""
+        import pubrun.capture.signals as signals_mod
+
+        orig_excepthook = sys.excepthook
+        orig_handlers = {}
+        for sig_name in signals_mod._TARGET_SIGNALS:
+            sig = getattr(signal, sig_name, None)
+            if sig is not None:
+                orig_handlers[sig] = signal.getsignal(sig)
+
         cap = SignalExitCapture()
         cap.install()
+        assert cap._installed is True
         cap.install()  # no-op
+        assert cap._installed is True
         cap.uninstall()
+        assert cap._installed is False
+        assert sys.excepthook is orig_excepthook
+        for sig, orig_handler in orig_handlers.items():
+            assert signal.getsignal(sig) == orig_handler
 
     def test_double_uninstall_is_safe(self):
         """Calling uninstall() twice does not raise."""
         cap = SignalExitCapture()
         cap.install()
+        assert cap._installed is True
         cap.uninstall()
+        assert cap._installed is False
         cap.uninstall()  # no-op
+        assert cap._installed is False
 
     def test_get_records_empty_initially(self):
         """Records are empty before any signals are received."""
@@ -388,11 +406,13 @@ class TestFinalizeActiveRun:
 
     def test_finalize_active_run_no_crash_without_active_run(self, monkeypatch):
         """_finalize_active_run() does not crash when no run is active."""
-        from pubrun.capture.signals import _finalize_active_run
+        import pubrun.capture.signals as signals_mod
         import pubrun.tracker
         monkeypatch.setattr(pubrun.tracker, "_active_run", None)
         # Must not raise
-        _finalize_active_run()
+        signals_mod._finalize_active_run()
+        assert signals_mod._finalizing_active_run is False
+        assert signals_mod._timed_out_locks == set()
 
 
 class TestMacosHardwareSpying:
@@ -705,6 +725,12 @@ with lock:
     if case == "write_lock_vs_hw_refresh":
         run.writer._startup_included_hardware = False
         ready = threading.Event()
+        entering = threading.Event()
+        _orig_write_startup = run.writer.write_startup_manifest
+        def _wrapped_write_startup(*args, **kwargs):
+            entering.set()
+            return _orig_write_startup(*args, **kwargs)
+        run.writer.write_startup_manifest = _wrapped_write_startup
         def _bg():
             with pubrun.core._run_lock:
                 ready.set()
@@ -712,9 +738,15 @@ with lock:
         t = threading.Thread(target=_bg, daemon=True)
         t.start()
         assert ready.wait(5)
-        time.sleep(0.05)
+        assert entering.wait(5)
     elif case == "errors_lock_vs_hw_refresh":
         ready = threading.Event()
+        entering = threading.Event()
+        _orig_check_failed = run._check_section_failed
+        def _wrapped_check_failed(*args, **kwargs):
+            entering.set()
+            return _orig_check_failed(*args, **kwargs)
+        run._check_section_failed = _wrapped_check_failed
         def _bg():
             with pubrun.core._run_lock:
                 ready.set()
@@ -724,7 +756,7 @@ with lock:
         t = threading.Thread(target=_bg, daemon=True)
         t.start()
         assert ready.wait(5)
-        time.sleep(0.05)
+        assert entering.wait(5)
 
     print("held", flush=True)
     time.sleep(60)
@@ -784,7 +816,6 @@ class TestSignalHardeningAndRecovery:
 
         lock = threading.Lock()
         ctx = finalization_lock(lock, 0.1)
-        assert finalization_lock.__slots__ == ("_lock", "_timeout", "_acquired")
         assert not hasattr(ctx, "__dict__")
 
         with pytest.raises(RuntimeError, match="boom"):

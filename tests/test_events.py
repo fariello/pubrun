@@ -120,13 +120,20 @@ class TestEventStreamClose:
         stream = EventStream(tmp_path, config=config)
         stream.emit("metric", name="test")
         stream.close()
+        assert stream._file is None
         stream.close()  # Should not crash
+        assert stream._file is None
+        lines = (tmp_path / "events.jsonl").read_text("utf-8").strip().splitlines()
+        assert len(lines) == 1
+        assert json.loads(lines[0])["name"] == "test"
 
     def test_emit_after_close_is_silent(self, tmp_path):
         config = {"events": {"enabled": True, "max_tracked_events": 100}}
         stream = EventStream(tmp_path, config=config)
         stream.close()
         stream.emit("metric", name="orphan")  # Should not crash
+        assert stream._file is None
+        assert (tmp_path / "events.jsonl").read_text("utf-8") == ""
 
 
 class TestEventStreamFormat:
@@ -189,6 +196,8 @@ class TestEventStreamConstructorFailure:
         # Should not raise
         stream.emit("annotation", name="lost_event", payload={"key": "value"})
         stream.close()  # Also should not raise
+        assert stream._file is None
+        assert not (tmp_path / "events.jsonl").exists()
 
 
 class TestEventStreamMigration:

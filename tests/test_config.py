@@ -1,8 +1,16 @@
 """Tests for configuration resolution, file loading, and merge precedence."""
+import logging
+import sys
 import pytest
 from pathlib import Path
 
-from pubrun.config import _deep_merge, load_default_config, resolve_config, load_local_config
+from pubrun.config import (
+    _deep_merge,
+    load_default_config,
+    load_local_config,
+    load_user_config,
+    resolve_config,
+)
 
 
 class TestDeepMerge:
@@ -77,6 +85,47 @@ class TestLoadDefaultConfig:
     def test_has_console_section(self):
         conf = load_default_config()
         assert "console" in conf
+
+
+class TestLoadUserConfig:
+
+    def test_missing_user_config_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        assert load_user_config() is None
+
+    def test_valid_user_config_under_xdg(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        cfg_file = tmp_path / "pubrun" / "config.toml"
+        cfg_file.parent.mkdir(parents=True)
+        cfg_file.write_text(
+            '[core]\nprofile = "deep"\n[events]\nenabled = true\n',
+            encoding="utf-8",
+        )
+        result = load_user_config()
+        assert result == {"core": {"profile": "deep"}, "events": {"enabled": True}}
+
+    def test_malformed_user_config_returns_none_and_warns(self, tmp_path, monkeypatch, caplog):
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        cfg_file = tmp_path / "pubrun" / "config.toml"
+        cfg_file.parent.mkdir(parents=True)
+        cfg_file.write_text("[core\nprofile = = bad\n", encoding="utf-8")
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            result = load_user_config()
+        assert result is None
+        assert any("ignoring malformed config file" in r.getMessage() for r in caplog.records)
+
+    def test_windows_appdata_user_config(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        appdata = tmp_path / "appdata"
+        monkeypatch.setenv("APPDATA", str(appdata))
+        cfg_file = appdata / "pubrun" / "config.toml"
+        cfg_file.parent.mkdir(parents=True)
+        cfg_file.write_text('[core]\nprofile = "minimal"\n', encoding="utf-8")
+        result = load_user_config()
+        assert result == {"core": {"profile": "minimal"}}
 
 
 class TestLoadLocalConfig:
