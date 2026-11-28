@@ -1,12 +1,16 @@
 """
 Diff report rendering -- plain-text ANSI output (git-style).
 """
+import collections
 import json
 import math
+import re
 import sys
-from typing import Any, Dict, Iterable, Optional, TextIO
+from typing import Any, Dict, Iterable, List, Optional, TextIO, Tuple
 
 from pubrun.report.output import use_color as _output_use_color
+
+_ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 class Colors:
@@ -51,45 +55,55 @@ def _format_array_diff(
     rst = Colors.RESET if use_color else ""
 
     # Compare by a type-tagged key so bool/int do not alias (True == 1, False == 0)
-    # and NaN == NaN. Precompute first-occurrence index dicts for O(N) formatting.
-    added_tags = {_tag(x) for x in added_set}
-    removed_tags = {_tag(x) for x in removed_set}
-    pos_a: Dict[Any, int] = {}
+    # and NaN == NaN. Track common elements as multisets keyed by (tag, occurrence_idx)
+    # so duplicate occurrences match diff.py without false rearrangement markers.
+    pos_a: Dict[Tuple[Any, int], int] = {}
+    seen_a: Dict[Any, int] = {}
     for idx, x in enumerate(common_a):
         t = _tag(x)
-        if t not in pos_a:
-            pos_a[t] = idx
-    pos_b: Dict[Any, int] = {}
+        occ = seen_a.get(t, 0)
+        pos_a[(t, occ)] = idx
+        seen_a[t] = occ + 1
+
+    pos_b: Dict[Tuple[Any, int], int] = {}
+    seen_b: Dict[Any, int] = {}
     for idx, x in enumerate(common_b):
         t = _tag(x)
-        if t not in pos_b:
-            pos_b[t] = idx
+        occ = seen_b.get(t, 0)
+        pos_b[(t, occ)] = idx
+        seen_b[t] = occ + 1
 
-    def _moved(t: Any) -> bool:
-        ia = pos_a.get(t)
+    def _moved(t: Any, occ: int) -> bool:
+        ia = pos_a.get((t, occ))
         if ia is None:
             return False
-        ib = pos_b.get(t)
+        ib = pos_b.get((t, occ))
         return ib is not None and ia != ib
+
+    common_budget = collections.Counter(_tag(x) for x in (common_b if is_new_list else common_a))
+    delta_budget = collections.Counter(_tag(x) for x in (added_set if is_new_list else removed_set))
+    common_occ: Dict[Any, int] = {}
 
     parts = []
     for x in elements:
         x_repr = repr(x)
         t = _tag(x)
-        if is_new_list:
-            if t in added_tags:
+        if common_budget[t] > 0:
+            common_budget[t] -= 1
+            occ = common_occ.get(t, 0)
+            common_occ[t] = occ + 1
+            if _moved(t, occ):
+                parts.append(f"{yel}~{x_repr}{rst}")
+            else:
+                parts.append(x_repr)
+        elif delta_budget[t] > 0:
+            delta_budget[t] -= 1
+            if is_new_list:
                 parts.append(f"{grn}+{x_repr}{rst}")
-            elif _moved(t):
-                parts.append(f"{yel}~{x_repr}{rst}")
             else:
-                parts.append(x_repr)
-        else:
-            if t in removed_tags:
                 parts.append(f"{red}-{x_repr}{rst}")
-            elif _moved(t):
-                parts.append(f"{yel}~{x_repr}{rst}")
-            else:
-                parts.append(x_repr)
+        else:
+            parts.append(x_repr)
 
     return "[" + ", ".join(parts) + "]"
 
@@ -99,14 +113,64 @@ def _has_color(no_color_flag: bool, stream: Optional[TextIO] = None) -> bool:
     return _output_use_color(stream if stream is not None else sys.stdout, force_no_color=no_color_flag)
 
 
+def _truncate_ansi_aware(text: str, max_length: int) -> str:
+    """Truncate *text* to *max_length* visible characters without splitting ANSI SGR sequences."""
+    limit = max(0, max_length)
+    if "\x1b" not in text:
+        if len(text) > limit:
+            return text[:limit] + " ... [TRUNCATED]"
+        return text
+
+    parts: List[str] = []
+    visible = 0
+    pos = 0
+    truncated = False
+    has_sgr = False
+
+    for match in _ANSI_SGR_RE.finditer(text):
+        start, end = match.span()
+        if start > pos:
+            chunk = text[pos:start]
+            remaining = limit - visible
+            if len(chunk) > remaining:
+                if remaining > 0:
+                    parts.append(chunk[:remaining])
+                visible = limit
+                truncated = True
+                break
+            parts.append(chunk)
+            visible += len(chunk)
+        seq = match.group(0)
+        if visible < limit or seq == Colors.RESET:
+            parts.append(seq)
+            has_sgr = True
+        pos = end
+
+    if not truncated and pos < len(text):
+        chunk = text[pos:]
+        remaining = limit - visible
+        if len(chunk) > remaining:
+            if remaining > 0:
+                parts.append(chunk[:remaining])
+            truncated = True
+        else:
+            parts.append(chunk)
+
+    if not truncated:
+        return text
+
+    prefix = "".join(parts)
+    if has_sgr and not prefix.endswith(Colors.RESET):
+        prefix += Colors.RESET
+    return prefix + " ... [TRUNCATED]"
+
+
 def _fmt(val: Any, max_length: int, wrap: bool) -> str:
     """Format a value for display, handling truncation or wrapping."""
     s = json.dumps(val, indent=2) if isinstance(val, (dict, list)) else str(val)
-    if len(s) > max_length:
-        if wrap:
-            return s  # Let the terminal wrap naturally
-        return s[:max_length] + " ... [TRUNCATED]"
-    return s
+    if wrap:
+        return s  # Let the terminal wrap naturally
+    return _truncate_ansi_aware(s, max_length)
 
 
 def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int = 300, wrap: bool = False, depth: str = "basic") -> None:
@@ -154,10 +218,20 @@ def _render_inline(diff_report: Dict[str, Any], use_color: bool, max_length: int
                 val_a = mod.get("old", [])
                 val_b = mod.get("new", [])
 
-                tags_a = {_tag(x) for x in val_a}
-                tags_b = {_tag(x) for x in val_b}
-                common_a = [x for x in val_a if _tag(x) in tags_b]
-                common_b = [x for x in val_b if _tag(x) in tags_a]
+                rem_a = collections.Counter(_tag(x) for x in val_a)
+                rem_b = collections.Counter(_tag(x) for x in val_b)
+                common_a = []
+                for x in val_a:
+                    t = _tag(x)
+                    if rem_b[t] > 0:
+                        rem_b[t] -= 1
+                        common_a.append(x)
+                common_b = []
+                for x in val_b:
+                    t = _tag(x)
+                    if rem_a[t] > 0:
+                        rem_a[t] -= 1
+                        common_b.append(x)
 
                 old_repr = _format_array_diff(val_a, False, added_set, removed_set, common_a, common_b, use_color)
                 new_repr = _format_array_diff(val_b, True, added_set, removed_set, common_a, common_b, use_color)

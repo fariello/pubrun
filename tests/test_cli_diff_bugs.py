@@ -517,3 +517,198 @@ class TestRender:
         out = capsys.readouterr().out
         assert "[-0, 5]" in out
         assert "[5, +False]" in out
+
+
+# ------------------------------------------- BUG-U3/U5/U7/U9/U11/U12 (IPD kk83rk)
+
+class TestCliSelectorsAndFixesKk83rk:
+    """Regression tests for CLI directory selectors, --dir expansion, diff guard, show, and bench."""
+
+    def test_status_accepts_direct_run_dir_inside_and_outside_output_dir(self, tmp_path, monkeypatch, capsys):
+        runs_dir = tmp_path / "runs"
+        now = time.time()
+        _make_run(runs_dir, "newer111", now - 10, script="new.py")
+        older = _make_run(runs_dir, "older222", now - 20, script="old.py")
+        ext_root = tmp_path / "external"
+        ext_run = _make_run(ext_root, "ext33333", now - 30, script="ext.py")
+
+        # Text inspection via direct run directory path and manifest.json path.
+        m.main(["pubrun", "--no-color", "status", str(older), "--dir", str(runs_dir)])
+        assert "older222" in capsys.readouterr().out
+
+        m.main(["pubrun", "--no-color", "status", str(ext_run / "manifest.json"), "--dir", str(runs_dir)])
+        assert "ext33333" in capsys.readouterr().out
+
+        # --json inside output_dir preserves recency index (2 for older222).
+        m.main(["pubrun", "--no-color", "status", str(older), "--dir", str(runs_dir), "--json"])
+        in_payload = json.loads(capsys.readouterr().out)
+        assert in_payload["run"]["run_id"] == "older222"
+        assert in_payload["run"]["index"] == 2
+
+        # --json outside output_dir succeeds with index: null.
+        m.main(["pubrun", "--no-color", "status", str(ext_run), "--dir", str(runs_dir), "--json"])
+        ext_payload = json.loads(capsys.readouterr().out)
+        assert ext_payload["run"]["run_id"] == "ext33333"
+        assert ext_payload["run"]["index"] is None
+
+        # An unrelated directory without manifest/lock/logs is still rejected.
+        not_a_run = tmp_path / "not_a_run"
+        not_a_run.mkdir()
+        with pytest.raises(SystemExit) as ei:
+            m.main(["pubrun", "--no-color", "status", str(not_a_run), "--dir", str(runs_dir)])
+        assert ei.value.code == 1
+
+    def test_combined_accepts_direct_run_dir_and_log_only_dir(self, tmp_path, capsys):
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        ext_a = _make_run(
+            tmp_path / "ext",
+            "extA1111",
+            1000.0,
+            stdout="[2026-06-19T22:00:00.000Z] from-ext-a\n",
+        )
+        log_only = tmp_path / "custom-log-dir"
+        log_only.mkdir()
+        (log_only / "stdout.log").write_text("[2026-06-19T22:00:01.000Z] from-log-only\n", encoding="utf-8")
+
+        m.main(["pubrun", "--no-color", "combined", "--dir", str(runs_dir), str(ext_a), str(log_only)])
+        lines = capsys.readouterr().out.strip().splitlines()
+        assert lines == [
+            "[extA1111][stdout] [2026-06-19T22:00:00.000Z] from-ext-a",
+            "[custom-log-dir][stdout] [2026-06-19T22:00:01.000Z] from-log-only",
+        ]
+
+        # Single manifest.json direct path works too.
+        m.main(["pubrun", "--no-color", "combined", "--dir", str(runs_dir), str(ext_a / "manifest.json")])
+        assert capsys.readouterr().out.strip() == "[stdout] [2026-06-19T22:00:00.000Z] from-ext-a"
+
+    def test_status_dir_expands_env_var_and_tilde(self, tmp_path, monkeypatch, capsys):
+        custom_runs = tmp_path / "custom_runs"
+        _make_run(custom_runs, "envdir01", time.time() - 5, script="env_test.py")
+        monkeypatch.setenv("TEST_RUNS_DIR", str(custom_runs))
+
+        m.main(["pubrun", "--no-color", "status", "--dir", "$TEST_RUNS_DIR", "--json"])
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["total_runs"] == 1
+        assert payload["runs"][0]["run_id"] == "envdir01"
+
+        # Tilde expansion via HOME/USERPROFILE.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        m.main(["pubrun", "--no-color", "status", "--dir", "~/custom_runs", "--json"])
+        tilde_payload = json.loads(capsys.readouterr().out)
+        assert tilde_payload["total_runs"] == 1
+        assert tilde_payload["runs"][0]["run_id"] == "envdir01"
+
+    def test_diff_recency_selectors_not_hijacked_by_cwd_numeric_dirs(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        # Ordinary folders named ./1 and ./2 in CWD must NOT hijack `diff --dir <other> 1 2`.
+        (tmp_path / "1").mkdir()
+        (tmp_path / "2").mkdir()
+
+        other_runs = tmp_path / "other_runs"
+        now = time.time()
+        _make_run(other_runs, "new11111", now - 10, script="newest.py")
+        _make_run(other_runs, "old22222", now - 20, script="older.py")
+
+        m.main(["pubrun", "--no-color", "diff", "--dir", str(other_runs), "1", "2"])
+        out = capsys.readouterr().out
+        assert "newest.py" in out
+        assert "older.py" in out
+
+    def test_show_section_before_run_selector_swaps_and_double_section_exits_2(self, tmp_path, capsys):
+        runs_dir = tmp_path / "runs"
+        now = time.time()
+        _make_run(
+            runs_dir,
+            "first111",
+            now - 10,
+            env_vars=[{"name": "TARGET_ENV", "value": {"representation": "plain", "value": "from_first"}}],
+        )
+        _make_run(
+            runs_dir,
+            "second22",
+            now - 20,
+            env_vars=[{"name": "TARGET_ENV", "value": {"representation": "plain", "value": "from_second"}}],
+        )
+
+        m.main(["pubrun", "--no-color", "show", "--dir", str(runs_dir), "env", "2"])
+        out = capsys.readouterr().out
+        assert "TARGET_ENV=from_second" in out
+        assert "from_first" not in out
+
+        with pytest.raises(SystemExit) as ei:
+            m.main(["pubrun", "--no-color", "show", "--dir", str(runs_dir), "env", "logs"])
+        assert ei.value.code == 2
+        err = capsys.readouterr().err
+        assert "env" in err and "logs" in err
+
+    def test_bench_local_prepare_submission_failure_exits_1(self, tmp_path, monkeypatch):
+        bench_dir = tmp_path / "benchmarks"
+        bench_dir.mkdir()
+        harness = bench_dir / "harness.py"
+        harness.write_text("", encoding="utf-8")
+
+        monkeypatch.setattr(m, "_find_bench_harness", lambda: harness)
+        monkeypatch.setattr(m, "_detect_schedulers", lambda: [])
+        monkeypatch.setattr(m, "_print_safe_file_block", lambda *a, **k: None)
+        monkeypatch.setattr(m, "_prepare_submission", lambda *a, **k: None)
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
+        monkeypatch.setenv("PUBRUN_RESULTS_DIR", str(tmp_path / "results"))
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda cmd, *a, **k: subprocess.CompletedProcess(cmd, 0, "", ""),
+        )
+
+        with pytest.raises(SystemExit) as ei:
+            m._run_bench(
+                None, None, True, True, False, False, False, False,
+                prepare_submission=True,
+            )
+        assert ei.value.code == 1
+
+    def test_show_utc_on_locked_crashed_run_and_single_scan_on_filtered_show(self, tmp_path, monkeypatch, capsys):
+        runs_dir = tmp_path / "runs"
+        locked = runs_dir / "pubrun-locked01"
+        locked.mkdir(parents=True)
+        # 1700000000.0 == 2023-11-14 22:13:20 UTC
+        lock_payload = {
+            "run_id": "locked01",
+            "pid": 999999,
+            "started_at_utc": 1700000000.0,
+            "script": "train.py",
+            "argv": ["train.py"],
+            "hostname": "remote-other-host",
+        }
+        (locked / ".pubrun.lock").write_text(json.dumps(lock_payload), encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            m.main(["pubrun", "--no-color", "show", str(locked), "--dir", str(runs_dir), "--utc"])
+        assert ei.value.code == 1
+        err = capsys.readouterr().err
+        assert "2023-11-14 22:13:20Z" in err
+
+        # Filtered `show` across multiple matching runs calls scan_runs exactly once.
+        multi_runs = tmp_path / "multi_runs"
+        now = time.time()
+        _make_run(multi_runs, "mrun0001", now - 10, script="train.py")
+        _make_run(multi_runs, "mrun0002", now - 20, script="train.py")
+        _make_run(multi_runs, "mrun0003", now - 30, script="train.py")
+
+        import pubrun.status as status_mod
+
+        real_scan = status_mod.scan_runs
+        scan_count = 0
+
+        def _spy_scan(*args, **kwargs):
+            nonlocal scan_count
+            scan_count += 1
+            return real_scan(*args, **kwargs)
+
+        monkeypatch.setattr(status_mod, "scan_runs", _spy_scan)
+        m.main(["pubrun", "--no-color", "show", "--dir", str(multi_runs), "-f", "train"])
+        out = capsys.readouterr().out
+        assert scan_count == 1
+        for rid in ("mrun0001", "mrun0002", "mrun0003"):
+            assert rid in out

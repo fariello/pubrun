@@ -208,3 +208,90 @@ def test_combined_size_checks_warning_prompt_reject(tmp_path):
             with pytest.raises(SystemExit) as excinfo:
                 _run_combined(["runH"], dir_path=str(runs_dir), output=None, yes=False, force=False)
             assert excinfo.value.code == 0
+
+
+def test_combined_bounded_leading_buffer_zero_dropped_lines(tmp_path, capsys):
+    """Untimestamped sibling logs crossing the 50-line leading buffer flush cleanly with zero dropped lines."""
+    from datetime import datetime, timezone
+
+    runs_dir = tmp_path / "runs"
+    base_ts = datetime(2026, 6, 19, 22, 0, 0, tzinfo=timezone.utc).timestamp()
+    untimestamped = [f"untimestamped-{i:03d}" for i in range(120)]
+    stamped = [
+        "[2026-06-19T22:00:00.500Z] stdout stamped 1",
+        "[2026-06-19T22:00:01.000Z] stdout stamped 2",
+    ]
+    create_mock_run(runs_dir, "runBound", base_ts, stdout_lines=stamped, stderr_lines=untimestamped)
+
+    _run_combined(["runBound"], dir_path=str(runs_dir), output=None, yes=True, force=False)
+    lines = capsys.readouterr().out.strip().splitlines()
+
+    expected_stderr = [f"[stderr] untimestamped-{i:03d}" for i in range(120)]
+    actual_stderr = [ln for ln in lines if ln.startswith("[stderr] ")]
+    assert actual_stderr == expected_stderr
+    assert "[stdout] [2026-06-19T22:00:00.500Z] stdout stamped 1" in lines
+    assert "[stdout] [2026-06-19T22:00:01.000Z] stdout stamped 2" in lines
+    # Flushed untimestamped lines stay anchored at started_at_utc (22:00:00.000Z) before 22:00:00.500Z.
+    assert lines.index("[stderr] untimestamped-119") < lines.index(
+        "[stdout] [2026-06-19T22:00:00.500Z] stdout stamped 1"
+    )
+
+
+def test_combined_eof_fallback_anchored_to_started_at_utc(tmp_path, capsys):
+    """Untimestamped run hitting EOF flushes with started_at_utc so it stays between earlier and later runs."""
+    from datetime import datetime, timezone
+
+    runs_dir = tmp_path / "runs"
+    t0 = datetime(2026, 6, 19, 22, 0, 0, tzinfo=timezone.utc).timestamp()
+    create_mock_run(runs_dir, "runEarly", t0, ["[2026-06-19T22:00:00.100Z] early line"])
+    create_mock_run(runs_dir, "runMid", t0 + 5.0, ["mid untimestamped 1", "mid untimestamped 2"])
+    create_mock_run(runs_dir, "runLate", t0 + 10.0, ["[2026-06-19T22:00:10.100Z] late line"])
+
+    _run_combined(
+        ["runEarly", "runMid", "runLate"],
+        dir_path=str(runs_dir),
+        output=None,
+        yes=True,
+        force=False,
+    )
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines == [
+        "[runEarly][stdout] [2026-06-19T22:00:00.100Z] early line",
+        "[runMid][stdout] mid untimestamped 1",
+        "[runMid][stdout] mid untimestamped 2",
+        "[runLate][stdout] [2026-06-19T22:00:10.100Z] late line",
+    ]
+
+
+def test_combined_mid_file_untimestamped_traceback_continuations(tmp_path, capsys):
+    """Untimestamped multiline traceback lines stay attached to their preceding timestamped line."""
+    from datetime import datetime, timezone
+
+    runs_dir = tmp_path / "runs"
+    t0 = datetime(2026, 6, 19, 22, 0, 0, tzinfo=timezone.utc).timestamp()
+    create_mock_run(
+        runs_dir,
+        "runTb",
+        t0,
+        stdout_lines=[
+            "[2026-06-19T22:00:00.000Z] step 1",
+            "[2026-06-19T22:00:02.000Z] step 2",
+        ],
+        stderr_lines=[
+            "[2026-06-19T22:00:01.000Z] Traceback (most recent call last):",
+            '  File "train.py", line 10, in <module>',
+            '    raise ValueError("boom")',
+            "ValueError: boom",
+        ],
+    )
+
+    _run_combined(["runTb"], dir_path=str(runs_dir), output=None, yes=True, force=False)
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines == [
+        "[stdout] [2026-06-19T22:00:00.000Z] step 1",
+        "[stderr] [2026-06-19T22:00:01.000Z] Traceback (most recent call last):",
+        '[stderr]   File "train.py", line 10, in <module>',
+        '[stderr]     raise ValueError("boom")',
+        "[stderr] ValueError: boom",
+        "[stdout] [2026-06-19T22:00:02.000Z] step 2",
+    ]
