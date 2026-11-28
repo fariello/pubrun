@@ -5,8 +5,9 @@
 - Concern: Close high/medium behavioral coverage gaps in `ResourceWatcher`, `src/pubrun/capture/hardware.py`, `src/pubrun/report/meta_snapshot.py`, `src/pubrun/report/reproducibility.py`, `src/pubrun/report/checks.py`, and `src/pubrun/report/methods.py` (`TEST-C3`, `TEST-C4`, `TEST-U6`, `TEST-U7`, `TEST-U10`).
 - Scope: Add deterministic behavioral tests (no production code changes) in `tests/test_resources.py`, `tests/test_hardware.py`, `tests/test_hpc_hydration_e2e.py`, `tests/test_reproducibility_assessment.py`, `tests/test_checks_commands.py`, `tests/test_reports.py`, and `tests/test_methods_multi.py`.
 - Scope-Paths: tests/test_resources.py, tests/test_hardware.py, tests/test_hpc_hydration_e2e.py, tests/test_reproducibility_assessment.py, tests/test_checks_commands.py, tests/test_reports.py, tests/test_methods_multi.py
+- Scope-Exceeded: .aw/records/backlog/open/20261127-wvdr46-01-wvdr46-avoid-import-lock-deadlock-when-coverage-py-probes.backlog.md (Required defect-report backlog carrier filed for adjacent coverage.py + pubrun auto-start import-lock deadlock observed during validation)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Add deterministic tests for ResourceWatcher partial/failed states, hardware parsers/timeouts, meta_snapshot containment, seed scan caps, and checks/methods
@@ -17,12 +18,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: dqaj9a
-- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: dqaj9a verified (set assess-bt, attempt 1). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261127-wvdr46-01-wvdr46-avoid-import-lock-deadlock-when-coverage-py-probes.backlog.md: Required defect-report backlog carrier filed for adjacent coverage.py + pubrun auto-start import-lock deadlock observed during validation]
 - 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 reviewed (Antigravity): /plan-review (complex tier, single pass); added tuple-via-list cycle case for `meta_snapshot.py:49`, `b'"annotation"'` pre-filter requirement for `reproducibility.py:1198-1199`, started-watcher abort precondition in `E-01`, exact hardware parser/budget isolation in `E-02`, deterministic `os.cpu_count`/local-import isolation and multi-run variance pairing in `E-04`, and hardened execution gate; readiness `go-pending-approval`.
 - 2026-11-27 to-review (Antigravity): Authored review-ready child Implementation Plan Document (IPD) from `/assess testing` Slices 1 and 2 on HEAD `512ee68` / `8f2aacd`.
