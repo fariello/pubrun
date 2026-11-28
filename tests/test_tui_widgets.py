@@ -45,6 +45,7 @@ def _isolated_config(tmp_path, monkeypatch):
     monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.delenv("PUBRUN_PROFILE", raising=False)
     monkeypatch.delenv("PUBRUN_META_REF", raising=False)
+    monkeypatch.delenv("PUBRUN_OUTPUT_DIR", raising=False)
 
 
 def _write_run(runs, run_id, script="train.py", age=60.0, extra=None, logs=None):
@@ -221,6 +222,86 @@ class TestAppWiring:
 
         _run_app(runs, _body, monkeypatch)
 
+    def test_refresh_all_clears_all_run_panels_when_last_run_is_removed(self, tmp_path, monkeypatch):
+        runs = tmp_path / "runs"
+        run_dir = _write_run(
+            runs,
+            "last0001",
+            script="train.py",
+            age=10,
+            extra={"resources": {"peak_rss_bytes": 64 * 1024 * 1024}},
+            logs={"stdout.log": "hello from stdout\n"},
+        )
+
+        async def _body(app, pilot, notes):
+            await pilot.pause()
+            details = app.query_one("#details-view", RunDetailsView)
+            logs = app.query_one("#logs-view", LogViewer)
+            resources = app.query_one("#resources-view", RunResourcesView)
+            actions = app.query_one("#actions-view", ActionsPanel)
+
+            # Visit all four run-dependent tabs so every panel holds live state.
+            assert details.run_info is not None
+            await _show_tab(app, pilot, "tab-logs")
+            select_log = logs.query_one("#select-log-file", Select)
+            log_area = logs.query_one("#log-content-area", RichLog)
+            assert logs.run_dir == run_dir
+            assert [p.name for p in logs.log_files] == ["stdout.log"]
+            assert select_log.value == str(run_dir / "stdout.log")
+            assert "hello from stdout" in _log_lines(log_area)
+
+            await _show_tab(app, pilot, "tab-resources")
+            assert resources.run_info is not None
+            assert "64.0MB" in str(app.query_one("#resources-body").render())
+
+            await _show_tab(app, pilot, "tab-actions")
+            assert actions.run_info is not None
+            assert actions.rerun_command == "python train.py"
+
+            # Verify direct None delegation on LogViewer and RunResourcesView as well.
+            logs.display_run_logs(None)
+            resources.display_run(None)
+            await pilot.pause()
+            assert logs.run_dir is None
+            assert logs.log_files == []
+            assert select_log.value == _SELECT_EMPTY_VALUE
+            assert _log_lines(log_area) == []
+            assert resources.run_info is None
+            assert (
+                str(app.query_one("#resources-body").render())
+                == "Select a run to view its CPU and memory usage."
+            )
+
+            # Re-populate Logs and Resources so action_refresh_all() must clear all four panels.
+            logs.display_run_logs(run_dir)
+            resources.display_run(RunInfo(run_dir))
+            await pilot.pause()
+            assert logs.run_dir == run_dir
+            assert resources.run_info is not None
+
+            # Delete the only run and refresh.
+            shutil.rmtree(run_dir)
+            app.action_refresh_all()
+            await pilot.pause()
+
+            assert app.selected_run_info is None
+            assert details.run_info is None
+            assert "NO RUNS FOUND" in _general_text(app)
+            assert logs.run_dir is None
+            assert logs.log_files == []
+            assert select_log.value == _SELECT_EMPTY_VALUE
+            assert _log_lines(log_area) == []
+            assert resources.run_info is None
+            assert (
+                str(app.query_one("#resources-body").render())
+                == "Select a run to view its CPU and memory usage."
+            )
+            assert actions.run_info is None
+            assert str(actions.query_one("#lbl-rerun-command").render()) == "Select a run."
+            assert str(actions.query_one("#lbl-methods-citation").render()) == ""
+
+        _run_app(runs, _body, monkeypatch)
+
 
 # --------------------------------------------------------------------------- #
 # E-10: RunsSidebar search and scan failure
@@ -371,6 +452,54 @@ class TestActionsArchive:
         res = _run_app(runs, _body, monkeypatch)
         assert res["running"] is True
 
+    def test_archive_skips_external_symlinks_and_sanitizes_traversal_run_id(self, tmp_path, monkeypatch):
+        runs = tmp_path / "runs"
+        run_dir = _write_run(runs, "sec00001", logs={"console.log": "regular log\n"})
+
+        outside_file = tmp_path / "outside_secret.txt"
+        outside_file.write_text("do not archive file\n", encoding="utf-8")
+        outside_dir = tmp_path / "outside_dir"
+        outside_dir.mkdir()
+        (outside_dir / "nested_secret.txt").write_text("do not archive dir\n", encoding="utf-8")
+
+        try:
+            (run_dir / "leak_file.txt").symlink_to(outside_file)
+            (run_dir / "leak_dir").symlink_to(outside_dir, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("OS does not permit symlink creation")
+
+        async def _body(app, pilot, notes):
+            panel = app.query_one("#actions-view", ActionsPanel)
+            panel.display_run(RunInfo(run_dir))
+            await pilot.pause()
+            notes.clear()
+            panel.archive_selected_run()
+            await pilot.pause()
+
+            zip_path = runs / "archive" / "sec00001.zip"
+            assert zip_path.exists()
+            with zipfile.ZipFile(zip_path) as zf:
+                assert sorted(zf.namelist()) == ["console.log", "manifest.json"]
+
+            # Path-traversal run_id must be sanitized strictly inside <output_dir>/archive/.
+            traversal_info = RunInfo(run_dir)
+            traversal_info.run_id = "../../escape"
+            panel.display_run(traversal_info)
+            await pilot.pause()
+            notes.clear()
+            panel.archive_selected_run()
+            await pilot.pause()
+
+            sanitized_zip = runs / "archive" / "escape.zip"
+            assert sanitized_zip.exists()
+            assert not (runs / "escape.zip").exists()
+            assert not (tmp_path / "escape.zip").exists()
+            assert notes == [("Created archive: escape.zip", "information")]
+            with zipfile.ZipFile(sanitized_zip) as zf:
+                assert sorted(zf.namelist()) == ["console.log", "manifest.json"]
+
+        _run_app(runs, _body, monkeypatch)
+
 
 # --------------------------------------------------------------------------- #
 # E-11: ActionsPanel citations and no-selection guard
@@ -474,6 +603,34 @@ class TestActionsCitations:
             assert not (runs / "archive").exists()
 
         _run_app(runs, _body, monkeypatch)
+
+    def test_methods_citation_renders_computer_software_and_bracketed_remote_url_literally(
+        self, tmp_path, monkeypatch
+    ):
+        runs = tmp_path / "runs"
+        remote_url = "https://example.com/org/repo[/b]/tree"
+        _write_run(
+            runs,
+            "citeb001",
+            extra={
+                "git": {
+                    "commit": "a" * 40,
+                    "branch": "main",
+                    "remote_url": {"representation": "plain", "value": remote_url},
+                }
+            },
+        )
+
+        async def _body(app, pilot, notes):
+            await _show_tab(app, pilot, "tab-actions")
+            actions = app.query_one("#actions-view", ActionsPanel)
+            rendered = str(actions.query_one("#lbl-methods-citation").render())
+            assert "[Computer software]" in rendered
+            assert remote_url in rendered
+
+        res = _run_app(runs, _body, monkeypatch)
+        assert res["running"] is True
+        assert res["return_code"] in (None, 0)
 
 
 # --------------------------------------------------------------------------- #
@@ -1015,6 +1172,10 @@ class TestDictToToml:
             "g": {"h": {"i": 1}},
         }
 
+    def test_inline_table_list_round_trips_and_omits_none(self):
+        out = dict_to_toml({"custom": {"items": [{"b": 2, "a": "x", "skip": None}]}})
+        assert tomllib.loads(out) == {"custom": {"items": [{"a": "x", "b": 2}]}}
+
 
 # --------------------------------------------------------------------------- #
 # E-18: dict_to_toml escaping and Save Settings round trip
@@ -1228,6 +1389,123 @@ class TestRunDetailsStates:
 
         _run_app(runs, _body, monkeypatch)
 
+    def test_refresh_live_metrics_hydrates_finalized_manifest_on_running_to_completed_transition(
+        self, tmp_path, monkeypatch
+    ):
+        import os
+        from textual.widgets import DataTable
+        from pubrun import status as status_mod
+
+        runs = tmp_path / "runs"
+        live_dir = runs / "pubrun-livefin1"
+        live_dir.mkdir(parents=True)
+        lock_path = live_dir / ".pubrun.lock"
+        lock_path.write_text(
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "run_id": "livefin1",
+                    "script": "train.py",
+                    "argv": ["--epochs", "3"],
+                    "hostname": "",
+                    "started_at_utc": time.time() - 5,
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(status_mod, "is_same_process", lambda pid, *a, **kw: pid == os.getpid())
+
+        async def _body(app, pilot, notes):
+            await pilot.pause()
+            details = app.query_one("#details-view", RunDetailsView)
+            assert details.run_info is not None
+            assert details.run_info.status == "running"
+            assert "still in progress" in _general_text(app).lower()
+
+            # Transition the run on disk: remove lock and write finalized manifest + parent meta.json.
+            lock_path.unlink()
+            (live_dir / "meta.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "manifest_type": "pubrun-meta-snapshot",
+                        "hardware": {
+                            "cpu": {
+                                "model": "AMD EPYC 9654",
+                                "logical_cores": 64,
+                                "architecture": "x86_64",
+                            },
+                            "memory_total_bytes": 128 * 1024**3,
+                            "capture_state": {"status": "complete"},
+                        },
+                        "git": {
+                            "commit": "f" * 40,
+                            "branch": "feat/hydrated",
+                            "dirty": False,
+                            "capture_state": {"status": "complete"},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (live_dir / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "meta_ref": "meta.json",
+                        "run": {"run_id": "livefin1"},
+                        "status": {"outcome": "completed", "exit_code": 0},
+                        "timing": {
+                            "started_at_utc": time.time() - 5,
+                            "ended_at_utc": time.time(),
+                            "elapsed_seconds": 5.0,
+                        },
+                        "invocation": {
+                            "script": {"basename": "train.py"},
+                            "argv": ["train.py", "--epochs", "3"],
+                            "rerun_command": "python train.py --epochs 3",
+                        },
+                        "hardware": {"capture_state": {"status": "suppressed"}},
+                        "git": {"capture_state": {"status": "suppressed"}},
+                        "packages": {
+                            "records": [
+                                {"name": "numpy", "version": "1.26.4", "editable": False},
+                                {"name": "scipy", "version": "1.13.0", "editable": False},
+                            ],
+                            "capture_state": {"status": "complete"},
+                        },
+                        "subprocesses": [
+                            {
+                                "argv": ["echo", "done"],
+                                "started_at_utc": time.time() - 2,
+                                "elapsed_seconds": 0.25,
+                                "duration_clock": "monotonic",
+                                "exit_code": 0,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            details.refresh_live_metrics()
+            await pilot.pause()
+
+            assert details.run_info is not None
+            assert details.run_info.status == "completed"
+            gen = _general_text(app)
+            assert "  Status:        COMPLETED" in gen.splitlines()
+            assert "AMD EPYC 9654" in gen
+            assert "feat/hydrated" in gen
+            assert "still in progress" not in gen.lower()
+
+            pkg_table = app.query_one("#packages-table", DataTable)
+            sub_table = app.query_one("#subprocesses-table", DataTable)
+            assert pkg_table.row_count == 2
+            assert sub_table.row_count == 1
+
+        _run_app(runs, _body, monkeypatch)
+
 
 # --------------------------------------------------------------------------- #
 # E-17: RunResourcesView states
@@ -1358,6 +1636,86 @@ class TestBulkPruneConfirmationAndStderr:
         _run_app(runs, _body, monkeypatch)
         # No raw stderr bled outside the TUI.
         assert "Simulated stderr warning from clean_runs" not in capsys.readouterr().err
+
+    def test_prune_preview_and_execute_exclude_active_running_and_old_remote_locked_runs(
+        self, tmp_path, monkeypatch
+    ):
+        import os
+        from pubrun import status as status_mod
+        from pubrun.status import _dir_size
+        from pubrun.tui.widgets.actions import ConfirmBulkPruneModal
+
+        runs = tmp_path / "runs"
+        old1 = _write_run(runs, "prun1001", age=30 * 86400, logs={"stdout.log": "A" * 2048})
+        old2 = _write_run(runs, "prun1002", age=40 * 86400, logs={"stdout.log": "B" * 2048})
+        recent = _write_run(runs, "keep1001", age=60)
+
+        # Old active local run -> classified STATUS_RUNNING, must be skipped by STATUS_RUNNING guard.
+        active_old = runs / "pubrun-actold01"
+        active_old.mkdir(parents=True)
+        (active_old / ".pubrun.lock").write_text(
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "run_id": "actold01",
+                    "script": "train.py",
+                    "hostname": "",
+                    "started_at_utc": time.time() - 30 * 86400,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (active_old / "stdout.log").write_text("X" * 16384, encoding="utf-8")
+
+        # Old (>48h) remote-locked run -> classified crashed, must be skipped by lock_state == "remote" guard.
+        remote_old = runs / "pubrun-remold01"
+        remote_old.mkdir(parents=True)
+        (remote_old / ".pubrun.lock").write_text(
+            json.dumps(
+                {
+                    "pid": 424242,
+                    "run_id": "remold01",
+                    "script": "train.py",
+                    "hostname": "other-hpc-node-never-local",
+                    "started_at_utc": time.time() - 30 * 86400,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (remote_old / "stdout.log").write_text("Y" * 16384, encoding="utf-8")
+
+        monkeypatch.setattr(status_mod, "is_same_process", lambda pid, *a, **kw: pid == os.getpid())
+        expected_bytes = _dir_size(old1) + _dir_size(old2)
+
+        async def _body(app, pilot, notes):
+            await _show_tab(app, pilot, "tab-actions")
+            panel = app.query_one("#actions-view", ActionsPanel)
+
+            # Include "running" so _preview_prune_candidates receives the active run from filter_runs.
+            panel.query_one("#input-clean-older", Input).value = "7d"
+            panel.query_one("#input-clean-status", Input).value = (
+                "completed,failed,crashed,ghost,running"
+            )
+            await pilot.pause()
+
+            panel.query_one("#btn-prune-execute", Button).press()
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmBulkPruneModal)
+            modal = app.screen
+            assert modal.matched_count == 2
+            assert modal.total_size_bytes == expected_bytes
+
+            modal.query_one("#btn-confirm-bulk-prune", Button).press()
+            await pilot.pause()
+            await pilot.pause()
+
+            assert not old1.exists()
+            assert not old2.exists()
+            assert recent.exists()
+            assert active_old.exists()
+            assert remote_old.exists()
+
+        _run_app(runs, _body, monkeypatch)
 
 
 class TestSafeDeleteGuardsAndLabels:
@@ -1790,3 +2148,99 @@ class TestConfigPanelHardening:
             config_mod._atomic_write_text(target, "[core]\nauto_start = true\n")
         assert not target.exists()
         assert not list(tmp_path.glob("*.tmp"))
+
+    def test_env_var_output_dir_expansion_preserves_portable_string_and_respects_env_and_explicit_pinning(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TEST_BASE", str(tmp_path))
+
+        # 1. Saving "$TEST_BASE/my_runs" discovers expanded runs, keeps #cfg-output-dir unexpanded,
+        #    and preserves "$TEST_BASE/my_runs" across a second save without spurious sidebar refresh.
+        my_runs = tmp_path / "my_runs"
+        _write_run(my_runs, "env00001", script="exp.py")
+
+        async def _drive_env_expansion():
+            app = PubrunTUIApp(output_dir=None)
+            async with app.run_test() as pilot:
+                await _show_tab(app, pilot, "tab-config")
+                panel = app.query_one("#config-view", ConfigPanel)
+                sidebar = app.query_one("#sidebar", RunsSidebar)
+                out_input = panel.query_one("#cfg-output-dir", Input)
+
+                out_input.value = "$TEST_BASE/my_runs"
+                await pilot.pause()
+                panel.save_settings()
+                await pilot.pause()
+                await pilot.pause()
+
+                assert len(sidebar.all_runs) == 1
+                assert sidebar.all_runs[0].run_id == "env00001"
+                assert out_input.value == "$TEST_BASE/my_runs"
+
+                # Second save preserves the portable string and does not spuriously refresh sidebar.
+                posts = _capture_posts(app, monkeypatch)
+                panel.save_settings()
+                await pilot.pause()
+                await pilot.pause()
+
+                saved = tomllib.loads((tmp_path / ".pubrun.toml").read_text(encoding="utf-8"))
+                assert saved["core"]["output_dir"] == "$TEST_BASE/my_runs"
+                assert out_input.value == "$TEST_BASE/my_runs"
+                assert "RefreshSidebar" not in posts
+
+        asyncio.run(_drive_env_expansion())
+
+        # 2. PUBRUN_OUTPUT_DIR takes precedence over saved ConfigPanel output_dir.
+        env_runs = tmp_path / "env_runs"
+        other_runs = tmp_path / "other_runs"
+        _write_run(env_runs, "envovr01", script="env.py")
+        _write_run(other_runs, "other001", script="other.py")
+        monkeypatch.setenv("PUBRUN_OUTPUT_DIR", str(env_runs))
+
+        async def _drive_env_precedence():
+            app = PubrunTUIApp(output_dir=None)
+            async with app.run_test() as pilot:
+                await _show_tab(app, pilot, "tab-config")
+                panel = app.query_one("#config-view", ConfigPanel)
+                sidebar = app.query_one("#sidebar", RunsSidebar)
+                assert [r.run_id for r in sidebar.all_runs] == ["envovr01"]
+
+                panel.query_one("#cfg-output-dir", Input).value = "other_runs"
+                await pilot.pause()
+                panel.save_settings()
+                await pilot.pause()
+                await pilot.pause()
+
+                saved = tomllib.loads((tmp_path / ".pubrun.toml").read_text(encoding="utf-8"))
+                assert saved["core"]["output_dir"] == "other_runs"
+                assert [r.run_id for r in sidebar.all_runs] == ["envovr01"]
+
+        asyncio.run(_drive_env_precedence())
+
+        # 3. Explicit --dir (output_dir=str(runs_a)) pins the sidebar even when ConfigPanel saves runs_b.
+        monkeypatch.delenv("PUBRUN_OUTPUT_DIR", raising=False)
+        runs_a = tmp_path / "runs_a"
+        runs_b = tmp_path / "runs_b"
+        _write_run(runs_a, "pina0001", script="a.py")
+        _write_run(runs_b, "pinb0002", script="b.py")
+
+        async def _drive_explicit_pinning():
+            app = PubrunTUIApp(output_dir=str(runs_a))
+            async with app.run_test() as pilot:
+                await _show_tab(app, pilot, "tab-config")
+                panel = app.query_one("#config-view", ConfigPanel)
+                sidebar = app.query_one("#sidebar", RunsSidebar)
+                assert [r.run_id for r in sidebar.all_runs] == ["pina0001"]
+
+                panel.query_one("#cfg-output-dir", Input).value = "runs_b"
+                await pilot.pause()
+                panel.save_settings()
+                await pilot.pause()
+                await pilot.pause()
+
+                saved = tomllib.loads((tmp_path / ".pubrun.toml").read_text(encoding="utf-8"))
+                assert saved["core"]["output_dir"] == "runs_b"
+                assert [r.run_id for r in sidebar.all_runs] == ["pina0001"]
+
+        asyncio.run(_drive_explicit_pinning())

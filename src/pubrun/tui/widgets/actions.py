@@ -356,7 +356,7 @@ class ActionsPanel(Vertical):
             except Exception as e:
                 methods_str = f"Failed to compile citation: {e}"
 
-        citation_lbl.update(methods_str)
+        citation_lbl.update(Text(methods_str))
 
     def _preview_prune_candidates(
         self, older_val: str, status_val: str

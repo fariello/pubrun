@@ -270,7 +270,19 @@ class ConfigPanel(Vertical):
                 f"Deprecated core.profile={profile_val!r} has no effect; configure capture.* keys instead.",
                 severity="warning",
             )
-        self.query_one("#cfg-output-dir", Input).value = core.get("output_dir") or ""
+        raw_local = load_local_config()
+        local_core = raw_local.get("core") if isinstance(raw_local, dict) else None
+        local_output_dir = (
+            local_core.get("output_dir") if isinstance(local_core, dict) else None
+        )
+        resolved_output_dir = core.get("output_dir")
+        if isinstance(local_output_dir, str):
+            display_output_dir = local_output_dir
+        elif isinstance(resolved_output_dir, str):
+            display_output_dir = resolved_output_dir
+        else:
+            display_output_dir = ""
+        self.query_one("#cfg-output-dir", Input).value = display_output_dir
         self.query_one("#cfg-auto-start", Checkbox).value = bool(core.get("auto_start", True))
 
         # Imports
@@ -322,7 +334,12 @@ class ConfigPanel(Vertical):
                 return
 
         prev_core = self.config_data.get("core", {})
-        prev_output_dir = str(prev_core.get("output_dir") or "") if isinstance(prev_core, dict) else ""
+        prev_raw_output_dir = (
+            prev_core.get("output_dir") if isinstance(prev_core, dict) else None
+        )
+        prev_resolved_output_dir = (
+            prev_raw_output_dir if isinstance(prev_raw_output_dir, str) else ""
+        )
 
         # 1. Fetch current local configurations to avoid overwriting unrelated settings
         raw_local = load_local_config()
@@ -371,12 +388,20 @@ class ConfigPanel(Vertical):
             self.app.notify(f"Configuration saved to: {target_path.name}", severity="information")
             self.load_settings()
 
-            if new_output_dir != prev_output_dir and not getattr(
+            new_core = self.config_data.get("core", {})
+            new_raw_output_dir = (
+                new_core.get("output_dir") if isinstance(new_core, dict) else None
+            )
+            new_resolved_output_dir = (
+                new_raw_output_dir if isinstance(new_raw_output_dir, str) else ""
+            )
+
+            if new_resolved_output_dir != prev_resolved_output_dir and not getattr(
                 self.app, "_explicit_output_dir", False
             ):
                 updater = getattr(self.app, "update_output_dir", None)
                 if callable(updater):
-                    updater(new_output_dir or None)
+                    updater(None)
                 self.app.post_message(_refresh_sidebar_message(self.app))
         except Exception as e:
             self.app.notify(f"Failed to write configuration: {e}", severity="error")

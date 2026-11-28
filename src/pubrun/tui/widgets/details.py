@@ -294,12 +294,15 @@ class RunDetailsView(Vertical):
         self.update_subprocesses_pane()
 
     def refresh_live_metrics(self) -> None:
-        """Periodic callback to update CPU/Memory for running processes without retaining manifests."""
+        """Periodic callback to update live metrics and hydrate once a running run finishes."""
         if self.run_info and self.run_info.status == STATUS_RUNNING:
             try:
                 refreshed = RunInfo(self.run_info.run_dir, keep_manifest=False)
-                self.run_info = refreshed
-                self.update_general_pane()
+                if refreshed.status != STATUS_RUNNING:
+                    self.display_run(refreshed)
+                else:
+                    self.run_info = refreshed
+                    self.update_general_pane()
             except Exception:
                 pass
 
