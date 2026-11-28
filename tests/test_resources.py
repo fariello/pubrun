@@ -3,7 +3,6 @@ import time
 import json
 import pytest
 from pubrun import start
-from pubrun.capture.resources import _get_rss_windows
 
 def test_resources_watcher_threads(tmp_path, monkeypatch):
     monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
@@ -39,11 +38,12 @@ def test_resources_watcher_threads(tmp_path, monkeypatch):
     assert "peak_rss_bytes" in res
     assert "end_rss_bytes" in res
     assert res["capture_state"]["status"] == "complete"
-    # peak_rss_bytes is populated by the background sampler thread. On Windows wmic may be
-    # unavailable, and on a slow/contended runner the very short test run can finish before the
-    # first sample lands - in both cases peak may be None. When a sample DID land, it must be a
-    # positive int. This keeps the assertion meaningful without a timing/platform dependency.
-    if res["peak_rss_bytes"] is not None:
+    # peak_rss_bytes is populated by the background sampler thread. On non-Windows
+    # platforms polling is deterministic and must produce a positive int; only Windows
+    # keeps the optional fallback where wmic/ctypes may be unavailable.
+    if sys.platform != "win32":
+        assert isinstance(res["peak_rss_bytes"], int) and res["peak_rss_bytes"] > 0
+    elif res["peak_rss_bytes"] is not None:
         assert isinstance(res["peak_rss_bytes"], int) and res["peak_rss_bytes"] > 0
 
     # Ensure background thread streamed ticks (skip on Windows where
@@ -209,3 +209,151 @@ def test_cpu_poll_clamped_to_cores(monkeypatch):
     times[0] = T(100.0, 0.0)  # absurd 100s of cpu in 1ms
     cpu = w._poll_cpu()
     assert cpu == 100.0 * (_os.cpu_count() or 1)
+
+
+def test_resource_watcher_failed_manifest_state_when_no_successful_samples(monkeypatch):
+    """When every sample fails until max_failures, capture_state reports failed."""
+    from pubrun.capture.resources import ResourceWatcher
+
+    class FakeTracker:
+        event_stream = None
+
+    watcher = ResourceWatcher(FakeTracker(), interval_seconds=1.0, max_failures=3, system_metrics=False)
+    monkeypatch.setattr(watcher, "_poll_rss", lambda: -1)
+    monkeypatch.setattr(watcher, "_poll_cpu", lambda: 0.0)
+
+    for _ in range(watcher.max_failures):
+        watcher._update_metrics()
+
+    assert watcher._stop_event.is_set()
+    manifest = watcher.to_manifest_dict()
+    assert manifest["capture_state"] == {
+        "status": "failed",
+        "detail": "resource polling failed on every sample",
+    }
+    assert manifest["peak_rss_bytes"] is None
+    assert manifest["end_rss_bytes"] is None
+
+
+def test_resource_watcher_partial_manifest_state_after_successful_then_failures(monkeypatch):
+    """When at least one sample succeeded before max_failures consecutive failures, capture_state reports partial."""
+    from pubrun.capture.resources import ResourceWatcher
+
+    class FakeTracker:
+        event_stream = None
+
+    watcher = ResourceWatcher(FakeTracker(), interval_seconds=1.0, max_failures=3, system_metrics=False)
+    readings = iter([2 * 1024 * 1024, -1, -1, -1])
+    monkeypatch.setattr(watcher, "_poll_rss", lambda: next(readings))
+    monkeypatch.setattr(watcher, "_poll_cpu", lambda: 0.0)
+
+    for _ in range(4):
+        watcher._update_metrics()
+
+    assert watcher._stop_event.is_set()
+    manifest = watcher.to_manifest_dict()
+    assert manifest["capture_state"] == {
+        "status": "partial",
+        "detail": "resource polling stopped after consecutive failures",
+    }
+    assert manifest["peak_rss_bytes"] == 2 * 1024 * 1024
+
+
+def test_resource_watcher_stop_skips_final_poll_after_self_abort(monkeypatch):
+    """A started watcher that self-aborts on consecutive failures skips the final poll on stop()."""
+    from pubrun.capture.resources import ResourceWatcher
+
+    class FakeTracker:
+        event_stream = None
+
+    watcher = ResourceWatcher(FakeTracker(), interval_seconds=0.05, max_failures=2, system_metrics=False)
+    poll_calls = []
+
+    def failing_poll() -> int:
+        poll_calls.append(1)
+        return -1
+
+    monkeypatch.setattr(watcher, "_poll_rss", failing_poll)
+    monkeypatch.setattr(watcher, "_poll_cpu", lambda: 0.0)
+
+    watcher.start()
+    try:
+        assert watcher._stop_event.wait(timeout=5.0)
+        watcher.join(timeout=5.0)
+        assert not watcher.is_alive()
+        assert len(poll_calls) == 2
+
+        poll_calls.clear()
+        watcher.stop()
+        assert poll_calls == []
+        manifest = watcher.to_manifest_dict()
+        assert manifest["end_rss_bytes"] is None
+        assert manifest["capture_state"] == {
+            "status": "failed",
+            "detail": "resource polling failed on every sample",
+        }
+    finally:
+        watcher.stop()
+
+
+def test_resource_watcher_stop_idempotent_double_stop_and_unstarted(monkeypatch):
+    """stop() is idempotent on double-stop of a started watcher and on an unstarted watcher."""
+    from pubrun.capture.resources import ResourceWatcher
+
+    class FakeTracker:
+        event_stream = None
+
+    # 1. Unstarted watcher: stop() never polls and can be called twice safely.
+    unstarted = ResourceWatcher(FakeTracker(), interval_seconds=1.0, max_failures=3, system_metrics=False)
+    unstarted_calls = []
+    monkeypatch.setattr(unstarted, "_poll_rss", lambda: (unstarted_calls.append(1) or 4096))
+    unstarted.stop()
+    unstarted.stop()
+    assert unstarted_calls == []
+    assert unstarted.to_manifest_dict()["end_rss_bytes"] is None
+
+    # 2. Started watcher: second stop() performs no additional polling.
+    started = ResourceWatcher(FakeTracker(), interval_seconds=0.05, max_failures=3, system_metrics=False)
+    started_calls = []
+    monkeypatch.setattr(started, "_poll_rss", lambda: (started_calls.append(1) or 8192))
+    monkeypatch.setattr(started, "_poll_cpu", lambda: 0.0)
+    started.start()
+    try:
+        deadline = time.time() + 5.0
+        while time.time() < deadline and not started_calls:
+            time.sleep(0.01)
+        assert started_calls
+        started.stop()
+        count_after_first_stop = len(started_calls)
+        started.stop()
+        assert len(started_calls) == count_after_first_stop
+        assert started.to_manifest_dict()["end_rss_bytes"] == 8192
+    finally:
+        started.stop()
+
+
+def test_cpu_poll_clamps_negative_delta_to_zero(monkeypatch):
+    """A negative os.times() CPU delta (counter wrap) clamps to 0.0."""
+    from pubrun.capture.resources import ResourceWatcher
+
+    class FakeTracker:
+        event_stream = None
+
+    watcher = ResourceWatcher(FakeTracker(), interval_seconds=1.0, system_metrics=False)
+
+    class T:
+        def __init__(self, user, system):
+            self.user = user
+            self.system = system
+            self.children_user = 0.0
+            self.children_system = 0.0
+
+    clock = [100.0]
+    times = [T(5.0, 2.0)]
+    monkeypatch.setattr("pubrun.capture.resources.time.perf_counter", lambda: clock[0])
+    monkeypatch.setattr("pubrun.capture.resources.os.times", lambda: times[0])
+
+    watcher._poll_cpu()  # seed baseline
+    clock[0] = 101.0
+    times[0] = T(4.0, 1.0)  # negative user and system delta
+    assert watcher._poll_cpu() == 0.0

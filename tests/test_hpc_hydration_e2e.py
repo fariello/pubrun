@@ -94,3 +94,65 @@ def test_report_time_hydration_stitches_parent_context(tmp_path):
     assert hydrated["packages"].get("is_hydrated") is True
     # The stitched hardware carries the parent's captured data.
     assert hydrated["hardware"].get("cpu") == parent["hardware"].get("cpu")
+
+
+def test_generate_meta_snapshot_contains_section_failure(tmp_path, monkeypatch, capsys):
+    """A raising capture section records status='failed' while sibling sections still succeed."""
+    import pubrun.report.meta_snapshot as meta_snapshot_mod
+
+    def fail_hardware(cfg):
+        raise RuntimeError("probe failed")
+
+    monkeypatch.setattr(meta_snapshot_mod, "get_hardware", fail_hardware)
+
+    out_path = tmp_path / "meta.json"
+    meta_snapshot_mod.generate_meta_snapshot(str(out_path), "basic")
+
+    assert out_path.exists()
+    data = json.loads(out_path.read_text(encoding="utf-8"))
+    assert data["hardware"]["capture_state"] == {
+        "status": "failed",
+        "detail": "probe failed",
+    }
+    for sibling in ("python", "packages", "git", "environment", "host"):
+        assert sibling in data
+        assert data[sibling]["capture_state"]["status"] != "failed"
+
+    stdout = capsys.readouterr().out
+    assert "hardware: capture failed (RuntimeError: probe failed)" in stdout
+
+
+def test_sanitize_json_value_cycles_tuples_and_non_finite_keys():
+    """_sanitize_json_value rejects dict/list/tuple cycles and sanitizes tuples and float keys."""
+    import pytest
+    from pubrun.report.meta_snapshot import _sanitize_json_value
+
+    # Self-referential dict cycle.
+    d: dict = {}
+    d["self"] = d
+    with pytest.raises(ValueError, match="Circular reference detected"):
+        _sanitize_json_value(d)
+
+    # Self-referential list cycle.
+    lst_cycle: list = []
+    lst_cycle.append(lst_cycle)
+    with pytest.raises(ValueError, match="Circular reference detected"):
+        _sanitize_json_value(lst_cycle)
+
+    # Tuple-via-list cycle (start from tup so the tuple branch detects the revisit).
+    holder: list = []
+    tup_cycle = (holder,)
+    holder.append(tup_cycle)
+    with pytest.raises(ValueError, match="Circular reference detected"):
+        _sanitize_json_value(tup_cycle)
+
+    # Tuples with non-finite floats return sanitized tuples.
+    sanitized_tuple = _sanitize_json_value(
+        (1.5, float("nan"), float("inf"), float("-inf"), "ok")
+    )
+    assert isinstance(sanitized_tuple, tuple)
+    assert sanitized_tuple == (1.5, None, None, None, "ok")
+
+    # Non-finite float dict keys are replaced with "null".
+    assert _sanitize_json_value({float("nan"): 1.0}) == {"null": 1.0}
+    assert _sanitize_json_value({float("inf"): float("-inf")}) == {"null": None}

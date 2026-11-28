@@ -199,11 +199,26 @@ class TestGenerateReportDegradedManifests:
         assert "unknown CPU" in result
 
     def test_empty_python_version(self):
-        """Empty python version doesn't crash."""
+        """Empty python version renders explicit unknown version and implementation."""
         manifest = {"host": {"os_name": "Linux"}, "python": {"version": ""}, "git": {"commit": "abc12345"}}
         result = generate_report(manifest)
-        # Should not crash; may produce "v" or "unknown"
-        assert isinstance(result, str)
+        assert "Python unknown (Unknown)" in result
+
+    def test_twelve_non_highlighted_packages_truncation(self):
+        """More than 10 non-highlighted packages truncate after the first 10 with total count."""
+        records = [{"name": f"custom-pkg-{i:02d}", "version": f"1.{i}.0"} for i in range(1, 13)]
+        manifest = {
+            "host": {"os_name": "Linux"},
+            "hardware": {"cpu": {"model": "EPYC"}, "memory_total_bytes": 16 * 1024 ** 3},
+            "python": {"version": "3.11.0", "implementation": "cpython"},
+            "git": {"commit": "abc12345"},
+            "packages": {"records": records, "capture_state": {"status": "complete"}},
+        }
+        result = generate_report(manifest)
+        assert "and 2 additional packages (12 total)." in result
+        assert "custom-pkg-01 (v1.1.0)" in result
+        assert "custom-pkg-10 (v1.10.0)" in result
+        assert "custom-pkg-11" not in result
 
     def test_missing_packages_section(self):
         """No packages section uses 'Standard library dependencies'."""
