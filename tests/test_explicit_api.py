@@ -598,8 +598,10 @@ def test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively(
 ):
     import logging
 
-    tracker = active_run()
+    # Disable background pubrun-hw hardware capture to prevent an asynchronous write_startup_manifest(is_refresh=True) overwrite of manifest.json before the equality check.
+    tracker = active_run(capture={"hardware": {"depth": "off"}})
     orig_manifest = (tracker.run_dir / "manifest.json").read_text(encoding="utf-8")
+    assert json.loads(orig_manifest)["hardware"]["capture_state"]["status"] == "suppressed"
 
     with caplog.at_level(logging.WARNING, logger="pubrun"):
         for bad_name in ("", "   ", "manifest", "MANIFEST", "config.resolved", "./manifest"):

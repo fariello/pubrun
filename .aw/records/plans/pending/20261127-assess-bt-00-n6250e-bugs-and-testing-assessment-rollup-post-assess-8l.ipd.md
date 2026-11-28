@@ -161,6 +161,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - Background `pubrun-hw` manifest refresh race specifically in `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively`: already graduated from backlog item `7jd8g1` into pending plan `8o6o83` (child `thbepl` fixes the other four affected tests in `tests/test_explicit_api.py` without touching that test).
   - Carrier: 8o6o83
+  - Carrier-Evidence: .aw/records/plans/executed/20261127-7jd8g1-01-8o6o83-fix-background-pubrun-hw-manifest-refresh-race-in-test-repor.ipd.md
 - Eager top-level import of `pubrun.capture.packages` from `src/pubrun/report/methods.py` when `capture.packages.mode == "off"`: already graduated from backlog item `b3dejs` into pending plan `3u1xgk`.
   - Carrier: 3u1xgk
   - Carrier-Evidence: .aw/records/plans/executed/20261127-b3dejs-01-3u1xgk-avoid-loading-pubrun-capture-packages-from-report-methods-py.ipd.md
