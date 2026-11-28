@@ -6,7 +6,9 @@
 - Scope: Add a `sys.modules`-based `_disable_spy_if_loaded()` helper in `src/pubrun/capture/git.py` (matching `src/pubrun/capture/hardware.py`, `src/pubrun/capture/filesystem.py`, and `src/pubrun/capture/resources.py` from Implementation Plan Document (IPD) `3ed2o4`) and use it inside `_run_git_raw`; add behavioral regression tests in `tests/test_capture_engines.py` and `tests/test_import_modes.py`.
 - Scope-Paths: src/pubrun/capture/git.py, tests/test_capture_engines.py, tests/test_import_modes.py
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: standard
 - Short-Description: Use _disable_spy_if_loaded() in src/pubrun/capture/git.py so nopatch runs keep pubrun.capture.subprocesses unloaded with git capture enabled
 - Work-Kind: followup
 - Priority: low
@@ -21,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-28 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-28 to-review (aw set): Authored review-ready IPD graduating backlog item ctx0hj
 - 2026-11-28 draft (Antigravity): created.
 
@@ -34,7 +37,7 @@ Keep `pubrun.capture.subprocesses` unloaded during `import pubrun.nopatch` runs 
 flowchart TD
     BOOT["Run._bootstrap_engines() Step 2 calls get_git(config)"] --> RAW["get_git(config) calls _run_git_raw(args)"]
     RAW --> HELPER["_run_git_raw(args) enters _disable_spy_if_loaded()"]
-    HELPER --> LOOKUP["Read getattr(sys, 'modules', _SYS_MODULES).get('pubrun.capture.subprocesses')"]
+    HELPER --> LOOKUP["Resolve modules = getattr(sys, 'modules', _SYS_MODULES); look up 'pubrun.capture.subprocesses' if modules is not None"]
     LOOKUP --> LOADED{"Module loaded and disable_spy callable?"}
     LOADED -->|"Yes"| BYPASS["Return spy_mod.disable_spy()"]
     BYPASS --> RUN_BYPASS["Run subprocess.run(['git', ...]) with SubprocessSpy bypassed"]
@@ -65,9 +68,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - [ ] E-02 Add behavioral unit tests for `get_git` spy-bypass and unloaded-module behavior in `tests/test_capture_engines.py::TestGit`:
   - Write tests that assert observable runtime behavior only (do not inspect source code with `ast`, `inspect`, regex, or substring matching):
-    1. **Active `SubprocessSpy` bypass:** Install `SubprocessSpy` (with `pubrun.capture.subprocesses` loaded), run `get_git({"capture": {"git": {"enabled": True}}})` inside the `git_repo` fixture while wrapping `subprocess.run` to record `_spy_bypassed()`, and assert that every git invocation ran with `_spy_bypassed()` equal to `True`, `result["capture_state"]["status"] == "complete"`, and `SubprocessSpy.get_records()` contains zero records. Uninstall `SubprocessSpy` in a `finally` block.
+    1. **Active `SubprocessSpy` bypass:** Assert `SubprocessSpy.install(owner=...)` returns `True` (with `pubrun.capture.subprocesses` loaded), run `get_git({"capture": {"git": {"enabled": True}}})` inside the `git_repo` fixture while wrapping `subprocess.run` to record `_spy_bypassed()`, and assert that at least one git invocation ran, every recorded invocation ran with `_spy_bypassed()` equal to `True`, `_spy_bypassed()` is `False` after `get_git` returns, `result["capture_state"]["status"] == "complete"`, and `SubprocessSpy.get_records()` contains zero records (checked before uninstalling). Uninstall `SubprocessSpy.uninstall(owner=...)` in a `finally` block.
     2. **Monkeypatched `sys` fallback:** Replace `pubrun.capture.git.sys` with a minimal stub object lacking a `modules` attribute (via `monkeypatch.setattr`), call `_disable_spy_if_loaded()` while `pubrun.capture.subprocesses` is loaded, and assert that `_spy_bypassed()` is `True` inside the returned context manager and `False` after exit without raising `AttributeError`.
-    3. **Direct `get_git` leaves `pubrun.capture.subprocesses` unloaded:** In a fresh Python subprocess (with `PYTHONPATH` pointing at `src` and `cwd` set to an initialized temporary git repository), import `pubrun.capture.git`, call `get_git({"capture": {"git": {"enabled": True}}})`, and assert exit `0`, `capture_state["status"] == "complete"`, and `"pubrun.capture.subprocesses" not in sys.modules`.
+    3. **Direct `get_git` leaves `pubrun.capture.subprocesses` unloaded:** In a fresh Python subprocess (with `PYTHONPATH` pointing at `src`, `PUBRUN_IMPORT_MODE="minimal"`, `PUBRUN_AUTO_START` and `PUBRUN_RUN_MODE_OVERRIDE` removed from the environment so importing parent package `pubrun` does not trigger default auto-start and load `SubprocessSpy`, and `cwd` set to an initialized temporary git repository), import `pubrun.capture.git`, verify `"pubrun.capture.subprocesses" not in sys.modules` before calling `get_git({"capture": {"git": {"enabled": True}}})`, and assert exit `0`, `capture_state["status"] == "complete"`, and `"pubrun.capture.subprocesses" not in sys.modules` after the call.
   - Depends on: E-01
   - Expected outcome: `tests/test_capture_engines.py` passes and verifies all three behaviors (`SubprocessSpy` bypass when loaded, `_SYS_MODULES` fallback under stubbed `sys`, and zero `pubrun.capture.subprocesses` import when unloaded).
   - Execution state: pending
@@ -76,7 +79,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - In `tests/test_import_modes.py::TestSpecProbeAndBackgroundImportLockSafety`, add `test_nopatch_with_git_capture_enabled_does_not_load_subprocesses_module`:
     - Create a temporary git repository under `tmp_path` (`git init`, create a file, `git add`, `git commit` with explicit author identity and `commit.gpgsign=false`).
     - Run a fresh Python subprocess using `self._clean_env()` with `cwd=str(repo)` and no `.pubrun.toml` disabling git capture (so default `[capture.git].enabled = true` applies).
-    - Execute `import pubrun.nopatch as pubrun`, obtain `run = pubrun.get_current_run()`, join `run._hardware_thread` with a 15-second timeout when present, record `run.git_data["capture_state"]["status"]`, `run.git_data.get("commit")`, and `"pubrun.capture.subprocesses" in sys.modules` before and after `pubrun.stop()`.
+    - Execute `import pubrun.nopatch as pubrun`, obtain `run = pubrun.get_current_run()`, join `run._hardware_thread` with a 15-second timeout and assert `not hw_thread.is_alive()` when present, record `run.git_data["capture_state"]["status"]`, `run.git_data.get("commit")`, and `"pubrun.capture.subprocesses" in sys.modules` before and after `pubrun.stop()`.
     - Assert exit `0`, `git_status == "complete"`, `isinstance(commit, str)` with `len(commit) == 40`, `loaded_before_stop is False`, and `loaded_after_stop is False`.
   - In `tests/test_import_modes.py::TestSpecProbeAndBackgroundImportLockSafety::test_nopatch_background_hw_does_not_load_subprocesses_module`, update the comment above `.pubrun.toml` so it explains that disabling git capture isolates the `pubrun-hw` background-thread path (removing the stale note that `pubrun.capture.git` pre-loads `pubrun.capture.subprocesses`). Keep the test assertions and config file write unchanged.
   - Run all commands in `## Required tests / validation`.
@@ -101,7 +104,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 ## Proposed changes (ordered, validatable)
 
 1. `E-01` (`src/pubrun/capture/git.py`): Add `_SYS_MODULES = sys.modules` and `_disable_spy_if_loaded() -> Any` using `contextlib.nullcontext()`, and replace `from pubrun.capture.subprocesses import disable_spy` / `with disable_spy():` in `_run_git_raw` with `with _disable_spy_if_loaded():`.
-2. `E-02` (`tests/test_capture_engines.py`): Add behavioral unit tests in `TestGit` covering active `SubprocessSpy` bypass, `_SYS_MODULES` fallback when `git.sys` lacks `.modules`, and unloaded `pubrun.capture.subprocesses` during a fresh-subprocess `get_git` call.
+2. `E-02` (`tests/test_capture_engines.py`): Add behavioral unit tests in `TestGit` covering active `SubprocessSpy` bypass, `_SYS_MODULES` fallback when `git.sys` lacks `.modules`, and unloaded `pubrun.capture.subprocesses` before and after a fresh-subprocess `get_git` call under `PUBRUN_IMPORT_MODE=minimal`.
 3. `E-03` (`tests/test_import_modes.py`): Add `test_nopatch_with_git_capture_enabled_does_not_load_subprocesses_module` in `TestSpecProbeAndBackgroundImportLockSafety`, update the stale comment in `test_nopatch_background_hw_does_not_load_subprocesses_module`, and run all required `pytest` and `mypy` checks.
 
 ## Deferred / out of scope (with reason)
@@ -132,7 +135,7 @@ None. Backlog item `ctx0hj` names the exact target (`src/pubrun/capture/git.py::
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
 - [ ] V-01 validates E-01
-  - Required evidence: Pasted output of (1) a fresh-subprocess probe (with `PYTHONPATH=src` in a temporary initialized git repository) calling `pubrun.capture.git.get_git({"capture": {"git": {"enabled": True}}})` (exercising `src/pubrun/capture/git.py::_disable_spy_if_loaded` and `_run_git_raw` updated in `E-01`) printing `status=complete`, a 40-character commit hash, and `subprocesses_loaded=False` with exit `0`, and (2) Command 3 (`mypy` on Linux, `win32`, and `darwin`) exiting `0` with zero issues.
+  - Required evidence: Pasted output of (1) a fresh-subprocess probe (with `PYTHONPATH=src`, `PUBRUN_IMPORT_MODE=minimal`, and `PUBRUN_AUTO_START` / `PUBRUN_RUN_MODE_OVERRIDE` unset, in a temporary initialized git repository) importing `pubrun.capture.git`, confirming `pubrun.capture.subprocesses` is unloaded before the call, and calling `pubrun.capture.git.get_git({"capture": {"git": {"enabled": True}}})` (exercising `src/pubrun/capture/git.py::_disable_spy_if_loaded` and `_run_git_raw` updated in `E-01`) printing `status=complete`, a 40-character commit hash, and `subprocesses_loaded=False` with exit `0`, and (2) Command 3 (`mypy` on Linux, `win32`, and `darwin`) exiting `0` with zero issues.
   - Observed evidence:
   - Result: pending
 
