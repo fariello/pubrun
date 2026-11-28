@@ -5,8 +5,9 @@
 - Concern: Fix four benchmark/capture bugs (`BUG-E5`, `BUG-E6`, `BUG-E7`, `BUG-E8`) and close benchmark test-suite performance and collection-isolation gaps (`TEST-I5` benchmarks, `TEST-I6` redundant harness runs).
 - Scope: Fix `src/pubrun/_bench/harness.py`, `src/pubrun/capture/filesystem.py`, `benchmarks/scaling_bench.py`, and `benchmarks/pull_submissions.py`, and add regression tests plus fixture caching / `sys.path` cleanup in `benchmarks/test_benchmarks.py`, `benchmarks/test_share_safety.py`, `benchmarks/test_pull_submissions.py`, and `tests/test_capture_engines.py`.
 - Scope-Paths: src/pubrun/_bench/harness.py, src/pubrun/capture/filesystem.py, benchmarks/scaling_bench.py, benchmarks/pull_submissions.py, benchmarks/test_benchmarks.py, benchmarks/test_share_safety.py, benchmarks/test_pull_submissions.py, tests/test_capture_engines.py
+- Scope-Exceeded: .aw/records/backlog/open/20261127-lp4sac-01-lp4sac-isolate-collection-time-sys-path-and-sys-modules-m.backlog.md (File follow-up backlog item lp4sac for adjacent TEST-I5 collection-time sys.path/sys.modules leak observed in tests/test_benchmark_intake_bugs.py); tests/test_benchmark_intake_bugs.py (Update two pre-existing pull_submissions._retag unit tests whose assertions pinned the pre-BUG-E8 3-attempt fallback count and 5-arg _retag mock signature superseded by E-02); tests/test_capture_mypy_guarded_paths.py (Update pre-existing test_probe_paths_live_probes_each_entry_path superseded by E-01 BUG-E7 mount-point probing fix)
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix bench PUBRUN_* leakage, mount-point live probing, scaling_bench scrub key mismatch, pull_submissions retag, and benchmark suite caching
@@ -17,12 +18,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: n39jh9
-- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: n39jh9 verified (set assess-bt, attempt 1). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261127-lp4sac-01-lp4sac-isolate-collection-time-sys-path-and-sys-modules-m.backlog.md: File follow-up backlog item lp4sac for adjacent TEST-I5 collection-time sys.path/sys.modules leak observed in tests/test_benchmark_intake_bugs.py; out-of-scope tests/test_benchmark_intake_bugs.py: Update two pre-existing pull_submissions._retag unit tests whose assertions pinned the pre-BUG-E8 3-attempt fallback count and 5-arg _retag mock signature superseded by E-02; out-of-scope tests/test_capture_mypy_guarded_paths.py: Update pre-existing test_probe_paths_live_probes_each_entry_path superseded by E-01 BUG-E7 mount-point probing fix]
 - 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-27 to-review (Antigravity): Authored review-ready child IPD from parallel `/assess bugs` and `/assess testing` audits on HEAD `512ee68` / `8f2aacd`.
