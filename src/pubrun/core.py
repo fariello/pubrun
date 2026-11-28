@@ -1958,12 +1958,21 @@ def popen(cmd: str, mode: str = "r", bufsize: int = -1) -> Any:
             try:
                 ended_at = time.time()
                 end_mono = time.perf_counter()
-                rc = 0
+                rc: Any = 0
                 if exit_status is not None:
                     if sys.platform == "win32":
                         rc = exit_status
+                    elif isinstance(exit_status, int) and not isinstance(exit_status, bool):
+                        if exit_status < 0 and (exit_status & 0xFF) == 0:
+                            rc = exit_status >> 8
+                        elif exit_status >= 0 and os.WIFEXITED(exit_status):
+                            rc = os.WEXITSTATUS(exit_status)
+                        elif exit_status >= 0 and os.WIFSIGNALED(exit_status):
+                            rc = -os.WTERMSIG(exit_status)
+                        else:
+                            rc = exit_status
                     else:
-                        rc = os.WEXITSTATUS(exit_status) if os.WIFEXITED(exit_status) else exit_status
+                        rc = exit_status
 
                 current_run = get_current_run()
                 if current_run and current_run.is_active:

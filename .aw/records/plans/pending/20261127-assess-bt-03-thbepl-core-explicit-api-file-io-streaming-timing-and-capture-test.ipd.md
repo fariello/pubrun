@@ -50,21 +50,21 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Fix core `popen` signal decoding and `file_io` streaming hash timing
 
-- [ ] E-01 Fix POSIX signal-terminated exit decoding in `src/pubrun/core.py::popen` (`_PopenPipeProxy.close`) (`BUG-C5`):
+- [x] E-01 Fix POSIX signal-terminated exit decoding in `src/pubrun/core.py::popen` (`_PopenPipeProxy.close`) (`BUG-C5`):
   - On POSIX (`sys.platform != "win32"`), when `isinstance(exit_status, int) and not isinstance(exit_status, bool)`: if `exit_status < 0 and (exit_status & 0xFF) == 0`, decode `rc = exit_status >> 8` (`-signum`); else if `exit_status >= 0 and os.WIFEXITED(exit_status)`, use `os.WEXITSTATUS(exit_status)`; else if `exit_status >= 0 and os.WIFSIGNALED(exit_status)`, use `-os.WTERMSIG(exit_status)`; else keep `exit_status`.
   - Depends on: none
   - Expected outcome: `pubrun.popen("kill -TERM $$")` and `pubrun.popen("kill -9 $$")` record `-15` and `-9` (matching `pubrun.subprocess.run` and `SubprocessSpy`) instead of `241` and `247`, normal non-zero exits decode cleanly (`exit 5` -> `5`), and unusual negative integers without a zero low byte are preserved verbatim.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Fix small-chunk streaming hash timing in `src/pubrun/capture/file_io.py::ProvenanceFileProxy._update_stream_hash` (`BUG-E3`):
+- [x] E-02 Fix small-chunk streaming hash timing in `src/pubrun/capture/file_io.py::ProvenanceFileProxy._update_stream_hash` (`BUG-E3`):
   - When `budget.max_total_hash_seconds > 0.0`, time every `self._stream_hasher.update(data)` call with `time.monotonic()` into `self._stream_elapsed`. If `self._stream_elapsed > budget.max_total_hash_seconds`, abort streaming immediately lock-free (`_stream_over_budget = True`, set `_stream_over_budget_reason`, call `_invalidate_stream()`, and return) so slow small-chunk streams do not keep hashing up to `DEFAULT_CHUNK_SIZE`. Keep the `DEFAULT_CHUNK_SIZE` throttle strictly for the locked `budget.check_stream_progress(self._stream_bytes, self._stream_elapsed)` call (with the final check still running at `close()` for cumulative multi-file budgets). Keep the zero-timer fast path only when `budget.max_total_hash_seconds == 0.0`.
   - Depends on: none
   - Expected outcome: Small-chunk streaming I/O (<64 KiB reads/writes) enforces `max_total_hash_seconds` accurately (both single-file lock-free and cumulative multi-file), avoids unnecessary hashing once the single-file time exceeds `max_total_hash_seconds`, and records accurate `hash_duration_seconds`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Harden explicit API, runtime safety, and file I/O test suites
 
-- [ ] E-03 Eliminate `pubrun-hw` thread races, add explicit-API failure/edge tests, and clean up manual `Path.cwd` mutation in `tests/test_explicit_api.py` (`TEST-C1`/`TEST-I3`, `TEST-C6`, `TEST-C7`, `BUG-C5`):
+- [x] E-03 Eliminate `pubrun-hw` thread races, add explicit-API failure/edge tests, and clean up manual `Path.cwd` mutation in `tests/test_explicit_api.py` (`TEST-C1`/`TEST-I3`, `TEST-C6`, `TEST-C7`, `BUG-C5`):
   - Pass `capture={"hardware": {"depth": "off"}, "resources": {"depth": "off"}}` in `test_explicit_subprocess_popen_wait_communicate_poll_timeout_and_failure`, `test_explicit_popen_monotonic_and_launch_failure_schema`, `test_explicit_subprocess_run_monotonic_and_schema`, and `test_manual_subprocess_provenance_isolation_cap_zero_bool_and_concurrency`. Do NOT edit `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` (owned by pending plan `8o6o83`).
   - Add behavioral tests covering:
     - (a) POSIX `pubrun.popen` signal termination (`@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal exit semantics")` covering `kill -TERM $$` -> `-15` and `kill -9 $$` -> `-9`), plus cross-platform non-zero exit (`exit 5` -> `5`, `capture_state.status == "failed"`) and double-`close()` idempotency (second `close()` returns `None` and records only one subprocess entry);
@@ -73,9 +73,9 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Remove direct `Path.cwd = staticmethod(lambda: tmp_path)` assignments in `test_report_and_artifact`, `test_pubrun_print`, `test_pubrun_open_provenance`, and `test_explicit_subprocess_and_popen` (relying on autouse `tests/conftest.py::isolated_cwd`).
   - Depends on: E-01
   - Expected outcome: `tests/test_explicit_api.py` has zero background `pubrun-hw` interference in the four racy tests, leaves `8o6o83`'s test untouched, has zero manual `Path.cwd = staticmethod(...)` assignments, and covers all explicit `popen`/`print`/`phase` failure paths including `core.py`'s timestamped `pubrun.print` lines.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Add symlink-escape security tests, replace fixed sleeps, and harden `file_io` tests in `tests/test_runtime_safety.py`, `tests/test_file_io_provenance.py`, and `tests/test_file_registration.py` (`TEST-C2`, `TEST-C5`, `TEST-C7`, `TEST-C9`, `TEST-I7`, `BUG-E3`):
+- [x] E-04 Add symlink-escape security tests, replace fixed sleeps, and harden `file_io` tests in `tests/test_runtime_safety.py`, `tests/test_file_io_provenance.py`, and `tests/test_file_registration.py` (`TEST-C2`, `TEST-C5`, `TEST-C7`, `TEST-C9`, `TEST-I7`, `BUG-E3`):
   - In `tests/test_runtime_safety.py`:
     - add symlink-escape and `"."` target security tests for `pubrun.artifact()` / `pubrun.report()` (using `capture={"hardware": {"depth": "off"}}` so `manifest.json` snapshots cannot race with `pubrun-hw`): symlink to an outside directory rejected for both `artifact` and `report`, symlink to `manifest.json` rejected for both `artifact` and `report` with `manifest.json` unchanged, and `artifact(".", ...)` / `artifact("./", ...)` rejected (skipping symlink cases cleanly via `pytest.skip` if `os.symlink` raises `OSError` or `NotImplementedError`);
     - replace the two fixed-sleep thread handshakes (`time.sleep(0.05)` in `_fake_hw_worker` and `time.sleep(0.03)` before `ci.stop()` in the concurrent `ConsoleInterceptor` test) with `threading.Event` synchronization (leaving the bounded child-process exit polling loop in `test_subprocess_spy_windows_shlex_and_drain_reaping` intact).
@@ -89,15 +89,15 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - remove redundant manual `Path.cwd = staticmethod(...)` mutation in `_run_manifest` (`TEST-C7`).
   - Depends on: E-02
   - Expected outcome: Symlink-escape security guards, deterministic small-chunk stream hash timing, concurrent `max_tracked_files`, and pending-output re-registration are behaviorally verified with zero private-field pinning, zero fixed-sleep thread handshakes, and zero manual `Path.cwd` overwrites.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Validate
 
-- [ ] E-05 Run targeted `pytest -p randomly` with coverage and 3-OS `mypy` and record complete output:
+- [x] E-05 Run targeted `pytest -p randomly` with coverage and 3-OS `mypy` and record complete output:
   - Run all commands listed in `## Required tests / validation` and verify exit `0`.
   - Depends on: E-03, E-04
   - Expected outcome: All targeted tests pass under `-p randomly`, targeted coverage lines in `src/pubrun/core.py` and `src/pubrun/capture/file_io.py` are hit, and 3-OS `mypy` exits `0`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -162,30 +162,47 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `git diff -- src/pubrun/core.py` and passing pytest output (re-derived at execution time) from `tests/test_explicit_api.py` exercising `pubrun.popen` with POSIX `kill -TERM $$` (`-15`) and `kill -9 $$` (`-9`), cross-platform `exit 5` (`5`, `capture_state.status == "failed"`), and double-`close()` idempotency.
   - Observed evidence:
-  - Result: pending
+    - `git diff -- src/pubrun/core.py`: replaced the POSIX branch in `_PopenPipeProxy.close` (lines 1961-1975) with `elif isinstance(exit_status, int) and not isinstance(exit_status, bool):` decoding `exit_status < 0 and (exit_status & 0xFF) == 0` via `exit_status >> 8`, `exit_status >= 0 and os.WIFEXITED(exit_status)` via `os.WEXITSTATUS(exit_status)`, `exit_status >= 0 and os.WIFSIGNALED(exit_status)` via `-os.WTERMSIG(exit_status)`, and preserving all other values verbatim.
+    - Pytest output (`PUBRUN_IMPORT_MODE=minimal python3 -m pytest -p randomly tests/test_explicit_api.py ...`, seed `4006907554`):
+      - `tests/test_explicit_api.py::test_explicit_popen_posix_signal_exit_codes PASSED [ 8%]` (`kill -TERM $$` -> `-15`, `kill -9 $$` -> `-9`, raw waitpid signaled status `15` -> `-15`, unusual negative `-3` -> `-3`)
+      - `tests/test_explicit_api.py::test_explicit_popen_nonzero_exit_and_double_close_idempotency PASSED [ 9%]` (`exit 5` -> `5`, `capture_state == {"status": "failed"}`, second `close()` returns `None` and records one entry).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `git diff -- src/pubrun/capture/file_io.py` and passing pytest output (re-derived at execution time) from `tests/test_file_io_provenance.py` verifying small-chunk (<64 KiB) streaming under a stepped `time.monotonic` enforces `max_total_hash_seconds` (`over_budget`) and reports positive `hash_duration_seconds` under a generous cap.
   - Observed evidence:
-  - Result: pending
+    - `git diff -- src/pubrun/capture/file_io.py`: updated `ProvenanceFileProxy._update_stream_hash` (lines 2353-2377) to time every `self._stream_hasher.update(data)` call when `budget.max_total_hash_seconds > 0.0`, abort lock-free immediately when `self._stream_elapsed > budget.max_total_hash_seconds`, keep the zero-timer fast path only when `budget.max_total_hash_seconds == 0.0`, and retain the `DEFAULT_CHUNK_SIZE` throttle strictly for `budget.check_stream_progress(self._stream_bytes, self._stream_elapsed)`.
+    - Pytest output (`PUBRUN_IMPORT_MODE=minimal python3 -m pytest -p randomly ... tests/test_file_io_provenance.py ...`, seed `4006907554`):
+      - `tests/test_file_io_provenance.py::TestStreamingHashFastPath::test_small_chunk_stream_hash_time_cap_enforced_and_recorded PASSED` (tight `0.5s` cap aborts lock-free after 2 of 6 small 128-byte chunks with `hash_status == "over_budget"`, `extra_read_bytes == 0`, `bytes_hashed == 0`, `clock.calls == 4`; generous `10.0s` cap completes `during_stream` with `hash_duration_seconds == 0.75` and `total_hash_seconds == 0.75`; cumulative multi-file `0.5s` cap accepts file 1 at `0.35s` and marks file 2 `over_budget` at `close()`).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `git diff -- tests/test_explicit_api.py` confirming the 4 racy tests pass `capture={"hardware": {"depth": "off"}, "resources": {"depth": "off"}}` (while leaving `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` untouched for `8o6o83`), no manual `Path.cwd = staticmethod(...)` remains, and passing pytest output (re-derived at execution time) for all newly added `popen`/`print`/`phase` tests.
   - Observed evidence:
-  - Result: pending
+    - `git diff -- tests/test_explicit_api.py`: updated `test_explicit_subprocess_run_monotonic_and_schema`, `test_explicit_subprocess_popen_wait_communicate_poll_timeout_and_failure`, `test_explicit_popen_monotonic_and_launch_failure_schema`, and `test_manual_subprocess_provenance_isolation_cap_zero_bool_and_concurrency` to pass `capture={"hardware": {"depth": "off"}, "resources": {"depth": "off"}}`; removed all four `Path.cwd = staticmethod(lambda: tmp_path)` assignments (`grep -rn "Path\.cwd\s*=" tests/test_explicit_api.py` returned no matches); verified `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` untouched (`git diff -- tests/test_explicit_api.py | grep test_report_and_artifact_reject_blank` returned empty).
+    - Pytest output (seed `4006907554`): all 23 tests in `tests/test_explicit_api.py` passed, including `test_explicit_popen_posix_signal_exit_codes PASSED`, `test_explicit_popen_nonzero_exit_and_double_close_idempotency PASSED`, `test_pubrun_print_timestamped_multiline_oserror_recovery_and_concurrency PASSED`, and `test_phase_profile_save_oserror_unlinks_sentinel_and_skips_event PASSED`.
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `git diff -- tests/test_runtime_safety.py tests/test_file_io_provenance.py tests/test_file_registration.py` and passing pytest output (re-derived at execution time) confirming symlink-escape/`"."`, `threading.Event` handshake replacement, concurrent `max_tracked_files`, and pending-digest re-registration tests pass, manual `Path.cwd` overwrites are removed, and private `_budget._has_caps`/`_stream_valid`/`_stream_over_budget` assertions are replaced by observable manifest checks.
   - Observed evidence:
-  - Result: pending
+    - `git diff -- tests/test_runtime_safety.py tests/test_file_io_provenance.py tests/test_file_registration.py`: added `test_artifact_rejects_dot_targets` and `test_artifact_and_report_reject_symlink_escapes_and_reserved_target` in `tests/test_runtime_safety.py` and replaced both fixed sleeps (`time.sleep(0.05)` in `_fake_hw_worker` and `time.sleep(0.03)` in the concurrent `ConsoleInterceptor` test) with `threading.Event` handshakes (`hw_release` and `wrote_first`); added `test_small_chunk_stream_hash_time_cap_enforced_and_recorded` and `test_concurrent_max_tracked_files_cap_across_open_and_register` in `tests/test_file_io_provenance.py` while removing private `_budget._has_caps`, `_stream_valid`, and `_stream_over_budget` assertions in favor of `hash_stats["extra_read_bytes"] == 0` and `hash_stats["bytes_hashed"] == 0`; added `test_reregistering_pending_deferred_output_with_digest_verifies_at_finalization` in `tests/test_file_registration.py`; removed all manual `Path.cwd = staticmethod(...)` assignments (`grep` checks returned `NONE` for both `Path.cwd =` and private streaming attributes).
+    - Pytest output (seed `4006907554`): all tests passed across `tests/test_runtime_safety.py`, `tests/test_file_io_provenance.py`, and `tests/test_file_registration.py` (`122 passed in 23.41s` combined with `tests/test_explicit_api.py`).
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted complete output of both commands in `## Required tests / validation` (re-derived at execution time), both exiting `0` with coverage confirming the targeted branches in `src/pubrun/core.py` (`_PopenPipeProxy.close`, timestamped `pubrun.print`, `phase.__exit__` sentinel cleanup) and `src/pubrun/capture/file_io.py` (`_update_stream_hash`, pending re-registration) are hit.
   - Observed evidence:
-  - Result: pending
+    - Command 1 (`PUBRUN_IMPORT_MODE=minimal python3 -m pytest -p randomly tests/test_explicit_api.py tests/test_runtime_safety.py tests/test_file_io_provenance.py tests/test_file_registration.py --cov=pubrun.core --cov=pubrun.capture.file_io --cov-report=term-missing -v`; `PUBRUN_IMPORT_MODE=minimal` required per tracked backlog bug `wvdr46` to avoid the Python 3.14 `coverage.py` startup import-lock deadlock): exited `0`, `Using --randomly-seed=4006907554`, `122 passed in 23.41s`. Coverage:
+      - `src/pubrun/capture/file_io.py  1550  200  87%` (zero missed lines across `_update_stream_hash` lines 2336-2378 and pending re-registration digest/reindex lines 1995-2010, 2012-2019, 2021-2036).
+      - `src/pubrun/core.py  971  209  78%` (zero missed lines across POSIX `_PopenPipeProxy.close` lines 1965-1973, timestamped `pubrun.print` lines 1278-1295/1300-1306/1311-1323/1326-1328, and `phase.__exit__` sentinel cleanup lines 779-783/786/811-815/818).
+      - `TOTAL  2521  409  84%`.
+    - Command 2 (`python3 -m mypy && python3 -m mypy --platform win32 && python3 -m mypy --platform darwin`): exited `0` with `Success: no issues found in 71 source files` on Linux, `Success: no issues found in 71 source files` on `win32`, and `Success: no issues found in 71 source files` on `darwin`.
+    - Full repository suite (`aw suite`): exited `0`, `2609 passed in 113.17s (0:01:53)`. Leak scan (`aw sanitize --agent`): `outcome: "clean"`, `checked: 1072`, `findings: 0`.
+  - Result: pass
 
 ## Approval and execution gate
 

@@ -2350,11 +2350,23 @@ class ProvenanceFileProxy:
             self._invalidate_stream()
             return
 
-        if self._stream_bytes_since_check >= DEFAULT_CHUNK_SIZE:
+        if budget.max_total_hash_seconds > 0.0:
             t0 = time.monotonic()
             self._stream_hasher.update(data)
             dt = max(0.0, time.monotonic() - t0)
             self._stream_elapsed += dt
+            if self._stream_elapsed > budget.max_total_hash_seconds:
+                self._stream_over_budget = True
+                self._stream_over_budget_reason = (
+                    f"streamed hash time ({self._stream_elapsed:.4f}s) exceeded "
+                    f"max_total_hash_seconds ({budget.max_total_hash_seconds}s)"
+                )
+                self._invalidate_stream()
+                return
+        else:
+            self._stream_hasher.update(data)
+
+        if self._stream_bytes_since_check >= DEFAULT_CHUNK_SIZE:
             self._stream_bytes_since_check = 0
             over = budget.check_stream_progress(
                 self._stream_bytes, self._stream_elapsed
@@ -2363,9 +2375,6 @@ class ProvenanceFileProxy:
                 self._stream_over_budget = True
                 self._stream_over_budget_reason = over
                 self._invalidate_stream()
-            return
-
-        self._stream_hasher.update(data)
 
     def _is_read_mode(self) -> bool:
         return self._role == "input"

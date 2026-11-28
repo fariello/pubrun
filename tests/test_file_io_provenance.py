@@ -21,9 +21,7 @@ def tracked(tmp_path):
     """Factory: tracked(level) -> (manifest dict) after opening one input + one output."""
     def _factory(level=None, hashed_input=True):
         pubrun.tracker._active_run = None
-        old = Path.cwd
         try:
-            Path.cwd = staticmethod(lambda: tmp_path)
             kwargs = {"console": {"capture_mode": "off"}}
             if level is not None:
                 kwargs["capture"] = {"file_io": {"level": level}}
@@ -38,7 +36,6 @@ def tracked(tmp_path):
             t.stop()
             return json.loads((Path(t.run_dir) / "manifest.json").read_text()), tmp_path
         finally:
-            Path.cwd = old
             pubrun.tracker._active_run = None
     return _factory
 
@@ -82,9 +79,7 @@ class TestFileIoLevels:
     def test_pubrun_open_returns_usable_file(self, tmp_path):
         """The proxy must behave like a normal file for reads/iteration/context mgmt."""
         pubrun.tracker._active_run = None
-        old = Path.cwd
         try:
-            Path.cwd = staticmethod(lambda: tmp_path)
             t = pubrun.start(console={"capture_mode": "off"})
             p = tmp_path / "data.txt"
             p.write_text("l1\nl2\nl3\n")
@@ -93,14 +88,11 @@ class TestFileIoLevels:
                 assert [ln.strip() for ln in f] == ["l2", "l3"]  # iteration works
             t.stop()
         finally:
-            Path.cwd = old
             pubrun.tracker._active_run = None
 
     def test_max_hash_bytes_skips_large_files(self, tmp_path):
         pubrun.tracker._active_run = None
-        old = Path.cwd
         try:
-            Path.cwd = staticmethod(lambda: tmp_path)
             t = pubrun.start(console={"capture_mode": "off"},
                              capture={"file_io": {"level": "hash", "max_hash_bytes": 4}})
             p = tmp_path / "big.bin"
@@ -111,7 +103,6 @@ class TestFileIoLevels:
             m = json.loads((Path(t.run_dir) / "manifest.json").read_text())
             assert m["data_files"]["inputs"][0]["sha256"] is None  # skipped (too large)
         finally:
-            Path.cwd = old
             pubrun.tracker._active_run = None
 
 
@@ -139,9 +130,7 @@ class TestProcIoCounters:
 def _run_with_file_io(tmp_path, file_io_cfg, fn):
     """Helper running `fn(tmp_path, run)` inside an isolated tracked run."""
     pubrun.tracker._active_run = None
-    old_cwd = Path.cwd
     try:
-        Path.cwd = staticmethod(lambda: tmp_path)
         t = pubrun.start(
             console={"capture_mode": "off"},
             capture={"file_io": file_io_cfg},
@@ -152,7 +141,6 @@ def _run_with_file_io(tmp_path, file_io_cfg, fn):
             t.stop()
         return json.loads((Path(t.run_dir) / "manifest.json").read_text(encoding="utf-8"))
     finally:
-        Path.cwd = old_cwd
         pubrun.tracker._active_run = None
 
 
@@ -1303,8 +1291,6 @@ class TestStreamingHashFastPath:
             with monkeypatch.context() as mp:
                 mp.setattr(FileIoBudgetTracker, "check_stream_progress", _spy_check)
                 with pubrun.open(p_write, "wb") as fh:
-                    assert fh._budget is not None
-                    assert fh._budget._has_caps is False
                     fh.write(b"bytes-chunk-")
                     fh.write(bytearray(b"bytearray-chunk-"))
                     fh.write(memoryview(b"mv-chunk"))
@@ -1400,13 +1386,8 @@ class TestStreamingHashFastPath:
 
         def _work_small(_base, _run):
             with pubrun.open(p_small_over, "wb") as fh:
-                assert fh._budget is not None
-                assert fh._budget._has_caps is True
                 fh.write(b"12345")
-                assert fh._stream_valid is True
                 fh.write(b"678901")  # 11 bytes > 10 -> aborts immediately
-                assert fh._stream_valid is False
-                assert fh._stream_over_budget is True
             with pubrun.open(p_small_ok, "wb") as fh:
                 fh.write(b"1234567890")  # exactly 10 bytes
 
@@ -1418,7 +1399,11 @@ class TestStreamingHashFastPath:
         by_name = {Path(r["path"]).name: r for r in m_small["data_files"]["outputs"]}
         assert by_name["small_over.bin"]["hash_status"] == "over_budget"
         assert by_name["small_over.bin"]["sha256"] is None
+        assert by_name["small_over.bin"]["hash_stats"]["extra_read_bytes"] == 0
+        assert by_name["small_over.bin"]["hash_stats"]["bytes_hashed"] == 0
         assert by_name["small_ok.bin"]["hash_status"] == "completed"
+        assert by_name["small_ok.bin"]["observation_time"] == "during_stream"
+        assert by_name["small_ok.bin"]["hash_stats"]["extra_read_bytes"] == 0
         assert by_name["small_ok.bin"]["sha256"] == hashlib.sha256(b"1234567890").hexdigest()
 
         # 2. Large >= 64 KiB stream checks progress at 64 KiB intervals + close.
@@ -1462,4 +1447,167 @@ class TestStreamingHashFastPath:
         assert big_by_name["big_ok.bin"]["hash_stats"]["bytes_hashed"] == len(big_payload)
         assert big_by_name["big_over.bin"]["hash_status"] == "over_budget"
         assert big_by_name["big_over.bin"]["sha256"] is None
+        assert big_by_name["big_over.bin"]["hash_stats"]["extra_read_bytes"] == 0
+        assert big_by_name["big_over.bin"]["hash_stats"]["bytes_hashed"] == 0
         assert m_big["data_files"]["hashing_summary"]["total_bytes_hashed"] == len(big_payload)
+
+    def test_small_chunk_stream_hash_time_cap_enforced_and_recorded(
+        self, tmp_path, monkeypatch
+    ):
+        """Small-chunk (<64 KiB) streams enforce max_total_hash_seconds and record hash_duration_seconds."""
+        import time as real_time
+        import pubrun.capture.file_io as file_io
+
+        class _SteppedMonotonic:
+            def __init__(self, step: float) -> None:
+                self._now = 100.0
+                self._step = step
+                self.calls = 0
+
+            def monotonic(self) -> float:
+                self.calls += 1
+                if self.calls % 2 == 0:
+                    self._now += self._step
+                return self._now
+
+            def __getattr__(self, name: str):
+                return getattr(real_time, name)
+
+        small_chunk = b"a" * 128
+        assert len(small_chunk) * 6 < file_io.DEFAULT_CHUNK_SIZE
+
+        # 1. Tight cap: 6 small chunks at 0.3s each against 0.5s cap aborts after chunk 2 lock-free.
+        tight_clock = _SteppedMonotonic(step=0.3)
+        p_tight = tmp_path / "small_tight.bin"
+
+        def _work_tight(_base, _run):
+            with monkeypatch.context() as mp:
+                mp.setattr(file_io, "time", tight_clock)
+                with pubrun.open(p_tight, "wb") as fh:
+                    for _ in range(6):
+                        fh.write(small_chunk)
+
+        m_tight = _run_with_file_io(
+            tmp_path,
+            {"level": "hash", "max_total_hash_seconds": 0.5},
+            _work_tight,
+        )
+        rec_tight = m_tight["data_files"]["outputs"][0]
+        assert rec_tight["hash_status"] == "over_budget"
+        assert rec_tight["sha256"] is None
+        assert rec_tight["digest"] is None
+        assert rec_tight["hash_stats"]["extra_read_bytes"] == 0
+        assert rec_tight["hash_stats"]["bytes_hashed"] == 0
+        # Only chunks 1 (0.3s) and 2 (0.6s > 0.5s) were timed (2 calls each); chunks 3-6 skipped.
+        assert tight_clock.calls == 4
+
+        # 2. Generous cap: small chunks complete during_stream with accurate positive duration.
+        gen_clock = _SteppedMonotonic(step=0.25)
+        p_gen = tmp_path / "small_generous.bin"
+
+        def _work_gen(_base, _run):
+            with monkeypatch.context() as mp:
+                mp.setattr(file_io, "time", gen_clock)
+                with pubrun.open(p_gen, "wb") as fh:
+                    for _ in range(3):
+                        fh.write(small_chunk)
+
+        m_gen = _run_with_file_io(
+            tmp_path,
+            {"level": "hash", "max_total_hash_seconds": 10.0},
+            _work_gen,
+        )
+        rec_gen = m_gen["data_files"]["outputs"][0]
+        assert rec_gen["hash_status"] == "completed"
+        assert rec_gen["observation_time"] == "during_stream"
+        assert rec_gen["sha256"] == hashlib.sha256(small_chunk * 3).hexdigest()
+        assert rec_gen["hash_stats"]["extra_read_bytes"] == 0
+        assert rec_gen["hash_stats"]["bytes_hashed"] == len(small_chunk) * 3
+        assert rec_gen["hash_stats"]["hash_duration_seconds"] == pytest.approx(0.75, abs=1e-6)
+        assert m_gen["data_files"]["hashing_summary"]["total_hash_seconds"] == pytest.approx(
+            0.75, abs=1e-6
+        )
+
+        # 3. Cumulative multi-file small-chunk budget enforced at close().
+        cum_clock = _SteppedMonotonic(step=0.35)
+        p_cum1 = tmp_path / "cum1.bin"
+        p_cum2 = tmp_path / "cum2.bin"
+
+        def _work_cum(_base, _run):
+            with monkeypatch.context() as mp:
+                mp.setattr(file_io, "time", cum_clock)
+                with pubrun.open(p_cum1, "wb") as fh:
+                    fh.write(small_chunk)
+                with pubrun.open(p_cum2, "wb") as fh:
+                    fh.write(small_chunk)
+
+        m_cum = _run_with_file_io(
+            tmp_path,
+            {"level": "hash", "max_total_hash_seconds": 0.5},
+            _work_cum,
+        )
+        cum_by_name = {Path(r["path"]).name: r for r in m_cum["data_files"]["outputs"]}
+        assert cum_by_name["cum1.bin"]["hash_status"] == "completed"
+        assert cum_by_name["cum1.bin"]["observation_time"] == "during_stream"
+        assert cum_by_name["cum1.bin"]["hash_stats"]["hash_duration_seconds"] == pytest.approx(
+            0.35, abs=1e-6
+        )
+        assert cum_by_name["cum2.bin"]["hash_status"] == "over_budget"
+        assert cum_by_name["cum2.bin"]["sha256"] is None
+        assert cum_by_name["cum2.bin"]["hash_stats"]["extra_read_bytes"] == 0
+        assert cum_by_name["cum2.bin"]["hash_stats"]["bytes_hashed"] == 0
+
+    def test_concurrent_max_tracked_files_cap_across_open_and_register(self, tmp_path):
+        """Concurrent pubrun.open, register_input, and register_output(defer=True) honor max_tracked_files."""
+        import threading
+
+        cap = 15
+        files_per_thread = 5
+        num_threads = 9  # 3 open, 3 register_input, 3 register_output(defer=True)
+        total_attempts = num_threads * files_per_thread
+
+        # Pre-create input files for register_input threads.
+        for tid in range(3, 6):
+            for idx in range(files_per_thread):
+                (tmp_path / f"reg_in_{tid}_{idx}.bin").write_bytes(f"in-{tid}-{idx}".encode())
+
+        def _work(base, _run):
+            barrier = threading.Barrier(num_threads)
+            errors = []
+
+            def _worker(tid):
+                try:
+                    barrier.wait(timeout=5.0)
+                    for idx in range(files_per_thread):
+                        if tid < 3:
+                            p = base / f"open_out_{tid}_{idx}.bin"
+                            with pubrun.open(p, "wb") as fh:
+                                fh.write(f"open-{tid}-{idx}".encode())
+                        elif tid < 6:
+                            p = base / f"reg_in_{tid}_{idx}.bin"
+                            pubrun.register_input(p)
+                        else:
+                            p = base / f"defer_out_{tid}_{idx}.bin"
+                            pubrun.register_output(p, defer=True)
+                except Exception as exc:
+                    errors.append(exc)
+
+            threads = [
+                threading.Thread(target=_worker, args=(tid,)) for tid in range(num_threads)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=15.0)
+            assert errors == []
+
+        m = _run_with_file_io(
+            tmp_path,
+            {"level": "stat", "max_tracked_files": cap},
+            _work,
+        )
+        df = m["data_files"]
+        total_stored = len(df["inputs"]) + len(df["outputs"]) + len(df["mixed"])
+        assert total_stored == cap
+        assert df["records_truncated"] == total_attempts - cap
+        TestMaxTrackedFilesCapAndSchema()._validate_manifest_schema(m)
