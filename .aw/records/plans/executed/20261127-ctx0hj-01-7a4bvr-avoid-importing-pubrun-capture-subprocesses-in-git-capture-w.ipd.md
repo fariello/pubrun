@@ -6,7 +6,7 @@
 - Scope: Add a `sys.modules`-based `_disable_spy_if_loaded()` helper in `src/pubrun/capture/git.py` (matching `src/pubrun/capture/hardware.py`, `src/pubrun/capture/filesystem.py`, and `src/pubrun/capture/resources.py` from Implementation Plan Document (IPD) `3ed2o4`) and use it inside `_run_git_raw`; add behavioral regression tests in `tests/test_capture_engines.py` and `tests/test_import_modes.py`.
 - Scope-Paths: src/pubrun/capture/git.py, tests/test_capture_engines.py, tests/test_import_modes.py
 - Item-Dependencies: none
-- Status: auto-approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Use _disable_spy_if_loaded() in src/pubrun/capture/git.py so nopatch runs keep pubrun.capture.subprocesses unloaded with git capture enabled
@@ -23,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 7a4bvr verified (set ctx0hj, attempt 2).
 - 2026-11-28 auto-approved (aw agy run --full-auto): auto-approved by --full-auto: review readiness cleared (not human approval)
 - 2026-11-28 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-28 to-review (aw set): Authored review-ready IPD graduating backlog item ctx0hj
