@@ -6,7 +6,7 @@
 - Scope: Harden `src/pubrun/tracker.py`, `src/pubrun/writer.py`, `src/pubrun/status.py`, `src/pubrun/config.py`, and `src/pubrun/__init__.py` against non-dict config sections, premature `.pubrun.lock` removal, lockless `outcome: "running"` misclassification, `SystemExit`/bool exit-code corruption, `find_run()` stripping/ambiguity, `_merge_and_migrate()` concurrency/notice bugs, shadowed `open`, aliased `_deep_merge`, and symlink/corrupt-JavaScript Object Notation (JSON) `status.py` edges; synchronize finalization lock-removal documentation in `docs/architecture.md` and `docs/functional_spec.md`; add behavioral regression tests and update lock-finalization test expectations in `tests/test_core_lifecycle_bugs.py`, `tests/test_status_bugs.py`, and `tests/test_status.py`.
 - Scope-Paths: src/pubrun/tracker.py, src/pubrun/writer.py, src/pubrun/status.py, src/pubrun/config.py, src/pubrun/__init__.py, tests/test_core_lifecycle_bugs.py, tests/test_status_bugs.py, tests/test_status.py, docs/architecture.md, docs/functional_spec.md
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix non-dict config crashes, lock removal before manifest write, lockless running misclassification, SystemExit/bool codes, find_run, migration races, and status tests
@@ -17,12 +17,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: wcjdbu
-- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: wcjdbu verified (set assess-bt, attempt 1).
 - 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-27 to-review (Antigravity): Authored review-ready child IPD from parallel `/assess bugs` and `/assess testing` audits on HEAD `512ee68` / `8f2aacd`.
