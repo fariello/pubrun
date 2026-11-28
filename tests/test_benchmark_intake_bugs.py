@@ -6,9 +6,11 @@ are imported directly from the packaged subpackage, while repository-only tools 
 `benchmarks/` (`aggregate.py`, `pull_submissions.py`) and `.github/scripts/` are loaded
 from their checkout file paths.
 """
+import contextlib
 import copy
 import importlib.util
 import json
+import subprocess
 import sys
 import urllib.error
 from pathlib import Path
@@ -23,23 +25,68 @@ _BENCH = _REPO / "benchmarks"
 _SCRIPTS = _REPO / ".github" / "scripts"
 _FX = _SCRIPTS / "test_fixtures"
 
-for _p in (str(_BENCH), str(_SCRIPTS)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
-
-def _load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
+@contextlib.contextmanager
+def _load_scoped(mod_name: str, file_path: Path):
+    """Load a standalone script and restore sys.path and sys.modules on exit or error."""
+    before_path = list(sys.path)
+    before_modules = dict(sys.modules)
+    spec = importlib.util.spec_from_file_location(mod_name, file_path)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    sys.modules[mod_name] = mod
+    try:
+        spec.loader.exec_module(mod)
+    except BaseException:
+        sys.path[:] = before_path
+        for name in list(sys.modules):
+            if name not in before_modules:
+                sys.modules.pop(name, None)
+        for name, prev in before_modules.items():
+            if name not in sys.modules or sys.modules[name] is not prev:
+                sys.modules[name] = prev
+        raise
+    added = [name for name in sys.modules if name not in before_modules]
+    overwritten = {
+        name: prev
+        for name, prev in before_modules.items()
+        if name not in sys.modules or sys.modules[name] is not prev
+    }
+    try:
+        yield mod
+    finally:
+        sys.path[:] = before_path
+        for name in added:
+            sys.modules.pop(name, None)
+        for name, prev in overwritten.items():
+            sys.modules[name] = prev
 
 
-agg = _load("aggregate", _BENCH / "aggregate.py")
-x = _load("extract_attachment_url", _SCRIPTS / "extract_attachment_url.py")
-v = _load("validate_benchmark_submission", _SCRIPTS / "validate_benchmark_submission.py")
+@pytest.fixture(scope="module")
+def agg():
+    with _load_scoped("aggregate", _BENCH / "aggregate.py") as mod:
+        yield mod
+
+
+@pytest.fixture(scope="module")
+def x():
+    with _load_scoped("extract_attachment_url", _SCRIPTS / "extract_attachment_url.py") as mod:
+        yield mod
+
+
+@pytest.fixture(scope="module")
+def v():
+    with _load_scoped(
+        "validate_benchmark_submission", _SCRIPTS / "validate_benchmark_submission.py"
+    ) as mod:
+        yield mod
+
+
+@pytest.fixture(scope="module")
+def ps():
+    pytest.importorskip("jsonschema")
+    with _load_scoped("pull_submissions", _BENCH / "pull_submissions.py") as mod:
+        yield mod
 
 
 def _safe_result():
@@ -256,27 +303,27 @@ class TestExtractorUrlSafety:
         "https://github.com:99999/a.json",
         "https://github.com:abc/a.json",
     ])
-    def test_malformed_url_does_not_raise(self, body):
+    def test_malformed_url_does_not_raise(self, x, body):
         url, error = x.find_attachment_url(body)
         assert url == ""
         assert error
 
-    def test_malformed_url_skipped_then_valid_wins(self):
+    def test_malformed_url_skipped_then_valid_wins(self, x):
         good = "https://github.com/user-attachments/files/1/r.json"
         url, error = x.find_attachment_url(f"https://[bad/a.json then {good}")
         assert url == good and error == ""
 
-    def test_http_allowlisted_json_rejected_with_https_error(self):
+    def test_http_allowlisted_json_rejected_with_https_error(self, x):
         url, error = x.find_attachment_url("http://github.com/user-attachments/files/1/r.json")
         assert url == ""
         assert "HTTPS" in error
 
-    def test_resolve_source_rejects_http(self):
+    def test_resolve_source_rejects_http(self, x):
         kind, url, _file, error = x.resolve_source(
             "http://objects.githubusercontent.com/a/r.json")
         assert kind == "none" and url == "" and "HTTPS" in error
 
-    def test_existing_errors_preserved(self):
+    def test_existing_errors_preserved(self, x):
         assert "empty" in x.find_attachment_url("")[1]
         assert "no URL" in x.find_attachment_url("nothing here")[1]
         assert "allowlist" in x.find_attachment_url("https://evil.example.com/a.json")[1]
@@ -294,7 +341,7 @@ class TestValidatorDownload:
         "https://[invalid/a.json",
         "https://github.com:99999/a.json",
     ])
-    def test_bad_initial_url_rejected_before_fetch(self, url, tmp_path, monkeypatch):
+    def test_bad_initial_url_rejected_before_fetch(self, v, url, tmp_path, monkeypatch):
         import urllib.request
 
         def _no_open(*a, **k):
@@ -304,7 +351,7 @@ class TestValidatorDownload:
             v._download(url, tmp_path / "s.json")
         assert ei.value.stage == "shape"
 
-    def _redirect_handler(self, monkeypatch):
+    def _redirect_handler(self, v, monkeypatch):
         """Capture the redirect handler class that _download installs."""
         import urllib.request
         captured = {}
@@ -319,8 +366,8 @@ class TestValidatorDownload:
         monkeypatch.setattr(urllib.request, "build_opener", real_build)
         return captured["cls"]
 
-    def test_redirect_limits_bounded(self, monkeypatch):
-        cls = self._redirect_handler(monkeypatch)
+    def test_redirect_limits_bounded(self, v, monkeypatch):
+        cls = self._redirect_handler(v, monkeypatch)
         assert cls.max_redirections == 3
         assert cls.max_repeats == 3
 
@@ -329,24 +376,24 @@ class TestValidatorDownload:
         "https://evil.example.com/a.json",
         "https://[invalid/a.json",
     ])
-    def test_redirect_downgrade_or_offlist_rejected(self, newurl, monkeypatch):
+    def test_redirect_downgrade_or_offlist_rejected(self, v, newurl, monkeypatch):
         import urllib.request
-        cls = self._redirect_handler(monkeypatch)
+        cls = self._redirect_handler(v, monkeypatch)
         req = urllib.request.Request("https://github.com/a.json")
         with pytest.raises(v.Reject) as ei:
             cls().redirect_request(req, None, 302, "Found", {}, newurl)
         assert ei.value.stage == "shape"
 
-    def test_redirect_allowed_target_proceeds(self, monkeypatch):
+    def test_redirect_allowed_target_proceeds(self, v, monkeypatch):
         import urllib.request
-        cls = self._redirect_handler(monkeypatch)
+        cls = self._redirect_handler(v, monkeypatch)
         req = urllib.request.Request("https://github.com/a.json")
         new = cls().redirect_request(req, None, 302, "Found", {},
                                      "https://objects.githubusercontent.com/a.json")
         assert new is not None
         assert new.full_url == "https://objects.githubusercontent.com/a.json"
 
-    def test_excess_redirects_rejected(self, monkeypatch, tmp_path):
+    def test_excess_redirects_rejected(self, v, monkeypatch, tmp_path):
         """More than 3 redirects (all on allowlisted https hosts) is a clean shape rejection."""
         import io
         import urllib.request
@@ -383,7 +430,7 @@ class TestValidatorDownload:
         TimeoutError("t"), OSError("o"), ValueError("v"),
         urllib.error.URLError("u"),
     ])
-    def test_transport_errors_become_rejects(self, exc, monkeypatch, tmp_path):
+    def test_transport_errors_become_rejects(self, v, exc, monkeypatch, tmp_path):
         import urllib.request
 
         def _raise(*a, **k):
@@ -393,7 +440,7 @@ class TestValidatorDownload:
             v._download("https://github.com/a.json", tmp_path / "s.json")
         assert ei.value.stage == "shape"
 
-    def test_http_exception_becomes_reject(self, monkeypatch, tmp_path):
+    def test_http_exception_becomes_reject(self, v, monkeypatch, tmp_path):
         import http.client
         import urllib.request
 
@@ -409,7 +456,7 @@ class TestValidatorDownload:
 
 class TestValidatorParse:
 
-    def test_invalid_utf8_rejected_at_parse(self, tmp_path):
+    def test_invalid_utf8_rejected_at_parse(self, v, tmp_path):
         f = tmp_path / "bad.json"
         f.write_bytes(b'{"schema": "\xff\xfe"}')
         verdict = v.validate_file(f)
@@ -417,14 +464,14 @@ class TestValidatorParse:
         assert verdict["stage"] == "parse"
 
     @pytest.mark.parametrize("const", ["NaN", "Infinity", "-Infinity"])
-    def test_non_standard_constants_rejected_at_parse(self, const, tmp_path):
+    def test_non_standard_constants_rejected_at_parse(self, v, const, tmp_path):
         f = tmp_path / "c.json"
         f.write_text('{"schema": "pubrun-benchmark/5", "x": %s}' % const, encoding="utf-8")
         verdict = v.validate_file(f)
         assert verdict["accepted"] is False
         assert verdict["stage"] == "parse"
 
-    def test_nan_in_timings_rejected_at_parse(self, tmp_path):
+    def test_nan_in_timings_rejected_at_parse(self, v, tmp_path):
         data = json.loads((_FX / "valid.json").read_text(encoding="utf-8"))
         text = json.dumps(data)
         first_scn = next(iter(data["pass_results"][0]["timings"]))
@@ -448,7 +495,7 @@ class TestSchemaReasonPayloadFree:
     def _valid(self):
         return json.loads((_FX / "valid.json").read_text(encoding="utf-8"))
 
-    def test_bad_value_not_echoed(self):
+    def test_bad_value_not_echoed(self, v):
         d = self._valid()
         d["mode"] = {"secret": "SECRET-VALUE-123"}
         with pytest.raises(v.Reject) as ei:
@@ -458,7 +505,7 @@ class TestSchemaReasonPayloadFree:
         assert "secret" not in ei.value.reason
         assert "validator `" in ei.value.reason and "schema path `" in ei.value.reason
 
-    def test_user_supplied_key_not_echoed(self):
+    def test_user_supplied_key_not_echoed(self, v):
         d = self._valid()
         d["ATTACKER-KEY-xyz"] = 1
         with pytest.raises(v.Reject) as ei:
@@ -466,7 +513,7 @@ class TestSchemaReasonPayloadFree:
         assert "ATTACKER-KEY-xyz" not in ei.value.reason
         assert "additionalProperties" in ei.value.reason
 
-    def test_mixed_int_and_str_paths_sort_without_typeerror(self):
+    def test_mixed_int_and_str_paths_sort_without_typeerror(self, v):
         d = self._valid()
         d["pass_results"][0] = "not-an-object"   # error under an int path component
         d["iterations"] = "LEAK-ITER"            # error under a str path component
@@ -496,7 +543,7 @@ def _run5(group="startup", machine=None):
 
 class TestAggregateHardening:
 
-    def test_group_null_does_not_crash(self, tmp_path):
+    def test_group_null_does_not_crash(self, agg, tmp_path):
         rows = agg.build_rows([_run5(group=None), _run5()])
         groups = {r["scenario"]: r["group"] for r in rows if r["scenario"] == "s"}
         assert groups["s"] in ("?", "startup")
@@ -511,13 +558,13 @@ class TestAggregateHardening:
         {"hardware": {"cpu": "z"}, "host": {"os_name": "Linux"}},
         {"hardware": {"cpu": {"model": None}}, "host": None},
     ])
-    def test_non_dict_machine_blocks_do_not_crash(self, machine):
+    def test_non_dict_machine_blocks_do_not_crash(self, agg, machine):
         rows = agg.build_rows([_run5(machine=machine)])
         assert rows
         assert rows[0]["machine"].startswith("?/") or rows[0]["machine"].startswith("Linux/")
         assert "/?/" in rows[0]["machine"] or rows[0]["machine"].split("/")[1] == "?"
 
-    def test_non_dict_json_skipped_with_warning(self, tmp_path, capsys):
+    def test_non_dict_json_skipped_with_warning(self, agg, tmp_path, capsys):
         a = tmp_path / "a.json"
         a.write_text("[1, 2, 3]", encoding="utf-8")
         b = tmp_path / "b.json"
@@ -529,14 +576,14 @@ class TestAggregateHardening:
         err = capsys.readouterr().err
         assert "a.json" in err and "b.json" in err
 
-    def test_non_dict_scenario_entries_ignored(self):
+    def test_non_dict_scenario_entries_ignored(self, agg):
         run = _run5()
         run["scenario_defs"]["junk"] = "not-a-dict"
         run["pass_results"][0]["timings"]["s"] = "nope"
         rows = agg.build_rows([run, {"schema": "pubrun-benchmark/4", "scenarios": {"a": 1}}])
         assert {r["scenario"] for r in rows} == {"baseline-noop", "s"}
 
-    def test_writers_create_missing_parent_dirs(self, tmp_path):
+    def test_writers_create_missing_parent_dirs(self, agg, tmp_path):
         rows = agg.build_rows([_run5()])
         csv_path = tmp_path / "new" / "deeper" / "summary.csv"
         md_path = tmp_path / "other" / "summary.md"
@@ -546,12 +593,6 @@ class TestAggregateHardening:
 
 
 # ------------------------------------------------------------ BUG-22/56: pull_submissions
-
-@pytest.fixture
-def ps():
-    pytest.importorskip("jsonschema")
-    return _load("pull_submissions", _BENCH / "pull_submissions.py")
-
 
 class TestPullIsolation:
 
@@ -700,3 +741,76 @@ class TestPullRetag:
 
 class PullErrorHolder:
     cls = Exception
+
+
+# ----------------------------------------------- TEST-I5: collection and fixture isolation
+
+class TestCollectionAndFixtureIsolation:
+    """Verify collection-time cleanliness and scoped loader rollback behavior."""
+
+    def test_importing_module_does_not_mutate_sys_path_or_sys_modules(self):
+        probe = (
+            "import importlib.util, sys\n"
+            "test_path, bench_dir, scripts_dir = sys.argv[1:4]\n"
+            "before_path = list(sys.path)\n"
+            "before_modules = set(sys.modules)\n"
+            "spec = importlib.util.spec_from_file_location('_probe_intake_bugs', test_path)\n"
+            "assert spec is not None and spec.loader is not None\n"
+            "mod = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(mod)\n"
+            "assert sys.path == before_path, f'sys.path changed: {sys.path!r} != {before_path!r}'\n"
+            "assert bench_dir not in sys.path, bench_dir\n"
+            "assert scripts_dir not in sys.path, scripts_dir\n"
+            "leaked = [\n"
+            "    name for name in (\n"
+            "        'aggregate',\n"
+            "        'extract_attachment_url',\n"
+            "        'validate_benchmark_submission',\n"
+            "        'pull_submissions',\n"
+            "        'share_safety',\n"
+            "    )\n"
+            "    if name not in before_modules and name in sys.modules\n"
+            "]\n"
+            "assert not leaked, f'leaked modules: {leaked!r}'\n"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", probe, str(Path(__file__).resolve()), str(_BENCH), str(_SCRIPTS)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+
+    def test_scoped_loader_restores_state_after_normal_exit(self):
+        targets = (
+            ("validate_benchmark_submission", _SCRIPTS / "validate_benchmark_submission.py", "validate_file"),
+            ("pull_submissions", _BENCH / "pull_submissions.py", "process"),
+        )
+        for mod_name, file_path, attr in targets:
+            before_path = list(sys.path)
+            before_modules = dict(sys.modules)
+            with _load_scoped(mod_name, file_path) as loaded:
+                assert callable(getattr(loaded, attr))
+            assert sys.path == before_path
+            assert set(sys.modules) == set(before_modules)
+            assert all(sys.modules[name] is prev for name, prev in before_modules.items())
+
+    def test_scoped_loader_restores_state_when_exec_raises(self, tmp_path):
+        dummy_key = "_test_scoped_loader_boom_dummy"
+        bad_script = tmp_path / "failing_script.py"
+        bad_script.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {str(tmp_path)!r})\n"
+            f"sys.modules[{dummy_key!r}] = object()\n"
+            "raise RuntimeError('boom')\n",
+            encoding="utf-8",
+        )
+        before_path = list(sys.path)
+        before_modules = dict(sys.modules)
+        with pytest.raises(RuntimeError, match="boom"):
+            with _load_scoped("_test_failing_script", bad_script):
+                pass
+        assert sys.path == before_path
+        assert dummy_key not in sys.modules
+        assert set(sys.modules) == set(before_modules)
+        assert all(sys.modules[name] is prev for name, prev in before_modules.items())
