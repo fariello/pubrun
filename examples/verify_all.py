@@ -31,6 +31,9 @@ def main() -> None:
     src_dir = os.path.join(repo_root, "src")
 
     env = os.environ.copy()
+    for key in list(env):
+        if key.startswith("PUBRUN_"):
+            del env[key]
     existing_pythonpath = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = (
         f"{src_dir}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else src_dir
@@ -43,6 +46,10 @@ def main() -> None:
     failed = []
 
     with tempfile.TemporaryDirectory(prefix="pubrun-examples-") as tmp_dir:
+        config_home = os.path.join(tmp_dir, "config_home")
+        os.makedirs(config_home, exist_ok=True)
+        env["XDG_CONFIG_HOME"] = config_home
+        env["APPDATA"] = config_home
         runs_dir = os.path.join(tmp_dir, "runs")
         outputs_dir = os.path.join(tmp_dir, "outputs")
 

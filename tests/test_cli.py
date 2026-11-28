@@ -665,20 +665,53 @@ class TestCliFilterFlagConsistency:
 
 class TestCliRunTests:
 
-    def test_run_tests_exits_zero(self, tmp_path, monkeypatch):
-        """P3-T15: Test --run-tests command exits 0, defusing recursive pytest call."""
-        import subprocess
+    def test_run_tests_exits_zero(self, tmp_path, monkeypatch, capsys):
+        """Exercise _run_tests() in-process for both zero and non-zero pytest outcomes."""
+        import pubrun.__main__ as cli_main
+
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tox.ini").write_text("[tox]\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        src_dir = Path(__file__).resolve().parents[1] / "src"
+        if src_dir.is_dir():
+            existing = os.environ.get("PYTHONPATH", "")
+            monkeypatch.setenv(
+                "PYTHONPATH",
+                f"{src_dir}{os.pathsep}{existing}" if existing else str(src_dir),
+            )
+
         original_run = subprocess.run
+        pytest_calls = []
+        stub_returncode = {"value": 0}
 
         def mock_run(cmd, *args, **kwargs):
-            if isinstance(cmd, list) and len(cmd) > 2 and cmd[2] == "pytest":
-                return subprocess.CompletedProcess(cmd, 0, stdout="Mocked pytest success", stderr="")
+            if isinstance(cmd, list) and len(cmd) >= 3 and cmd[1:3] == ["-m", "pytest"]:
+                pytest_calls.append(list(cmd))
+                return subprocess.CompletedProcess(
+                    cmd, stub_returncode["value"], stdout="Mocked pytest run", stderr=""
+                )
             return original_run(cmd, *args, **kwargs)
 
         monkeypatch.setattr(subprocess, "run", mock_run)
 
-        result = run_pubrun("--run-tests", cwd=str(tmp_path))
-        assert result.returncode == 0
+        # (a) Stubbed pytest exits 0 -> _run_tests completes cleanly.
+        cli_main._run_tests()
+        out_ok = capsys.readouterr().out
+        assert len(pytest_calls) == 1
+        assert pytest_calls[0] == [sys.executable, "-m", "pytest", "tests/", "-q"]
+        assert "Validation complete." in out_ok
+
+        # (b) Stubbed pytest exits 1 -> _run_tests emits failure and exits 1.
+        pytest_calls.clear()
+        stub_returncode["value"] = 1
+        with pytest.raises(SystemExit) as exc_info:
+            cli_main._run_tests()
+        out_fail = capsys.readouterr().out
+        assert exc_info.value.code == 1
+        assert len(pytest_calls) == 1
+        assert pytest_calls[0] == [sys.executable, "-m", "pytest", "tests/", "-q"]
+        assert "PyTest exited with code 1." in out_fail
 
     def test_run_tests_end_to_end_mock_validates_manifest(self, tmp_path):
         """The built-in self-test's end-to-end mock must actually run a tracked script
@@ -1336,10 +1369,14 @@ raise ValueError("TEST_EXCEPTION")
             assert f"  pubrun {expected_cmd}" in after_examples
 
     def test_pbr_alias_registered_in_pyproject(self):
+        from pubrun.config import tomllib
+
         pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
         assert pyproject_path.exists()
-        content = pyproject_path.read_text(encoding="utf-8")
-        assert 'pbr = "pubrun.__main__:main"' in content
+        data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+        scripts = data["project"]["scripts"]
+        assert scripts["pbr"] == "pubrun.__main__:main"
+        assert scripts["pubrun"] == "pubrun.__main__:main"
 
     def test_pbr_me_easter_egg(self):
         # Invoke main directly with modified argv[0] and argv[1]

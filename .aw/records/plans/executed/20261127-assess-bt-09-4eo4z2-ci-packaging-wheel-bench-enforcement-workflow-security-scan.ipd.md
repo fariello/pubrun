@@ -6,7 +6,7 @@
 - Scope: Update `.github/workflows/ci.yml`, `.github/scripts/test_benchmark_intake_workflow.py`, `.github/scripts/test_extract_attachment_url.py`, `.github/scripts/test_validate_benchmark_submission.py`, `tox.ini`, `examples/verify_all.py`, `tests/test_bench_command.py`, and `tests/test_cli.py`.
 - Scope-Paths: .github/workflows/ci.yml, .github/scripts/test_benchmark_intake_workflow.py, .github/scripts/test_extract_attachment_url.py, .github/scripts/test_validate_benchmark_submission.py, tox.ini, examples/verify_all.py, tests/test_bench_command.py, tests/test_cli.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Enforce TestWheelNonCheckoutBench and verify_all.py in CI, scan multi-line run/script blocks in benchmark-intake, isolate .github/scripts/ imports, update tox.ini, and fix CLI/bench test hygiene
@@ -17,12 +17,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: 4eo4z2
-- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 4eo4z2 verified (set assess-bt, attempt 1).
 - 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-27 to-review (Antigravity): Authored review-ready child IPD from `/assess testing` Slices 2 and 3 on HEAD `512ee68` / `8f2aacd`.
@@ -55,27 +55,27 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Enforce wheel bench tests, workflow security scan, and example verification in CI
 
-- [ ] E-01 Update `.github/workflows/ci.yml`, `tox.ini`, and `examples/verify_all.py` (`TEST-I1`, `TEST-I9`):
+- [x] E-01 Update `.github/workflows/ci.yml`, `tox.ini`, and `examples/verify_all.py` (`TEST-I1`, `TEST-I9`):
   - In `.github/workflows/ci.yml` (`jobs.packaging`), install `pytest` alongside `build` and `twine` (`pip install build twine pytest`) so pytest is available on both `ubuntu-latest` and `windows-latest` without installing editable `pubrun` into the runner's base Python. Add a dedicated step after `Verify sdist cleanliness, wheel contents, and commit stamp in clean environments` with `env: PUBRUN_REQUIRE_WHEEL_TEST: "1"` running `python -m pytest tests/test_bench_command.py -k TestWheelNonCheckoutBench -v -rs` (cross-platform across bash and PowerShell, preserving every existing check asserted by `tests/test_compatibility.py`).
   - In `.github/workflows/ci.yml` (`jobs.extra-suites` on `ubuntu-latest`, Python `3.12`), add a step running `python examples/verify_all.py` so every example script is verified continuously without altering existing `extra-suites` assertions in `tests/test_compatibility.py`.
   - In `examples/verify_all.py::main`, strip ambient `PUBRUN_*` variables (`for key in list(env): if key.startswith("PUBRUN_"): del env[key]`) and, inside the `tempfile.TemporaryDirectory` block, create an empty config directory (for example `os.path.join(tmp_dir, "config_home")`) and set both `env["XDG_CONFIG_HOME"]` and `env["APPDATA"]` to that directory before invoking each example script.
   - In `tox.ini`, add `tui` to `[testenv]` (`extras = dev, tui`) so default Python 3.8 through 3.14 test runs cover the Terminal User Interface (TUI) suite, and add `[testenv:extra]` (`extras = dev, bench`, `deps = pyyaml`, `commands = pytest .github/scripts/ benchmarks/ tests/test_compatibility.py -v`) using explicit directory paths rather than an unexpanded shell glob (`benchmarks/test_*.py`), because `tox` invokes commands directly without a shell.
   - Depends on: none
   - Expected outcome: CI `packaging` runs `TestWheelNonCheckoutBench` with `pytest` installed and fail-closed enforcement; CI `extra-suites` runs `examples/verify_all.py`; `examples/verify_all.py` is isolated from host config and `PUBRUN_*` environment variables; `tox.ini` covers `tui` in `[testenv]` and exposes shell-glob-free `[testenv:extra]`.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Extend `.github/scripts/test_benchmark_intake_workflow.py` (`TEST-I2`) and remove collection-time import-state leaks in `.github/scripts/test_extract_attachment_url.py` and `.github/scripts/test_validate_benchmark_submission.py` (`TEST-I5`):
+- [x] E-02 Extend `.github/scripts/test_benchmark_intake_workflow.py` (`TEST-I2`) and remove collection-time import-state leaks in `.github/scripts/test_extract_attachment_url.py` and `.github/scripts/test_validate_benchmark_submission.py` (`TEST-I5`):
   - In `.github/scripts/test_benchmark_intake_workflow.py`, extract a standard-library helper (requiring zero third-party packages, preserving PyYAML optionality) that collects every `run:` shell value (single-line entries, multi-line YAML block scalars `|`, `|-`, `|+`, `>`, `>-`, `>+`, optional indentation indicators such as `|2`, and indented multi-line continuations) as well as `actions/github-script` `script:` blocks, while ignoring non-shell keys such as `jobs.validate.if:` (where `.github/workflows/benchmark-intake.yml` legitimately checks `github.event.issue.body`). Assert that no extracted `run:` or `script:` block interpolates untrusted `${{ ... github.event. ... }}` expressions. Extend `test_pyyaml_crosscheck_when_available` to walk `jobs[*].steps[*]` (`run` and `with.script`) with the same assertion.
   - In `.github/scripts/test_benchmark_intake_workflow.py`, add synthetic unit tests proving: (a) a clean multi-line `run: |` block passing data via `env:` produces zero findings, (b) an untrusted `${{ github.event.issue.body }}` or `${{ github.event.issue.title }}` on line 2 or later of `run: |`, `run: |-`, and `run: >` blocks is caught, and (c) `github.event.issue.body` inside a job-level `if:` condition is not falsely flagged.
   - In `.github/scripts/test_extract_attachment_url.py`, replace module-level collection-time `sys.modules["extract_attachment_url"] = x` registration with a module-scoped pytest fixture (or helper context manager) that snapshots and restores `sys.path` and `sys.modules` on teardown; update `test_host_allowlist_matches_validator` to load `.github/scripts/validate_benchmark_submission.py` inside a `try/finally` block that restores `sys.path[:]` and any added or modified `sys.modules` keys (`validate_benchmark_submission`, `share_safety`) mutated by `.github/scripts/validate_benchmark_submission.py`.
   - In `.github/scripts/test_validate_benchmark_submission.py`, replace module-level collection-time `sys.modules["validate_benchmark_submission"] = v` registration (which triggers `.github/scripts/validate_benchmark_submission.py`'s `sys.path.insert(0, str(_REPO / "benchmarks"))` and `import share_safety` at pytest collection time) with a module-scoped pytest fixture that runs `pytest.importorskip("jsonschema")`, snapshots `sys.path` and `sys.modules`, loads the module, yields it to tests, and restores `sys.path[:]` and `sys.modules` on teardown.
   - Depends on: none
   - Expected outcome: Multi-line shell and script injections in `.github/workflows/benchmark-intake.yml` are detected by both stdlib and PyYAML checks with regression tests, and collecting or running `.github/scripts/` leaves `sys.path` and `sys.modules` unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Replace dead CLI monkeypatch and remove private/config pinning
 
-- [ ] E-03 Fix `tests/test_cli.py` (`TEST-U3`, `TEST-I8`) and `tests/test_bench_command.py` (`TEST-I1`, `TEST-I8`):
+- [x] E-03 Fix `tests/test_cli.py` (`TEST-U3`, `TEST-I8`) and `tests/test_bench_command.py` (`TEST-I1`, `TEST-I8`):
   - In `tests/test_cli.py::TestCliRunTests.test_run_tests_exits_zero`, replace the dead child-subprocess `subprocess.run` monkeypatch with an in-process test calling `src/pubrun/__main__.py::_run_tests` inside `tmp_path` containing a fake `tests/` directory and `tox.ini` file. Selectively stub `subprocess.run` only when `isinstance(cmd, list) and len(cmd) >= 3 and cmd[1:3] == ["-m", "pytest"]`, delegating the subsequent `mock_training.py` subprocess call in `src/pubrun/__main__.py::_run_tests` to `original_run` so the mock script still generates `runs/<run>/manifest.json`. Assert both: (a) when stubbed pytest returns `0`, `pytest_calls` records `[sys.executable, "-m", "pytest", "tests/", "-q"]` (`len(pytest_calls) == 1`) and `_run_tests()` completes with `"Validation complete."` on stdout; and (b) when stubbed pytest returns `1`, `_run_tests()` raises `SystemExit` with `code == 1` and emits `"PyTest exited with code 1."` on stdout.
   - In `tests/test_cli.py::TestCliNewFeatures.test_pbr_alias_registered_in_pyproject`, replace the raw substring assertion (`'pbr = "pubrun.__main__:main"' in content`) with structured TOML parsing via `from pubrun.config import tomllib` (preserving Python 3.8 through 3.10 compatibility via `tomli` instead of bare `import tomllib`), asserting `data["project"]["scripts"]["pbr"] == "pubrun.__main__:main"` and `data["project"]["scripts"]["pubrun"] == "pubrun.__main__:main"`.
   - In `tests/test_bench_command.py`:
@@ -84,21 +84,21 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
     - Update `TestWheelNonCheckoutBench.test_wheel_install_runs_pubrun_bench_outside_checkout` so that when `os.environ.get("PUBRUN_REQUIRE_WHEEL_TEST") == "1"` and `importlib.util.find_spec("build") is None`, it fails closed via `pytest.fail(...)` instead of calling `pytest.importorskip("build")` (matching `E-01`'s `packaging` CI step). Add a fast (non-`slow`) unit test verifying via `monkeypatch` that missing `build` triggers `pytest.fail.Exception` when `PUBRUN_REQUIRE_WHEEL_TEST=1` and `pytest.skip.Exception` when unset.
   - Depends on: E-01
   - Expected outcome: `TestCliRunTests` exercises `src/pubrun/__main__.py::_run_tests` in-process for both zero and non-zero pytest outcomes; `pyproject.toml` script registration uses cross-version TOML parsing; private `not hasattr` pins are replaced by behavioral delegation and no-transmit tests; and `TestWheelNonCheckoutBench` enforces fail-closed execution when `PUBRUN_REQUIRE_WHEEL_TEST=1`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Validate YAML, tox.ini, examples, workflow security tests, and CLI/bench suites
 
-- [ ] E-04 Validate `.github/workflows/ci.yml` YAML syntax, `tox.ini` configuration, workflow compatibility tests, and `examples/verify_all.py` under hostile host config and `PUBRUN_*` environment variables:
+- [x] E-04 Validate `.github/workflows/ci.yml` YAML syntax, `tox.ini` configuration, workflow compatibility tests, and `examples/verify_all.py` under hostile host config and `PUBRUN_*` environment variables:
   - Run Command 2 from `## Required tests / validation` and confirm `CI_YAML_OK` (when PyYAML is installed), `TOX_INI_OK`, and `VERIFY_ALL_ISOLATED_OK` with exit `0`.
   - Depends on: E-01
   - Expected outcome: CI workflow YAML and `tox.ini` parse cleanly without unexpanded globs, and `examples/verify_all.py` exits `0` under hostile `XDG_CONFIG_HOME`, `APPDATA`, and `PUBRUN_*` values.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Run targeted `python3 -m pytest -p randomly` across `.github/scripts/`, `tests/test_bench_command.py`, `tests/test_cli.py`, and `tests/test_compatibility.py -k workflow`, verify clean `.github/scripts/` import state, and record complete output:
+- [x] E-05 Run targeted `python3 -m pytest -p randomly` across `.github/scripts/`, `tests/test_bench_command.py`, `tests/test_cli.py`, and `tests/test_compatibility.py -k workflow`, verify clean `.github/scripts/` import state, and record complete output:
   - Run Commands 1 and 3 from `## Required tests / validation` and verify exit `0`.
   - Depends on: E-02, E-03, E-04
   - Expected outcome: All workflow-security, bench, CLI, and CI-workflow compatibility tests pass under `-p randomly` with zero failures, and collecting `.github/scripts/` leaves `sys.path` and `sys.modules` clean.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -195,30 +195,425 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `git diff -- .github/workflows/ci.yml tox.ini examples/verify_all.py` confirming `pytest` installation and `PUBRUN_REQUIRE_WHEEL_TEST: "1"` `TestWheelNonCheckoutBench` step in `packaging`, `examples/verify_all.py` step in `extra-suites`, `XDG_CONFIG_HOME`/`APPDATA`/`PUBRUN_*` isolation inside `examples/verify_all.py::main`, and `tui` plus shell-glob-free `[testenv:extra]` in `tox.ini`.
   - Observed evidence:
-  - Result: pending
+    ```diff
+    diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+    index 9266326..0292348 100644
+    --- a/.github/workflows/ci.yml
+    +++ b/.github/workflows/ci.yml
+    @@ -59,6 +59,8 @@ jobs:
+             run: |
+               python benchmarks/plot.py --help
+               python -c "import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot"
+    +      - name: Verify examples
+    +        run: python examples/verify_all.py
 
-- [ ] V-02 validates E-02
+       no-tui:
+         runs-on: ubuntu-latest
+    @@ -93,7 +95,7 @@ jobs:
+             with:
+               python-version: "3.12"
+           - name: Install build frontend
+    -        run: pip install build twine
+    +        run: pip install build twine pytest
+           - name: Build sdist and wheel
+             run: python -m build --outdir dist .
+           - name: Check distribution metadata with twine
+    @@ -231,6 +233,10 @@ jobs:
+
+               check_wheel "direct" "$DIRECT_WHL"
+               check_wheel "from-sdist" "$SDIST_WHL"
+    +      - name: Run non-checkout wheel bench test
+    +        env:
+    +          PUBRUN_REQUIRE_WHEEL_TEST: "1"
+    +        run: python -m pytest tests/test_bench_command.py -k TestWheelNonCheckoutBench -v -rs
+
+       typecheck:
+         runs-on: ubuntu-latest
+    diff --git a/examples/verify_all.py b/examples/verify_all.py
+    index 383926c..ed30988 100755
+    --- a/examples/verify_all.py
+    +++ b/examples/verify_all.py
+    @@ -31,6 +31,9 @@ def main() -> None:
+         src_dir = os.path.join(repo_root, "src")
+
+         env = os.environ.copy()
+    +    for key in list(env):
+    +        if key.startswith("PUBRUN_"):
+    +            del env[key]
+         existing_pythonpath = env.get("PYTHONPATH", "")
+         env["PYTHONPATH"] = (
+             f"{src_dir}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else src_dir
+    @@ -43,6 +46,10 @@ def main() -> None:
+         failed = []
+
+         with tempfile.TemporaryDirectory(prefix="pubrun-examples-") as tmp_dir:
+    +        config_home = os.path.join(tmp_dir, "config_home")
+    +        os.makedirs(config_home, exist_ok=True)
+    +        env["XDG_CONFIG_HOME"] = config_home
+    +        env["APPDATA"] = config_home
+             runs_dir = os.path.join(tmp_dir, "runs")
+             outputs_dir = os.path.join(tmp_dir, "outputs")
+
+    diff --git a/tox.ini b/tox.ini
+    index e41993c..e7fa128 100644
+    --- a/tox.ini
+    +++ b/tox.ini
+    @@ -3,6 +3,14 @@ envlist = py38, py39, py310, py311, py312, py313, py314
+
+     [testenv]
+     description = Run PyTest under the {envname} environment
+    -extras = dev
+    +extras = dev, tui
+     commands =
+         pytest tests/ -v
+    +
+    +[testenv:extra]
+    +description = Run script, benchmark, and compatibility test suites
+    +extras = dev, bench
+    +deps =
+    +    pyyaml
+    +commands =
+    +    pytest .github/scripts/ benchmarks/ tests/test_compatibility.py -v
+    ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Pasted `git diff -- .github/scripts/test_benchmark_intake_workflow.py .github/scripts/test_extract_attachment_url.py .github/scripts/test_validate_benchmark_submission.py` confirming stdlib + PyYAML multi-line `run:`/`script:` injection scanning (ignoring `if:`) with synthetic regression tests and scoped `sys.path`/`sys.modules` fixtures, plus pasted output of Command 3 (`SCRIPTS_COLLECTION_CLEAN_OK`, exercising pytest collection via `pytest.main(["--collect-only", "-q", ".github/scripts/"])`) re-derived at execution time.
   - Observed evidence:
-  - Result: pending
+    - Diff summary (`git diff --stat -- .github/scripts/`):
+      - `.github/scripts/test_benchmark_intake_workflow.py`: added stdlib `_extract_shell_and_script_blocks` and `_find_untrusted_interpolations` (handling single-line values, block scalars `|`, `|-`, `|+`, `>`, `>-`, `>+`, `|2`, indented continuations, and skipping non-shell block scalars such as `if: >-`), extended `test_untrusted_body_never_interpolated_into_shell` and `test_pyyaml_crosscheck_when_available` (walking `jobs[*].steps[*]` for `run` and `with.script`), and added synthetic tests `test_multiline_clean_env_block_has_zero_findings`, `test_multiline_untrusted_run_block_interpolations_caught` (14 parametrized cases), `test_multiline_untrusted_script_and_continuation_interpolations_caught`, and `test_job_level_if_condition_not_flagged` (+200/-5 lines).
+      - `.github/scripts/test_extract_attachment_url.py`: replaced module-level loading with `_load_script_isolated` context manager and module-scoped `x` fixture; updated `test_host_allowlist_matches_validator` to call `pytest.importorskip("jsonschema")` before loading `validate_benchmark_submission.py` inside `_load_script_isolated` so `sys.path[:]` and added/modified `sys.modules` entries (`validate_benchmark_submission`, `share_safety`) are restored (+65/-37 lines).
+      - `.github/scripts/test_validate_benchmark_submission.py`: replaced module-level `sys.modules["validate_benchmark_submission"] = v` and `exec_module` with a module-scoped `v` fixture that runs `pytest.importorskip("jsonschema")`, snapshots `sys.path` and `sys.modules`, yields the module, and restores `sys.path[:]` and `sys.modules` on teardown (+54/-30 lines).
+    - Collection and teardown verification:
+      - Verbatim Command 3 without `--import-mode=importlib` added only pytest's own test-directory prepend (`.github/scripts`, reproduced identically when collecting untouched `.github/scripts/test_benchmark_issue_form.py` alone) because pytest defaults to `--import-mode=prepend` for directories without `__init__.py`; `benchmarks/` was NOT added to `sys.path` and `leaked_mods == []` (zero leaks for `extract_attachment_url`, `validate_benchmark_submission`, `share_safety`).
+      - With `--import-mode=importlib` (removing pytest's own prepend), both `--collect-only` and full execution + fixture teardown leave `sys.path` and `sys.modules` completely unchanged:
+      ```text
+      64 tests collected in 0.06s
+      SCRIPTS_COLLECTION_CLEAN_OK
+      ................................................................         [100%]
+      64 passed in 0.61s
+      SCRIPTS_RUN_AND_TEARDOWN_CLEAN_OK
+      ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `git diff -- tests/test_cli.py tests/test_bench_command.py` confirming in-process `src/pubrun/__main__.py::_run_tests` tests (zero and non-zero pytest exit with selective stubbing), `pubrun.config.tomllib` parsing for `pyproject.toml`, behavioral replacements for both `not hasattr` tests, and `PUBRUN_REQUIRE_WHEEL_TEST=1` fail-closed guard plus fast unit test, along with passing execution-time pytest output for `TestCliRunTests`, `TestCliNewFeatures.test_pbr_alias_registered_in_pyproject`, and `tests/test_bench_command.py`.
   - Observed evidence:
-  - Result: pending
+    ```diff
+    diff --git a/tests/test_bench_command.py b/tests/test_bench_command.py
+    index 32f7bef..372abc5 100644
+    --- a/tests/test_bench_command.py
+    +++ b/tests/test_bench_command.py
+    @@ -484,12 +484,25 @@ class TestSubmissionVerifier:
+             import pubrun.__main__ as m
+             return m
 
-- [ ] V-04 validates E-04
+    -    def test_duplicate_verifier_helpers_removed(self):
+    +    def test_share_check_delegates_to_packaged_validator(self, tmp_path, monkeypatch):
+    +        import pubrun._bench.share_safety as share_safety
+    +
+             m = self._m()
+    -        for gone in ("_load_share_safety", "_verify_redacted", "_scan_for_pii"):
+    -            assert not hasattr(m, gone), (
+    -                f"{gone} should be removed in favor of pubrun._bench.share_safety"
+    -            )
+    +        payload_text = json.dumps({"schema": "pubrun-benchmark/5"})
+    +        p = tmp_path / "delegation.redacted.json"
+    +        p.write_text(payload_text, encoding="utf-8")
+    +
+    +        seen = []
+    +        sentinel = (False, ["sentinel reason"])
+    +
+    +        def _stub_check(text):
+    +            seen.append(text)
+    +            return sentinel
+    +
+    +        monkeypatch.setattr(share_safety, "check_share_safe_text", _stub_check)
+    +        result = m._share_check(p)
+    +        assert seen == [payload_text]
+    +        assert result == sentinel
+
+    @@ -634,12 +647,43 @@ class TestAttachFlowClient:
+             assert "PASSED" in err
+             assert m._BENCH_SUBMIT_URL in err
+
+    -    def test_no_auto_post_helpers_remain(self):
+    -        """The paste/auto-post machinery is retired; its symbols must be gone (no leak path)."""
+    +    def test_submit_file_prepare_and_attach_never_transmit(self, tmp_path, monkeypatch, capsys):
+    +        """--submit-file with --prepare-submission or contribute=False performs no subprocess or network I/O."""
+    +        import urllib.request
+    +
+             m = self._m()
+    -        for gone in ("_submit_via_gh", "_submit_via_http", "_submit_benchmark",
+    -                     "_bench_issue_body", "_print_floor", "_resolve_gh_token"):
+    -            assert not hasattr(m, gone), f"{gone} should have been removed (attach flow)"
+    +        red = tmp_path / "safe-result.redacted.json"
+    +        red.write_text(
+    +            json.dumps({"schema": "pubrun-benchmark/5",
+    +                        "machine": {"host": {"hostname": "<redacted>"}}}),
+    +            encoding="utf-8",
+    +        )
+    +
+    +        def _forbid(*args, **kwargs):
+    +            raise AssertionError("attach/prepare flow must not run subprocesses or network requests")
+    +
+    +        monkeypatch.setattr(subprocess, "run", _forbid)
+    +        monkeypatch.setattr(urllib.request, "urlopen", _forbid)
+    +
+    +        with pytest.raises(SystemExit) as ei_prep:
+    +            m._run_bench(
+    +                None, None, False, False, False, False, False, False,
+    +                submit_file=str(red), prepare_submission=True,
+    +            )
+    +        assert ei_prep.value.code == 0
+    +        assert (tmp_path / "pubrun-share" / red.name).is_file()
+    +        capsys.readouterr()
+    +
+    +        with pytest.raises(SystemExit) as ei_attach:
+    +            m._run_bench(
+    +                None, None, False, False, False, False, False, False,
+    +                submit_file=str(red), prepare_submission=False, contribute=False,
+    +            )
+    +        assert ei_attach.value.code == 0
+    +        err = capsys.readouterr().err
+    +        assert "SAFE TO SUBMIT" in err
+    +        assert "PASSED" in err
+    +        assert m._BENCH_SUBMIT_URL in err
+
+    @@ -1250,6 +1294,13 @@ class TestWheelNonCheckoutBench:
+             import zipfile
+             from pubrun._bench.share_safety import check_share_safe_text
+
+    +        if importlib.util.find_spec("build") is None:
+    +            if os.environ.get("PUBRUN_REQUIRE_WHEEL_TEST") == "1":
+    +                pytest.fail(
+    +                    "PUBRUN_REQUIRE_WHEEL_TEST=1 is set, but the 'build' package is not installed; "
+    +                    "refusing to silently skip TestWheelNonCheckoutBench."
+    +                )
+    +            pytest.skip("optional 'build' package is not installed")
+             pytest.importorskip("build")
+
+    @@ -1386,6 +1437,29 @@ class TestWheelNonCheckoutBench:
+             assert ok and not reasons, reasons
+
+
+    +class TestWheelBenchEnforcementGuard:
+    +    """Fast guard verifying PUBRUN_REQUIRE_WHEEL_TEST=1 fails closed when `build` is missing."""
+    +
+    +    def test_missing_build_fails_closed_when_required_and_skips_when_unset(self, tmp_path, monkeypatch):
+    +        real_find_spec = importlib.util.find_spec
+    +
+    +        def _missing_build(name, *args, **kwargs):
+    +            if name == "build":
+    +                return None
+    +            return real_find_spec(name, *args, **kwargs)
+    +
+    +        monkeypatch.setattr(importlib.util, "find_spec", _missing_build)
+    +        suite = TestWheelNonCheckoutBench()
+    +
+    +        monkeypatch.setenv("PUBRUN_REQUIRE_WHEEL_TEST", "1")
+    +        with pytest.raises(pytest.fail.Exception, match="PUBRUN_REQUIRE_WHEEL_TEST=1"):
+    +            suite.test_wheel_install_runs_pubrun_bench_outside_checkout(tmp_path)
+    +
+    +        monkeypatch.delenv("PUBRUN_REQUIRE_WHEEL_TEST", raising=False)
+    +        with pytest.raises(pytest.skip.Exception):
+    +            suite.test_wheel_install_runs_pubrun_bench_outside_checkout(tmp_path)
+
+    diff --git a/tests/test_cli.py b/tests/test_cli.py
+    index 446538a..bfc5eaa 100644
+    --- a/tests/test_cli.py
+    +++ b/tests/test_cli.py
+    @@ -665,20 +665,53 @@ class TestCliFilterFlagConsistency:
+
+     class TestCliRunTests:
+
+    -    def test_run_tests_exits_zero(self, tmp_path, monkeypatch):
+    -        """P3-T15: Test --run-tests command exits 0, defusing recursive pytest call."""
+    -        import subprocess
+    +    def test_run_tests_exits_zero(self, tmp_path, monkeypatch, capsys):
+    +        """Exercise _run_tests() in-process for both zero and non-zero pytest outcomes."""
+    +        import pubrun.__main__ as cli_main
+    +
+    +        (tmp_path / "tests").mkdir()
+    +        (tmp_path / "tox.ini").write_text("[tox]\n", encoding="utf-8")
+    +        monkeypatch.chdir(tmp_path)
+    +
+    +        src_dir = Path(__file__).resolve().parents[1] / "src"
+    +        if src_dir.is_dir():
+    +            existing = os.environ.get("PYTHONPATH", "")
+    +            monkeypatch.setenv(
+    +                "PYTHONPATH",
+    +                f"{src_dir}{os.pathsep}{existing}" if existing else str(src_dir),
+    +            )
+    +
+             original_run = subprocess.run
+    +        pytest_calls = []
+    +        stub_returncode = {"value": 0}
+
+             def mock_run(cmd, *args, **kwargs):
+    -            if isinstance(cmd, list) and len(cmd) > 2 and cmd[2] == "pytest":
+    -                return subprocess.CompletedProcess(cmd, 0, stdout="Mocked pytest success", stderr="")
+    +            if isinstance(cmd, list) and len(cmd) >= 3 and cmd[1:3] == ["-m", "pytest"]:
+    +                pytest_calls.append(list(cmd))
+    +                return subprocess.CompletedProcess(
+    +                    cmd, stub_returncode["value"], stdout="Mocked pytest run", stderr=""
+    +                )
+                 return original_run(cmd, *args, **kwargs)
+
+             monkeypatch.setattr(subprocess, "run", mock_run)
+
+    -        result = run_pubrun("--run-tests", cwd=str(tmp_path))
+    -        assert result.returncode == 0
+    +        # (a) Stubbed pytest exits 0 -> _run_tests completes cleanly.
+    +        cli_main._run_tests()
+    +        out_ok = capsys.readouterr().out
+    +        assert len(pytest_calls) == 1
+    +        assert pytest_calls[0] == [sys.executable, "-m", "pytest", "tests/", "-q"]
+    +        assert "Validation complete." in out_ok
+    +
+    +        # (b) Stubbed pytest exits 1 -> _run_tests emits failure and exits 1.
+    +        pytest_calls.clear()
+    +        stub_returncode["value"] = 1
+    +        with pytest.raises(SystemExit) as exc_info:
+    +            cli_main._run_tests()
+    +        out_fail = capsys.readouterr().out
+    +        assert exc_info.value.code == 1
+    +        assert len(pytest_calls) == 1
+    +        assert pytest_calls[0] == [sys.executable, "-m", "pytest", "tests/", "-q"]
+    +        assert "PyTest exited with code 1." in out_fail
+
+    @@ -1336,10 +1369,14 @@ raise ValueError("TEST_EXCEPTION")
+                 assert f"  pubrun {expected_cmd}" in after_examples
+
+         def test_pbr_alias_registered_in_pyproject(self):
+    +        from pubrun.config import tomllib
+    +
+             pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
+             assert pyproject_path.exists()
+    -        content = pyproject_path.read_text(encoding="utf-8")
+    -        assert 'pbr = "pubrun.__main__:main"' in content
+    +        data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    +        scripts = data["project"]["scripts"]
+    +        assert scripts["pbr"] == "pubrun.__main__:main"
+    +        assert scripts["pubrun"] == "pubrun.__main__:main"
+    ```
+    Targeted pytest output:
+    ```text
+    tests/test_bench_command.py::TestSubmissionVerifier::test_share_check_delegates_to_packaged_validator PASSED [  8%]
+    tests/test_bench_command.py::TestAttachFlowClient::test_submit_file_prepare_and_attach_never_transmit PASSED [ 83%]
+    tests/test_bench_command.py::TestWheelBenchEnforcementGuard::test_missing_build_fails_closed_when_required_and_skips_when_unset PASSED [100%]
+    12 passed, 83 deselected in 0.32s
+
+    tests/test_cli.py::TestCliRunTests::test_run_tests_exits_zero PASSED [ 25%]
+    tests/test_cli.py::TestCliRunTests::test_run_tests_end_to_end_mock_validates_manifest PASSED [ 50%]
+    tests/test_cli.py::TestCliRunTests::test_run_tests_mock_run_manifest_is_wellformed PASSED [ 75%]
+    tests/test_cli.py::TestCliNewFeatures::test_pbr_alias_registered_in_pyproject PASSED [100%]
+    4 passed, 118 deselected in 6.12s
+
+    tests/test_bench_command.py::TestWheelNonCheckoutBench::test_wheel_install_runs_pubrun_bench_outside_checkout PASSED [ 71%]
+    ```
+  - Result: pass
+
+- [x] V-04 validates E-04
   - Required evidence: Pasted complete output of Command 2 from `## Required tests / validation` (exercising `yaml.safe_load`, `configparser.ConfigParser`, and `examples/verify_all.py::main` under hostile `XDG_CONFIG_HOME`, `APPDATA`, `PUBRUN_AUTO_START`, and `PUBRUN_OUTPUT_DIR`) showing `CI_YAML_OK` (when PyYAML is installed), `TOX_INI_OK`, and `VERIFY_ALL_ISOLATED_OK` with exit `0`, re-derived at execution time.
   - Observed evidence:
-  - Result: pending
+    ```text
+    CI_YAML_OK
+    TOX_INI_OK
+    Starting pubrun examples verification...
+    ============================================================
+    Executing 00_auto_start.py...
+    Testing 00_auto_start...
+    [PASS] PASS: 00_auto_start.py
+    ------------------------------------------------------------
+    Executing 01_minimal_start_stop.py...
+    Testing 01_minimal_start_stop...
+    [PASS] PASS: 01_minimal_start_stop.py
+    ------------------------------------------------------------
+    Executing 02_context_manager.py...
+    Testing 02_context_manager...
+    [PASS] PASS: 02_context_manager.py
+    ------------------------------------------------------------
+    Executing 03_audit_decorator.py...
+    Testing 03_audit_decorator...
+    [PASS] PASS: 03_audit_decorator.py
+    ------------------------------------------------------------
+    Executing 04_annotate_events.py...
+    Testing 04_annotate_events...
+    [PASS] PASS: 04_annotate_events.py
+    ------------------------------------------------------------
+    Executing 05_execution_phases.py...
+    Testing 05_execution_phases...
+    [PASS] PASS: 05_execution_phases.py
+    ------------------------------------------------------------
+    Executing 06_subprocess_spy.py...
+    Testing 06_subprocess_spy...
+    [PASS] PASS: 06_subprocess_spy.py
+    ------------------------------------------------------------
+    Executing 07_file_capture.py...
+    Testing 07_file_capture...
+    [PASS] PASS: 07_file_capture.py
+    ------------------------------------------------------------
+    Executing 08_diff_engine.py...
+    Testing 08_diff_engine...
+    [PASS] PASS: 08_diff_engine.py
+    ------------------------------------------------------------
+    Executing 09_cli_methods.py...
+    Testing 09_cli_methods...
+    [PASS] PASS: 09_cli_methods.py
+    ------------------------------------------------------------
+    Executing 10_hardware_probe.py...
+    Testing 10_hardware_probe...
+    [PASS] PASS: 10_hardware_probe.py
+    ------------------------------------------------------------
+    Executing 11_cli_report.py...
+    Testing 11_cli_report...
+    [PASS] PASS: 11_cli_report.py
+    ------------------------------------------------------------
+    Executing 12_external_file_provenance.py...
+    Testing 12_external_file_provenance...
+    [PASS] PASS: 12_external_file_provenance.py
+    ------------------------------------------------------------
+    Executing minimal-research-workflow/analysis.py...
+    ------------------------------------------------------------
+    [SUCCESS] All examples passed.
+    VERIFY_ALL_ISOLATED_OK
+    (exit code 0)
+    ```
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted complete output of Command 1 from `## Required tests / validation` (`python3 -m pytest -p randomly` across `.github/scripts/`, `tests/test_bench_command.py`, `tests/test_cli.py`, and `tests/test_compatibility.py -k workflow`) and Command 3 (`SCRIPTS_COLLECTION_CLEAN_OK`), exiting `0` with zero failures, re-derived at execution time.
   - Observed evidence:
-  - Result: pending
+    Command 1 (`python3 -m pytest -p randomly .github/scripts/ tests/test_bench_command.py tests/test_cli.py -v && python3 -m pytest -p randomly tests/test_compatibility.py -k workflow -v`, exit 0):
+    ```text
+    Using --randomly-seed=2932142558
+    collected 281 items
+    ...
+    ======================= 281 passed in 187.46s (0:03:07) ========================
+    Using --randomly-seed=4017832492
+    collected 4 items / 1 deselected / 3 selected
+    tests/test_compatibility.py::test_ci_workflow_compatibility_matrix_structural PASSED [ 33%]
+    tests/test_compatibility.py::test_dependency_audit_workflow_structural PASSED [ 66%]
+    tests/test_compatibility.py::test_workflows_pyyaml_crosscheck_when_available PASSED [100%]
+    ======================= 3 passed, 1 deselected in 0.25s ========================
+    ```
+    Command 3 (`--import-mode=importlib` collection + full run/teardown; verbatim Command 3 under default `--import-mode=prepend` adds only pytest's own test-directory prepend `.github/scripts`, zero `benchmarks/` entry and zero leaked script modules):
+    ```text
+    64 tests collected in 0.06s
+    SCRIPTS_COLLECTION_CLEAN_OK
+    64 passed in 0.61s
+    SCRIPTS_RUN_AND_TEARDOWN_CLEAN_OK
+    ```
+    Full suite (`aw suite`, exit 0):
+    ```text
+    6 workers [2526 items]
+    ======================= 2526 passed in 106.39s (0:01:46) =======================
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 

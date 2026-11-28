@@ -484,12 +484,25 @@ class TestSubmissionVerifier:
         import pubrun.__main__ as m
         return m
 
-    def test_duplicate_verifier_helpers_removed(self):
+    def test_share_check_delegates_to_packaged_validator(self, tmp_path, monkeypatch):
+        import pubrun._bench.share_safety as share_safety
+
         m = self._m()
-        for gone in ("_load_share_safety", "_verify_redacted", "_scan_for_pii"):
-            assert not hasattr(m, gone), (
-                f"{gone} should be removed in favor of pubrun._bench.share_safety"
-            )
+        payload_text = json.dumps({"schema": "pubrun-benchmark/5"})
+        p = tmp_path / "delegation.redacted.json"
+        p.write_text(payload_text, encoding="utf-8")
+
+        seen = []
+        sentinel = (False, ["sentinel reason"])
+
+        def _stub_check(text):
+            seen.append(text)
+            return sentinel
+
+        monkeypatch.setattr(share_safety, "check_share_safe_text", _stub_check)
+        result = m._share_check(p)
+        assert seen == [payload_text]
+        assert result == sentinel
 
     def test_verifier_passes_redacted(self, tmp_path):
         m = self._m()
@@ -634,12 +647,43 @@ class TestAttachFlowClient:
         assert "PASSED" in err
         assert m._BENCH_SUBMIT_URL in err
 
-    def test_no_auto_post_helpers_remain(self):
-        """The paste/auto-post machinery is retired; its symbols must be gone (no leak path)."""
+    def test_submit_file_prepare_and_attach_never_transmit(self, tmp_path, monkeypatch, capsys):
+        """--submit-file with --prepare-submission or contribute=False performs no subprocess or network I/O."""
+        import urllib.request
+
         m = self._m()
-        for gone in ("_submit_via_gh", "_submit_via_http", "_submit_benchmark",
-                     "_bench_issue_body", "_print_floor", "_resolve_gh_token"):
-            assert not hasattr(m, gone), f"{gone} should have been removed (attach flow)"
+        red = tmp_path / "safe-result.redacted.json"
+        red.write_text(
+            json.dumps({"schema": "pubrun-benchmark/5",
+                        "machine": {"host": {"hostname": "<redacted>"}}}),
+            encoding="utf-8",
+        )
+
+        def _forbid(*args, **kwargs):
+            raise AssertionError("attach/prepare flow must not run subprocesses or network requests")
+
+        monkeypatch.setattr(subprocess, "run", _forbid)
+        monkeypatch.setattr(urllib.request, "urlopen", _forbid)
+
+        with pytest.raises(SystemExit) as ei_prep:
+            m._run_bench(
+                None, None, False, False, False, False, False, False,
+                submit_file=str(red), prepare_submission=True,
+            )
+        assert ei_prep.value.code == 0
+        assert (tmp_path / "pubrun-share" / red.name).is_file()
+        capsys.readouterr()
+
+        with pytest.raises(SystemExit) as ei_attach:
+            m._run_bench(
+                None, None, False, False, False, False, False, False,
+                submit_file=str(red), prepare_submission=False, contribute=False,
+            )
+        assert ei_attach.value.code == 0
+        err = capsys.readouterr().err
+        assert "SAFE TO SUBMIT" in err
+        assert "PASSED" in err
+        assert m._BENCH_SUBMIT_URL in err
 
     def test_submit_url_points_at_main_repo_form(self):
         m = self._m()
@@ -1250,6 +1294,13 @@ class TestWheelNonCheckoutBench:
         import zipfile
         from pubrun._bench.share_safety import check_share_safe_text
 
+        if importlib.util.find_spec("build") is None:
+            if os.environ.get("PUBRUN_REQUIRE_WHEEL_TEST") == "1":
+                pytest.fail(
+                    "PUBRUN_REQUIRE_WHEEL_TEST=1 is set, but the 'build' package is not installed; "
+                    "refusing to silently skip TestWheelNonCheckoutBench."
+                )
+            pytest.skip("optional 'build' package is not installed")
         pytest.importorskip("build")
 
         dist_dir = tmp_path / "dist"
@@ -1384,6 +1435,29 @@ class TestWheelNonCheckoutBench:
         assert str(files[0]) in bench_res.stderr, bench_res.stderr
         ok, reasons = check_share_safe_text(files[0].read_text(encoding="utf-8"))
         assert ok and not reasons, reasons
+
+
+class TestWheelBenchEnforcementGuard:
+    """Fast guard verifying PUBRUN_REQUIRE_WHEEL_TEST=1 fails closed when `build` is missing."""
+
+    def test_missing_build_fails_closed_when_required_and_skips_when_unset(self, tmp_path, monkeypatch):
+        real_find_spec = importlib.util.find_spec
+
+        def _missing_build(name, *args, **kwargs):
+            if name == "build":
+                return None
+            return real_find_spec(name, *args, **kwargs)
+
+        monkeypatch.setattr(importlib.util, "find_spec", _missing_build)
+        suite = TestWheelNonCheckoutBench()
+
+        monkeypatch.setenv("PUBRUN_REQUIRE_WHEEL_TEST", "1")
+        with pytest.raises(pytest.fail.Exception, match="PUBRUN_REQUIRE_WHEEL_TEST=1"):
+            suite.test_wheel_install_runs_pubrun_bench_outside_checkout(tmp_path)
+
+        monkeypatch.delenv("PUBRUN_REQUIRE_WHEEL_TEST", raising=False)
+        with pytest.raises(pytest.skip.Exception):
+            suite.test_wheel_install_runs_pubrun_bench_outside_checkout(tmp_path)
 
 
 class TestBenchErgonomicsAndValidation2ge0ea:
