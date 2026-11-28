@@ -1972,10 +1972,9 @@ print(json.dumps({
         assert data["filesystem_status"] != "pending"
 
     def test_nopatch_background_hw_does_not_load_subprocesses_module(self, tmp_path):
-        # Disable git capture so synchronous Step 2 (pubrun.capture.git, out of scope for
-        # background-thread changes) does not pre-load pubrun.capture.subprocesses before
-        # pubrun-hw runs; this exercises _disable_spy_if_loaded() in hardware.py,
-        # filesystem.py, and resources.py when pubrun.capture.subprocesses is unloaded.
+        # Disable git capture to isolate the pubrun-hw background-thread path and exercise
+        # _disable_spy_if_loaded() in hardware.py, filesystem.py, and resources.py when
+        # pubrun.capture.subprocesses is unloaded.
         (tmp_path / ".pubrun.toml").write_text(
             "[capture.git]\nenabled = false\n",
             encoding="utf-8",
@@ -2009,5 +2008,75 @@ print(json.dumps({
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["loaded_before_stop"] is False
+        assert data["loaded_after_stop"] is False
+
+    def test_nopatch_with_git_capture_enabled_does_not_load_subprocesses_module(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(
+            ["git", "init"],
+            cwd=repo,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        (repo / "README.txt").write_text("init\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "README.txt"],
+            cwd=repo,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-c", "user.email=test@example.com",
+                "-c", "user.name=Test User",
+                "-c", "commit.gpgsign=false",
+                "commit", "-m", "initial commit",
+            ],
+            cwd=repo,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        script = """
+import json, sys
+import pubrun.nopatch as pubrun
+
+run = pubrun.get_current_run()
+assert run is not None
+hw_thread = run._hardware_thread
+if hw_thread is not None:
+    hw_thread.join(timeout=15)
+    assert not hw_thread.is_alive()
+git_status = run.git_data["capture_state"]["status"]
+commit = run.git_data.get("commit")
+loaded_before_stop = "pubrun.capture.subprocesses" in sys.modules
+pubrun.stop()
+loaded_after_stop = "pubrun.capture.subprocesses" in sys.modules
+
+print(json.dumps({
+    "git_status": git_status,
+    "commit": commit,
+    "loaded_before_stop": loaded_before_stop,
+    "loaded_after_stop": loaded_after_stop,
+}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(repo),
+            env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["git_status"] == "complete"
+        assert isinstance(data["commit"], str) and len(data["commit"]) == 40
         assert data["loaded_before_stop"] is False
         assert data["loaded_after_stop"] is False

@@ -1,8 +1,22 @@
+import contextlib
 import math
 import os
 import subprocess
+import sys
 import time
 from typing import Any, Dict, Optional, Tuple
+
+_SYS_MODULES = sys.modules
+
+
+def _disable_spy_if_loaded() -> Any:
+    """Return ``disable_spy()`` when ``pubrun.capture.subprocesses`` is loaded, else a no-op context."""
+    modules = getattr(sys, "modules", _SYS_MODULES)
+    spy_mod = modules.get("pubrun.capture.subprocesses") if modules is not None else None
+    disable = getattr(spy_mod, "disable_spy", None)
+    if callable(disable):
+        return disable()
+    return contextlib.nullcontext()
 
 
 def _parse_positive_timeout(value: Any, default: float) -> float:
@@ -70,8 +84,7 @@ def get_git(config: Dict[str, Any]) -> Dict[str, Any]:
 
         cmd_timeout = min(per_cmd_timeout, remaining)
         try:
-            from pubrun.capture.subprocesses import disable_spy
-            with disable_spy():
+            with _disable_spy_if_loaded():
                 res = subprocess.run(
                     ["git"] + args,
                     stdout=subprocess.PIPE,

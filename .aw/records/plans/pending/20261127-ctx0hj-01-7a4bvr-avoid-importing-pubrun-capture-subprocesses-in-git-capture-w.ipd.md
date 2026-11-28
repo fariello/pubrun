@@ -52,7 +52,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Guard spy bypass lookup in git capture
 
-- [ ] E-01 Replace the unconditional `pubrun.capture.subprocesses` import in `src/pubrun/capture/git.py::_run_git_raw` with `_disable_spy_if_loaded()`:
+- [x] E-01 Replace the unconditional `pubrun.capture.subprocesses` import in `src/pubrun/capture/git.py::_run_git_raw` with `_disable_spy_if_loaded()`:
   - Import `contextlib` and `sys` at module scope in `src/pubrun/capture/git.py`.
   - Capture `_SYS_MODULES = sys.modules` at module import time and define `_disable_spy_if_loaded() -> Any`, matching `src/pubrun/capture/hardware.py::_disable_spy_if_loaded`, `src/pubrun/capture/filesystem.py::_disable_spy_if_loaded`, and `src/pubrun/capture/resources.py::_disable_spy_if_loaded`:
     - Resolve `modules = getattr(sys, "modules", _SYS_MODULES)`.
@@ -63,20 +63,20 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Keep all timeout parsing, monotonic budget enforcement, UTF-8 decoding, `LC_ALL=C` environment handling, error handling, and return dictionary structure in `get_git` unchanged.
   - Depends on: none
   - Expected outcome: Calling `get_git` when `pubrun.capture.subprocesses` is absent from `sys.modules` completes git capture without loading `pubrun.capture.subprocesses`. Calling `get_git` when `pubrun.capture.subprocesses` is loaded enters `disable_spy()` around each `subprocess.run(["git", ...])` call.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Behavioral regression tests and validation
 
-- [ ] E-02 Add behavioral unit tests for `get_git` spy-bypass and unloaded-module behavior in `tests/test_capture_engines.py::TestGit`:
+- [x] E-02 Add behavioral unit tests for `get_git` spy-bypass and unloaded-module behavior in `tests/test_capture_engines.py::TestGit`:
   - Write tests that assert observable runtime behavior only (do not inspect source code with `ast`, `inspect`, regex, or substring matching):
     1. **Active `SubprocessSpy` bypass:** Assert `SubprocessSpy.install(owner=...)` returns `True` (with `pubrun.capture.subprocesses` loaded), run `get_git({"capture": {"git": {"enabled": True}}})` inside the `git_repo` fixture while wrapping `subprocess.run` to record `_spy_bypassed()`, and assert that at least one git invocation ran, every recorded invocation ran with `_spy_bypassed()` equal to `True`, `_spy_bypassed()` is `False` after `get_git` returns, `result["capture_state"]["status"] == "complete"`, and `SubprocessSpy.get_records()` contains zero records (checked before uninstalling). Uninstall `SubprocessSpy.uninstall(owner=...)` in a `finally` block.
     2. **Monkeypatched `sys` fallback:** Replace `pubrun.capture.git.sys` with a minimal stub object lacking a `modules` attribute (via `monkeypatch.setattr`), call `_disable_spy_if_loaded()` while `pubrun.capture.subprocesses` is loaded, and assert that `_spy_bypassed()` is `True` inside the returned context manager and `False` after exit without raising `AttributeError`.
     3. **Direct `get_git` leaves `pubrun.capture.subprocesses` unloaded:** In a fresh Python subprocess (with `PYTHONPATH` pointing at `src`, `PUBRUN_IMPORT_MODE="minimal"`, `PUBRUN_AUTO_START` and `PUBRUN_RUN_MODE_OVERRIDE` removed from the environment so importing parent package `pubrun` does not trigger default auto-start and load `SubprocessSpy`, and `cwd` set to an initialized temporary git repository), import `pubrun.capture.git`, verify `"pubrun.capture.subprocesses" not in sys.modules` before calling `get_git({"capture": {"git": {"enabled": True}}})`, and assert exit `0`, `capture_state["status"] == "complete"`, and `"pubrun.capture.subprocesses" not in sys.modules` after the call.
   - Depends on: E-01
   - Expected outcome: `tests/test_capture_engines.py` passes and verifies all three behaviors (`SubprocessSpy` bypass when loaded, `_SYS_MODULES` fallback under stubbed `sys`, and zero `pubrun.capture.subprocesses` import when unloaded).
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Add a fresh-subprocess `nopatch` git-enabled regression test in `tests/test_import_modes.py` and run full validation:
+- [x] E-03 Add a fresh-subprocess `nopatch` git-enabled regression test in `tests/test_import_modes.py` and run full validation:
   - In `tests/test_import_modes.py::TestSpecProbeAndBackgroundImportLockSafety`, add `test_nopatch_with_git_capture_enabled_does_not_load_subprocesses_module`:
     - Create a temporary git repository under `tmp_path` (`git init`, create a file, `git add`, `git commit` with explicit author identity and `commit.gpgsign=false`).
     - Run a fresh Python subprocess using `self._clean_env()` with `cwd=str(repo)` and no `.pubrun.toml` disabling git capture (so default `[capture.git].enabled = true` applies).
@@ -86,7 +86,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Run all commands in `## Required tests / validation`.
   - Depends on: E-01, E-02
   - Expected outcome: Both `nopatch` regression tests in `tests/test_import_modes.py`, the targeted `pytest` suites (including `-p randomly`), and three-platform `mypy` pass with exit `0`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -135,20 +135,51 @@ None. Backlog item `ctx0hj` names the exact target (`src/pubrun/capture/git.py::
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted output of (1) a fresh-subprocess probe (with `PYTHONPATH=src`, `PUBRUN_IMPORT_MODE=minimal`, and `PUBRUN_AUTO_START` / `PUBRUN_RUN_MODE_OVERRIDE` unset, in a temporary initialized git repository) importing `pubrun.capture.git`, confirming `pubrun.capture.subprocesses` is unloaded before the call, and calling `pubrun.capture.git.get_git({"capture": {"git": {"enabled": True}}})` (exercising `src/pubrun/capture/git.py::_disable_spy_if_loaded` and `_run_git_raw` updated in `E-01`) printing `status=complete`, a 40-character commit hash, and `subprocesses_loaded=False` with exit `0`, and (2) Command 3 (`mypy` on Linux, `win32`, and `darwin`) exiting `0` with zero issues.
   - Observed evidence:
-  - Result: pending
+    ```text
+    === V-01 probe (exit 0) ===
+    before_loaded=False status=complete commit=59bf863eab233b72c11d89390a8d26a56c21ef90 commit_len=40 subprocesses_loaded=False
+    === Command 3 (mypy linux / win32 / darwin, exit 0) ===
+    Success: no issues found in 71 source files
+    Success: no issues found in 71 source files
+    Success: no issues found in 71 source files
+    ```
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted output of `python3 -m pytest tests/test_capture_engines.py -v` exiting `0` with all three new `TestGit` unit tests (`SubprocessSpy` bypass while loaded, `_SYS_MODULES` fallback under monkeypatched `git.sys`, and fresh-subprocess `get_git` keeping `pubrun.capture.subprocesses` unloaded, exercising `E-01` via the tests added in `E-02`) visibly listed as `PASSED`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    === python3 -m pytest tests/test_capture_engines.py -v (exit 0) ===
+    tests/test_capture_engines.py::TestGit::test_get_git_bypasses_active_subprocess_spy PASSED [ 90%]
+    tests/test_capture_engines.py::TestGit::test_disable_spy_if_loaded_falls_back_when_sys_lacks_modules PASSED [ 93%]
+    tests/test_capture_engines.py::TestGit::test_get_git_direct_does_not_load_subprocesses_module PASSED [ 95%]
+    ============================== 44 passed in 1.43s ==============================
+    ```
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted output of Commands 1, 2, and 3 from `## Required tests / validation` all exiting `0`, with `TestSpecProbeAndBackgroundImportLockSafety::test_nopatch_with_git_capture_enabled_does_not_load_subprocesses_module` and `TestSpecProbeAndBackgroundImportLockSafety::test_nopatch_background_hw_does_not_load_subprocesses_module` visibly listed as `PASSED` (exercising `import pubrun.nopatch` with `[capture.git].enabled = true` through `src/pubrun/tracker.py::Run._bootstrap_engines` Step 2 and `src/pubrun/capture/git.py::_run_git_raw` updated in `E-01` via the test added in `E-03`).
   - Observed evidence:
-  - Result: pending
+    ```text
+    === Command 1 (exit 0) ===
+    tests/test_import_modes.py::TestSpecProbeAndBackgroundImportLockSafety::test_nopatch_background_hw_does_not_load_subprocesses_module PASSED [ 67%]
+    tests/test_import_modes.py::TestSpecProbeAndBackgroundImportLockSafety::test_nopatch_with_git_capture_enabled_does_not_load_subprocesses_module PASSED [ 67%]
+    ============================= 237 passed in 58.45s =============================
+    === Command 2 (-p randomly, seed=2185052450, exit 0) ===
+    tests/test_import_modes.py::TestSpecProbeAndBackgroundImportLockSafety::test_nopatch_background_hw_does_not_load_subprocesses_module PASSED [ 90%]
+    tests/test_import_modes.py::TestSpecProbeAndBackgroundImportLockSafety::test_nopatch_with_git_capture_enabled_does_not_load_subprocesses_module PASSED [ 93%]
+    ============================= 160 passed in 27.29s =============================
+    === Command 3 (mypy linux / win32 / darwin, exit 0) ===
+    Success: no issues found in 71 source files
+    Success: no issues found in 71 source files
+    Success: no issues found in 71 source files
+    === aw suite (full suite, exit 0) ===
+    ======================= 2669 passed in 196.57s (0:03:16) =======================
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 

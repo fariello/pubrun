@@ -521,6 +521,89 @@ class TestGit:
         assert len(calls) == 1
         assert calls[0][1]["env"]["LC_ALL"] == "C"
 
+    def test_get_git_bypasses_active_subprocess_spy(self, git_repo, monkeypatch):
+        """When SubprocessSpy is loaded and installed, get_git runs every git command with spy bypassed."""
+        import subprocess
+        import pubrun.capture.git as git_mod
+        from pubrun.capture.subprocesses import SubprocessSpy, _spy_bypassed
+
+        owner = object()
+        assert SubprocessSpy.install(owner=owner) is True
+        try:
+            real_run = subprocess.run
+            observed_bypass = []
+
+            def wrapped_run(args, *a, **kw):
+                observed_bypass.append(_spy_bypassed())
+                return real_run(args, *a, **kw)
+
+            monkeypatch.setattr(git_mod.subprocess, "run", wrapped_run)
+            result = get_git({"capture": {"git": {"enabled": True}}})
+            assert observed_bypass
+            assert all(observed_bypass)
+            assert _spy_bypassed() is False
+            assert result["capture_state"]["status"] == "complete"
+            assert SubprocessSpy.get_records() == []
+        finally:
+            SubprocessSpy.uninstall(owner=owner)
+
+    def test_disable_spy_if_loaded_falls_back_when_sys_lacks_modules(self, monkeypatch):
+        """_disable_spy_if_loaded uses _SYS_MODULES when pubrun.capture.git.sys has no modules attribute."""
+        import types
+        import pubrun.capture.git as git_mod
+        from pubrun.capture.subprocesses import _spy_bypassed
+
+        monkeypatch.setattr(git_mod, "sys", types.SimpleNamespace(platform="linux"))
+        assert _spy_bypassed() is False
+        with git_mod._disable_spy_if_loaded():
+            assert _spy_bypassed() is True
+        assert _spy_bypassed() is False
+
+    def test_get_git_direct_does_not_load_subprocesses_module(self, git_repo):
+        """Direct get_git in a fresh subprocess leaves pubrun.capture.subprocesses unloaded."""
+        import json
+        import pathlib
+        import subprocess
+
+        src_dir = pathlib.Path(__file__).resolve().parents[1] / "src"
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("PUBRUN_AUTO_START", "PUBRUN_RUN_MODE_OVERRIDE")
+        }
+        existing_pp = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing_pp}" if existing_pp else str(src_dir)
+        env["PUBRUN_IMPORT_MODE"] = "minimal"
+
+        script = """
+import json, sys
+import pubrun.capture.git as git_mod
+
+loaded_before = "pubrun.capture.subprocesses" in sys.modules
+result = git_mod.get_git({"capture": {"git": {"enabled": True}}})
+loaded_after = "pubrun.capture.subprocesses" in sys.modules
+print(json.dumps({
+    "loaded_before": loaded_before,
+    "loaded_after": loaded_after,
+    "status": result["capture_state"]["status"],
+    "commit": result.get("commit"),
+}))
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(git_repo),
+            env=env,
+        )
+        assert proc.returncode == 0, f"stderr: {proc.stderr}"
+        data = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert data["loaded_before"] is False
+        assert data["status"] == "complete"
+        assert isinstance(data["commit"], str) and len(data["commit"]) == 40
+        assert data["loaded_after"] is False
+
 
 # ---------------------------------------------------------------------------
 # Filesystem live probing
