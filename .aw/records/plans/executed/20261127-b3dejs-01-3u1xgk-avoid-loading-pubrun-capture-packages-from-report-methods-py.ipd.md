@@ -6,7 +6,7 @@
 - Scope: Extract the Python Enhancement Proposal 503 (PEP 503) package-name normalization helper into a lightweight standard-library module `src/pubrun/_pep503.py`, re-export it from `src/pubrun/capture/packages.py` for backward compatibility, switch `src/pubrun/report/methods.py` to import from `pubrun._pep503`, and add fresh-subprocess and unit regression tests in `tests/test_import_modes.py` and `tests/test_package_resolution.py`.
 - Scope-Paths: src/pubrun/_pep503.py, src/pubrun/capture/packages.py, src/pubrun/report/methods.py, tests/test_import_modes.py, tests/test_package_resolution.py
 - Item-Dependencies: executed:p4ueaj
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Extract PEP 503 package-name normalization to a shared standard-library helper so report/methods.py never loads pubrun.capture.packages when package capture is off
@@ -18,12 +18,12 @@
 - Highest E allocated: 04
 - Author: Antigravity
 - Id: 3u1xgk
-- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 3u1xgk verified (set b3dejs, attempt 1).
 - 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-27 to-review (Antigravity): Authored review-ready IPD graduating backlog item b3dejs
