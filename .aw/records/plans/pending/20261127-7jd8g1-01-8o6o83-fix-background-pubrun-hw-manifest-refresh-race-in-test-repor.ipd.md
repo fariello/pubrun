@@ -58,23 +58,23 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Disable background hardware refresh in the affected test
 
-- [ ] E-01 Update `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` to disable background hardware capture before reading `orig_manifest`:
+- [x] E-01 Update `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` to disable background hardware capture before reading `orig_manifest`:
   - Change `tracker = active_run()` to `tracker = active_run(capture={"hardware": {"depth": "off"}})`.
   - Add a one-line comment directly above that call stating that disabling background `pubrun-hw` hardware capture prevents an asynchronous `write_startup_manifest(is_refresh=True)` overwrite of `manifest.json` before the equality check.
   - Immediately after reading `orig_manifest`, add `assert json.loads(orig_manifest)["hardware"]["capture_state"]["status"] == "suppressed"` to confirm through public manifest output that hardware capture was suppressed before the rejected `pubrun.report()` and `pubrun.artifact()` calls run.
   - Leave the `active_run` fixture, all other tests in `tests/test_explicit_api.py`, and all existing assertions in `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` unchanged.
   - Depends on: none
   - Expected outcome: `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` starts the run with `capture.hardware.depth == "off"`, confirms `"suppressed"` hardware status in `orig_manifest`, spawns no `pubrun-hw` thread, and never triggers `ArtifactWriter.write_startup_manifest(is_refresh=True)`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Validate race removal and test stability
 
-- [ ] E-02 Run all commands listed in `## Required tests / validation` and capture their complete output:
+- [x] E-02 Run all commands listed in `## Required tests / validation` and capture their complete output:
   - Run the deterministic runtime probe confirming that `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` exits `0`, spawns no `pubrun-hw` thread, and performs no `is_refresh=True` startup manifest write.
   - Run `tests/test_explicit_api.py` and `tests/test_startup_overhead_writes.py` with `pytest` in default order and with randomized order (`-p randomly`).
   - Depends on: E-01
   - Expected outcome: The runtime probe prints `NO_HW_RACE_OK` with exit `0`, and every `pytest` command passes with exit `0`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -149,15 +149,47 @@ None. Backlog item `7jd8g1` explicitly permits passing `hardware depth=off` befo
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted output of `git diff -- tests/test_explicit_api.py` showing only the targeted edit in `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` (`active_run(capture={"hardware": {"depth": "off"}})`, explanatory comment, and `hardware.capture_state.status == "suppressed"` assertion), plus pasted output of Command 1 from `## Required tests / validation` exiting `0` and printing `NO_HW_RACE_OK` with zero `pubrun-hw` thread spawns and zero `is_refresh=True` startup manifest writes while passing the blank/reserved report and artifact name rejection test (re-deriving its active test node name at execution time, e.g. `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively`; exercising `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` -> `src/pubrun/tracker.py::Run._bootstrap_engines` -> `src/pubrun/writer.py::ArtifactWriter.write_startup_manifest` updated in `E-01`).
   - Observed evidence:
-  - Result: pending
+    - `git diff -- tests/test_explicit_api.py` (exit `0`):
+      ```diff
+      diff --git a/tests/test_explicit_api.py b/tests/test_explicit_api.py
+      index a73da99..6c9c05d 100644
+      --- a/tests/test_explicit_api.py
+      +++ b/tests/test_explicit_api.py
+      @@ -598,8 +598,10 @@ def test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively(
+       ):
+           import logging
 
-- [ ] V-02 validates E-02
+      -    tracker = active_run()
+      +    # Disable background pubrun-hw hardware capture to prevent an asynchronous write_startup_manifest(is_refresh=True) overwrite of manifest.json before the equality check.
+      +    tracker = active_run(capture={"hardware": {"depth": "off"}})
+           orig_manifest = (tracker.run_dir / "manifest.json").read_text(encoding="utf-8")
+      +    assert json.loads(orig_manifest)["hardware"]["capture_state"]["status"] == "suppressed"
+
+           with caplog.at_level(logging.WARNING, logger="pubrun"):
+               for bad_name in ("", "   ", "manifest", "MANIFEST", "config.resolved", "./manifest"):
+      ```
+    - Command 1 deterministic runtime probe on `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` (exit `0`):
+      ```text
+      .                                                                        [100%]
+      1 passed in 0.41s
+      NO_HW_RACE_OK
+      ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Pasted output of Command 2 (`python3 -m pytest tests/test_explicit_api.py tests/test_startup_overhead_writes.py -v`) and Command 3 (`python3 -m pytest -p randomly tests/test_explicit_api.py tests/test_startup_overhead_writes.py -v`), both exiting `0` and confirming that the tests pinning (a) blank/reserved report and artifact name rejection with suppressed hardware and unchanged `manifest.json` and (b) `hardware.depth == "off"` skipping thread spawn and duplicate startup write both pass in default and randomized order (re-deriving active test node names at execution time, e.g. `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` and `test_hardware_off_skips_thread_spawn_and_duplicate_startup_write`).
   - Observed evidence:
-  - Result: pending
+    - Command 2 (`python3 -m pytest tests/test_explicit_api.py tests/test_startup_overhead_writes.py -v`) exited `0`: `32 passed in 6.78s`, including:
+      - `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively PASSED [ 43%]`
+      - `tests/test_startup_overhead_writes.py::test_hardware_off_skips_thread_spawn_and_duplicate_startup_write PASSED [ 75%]`
+    - Command 3 (`python3 -m pytest -p randomly tests/test_explicit_api.py tests/test_startup_overhead_writes.py -v`) exited `0` (`Using --randomly-seed=766216236`): `32 passed in 8.39s`, including:
+      - `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively PASSED [  9%]`
+      - `tests/test_startup_overhead_writes.py::test_hardware_off_skips_thread_spawn_and_duplicate_startup_write PASSED [ 84%]`
+    - Full repository suite (`aw suite`) exited `0`: `2527 passed in 104.54s (0:01:44)`.
+  - Result: pass
 
 ## Approval and execution gate
 
