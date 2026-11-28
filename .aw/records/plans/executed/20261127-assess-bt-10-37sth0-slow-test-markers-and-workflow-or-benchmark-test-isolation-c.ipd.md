@@ -6,7 +6,7 @@
 - Scope: Update `tests/test_compatibility.py`, `tests/test_package_benchmark.py`, and `tests/test_startup_benchmark.py` (test-only changes; no production source edits).
 - Scope-Paths: tests/test_compatibility.py, tests/test_package_benchmark.py, tests/test_startup_benchmark.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Add @pytest.mark.slow markers, harden workflow assertions in test_compatibility.py, and isolate sys.path/sys.modules in benchmark tests
@@ -17,12 +17,12 @@
 - Highest E allocated: 04
 - Author: Antigravity
 - Id: 37sth0
-- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 37sth0 verified (set assess-bt, attempt 1).
 - 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-27 to-review (Antigravity): Authored review-ready child IPD from `/assess testing` Slice 3 audit on HEAD `512ee68` / `8f2aacd`.
@@ -52,35 +52,35 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Mark slow tests and remove brittle substring/module-state coupling
 
-- [ ] E-01 Update `tests/test_compatibility.py` (`TEST-I6`, `TEST-I8`):
+- [x] E-01 Update `tests/test_compatibility.py` (`TEST-I6`, `TEST-I8`):
   - Apply `@pytest.mark.slow` to `tests/test_compatibility.py::test_scaling_benchmark_quick_smoke_and_share_safety` (the sole multi-subprocess benchmark test in the file), leaving the three fast workflow tests (`test_ci_workflow_compatibility_matrix_structural`, `test_dependency_audit_workflow_structural`, and `test_workflows_pyyaml_crosscheck_when_available`) unmarked so `pytest -m "not slow"` still executes them.
   - Harden the zero-dependency standard-library structural tests (`test_ci_workflow_compatibility_matrix_structural` and `test_dependency_audit_workflow_structural`, which MUST keep running without PyYAML because Continuous Integration (CI)'s 21-cell `test` job in `.github/workflows/ci.yml` does not install `pyyaml`): make `_extract_job_block` tolerant of valid YAML indentation/trailing comments and replace brittle verbatim quoted-string pins (such as `'"3.10"'`, `'"scaling_bench.py"'`, `'.[dev,bench]'`, `'install -e ".[tui]"'`, and exact flag-ordered `pubrun bench ...` lines) with formatting-tolerant semantic token/flag checks that survive single-vs-double quoting, list reflow, extra ordering, and flag reordering.
   - In `test_workflows_pyyaml_crosscheck_when_available` (kept guarded by `pytest.importorskip("yaml")`), replace the remaining verbatim quoted-string substring checks (`'"scaling_bench.py"'`, exact flag order in `pubrun bench`, and literal `'.[dev,bench]'`/`'.[tui]'`) with parsed step/token assertions over `yaml.safe_load` output.
   - Depends on: none
   - Expected outcome: `test_scaling_benchmark_quick_smoke_and_share_safety` is deselected by `-m "not slow"`, workflow checks pass both with and without PyYAML installed, and benign YAML/shell reformatting does not trigger false failures.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-02 Update `tests/test_package_benchmark.py` (`TEST-I5`, `TEST-I6`):
+- [x] E-02 Update `tests/test_package_benchmark.py` (`TEST-I5`, `TEST-I6`):
   - Apply `@pytest.mark.slow` at the class level to `tests/test_package_benchmark.py::TestPackageCaptureBenchRun` so all eight methods sharing the module-scoped `bench_run` fixture are deselected under `-m "not slow"` and the slow `benchmarks/package_capture_bench.py` fixture never runs in fast mode; keep `TestPackageCaptureBenchCli.test_rejects_non_positive_repetitions`, `TestSyntheticEnvironmentBuilder`, and `TestTransitiveScenario` unmarked so fast Command-Line Interface (CLI) validation and unit tests still run.
   - Replace bare `tests/test_package_benchmark.py::_load_module` with a context manager (for example `_loaded_module(mod_name, rel_path)`) or fixture that snapshots `list(sys.path)` and `dict(sys.modules)` before `spec.loader.exec_module(mod)` and restores `sys.path[:]` plus any added or replaced `sys.modules` keys (covering both synthetic `mod_name` entries and side effects from `benchmarks/package_capture_bench.py` inserting `benchmarks/` and `src/` into `sys.path` and `benchmarks/scenarios.py` registering `_pubrun_bench_scenarios_standalone`) in a `finally` block while keeping all tests deterministic under `-p randomly`.
   - Depends on: none
   - Expected outcome: `TestPackageCaptureBenchRun` is deselected under `-m "not slow"`, fast unit/CLI-validation tests remain active, and running the tests leaves `sys.path` and `sys.modules` unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Update `tests/test_startup_benchmark.py` (`TEST-I5`, `TEST-I6`):
+- [x] E-03 Update `tests/test_startup_benchmark.py` (`TEST-I5`, `TEST-I6`):
   - Apply `@pytest.mark.slow` at the class level to `tests/test_startup_benchmark.py::TestBreakdownEndToEnd` (three multi-subprocess end-to-end tests) AND at the method level to `tests/test_startup_benchmark.py::TestBreakdownScrubBoundaries.test_cli_with_short_username_emits_intact_output` (two parametrized full-benchmark subprocess cases); keep `TestStartupAutoDefaultScenario`, `TestBreakdownStatisticsAndRedaction`, `TestBreakdownCLIValidation`, and the eight non-CLI unit tests in `TestBreakdownScrubBoundaries` unmarked so all fast unit and flag-validation tests run under `-m "not slow"`.
   - Replace bare `tests/test_startup_benchmark.py::_load_module` with a context manager (or fixture) that snapshots `list(sys.path)` and `dict(sys.modules)` before `spec.loader.exec_module(mod)` and restores `sys.path[:]` plus any added or replaced `sys.modules` keys (covering synthetic `mod_name` entries, `benchmarks/startup_breakdown.py`'s `sys.path` insertions of `benchmarks/` and `src/` plus transitive `share_safety` import, and `benchmarks/scenarios.py`'s `_pubrun_bench_scenarios_standalone` entry) in a `finally` block while keeping all tests deterministic under `-p randomly`.
   - Depends on: none
   - Expected outcome: All five multi-subprocess startup-breakdown benchmark tests are deselected under `-m "not slow"`, fast unit and CLI-validation tests remain active, and running the tests leaves `sys.path` and `sys.modules` unchanged.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Validate full execution, `-m "not slow"` selection, and clean import state
 
-- [ ] E-04 Run targeted `python3 -m pytest -p randomly` (full and `-m "not slow"`) plus import-state isolation check and record complete output:
+- [x] E-04 Run targeted `python3 -m pytest -p randomly` (full and `-m "not slow"`) plus import-state isolation check and record complete output:
   - Run Commands 1, 2, and 3 listed in `## Required tests / validation` and verify exit `0`, confirming `-m "not slow"` deselects the slow benchmark tests, runs only the fast subset, and leaves `sys.path` and `sys.modules` unchanged.
   - Depends on: E-01, E-02, E-03
   - Expected outcome: All tests pass under `-p randomly`, `-m "not slow"` reports deselected slow tests with exit `0`, and `BENCH_TESTS_IMPORT_CLEAN_OK` exits `0`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -151,25 +151,160 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `git diff -- tests/test_compatibility.py` confirming `@pytest.mark.slow` on `test_scaling_benchmark_quick_smoke_and_share_safety`, formatting-tolerant zero-dependency stdlib workflow checks, and structured `pytest.importorskip("yaml")` cross-checks, plus execution-time passing pytest output for `tests/test_compatibility.py`.
   - Observed evidence:
-  - Result: pending
+    - `git diff --stat -- tests/test_compatibility.py`: `tests/test_compatibility.py | 595 ++++++++++++++++++++++++++++++++++++----` (adds `@pytest.mark.slow` on `test_scaling_benchmark_quick_smoke_and_share_safety`, updates `_extract_job_block` for variable YAML indentation/quoted keys/trailing comments, adds zero-dependency stdlib helpers `_extract_subblock`, `_extract_yaml_list_values`, `_extract_run_blocks`, `_iter_shell_commands`, `_has_python_import_check`, `_has_venv_cross_platform_bin_paths`, `_has_pubrun_bench_smoke`, `_has_forbidden_wheel_entry`, `_has_pip_install_with_extras`, `_has_pytest_target`, `_has_python_script_flag`, `_has_headless_matplotlib_smoke`, `_has_strict_mypy_mode_check`, `_has_pip_audit_with_arg`, updates `test_ci_workflow_compatibility_matrix_structural`, `test_dependency_audit_workflow_structural`, and `test_workflows_pyyaml_crosscheck_when_available` to use parsed semantic assertions, and adds `test_workflow_structural_helpers_tolerate_reformatting`).
+    - Python 3.8 syntax check (`ast.parse(..., feature_version=(3, 8))`): `PY38_AST_OK` (exit `0`).
+    - PyYAML-absent check (`sys.modules["yaml"] = None`, `pytest -m "not slow" -v tests/test_compatibility.py`, exit `0`):
+      ```text
+      collected 5 items / 1 deselected / 4 selected
+      tests/test_compatibility.py::test_ci_workflow_compatibility_matrix_structural PASSED [ 25%]
+      tests/test_compatibility.py::test_dependency_audit_workflow_structural PASSED [ 50%]
+      tests/test_compatibility.py::test_workflow_structural_helpers_tolerate_reformatting PASSED [ 75%]
+      tests/test_compatibility.py::test_workflows_pyyaml_crosscheck_when_available SKIPPED [100%]
+      ================== 3 passed, 1 skipped, 1 deselected in 0.21s ==================
+      NO_PYYAML_COMPAT_OK
+      ```
+    - Full run (`--randomly-seed=2943693621`, exit `0`): all 5 tests in `tests/test_compatibility.py` passed (`test_workflows_pyyaml_crosscheck_when_available`, `test_ci_workflow_compatibility_matrix_structural`, `test_dependency_audit_workflow_structural`, `test_workflow_structural_helpers_tolerate_reformatting`, `test_scaling_benchmark_quick_smoke_and_share_safety`).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `git diff -- tests/test_package_benchmark.py` confirming `@pytest.mark.slow` on `TestPackageCaptureBenchRun` and scoped `sys.path`/`sys.modules` snapshot-and-restore in `_load_module`, plus passing execution-time pytest output for `tests/test_package_benchmark.py` and `BENCH_TESTS_IMPORT_CLEAN_OK` from Command 3.
   - Observed evidence:
-  - Result: pending
+    - `git diff -- tests/test_package_benchmark.py` (`43 ++-`): replaces `_load_module` with `@contextlib.contextmanager def _loaded_module(mod_name, rel_path)` snapshotting `list(sys.path)` and `dict(sys.modules)` and restoring both in `finally:`, decorates `class TestPackageCaptureBenchRun:` with `@pytest.mark.slow`, and converts all three call sites (`TestSyntheticEnvironmentBuilder.test_builder_writes_discoverable_distributions`, `test_workload_subsets_are_fixed_and_disjoint`, and `TestTransitiveScenario.test_feature_packages_transitive_registered`) to `with _loaded_module(...) as mod:`.
+    - Key diff hunks:
+      ```diff
+      +@contextlib.contextmanager
+      +def _loaded_module(mod_name: str, rel_path: str):
+      +    """Load a script by repo-relative path and restore ``sys.path`` and ``sys.modules`` on exit."""
+           ...
+      +    saved_path = list(sys.path)
+      +    saved_modules = dict(sys.modules)
+      +    try:
+      +        sys.modules[mod_name] = mod
+      +        spec.loader.exec_module(mod)
+      +        yield mod
+      +    finally:
+      +        sys.path[:] = saved_path
+      +        for key in list(sys.modules):
+      +            if key not in saved_modules:
+      +                sys.modules.pop(key, None)
+      +        for key, prev_mod in saved_modules.items():
+      +            if sys.modules.get(key) is not prev_mod:
+      +                sys.modules[key] = prev_mod
+      +@pytest.mark.slow
+       class TestPackageCaptureBenchRun:
+      ```
+    - Full run (`--randomly-seed=2943693621`, exit `0`): all 12 tests in `tests/test_package_benchmark.py` passed; fast run (`-m "not slow"`, `--randomly-seed=4221695671`, exit `0`): all 8 methods of `TestPackageCaptureBenchRun` deselected and 4 fast tests passed.
+    - Import cleanliness check (`--import-mode=importlib` and in-session `pytest_collection_finish` -> `pytest_sessionfinish`, exit `0`): `24 passed, 13 deselected in 1.46s` / `BENCH_TESTS_IMPORT_CLEAN_OK` (see `V-04` for verbatim Command 3 pytest `prepend`-mode note).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `git diff -- tests/test_startup_benchmark.py` confirming `@pytest.mark.slow` on `TestBreakdownEndToEnd` and `TestBreakdownScrubBoundaries.test_cli_with_short_username_emits_intact_output` plus scoped `sys.path`/`sys.modules` snapshot-and-restore in `_load_module`, along with passing execution-time pytest output for `tests/test_startup_benchmark.py` and `BENCH_TESTS_IMPORT_CLEAN_OK` from Command 3.
   - Observed evidence:
-  - Result: pending
+    - `git diff -- tests/test_startup_benchmark.py` (`283 ++++++++++---------`): replaces `_load_module` with `@contextlib.contextmanager def _loaded_module(mod_name, rel_path)` snapshotting `list(sys.path)` and `dict(sys.modules)` and restoring both in `finally:`, decorates `class TestBreakdownEndToEnd:` and `TestBreakdownScrubBoundaries.test_cli_with_short_username_emits_intact_output` with `@pytest.mark.slow`, and wraps all nine module-load call sites in `with _loaded_module(...) as ...:` (Python 3.8-compatible nested `with` in `test_redact_breakdown_scrubs_home_host_user_workdir_and_repo`).
+    - Key diff hunks:
+      ```diff
+      +@contextlib.contextmanager
+      +def _loaded_module(mod_name: str, rel_path: str):
+      ...
+      +@pytest.mark.slow
+       class TestBreakdownEndToEnd:
+      ...
+      +    @pytest.mark.slow
+           @pytest.mark.parametrize("user", ["pub", "ed"])
+           def test_cli_with_short_username_emits_intact_output(self, tmp_path, user):
+      ```
+    - Full run (`--randomly-seed=2943693621`, exit `0`): all 25 tests in `tests/test_startup_benchmark.py` passed; fast run (`-m "not slow"`, `--randomly-seed=4221695671`, exit `0`): all 5 slow tests (`TestBreakdownEndToEnd` 3 + `test_cli_with_short_username_emits_intact_output` 2) deselected and 20 fast tests passed.
+    - Import cleanliness check (`--import-mode=importlib` and in-session `pytest_collection_finish` -> `pytest_sessionfinish`, exit `0`): `24 passed, 13 deselected in 1.46s` / `BENCH_TESTS_IMPORT_CLEAN_OK` (see `V-04` for verbatim Command 3 pytest `prepend`-mode note).
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted complete execution-time output of Commands 1, 2, and 3 in `## Required tests / validation` across `tests/test_compatibility.py`, `tests/test_package_benchmark.py`, and `tests/test_startup_benchmark.py`, confirming exit `0`, all collected tests passing in Command 1, all marked slow tests (`test_scaling_benchmark_quick_smoke_and_share_safety`, `TestPackageCaptureBenchRun`, `TestBreakdownEndToEnd`, and `TestBreakdownScrubBoundaries.test_cli_with_short_username_emits_intact_output`) visibly deselected (`deselected`) while fast tests pass in Command 2, and `BENCH_TESTS_IMPORT_CLEAN_OK` in Command 3.
   - Observed evidence:
-  - Result: pending
+    - Command 1 (`python3 -m pytest -p randomly tests/test_compatibility.py tests/test_package_benchmark.py tests/test_startup_benchmark.py -v`, `--randomly-seed=2943693621`, exit `0`):
+      ```text
+      collected 42 items
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_markdown_has_no_identifying_strings PASSED [  2%]
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_synthetic_profiles_capture_expected_distributions PASSED [  4%]
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_exits_zero_and_writes_json PASSED [  7%]
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_json_has_no_workdir_path PASSED [  9%]
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_environment_revision_and_filesystem_metadata PASSED [ 11%]
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_off_mode_is_suppressed_baseline PASSED [ 14%]
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_workdir_left_clean PASSED [ 16%]
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_separate_startup_and_finalization_cold_and_warm_stats PASSED [ 19%]
+      tests/test_package_benchmark.py::TestTransitiveScenario::test_feature_packages_transitive_registered PASSED [ 21%]
+      tests/test_package_benchmark.py::TestPackageCaptureBenchCli::test_rejects_non_positive_repetitions PASSED [ 23%]
+      tests/test_package_benchmark.py::TestSyntheticEnvironmentBuilder::test_workload_subsets_are_fixed_and_disjoint PASSED [ 26%]
+      tests/test_package_benchmark.py::TestSyntheticEnvironmentBuilder::test_builder_writes_discoverable_distributions PASSED [ 28%]
+      tests/test_compatibility.py::test_workflows_pyyaml_crosscheck_when_available PASSED [ 30%]
+      tests/test_compatibility.py::test_ci_workflow_compatibility_matrix_structural PASSED [ 33%]
+      tests/test_compatibility.py::test_dependency_audit_workflow_structural PASSED [ 35%]
+      tests/test_compatibility.py::test_workflow_structural_helpers_tolerate_reformatting PASSED [ 38%]
+      tests/test_compatibility.py::test_scaling_benchmark_quick_smoke_and_share_safety PASSED [ 40%]
+      tests/test_startup_benchmark.py::TestStartupAutoDefaultScenario::test_startup_auto_default_registered PASSED [ 42%]
+      tests/test_startup_benchmark.py::TestBreakdownScrubBoundaries::test_validate_refuses_standalone_username PASSED [ 45%]
+      tests/test_startup_benchmark.py::TestBreakdownScrubBoundaries::test_redact_breakdown_keeps_markers_schema_and_metadata[startup] PASSED [ 47%]
+      tests/test_startup_benchmark.py::TestBreakdownScrubBoundaries::test_redact_breakdown_keeps_markers_schema_and_metadata[benchmark] PASSED [ 50%]
+      tests/test_startup_benchmark.py::TestBreakdownScrubBoundaries::test_cli_with_short_username_emits_intact_output[pub] PASSED [ 52%]
+      tests/test_startup_benchmark.py::TestBreakdownScrubBoundaries::test_cli_with_short_username_emits_intact_output[ed] PASSED [ 54%]
+      tests/test_startup_benchmark.py::TestBreakdownScrubBoundaries::test_scrub_text_keeps_existing_marker_and_redacts_standalone_user PASSED [ 57%]
+      tests/test_startup_benchmark.py::TestBreakdownScrubBoundaries::test_redact_breakdown_keeps_markers_schema_and_metadata[pub] PASSED [ 59%]
+      tests/test_startup_benchmark.py::TestBreakdownScrubBoundaries::test_redact_breakdown_keeps_markers_schema_and_metadata[run] PASSED [ 61%]
+      tests/test_startup_benchmark.py::TestBreakdownScrubBoundaries::test_redact_breakdown_keeps_markers_schema_and_metadata[ed] PASSED [ 64%]
+      tests/test_startup_benchmark.py::TestBreakdownScrubBoundaries::test_scrub_text_keeps_schema_line PASSED [ 66%]
+      tests/test_startup_benchmark.py::TestBreakdownEndToEnd::test_cli_single_iteration_and_explicit_durability_policy PASSED [ 69%]
+      tests/test_startup_benchmark.py::TestBreakdownEndToEnd::test_cli_does_not_autostart_pubrun_in_caller_cwd_and_accepts_short_relative_workdir PASSED [ 71%]
+      tests/test_startup_benchmark.py::TestBreakdownEndToEnd::test_cli_two_passes_two_iterations_and_workdir_cleanup PASSED [ 73%]
+      tests/test_startup_benchmark.py::TestBreakdownStatisticsAndRedaction::test_redact_breakdown_scrubs_home_host_user_workdir_and_repo PASSED [ 76%]
+      tests/test_startup_benchmark.py::TestBreakdownStatisticsAndRedaction::test_compute_stats_handles_empty_single_and_multi PASSED [ 78%]
+      tests/test_startup_benchmark.py::TestBreakdownStatisticsAndRedaction::test_validate_redacted_output_rejects_leaked_home_path PASSED [ 80%]
+      tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_workdir_regular_file_rejected PASSED [ 83%]
+      tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args4] PASSED [ 85%]
+      tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args5] PASSED [ 88%]
+      tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args6] PASSED [ 90%]
+      tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args3] PASSED [ 92%]
+      tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args2] PASSED [ 95%]
+      tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args0] PASSED [ 97%]
+      tests/test_startup_benchmark.py::TestBreakdownCLIValidation::test_invalid_flags_exit_nonzero[extra_args1] PASSED [100%]
+      ============================= 42 passed in 41.28s ==============================
+      ```
+    - Command 2 (`python3 -m pytest -p randomly -m "not slow" tests/test_compatibility.py tests/test_package_benchmark.py tests/test_startup_benchmark.py -v`, `--randomly-seed=4221695671`, exit `0`) and slow collection verification (`python3 -m pytest -m slow --collect-only -q ...`, exit `0`):
+      ```text
+      collected 42 items / 14 deselected / 28 selected
+      ====================== 28 passed, 14 deselected in 1.23s =======================
+      ```
+      The 14 collected `@pytest.mark.slow` items confirmed via `-m slow --collect-only -q`:
+      ```text
+      tests/test_compatibility.py::test_scaling_benchmark_quick_smoke_and_share_safety
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_exits_zero_and_writes_json
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_environment_revision_and_filesystem_metadata
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_separate_startup_and_finalization_cold_and_warm_stats
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_off_mode_is_suppressed_baseline
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_synthetic_profiles_capture_expected_distributions
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_markdown_has_no_identifying_strings
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_json_has_no_workdir_path
+      tests/test_package_benchmark.py::TestPackageCaptureBenchRun::test_workdir_left_clean
+      tests/test_startup_benchmark.py::TestBreakdownEndToEnd::test_cli_two_passes_two_iterations_and_workdir_cleanup
+      tests/test_startup_benchmark.py::TestBreakdownEndToEnd::test_cli_single_iteration_and_explicit_durability_policy
+      tests/test_startup_benchmark.py::TestBreakdownEndToEnd::test_cli_does_not_autostart_pubrun_in_caller_cwd_and_accepts_short_relative_workdir
+      tests/test_startup_benchmark.py::TestBreakdownScrubBoundaries::test_cli_with_short_username_emits_intact_output[pub]
+      tests/test_startup_benchmark.py::TestBreakdownScrubBoundaries::test_cli_with_short_username_emits_intact_output[ed]
+      14/42 tests collected (28 deselected) in 0.08s
+      ```
+    - Command 3 import-state check:
+      - Verbatim Command 3 ran `pytest.main(["-m", "not slow", "-q", "tests/test_package_benchmark.py", "tests/test_startup_benchmark.py"])` (`24 passed, 13 deselected in 1.76s`) and hit `AssertionError: ('sys.path mutated:', {'<worktree>/tests'})` because pytest's default `--import-mode=prepend` inserts `<worktree>/tests` into `sys.path` during test collection for any file under `tests/` (verified identically on `tests/test_compatibility.py`: `added: ['<worktree>/tests']`). Neither `benchmarks/` nor `src/` entered `sys.path`, and zero `_test_*`, `share_safety`, or `_pubrun_bench_scenarios_standalone` entries entered `sys.modules`.
+      - Running the same check with `--import-mode=importlib` (exit `0`) and with an in-session plugin comparing `pytest_collection_finish` to `pytest_sessionfinish` (exit `0`) confirmed zero `sys.path` or `sys.modules` mutations by the test code:
+        ```text
+        24 passed, 13 deselected in 1.46s
+        BENCH_TESTS_IMPORT_CLEAN_OK
+        ```
+        ```text
+        IN_SESSION_BENCH_TESTS_IMPORT_CLEAN_OK
+        24 passed, 13 deselected in 1.12s
+        ```
+  - Result: pass
 
 ## Approval and execution gate
 
