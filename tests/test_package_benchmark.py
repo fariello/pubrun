@@ -1,6 +1,7 @@
 """Behavioral tests for benchmarks/package_capture_bench.py and its scenario entry."""
 from __future__ import annotations
 
+import contextlib
 import getpass
 import importlib.metadata
 import importlib.util
@@ -19,14 +20,27 @@ _MODES = ("off", "imported-only", "imported-transitive", "top-level-installed", 
 _STAT_KEYS = ("n", "median_ms", "iqr_ms", "stdev_ms", "p95_ms", "min_ms", "max_ms")
 
 
-def _load_module(mod_name: str, rel_path: str):
+@contextlib.contextmanager
+def _loaded_module(mod_name: str, rel_path: str):
+    """Load a script by repo-relative path and restore ``sys.path`` and ``sys.modules`` on exit."""
     path = _REPO / rel_path
     spec = importlib.util.spec_from_file_location(mod_name, path)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    sys.modules[mod_name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    saved_path = list(sys.path)
+    saved_modules = dict(sys.modules)
+    try:
+        sys.modules[mod_name] = mod
+        spec.loader.exec_module(mod)
+        yield mod
+    finally:
+        sys.path[:] = saved_path
+        for key in list(sys.modules):
+            if key not in saved_modules:
+                sys.modules.pop(key, None)
+        for key, prev_mod in saved_modules.items():
+            if sys.modules.get(key) is not prev_mod:
+                sys.modules[key] = prev_mod
 
 
 @pytest.fixture(scope="module")
@@ -53,6 +67,7 @@ def bench_run(tmp_path_factory):
     return proc, result, workdir
 
 
+@pytest.mark.slow
 class TestPackageCaptureBenchRun:
     def test_exits_zero_and_writes_json(self, bench_run):
         proc, result, _ = bench_run
@@ -158,8 +173,8 @@ class TestPackageCaptureBenchCli:
 
 class TestSyntheticEnvironmentBuilder:
     def test_builder_writes_discoverable_distributions(self, tmp_path):
-        mod = _load_module("_test_pcbench_builder", "benchmarks/package_capture_bench.py")
-        site_dir = mod.build_synthetic_site(tmp_path / "env", 12)
+        with _loaded_module("_test_pcbench_builder", "benchmarks/package_capture_bench.py") as mod:
+            site_dir = mod.build_synthetic_site(tmp_path / "env", 12)
         dists = {
             d.metadata["Name"]: d
             for d in importlib.metadata.distributions(path=[str(site_dir)])
@@ -177,18 +192,18 @@ class TestSyntheticEnvironmentBuilder:
         assert (site_dir / "pcbench_mod_0000" / "__init__.py").is_file()
 
     def test_workload_subsets_are_fixed_and_disjoint(self):
-        mod = _load_module("_test_pcbench_workload", "benchmarks/package_capture_bench.py")
-        w = mod.synthetic_workload(300)
-        assert len(w["startup_modules"]) == 30
-        assert len(w["late_modules"]) == 15
-        assert not set(w["startup_modules"]) & set(w["late_modules"])
-        assert mod.synthetic_workload(300) == w
+        with _loaded_module("_test_pcbench_workload", "benchmarks/package_capture_bench.py") as mod:
+            w = mod.synthetic_workload(300)
+            assert len(w["startup_modules"]) == 30
+            assert len(w["late_modules"]) == 15
+            assert not set(w["startup_modules"]) & set(w["late_modules"])
+            assert mod.synthetic_workload(300) == w
 
 
 class TestTransitiveScenario:
     def test_feature_packages_transitive_registered(self):
-        mod = _load_module("_test_scenarios_pkg_transitive", "benchmarks/scenarios.py")
-        by_name = {s.name: s for s in mod.all_scenarios()}
+        with _loaded_module("_test_scenarios_pkg_transitive", "benchmarks/scenarios.py") as mod:
+            by_name = {s.name: s for s in mod.all_scenarios()}
         scn = by_name["feature-packages-transitive"]
         assert scn.group == "feature"
         assert scn.mode == "auto"
