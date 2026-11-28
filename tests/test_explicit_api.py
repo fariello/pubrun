@@ -9,9 +9,7 @@ def test_report_and_artifact(tmp_path):
     import pubrun.tracker
     pubrun.tracker._active_run = None
 
-    old_cwd = Path.cwd
     try:
-        Path.cwd = staticmethod(lambda: tmp_path)
         tracker = pubrun.start(console={"capture_mode": "off"})
 
         # Test report
@@ -42,16 +40,13 @@ def test_report_and_artifact(tmp_path):
 
         tracker.stop()
     finally:
-        Path.cwd = old_cwd
         pubrun.tracker._active_run = None
 
 
 def test_pubrun_print(tmp_path):
     import pubrun.tracker
     pubrun.tracker._active_run = None
-    old_cwd = Path.cwd
     try:
-        Path.cwd = staticmethod(lambda: tmp_path)
         tracker = pubrun.start(console={"capture_mode": "off"})
 
         pubrun.print("hello", "world", sep="-")
@@ -63,17 +58,13 @@ def test_pubrun_print(tmp_path):
 
         tracker.stop()
     finally:
-        Path.cwd = old_cwd
         pubrun.tracker._active_run = None
 
 
 def test_pubrun_open_provenance(tmp_path):
     import pubrun.tracker
     pubrun.tracker._active_run = None
-    old_cwd = Path.cwd
     try:
-        Path.cwd = staticmethod(lambda: tmp_path)
-
         input_file = tmp_path / "dataset.txt"
         input_file.write_text("dataset content line 1\nline 2", encoding="utf-8")
 
@@ -114,16 +105,13 @@ def test_pubrun_open_provenance(tmp_path):
         assert outputs[0]["sha256"] == expected_out_sha
 
     finally:
-        Path.cwd = old_cwd
         pubrun.tracker._active_run = None
 
 
 def test_explicit_subprocess_and_popen(tmp_path):
     import pubrun.tracker
     pubrun.tracker._active_run = None
-    old_cwd = Path.cwd
     try:
-        Path.cwd = staticmethod(lambda: tmp_path)
         tracker = pubrun.start(console={"capture_mode": "off"})
 
         res = pubrun.subprocess.run([sys.executable, "-c", "print('explicit subprocess')"], capture_output=True, text=True)
@@ -148,7 +136,6 @@ def test_explicit_subprocess_and_popen(tmp_path):
         assert any("explicit popen" in str(arg) for arg in cmd_argvs)
 
     finally:
-        Path.cwd = old_cwd
         pubrun.tracker._active_run = None
 
 
@@ -204,7 +191,10 @@ def test_explicit_subprocess_run_monotonic_and_schema(tmp_path, monkeypatch):
     monkeypatch.setattr(writer_mod, "time", clock)
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
 
-    tracker = pubrun.start(console={"capture_mode": "off"}, capture={"resources": {"depth": "off"}})
+    tracker = pubrun.start(
+        console={"capture_mode": "off"},
+        capture={"hardware": {"depth": "off"}, "resources": {"depth": "off"}},
+    )
     if tracker._hardware_future_done is not None:
         tracker._hardware_future_done.wait(timeout=5.0)
 
@@ -288,7 +278,10 @@ def test_explicit_subprocess_popen_wait_communicate_poll_timeout_and_failure(
     monkeypatch.setattr(writer_mod, "time", clock)
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
 
-    tracker = pubrun.start(console={"capture_mode": "off"}, capture={"resources": {"depth": "off"}})
+    tracker = pubrun.start(
+        console={"capture_mode": "off"},
+        capture={"hardware": {"depth": "off"}, "resources": {"depth": "off"}},
+    )
     try:
         # 1. wait(timeout) raising TimeoutExpired must not log prematurely; final wait logs once.
         p_wait = pubrun.subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.5)"])
@@ -405,7 +398,10 @@ def test_explicit_popen_monotonic_and_launch_failure_schema(tmp_path, monkeypatc
     monkeypatch.setattr(writer_mod, "time", clock)
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
 
-    tracker = pubrun.start(console={"capture_mode": "off"}, capture={"resources": {"depth": "off"}})
+    tracker = pubrun.start(
+        console={"capture_mode": "off"},
+        capture={"hardware": {"depth": "off"}, "resources": {"depth": "off"}},
+    )
     try:
         with pubrun.popen(f"{sys.executable} -c \"print('popen_ok')\"") as pipe:
             out = pipe.read()
@@ -722,7 +718,7 @@ def test_manual_subprocess_provenance_isolation_cap_zero_bool_and_concurrency(
     assert len(r_conc.manual_subprocess_records) == 25
 
     # 3. Provenance errors never replace host return values or host exceptions.
-    active_run()
+    active_run(capture={"hardware": {"depth": "off"}, "resources": {"depth": "off"}})
 
     def _boom(*args, **kwargs):
         raise RuntimeError("provenance recorder exploded")
@@ -1013,3 +1009,274 @@ def test_core_api_ergonomics_callable_module_tracked_run_start_kwargs_and_diff(
 
     with pytest.raises(FileNotFoundError, match="pubrun status"):
         pubrun.diff(str(tmp_path / "missing_run"), str(run_b))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal exit semantics")
+def test_explicit_popen_posix_signal_exit_codes(active_run, monkeypatch):
+    """pubrun.popen decodes POSIX signal-terminated exit statuses to -signum and preserves unusual negative ints."""
+    tracker = active_run(capture={"hardware": {"depth": "off"}, "resources": {"depth": "off"}})
+
+    with pubrun.popen("kill -TERM $$") as pipe:
+        pipe.read()
+
+    with pubrun.popen("kill -9 $$") as pipe:
+        pipe.read()
+
+    # Raw waitpid signaled status (e.g. 15 -> WIFSIGNALED -> -15) and an unusual
+    # negative integer without a zero low byte (e.g. -3 -> preserved verbatim).
+    class _FakePipe:
+        def __init__(self, status):
+            self._status = status
+
+        def read(self):
+            return ""
+
+        def close(self):
+            return self._status
+
+    with monkeypatch.context() as mp:
+        mp.setattr(os, "popen", lambda cmd, mode="r", bufsize=-1: _FakePipe(15))
+        with pubrun.popen("raw_waitpid_sigterm") as pipe:
+            pipe.read()
+
+        mp.setattr(os, "popen", lambda cmd, mode="r", bufsize=-1: _FakePipe(-3))
+        with pubrun.popen("unusual_negative_status") as pipe:
+            pipe.read()
+
+    tracker.stop()
+    manifest = json.loads((tracker.run_dir / "manifest.json").read_text(encoding="utf-8"))
+    _validate_manifest_against_schema(manifest)
+
+    subs = manifest["subprocesses"]
+    assert len(subs) == 4
+
+    assert subs[0]["exit_code"] == -15
+    assert subs[0]["capture_state"] == {"status": "failed"}
+
+    assert subs[1]["exit_code"] == -9
+    assert subs[1]["capture_state"] == {"status": "failed"}
+
+    assert subs[2]["exit_code"] == -15
+    assert subs[2]["capture_state"] == {"status": "failed"}
+
+    assert subs[3]["exit_code"] == -3
+    assert subs[3]["capture_state"] == {"status": "failed"}
+
+
+def test_explicit_popen_nonzero_exit_and_double_close_idempotency(active_run):
+    """pubrun.popen decodes non-zero exits cleanly and treats a second close() as a no-op."""
+    tracker = active_run(capture={"hardware": {"depth": "off"}, "resources": {"depth": "off"}})
+
+    pipe = pubrun.popen(f'{sys.executable} -c "import sys; sys.exit(5)"')
+    pipe.read()
+    first_close = pipe.close()
+    assert first_close is not None
+    second_close = pipe.close()
+    assert second_close is None
+
+    tracker.stop()
+    manifest = json.loads((tracker.run_dir / "manifest.json").read_text(encoding="utf-8"))
+    _validate_manifest_against_schema(manifest)
+
+    subs = manifest["subprocesses"]
+    assert len(subs) == 1
+    assert subs[0]["exit_code"] == 5
+    assert subs[0]["capture_state"] == {"status": "failed"}
+
+
+def test_pubrun_print_timestamped_multiline_oserror_recovery_and_concurrency(
+    active_run, monkeypatch, caplog, capsys
+):
+    """pubrun.print timestamps multiline output directly, recovers after write OSError, and handles threads."""
+    import builtins
+    import logging
+    import re
+    import threading
+    import pubrun.core as core_mod
+
+    ts_re = re.compile(r"^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] ")
+
+    # 1. Timestamped multi-line output directly through core.py's timestamping branch.
+    tracker = active_run(
+        console={"capture_mode": "standard", "non_tty_mode": "off"},
+        capture={"hardware": {"depth": "off"}, "resources": {"depth": "off"}},
+    )
+    assert core_mod._should_log_pubrun_print(tracker, None) is True
+
+    pubrun.print("line-one\nline-two")
+    pubrun.print("no-trailing-nl", end="")
+
+    log_path = tracker.run_dir / "stdout.log"
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 3
+    assert ts_re.match(lines[0]) and lines[0].endswith("] line-one")
+    assert ts_re.match(lines[1]) and lines[1].endswith("] line-two")
+    assert ts_re.match(lines[2]) and lines[2].endswith("] no-trailing-nl")
+
+    tracker.stop()
+
+    # 2. Simulated write OSError logs warning, clears cached handle, and recovers cleanly.
+    tracker_err = active_run(
+        console={"capture_mode": "off"},
+        capture={"hardware": {"depth": "off"}, "resources": {"depth": "off"}},
+    )
+    orig_open = builtins.open
+    open_calls = []
+
+    class _FailOnceHandle:
+        def __init__(self, real_fh):
+            self._real_fh = real_fh
+            self.closed = False
+
+        def write(self, data):
+            raise OSError("simulated disk write failure")
+
+        def flush(self):
+            return self._real_fh.flush()
+
+        def close(self):
+            self.closed = True
+            return self._real_fh.close()
+
+    wrapped_handles = []
+
+    def _intercept_open(file, *args, **kwargs):
+        fh = orig_open(file, *args, **kwargs)
+        if Path(str(file)) == tracker_err.run_dir / "stdout.log":
+            open_calls.append(len(open_calls) + 1)
+            if len(open_calls) == 1:
+                wrapped = _FailOnceHandle(fh)
+                wrapped_handles.append(wrapped)
+                return wrapped
+        return fh
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="pubrun"):
+        with monkeypatch.context() as mp:
+            mp.setattr(builtins, "open", _intercept_open)
+            pubrun.print("fails-first-write")
+            assert len(wrapped_handles) == 1
+            assert wrapped_handles[0].closed is True
+            assert getattr(tracker_err, "_print_log_file", None) is None
+            pubrun.print("recovered-second-write")
+
+    warn_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("pubrun.print: failed to write to stdout.log:" in m and "simulated disk write failure" in m for m in warn_msgs)
+    assert len(open_calls) == 2
+    err_log_text = (tracker_err.run_dir / "stdout.log").read_text(encoding="utf-8")
+    assert "fails-first-write" not in err_log_text
+    assert "recovered-second-write" in err_log_text
+    tracker_err.stop()
+
+    # 3. Concurrent multi-threaded pubrun.print calls lose zero messages and raise no errors.
+    tracker_mt = active_run(
+        console={"capture_mode": "standard", "non_tty_mode": "off"},
+        capture={"hardware": {"depth": "off"}, "resources": {"depth": "off"}},
+    )
+    num_threads = 6
+    msgs_per_thread = 10
+    barrier = threading.Barrier(num_threads)
+    thread_errors = []
+
+    def _print_worker(tid):
+        try:
+            barrier.wait(timeout=5.0)
+            for idx in range(msgs_per_thread):
+                pubrun.print(f"mt-worker-{tid}-item-{idx}")
+        except Exception as exc:
+            thread_errors.append(exc)
+
+    threads = [threading.Thread(target=_print_worker, args=(tid,)) for tid in range(num_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10.0)
+    assert thread_errors == []
+
+    tracker_mt.stop()
+    mt_lines = (tracker_mt.run_dir / "stdout.log").read_text(encoding="utf-8").splitlines()
+    assert len(mt_lines) == num_threads * msgs_per_thread
+    for line in mt_lines:
+        assert ts_re.match(line)
+    expected_tokens = {
+        f"mt-worker-{tid}-item-{idx}"
+        for tid in range(num_threads)
+        for idx in range(msgs_per_thread)
+    }
+    observed_tokens = {line.split("] ", 1)[1] for line in mt_lines}
+    assert observed_tokens == expected_tokens
+    capsys.readouterr()
+
+
+def test_phase_profile_save_oserror_unlinks_sentinel_and_skips_event(active_run, monkeypatch):
+    """Failing cProfile.dump_stats and yappi save() unlink the 0-byte sentinel and emit no profile_saved event."""
+    import cProfile
+    import types
+
+    # 1. cProfile.Profile.dump_stats raising OSError
+    tracker_cp = active_run(
+        capture={
+            "profiling": {"enabled": True, "backend": "cprofile"},
+            "hardware": {"depth": "off"},
+            "resources": {"depth": "off"},
+        }
+    )
+
+    def _fail_dump_stats(self, filename):
+        raise OSError("cprofile disk full")
+
+    with monkeypatch.context() as mp:
+        mp.setattr(cProfile.Profile, "dump_stats", _fail_dump_stats)
+        with pubrun.phase("cprof_fail"):
+            sum(range(50))
+
+    assert getattr(tracker_cp, "_active_profilers", []) == []
+    assert list(tracker_cp.run_dir.glob("profile-*.prof")) == []
+    tracker_cp.stop()
+
+    cp_events = [
+        json.loads(line)
+        for line in (tracker_cp.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert not any(e.get("type") == "profile_saved" for e in cp_events)
+    assert any(e.get("type") == "phase_end" and e.get("name") == "cprof_fail" for e in cp_events)
+
+    # 2. Fake yappi stats.save() raising OSError
+    yappi_calls = []
+
+    class _FailingYappiStats:
+        def save(self, path, type="pstat"):
+            yappi_calls.append("save")
+            raise OSError("yappi disk full")
+
+    fake_yappi = types.ModuleType("yappi")
+    fake_yappi.start = lambda: yappi_calls.append("start")
+    fake_yappi.stop = lambda: yappi_calls.append("stop")
+    fake_yappi.clear_stats = lambda: yappi_calls.append("clear")
+    fake_yappi.get_func_stats = lambda: _FailingYappiStats()
+
+    with monkeypatch.context() as mp:
+        mp.setitem(sys.modules, "yappi", fake_yappi)
+        tracker_yp = active_run(
+            capture={
+                "profiling": {"enabled": True, "backend": "yappi"},
+                "hardware": {"depth": "off"},
+                "resources": {"depth": "off"},
+            }
+        )
+        with pubrun.phase("yappi_fail"):
+            pass
+
+    assert pubrun.phase._yappi_active is False
+    assert yappi_calls == ["start", "stop", "save", "clear"]
+    assert list(tracker_yp.run_dir.glob("profile-*.prof")) == []
+    tracker_yp.stop()
+
+    yp_events = [
+        json.loads(line)
+        for line in (tracker_yp.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert not any(e.get("type") == "profile_saved" for e in yp_events)
+    assert any(e.get("type") == "phase_end" and e.get("name") == "yappi_fail" for e in yp_events)

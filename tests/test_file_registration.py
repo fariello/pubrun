@@ -27,9 +27,7 @@ _SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "manifest.schem
 def _run_manifest(tmp_path, file_io_cfg, fn, *, extra_start_kwargs=None):
     """Run ``fn(tmp_path, tracker)`` inside an isolated run and return its parsed manifest."""
     pubrun.tracker._active_run = None
-    old_cwd = Path.cwd
     try:
-        Path.cwd = staticmethod(lambda: tmp_path)
         start_kwargs = {
             "console": {"capture_mode": "off"},
             "capture": {"file_io": file_io_cfg},
@@ -43,7 +41,6 @@ def _run_manifest(tmp_path, file_io_cfg, fn, *, extra_start_kwargs=None):
             tracker.stop()
         return json.loads((Path(tracker.run_dir) / "manifest.json").read_text(encoding="utf-8"))
     finally:
-        Path.cwd = old_cwd
         pubrun.tracker._active_run = None
 
 
@@ -435,6 +432,75 @@ class TestPendingOutputLifecycles:
         assert verify["hash_status"] == "unavailable"
         assert verify["caller_digest"]["verified"] is None
         assert verify["sha256"] is None
+
+    def test_reregistering_pending_deferred_output_with_digest_verifies_at_finalization(
+        self, tmp_path
+    ):
+        """Re-registering a pending deferred output with digest/verify_digest/level/metadata updates in place."""
+        out_path = tmp_path / "pending_rereg_verified.bin"
+        payload = b"verified-deferred-output-bytes"
+        expected_sha = hashlib.sha256(payload).hexdigest()
+
+        def _work(_base, run):
+            r1 = pubrun.register_output(
+                out_path,
+                label="model_weights",
+                defer=True,
+                level="stat",
+                metadata={"stage": "init", "epoch": 1},
+            )
+            assert r1 is not None
+            assert r1["hash_status"] == "pending"
+            assert r1["registration_count"] == 1
+            assert r1["registered_before_creation"] is True
+
+            # Re-register before the file exists with digest, verify_digest, level='hash', and metadata.
+            r2 = pubrun.register_output(
+                out_path,
+                label="model_weights",
+                defer=True,
+                level="hash",
+                digest=expected_sha,
+                verify_digest=True,
+                metadata={"epoch": 2, "verified_by": "caller"},
+            )
+            assert r2 is r1
+            assert r2["hash_status"] == "pending"
+            assert r2["registration_count"] == 2
+            assert r2["metadata"] == {"stage": "init", "epoch": 2, "verified_by": "caller"}
+            assert r2["caller_digest"] == {
+                "algorithm": "sha256",
+                "value": expected_sha,
+                "verified": None,
+            }
+            assert len(run.data_files["outputs"]) == 1
+
+            # Write the file on disk before run stop triggers finalize_pending_registrations.
+            out_path.write_bytes(payload)
+
+        manifest = _run_manifest(tmp_path, {"level": "stat"}, _work)
+        outputs = manifest["data_files"]["outputs"]
+        assert len(outputs) == 1
+        rec = outputs[0]
+        assert rec["label"] == "model_weights"
+        assert rec["registration_count"] == 2
+        assert rec["registered_before_creation"] is True
+        assert rec["metadata"] == {"stage": "init", "epoch": 2, "verified_by": "caller"}
+        assert rec["hash_status"] == "completed"
+        assert rec["observation_time"] == "at_finalization"
+        assert rec["caller_digest"] == {
+            "algorithm": "sha256",
+            "value": expected_sha,
+            "verified": True,
+        }
+        assert rec["digest"] == {"algorithm": "sha256", "value": expected_sha}
+        assert rec["sha256"] == expected_sha
+        assert rec["evidence_source"] == "observed"
+        assert rec["evidence_strength"] == "verified_content"
+
+        jsonschema = pytest.importorskip("jsonschema")
+        schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+        jsonschema.validate(manifest, schema)
 
 
 class TestDetailLevelsAndDeduplication:

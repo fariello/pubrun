@@ -230,6 +230,74 @@ def test_report_and_artifact_reject_path_traversal(tmp_path: Path) -> None:
     assert not (tmp_path / "escape_report.json").exists()
 
 
+def test_artifact_rejects_dot_targets(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """pubrun.artifact() refuses '.' and './' targets pointing to the run directory itself."""
+    import logging
+
+    out_dir = tmp_path / "runs"
+    with pubrun.tracked_run(
+        output_dir=str(out_dir),
+        console={"capture_mode": "off"},
+        capture={"hardware": {"depth": "off"}},
+    ) as ctx:
+        assert ctx.run_dir is not None
+        orig_manifest = (ctx.run_dir / "manifest.json").read_text(encoding="utf-8")
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            pubrun.artifact(".", "nope")
+            pubrun.artifact("./", "nope")
+        assert (ctx.run_dir / "manifest.json").read_text(encoding="utf-8") == orig_manifest
+
+    warn_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("failed to write artifact '.'" in m for m in warn_msgs)
+    assert any("failed to write artifact './'" in m for m in warn_msgs)
+
+
+def test_artifact_and_report_reject_symlink_escapes_and_reserved_target(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """pubrun.artifact() and pubrun.report() reject symlinks escaping run_dir or targeting manifest.json."""
+    import logging
+
+    outside_dir = tmp_path / "outside_dir"
+    outside_dir.mkdir()
+    out_dir = tmp_path / "runs"
+
+    with pubrun.tracked_run(
+        output_dir=str(out_dir),
+        console={"capture_mode": "off"},
+        capture={"hardware": {"depth": "off"}},
+    ) as ctx:
+        assert ctx.run_dir is not None
+        manifest_path = ctx.run_dir / "manifest.json"
+        orig_manifest = manifest_path.read_text(encoding="utf-8")
+
+        escape_link = ctx.run_dir / "escape_dir"
+        manifest_art_link = ctx.run_dir / "manifest_alias.txt"
+        manifest_rep_link = ctx.run_dir / "manifest_alias_rep.json"
+        try:
+            os.symlink(outside_dir, escape_link, target_is_directory=True)
+            os.symlink(manifest_path, manifest_art_link)
+            os.symlink(manifest_path, manifest_rep_link)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"symlinks unavailable on this platform: {exc}")
+
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            pubrun.artifact("escape_dir/escaped.txt", "evil")
+            pubrun.report("escape_dir/escaped_report", {"evil": True})
+            pubrun.artifact("manifest_alias.txt", "tampered")
+            pubrun.report("manifest_alias_rep", {"tampered": True})
+
+        assert not (outside_dir / "escaped.txt").exists()
+        assert not (outside_dir / "escaped_report.json").exists()
+        assert manifest_path.read_text(encoding="utf-8") == orig_manifest
+
+    warn_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("failed to write artifact 'escape_dir/escaped.txt'" in m for m in warn_msgs)
+    assert any("failed to write report 'escape_dir/escaped_report'" in m for m in warn_msgs)
+    assert any("failed to write artifact 'manifest_alias.txt'" in m for m in warn_msgs)
+    assert any("failed to write report 'manifest_alias_rep'" in m for m in warn_msgs)
+
+
 def test_pubrun_run_directory_target_clean_error(tmp_path: Path) -> None:
     """pubrun run exits cleanly without traceback when target is a directory."""
     proc = subprocess.run(
@@ -466,16 +534,24 @@ def test_merge_and_migrate_noop_descendant_print_handle_and_locking(
     )
     try:
         hw_entered = threading.Event()
+        hw_release = threading.Event()
         hw_done = threading.Event()
 
         def _fake_hw_worker() -> None:
             hw_entered.set()
-            time.sleep(0.05)
+            assert hw_release.wait(timeout=5.0)
             with core_mod._run_lock:
                 run2.hardware_data = {"capture_state": {"status": "complete"}}
             hw_done.set()
 
         t_hw = threading.Thread(target=_fake_hw_worker, daemon=True)
+        real_hw_join = t_hw.join
+
+        def _signal_join(timeout=None) -> None:
+            hw_release.set()
+            real_hw_join(timeout=timeout)
+
+        t_hw.join = _signal_join  # type: ignore[method-assign]
         run2._hardware_thread = t_hw
         run2._hardware_future_done = hw_done
         t_hw.start()
@@ -490,8 +566,10 @@ def test_merge_and_migrate_noop_descendant_print_handle_and_locking(
         t_mig = threading.Thread(target=_do_migrate, daemon=True)
         t_mig.start()
         assert mig_done.wait(timeout=5.0), "_merge_and_migrate deadlocked joining pubrun-hw"
+        assert hw_release.is_set()
         assert run2.run_dir.parent == out_d
     finally:
+        hw_release.set()
         run2.stop()
 
     # 5. Concurrent stop() racing with _merge_and_migrate() does not deadlock or reopen closed streams.
@@ -901,6 +979,7 @@ def test_tqdm_safe_tee_writelines_flush_fast_path_and_cleanup_safety(tmp_path: P
     cdir.mkdir()
     ci = ConsoleInterceptor(cdir, mode="basic")
     assert ci.start() is True
+    wrote_first = threading.Event()
     stop_flag = threading.Event()
     errors: list = []
 
@@ -909,13 +988,14 @@ def test_tqdm_safe_tee_writelines_flush_fast_path_and_cleanup_safety(tmp_path: P
             try:
                 if ci.stdout_tee is not None:
                     ci.stdout_tee.write("concurrent line\n")
+                    wrote_first.set()
             except Exception as exc:
                 errors.append(exc)
 
     wt = threading.Thread(target=_writer, daemon=True)
     wt.start()
     try:
-        time.sleep(0.03)
+        assert wrote_first.wait(timeout=5.0)
         res = ci.stop()
         assert res["capture_state"]["status"] in ("complete", "partial")
     finally:
