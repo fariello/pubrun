@@ -1,3 +1,4 @@
+import contextlib
 import ctypes
 import logging
 import math
@@ -10,6 +11,18 @@ from typing import Any, Dict, Optional, Tuple
 from pubrun.capture.signals import finalization_lock, in_signal_finalization
 
 logger = logging.getLogger("pubrun")
+
+_SYS_MODULES = sys.modules
+
+
+def _disable_spy_if_loaded() -> Any:
+    """Return ``disable_spy()`` when ``pubrun.capture.subprocesses`` is loaded, else a no-op context."""
+    modules = getattr(sys, "modules", _SYS_MODULES)
+    spy_mod = modules.get("pubrun.capture.subprocesses") if modules is not None else None
+    disable = getattr(spy_mod, "disable_spy", None)
+    if callable(disable):
+        return disable()
+    return contextlib.nullcontext()
 
 
 def _sysconf(name: str) -> int:
@@ -154,8 +167,7 @@ def _get_rss_windows() -> int:
     # Fallback path: legacy wmic subprocess for older Windows environments.
     try:
         import subprocess
-        from pubrun.capture.subprocesses import disable_spy
-        with disable_spy():
+        with _disable_spy_if_loaded():
             out = subprocess.check_output(
                 ["wmic", "process", "where", f"processid={os.getpid()}", "get", "WorkingSetSize"],
                 text=True, stderr=subprocess.DEVNULL, timeout=_poll_timeout
@@ -190,8 +202,7 @@ def _get_rss_darwin() -> int:
     """
     try:
         import subprocess
-        from pubrun.capture.subprocesses import disable_spy
-        with disable_spy():
+        with _disable_spy_if_loaded():
             out = subprocess.check_output(
                 ['ps', '-o', 'rss=', '-p', str(os.getpid())],
                 text=True, stderr=subprocess.DEVNULL, timeout=_poll_timeout
@@ -261,11 +272,10 @@ def _get_tree_rss_darwin() -> int:
     """
     try:
         import subprocess
-        from pubrun.capture.subprocesses import disable_spy
         my_pid = os.getpid()
 
         # Single subprocess call: get pid, ppid, rss for ALL processes
-        with disable_spy():
+        with _disable_spy_if_loaded():
             out = subprocess.check_output(
                 ['ps', '-eo', 'pid,ppid,rss'],
                 text=True, stderr=subprocess.DEVNULL, timeout=_poll_timeout
@@ -566,7 +576,12 @@ class ResourceWatcher(threading.Thread):
         if not self._system_metrics:
             return
         try:
-            from pubrun.capture import system_metrics as _sm
+            modules = getattr(sys, "modules", _SYS_MODULES)
+            _sm: Any = (
+                modules.get("pubrun.capture.system_metrics") if modules is not None else None
+            )
+            if _sm is None:
+                from pubrun.capture import system_metrics as _sm
             mem = _sm.get_system_memory()
             load = _sm.get_load_average()
             curr_raw = _sm.read_proc_stat_cpu_times()

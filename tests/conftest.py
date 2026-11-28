@@ -7,6 +7,9 @@ import threading
 
 import pytest
 
+# Import pubrun.noauto first because tests/conftest.py loads before isolated_cwd
+# runs and must not auto-start a stray runs/pubrun-pytest-* directory in the repository root.
+import pubrun.noauto  # noqa: F401
 import pubrun
 import pubrun.tracker
 

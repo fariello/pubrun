@@ -1601,3 +1601,413 @@ print(json.dumps({
             env=env,
         )
         assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+
+
+class TestSpecProbeAndBackgroundImportLockSafety:
+    """Behavioral regression tests for find_spec probing and background-thread import safety."""
+
+    @staticmethod
+    def _clean_env():
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("PUBRUN_IMPORT_MODE", "PUBRUN_AUTO_START", "PUBRUN_RUN_MODE_OVERRIDE")
+        }
+        src_dir = pathlib.Path(__file__).resolve().parents[1] / "src"
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing}" if existing else str(src_dir)
+        return env
+
+    @pytest.mark.parametrize(
+        ("target", "package"),
+        [
+            ("pubrun.tracker", None),
+            ("pubrun.config", None),
+            ("pubrun.capture.subprocesses", None),
+            ("pubrun.noauto", None),
+            (".tracker", "pubrun"),
+        ],
+    )
+    def test_find_spec_probe_skips_auto_start_and_atexit_growth(
+        self, target, package, tmp_path
+    ):
+        script = f"""
+import atexit, importlib.util, json, pathlib, sys, threading
+
+target = {target!r}
+package = {package!r}
+
+spec = importlib.util.find_spec(target, package=package)
+assert spec is not None, f"find_spec returned None for {{target!r}} (package={{package!r}})"
+
+import pubrun._bootstrap as bs
+mode_selected_after_first = bs.is_mode_selected()
+hw_threads_after_first = [t.name for t in threading.enumerate() if t.name == "pubrun-hw"]
+ncallbacks_after_first = atexit._ncallbacks()
+
+# Repeat sys_modules_saved()-style clear-and-probe cycles; atexit callbacks must not grow.
+for _ in range(4):
+    for mod_name in [m for m in list(sys.modules) if m == "pubrun" or m.startswith("pubrun.")]:
+        del sys.modules[mod_name]
+    repeat_spec = importlib.util.find_spec(target, package=package)
+    assert repeat_spec is not None
+
+ncallbacks_after_repeats = atexit._ncallbacks()
+hw_threads_after_repeats = [t.name for t in threading.enumerate() if t.name == "pubrun-hw"]
+
+print(json.dumps({{
+    "spec_name": spec.name,
+    "mode_selected": mode_selected_after_first,
+    "hw_threads_first": hw_threads_after_first,
+    "hw_threads_repeats": hw_threads_after_repeats,
+    "ncallbacks_first": ncallbacks_after_first,
+    "ncallbacks_repeats": ncallbacks_after_repeats,
+    "runs_exists": pathlib.Path("runs").exists(),
+}}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(tmp_path),
+            env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["spec_name"].startswith("pubrun.")
+        assert data["mode_selected"] is False
+        assert data["hw_threads_first"] == []
+        assert data["hw_threads_repeats"] == []
+        assert data["ncallbacks_repeats"] == data["ncallbacks_first"]
+        assert data["runs_exists"] is False
+        assert not (tmp_path / "runs").exists()
+
+    def test_followup_mode_import_after_find_spec_has_no_conflicts(self, tmp_path):
+        script = """
+import importlib.util, json
+
+spec = importlib.util.find_spec("pubrun.tracker")
+assert spec is not None
+
+import pubrun.minimal as pubrun
+from pubrun._bootstrap import get_import_metadata
+
+meta = get_import_metadata()
+print(json.dumps({
+    "selected_mode": meta["selected_mode"],
+    "conflicts_detected": meta["conflicts_detected"],
+    "active": pubrun.get_current_run() is not None,
+}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(tmp_path),
+            env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["selected_mode"] == "minimal"
+        assert data["conflicts_detected"] == 0
+        assert data["active"] is False
+
+    def test_followup_root_import_and_api_after_find_spec_tracker(self, tmp_path):
+        script = """
+import importlib, importlib.util, json, types
+
+spec = importlib.util.find_spec("pubrun.tracker")
+assert spec is not None
+
+import pubrun
+run = pubrun.start()
+pubrun.report("probe_check", {"ok": True})
+report_is_callable = callable(pubrun.report)
+report_is_module = isinstance(pubrun.report, types.ModuleType)
+output_mod = importlib.import_module("pubrun.report.output")
+version_val = pubrun.__version__
+commit_val = pubrun.__commit__
+version_in_dict = "__version__" in pubrun.__dict__
+commit_in_dict = "__commit__" in pubrun.__dict__
+pubrun.stop()
+
+print(json.dumps({
+    "run_started": run is not None,
+    "report_is_callable": report_is_callable,
+    "report_is_module": report_is_module,
+    "output_loaded": output_mod is not None,
+    "version_is_str": isinstance(version_val, str) and bool(version_val),
+    "commit_valid": commit_val is None or isinstance(commit_val, str),
+    "version_in_dict": version_in_dict,
+    "commit_in_dict": commit_in_dict,
+}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(tmp_path),
+            env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["run_started"] is True
+        assert data["report_is_callable"] is True
+        assert data["report_is_module"] is True
+        assert data["output_loaded"] is True
+        assert data["version_is_str"] is True
+        assert data["commit_valid"] is True
+        assert data["version_in_dict"] is False
+        assert data["commit_in_dict"] is False
+
+    def test_followup_root_import_after_find_spec_report_output_preserves_callable_subpackage(
+        self, tmp_path
+    ):
+        script = """
+import importlib.util, json, types
+
+spec = importlib.util.find_spec("pubrun.report.output")
+assert spec is not None
+
+import pubrun
+run = pubrun.start()
+pubrun.report("probe_check", {"ok": True})
+import pubrun.report.diagnostics as diagnostics_mod
+report_is_callable = callable(pubrun.report)
+report_is_module = isinstance(pubrun.report, types.ModuleType)
+report_has_path = hasattr(pubrun.report, "__path__")
+pubrun.stop()
+
+print(json.dumps({
+    "run_started": run is not None,
+    "report_is_callable": report_is_callable,
+    "report_is_module": report_is_module,
+    "report_has_path": report_has_path,
+    "diagnostics_loaded": diagnostics_mod is not None,
+}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(tmp_path),
+            env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["run_started"] is True
+        assert data["report_is_callable"] is True
+        assert data["report_is_module"] is True
+        assert data["report_has_path"] is True
+        assert data["diagnostics_loaded"] is True
+
+    def test_unrelated_package_find_spec_still_auto_starts_pubrun(self, tmp_path):
+        pkg_dir = tmp_path / "userpkg"
+        pkg_dir.mkdir()
+        (pkg_dir / "__init__.py").write_text("import pubrun\n", encoding="utf-8")
+        (pkg_dir / "sub.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+        script = f"""
+import importlib.util, json, sys
+
+sys.path.insert(0, {str(tmp_path)!r})
+spec = importlib.util.find_spec("userpkg.sub")
+assert spec is not None
+import pubrun
+run = pubrun.get_current_run()
+active = run is not None
+if run is not None:
+    pubrun.stop()
+print(json.dumps({{"active": active}}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(tmp_path),
+            env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["active"] is True
+
+    @pytest.mark.parametrize(
+        "cov_target",
+        ["pubrun.config", "pubrun.tracker", "pubrun.capture.subprocesses"],
+    )
+    def test_pytest_randomly_cov_submodule_collect_clean(self, cov_target, tmp_path):
+        pytest.importorskip("pytest_cov")
+        pytest.importorskip("coverage")
+        pytest.importorskip("pytest_randomly")
+
+        repo_root = pathlib.Path(__file__).resolve().parents[1]
+        test_file = repo_root / "tests" / "test_api.py"
+        result = subprocess.run(
+            [
+                PYTHON,
+                "-m",
+                "pytest",
+                "-p",
+                "randomly",
+                f"--cov={cov_target}",
+                "-q",
+                "--collect-only",
+                str(test_file),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(tmp_path),
+            env=self._clean_env(),
+        )
+        assert result.returncode == 0, (
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "deadlock detected" not in result.stderr
+        assert "Exception in thread pubrun-hw" not in result.stderr
+        assert not (tmp_path / "runs").exists()
+
+    def test_coverage_sys_modules_saved_repeated_probe_stress(self, tmp_path):
+        pytest.importorskip("coverage")
+
+        script = """
+import json, pathlib
+from coverage import inorout
+
+paths = []
+for _ in range(10):
+    with inorout.sys_modules_saved():
+        file_path, pkg_path = inorout.file_and_path_for_module("pubrun.capture.subprocesses")
+        assert file_path is not None
+        paths.append(str(file_path))
+
+print(json.dumps({
+    "iterations": len(paths),
+    "runs_exists": pathlib.Path("runs").exists(),
+}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(tmp_path),
+            env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert "deadlock detected" not in result.stderr
+        assert "Exception in thread pubrun-hw" not in result.stderr
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["iterations"] == 10
+        assert data["runs_exists"] is False
+        assert not (tmp_path / "runs").exists()
+
+    def test_pubrun_hw_performs_zero_pubrun_imports_during_autostart(self, tmp_path):
+        (tmp_path / ".pubrun.toml").write_text(
+            '[capture.hardware]\ndepth = "basic"\n\n[capture.subprocesses]\nenabled = true\n',
+            encoding="utf-8",
+        )
+        script = """
+import builtins, importlib, json, threading
+
+hw_import_module_calls = []
+hw_builtin_import_calls = []
+_orig_import_module = importlib.import_module
+_orig_builtin_import = builtins.__import__
+
+def _wrapped_import_module(name, package=None):
+    if threading.current_thread().name == "pubrun-hw" and (
+        name == "pubrun" or name.startswith("pubrun.")
+    ):
+        hw_import_module_calls.append(name)
+    return _orig_import_module(name, package=package)
+
+def _wrapped_builtin_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if threading.current_thread().name == "pubrun-hw" and (
+        name == "pubrun" or name.startswith("pubrun.")
+    ):
+        hw_builtin_import_calls.append(name)
+    return _orig_builtin_import(name, globals, locals, fromlist, level)
+
+importlib.import_module = _wrapped_import_module
+builtins.__import__ = _wrapped_builtin_import
+
+import pubrun
+run = pubrun.get_current_run()
+assert run is not None
+hw_thread = run._hardware_thread
+assert hw_thread is not None
+hw_thread.join(timeout=15)
+assert not hw_thread.is_alive()
+manifest = run.to_manifest_dict()
+pubrun.stop()
+
+print(json.dumps({
+    "hw_import_module_calls": hw_import_module_calls,
+    "hw_builtin_import_calls": hw_builtin_import_calls,
+    "hardware_status": manifest["hardware"]["capture_state"]["status"],
+    "host_status": manifest["host"]["capture_state"]["status"],
+    "filesystem_status": manifest["filesystem"]["capture_state"]["status"],
+}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(tmp_path),
+            env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["hw_import_module_calls"] == []
+        assert data["hw_builtin_import_calls"] == []
+        assert data["hardware_status"] != "pending"
+        assert data["host_status"] != "pending"
+        assert data["filesystem_status"] != "pending"
+
+    def test_nopatch_background_hw_does_not_load_subprocesses_module(self, tmp_path):
+        # Disable git capture so synchronous Step 2 (pubrun.capture.git, out of scope for
+        # background-thread changes) does not pre-load pubrun.capture.subprocesses before
+        # pubrun-hw runs; this exercises _disable_spy_if_loaded() in hardware.py,
+        # filesystem.py, and resources.py when pubrun.capture.subprocesses is unloaded.
+        (tmp_path / ".pubrun.toml").write_text(
+            "[capture.git]\nenabled = false\n",
+            encoding="utf-8",
+        )
+        script = """
+import json, sys
+import pubrun.nopatch as pubrun
+
+run = pubrun.get_current_run()
+assert run is not None
+hw_thread = run._hardware_thread
+if hw_thread is not None:
+    hw_thread.join(timeout=15)
+    assert not hw_thread.is_alive()
+loaded_before_stop = "pubrun.capture.subprocesses" in sys.modules
+pubrun.stop()
+loaded_after_stop = "pubrun.capture.subprocesses" in sys.modules
+
+print(json.dumps({
+    "loaded_before_stop": loaded_before_stop,
+    "loaded_after_stop": loaded_after_stop,
+}))
+"""
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(tmp_path),
+            env=self._clean_env(),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        assert data["loaded_before_stop"] is False
+        assert data["loaded_after_stop"] is False

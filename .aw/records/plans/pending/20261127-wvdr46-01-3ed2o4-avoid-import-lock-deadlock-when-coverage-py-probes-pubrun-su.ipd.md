@@ -64,7 +64,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Spec-probe detection and lazy core exports
 
-- [ ] E-01 Detect `importlib.util.find_spec` probes targeting `pubrun` in `src/pubrun/_bootstrap.py` and bypass eager boot in `src/pubrun/__init__.py`:
+- [x] E-01 Detect `importlib.util.find_spec` probes targeting `pubrun` in `src/pubrun/_bootstrap.py` and bypass eager boot in `src/pubrun/__init__.py`:
   - In `src/pubrun/_bootstrap.py`, add `is_spec_probe_in_progress() -> bool`. Walk up to 64 call frames starting at `sys._getframe(1)`. Return `True` when a frame has `frame.f_globals.get("__name__") == "importlib.util"` and `frame.f_code.co_name == "find_spec"`, and its target module name (`frame.f_locals.get("fullname")` when it is a non-empty `str`, otherwise `frame.f_locals.get("name")`) equals `"pubrun"` or starts with `"pubrun."`. Catch `(AttributeError, ValueError)` and return `False` as the safe fallback.
   - In `src/pubrun/__init__.py`, import `is_spec_probe_in_progress as _is_spec_probe` alongside `is_mode_submodule_import_in_progress as _is_mode_import` from `pubrun._bootstrap`, and check `_is_spec_probe()` first before `_is_mode_import()`:
     - When `_is_spec_probe()` returns `True`, do not import `pubrun.core`, do not call `_execute_boot_sequence()`, do not mutate `pubrun._bootstrap` mode-selection state, and do not register an `atexit` handler (preventing `atexit` callback accumulation when `coverage.inorout.sys_modules_saved()` removes and re-imports `pubrun` repeatedly).
@@ -74,11 +74,11 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - In `src/pubrun/__init__.py`, add a lock-guarded helper `_load_core_exports()` (using a reentrant module-level `_core_export_lock = _threading.RLock()`) and define `_CORE_EXPORT_NAMES` covering the 18 non-PEP-562 public exports in `__all__` plus `"_run_lock"` (excluding `"__version__"` and `"__commit__"`). Inside `_load_core_exports()`, acquire `_core_export_lock`, return immediately if every name in `_CORE_EXPORT_NAMES` is already present in `globals()`, otherwise import only the 17 non-`report` public exports plus `"_run_lock"` from `pubrun.core` and bind each into `globals()`, and import `pubrun.report as _report_pkg` and bind `globals()["report"] = _report_pkg`; never bind `pubrun.core.report` onto `pubrun` (so `pubrun.report` stays the `CallableModule` subpackage even if `pubrun.report` was already in `sys.modules`, such as after `importlib.util.find_spec("pubrun.report.output")`). Reuse `_load_core_exports()` from both `_ensure_core_loaded()` (the mode-submodule failure fallback, checking `if "start" not in globals():` inside `try: ... except Exception: pass` rather than calling `hasattr(_pkg, "start")` outside `try/except`, so lazy `__getattr__` cannot fire outside the `atexit` failure guard) and `src/pubrun/__init__.py::__getattr__` when `name in _CORE_EXPORT_NAMES`, returning `globals()[name]` while keeping `__version__` and `__commit__` resolved dynamically first in `__getattr__` without caching them in `globals()`.
   - Depends on: none
   - Expected outcome: Calling `importlib.util.find_spec("pubrun.<submodule>")` (including nested submodules such as `pubrun.report.output`, mode submodules, and relative `find_spec(".tracker", package="pubrun")`) with `PUBRUN_IMPORT_MODE` unset returns the module spec with zero `runs/` created, zero `pubrun-hw` threads spawned, zero `_bootstrap` mode selection, and zero `atexit` callbacks registered. If a caller does not restore `sys.modules` after `find_spec`, a subsequent `import pubrun.minimal as pubrun` selects `"minimal"` with zero conflicts, and a subsequent `import pubrun; pubrun.start(); pubrun.report(...); pubrun.stop()` resolves every public symbol cleanly while preserving `pubrun.report` as the `CallableModule` subpackage. Calling `importlib.util.find_spec("userpkg.sub")` where `userpkg/__init__.py` executes `import pubrun` still runs normal auto-start.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Lock-safe background capture startup and imports
 
-- [ ] E-02 Eliminate background-thread `importlib` lock acquisitions in `src/pubrun/tracker.py`:
+- [x] E-02 Eliminate background-thread `importlib` lock acquisitions in `src/pubrun/tracker.py`:
   - Update `src/pubrun/tracker.py::_get_dep` to check `sys.modules.get(module_name)` first and return `getattr(mod, attr_name)` directly when the module is already loaded and exposes `attr_name`, falling back to `importlib.import_module(module_name)` only when the module is missing or does not yet define `attr_name`.
   - In `src/pubrun/tracker.py::Run._bootstrap_engines`, reorder background `pubrun-hw` launch so synchronous capture setup (Steps 5 through 9: `SubprocessSpy`, `ConsoleInterceptor`, `EventStream`, `ResourceWatcher`, and `SignalExitCapture`) executes on the main thread before `pubrun-hw` starts:
     - Keep `self.hardware_data`, `self.host_data`, `self.filesystem_data`, and `self._hardware_future_done` initialized before Steps 5 through 9, and keep the `hw_depth == "off"` synchronous path (no thread spawn, no extra startup manifest write) unchanged.
@@ -86,26 +86,26 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Update `Run._record_capture_error`, `Run._collect_hardware_section`, `Run._collect_host_and_filesystem`, `Run._get_import_metadata`, `Run.to_manifest_dict`, and `_collect_hardware` in `src/pubrun/tracker.py` to resolve already-loaded modules (`pubrun`, `pubrun.core`, `pubrun.config`, `pubrun._bootstrap`, `pubrun.capture.redaction`, `pubrun.capture.filesystem`, `tempfile`) via `sys.modules.get(...)` before falling back to `import` statements, while still reading `fs_mod.get_filesystem` dynamically from the `pubrun.capture.filesystem` module so monkeypatches on `pubrun.capture.filesystem.get_filesystem` continue to work.
   - Depends on: none
   - Expected outcome: During a live `Run()` startup with `[capture.hardware].depth != "off"`, `pubrun-hw` never races with Steps 5 through 9 on Python `_ModuleLock` and executes zero `importlib.import_module` or `pubrun.*` module loads on the background thread, while preserving startup write coalescing, semaphore capping, `Thread.start()` rollback, and monkeypatch seams.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Avoid importing `pubrun.capture.subprocesses` from background worker threads in `src/pubrun/capture/hardware.py`, `src/pubrun/capture/filesystem.py`, and `src/pubrun/capture/resources.py`:
+- [x] E-03 Avoid importing `pubrun.capture.subprocesses` from background worker threads in `src/pubrun/capture/hardware.py`, `src/pubrun/capture/filesystem.py`, and `src/pubrun/capture/resources.py`:
   - Add a module-level `_SYS_MODULES = sys.modules` reference and a `_disable_spy_if_loaded()` helper in `src/pubrun/capture/hardware.py`, `src/pubrun/capture/filesystem.py`, and `src/pubrun/capture/resources.py` (using `contextlib.nullcontext`). Look up `spy_mod = getattr(sys, "modules", _SYS_MODULES).get("pubrun.capture.subprocesses")` so tests that monkeypatch `hardware.sys` with a minimal namespace (such as `tests/test_signals.py::TestMacosHardwareSpying::test_macos_hardware_calls_wrapped_in_disable_spy`) continue to resolve `pubrun.capture.subprocesses` safely. When `spy_mod` is present and exposes a callable `disable_spy`, return `spy_mod.disable_spy()`; otherwise return `contextlib.nullcontext()`.
   - Replace every inline `from pubrun.capture.subprocesses import disable_spy` followed by `with disable_spy():` in `src/pubrun/capture/hardware.py` (`_get_cpu_model`, `_get_total_memory_bytes`, `_get_gpus`), `src/pubrun/capture/filesystem.py` (`_mac_mount_table`), and `src/pubrun/capture/resources.py` (`_get_rss_windows`, `_get_rss_darwin`, `_get_tree_rss_darwin`) with `with _disable_spy_if_loaded():`.
   - In `src/pubrun/capture/resources.py::ResourceWatcher._sample_system_metrics`, resolve `pubrun.capture.system_metrics` via `getattr(sys, "modules", _SYS_MODULES).get("pubrun.capture.system_metrics")` first (already imported on the main thread during `ResourceWatcher.__init__` -> `_capture_system_start`) before falling back to `from pubrun.capture import system_metrics as _sm`.
   - Depends on: none
   - Expected outcome: When `pubrun.capture.subprocesses` is loaded (for example under `auto` mode), hardware, filesystem, and resource subprocess probes still execute inside `disable_spy()` and are not recorded by `SubprocessSpy`. When `pubrun.capture.subprocesses` is not loaded (for example under `nopatch` mode or with `[capture.subprocesses].enabled = false`), background probes execute without importing `pubrun.capture.subprocesses` or acquiring its `_ModuleLock`.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Test harness startup isolation and regression tests
 
-- [ ] E-04 Prevent `tests/conftest.py` from auto-starting a stray run during `pytest` collection:
+- [x] E-04 Prevent `tests/conftest.py` from auto-starting a stray run during `pytest` collection:
   - At the top of `tests/conftest.py`, add `import pubrun.noauto` immediately before `import pubrun` and `import pubrun.tracker`, with a concise comment explaining that `tests/conftest.py` loads before `isolated_cwd` runs and must not auto-start a stray `runs/pubrun-pytest-*` directory in the repository root.
   - Keep `clean_active_run`, `pubrun_state_isolation` (which calls `_bs.reset_state()` around every test), and all other fixtures in `tests/conftest.py` unchanged.
   - Depends on: E-01
   - Expected outcome: Running `pytest --collect-only` or `pytest -p randomly --cov=pubrun.<submodule>` with `PUBRUN_IMPORT_MODE` unset creates zero `runs/` directories in the working directory, while `tests/test_conftest_isolation.py` and the full test suite continue to pass.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Add fresh-subprocess behavioral regression tests in `tests/test_import_modes.py` and run full validation:
+- [x] E-05 Add fresh-subprocess behavioral regression tests in `tests/test_import_modes.py` and run full validation:
   - Add a new test class (for example `TestSpecProbeAndBackgroundImportLockSafety`) in `tests/test_import_modes.py` using clean subprocess environments (`PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and `PUBRUN_RUN_MODE_OVERRIDE` unset, `PYTHONPATH` pointing at `src`, `cwd=tmp_path`) testing observable runtime behavior only (no `ast`, `inspect`, regex, or source-text inspection):
     1. **Direct `importlib.util.find_spec` probes:** Probe `pubrun.tracker`, `pubrun.config`, `pubrun.capture.subprocesses`, `pubrun.noauto`, and relative `find_spec(".tracker", package="pubrun")` in fresh subprocesses; assert every spec is non-`None`, `runs/` does not exist in `tmp_path`, no `pubrun-hw` thread is alive, `pubrun._bootstrap.is_mode_selected()` is `False`, and `atexit._ncallbacks()` does not increase across repeated `sys_modules_saved()`-style probe cycles (clearing `pubrun*` from `sys.modules` between probes).
     2. **Follow-up imports after `find_spec` without `sys_modules_saved()`:** (a) Call `importlib.util.find_spec("pubrun.tracker")`, then `import pubrun.minimal as pubrun`; assert `selected_mode == "minimal"`, `conflicts_detected == 0`, and `get_current_run() is None`. (b) Call `importlib.util.find_spec("pubrun.tracker")`, then `import pubrun; run = pubrun.start(); pubrun.report("probe_check", {"ok": True}); pubrun.stop()`; assert `pubrun.report` is callable, `pubrun.report.output` is importable, `pubrun.__version__` is a `str`, `"__version__" not in pubrun.__dict__`, and `"__commit__" not in pubrun.__dict__`. (c) Call `importlib.util.find_spec("pubrun.report.output")` (so `pubrun.report` is already in `sys.modules`), then `import pubrun; run = pubrun.start(); pubrun.report("probe_check", {"ok": True}); import pubrun.report.diagnostics; pubrun.stop()`; assert `pubrun.report` remains the `CallableModule` subpackage and `pubrun.report.diagnostics` imports cleanly.
@@ -115,7 +115,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - Run all commands in `## Required tests / validation`.
   - Depends on: E-01, E-02, E-03, E-04
   - Expected outcome: All new and existing `pytest` suites, `pytest -p randomly --cov=pubrun.<submodule>` checks, and three-platform `mypy` checks pass with exit `0` and leave zero stray `runs/` directories in the repository root.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -174,30 +174,83 @@ None. Backlog item `wvdr46` describes the exact trigger (`pytest -p randomly --c
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted output of fresh-subprocess checks (with `PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and `PUBRUN_RUN_MODE_OVERRIDE` unset, `PYTHONPATH=src`, running in a temporary directory) exiting `0`: (1) invoking `importlib.util.find_spec` on `pubrun.tracker`, `pubrun.capture.subprocesses`, `pubrun.noauto`, and relative `(".tracker", "pubrun")` (exercising `src/pubrun/_bootstrap.py::is_spec_probe_in_progress` and `src/pubrun/__init__.py` spec-probe guard created in `E-01`), printing confirmation that all specs are non-`None`, `runs/` does not exist, `is_mode_selected()` is `False`, no `pubrun-hw` thread is alive, and `atexit._ncallbacks()` does not grow across repeated `sys.modules` clear-and-probe cycles; (2) calling `importlib.util.find_spec("pubrun.tracker")` without clearing `sys.modules`, then exercising both follow-up paths (`import pubrun.minimal` with zero conflicts in one subprocess, and `import pubrun; run = pubrun.start(); pubrun.report("check", {"ok": True}); import pubrun.report.output; pubrun.stop()` with dynamic `__version__`/`__commit__` in a second subprocess, exercising `src/pubrun/__init__.py::__getattr__` and `_load_core_exports` created in `E-01`), plus calling `importlib.util.find_spec("pubrun.report.output")` without clearing `sys.modules` followed by `import pubrun; pubrun.start(); pubrun.report("check", {"ok": True}); import pubrun.report.diagnostics; pubrun.stop()` confirming `pubrun.report` stays a `CallableModule` subpackage; and (3) `tests/test_report_subpackage_integrity.py` exiting `0`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    === V-01-1 (rc=0, runs_exists=False) ===
+    probe target='pubrun.tracker' pkg=None spec=pubrun.tracker mode_selected=False hw_threads=0 ncallbacks=0->0 runs=False
+    probe target='pubrun.capture.subprocesses' pkg=None spec=pubrun.capture.subprocesses mode_selected=False hw_threads=0 ncallbacks=0->0 runs=False
+    probe target='pubrun.noauto' pkg=None spec=pubrun.noauto mode_selected=False hw_threads=0 ncallbacks=0->0 runs=False
+    probe target='.tracker' pkg='pubrun' spec=pubrun.tracker mode_selected=False hw_threads=0 ncallbacks=0->0 runs=False
+    === V-01-2a (rc=0, runs_exists=False) ===
+    followup minimal: selected_mode=minimal conflicts=0 active=False
+    === V-01-2b (rc=0, runs_exists=True) ===
+    followup root(tracker): callable_report=True module_report=True version='1.4.0' dynamic_meta=True
+    === V-01-2c (rc=0, runs_exists=True) ===
+    followup root(report.output): callable_subpackage=True diagnostics_imported=True
+    ```
+    `tests/test_report_subpackage_integrity.py` passed within both Command 1 (`309 passed in 57.59s`, exit `0`) and the targeted run (`146 passed in 27.04s`, exit `0`).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted output of a fresh-subprocess check (with `PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and `PUBRUN_RUN_MODE_OVERRIDE` unset, `PYTHONPATH=src`, running in a temporary directory) that wraps both `importlib.import_module` and `builtins.__import__` to record any `"pubrun"` or `"pubrun.*"` call made on thread `pubrun-hw`, executes `import pubrun`, waits for `run._hardware_thread.join(timeout=15)` and `pubrun.stop()` (exercising `src/pubrun/tracker.py::_get_dep`, `sys.modules` fast paths, and reordered main-thread pre-loading in `Run._bootstrap_engines` updated in `E-02`), and prints empty background-import records with non-`pending` `hardware`/`host`/`filesystem` statuses and exit `0`; plus pasted output of `python3 -m pytest tests/test_startup_overhead_writes.py tests/test_runtime_safety.py -v` exiting `0`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    === V-02 (rc=0, runs_exists=True) ===
+    pubrun-hw imports: import_module=[] __import__=[] statuses=(complete, complete, complete)
+    ```
+    `tests/test_startup_overhead_writes.py` and `tests/test_runtime_safety.py` passed within both Command 1 (`309 passed in 57.59s`, exit `0`) and the targeted run (`146 passed in 27.04s`, exit `0`).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted output of (1) a fresh-subprocess check under `import pubrun.nopatch as pubrun` in a temporary directory waiting for `run._hardware_thread.join(timeout=15)` and `pubrun.stop()` and confirming `"pubrun.capture.subprocesses" not in sys.modules` with exit `0` (exercising `_disable_spy_if_loaded()` in `src/pubrun/capture/hardware.py` and `src/pubrun/capture/filesystem.py` updated in `E-03`), (2) `python3 -m pytest tests/test_signals.py tests/test_hardware.py tests/test_resources.py -v` exiting `0` (including `tests/test_signals.py::TestMacosHardwareSpying::test_macos_hardware_calls_wrapped_in_disable_spy` PASSED, exercising `_SYS_MODULES` fallback under monkeypatched `hardware.sys`), and (3) Command 3 (`mypy` on Linux, `win32`, and `darwin`) exiting `0`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    === V-03-1 (rc=0, runs_exists=True) ===
+    nopatch (git.enabled=false): pubrun.capture.subprocesses in sys.modules = False
+    ```
+    Note (`D-01`): `[capture.git].enabled = false` is set in `.pubrun.toml` for this probe because `src/pubrun/capture/git.py::_run_git_raw` (explicitly deferred outside `Scope-Paths` in this plan) unconditionally imports `pubrun.capture.subprocesses` on the main thread during Step 2; disabling git capture leaves `pubrun.capture.subprocesses` unloaded so `_disable_spy_if_loaded()` in `hardware.py`, `filesystem.py`, and `resources.py` is exercised on the unloaded path. Follow-up backlog item `ctx0hj` filed for `src/pubrun/capture/git.py`.
+    ```text
+    tests/test_signals.py::TestMacosHardwareSpying::test_macos_hardware_calls_wrapped_in_disable_spy PASSED [ 56%]
+    ============================= 309 passed in 57.59s =============================
+    === CMD 3 ===
+    Success: no issues found in 71 source files
+    Success: no issues found in 71 source files
+    Success: no issues found in 71 source files
+    ```
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted output of (1) running `python3 -m pytest -q --collect-only tests/test_api.py` in a temporary working directory (with `PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and `PUBRUN_RUN_MODE_OVERRIDE` unset, exercising `tests/conftest.py` updated in `E-04`) exiting `0` with zero `runs/` directory created, and (2) `python3 -m pytest tests/test_conftest_isolation.py -v` exiting `0`.
   - Observed evidence:
-  - Result: pending
+    ```text
+    === V-04-1 (rc=0, runs_exists=False) ===
+    48 tests collected in 0.03s
+    ```
+    `tests/test_conftest_isolation.py` passed within Command 1 (`309 passed in 57.59s`, exit `0`) and the targeted run (`146 passed in 27.04s`, `TARGETED_CLEAN_OK`, exit `0`).
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted output of Commands 1, 2, 3, 4, and 5 from `## Required tests / validation` all exiting `0` (including the new regression tests in `tests/test_import_modes.py` passing, `CLEAN_COV_PROBES_OK` with zero `deadlock detected` or timeout on `pytest -p randomly --cov=pubrun.config`, `--cov=pubrun.tracker`, and `--cov=pubrun.capture.subprocesses` with `PUBRUN_IMPORT_MODE`, `PUBRUN_AUTO_START`, and `PUBRUN_RUN_MODE_OVERRIDE` unset, zero stray `runs/` directories created in the temporary working directory or repository root, and three-platform plus downstream strict `mypy` passing).
   - Observed evidence:
-  - Result: pending
+    ```text
+    === CMD 1 ===
+    ============================= 309 passed in 57.59s =============================
+    === CMD 2 ===
+    ============================= 115 passed in 24.53s =============================
+    === CMD 3 ===
+    Success: no issues found in 71 source files
+    Success: no issues found in 71 source files
+    Success: no issues found in 71 source files
+    === CMD 4 ===
+    Success: no issues found in 1 source file
+    === CMD 5 (PYTHONPATH="$repo/src" for worktree isolation) ===
+    CLEAN_COV_PROBES_OK
+    === AW SUITE ===
+    ======================= 2665 passed in 158.66s (0:02:38) =======================
+    ```
+  - Result: pass
 
 ## Approval and execution gate
 

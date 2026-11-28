@@ -1,3 +1,4 @@
+import contextlib
 import json
 import logging
 import math
@@ -10,6 +11,18 @@ import time
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("pubrun")
+
+_SYS_MODULES = sys.modules
+
+
+def _disable_spy_if_loaded() -> Any:
+    """Return ``disable_spy()`` when ``pubrun.capture.subprocesses`` is loaded, else a no-op context."""
+    modules = getattr(sys, "modules", _SYS_MODULES)
+    spy_mod = modules.get("pubrun.capture.subprocesses") if modules is not None else None
+    disable = getattr(spy_mod, "disable_spy", None)
+    if callable(disable):
+        return disable()
+    return contextlib.nullcontext()
 
 # Default per-command timeout (seconds) for hardware-inspection subprocesses if
 # no config value is available. Overridable via [capture.hardware].timeout.
@@ -450,8 +463,7 @@ def _get_cpu_model(
             cmd_timeout = budget.next_timeout() if budget is not None else timeout
             if cmd_timeout is not None:
                 try:
-                    from pubrun.capture.subprocesses import disable_spy
-                    with disable_spy():
+                    with _disable_spy_if_loaded():
                         out = subprocess.check_output(
                             ["wmic", "cpu", "get", "Name"],
                             text=True,
@@ -476,8 +488,7 @@ def _get_cpu_model(
             cmd_timeout = budget.next_timeout() if budget is not None else timeout
             if cmd_timeout is None:
                 return None
-            from pubrun.capture.subprocesses import disable_spy
-            with disable_spy():
+            with _disable_spy_if_loaded():
                 out = subprocess.check_output(
                     ["sysctl", "-n", "machdep.cpu.brand_string"],
                     text=True,
@@ -521,8 +532,7 @@ def _get_cpu_model(
             cmd_timeout = budget.next_timeout() if budget is not None else timeout
             if cmd_timeout is None:
                 return None
-            from pubrun.capture.subprocesses import disable_spy
-            with disable_spy():
+            with _disable_spy_if_loaded():
                 out = subprocess.check_output(
                     ["lscpu"],
                     text=True,
@@ -560,8 +570,7 @@ def _get_total_memory_bytes(
             cmd_timeout = budget.next_timeout() if budget is not None else timeout
             if cmd_timeout is None:
                 return None
-            from pubrun.capture.subprocesses import disable_spy
-            with disable_spy():
+            with _disable_spy_if_loaded():
                 out = subprocess.check_output(
                     ["wmic", "OS", "get", "TotalVisibleMemorySize"],
                     text=True,
@@ -575,8 +584,7 @@ def _get_total_memory_bytes(
             cmd_timeout = budget.next_timeout() if budget is not None else timeout
             if cmd_timeout is None:
                 return None
-            from pubrun.capture.subprocesses import disable_spy
-            with disable_spy():
+            with _disable_spy_if_loaded():
                 out = subprocess.check_output(
                     ["sysctl", "-n", "hw.memsize"],
                     text=True,
@@ -621,8 +629,7 @@ def _get_gpus(
             if config_hw.get("capture_gpu_clock_speed", False):
                 cmd[1] += ",clocks.max.sm"
 
-            from pubrun.capture.subprocesses import disable_spy
-            with disable_spy():
+            with _disable_spy_if_loaded():
                 out = subprocess.check_output(
                     cmd, text=True, stderr=subprocess.DEVNULL, timeout=nvidia_timeout
                 )
@@ -657,8 +664,7 @@ def _get_gpus(
         amd_timeout = budget.next_timeout() if budget is not None else timeout
         if amd_timeout is not None:
             try:
-                from pubrun.capture.subprocesses import disable_spy
-                with disable_spy():
+                with _disable_spy_if_loaded():
                     out = subprocess.check_output(
                         ["amd-smi", "static", "--json"],
                         text=True,
@@ -679,8 +685,7 @@ def _get_gpus(
             rocm_timeout = budget.next_timeout() if budget is not None else timeout
             if rocm_timeout is not None:
                 try:
-                    from pubrun.capture.subprocesses import disable_spy
-                    with disable_spy():
+                    with _disable_spy_if_loaded():
                         out = subprocess.check_output(
                             [
                                 "rocm-smi",
@@ -715,8 +720,7 @@ def _get_gpus(
             try:
                 sys_plat = sys.platform
                 if sys_plat == "win32":
-                    from pubrun.capture.subprocesses import disable_spy
-                    with disable_spy():
+                    with _disable_spy_if_loaded():
                         out = subprocess.check_output(
                             [
                                 "wmic",
@@ -750,8 +754,7 @@ def _get_gpus(
                                 "driver_version": parts[2],
                             })
                 elif sys_plat == "darwin":
-                    from pubrun.capture.subprocesses import disable_spy
-                    with disable_spy():
+                    with _disable_spy_if_loaded():
                         out = subprocess.check_output(
                             ["system_profiler", "SPDisplaysDataType"],
                             text=True,

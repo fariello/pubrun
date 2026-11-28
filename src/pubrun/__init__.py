@@ -398,11 +398,90 @@ def _reset_commit_cache() -> None:
         globals().pop("__commit__", None)
 
 
+_core_export_lock = _threading.RLock()
+_CORE_EXPORT_NAMES = frozenset({
+    "start",
+    "stop",
+    "annotate",
+    "phase",
+    "paused",
+    "diff",
+    "audit_run",
+    "tracked_run",
+    "get_current_run",
+    "report",
+    "artifact",
+    "print",
+    "open",
+    "register_file",
+    "register_input",
+    "register_output",
+    "subprocess",
+    "popen",
+    "_run_lock",
+})
+
+
+def _load_core_exports() -> None:
+    """Lazily bind pubrun.core exports and the pubrun.report CallableModule subpackage."""
+    with _core_export_lock:
+        g = globals()
+        if all(name in g for name in _CORE_EXPORT_NAMES):
+            return
+        from pubrun.core import (
+            start,
+            stop,
+            annotate,
+            phase,
+            paused,
+            diff,
+            audit_run,
+            tracked_run,
+            get_current_run,
+            artifact,
+            print as _pubrun_print,
+            open as _pubrun_open,
+            register_file,
+            register_input,
+            register_output,
+            subprocess,
+            popen,
+            _run_lock,
+        )
+        # Bind pubrun.report explicitly to the CallableModule subpackage (never
+        # pubrun.core.report) so `pubrun.report` stays both callable and a subpackage
+        # even when `pubrun.report` was already present in sys.modules.
+        import pubrun.report as _report_pkg
+
+        g["start"] = start
+        g["stop"] = stop
+        g["annotate"] = annotate
+        g["phase"] = phase
+        g["paused"] = paused
+        g["diff"] = diff
+        g["audit_run"] = audit_run
+        g["tracked_run"] = tracked_run
+        g["get_current_run"] = get_current_run
+        g["report"] = _report_pkg
+        g["artifact"] = artifact
+        g["print"] = _pubrun_print
+        g["open"] = _pubrun_open
+        g["register_file"] = register_file
+        g["register_input"] = register_input
+        g["register_output"] = register_output
+        g["subprocess"] = subprocess
+        g["popen"] = popen
+        g["_run_lock"] = _run_lock
+
+
 def __getattr__(name: str) -> _Any:
     if name == "__version__":
         return _get_version()
     if name == "__commit__":
         return _get_commit()
+    if name in _CORE_EXPORT_NAMES:
+        _load_core_exports()
+        return globals()[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -441,10 +520,18 @@ __all__ = [
 
 # -- Target-aware routing -----------------------------------------------------
 # When Python processes `import pubrun.noauto`, it loads pubrun/__init__.py
-# first. We detect this and defer core loading to the mode submodule.
-from pubrun._bootstrap import is_mode_submodule_import_in_progress as _is_mode_import  # noqa: E402
+# first. We detect spec probes (`importlib.util.find_spec("pubrun...")`) and
+# mode submodule imports so __init__.py avoids eager boot when appropriate.
+from pubrun._bootstrap import (  # noqa: E402
+    is_mode_submodule_import_in_progress as _is_mode_import,
+    is_spec_probe_in_progress as _is_spec_probe,
+)
 
-if not _is_mode_import():
+if _is_spec_probe():
+    # Spec probe targeting pubrun: skip eager core loading, boot sequence, and
+    # atexit registration. Follow-up attribute access resolves lazily via PEP 562.
+    pass
+elif not _is_mode_import():
     # Root import: load core and execute boot sequence (auto-start if configured)
     from pubrun.core import (  # noqa: F401, E402
         start,
@@ -477,47 +564,15 @@ else:
     # left permanently broken (P2-B5).
     import atexit as _atexit
 
-    def _ensure_core_loaded():
+    def _ensure_core_loaded() -> None:
         """Safety net: if mode submodule failed, load core as fallback."""
-        import pubrun as _pkg
-        if not hasattr(_pkg, "start"):
-            try:
-                from pubrun.core import (
-                    start, stop, annotate, phase, paused, diff,
-                    audit_run, tracked_run, get_current_run,
-                    report, artifact, print, open,
-                    register_file, register_input, register_output,
-                    subprocess, popen,
-                    _run_lock,
-                )
-                _pkg.start = start
-                _pkg.stop = stop
-                _pkg.annotate = annotate
-                _pkg.phase = phase
-                _pkg.paused = paused
-                _pkg.diff = diff
-                _pkg.audit_run = audit_run
-                _pkg.tracked_run = tracked_run
-                _pkg.get_current_run = get_current_run
-                # `pubrun.report` is a CallableModule (pubrun/report/__init__.py): BOTH callable
-                # as the report() API AND a subpackage exposing pubrun.report.output/checks/
-                # diagnostics. Import the subpackage so the attribute is that CallableModule; do
-                # NOT do `_pkg.report = report` (the plain function shadows the subpackage and
-                # breaks `import pubrun.report.<submodule>`).
-                import pubrun.report  # noqa: F401
-                _pkg.artifact = artifact
-                _pkg.print = print
-                _pkg.open = open
-                _pkg.register_file = register_file
-                _pkg.register_input = register_input
-                _pkg.register_output = register_output
-                _pkg.subprocess = subprocess
-                _pkg.popen = popen
-                _pkg._run_lock = _run_lock
-            except Exception:
-                pass
+        try:
+            if "start" not in globals():
+                _load_core_exports()
+        except Exception:
+            pass
 
     _atexit.register(_ensure_core_loaded)
     del _atexit
 
-del _is_mode_import
+del _is_spec_probe, _is_mode_import

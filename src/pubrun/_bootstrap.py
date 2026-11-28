@@ -333,3 +333,38 @@ def is_mode_submodule_import_in_progress() -> bool:
     except (AttributeError, ValueError):
         pass
     return False
+
+
+def is_spec_probe_in_progress() -> bool:
+    """Detect if ``importlib.util.find_spec`` is probing a ``pubrun`` module.
+
+    Tools such as ``coverage.py`` call ``importlib.util.find_spec("pubrun.<submodule>")``
+    while inspecting module paths, which executes ``pubrun/__init__.py`` as a side effect
+    of resolving the parent package. Detecting that frame allows ``pubrun/__init__.py``
+    to skip eager core loading, auto-start, and ``atexit`` registration during spec probes
+    while still running normal auto-start when an unrelated package explicitly executes
+    ``import pubrun`` during its own ``find_spec``.
+    """
+    try:
+        frame: Optional[FrameType] = sys._getframe(1)
+        for _ in range(64):
+            if frame is None:
+                break
+            if (
+                frame.f_globals.get("__name__") == "importlib.util"
+                and frame.f_code.co_name == "find_spec"
+            ):
+                raw_fullname = frame.f_locals.get("fullname")
+                target = (
+                    raw_fullname
+                    if isinstance(raw_fullname, str) and raw_fullname
+                    else frame.f_locals.get("name")
+                )
+                if isinstance(target, str) and (
+                    target == "pubrun" or target.startswith("pubrun.")
+                ):
+                    return True
+            frame = frame.f_back
+    except (AttributeError, ValueError):
+        pass
+    return False

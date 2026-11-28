@@ -13,6 +13,7 @@ PARSING ``/proc/mounts`` / ``/proc/self/mountinfo`` on Linux (pure file reads th
 touch the target mount) and by reading the pre-fetched ``mount`` table (with a hard
 subprocess timeout) on macOS. We never call ``statvfs``/``df``/``stat`` on the target path.
 """
+import contextlib
 import os
 import sys
 import time
@@ -21,6 +22,18 @@ import threading
 from typing import Dict, Any, List, Optional, Tuple
 
 logger = logging.getLogger("pubrun")
+
+_SYS_MODULES = sys.modules
+
+
+def _disable_spy_if_loaded() -> Any:
+    """Return ``disable_spy()`` when ``pubrun.capture.subprocesses`` is loaded, else a no-op context."""
+    modules = getattr(sys, "modules", _SYS_MODULES)
+    spy_mod = modules.get("pubrun.capture.subprocesses") if modules is not None else None
+    disable = getattr(spy_mod, "disable_spy", None)
+    if callable(disable):
+        return disable()
+    return contextlib.nullcontext()
 
 # Filesystem types considered "network" (remote / cluster) filesystems.
 _NETWORK_FSTYPES = {
@@ -170,10 +183,9 @@ def _mac_mount_table(timeout: float = 2.0) -> List[Tuple[str, str]]:
 
     Uses a hard subprocess timeout so a wedged network mount cannot hang us.
     """
-    from pubrun.capture.subprocesses import disable_spy
     import subprocess
     entries: List[Tuple[str, str]] = []
-    with disable_spy():
+    with _disable_spy_if_loaded():
         out = subprocess.check_output(["mount"], text=True, stderr=subprocess.DEVNULL, timeout=timeout)
     for line in out.splitlines():
         # e.g. "/dev/disk1s1 on / (apfs, local, journaled)"

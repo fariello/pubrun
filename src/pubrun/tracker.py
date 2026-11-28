@@ -56,6 +56,11 @@ def _get_dep(name: str) -> Any:
     if spec is None:
         raise KeyError(name)
     module_name, attr_name = spec
+    mod = sys.modules.get(module_name)
+    if mod is not None:
+        attr = getattr(mod, attr_name, _DEP_UNSET)
+        if attr is not _DEP_UNSET:
+            return attr
     import importlib
     mod = importlib.import_module(module_name)
     return getattr(mod, attr_name)
@@ -639,8 +644,10 @@ class Run:
         warn: bool = True,
     ) -> str:
         """Format, record, and warn once for a capture/cleanup exception."""
-        from pubrun.capture.redaction import format_safe_error_detail
-        detail = format_safe_error_detail(exc, getattr(self, "config", None))
+        redaction_mod: Any = sys.modules.get("pubrun.capture.redaction")
+        if redaction_mod is None:
+            from pubrun.capture import redaction as redaction_mod
+        detail = redaction_mod.format_safe_error_detail(exc, getattr(self, "config", None))
         should_warn = self._store_capture_error_detail(
             section, stage, detail, exc_type=type(exc).__name__, warn=warn
         )
@@ -767,8 +774,15 @@ class Run:
 
     def _collect_hardware_section(self) -> None:
         """Collect hardware metadata inside an isolated failure guard."""
-        from pubrun.core import _run_lock
-        from pubrun.capture.redaction import format_safe_error_detail
+        core_mod: Any = sys.modules.get("pubrun.core")
+        if core_mod is not None and hasattr(core_mod, "_run_lock"):
+            _run_lock = core_mod._run_lock
+        else:
+            from pubrun.core import _run_lock
+        redaction_mod: Any = sys.modules.get("pubrun.capture.redaction")
+        if redaction_mod is None:
+            from pubrun.capture import redaction as redaction_mod
+        format_safe_error_detail = redaction_mod.format_safe_error_detail
 
         try:
             hw_res = _get_dep("get_hardware")(self.config)
@@ -796,8 +810,15 @@ class Run:
         Note: on macOS ``get_filesystem()`` runs a bounded 2-second ``mount``
         subprocess; on Linux and Windows it is non-blocking.
         """
-        from pubrun.core import _run_lock
-        from pubrun.capture.redaction import format_safe_error_detail
+        core_mod: Any = sys.modules.get("pubrun.core")
+        if core_mod is not None and hasattr(core_mod, "_run_lock"):
+            _run_lock = core_mod._run_lock
+        else:
+            from pubrun.core import _run_lock
+        redaction_mod: Any = sys.modules.get("pubrun.capture.redaction")
+        if redaction_mod is None:
+            from pubrun.capture import redaction as redaction_mod
+        format_safe_error_detail = redaction_mod.format_safe_error_detail
 
         try:
             host_res = _get_dep("get_host")(self.config)
@@ -820,15 +841,19 @@ class Run:
                 self._emit_capture_warning("host", "bootstrap", detail)
 
         try:
-            from pubrun.capture.filesystem import get_filesystem
-            import tempfile as _tf
+            fs_mod: Any = sys.modules.get("pubrun.capture.filesystem")
+            if fs_mod is None:
+                from pubrun.capture import filesystem as fs_mod
+            tf_mod: Any = sys.modules.get("tempfile")
+            if tf_mod is None:
+                import tempfile as tf_mod
 
             paths = {
                 "output_dir": str(getattr(self, "output_base_dir", "") or ""),
                 "run_dir": str(getattr(self, "run_dir", "") or ""),
-                "tmpdir": _tf.gettempdir(),
+                "tmpdir": tf_mod.gettempdir(),
             }
-            fs_res = get_filesystem(self.config, {k: v for k, v in paths.items() if v})
+            fs_res = fs_mod.get_filesystem(self.config, {k: v for k, v in paths.items() if v})
             with _run_lock:
                 if not self._hardware_write_closed:
                     self.filesystem_data = fs_res
@@ -916,10 +941,12 @@ class Run:
             detail = self._record_capture_error("environment", "bootstrap", exc)
             self.environment_data = {"capture_state": {"status": "failed", "detail": detail}}
 
-        # 4. Hardware, Host, and Filesystem tracking.
+        # 4. Hardware, Host, and Filesystem tracking initialization.
         # When capture.hardware.depth == "off", collect all three synchronously in
         # separate guards without spawning pubrun-hw or triggering a second startup
-        # manifest write. Otherwise defer to a daemon thread with coalesced refresh.
+        # manifest write. When depth != "off", run synchronous Steps 5 through 9
+        # on the main thread first, then pre-load pubrun-hw dependencies and start
+        # the background daemon thread so it never contends on Python import locks.
         from pubrun.config import _section
         capture_cfg = _section(self.config, "capture")
         hw_depth = _section(capture_cfg, "hardware").get("depth", "basic")
@@ -936,76 +963,6 @@ class Run:
                 self._background_hardware_seconds = 0.0
                 self._hardware_thread = None
                 self._hardware_future_done.set()
-        else:
-            sem = _HARDWARE_SEMAPHORE
-            if not sem.acquire(blocking=False):
-                skip_detail = "hardware capture skipped: concurrent thread limit reached"
-                self.hardware_data = {
-                    "capture_state": {"status": "unavailable", "detail": skip_detail}
-                }
-                self.host_data = {
-                    "capture_state": {"status": "unavailable", "detail": skip_detail}
-                }
-                self.filesystem_data = {
-                    "capture_state": {"status": "unavailable", "detail": skip_detail}
-                }
-                self._background_hardware_seconds = 0.0
-                self._hardware_thread = None
-                self._hardware_future_done.set()
-            else:
-                def _collect_hardware():
-                    from pubrun.core import _run_lock
-
-                    hw_start = time.perf_counter()
-                    try:
-                        try:
-                            self._collect_hardware_section()
-                            self._collect_host_and_filesystem()
-                        finally:
-                            self._background_hardware_seconds = max(
-                                0.0, time.perf_counter() - hw_start
-                            )
-                            self._hardware_future_done.set()
-
-                        # Coalesced refresh: skip when the initial startup write already
-                        # included completed hardware data or when the run is inactive or
-                        # finalized. Always acquire _run_lock before _write_lock.
-                        try:
-                            with _run_lock:
-                                writer = getattr(self, "writer", None)
-                                if (
-                                    writer is not None
-                                    and self.is_active
-                                    and not self._finalized
-                                    and not getattr(writer, "_startup_included_hardware", False)
-                                ):
-                                    writer.write_startup_manifest(is_refresh=True)
-                        except Exception:
-                            pass  # Best-effort
-                    finally:
-                        try:
-                            sem.release()
-                        except ValueError:
-                            pass
-
-                self._hardware_thread = _threading.Thread(
-                    target=_collect_hardware, daemon=True, name="pubrun-hw"
-                )
-                try:
-                    self._hardware_thread.start()
-                except Exception as exc:
-                    try:
-                        sem.release()
-                    except ValueError:
-                        pass
-                    detail = self._record_capture_error("hardware", "bootstrap", exc)
-                    self._record_capture_error("host", "bootstrap", exc, warn=False)
-                    self._record_capture_error("filesystem", "bootstrap", exc, warn=False)
-                    self.hardware_data = {"capture_state": {"status": "failed", "detail": detail}}
-                    self.host_data = {"capture_state": {"status": "failed", "detail": detail}}
-                    self.filesystem_data = {"capture_state": {"status": "failed", "detail": detail}}
-                    self._hardware_thread = None
-                    self._hardware_future_done.set()
 
         # Determine if global hooks and patches are permitted by the import mode.
         _patch_subprocesses = True
@@ -1131,6 +1088,109 @@ class Run:
                 self.signal_capture = None
                 detail = self._record_capture_error("signals", "bootstrap", exc)
                 self.signals_data = {"capture_state": {"status": "failed", "detail": detail}}
+
+        # 10. Start deferred background hardware/host/filesystem capture after
+        # synchronous Steps 5 through 9 complete, pre-loading its dependencies on
+        # the main thread so pubrun-hw performs zero pubrun.* imports concurrently.
+        if hw_depth != "off":
+            sem = _HARDWARE_SEMAPHORE
+            if not sem.acquire(blocking=False):
+                skip_detail = "hardware capture skipped: concurrent thread limit reached"
+                self.hardware_data = {
+                    "capture_state": {"status": "unavailable", "detail": skip_detail}
+                }
+                self.host_data = {
+                    "capture_state": {"status": "unavailable", "detail": skip_detail}
+                }
+                self.filesystem_data = {
+                    "capture_state": {"status": "unavailable", "detail": skip_detail}
+                }
+                self._background_hardware_seconds = 0.0
+                self._hardware_thread = None
+                self._hardware_future_done.set()
+            else:
+                # Best-effort main-thread pre-load before starting pubrun-hw.
+                # Each load is isolated so a broken or fault-injected module never
+                # leaks _HARDWARE_SEMAPHORE or escapes bootstrap into Ghost Mode.
+                import importlib as _importlib
+                for _preload_mod in (
+                    "pubrun.core",
+                    "pubrun.capture.redaction",
+                    "pubrun.capture.signals",
+                    "pubrun.capture.filesystem",
+                    "pubrun.config",
+                    "pubrun._bootstrap",
+                    "tempfile",
+                ):
+                    if _preload_mod not in sys.modules:
+                        try:
+                            _importlib.import_module(_preload_mod)
+                        except Exception:
+                            pass
+                for _preload_dep in ("get_hardware", "get_host"):
+                    try:
+                        _get_dep(_preload_dep)
+                    except Exception:
+                        pass
+
+                def _collect_hardware() -> None:
+                    core_mod: Any = sys.modules.get("pubrun.core")
+                    if core_mod is not None and hasattr(core_mod, "_run_lock"):
+                        _run_lock = core_mod._run_lock
+                    else:
+                        from pubrun.core import _run_lock
+
+                    hw_start = time.perf_counter()
+                    try:
+                        try:
+                            self._collect_hardware_section()
+                            self._collect_host_and_filesystem()
+                        finally:
+                            self._background_hardware_seconds = max(
+                                0.0, time.perf_counter() - hw_start
+                            )
+                            if self._hardware_future_done is not None:
+                                self._hardware_future_done.set()
+
+                        # Coalesced refresh: skip when the initial startup write already
+                        # included completed hardware data or when the run is inactive or
+                        # finalized. Always acquire _run_lock before _write_lock.
+                        try:
+                            with _run_lock:
+                                writer = getattr(self, "writer", None)
+                                if (
+                                    writer is not None
+                                    and self.is_active
+                                    and not self._finalized
+                                    and not getattr(writer, "_startup_included_hardware", False)
+                                ):
+                                    writer.write_startup_manifest(is_refresh=True)
+                        except Exception:
+                            pass  # Best-effort
+                    finally:
+                        try:
+                            sem.release()
+                        except ValueError:
+                            pass
+
+                self._hardware_thread = _threading.Thread(
+                    target=_collect_hardware, daemon=True, name="pubrun-hw"
+                )
+                try:
+                    self._hardware_thread.start()
+                except Exception as exc:
+                    try:
+                        sem.release()
+                    except ValueError:
+                        pass
+                    detail = self._record_capture_error("hardware", "bootstrap", exc)
+                    self._record_capture_error("host", "bootstrap", exc, warn=False)
+                    self._record_capture_error("filesystem", "bootstrap", exc, warn=False)
+                    self.hardware_data = {"capture_state": {"status": "failed", "detail": detail}}
+                    self.host_data = {"capture_state": {"status": "failed", "detail": detail}}
+                    self.filesystem_data = {"capture_state": {"status": "failed", "detail": detail}}
+                    self._hardware_thread = None
+                    self._hardware_future_done.set()
 
     def _merge_and_migrate(self, overrides: Dict[str, Any]) -> None:
         """Merge new overrides into a running config. Migrates the run directory
@@ -1904,8 +1964,10 @@ class Run:
     def _get_import_metadata(self) -> Dict[str, Any]:
         """Return import-mode provenance metadata for the manifest."""
         try:
-            from pubrun._bootstrap import get_import_metadata
-            return get_import_metadata()
+            boot_mod: Any = sys.modules.get("pubrun._bootstrap")
+            if boot_mod is None:
+                from pubrun import _bootstrap as boot_mod
+            return dict(boot_mod.get_import_metadata())
         except Exception:
             return {"selected_mode": None, "capture_state": {"status": "unavailable"}}
 
@@ -1935,8 +1997,19 @@ class Run:
         manual_records = list(getattr(self, "manual_subprocess_records", []))
         subprocess_records = spy_records + manual_records
 
+        __version__: str
+        __commit__: Optional[str]
         try:
-            from pubrun import __version__, __commit__
+            if threading.current_thread() is not threading.main_thread():
+                pubrun_mod: Any = sys.modules.get("pubrun")
+                if pubrun_mod is None:
+                    import pubrun as pubrun_mod
+                __version__ = pubrun_mod.__version__
+                __commit__ = pubrun_mod.__commit__
+            else:
+                from pubrun import __version__ as _pkg_version, __commit__ as _pkg_commit
+                __version__ = _pkg_version
+                __commit__ = _pkg_commit
         except ImportError:
             __version__ = "0.0.0+unknown"
             __commit__ = None
@@ -2056,7 +2129,10 @@ class Run:
         else:
             capture_state = {"status": "complete"}
 
-        from pubrun.config import _section
+        config_mod: Any = sys.modules.get("pubrun.config")
+        if config_mod is None:
+            from pubrun import config as config_mod
+        _section = config_mod._section
         core_cfg = _section(self.config, "core")
         events_cfg = _section(self.config, "events")
         console_cfg = _section(self.config, "console")
