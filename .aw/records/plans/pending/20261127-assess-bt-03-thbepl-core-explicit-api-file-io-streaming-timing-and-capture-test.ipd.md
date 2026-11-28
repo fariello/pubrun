@@ -132,6 +132,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 - Fixing the `pubrun-hw` race in `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively`: already owned by pending plan `8o6o83` (graduated from `7jd8g1`).
   - Carrier: 8o6o83
+  - Carrier-Evidence: .aw/records/plans/executed/20261127-7jd8g1-01-8o6o83-fix-background-pubrun-hw-manifest-refresh-race-in-test-repor.ipd.md
 
 ## Scope check
 
