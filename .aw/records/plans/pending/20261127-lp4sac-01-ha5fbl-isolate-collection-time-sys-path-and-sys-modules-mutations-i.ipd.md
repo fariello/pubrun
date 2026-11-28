@@ -6,7 +6,7 @@
 - Scope: `tests/test_benchmark_intake_bugs.py` (replace collection-time `sys.path.insert` and module-level `_load` bindings with a scoped loader and module-scoped fixtures that snapshot and restore `sys.path` and `sys.modules`, update tests to inject those fixtures, and add behavioral isolation tests).
 - Scope-Paths: tests/test_benchmark_intake_bugs.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: auto-approved
 - Readiness: go-pending-approval
 - Review-Depth: simple
 - Short-Description: Replace module-level script loading in tests/test_benchmark_intake_bugs.py with scoped fixtures that snapshot and restore sys.path and sys.modules
@@ -23,6 +23,7 @@
 
 ## Workflow history
 
+- 2026-11-28 auto-approved (aw agy run --full-auto): auto-approved by --full-auto: review readiness cleared (not human approval)
 - 2026-11-28 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002
 - 2026-11-28 to-review (aw set): Authored review-ready child IPD from backlog lp4sac
 - 2026-11-28 draft (Antigravity): created.
