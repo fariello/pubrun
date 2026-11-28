@@ -368,3 +368,333 @@ class TestBug67Display:
         info = RunInfo(run_dir)
         assert info.script == "train"
         assert info.run_id == "abcd1234"
+
+
+# --------------------------------------------------------------------------
+# BUG-C1 & BUG-U5: _resolve_output_dir non-dict/non-string safety and $VAR expansion
+# --------------------------------------------------------------------------
+
+class TestResolveOutputDirHardening:
+    def test_scan_runs_tolerates_non_dict_core_section(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".pubrun.toml").write_text('core = "bad"\n', encoding="utf-8")
+        default_runs = tmp_path / "runs"
+        default_runs.mkdir()
+        _make_completed(default_runs, "nondict1", age_seconds=10)
+        runs = scan_runs()
+        assert [r.run_id for r in runs] == ["nondict1"]
+
+    def test_scan_runs_tolerates_non_string_output_dir(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".pubrun.toml").write_text("[core]\noutput_dir = 123\n", encoding="utf-8")
+        default_runs = tmp_path / "runs"
+        default_runs.mkdir()
+        _make_completed(default_runs, "badtype1", age_seconds=10)
+        runs = scan_runs()
+        assert [r.run_id for r in runs] == ["badtype1"]
+
+    def test_scan_runs_expands_env_vars_in_config_and_explicit_output_dir(
+        self, tmp_path, monkeypatch
+    ):
+        target = tmp_path / "expanded_base" / "sub"
+        target.mkdir(parents=True)
+        _make_completed(target, "envexp01", age_seconds=10)
+        monkeypatch.setenv("PUBRUN_TEST_STATUS_BASE", str(tmp_path / "expanded_base"))
+
+        # Explicit str and Path with $VAR
+        assert [r.run_id for r in scan_runs("$PUBRUN_TEST_STATUS_BASE/sub")] == ["envexp01"]
+        assert [r.run_id for r in scan_runs(Path("$PUBRUN_TEST_STATUS_BASE/sub"))] == ["envexp01"]
+
+        # Config-derived output_dir with $VAR
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".pubrun.toml").write_text(
+            '[core]\noutput_dir = "$PUBRUN_TEST_STATUS_BASE/sub"\n',
+            encoding="utf-8",
+        )
+        assert [r.run_id for r in scan_runs()] == ["envexp01"]
+
+
+# --------------------------------------------------------------------------
+# BUG-C3: lockless startup manifest with outcome == "running"
+# --------------------------------------------------------------------------
+
+class TestLocklessRunningManifestClassification:
+    def _write_lockless_running(
+        self,
+        base: Path,
+        run_id: str,
+        *,
+        pid=None,
+        hostname=None,
+        started_at_utc=None,
+    ) -> Path:
+        run_dir = base / f"pubrun-worker-20260101T000000Z-1111-{run_id}"
+        run_dir.mkdir(parents=True)
+        manifest = {
+            "schema_version": "1.0",
+            "run": {"run_id": run_id},
+            "status": {"outcome": "running"},
+            "timing": {"started_at_utc": started_at_utc},
+            "process": {"pid": pid} if pid is not None else {},
+            "host": {"hostname": hostname} if hostname is not None else {},
+        }
+        (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return run_dir
+
+    def test_lockless_running_manifest_dead_pid_classifies_as_crashed(self, runs_base):
+        from pubrun.capture.liveness import get_hostname
+        from pubrun.status import STATUS_CRASHED
+
+        run_dir = self._write_lockless_running(
+            runs_base,
+            "deadpid1",
+            pid=99999999,
+            hostname=get_hostname(),
+            started_at_utc=time.time() - 60.0,
+        )
+        info = RunInfo(run_dir)
+        assert info.status == STATUS_CRASHED
+
+    def test_lockless_running_manifest_missing_pid_classifies_as_crashed(self, runs_base):
+        from pubrun.capture.liveness import get_hostname
+        from pubrun.status import STATUS_CRASHED
+
+        run_dir = self._write_lockless_running(
+            runs_base,
+            "nopid001",
+            pid=None,
+            hostname=get_hostname(),
+            started_at_utc=time.time() - 60.0,
+        )
+        info = RunInfo(run_dir)
+        assert info.status == STATUS_CRASHED
+
+    def test_lockless_running_manifest_remote_hostname_classifies_as_crashed(self, runs_base):
+        import os
+        from pubrun.capture.liveness import get_process_start_time
+        from pubrun.status import STATUS_CRASHED
+
+        pid = os.getpid()
+        started = get_process_start_time(pid) or time.time()
+        run_dir = self._write_lockless_running(
+            runs_base,
+            "remhost1",
+            pid=pid,
+            hostname="remote-host-that-is-not-this-one.invalid",
+            started_at_utc=started,
+        )
+        info = RunInfo(run_dir)
+        assert info.status == STATUS_CRASHED
+
+    def test_lockless_running_manifest_live_local_pid_classifies_as_running(self, runs_base):
+        import os
+        from pubrun.capture.liveness import get_hostname, get_process_start_time
+
+        pid = os.getpid()
+        started = get_process_start_time(pid) or time.time()
+        run_dir = self._write_lockless_running(
+            runs_base,
+            "livepid1",
+            pid=pid,
+            hostname=get_hostname(),
+            started_at_utc=started,
+        )
+        info = RunInfo(run_dir)
+        assert info.status == STATUS_RUNNING
+        assert info.elapsed is not None and info.elapsed >= 0.0
+
+
+# --------------------------------------------------------------------------
+# BUG-C6: find_run whitespace stripping and multi-collision recency ambiguity
+# --------------------------------------------------------------------------
+
+class TestFindRunStrippingAndMultiCollision:
+    def test_find_run_strips_whitespace_for_prefix_and_substring(self, runs_base):
+        from pubrun.status import find_run
+
+        _make_completed(runs_base, "abcd9999", age_seconds=20, script="train")
+        _make_completed(runs_base, "zzzz1111", age_seconds=10, script="eval")
+
+        by_prefix = find_run(" abcd ", str(runs_base))
+        assert by_prefix is not None
+        assert by_prefix.run_id == "abcd9999"
+
+        by_substr = find_run(" train ", str(runs_base))
+        assert by_substr is not None
+        assert by_substr.run_id == "abcd9999"
+
+    def test_find_run_raises_ambiguous_with_all_candidates_on_multi_id_recency_collision(
+        self, runs_base
+    ):
+        from pubrun.status import AmbiguousRunSelectorError, find_run
+
+        # Two older runs sharing run_id="1" plus a newer run at recency index 1.
+        _make_completed(runs_base, "1", age_seconds=300, script="older_a")
+        _make_completed(runs_base, "1", age_seconds=200, script="older_b")
+        _make_completed(runs_base, "newest99", age_seconds=10, script="newest")
+
+        with pytest.raises(AmbiguousRunSelectorError) as exc_info:
+            find_run("1", str(runs_base))
+
+        err = exc_info.value
+        assert err.by_recency is not None
+        assert err.by_recency.run_id == "newest99"
+        assert err.by_id is not None
+        assert err.by_id.run_id == "1"
+        assert len(err.candidates) == 3
+        candidate_dirs = {c.run_dir.name for c in err.candidates}
+        assert len(candidate_dirs) == 3
+
+
+# --------------------------------------------------------------------------
+# BUG-C10: _dir_size symlinks/OSError and RunInfo non-dict JSON degradation
+# --------------------------------------------------------------------------
+
+class TestDirSizeAndNonDictJsonResilience:
+    def test_dir_size_skips_symlinks_and_tolerates_per_entry_oserror(
+        self, tmp_path, monkeypatch
+    ):
+        import os
+        from pubrun.status import _dir_size
+
+        external = tmp_path / "external_big.bin"
+        external.write_bytes(b"x" * 10000)
+
+        run_dir = tmp_path / "run_sizing"
+        run_dir.mkdir()
+        keep = run_dir / "keep.bin"
+        keep.write_bytes(b"a" * 120)
+        unreadable = run_dir / "vanishing.bin"
+        unreadable.write_bytes(b"b" * 50)
+
+        symlink_created = False
+        try:
+            os.symlink(external, run_dir / "link_to_external.bin")
+            os.symlink(tmp_path / "missing_target.bin", run_dir / "broken_link.bin")
+            symlink_created = True
+        except OSError:
+            symlink_created = False
+
+        # First verify symlinks are excluded (only keep + unreadable = 170 bytes).
+        assert _dir_size(run_dir) == 170
+        if symlink_created:
+            assert (run_dir / "link_to_external.bin").is_symlink()
+
+        # Now simulate a per-entry OSError on one file; the other file is still counted.
+        orig_stat = Path.stat
+
+        def flaky_stat(self, *args, **kwargs):
+            if self.name == "vanishing.bin":
+                raise OSError("entry vanished")
+            return orig_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", flaky_stat)
+        assert _dir_size(run_dir) == 120
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "[]",
+            "null",
+            '{"run": null, "status": null, "git": [], "invocation": {"script": "bad", "argv": 123}, "signals": "bad", "process": 42}',
+        ],
+    )
+    def test_run_info_degrades_safely_on_non_dict_manifest_and_malformed_sections(
+        self, runs_base, payload
+    ):
+        from pubrun.status import STATUS_CRASHED
+
+        run_dir = runs_base / "pubrun-badjson-20260101T000000Z-1234-badj0001"
+        run_dir.mkdir()
+        (run_dir / "manifest.json").write_text(payload, encoding="utf-8")
+
+        info = RunInfo(run_dir)
+        if payload in ("[]", "null"):
+            assert info.status == STATUS_CRASHED
+            assert info.manifest is None
+            assert info.run_id == "badj0001"
+        else:
+            assert info.run_id is None
+            assert info.script is None
+            assert info.args is None
+            assert info.pid is None
+
+    @pytest.mark.parametrize("payload", ["[]", "null"])
+    def test_run_info_degrades_to_crashed_on_non_dict_lock_and_enrich_manifest(
+        self, runs_base, payload
+    ):
+        from pubrun.status import STATUS_CRASHED
+
+        lock_dir = runs_base / "pubrun-badlock-20260101T000000Z-1234-badl0001"
+        lock_dir.mkdir()
+        (lock_dir / ".pubrun.lock").write_text(payload, encoding="utf-8")
+        info = RunInfo(lock_dir)
+        assert info.status == STATUS_CRASHED
+        assert info.lock_data is None
+        assert info.run_id == "badl0001"
+
+        enrich_dir = runs_base / "pubrun-enrich-20260101T000000Z-999999-enr00001"
+        enrich_dir.mkdir()
+        (enrich_dir / ".pubrun.lock").write_text(
+            json.dumps({"run_id": "enr00001", "pid": 999999, "started_at_utc": 1700000000.0}),
+            encoding="utf-8",
+        )
+        (enrich_dir / "manifest.json").write_text(payload, encoding="utf-8")
+        enriched = RunInfo(enrich_dir)
+        assert enriched.status == STATUS_CRASHED
+        assert enriched.manifest is None
+
+
+# --------------------------------------------------------------------------
+# TEST-U11: close_out_crashed_run TOCTOU refusal and empty-lock fallback
+# --------------------------------------------------------------------------
+
+class TestCrashCloseoutToctouAndEmptyLockFallback:
+    def test_close_out_crashed_run_refuses_live_local_pid_toctou(self, runs_base):
+        import os
+        from pubrun.capture.liveness import get_hostname, get_process_start_time
+
+        pid = os.getpid()
+        started = get_process_start_time(pid) or time.time()
+        run_dir = runs_base / f"pubrun-live-20260101T000000Z-{pid}-toctou01"
+        run_dir.mkdir()
+        lock = {
+            "run_id": "toctou01",
+            "pid": pid,
+            "started_at_utc": started,
+            "hostname": get_hostname(),
+        }
+        (run_dir / ".pubrun.lock").write_text(json.dumps(lock), encoding="utf-8")
+        startup_manifest = {
+            "schema_version": "1.0",
+            "run": {"run_id": "toctou01"},
+            "status": {"outcome": "running"},
+            "timing": {"started_at_utc": started},
+        }
+        (run_dir / "manifest.json").write_text(json.dumps(startup_manifest), encoding="utf-8")
+
+        close_out_crashed_run(run_dir, lock)
+
+        assert (run_dir / ".pubrun.lock").exists()
+        after = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert after["status"]["outcome"] == "running"
+
+    def test_close_out_crashed_run_reconstructs_run_id_and_mtime_from_empty_lock(
+        self, runs_base
+    ):
+        import os
+
+        run_dir = runs_base / "pubrun-train-20260101T000000Z-999999-deadbeef"
+        run_dir.mkdir()
+        lock_path = run_dir / ".pubrun.lock"
+        lock_path.write_text("{}", encoding="utf-8")
+        fixed_mtime = 1700001234.0
+        os.utime(lock_path, (fixed_mtime, fixed_mtime))
+
+        close_out_crashed_run(run_dir, {})
+
+        assert not lock_path.exists()
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["run"]["run_id"] == "deadbeef"
+        assert manifest["status"]["outcome"] == "crashed"
+        assert abs(manifest["timing"]["started_at_utc"] - fixed_mtime) < 2.0

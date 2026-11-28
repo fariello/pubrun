@@ -864,3 +864,321 @@ class TestPhase:
         assert state["running"] is False
         assert state["stops"] == 1
         assert pubrun.phase._yappi_active is False
+
+
+# =============================================================================
+# BUG-C1: non-dict config overrides and unexpected bootstrap rollback
+# =============================================================================
+
+class TestNonDictConfigAndBootstrapRollback:
+    def test_non_dict_events_and_capture_overrides_do_not_crash_or_leak_hooks(self, tmp_path):
+        from pubrun.capture.subprocesses import SubprocessSpy
+
+        run1 = pubrun.start(
+            output_dir=str(tmp_path / "out1"),
+            capture={"subprocesses": {"enabled": True}},
+            events="bad",
+        )
+        try:
+            assert run1._outcome != "ghost"
+            assert run1.is_active is True
+            assert SubprocessSpy._installed is True
+        finally:
+            run1.stop()
+        assert SubprocessSpy._installed is False
+        assert not (run1.run_dir / tracker_mod.Run.LOCK_FILENAME).exists()
+
+        run2 = pubrun.start(output_dir=str(tmp_path / "out2"), capture="bad")
+        try:
+            assert run2._outcome != "ghost"
+            assert run2.is_active is True
+        finally:
+            run2.stop()
+        assert SubprocessSpy._installed is False
+        assert not (run2.run_dir / tracker_mod.Run.LOCK_FILENAME).exists()
+
+        run3 = pubrun.start(
+            output_dir=str(tmp_path / "out3"),
+            capture={
+                "hardware": "bad",
+                "packages": "bad",
+                "subprocesses": "bad",
+                "resources": "bad",
+                "signals": "bad",
+            },
+        )
+        try:
+            assert run3._outcome != "ghost"
+        finally:
+            run3.stop()
+        assert SubprocessSpy._installed is False
+
+    def test_unexpected_bootstrap_exception_rolls_back_hooks_lock_and_enters_ghost_mode(
+        self, tmp_path, monkeypatch
+    ):
+        from pubrun.capture.subprocesses import SubprocessSpy
+
+        def broken_bootstrap(self):
+            self._write_lock_file()
+            assert (self.run_dir / self.LOCK_FILENAME).exists()
+            installed = SubprocessSpy.install(100, config=self.config, owner=self._spy_owner_token)
+            self._spying_subprocesses = bool(installed)
+            assert SubprocessSpy._installed is True
+            raise RuntimeError("unexpected bootstrap failure")
+
+        monkeypatch.setattr(tracker_mod.Run, "_bootstrap_engines", broken_bootstrap)
+        run = tracker_mod.Run(overrides={"core": {"output_dir": str(tmp_path / "out")}})
+        try:
+            assert run._outcome == "ghost"
+            assert run.is_active is False
+            assert run._finalized is True
+            assert run._hardware_write_closed is True
+            assert SubprocessSpy._installed is False
+            assert not (run.run_dir / tracker_mod.Run.LOCK_FILENAME).exists()
+        finally:
+            if tracker_mod._active_run is run:
+                tracker_mod._active_run = None
+
+
+# =============================================================================
+# BUG-C2: .pubrun.lock removal strictly after atomic manifest.json write
+# =============================================================================
+
+class TestLockRemovalOrdering:
+    def test_lock_persists_during_package_refresh_and_manifest_write_then_removed(
+        self, tmp_path, monkeypatch
+    ):
+        from pubrun import writer as writer_mod
+        from pubrun.capture import packages as packages_mod
+
+        run = pubrun.start(output_dir=str(tmp_path / "out"))
+        lock_path = run.run_dir / tracker_mod.Run.LOCK_FILENAME
+        assert lock_path.exists()
+
+        observed = {"during_pkg_merge": None, "during_manifest_write": None}
+
+        orig_merge = packages_mod.merge_package_snapshots
+
+        def spy_merge(startup, final, *, config=None):
+            observed["during_pkg_merge"] = lock_path.exists()
+            return orig_merge(startup, final, config=config)
+
+        orig_atomic_write = writer_mod._atomic_json_write
+
+        def spy_atomic_write(path, data, *, durability="fsync", pre_serialized=None):
+            if Path(path).name == "manifest.json":
+                observed["during_manifest_write"] = lock_path.exists()
+            return orig_atomic_write(
+                path, data, durability=durability, pre_serialized=pre_serialized
+            )
+
+        monkeypatch.setattr(tracker_mod, "merge_package_snapshots", spy_merge)
+        monkeypatch.setattr(writer_mod, "_atomic_json_write", spy_atomic_write)
+
+        run.stop()
+
+        assert observed["during_pkg_merge"] is True
+        assert observed["during_manifest_write"] is True
+        assert not lock_path.exists()
+        assert (run.run_dir / "manifest.json").exists()
+
+    def test_lock_preserved_when_final_manifest_write_raises_oserror(
+        self, tmp_path, monkeypatch
+    ):
+        from pubrun import writer as writer_mod
+
+        run = pubrun.start(output_dir=str(tmp_path / "out"))
+        lock_path = run.run_dir / tracker_mod.Run.LOCK_FILENAME
+        assert lock_path.exists()
+
+        orig_atomic_write = writer_mod._atomic_json_write
+
+        def failing_manifest_write(path, data, *, durability="fsync", pre_serialized=None):
+            if Path(path).name == "manifest.json":
+                raise OSError("disk full during final manifest")
+            return orig_atomic_write(
+                path, data, durability=durability, pre_serialized=pre_serialized
+            )
+
+        monkeypatch.setattr(writer_mod, "_atomic_json_write", failing_manifest_write)
+        run.stop()
+
+        assert run.writer._artifacts_written is False
+        assert lock_path.exists()
+
+    def test_lock_removed_on_stop_when_writer_is_none(self, tmp_path):
+        run = pubrun.start(output_dir=str(tmp_path / "out"))
+        lock_path = run.run_dir / tracker_mod.Run.LOCK_FILENAME
+        assert lock_path.exists()
+        if run.writer is not None:
+            run.writer.unregister_atexit()
+        run.writer = None
+        run.stop()
+        assert not lock_path.exists()
+
+
+# =============================================================================
+# BUG-C4: _finalize_state SystemExit classification and bool exit-code coercion
+# =============================================================================
+
+class TestFinalizeStateSystemExit:
+    @pytest.mark.parametrize(
+        "code, expected_outcome, expected_exit_code",
+        [
+            (0, "completed", 0),
+            (None, "completed", 0),
+            (True, "failed", 1),
+            (False, "completed", 0),
+        ],
+    )
+    def test_finalize_state_classifies_system_exit_and_coerces_bool_codes(
+        self, tmp_path, code, expected_outcome, expected_exit_code
+    ):
+        run = pubrun.start(output_dir=str(tmp_path / "out"))
+        try:
+            try:
+                raise SystemExit(code)
+            except SystemExit:
+                run._finalize_state()
+            assert run._outcome == expected_outcome
+            assert run.signals_data is not None
+            assert run.signals_data["exit_code"] == expected_exit_code
+            assert type(run.signals_data["exit_code"]) is int
+        finally:
+            run.stop()
+        manifest = json.loads((run.run_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["status"]["outcome"] == expected_outcome
+        assert manifest["signals"]["exit_code"] == expected_exit_code
+        assert type(manifest["signals"]["exit_code"]) is int
+
+
+# =============================================================================
+# BUG-C7: _merge_and_migrate config_notices, spy-install race, concurrent merges
+# =============================================================================
+
+class TestMergeAndMigrateHardening:
+    def test_merge_and_migrate_refreshes_config_notices_on_profile_override(self, tmp_path):
+        run = pubrun.start(output_dir=str(tmp_path / "out"))
+        try:
+            assert run.config_notices == []
+            pubrun.start(profile="deep")
+            try:
+                assert len(run.config_notices) == 1
+                assert run.config_notices[0]["code"] == "profile_deprecated"
+                assert run.config_notices[0]["value"] == "deep"
+            finally:
+                run.stop()
+        finally:
+            run.stop()
+        manifest = json.loads((run.run_dir / "manifest.json").read_text(encoding="utf-8"))
+        notices = manifest["config"]["notices"]
+        assert any(
+            n.get("code") == "profile_deprecated" and n.get("value") == "deep"
+            for n in notices
+        )
+
+    def test_merge_and_migrate_spy_install_race_with_stop_does_not_deadlock_or_leak(
+        self, tmp_path, monkeypatch
+    ):
+        from pubrun.capture.subprocesses import SubprocessSpy
+
+        run = pubrun.start(
+            output_dir=str(tmp_path / "out"),
+            capture={"subprocesses": {"enabled": False}},
+        )
+        entered_install = threading.Event()
+        stop_finished = threading.Event()
+        orig_install = SubprocessSpy.install
+
+        @classmethod
+        def racing_install(cls, max_records=5000, config=None, owner=None):
+            res = orig_install(max_records=max_records, config=config, owner=owner)
+            entered_install.set()
+            stop_finished.wait(timeout=5.0)
+            return res
+
+        monkeypatch.setattr(SubprocessSpy, "install", racing_install)
+
+        errors = []
+
+        def worker():
+            try:
+                run._merge_and_migrate({"capture": {"subprocesses": {"enabled": True}}})
+            except Exception as exc:
+                errors.append(exc)
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+        assert entered_install.wait(timeout=5.0), "worker did not reach SubprocessSpy.install"
+        run.stop()
+        stop_finished.set()
+        t.join(timeout=5.0)
+
+        assert not t.is_alive(), "_merge_and_migrate deadlocked against stop()"
+        assert errors == []
+        assert SubprocessSpy._installed is False
+        assert run._spying_subprocesses is False
+
+    def test_concurrent_start_overrides_are_not_lost(self, tmp_path):
+        run = pubrun.start(output_dir=str(tmp_path / "out"))
+        n_threads = 6
+        barrier = threading.Barrier(n_threads)
+        errors = []
+
+        def worker(idx):
+            try:
+                barrier.wait(timeout=5.0)
+                pubrun.start(events={f"key_{idx}": idx})
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_threads)]
+        try:
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10.0)
+            assert errors == []
+            for idx in range(n_threads):
+                assert run.config["events"].get(f"key_{idx}") == idx
+                assert run._api_overrides["events"].get(f"key_{idx}") == idx
+        finally:
+            for _ in range(n_threads + 1):
+                run.stop()
+
+
+# =============================================================================
+# BUG-C8 and BUG-C9: shadowed open in __init__ and _deep_merge non-aliasing
+# =============================================================================
+
+class TestPackageOpenAndDeepMerge:
+    def test_accessing_dunder_commit_during_active_run_does_not_pollute_inputs(
+        self, tmp_path, monkeypatch
+    ):
+        pubrun._reset_commit_cache()
+        run = pubrun.start(output_dir=str(tmp_path / "out"))
+        try:
+            _ = pubrun.__commit__
+            assert run.data_files["inputs"] == []
+            assert "builtins" not in dir(pubrun)
+
+            # Also exercise the fallback text-parser branch when tomllib/tomli are absent.
+            pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+            monkeypatch.setitem(sys.modules, "tomllib", None)
+            monkeypatch.setitem(sys.modules, "tomli", None)
+            name, ver = pubrun._read_pyproject_project_meta(pyproject)
+            assert name == "pubrun"
+            assert ver is not None
+            assert run.data_files["inputs"] == []
+        finally:
+            run.stop()
+
+    def test_deep_merge_does_not_alias_mutable_values_from_dict2(self):
+        from pubrun.config import _deep_merge
+
+        d1 = {"a": 1}
+        d2 = {"items": [1, 2], "nested": {"vals": [3, 4]}}
+        merged = _deep_merge(d1, d2)
+        merged["items"].append(99)
+        merged["nested"]["vals"].append(88)
+        assert d2 == {"items": [1, 2], "nested": {"vals": [3, 4]}}

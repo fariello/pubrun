@@ -77,8 +77,9 @@ def _call_get_packages(
     """Invoke ``get_packages`` while tolerating test mocks with narrower signatures."""
     fn = globals().get("get_packages", _DEP_UNSET)
     if fn is _DEP_UNSET:
-        pkg_cfg = (config.get("capture") or {}).get("packages") or {}
-        if isinstance(pkg_cfg, dict) and pkg_cfg.get("mode", "imported-only") == "off":
+        from pubrun.config import _section
+        pkg_cfg = _section(_section(config, "capture"), "packages")
+        if pkg_cfg.get("mode", "imported-only") == "off":
             return {"capture_state": {"status": "suppressed"}}
         fn = _get_dep("get_packages")
         real_get_packages: Any = fn
@@ -488,8 +489,23 @@ class Run:
         # ---- Phase 3: Bootstrap Capture Engines ----
         # Every engine inside _bootstrap_engines() runs in its own isolated guard
         # so an individual engine failure degrades only that section rather than
-        # entering ghost mode.
-        self._bootstrap_engines()
+        # entering ghost mode. If an unexpected exception still escapes bootstrap,
+        # latch finalized/inactive under _run_lock, roll back owned hooks and lock
+        # file, and enter ghost mode cleanly.
+        try:
+            self._bootstrap_engines()
+        except Exception as bootstrap_exc:
+            from pubrun.capture.redaction import format_safe_error_detail
+            from pubrun.core import _run_lock
+
+            reason = format_safe_error_detail(bootstrap_exc, self.config)
+            with _run_lock:
+                self._finalized = True
+                self._hardware_write_closed = True
+                self.is_active = False
+            self._rollback_owned_hooks(stage="rollback")
+            self._enter_ghost_mode(reason)
+            return
         # ---------------------------------------------
 
         # Wire up crash-safety and verify startup output is writable before
@@ -904,7 +920,9 @@ class Run:
         # When capture.hardware.depth == "off", collect all three synchronously in
         # separate guards without spawning pubrun-hw or triggering a second startup
         # manifest write. Otherwise defer to a daemon thread with coalesced refresh.
-        hw_depth = self.config.get("capture", {}).get("hardware", {}).get("depth", "basic")
+        from pubrun.config import _section
+        capture_cfg = _section(self.config, "capture")
+        hw_depth = _section(capture_cfg, "hardware").get("depth", "basic")
         self.hardware_data = {"capture_state": {"status": "pending"}}
         self.host_data = {"capture_state": {"status": "pending"}}
         self.filesystem_data = {"capture_state": {"status": "pending"}}
@@ -1006,9 +1024,10 @@ class Run:
             pass
 
         # 5. Subprocess interception (monkeypatch)
-        if _patch_subprocesses and self.config.get("capture", {}).get("subprocesses", {}).get("enabled", False):
+        subproc_cfg = _section(capture_cfg, "subprocesses")
+        if _patch_subprocesses and subproc_cfg.get("enabled", False):
             try:
-                max_tracked = self.config.get("capture", {}).get("subprocesses", {}).get("max_tracked_commands", 5000)
+                max_tracked = subproc_cfg.get("max_tracked_commands", 5000)
                 installed = _get_dep("SubprocessSpy").install(
                     max_tracked, config=self.config, owner=self._spy_owner_token
                 )
@@ -1060,7 +1079,7 @@ class Run:
             self.console_interceptor = None
 
         # 7. Event Stream (not a global hook -- safe in all modes)
-        if self.config.get("events", {}).get("enabled", False):
+        if _section(self.config, "events").get("enabled", False):
             try:
                 stream = _get_dep("EventStream")(self.run_dir, config=self.config)
                 if getattr(stream, "_file", None) is None:
@@ -1077,7 +1096,7 @@ class Run:
                 self._record_capture_error("events", "bootstrap", exc)
 
         # 8. Background Telemetry (not a global hook -- background thread only)
-        res_cfg = self.config.get("capture", {}).get("resources", {})
+        res_cfg = _section(capture_cfg, "resources")
         if res_cfg.get("depth", "off") != "off":
             watcher = None
             try:
@@ -1103,7 +1122,7 @@ class Run:
                 self.resources_data = {"capture_state": {"status": "failed", "detail": detail}}
 
         # 9. Signal and exit-code capture (standard registration hook)
-        if _signal_hooks and self.config.get("capture", {}).get("signals", {}).get("enabled", True):
+        if _signal_hooks and _section(capture_cfg, "signals").get("enabled", True):
             try:
                 sig_cap = _get_dep("SignalExitCapture")(config=self.config)
                 sig_cap.install()
@@ -1125,12 +1144,7 @@ class Run:
             return
 
         try:
-            from pubrun.config import _deep_merge, _section
-            accumulated = _deep_merge(
-                getattr(self, "_api_overrides", None) or {},
-                _normalize_overrides(overrides),
-            )
-            merged = _get_dep("resolve_config")(accumulated)
+            norm_overrides = _normalize_overrides(overrides)
         except Exception as exc:
             from pubrun.capture.redaction import format_safe_error_detail
             detail = format_safe_error_detail(exc, getattr(self, "config", None))
@@ -1158,118 +1172,175 @@ class Run:
                 return "move"
 
         from contextlib import nullcontext
+        from pubrun.config import _deep_merge, _section, profile_deprecation_notice
         from pubrun.core import _close_print_log_handle, _run_lock
 
-        new_base_str = _section(merged, "core").get("output_dir", "")
+        should_install_spy = False
+        max_tracked_for_spy: Any = 5000
+        merged_for_spy: Dict[str, Any] = {}
+        waited_for_hw = False
 
-        if new_base_str:
-            new_base = Path(new_base_str)
-            candidate_dir = new_base / self.run_dir.name
-            target_kind = _check_migration_target(self.run_dir, candidate_dir)
-            if target_kind == "descendant":
-                logging.getLogger("pubrun").warning(
-                    "pubrun: refusing to migrate run directory %s into its own descendant %s",
-                    self.run_dir,
-                    candidate_dir,
-                )
-            elif target_kind == "move":
-                # Wait for the background hardware thread OUTSIDE _run_lock: joining
-                # while holding _run_lock deadlocks against pubrun-hw's own _run_lock
-                # writes, and on Windows an open file prevents shutil.move.
-                hw = getattr(self, "_hardware_thread", None)
-                if hw is not None and hw.is_alive():
-                    hw.join(timeout=5)
-                done = getattr(self, "_hardware_future_done", None)
-                if done is not None:
-                    done.wait(timeout=5)
+        for _attempt in range(2):
+            need_hw_wait = False
+            hw_to_join: Optional[threading.Thread] = None
+            done_to_wait: Optional[threading.Event] = None
 
-                # Acquire _run_lock -> writer._write_lock (preserving strict lock order)
-                # so stop() and manifest writers cannot race with the directory move.
-                with _run_lock:
-                    if self._outcome == "ghost" or not self.is_active or self._finalized:
-                        return
-                    writer = getattr(self, "writer", None)
-                    write_lock_ctx: Any = (
-                        writer._write_lock
-                        if writer is not None and hasattr(writer, "_write_lock")
-                        else nullcontext()
+            with _run_lock:
+                if self._outcome == "ghost" or not self.is_active or self._finalized:
+                    return
+
+                try:
+                    accumulated = _deep_merge(
+                        getattr(self, "_api_overrides", None) or {},
+                        norm_overrides,
                     )
-                    with write_lock_ctx:
-                        if not self.is_active or self._finalized:
-                            return
-                        new_dir = new_base / self.run_dir.name
-                        recheck = _check_migration_target(self.run_dir, new_dir)
-                        if recheck == "descendant":
-                            logging.getLogger("pubrun").warning(
-                                "pubrun: refusing to migrate run directory %s into its own descendant %s",
-                                self.run_dir,
-                                new_dir,
-                            )
-                        elif recheck == "move":
-                            # Close cached pubrun.print() handle, event stream, and console logs
-                            # before moving the directory (required on Windows and avoids orphaned handles).
-                            _close_print_log_handle(self)
-                            event_stream = self.event_stream
-                            interceptor = self.console_interceptor
-                            if event_stream is not None:
-                                event_stream.close()
+                    merged = _get_dep("resolve_config")(accumulated)
+                except Exception as exc:
+                    from pubrun.capture.redaction import format_safe_error_detail
+                    detail = format_safe_error_detail(exc, getattr(self, "config", None))
+                    logging.getLogger("pubrun").warning(
+                        "pubrun: failed to resolve config overrides during merge: %s", detail
+                    )
+                    return
 
-                            reenable_faulthandler = False
-                            if interceptor is not None:
-                                reenable_faulthandler = interceptor.suspend_for_migration()
+                new_base_str = _section(merged, "core").get("output_dir", "")
+                new_base: Optional[Path] = None
+                target_kind = "noop"
+                if isinstance(new_base_str, (str, os.PathLike)) and str(new_base_str):
+                    new_base = Path(new_base_str)
+                    candidate_dir = new_base / self.run_dir.name
+                    target_kind = _check_migration_target(self.run_dir, candidate_dir)
+                    if target_kind == "move" and not waited_for_hw:
+                        hw = getattr(self, "_hardware_thread", None)
+                        done = getattr(self, "_hardware_future_done", None)
+                        if (hw is not None and hw.is_alive()) or (
+                            done is not None and not done.is_set()
+                        ):
+                            need_hw_wait = True
+                            hw_to_join = hw
+                            done_to_wait = done
 
-                            old_dir_str = str(self.run_dir)
-                            target_dir = new_dir
-                            moved = False
-                            try:
-                                import shutil
-                                new_dir.parent.mkdir(parents=True, exist_ok=True)
-                                shutil.move(str(self.run_dir), str(new_dir))
-                                self.run_dir = new_dir
-                                self.output_base_dir = new_base
-                                moved = True
-                            except Exception as e:
-                                from pubrun.capture.redaction import format_safe_error_detail
+                if not need_hw_wait:
+                    if target_kind == "descendant" and new_base is not None:
+                        logging.getLogger("pubrun").warning(
+                            "pubrun: refusing to migrate run directory %s into its own descendant %s",
+                            self.run_dir,
+                            new_base / self.run_dir.name,
+                        )
+                    elif target_kind == "move" and new_base is not None:
+                        # Acquire writer._write_lock while holding _run_lock
+                        # (preserving strict _run_lock -> _write_lock order) so
+                        # stop() and manifest writers cannot race with the move.
+                        writer = getattr(self, "writer", None)
+                        write_lock_ctx: Any = (
+                            writer._write_lock
+                            if writer is not None and hasattr(writer, "_write_lock")
+                            else nullcontext()
+                        )
+                        with write_lock_ctx:
+                            if not self.is_active or self._finalized:
+                                return
+                            new_dir = new_base / self.run_dir.name
+                            recheck = _check_migration_target(self.run_dir, new_dir)
+                            if recheck == "descendant":
                                 logging.getLogger("pubrun").warning(
-                                    "Failed migrating runtime paths: %s",
-                                    format_safe_error_detail(e, merged),
+                                    "pubrun: refusing to migrate run directory %s into its own descendant %s",
+                                    self.run_dir,
+                                    new_dir,
                                 )
-                                # Reopen files in original directory if move failed
-                                target_dir = self.run_dir
-
-                            # Re-check active/finalized before reopening handles.
-                            if self.is_active and not self._finalized:
+                            elif recheck == "move":
+                                # Close cached pubrun.print() handle, event stream, and console logs
+                                # before moving the directory (required on Windows and avoids orphaned handles).
+                                _close_print_log_handle(self)
+                                event_stream = self.event_stream
+                                interceptor = self.console_interceptor
                                 if event_stream is not None:
-                                    event_stream.migrate_directory(target_dir)
-                                    # BUG-10: Only emit if the stream successfully reopened.
-                                    if moved:
-                                        if getattr(event_stream, "_file", None):
-                                            event_stream.emit(
-                                                "warning",
-                                                payload={
-                                                    "message": (
-                                                        f"Storage directory changed mid-execution "
-                                                        f"from {old_dir_str} to {target_dir}"
-                                                    )
-                                                },
-                                            )
-                                        else:
-                                            logging.getLogger("pubrun").warning(
-                                                "pubrun: storage migrated to %s but event stream failed to reopen",
-                                                target_dir,
-                                            )
+                                    event_stream.close()
 
+                                reenable_faulthandler = False
                                 if interceptor is not None:
-                                    interceptor.resume_after_migration(
-                                        target_dir, reenable_faulthandler=reenable_faulthandler
+                                    reenable_faulthandler = interceptor.suspend_for_migration()
+
+                                old_dir_str = str(self.run_dir)
+                                target_dir = new_dir
+                                moved = False
+                                try:
+                                    import shutil
+                                    new_dir.parent.mkdir(parents=True, exist_ok=True)
+                                    shutil.move(str(self.run_dir), str(new_dir))
+                                    self.run_dir = new_dir
+                                    self.output_base_dir = new_base
+                                    moved = True
+                                except Exception as e:
+                                    from pubrun.capture.redaction import format_safe_error_detail
+                                    logging.getLogger("pubrun").warning(
+                                        "Failed migrating runtime paths: %s",
+                                        format_safe_error_detail(e, merged),
                                     )
+                                    # Reopen files in original directory if move failed
+                                    target_dir = self.run_dir
 
-        if not self.is_active or self._finalized:
-            return
+                                # Re-check active/finalized before reopening handles.
+                                if self.is_active and not self._finalized:
+                                    if event_stream is not None:
+                                        event_stream.migrate_directory(target_dir)
+                                        # BUG-10: Only emit if the stream successfully reopened.
+                                        if moved:
+                                            if getattr(event_stream, "_file", None):
+                                                event_stream.emit(
+                                                    "warning",
+                                                    payload={
+                                                        "message": (
+                                                            f"Storage directory changed mid-execution "
+                                                            f"from {old_dir_str} to {target_dir}"
+                                                        )
+                                                    },
+                                                )
+                                            else:
+                                                logging.getLogger("pubrun").warning(
+                                                    "pubrun: storage migrated to %s but event stream failed to reopen",
+                                                    target_dir,
+                                                )
 
-        was_spying = self._spying_subprocesses
-        will_spy = _section(_section(merged, "capture"), "subprocesses").get("enabled", False)
-        if will_spy and not was_spying:
+                                    if interceptor is not None:
+                                        interceptor.resume_after_migration(
+                                            target_dir, reenable_faulthandler=reenable_faulthandler
+                                        )
+
+                    if not self.is_active or self._finalized:
+                        return
+
+                    new_notices: list = []
+                    try:
+                        _profile_notice = profile_deprecation_notice(merged)
+                        if _profile_notice:
+                            new_notices.append(_profile_notice)
+                    except Exception:
+                        pass
+                    self.config_notices = new_notices
+                    self._api_overrides = accumulated
+                    self.config = merged
+                    writer = getattr(self, "writer", None)
+                    if writer is not None and hasattr(writer, "sync_config_if_changed"):
+                        writer.sync_config_if_changed()
+
+                    subproc_cfg = _section(_section(merged, "capture"), "subprocesses")
+                    if bool(subproc_cfg.get("enabled", False)) and not self._spying_subprocesses:
+                        should_install_spy = True
+                        max_tracked_for_spy = subproc_cfg.get("max_tracked_commands", 5000)
+                        merged_for_spy = merged
+                    break
+
+            # Wait for the background hardware thread OUTSIDE _run_lock: joining
+            # while holding _run_lock deadlocks against pubrun-hw's own _run_lock
+            # writes, and on Windows an open file prevents shutil.move.
+            waited_for_hw = True
+            if hw_to_join is not None and hw_to_join.is_alive():
+                hw_to_join.join(timeout=5)
+            if done_to_wait is not None:
+                done_to_wait.wait(timeout=5)
+
+        if should_install_spy:
             _patch_subprocesses = True
             try:
                 from pubrun._bootstrap import get_selected_behavior
@@ -1280,27 +1351,29 @@ class Run:
                 pass
             if _patch_subprocesses:
                 try:
-                    max_tracked = _section(_section(merged, "capture"), "subprocesses").get(
-                        "max_tracked_commands", 5000
-                    )
                     installed = _get_dep("SubprocessSpy").install(
-                        max_tracked, config=merged, owner=self._spy_owner_token
+                        max_tracked_for_spy, config=merged_for_spy, owner=self._spy_owner_token
                     )
-                    self._spying_subprocesses = bool(installed)
-                    if self._spying_subprocesses:
-                        self._subprocesses_was_enabled = True
                 except Exception as exc:
-                    self._spying_subprocesses = False
+                    with _run_lock:
+                        if not self._spying_subprocesses:
+                            self._spying_subprocesses = False
                     self._record_capture_error("subprocesses", "runtime", exc)
-
-        with _run_lock:
-            if not self.is_active or self._finalized:
-                return
-            self._api_overrides = accumulated
-            self.config = merged
-            writer = getattr(self, "writer", None)
-            if writer is not None and hasattr(writer, "sync_config_if_changed"):
-                writer.sync_config_if_changed()
+                    installed = False
+                if installed:
+                    rollback_spy = False
+                    with _run_lock:
+                        if not self.is_active or self._finalized:
+                            self._spying_subprocesses = False
+                            rollback_spy = True
+                        else:
+                            self._spying_subprocesses = True
+                            self._subprocesses_was_enabled = True
+                    if rollback_spy:
+                        try:
+                            _get_dep("SubprocessSpy").uninstall(owner=self._spy_owner_token)
+                        except Exception as exc:
+                            self._record_capture_error("subprocesses", "rollback", exc)
 
     def _rollback_owned_hooks(self, *, stage: str = "rollback") -> None:
         """Tear down every hook, worker, handle, and lock file owned by this run.
@@ -1447,11 +1520,14 @@ class Run:
             if is_rollback:
                 self.signal_capture = None
 
-        # 8. Lock file removal
-        try:
-            self._remove_lock_file()
-        except Exception as exc:
-            self._record_capture_error("lock_file", stage, exc)
+        # 8. Lock file removal (ghost rollback only; normal finalization removes
+        # .pubrun.lock in ArtifactWriter.write_artifacts() after manifest.json is
+        # atomically written, or in Run.stop()'s finally block when writer is None).
+        if is_rollback:
+            try:
+                self._remove_lock_file()
+            except Exception as exc:
+                self._record_capture_error("lock_file", stage, exc)
 
         # 9. Ghost rollback extras: unregister atexit and bound-join background hardware thread
         if is_rollback:
@@ -1518,11 +1594,16 @@ class Run:
             with fin_lock(_run_lock, 2.0):
                 self._hardware_write_closed = True
 
+        exc_type, exc_val, _ = sys.exc_info()
         if self._outcome in ("unknown", "running"):
-            # If sys.exc_info() denotes an active crash at exit time, we log failed.
-            if sys.exc_info()[0] is not None:
-                exc_type = sys.exc_info()[0]
-                if exc_type is KeyboardInterrupt:
+            # If sys.exc_info() denotes an active exception at exit time, classify
+            # via core._classify_exit_outcome so SystemExit(0)/None/False map to
+            # "completed", KeyboardInterrupt maps to "interrupted", and errors fail.
+            if exc_val is not None:
+                from pubrun.core import _classify_exit_outcome
+                self._outcome = _classify_exit_outcome(exc_val)
+            elif exc_type is not None:
+                if isinstance(exc_type, type) and issubclass(exc_type, KeyboardInterrupt):
                     self._outcome = "interrupted"
                 else:
                     self._outcome = "failed"
@@ -1554,10 +1635,11 @@ class Run:
         # Pre-teardown step 3: Record process exit code.
         if self.signal_capture:
             try:
-                exc_info = sys.exc_info()
-                if exc_info[1] is not None and isinstance(exc_info[1], SystemExit):
-                    code = exc_info[1].code
-                    if isinstance(code, int):
+                if exc_val is not None and isinstance(exc_val, SystemExit):
+                    code = exc_val.code
+                    if isinstance(code, bool):
+                        self.signal_capture.record_exit_code(int(code))
+                    elif isinstance(code, int):
                         self.signal_capture.record_exit_code(code)
                     elif code is None:
                         self.signal_capture.record_exit_code(0)
@@ -1612,10 +1694,9 @@ class Run:
     def _refresh_packages_at_finalization(self) -> None:
         """Refresh and merge startup/finalization package snapshots safely."""
         try:
-            pkg_mode = (
-                (self.config.get("capture") or {})
-                .get("packages", {})
-                .get("mode", "imported-only")
+            from pubrun.config import _section
+            pkg_mode = _section(_section(self.config, "capture"), "packages").get(
+                "mode", "imported-only"
             )
             if pkg_mode == "off":
                 self.packages_data = {"capture_state": {"status": "suppressed"}}
@@ -1806,7 +1887,12 @@ class Run:
             if writer is not None:
                 writer.write_artifacts()
         finally:
-            if writer is not None and hasattr(writer, "unregister_atexit"):
+            if writer is None:
+                try:
+                    self._remove_lock_file()
+                except Exception:
+                    pass
+            elif hasattr(writer, "unregister_atexit"):
                 try:
                     writer.unregister_atexit()
                 except Exception:

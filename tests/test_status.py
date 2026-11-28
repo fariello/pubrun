@@ -105,11 +105,14 @@ class TestLockFile:
         assert not lock_path.exists()
 
     def test_lock_file_removed_on_atexit_finalization(self):
-        """Lock file is removed when _finalize_state is called directly."""
+        """Lock file stays intact through _finalize_state and is removed after write_artifacts."""
         run = Run()
         lock_path = run.run_dir / Run.LOCK_FILENAME
         assert lock_path.exists()
         run._finalize_state()
+        assert lock_path.exists()
+        assert run.writer is not None
+        assert run.writer.write_artifacts() is True
         assert not lock_path.exists()
         # Clean up
         run.stop()
@@ -145,7 +148,10 @@ class TestLockFile:
         assert mode == "0o700"
         run.stop()
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="chmod 0o444 does not prevent writes on Windows")
+    @pytest.mark.skipif(
+        sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        reason="chmod 0o444 does not prevent writes on Windows or as root",
+    )
     def test_ghost_mode_no_lock_file(self, monkeypatch, tmp_path):
         """Ghost mode does not create a lock file."""
         # Make the directory creation fail

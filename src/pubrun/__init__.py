@@ -93,6 +93,8 @@ def _read_pyproject_project_meta(
     pyproject_path: _Any,
 ) -> _Tuple[_Optional[str], _Optional[str]]:
     """Read ``[project]`` ``name`` and ``version`` from ``pyproject.toml``."""
+    import builtins
+
     toml_mod: _Any = None
     if sys.version_info >= (3, 11):
         try:
@@ -106,7 +108,7 @@ def _read_pyproject_project_meta(
             toml_mod = None
 
     if toml_mod is not None:
-        with open(pyproject_path, "rb") as fh:
+        with builtins.open(pyproject_path, "rb") as fh:
             data = toml_mod.load(fh)
         if not isinstance(data, dict):
             return None, None
@@ -131,7 +133,7 @@ def _read_pyproject_project_meta(
     field_re = _re.compile(
         r"""^(name|version)\s*=\s*(?:"([^"]*)"|'([^']*)')(?:\s*(?:#.*)?)?$"""
     )
-    with open(pyproject_path, "r", encoding="utf-8") as fh:
+    with builtins.open(pyproject_path, "r", encoding="utf-8") as fh:
         for raw_line in fh:
             line = raw_line.strip()
             if not line or line.startswith("#"):

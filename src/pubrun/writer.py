@@ -389,6 +389,12 @@ class ArtifactWriter:
                     manifest_path, manifest_data, durability=durability
                 )
                 self._artifacts_written = True
+                remove_lock = getattr(self.run, "_remove_lock_file", None)
+                if callable(remove_lock):
+                    try:
+                        remove_lock()
+                    except Exception:
+                        pass
                 if config_err_detail is None:
                     self.last_error = None
                 else:
