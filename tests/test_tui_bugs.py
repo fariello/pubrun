@@ -170,7 +170,10 @@ class TestActionsPanel:
                 panel.display_run(info)
                 await pilot.pause()
                 panel.query_one("#btn-delete-selected").press()
-                await pilot.pause()
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, ConfirmDeleteModal) and len(app.screen.query("Label")) > 0:
+                        break
                 modal = app.screen
                 assert isinstance(modal, ConfirmDeleteModal)
                 assert modal.run_id == "pubrun-degraded"
@@ -199,7 +202,10 @@ class TestActionsPanel:
             async with app.run_test() as pilot:
                 modal = ConfirmDeleteModal(None)
                 app.push_screen(modal)
-                await pilot.pause()
+                for _ in range(20):
+                    await pilot.pause()
+                    if len(modal.query("Label")) > 0:
+                        break
                 rendered = " ".join(str(lbl.render()) for lbl in modal.query("Label"))
                 assert "unknown" in rendered
 

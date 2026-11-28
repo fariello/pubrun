@@ -115,6 +115,17 @@ async def _show_tab(app, pilot, tab_id):
     await pilot.pause()
 
 
+async def _wait_for_modal(app, pilot, modal_cls, selector, max_pauses=20):
+    """Wait until ``modal_cls`` is active and ``selector`` is mounted in its DOM."""
+    for _ in range(max_pauses):
+        await pilot.pause()
+        if isinstance(app.screen, modal_cls) and len(app.screen.query(selector)) > 0:
+            return app.screen
+    assert isinstance(app.screen, modal_cls)
+    app.screen.query_one(selector)
+    return app.screen
+
+
 def _run_app(runs, body, monkeypatch):
     result = {}
 
@@ -644,7 +655,7 @@ class TestConfirmDeleteModal:
         panel.display_run(RunInfo(run_dir))
         await pilot.pause()
         panel.query_one("#btn-delete-selected", Button).press()
-        await pilot.pause()
+        await _wait_for_modal(app, pilot, ConfirmDeleteModal, "#btn-confirm-del")
 
     def test_typing_gates_confirm_and_cancel_keeps_run(self, tmp_path, monkeypatch):
         runs = tmp_path / "runs"
@@ -1606,9 +1617,9 @@ class TestBulkPruneConfirmationAndStderr:
             panel.query_one("#input-clean-older", Input).value = "7d"
             await pilot.pause()
             panel.query_one("#btn-prune-execute", Button).press()
-            await pilot.pause()
-            assert isinstance(app.screen, ConfirmBulkPruneModal)
-            modal = app.screen
+            modal = await _wait_for_modal(
+                app, pilot, ConfirmBulkPruneModal, "#btn-cancel-bulk-prune"
+            )
             assert modal.matched_count == 2
             assert modal.total_size_bytes >= 4096
             rendered = " ".join(str(lbl.render()) for lbl in modal.query("Label"))
@@ -1621,9 +1632,10 @@ class TestBulkPruneConfirmationAndStderr:
 
             # 4. Re-open and confirm -> deletes old1/old2, keeps recent, captures stderr cleanly.
             panel.query_one("#btn-prune-execute", Button).press()
-            await pilot.pause()
-            assert isinstance(app.screen, ConfirmBulkPruneModal)
-            app.screen.query_one("#btn-confirm-bulk-prune", Button).press()
+            confirm_modal = await _wait_for_modal(
+                app, pilot, ConfirmBulkPruneModal, "#btn-confirm-bulk-prune"
+            )
+            confirm_modal.query_one("#btn-confirm-bulk-prune", Button).press()
             await pilot.pause()
             await pilot.pause()
 
@@ -1699,9 +1711,9 @@ class TestBulkPruneConfirmationAndStderr:
             await pilot.pause()
 
             panel.query_one("#btn-prune-execute", Button).press()
-            await pilot.pause()
-            assert isinstance(app.screen, ConfirmBulkPruneModal)
-            modal = app.screen
+            modal = await _wait_for_modal(
+                app, pilot, ConfirmBulkPruneModal, "#btn-confirm-bulk-prune"
+            )
             assert modal.matched_count == 2
             assert modal.total_size_bytes == expected_bytes
 
