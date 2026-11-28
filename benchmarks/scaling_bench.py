@@ -510,6 +510,34 @@ def _needles_found(text: str, needles: Sequence[str]) -> bool:
     return False
 
 
+def _json_needle_leak(
+    obj: Any, needles: Sequence[str], path_needles: Sequence[str]
+) -> bool:
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(k, str) and _needles_found(k, path_needles):
+                return True
+            if k in _SCRUB_SKIP_KEYS and isinstance(v, str):
+                continue
+            if _json_needle_leak(v, needles, path_needles):
+                return True
+        return False
+    if isinstance(obj, list):
+        return any(_json_needle_leak(x, needles, path_needles) for x in obj)
+    if isinstance(obj, str):
+        return _needles_found(obj, needles)
+    return False
+
+
+def _workdir_extra_needles(workdir: Optional[str]) -> List[str]:
+    extra_needles: List[str] = []
+    if workdir:
+        if "/" in workdir or "\\" in workdir:
+            extra_needles.append(workdir)
+        extra_needles.append(str(Path(workdir).resolve()))
+    return extra_needles
+
+
 def _validate_share_safety(
     result: Dict[str, Any],
     json_text: str,
@@ -532,7 +560,7 @@ def _validate_share_safety(
         if _sb._is_path_needle(n) or len(n) >= 3
     ]
     path_needles = [n for n in needles if _sb._is_path_needle(n)]
-    if _sb._json_needle_leak(result, needles, path_needles):
+    if _json_needle_leak(result, needles, path_needles):
         issues.append("identifying substring remains in JSON payload")
     if _needles_found(md_text, needles):
         issues.append("identifying substring remains in Markdown output")
@@ -722,10 +750,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
-    extra_needles: List[str] = []
-    if args.workdir:
-        extra_needles.append(args.workdir)
-        extra_needles.append(str(Path(args.workdir).resolve()))
+    extra_needles = _workdir_extra_needles(args.workdir)
 
     needles = _sb._collect_redaction_needles(extra_needles)
     redacted = _scrub_obj(_sb._redact_keys_recursive(result), needles)

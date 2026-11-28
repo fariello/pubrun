@@ -224,8 +224,8 @@ def _git_commit() -> Optional[str]:
 
 
 def _child_env_with_checkout_src() -> Dict[str, str]:
-    """Build child environment, prepending checkout ``src/`` only when running from a checkout."""
-    env = dict(os.environ)
+    """Build child environment, stripping ambient ``PUBRUN_*`` overrides and prepending checkout ``src/`` when running from a checkout."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PUBRUN_")}
     checkout_root = _package_checkout_root() or find_checkout_root()
     if checkout_root is not None:
         src_dir = checkout_root / "src"
@@ -347,7 +347,7 @@ def _run_pass(pass_no: int, iterations: int, warmup: int, workdir: Path) -> Dict
             (scn_cwd / ".pubrun.toml").write_text(_toml_dumps(scn.config), encoding="utf-8")
 
         argv, env = _build_child_command(scn, scn_cwd)
-        env["PUBRUN_PROFILE"] = env.get("PUBRUN_PROFILE", "default")
+        env["PUBRUN_PROFILE"] = "default"
 
         samples: List[float] = []
         failures = 0
