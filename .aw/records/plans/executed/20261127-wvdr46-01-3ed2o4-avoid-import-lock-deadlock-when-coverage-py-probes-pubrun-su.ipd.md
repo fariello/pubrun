@@ -5,8 +5,9 @@
 - Concern: Import-lock deadlock and stray `runs/pubrun-pytest-*` directories when `coverage.py` probes `pubrun.<submodule>` targets during `pytest` startup (backlog item `wvdr46`): `coverage.inorout.file_and_path_for_module` calls `importlib.util.find_spec("pubrun.<submodule>")` inside `sys.monitoring` (`sysmon_py_start`) wrapped in `coverage.inorout.sys_modules_saved()`. That probe imports `src/pubrun/__init__.py`, executes `_execute_boot_sequence()`, creates stray `runs/` directories in the current working directory (CWD), and spawns the `pubrun-hw` background thread (the `_collect_hardware` closure in `src/pubrun/tracker.py::Run._bootstrap_engines`), which calls `importlib.import_module` and inline `from pubrun.capture.subprocesses import disable_spy` concurrently with the main thread, causing Python `_ModuleLock` deadlocks on `pubrun.capture` and `pubrun.capture.subprocesses`. Separately, `tests/conftest.py` executes bare `import pubrun` before test fixtures run, creating a stray `runs/` directory in the repository root on `pytest` startup.
 - Scope: Suppress auto-start and eager core loading in `src/pubrun/__init__.py` during `importlib.util.find_spec` probes targeting `pubrun` (detected via a new `src/pubrun/_bootstrap.py::is_spec_probe_in_progress` helper) while preserving lazy Python Enhancement Proposal 562 (PEP 562) export loading for follow-up attribute access; eliminate background-thread `importlib` lock contention in `src/pubrun/tracker.py`, `src/pubrun/capture/hardware.py`, `src/pubrun/capture/filesystem.py`, and `src/pubrun/capture/resources.py` by starting `pubrun-hw` after synchronous engine imports, pre-loading its dependencies on the main thread, and using `sys.modules` lookups instead of background imports; import `pubrun.noauto` before `pubrun` in `tests/conftest.py` so `pytest` startup creates no stray `runs/` directory; and add fresh-subprocess behavioral regression tests in `tests/test_import_modes.py`.
 - Scope-Paths: src/pubrun/_bootstrap.py, src/pubrun/__init__.py, src/pubrun/tracker.py, src/pubrun/capture/hardware.py, src/pubrun/capture/filesystem.py, src/pubrun/capture/resources.py, tests/conftest.py, tests/test_import_modes.py
+- Scope-Exceeded: .aw/records/backlog/open/20261127-ctx0hj-01-ctx0hj-avoid-importing-pubrun-capture-subprocesses-in-src.backlog.md (Follow-up backlog item filed per defect report for adjacent git.py disable_spy import under nopatch)
 - Item-Dependencies: none
-- Status: auto-approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Suppress auto-start during importlib.util.find_spec probes, eliminate background-thread import-lock contention in pubrun-hw, and avoid stray pytest startup runs
@@ -24,6 +25,7 @@
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 3ed2o4 verified (set wvdr46, attempt 2). [Scope reconciliation - out-of-scope .aw/records/backlog/open/20261127-ctx0hj-01-ctx0hj-avoid-importing-pubrun-capture-subprocesses-in-src.backlog.md: Follow-up backlog item filed per defect report for adjacent git.py disable_spy import under nopatch]
 - 2026-11-28 auto-approved (aw agy run --full-auto): auto-approved by --full-auto: review readiness cleared (not human approval)
 - 2026-11-28 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004, PR-005, PR-006
 - 2026-11-28 to-review (aw set): Authored review-ready IPD graduating backlog item wvdr46
