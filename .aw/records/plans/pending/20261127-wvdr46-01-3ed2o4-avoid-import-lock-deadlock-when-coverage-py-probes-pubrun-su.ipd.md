@@ -142,8 +142,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ## Deferred / out of scope (with reason)
 
-- Replacing `from pubrun.capture.subprocesses import disable_spy` in synchronous main-thread modules (`src/pubrun/capture/git.py`, `src/pubrun/capture/liveness.py`, `src/pubrun/core.py`, `src/pubrun/report/reproducibility.py`): those execute on the caller's thread rather than in a background thread spawned during import, so changing them is unnecessary for `wvdr46` and would expand scope without addressing the deadlock.
-- Updating `docs/functional_spec.md` or `docs/architecture.md`: no public Application Programming Interface (API), Command-Line Interface (CLI) flag, configuration key, or manifest schema field changes; internal spec-probe suppression and background-thread pre-loading preserve every documented user-facing contract.
+None. All requirements of backlog item `wvdr46` are covered in this plan; synchronous main-thread callers of `disable_spy` (`src/pubrun/capture/git.py`, `src/pubrun/capture/liveness.py`, `src/pubrun/core.py`, `src/pubrun/report/reproducibility.py`) and user-facing documentation (`docs/functional_spec.md`, `docs/architecture.md`) require no changes because they are unaffected by background-thread import-lock contention or spec-probe auto-start.
 
 ## Scope check
 
@@ -160,7 +159,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ## Spec / documentation sync
 
-Not applicable. No user-facing CLI flags, environment variables, configuration keys, manifest schema fields, or public API signatures change. `is_spec_probe_in_progress` and `_disable_spy_if_loaded` are private internal helpers, and auto-start behavior for every documented `import pubrun` and `import pubrun.<mode>` entry point remains unchanged.
+Not applicable. No user-facing Command-Line Interface (CLI) flags, environment variables, configuration keys, manifest schema fields, or public Application Programming Interface (API) signatures change. `is_spec_probe_in_progress` and `_disable_spy_if_loaded` are private internal helpers, and auto-start behavior for every documented `import pubrun` and `import pubrun.<mode>` entry point remains unchanged.
 
 ## Open questions
 
