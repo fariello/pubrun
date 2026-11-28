@@ -52,7 +52,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Fix CLI selectors, streaming memory bound, show/bench contracts, and CLI docs sync
 
-- [ ] E-01 Fix `src/pubrun/__main__.py` (`BUG-U3`, `BUG-U5` CLI, `BUG-U6`, `BUG-U7`, `BUG-U9`, `BUG-U11`, `BUG-U12`) and sync `docs/cli.md`:
+- [x] E-01 Fix `src/pubrun/__main__.py` (`BUG-U3`, `BUG-U5` CLI, `BUG-U6`, `BUG-U7`, `BUG-U9`, `BUG-U11`, `BUG-U12`) and sync `docs/cli.md`:
   - Add `_resolve_run_selector_or_path(selector, output_dir, runs=...)` that tries `find_run(...)` first and, on `None`, expands `~`/`$VAR` on `selector` and accepts an existing run directory (or `manifest.json` file inside one) containing `manifest.json`, `.pubrun.lock`, `stdout.log`, or `stderr.log`, returning `RunInfo(candidate_dir, keep_manifest=False)`. Use it in `_run_status` and `_run_combined` (`BUG-U3`). In `_run_status(..., as_json=True)`, match `index` against `all_runs` by resolved `run_dir` path so a direct path inside `output_dir` keeps its recency index while an external path reports `index: null`. In `_run_combined`, fall back to `r.run_id or r.run_dir.name` when formatting multi-run line prefixes for log-only directories.
   - Update `docs/cli.md` lines 43-49 (`### Selecting a run`) so the selector table and explanatory paragraph state that `status` and `combined` accept a run directory path (or `manifest.json` path) alongside recency index, run-ID prefix, and directory-name substring, matching `--help` (`BUG-U3`).
   - In `_apply_global_flags`, normalize non-empty string `args.dir` with `os.path.expanduser(os.path.expandvars(args.dir))` (`BUG-U5`).
@@ -63,41 +63,41 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - In `_run_report` (`RunInProgressOrCrashedError`), format `started_at_utc` as Coordinated Universal Time (UTC) with trailing `Z` (`%Y-%m-%d %H:%M:%SZ`) when `utc=True`; add optional `runs: Optional[List[Any]] = None` to `_run_report` forwarded to `_get_manifest_path(..., runs=runs)`, and pass `runs=all_runs` from `src/pubrun/__main__.py::main`'s filtered `show` loop so `scan_runs` executes once instead of `O(M)` times (`BUG-U12`).
   - Depends on: none
   - Expected outcome: All seven CLI defects in `src/pubrun/__main__.py` are resolved, `docs/cli.md` matches runtime and `--help` behavior, and existing CLI flags and JavaScript Object Notation (JSON) schemas remain intact.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Fix diff array/ANSI rendering and upfront `--last` validation
 
-- [ ] E-02 Fix `src/pubrun/analysis/render.py` (`BUG-U8`) and `src/pubrun/report/diagnostics.py` (`BUG-U10`):
+- [x] E-02 Fix `src/pubrun/analysis/render.py` (`BUG-U8`) and `src/pubrun/report/diagnostics.py` (`BUG-U10`):
   - In `src/pubrun/analysis/render.py`, preserve `_format_array_diff`'s seven-parameter signature (directly tested in `tests/test_render.py`). In `_render_inline`, compute `common_a` and `common_b` by `collections.Counter` multiset intersection mirroring `src/pubrun/analysis/diff.py`. In `_format_array_diff`, track common-element budgets via `collections.Counter` (consuming common occurrences first before marking excess duplicate occurrences with `+`/`-`, matching `src/pubrun/analysis/diff.py`) and key common positions by `(tag, occurrence_idx)` so unmoved later elements are not falsely flagged with `~`.
   - In `src/pubrun/analysis/render.py`, make inline value truncation ANSI-aware by counting only visible characters (copying complete Select Graphic Rendition (SGR) `\x1b\[[0-9;]*m` sequences verbatim without advancing the character budget), never slicing mid-escape, emitting zero ANSI codes when `use_color=False`, and appending `Colors.RESET` (`\x1b[0m`) before `" ... [TRUNCATED]"` whenever a truncated value contains ANSI SGR sequences.
   - In `src/pubrun/report/diagnostics.py::print_resources_report`, validate `parse_duration(last)` when `last is not None` at the top of the function before opening `events.jsonl` or writing any output to `stream`, preserving the existing `DiagnosticsError(f"Invalid duration for --last: {e}")` (`exit_code=1`) contract asserted by `tests/test_diagnostics_seams.py`, `tests/test_cli_negative_paths.py`, and `tests/test_cli_seams.py`.
   - Depends on: none
   - Expected outcome: Duplicate array items render accurately with intact ANSI escape sequences on truncation; invalid `--last` fails immediately with `exit_code=1` and empty output whether or not `events.jsonl` exists.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Add behavioral regression and signal-supervision tests and validate
 
-- [ ] E-03 Add CLI, combined-streaming, render, and diagnostics regression tests in `tests/test_cli_diff_bugs.py`, `tests/test_combined.py`, `tests/test_render.py`, and `tests/test_diagnostics_seams.py`:
+- [x] E-03 Add CLI, combined-streaming, render, and diagnostics regression tests in `tests/test_cli_diff_bugs.py`, `tests/test_combined.py`, `tests/test_render.py`, and `tests/test_diagnostics_seams.py`:
   - In `tests/test_cli_diff_bugs.py`: add tests for `status <dir_path>` (including `--json` both inside and outside `output_dir`) and `combined <dir_path>` (`BUG-U3`), `status --dir "$TEST_RUNS_DIR" --json` (`BUG-U5`), `diff --dir <other> 1 2` with `./1` and `./2` directories in CWD (`BUG-U7`), `show --dir <runs> env 2` and double-section `show env logs` exiting `2` (`BUG-U9`), `_run_bench(..., prepare_submission=True)` exiting `1` when `_prepare_submission` returns `None` (`BUG-U11`), and `show --utc` on a locked/crashed run plus single `scan_runs` spy on filtered `show` (`BUG-U12`).
   - In `tests/test_combined.py`: add tests for bounded-memory streaming of a large untimestamped sibling log verifying zero dropped lines across the 50-line flush boundary (`BUG-U6`), EOF-fallback flushing of an untimestamped run anchored to `started_at_utc`, and mid-file untimestamped multiline traceback continuations (`TEST-U9`).
   - In `tests/test_render.py`: add tests for duplicate list diff (`['train.py', '-e', 'a', '-e', 'b']` vs `['train.py', '-e', 'a', '-e', 'b', '-e', 'c']`) marking `+'-e'` once (at the excess occurrence) with no false `~`, and ANSI truncation at `max_length=30, wrap=False, no_color=False` with `FORCE_COLOR=1` leaving zero severed SGR escapes and closing color with `\x1b[0m` before `[TRUNCATED]` (`BUG-U8`).
   - In `tests/test_diagnostics_seams.py`: add tests calling `print_resources_report(..., last="bogus", out=buf)` both without `events.jsonl` and with valid samples, asserting `DiagnosticsError` with `exit_code == 1` and `buf.getvalue() == ""` (`BUG-U10`).
   - Depends on: E-01, E-02
   - Expected outcome: Every CLI, streaming, render, and diagnostics defect has a deterministic regression test.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Add `pubrun run` `SIGTERM` forwarding and `KeyboardInterrupt` escalation tests in `tests/test_cli_negative_paths.py` (`TEST-U4`):
+- [x] E-04 Add `pubrun run` `SIGTERM` forwarding and `KeyboardInterrupt` escalation tests in `tests/test_cli_negative_paths.py` (`TEST-U4`):
   - Add a Portable Operating System Interface (POSIX) subprocess test (guarded with `pytest.mark.skipif(sys.platform == "win32", ...)`) launching `pubrun run -- python -c <ready-and-trap-script>`, sending `SIGTERM` to `pubrun run`, and asserting the child receives `SIGTERM` and exits cleanly with no orphan.
   - Add a fast in-process seam test using a fake `Popen` whose `wait()` raises `KeyboardInterrupt` on the initial wait, then `subprocess.TimeoutExpired` on the 3-second grace wait (verifying `terminate()`), then `subprocess.TimeoutExpired` on the 5-second termination wait (verifying `kill()`), then returns on the final reap `wait()`, asserting `SystemExit(130)`.
   - Depends on: E-01
   - Expected outcome: Both signal-supervision paths in `pubrun run` are behaviorally verified.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-05 Run targeted `pytest -p randomly` and three-operating-system (3-OS) `mypy` validation and record output:
+- [x] E-05 Run targeted `pytest -p randomly` and three-operating-system (3-OS) `mypy` validation and record output:
   - Run all commands listed in `## Required tests / validation` and verify exit `0`.
   - Depends on: E-03, E-04
   - Expected outcome: All targeted suites pass under `-p randomly` and 3-OS `mypy` exits `0`.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -161,30 +161,199 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `git diff -- src/pubrun/__main__.py docs/cli.md` and passing pytest output from `tests/test_cli_diff_bugs.py` and `tests/test_combined.py` exercising `_run_status`, `_run_combined`, `_apply_global_flags`, `_run_diff`, `show`, `_run_bench`, and `_run_report`.
   - Observed evidence:
-  - Result: pending
+    - `git diff -- src/pubrun/__main__.py docs/cli.md` (`docs/cli.md | 11 +--`, `src/pubrun/__main__.py | 152 +++++++++++++++++++++++++-----`):
+      ```diff
+      diff --git a/docs/cli.md b/docs/cli.md
+      index 77bacc1..4ddb3b1 100644
+      --- a/docs/cli.md
+      +++ b/docs/cli.md
+      @@ -40,13 +40,12 @@ Every command that takes a run (`show`/`report`, `res`/`cpu`/`mem`, `methods`, `
+       | **Recency index** | `pubrun show 1` | `1` = most recent run, `2` = second most recent, and so on (1-based). A bare positive integer (<= 999). |
+       | **Run id / prefix** | `pubrun show 8b9dc889` | The full run id or a unique leading prefix. |
+       | **Directory-name substring** | `pubrun show train-20260509` | A unique substring of the run directory name. |
+      -| **Directory path** | `pubrun show ./runs/pubrun-20260509` | A run directory or its `manifest.json` path (not accepted by `status` or `combined`). |
+      +| **Directory path** | `pubrun show ./runs/pubrun-20260509` | A run directory or its `manifest.json` path. |
 
-- [ ] V-02 validates E-02
+      -`status` and `combined` accept only a recency index, a run-id prefix, or a unique substring of
+      -the run directory name, searched within `--dir` or the configured output directory. They do not
+      -accept an arbitrary directory path or a `manifest.json` path. `show`/`report`, `res`/`cpu`/`mem`,
+      -`methods`, `inspect`, `rerun`, and `diff` accept those three selector forms and also accept a
+      -run directory path or a `manifest.json` path directly.
+      +Every command above, including `status` and `combined`, accepts all four selector forms: a
+      +recency index, a run-id prefix, a unique substring of the run directory name (searched within
+      +`--dir` or the configured output directory), or a direct run directory path or `manifest.json`
+      +path.
+
+      diff --git a/src/pubrun/__main__.py b/src/pubrun/__main__.py
+      @@ -736,9 +736,70 @@ def _run_rerun(
+      +def _safe_resolve_path(path: Path) -> Path:
+      +def _resolve_run_selector_or_path(selector: str, output_dir: Optional[str] = None, *, runs: Optional[List[Any]] = None) -> Optional[Any]:
+      +def _is_direct_run_path(raw_path: str) -> bool:
+      @@ -796,8 +857,8 @@ def _run_diff(
+      -        if len(run_dirs) == 2 and Path(run_dirs[0]).exists() and Path(run_dirs[1]).exists():
+      +        if len(run_dirs) == 2 and _is_direct_run_path(run_dirs[0]) and _is_direct_run_path(run_dirs[1]):
+      @@ -1124,12 +1185,13 @@ def _run_report(
+      +    runs: Optional[List[Any]] = None,
+      -            manifest_path = _get_manifest_path(run_dir, output_dir=output_dir)
+      +            manifest_path = _get_manifest_path(run_dir, output_dir=output_dir, runs=runs)
+      @@ -1171,8 +1233,12 @@ def _run_report(
+      +                    if utc:
+      +                        dt = datetime.fromtimestamp(run_info.started_at_utc, tz=timezone.utc)
+      +                        started_date_str = dt.strftime("%Y-%m-%d %H:%M:%SZ")
+      @@ -2448,7 +2514,9 @@ def _run_bench(
+      -        _prepare_submission(redacted_path)
+      +        target = _prepare_submission(redacted_path)
+      +        if target is None:
+      +            sys.exit(1)
+      @@ -2484,17 +2551,25 @@ def _run_status(
+      +                run_info = _resolve_run_selector_or_path(run_id, output_dir, runs=all_runs)
+      +                if run_info is not None:
+      +                    target_resolved = _safe_resolve_path(run_info.run_dir)
+      +                    idx = next((i for i, r in enumerate(all_runs, 1) if r is run_info or _safe_resolve_path(r.run_dir) == target_resolved), None)
+      @@ -2594,6 +2669,9 @@ def _fallback_iso_ts(run_info: Any) -> str:
+      +_MAX_LEADING_UNTIMESTAMPED_LINES = 50
+      @@ -2640,7 +2718,7 @@ def _run_combined(
+      +                run_info = _resolve_run_selector_or_path(rid, dir_path, runs=all_runs)
+      @@ -2732,7 +2811,15 @@ def _run_combined(
+      +                    if len(leading_buffer) >= _MAX_LEADING_UNTIMESTAMPED_LINES:
+      +                        for lead_idx, lead_line in leading_buffer:
+      +                            yield (fallback_ts, 0, file_idx, lead_idx, prefix + lead_line)
+      +                        leading_buffer.clear()
+      +                        seen_first_ts = True
+      +                        current_ts = fallback_ts
+      +                        yield (current_ts, 1, file_idx, line_idx, prefix + line_str)
+      @@ -2757,7 +2844,8 @@ def _run_combined(
+      +                    run_label = r.run_id or r.run_dir.name
+      +                    prefix = f"[{run_label}][{stream}] " if multiple_runs else f"[{stream}] "
+      @@ -3040,12 +3129,16 @@ def _apply_global_flags(
+      +    raw_dir = getattr(args, "dir", None)
+      +    if isinstance(raw_dir, str) and raw_dir:
+      +        setattr(args, "dir", os.path.expanduser(os.path.expandvars(raw_dir)))
+      @@ -3664,12 +3757,22 @@ def main(
+      +            sec = getattr(args, "section", None)
+      +            if sec is None:
+      +                args.section = args.run_dir
+      +                args.run_dir = None
+      +            elif sec in SHOW_SECTIONS:
+      +                _print_error(...)
+      +                sys.exit(2)
+      +            else:
+      +                args.run_dir, args.section = sec, args.run_dir
+      @@ -3708,6 +3811,7 @@ def main(
+      +                    runs=all_runs,
+      ```
+    - Passing pytest output (`--randomly-seed=189687884`, exit `0`) across `tests/test_cli_diff_bugs.py` (65 passed) and `tests/test_combined.py` (12 passed):
+      ```text
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_status_accepts_direct_run_dir_inside_and_outside_output_dir PASSED [ 67%]
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_combined_accepts_direct_run_dir_and_log_only_dir PASSED [ 67%]
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_status_dir_expands_env_var_and_tilde PASSED [ 68%]
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_show_section_before_run_selector_swaps_and_double_section_exits_2 PASSED [ 68%]
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_diff_recency_selectors_not_hijacked_by_cwd_numeric_dirs PASSED [ 68%]
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_show_utc_on_locked_crashed_run_and_single_scan_on_filtered_show PASSED [ 69%]
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_bench_local_prepare_submission_failure_exits_1 PASSED [ 69%]
+      tests/test_combined.py::test_combined_eof_fallback_anchored_to_started_at_utc PASSED [ 90%]
+      tests/test_combined.py::test_combined_mid_file_untimestamped_traceback_continuations PASSED [ 91%]
+      tests/test_combined.py::test_combined_bounded_leading_buffer_zero_dropped_lines PASSED [ 93%]
+      ```
+  - Result: pass
+
+- [x] V-02 validates E-02
   - Required evidence: Pasted `git diff -- src/pubrun/analysis/render.py src/pubrun/report/diagnostics.py` and passing pytest output from `tests/test_render.py`, `tests/test_diagnostics_seams.py`, and `tests/test_cli_seams.py`.
   - Observed evidence:
-  - Result: pending
+    - `git diff -- src/pubrun/analysis/render.py src/pubrun/report/diagnostics.py` (`src/pubrun/analysis/render.py | 138 ++++++++++++++++++++-------`, `src/pubrun/report/diagnostics.py | 14 +--`):
+      ```diff
+      diff --git a/src/pubrun/analysis/render.py b/src/pubrun/analysis/render.py
+      +import collections
+      +import re
+      +_ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+      # _format_array_diff preserves 7-parameter signature; uses pos_a/pos_b keyed by (tag, occ)
+      # and collections.Counter common_budget + delta_budget (common occurrences consumed first).
+      +def _truncate_ansi_aware(text: str, max_length: int) -> str:
+      # Counts only visible chars outside _ANSI_SGR_RE, never slices mid-escape, and appends
+      # Colors.RESET (\x1b[0m) before " ... [TRUNCATED]" when truncated text contains ANSI SGR.
+      # _render_inline computes common_a/common_b via collections.Counter multiset intersection.
 
-- [ ] V-03 validates E-03
+      diff --git a/src/pubrun/report/diagnostics.py b/src/pubrun/report/diagnostics.py
+      @@ -1423,6 +1423,13 @@ def print_resources_report(
+           stream = out if out is not None else sys.stdout
+      +    last_seconds: Optional[float] = None
+      +    if last is not None:
+      +        try:
+      +            last_seconds = parse_duration(last)
+      +        except ValueError as e:
+      +            raise DiagnosticsError(f"Invalid duration for --last: {e}") from e
+      @@ -1618,13 +1625,6 @@ def print_resources_report(
+      -    last_seconds = None
+      -    if last is not None:
+      -        try:
+      -            last_seconds = parse_duration(last)
+      -        except ValueError as e:
+      -            raise DiagnosticsError(f"Invalid duration for --last: {e}") from e
+      ```
+    - Passing pytest output (`--randomly-seed=189687884`, exit `0`) across `tests/test_render.py` (29 passed), `tests/test_diagnostics_seams.py` (22 passed), and `tests/test_cli_seams.py` (26 passed):
+      ```text
+      tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_resources_report_invalid_last_without_events_jsonl PASSED [  5%]
+      tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_resources_report_invalid_last PASSED [  6%]
+      tests/test_render.py::TestRenderTableAndSummarize::test_format_array_diff_linear_scaling_and_nan PASSED [  9%]
+      tests/test_render.py::TestRenderTableAndSummarize::test_ansi_truncation_leaves_no_severed_escapes_and_resets_before_truncated PASSED [ 10%]
+      tests/test_render.py::TestRenderTableAndSummarize::test_duplicate_list_diff_marks_excess_once_without_false_reorder PASSED [ 10%]
+      tests/test_cli_seams.py::TestDiagnosticsErrorAtCli::test_res_invalid_last_prints_exact_error PASSED [ 16%]
+      ```
+  - Result: pass
+
+- [x] V-03 validates E-03
   - Required evidence: Pasted `pytest -v` output naming every newly added test function across `tests/test_cli_diff_bugs.py`, `tests/test_combined.py`, `tests/test_render.py`, and `tests/test_diagnostics_seams.py` as `PASSED`.
   - Observed evidence:
-  - Result: pending
+    - Verbatim `pytest -p randomly ... -v` lines (`--randomly-seed=189687884`, exit `0`) naming all 13 newly added/hardened test functions as `PASSED`:
+      ```text
+      tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_resources_report_invalid_last_without_events_jsonl PASSED [  5%]
+      tests/test_diagnostics_seams.py::TestDiagnosticsError::test_print_resources_report_invalid_last PASSED [  6%]
+      tests/test_render.py::TestRenderTableAndSummarize::test_ansi_truncation_leaves_no_severed_escapes_and_resets_before_truncated PASSED [ 10%]
+      tests/test_render.py::TestRenderTableAndSummarize::test_duplicate_list_diff_marks_excess_once_without_false_reorder PASSED [ 10%]
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_status_accepts_direct_run_dir_inside_and_outside_output_dir PASSED [ 67%]
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_combined_accepts_direct_run_dir_and_log_only_dir PASSED [ 67%]
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_status_dir_expands_env_var_and_tilde PASSED [ 68%]
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_show_section_before_run_selector_swaps_and_double_section_exits_2 PASSED [ 68%]
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_diff_recency_selectors_not_hijacked_by_cwd_numeric_dirs PASSED [ 68%]
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_show_utc_on_locked_crashed_run_and_single_scan_on_filtered_show PASSED [ 69%]
+      tests/test_cli_diff_bugs.py::TestCliSelectorsAndFixesKk83rk::test_bench_local_prepare_submission_failure_exits_1 PASSED [ 69%]
+      tests/test_combined.py::test_combined_eof_fallback_anchored_to_started_at_utc PASSED [ 90%]
+      tests/test_combined.py::test_combined_mid_file_untimestamped_traceback_continuations PASSED [ 91%]
+      tests/test_combined.py::test_combined_bounded_leading_buffer_zero_dropped_lines PASSED [ 93%]
+      ```
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `pytest -v` output from `tests/test_cli_negative_paths.py` naming both newly added `pubrun run` signal-supervision tests (`SIGTERM` forwarding `PASSED` on POSIX or `SKIPPED` on `win32`, and `KeyboardInterrupt` escalation `PASSED` on all platforms).
   - Observed evidence:
-  - Result: pending
+    - Verbatim `pytest -p randomly ... -v` lines (`--randomly-seed=189687884`, Linux POSIX, exit `0`) naming both newly added signal-supervision tests in `tests/test_cli_negative_paths.py`:
+      ```text
+      tests/test_cli_negative_paths.py::TestPubrunRunSignalSupervision::test_pubrun_run_keyboard_interrupt_escalates_terminate_then_kill PASSED [ 84%]
+      tests/test_cli_negative_paths.py::TestPubrunRunSignalSupervision::test_pubrun_run_forwards_sigterm_to_child_with_no_orphan PASSED [ 84%]
+      ```
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted complete output of both commands in `## Required tests / validation`, both exiting `0` with zero failures.
   - Observed evidence:
-  - Result: pending
+    - Command 1 (`python3 -m pytest -p randomly tests/test_cli_diff_bugs.py tests/test_combined.py tests/test_render.py tests/test_diagnostics_seams.py tests/test_cli_negative_paths.py tests/test_cli_seams.py tests/test_show_sections.py tests/test_diff_usability.py tests/test_bench_command.py tests/test_resources.py -v`, exit `0`):
+      ```text
+      Using --randomly-seed=189687884
+      collected 331 items
+      ... (all 331 items PASSED: test_diagnostics_seams.py 22, test_render.py 29, test_cli_seams.py 26, test_bench_command.py 95, test_cli_diff_bugs.py 65, test_cli_negative_paths.py 48, test_diff_usability.py 12, test_combined.py 12, test_show_sections.py 15, test_resources.py 7)
+      ======================= 331 passed in 190.07s (0:03:10) ========================
+      ```
+    - Command 2 (`mypy && mypy --platform win32 && mypy --platform darwin`, exit `0`):
+      ```text
+      Success: no issues found in 71 source files
+      Success: no issues found in 71 source files
+      Success: no issues found in 71 source files
+      ```
+    - Additional checks: Full suite (`aw suite`, exit `0`): `2543 passed in 100.26s (0:01:40)`; Python 3.8 AST syntax check (`PY38_AST_OK`); leak-sanitizer (`aw sanitize --agent` -> `clean`, 1070 checked, 0 findings).
+  - Result: pass
 
 ## Approval and execution gate
 

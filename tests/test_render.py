@@ -360,3 +360,53 @@ class TestRenderTableAndSummarize:
         )
         assert "~nan" not in nan_out
         assert "nan" in nan_out
+
+    def test_duplicate_list_diff_marks_excess_once_without_false_reorder(self, capsys):
+        from pubrun.analysis.diff import compare_manifests
+
+        old_argv = ["train.py", "-e", "a", "-e", "b"]
+        new_argv = ["train.py", "-e", "a", "-e", "b", "-e", "c"]
+        rep = compare_manifests({"invocation": {"argv": old_argv}}, {"invocation": {"argv": new_argv}})
+
+        print_diff(rep, no_color=True, depth="standard")
+        out = capsys.readouterr().out
+        assert "    - ['train.py', '-e', 'a', '-e', 'b']" in out
+        assert "    + ['train.py', '-e', 'a', '-e', 'b', +'-e', +'c']" in out
+        assert "~'" not in out
+        assert out.count("+'-e'") == 1
+
+        # Symmetric removal of a duplicate marks only the excess occurrence as removed.
+        rep_rem = compare_manifests({"invocation": {"argv": new_argv}}, {"invocation": {"argv": old_argv}})
+        print_diff(rep_rem, no_color=True, depth="standard")
+        out_rem = capsys.readouterr().out
+        assert "    - ['train.py', '-e', 'a', '-e', 'b', -'-e', -'c']" in out_rem
+        assert "    + ['train.py', '-e', 'a', '-e', 'b']" in out_rem
+        assert "~'" not in out_rem
+
+    def test_ansi_truncation_leaves_no_severed_escapes_and_resets_before_truncated(self, capsys, monkeypatch):
+        import re
+        from pubrun.analysis.diff import compare_manifests
+
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        rep = compare_manifests(
+            {"invocation": {"argv": ["train.py", "-e", "a"]}},
+            {"invocation": {"argv": ["train.py", "-e", "a", "-e", "very_long_argument_value_12345"]}},
+        )
+
+        print_diff(rep, no_color=False, max_length=30, wrap=False, depth="standard")
+        out = capsys.readouterr().out
+        assert "[TRUNCATED]" in out
+        # Every ESC byte must belong to a complete SGR sequence (zero severed escapes).
+        stripped = re.sub(r"\x1b\[[0-9;]*m", "", out)
+        assert "\x1b" not in stripped
+        # The truncated colored array line closes ANSI styling before " ... [TRUNCATED]".
+        trunc_lines = [ln for ln in out.splitlines() if "[TRUNCATED]" in ln]
+        assert trunc_lines
+        assert any("\x1b[0m ... [TRUNCATED]" in ln for ln in trunc_lines)
+
+        # With no_color=True, zero ANSI codes are emitted on truncation.
+        print_diff(rep, no_color=True, max_length=30, wrap=False, depth="standard")
+        plain = capsys.readouterr().out
+        assert "[TRUNCATED]" in plain
+        assert "\x1b" not in plain

@@ -736,9 +736,70 @@ def _run_rerun(
         sys.exit(1)
 
 
+def _safe_resolve_path(path: Path) -> Path:
+    """Resolve *path* to an absolute canonical path, falling back to *path* on OSError."""
+    try:
+        return path.resolve()
+    except OSError:
+        return path
+
+
+def _resolve_run_selector_or_path(
+    selector: str,
+    output_dir: Optional[str] = None,
+    *,
+    runs: Optional[List[Any]] = None,
+) -> Optional[Any]:
+    """Resolve a run selector via ``find_run``, falling back to a direct run directory or manifest path."""
+    from pubrun.status import RunInfo, find_run
+
+    run_info = find_run(selector, output_dir, runs=runs)
+    if run_info is not None:
+        return run_info
+
+    raw = selector.strip() if isinstance(selector, str) else ""
+    if not raw:
+        return None
+    expanded = os.path.expanduser(os.path.expandvars(raw))
+    if not expanded:
+        return None
+    candidate = Path(expanded)
+    try:
+        if candidate.is_file() and candidate.name == "manifest.json":
+            candidate_dir = candidate.parent
+        elif candidate.is_dir():
+            candidate_dir = candidate
+        else:
+            return None
+        has_marker = any(
+            (candidate_dir / marker).exists()
+            for marker in ("manifest.json", ".pubrun.lock", "stdout.log", "stderr.log")
+        )
+    except OSError:
+        return None
+    if not has_marker:
+        return None
+    return RunInfo(candidate_dir, keep_manifest=False)
+
+
+def _is_direct_run_path(raw_path: str) -> bool:
+    """Return True only when *raw_path* points to a manifest.json file or run dir with manifest/lock."""
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return False
+    try:
+        candidate = Path(os.path.expanduser(os.path.expandvars(raw_path)))
+        if candidate.is_file() and candidate.name == "manifest.json":
+            return True
+        if candidate.is_dir():
+            return (candidate / "manifest.json").exists() or (candidate / ".pubrun.lock").exists()
+    except OSError:
+        return False
+    return False
+
+
 def _resolve_direct_manifest_path(raw_path: str) -> str:
     """Resolve an explicit existing filesystem run path without scanning output_dir."""
-    run_path = Path(raw_path)
+    run_path = Path(os.path.expanduser(os.path.expandvars(raw_path)))
     manifest_path = (
         run_path
         if (run_path.is_file() and run_path.name == "manifest.json")
@@ -796,8 +857,8 @@ def _run_diff(
             filter_str, not_filter_str, status_filter, not_status_filter, older_than, exit_code
         ))
 
-        if len(run_dirs) == 2 and Path(run_dirs[0]).exists() and Path(run_dirs[1]).exists():
-            # Explicit existing filesystem paths: skip scan_runs() entirely.
+        if len(run_dirs) == 2 and _is_direct_run_path(run_dirs[0]) and _is_direct_run_path(run_dirs[1]):
+            # Explicit existing run paths: skip scan_runs() entirely.
             manifest_path_a = _resolve_direct_manifest_path(run_dirs[0])
             manifest_path_b = _resolve_direct_manifest_path(run_dirs[1])
         else:
@@ -1124,12 +1185,13 @@ def _run_report(
     section: Optional[str] = None,
     utc: bool = False,
     output_dir: Optional[str] = None,
+    runs: Optional[List[Any]] = None,
 ) -> None:
     """Print a human-readable diagnostic report for a recorded run."""
     from pubrun.report.diagnostics import DiagnosticsError, print_report
     try:
         try:
-            manifest_path = _get_manifest_path(run_dir, output_dir=output_dir)
+            manifest_path = _get_manifest_path(run_dir, output_dir=output_dir, runs=runs)
             print_report(manifest_path, depth, section, utc=utc)
         except RunInProgressOrCrashedError as e:
             if section == "logs":
@@ -1171,8 +1233,12 @@ def _run_report(
             started_str = "-"
             if run_info.started_at_utc:
                 try:
-                    dt = datetime.fromtimestamp(run_info.started_at_utc)
-                    started_date_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    if utc:
+                        dt = datetime.fromtimestamp(run_info.started_at_utc, tz=timezone.utc)
+                        started_date_str = dt.strftime("%Y-%m-%d %H:%M:%SZ")
+                    else:
+                        dt = datetime.fromtimestamp(run_info.started_at_utc)
+                        started_date_str = dt.strftime("%Y-%m-%d %H:%M:%S")
 
                     elapsed = time.time() - run_info.started_at_utc
                     days = int(elapsed // 86400)
@@ -2448,7 +2514,9 @@ def _run_bench(iterations, passes, quick, local, submit, yes, as_json, unredacte
 
     # --prepare-submission stages a clean folder holding ONLY the safe file (browser attach).
     if prepare_submission:
-        _prepare_submission(redacted_path)
+        target = _prepare_submission(redacted_path)
+        if target is None:
+            sys.exit(1)
         return
 
     # Offer / perform the GitHub contribution (interactive TTY prompt defaults to YES; a
@@ -2473,7 +2541,6 @@ def _run_status(
 ) -> None:
     """List runs or inspect a specific run."""
     from pubrun.status import (
-        find_run,
         render_inspect,
         render_short_list,
         render_verbose_list,
@@ -2484,17 +2551,25 @@ def _run_status(
     )
 
     if run_id:
-        # Inspect a specific run (recency index / id-prefix / dir-substring).
+        # Inspect a specific run (recency index / id-prefix / dir-substring / direct path).
         from pubrun.status import AmbiguousRunSelectorError
         idx: Optional[int] = None
         try:
             if as_json:
                 all_runs = scan_runs(output_dir, keep_manifest=False)
-                run_info = find_run(run_id, output_dir, runs=all_runs)
+                run_info = _resolve_run_selector_or_path(run_id, output_dir, runs=all_runs)
                 if run_info is not None:
-                    idx = next((i for i, r in enumerate(all_runs, 1) if r is run_info), None)
+                    target_resolved = _safe_resolve_path(run_info.run_dir)
+                    idx = next(
+                        (
+                            i
+                            for i, r in enumerate(all_runs, 1)
+                            if r is run_info or _safe_resolve_path(r.run_dir) == target_resolved
+                        ),
+                        None,
+                    )
             else:
-                run_info = find_run(run_id, output_dir)
+                run_info = _resolve_run_selector_or_path(run_id, output_dir)
         except AmbiguousRunSelectorError as e:
             _emit_ambiguous_selector(e)
             sys.exit(1)
@@ -2594,6 +2669,9 @@ def _fallback_iso_ts(run_info: Any) -> str:
     return ""
 
 
+_MAX_LEADING_UNTIMESTAMPED_LINES = 50
+
+
 def _run_combined(
     run_ids: list,
     dir_path: Optional[str],
@@ -2609,7 +2687,7 @@ def _run_combined(
     not_status_filter: Optional[str] = None,
 ) -> None:
     """Interleave stdout/stderr logs from one or more runs in O(K) memory."""
-    from pubrun.status import AmbiguousRunSelectorError, filter_runs, find_run, scan_runs
+    from pubrun.status import AmbiguousRunSelectorError, filter_runs, scan_runs
 
     TIMESTAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\] (.*)$")
 
@@ -2640,7 +2718,7 @@ def _run_combined(
         target_runs = []
         for rid in run_ids:
             try:
-                run_info = find_run(rid, dir_path, runs=all_runs)
+                run_info = _resolve_run_selector_or_path(rid, dir_path, runs=all_runs)
             except AmbiguousRunSelectorError as e:
                 _emit_ambiguous_selector(e)
                 sys.exit(1)
@@ -2711,9 +2789,10 @@ def _run_combined(
     ) -> Iterator[Tuple[str, int, int, int, str]]:
         """Yield (sort_ts, phase, file_idx, line_idx, formatted_line) in O(1) steady-state RAM.
 
-        Leading untimestamped lines are buffered only until the file's first timestamped
-        line (or EOF, using ``fallback_ts`` from ``run.started_at_utc``), so they stay
-        anchored to their own run instead of being hoisted above earlier runs.
+        Leading untimestamped lines are buffered up to ``_MAX_LEADING_UNTIMESTAMPED_LINES``
+        until the file's first timestamped line (or flushed with ``fallback_ts`` from
+        ``run.started_at_utc`` once the cap or EOF is reached), so they stay anchored to
+        their own run without unbounded memory growth.
         """
         leading_buffer: List[Tuple[int, str]] = []
         seen_first_ts = False
@@ -2732,7 +2811,15 @@ def _run_combined(
                 yield (ts, 1, file_idx, line_idx, prefix + line_str)
             else:
                 if not seen_first_ts:
-                    leading_buffer.append((line_idx, line_str))
+                    if len(leading_buffer) >= _MAX_LEADING_UNTIMESTAMPED_LINES:
+                        for lead_idx, lead_line in leading_buffer:
+                            yield (fallback_ts, 0, file_idx, lead_idx, prefix + lead_line)
+                        leading_buffer.clear()
+                        seen_first_ts = True
+                        current_ts = fallback_ts
+                        yield (current_ts, 1, file_idx, line_idx, prefix + line_str)
+                    else:
+                        leading_buffer.append((line_idx, line_str))
                 else:
                     yield (current_ts, 1, file_idx, line_idx, prefix + line_str)
         if leading_buffer:
@@ -2757,7 +2844,8 @@ def _run_combined(
                     file=sys.stderr,
                 )
                 for r, stream, p in log_entries:
-                    prefix = f"[{r.run_id}][{stream}] " if multiple_runs else f"[{stream}] "
+                    run_label = r.run_id or r.run_dir.name
+                    prefix = f"[{run_label}][{stream}] " if multiple_runs else f"[{stream}] "
                     try:
                         with open(p, "r", encoding="utf-8", errors="replace") as f:
                             for line in f:
@@ -2771,7 +2859,8 @@ def _run_combined(
             else:
                 streams: List[Iterator[Tuple[str, int, int, int, str]]] = []
                 for file_idx, (r, stream, p) in enumerate(log_entries):
-                    prefix = f"[{r.run_id}][{stream}] " if multiple_runs else f"[{stream}] "
+                    run_label = r.run_id or r.run_dir.name
+                    prefix = f"[{run_label}][{stream}] " if multiple_runs else f"[{stream}] "
                     try:
                         fh = stack.enter_context(open(p, "r", encoding="utf-8", errors="replace"))
                     except OSError as e:
@@ -3040,11 +3129,15 @@ def _preprocess_argv(argv: List[str], subcommands: Set[str]) -> Tuple[List[str],
 
 
 def _apply_global_flags(args: argparse.Namespace, no_color_present: bool) -> None:
-    """Apply global CLI side effects (NO_COLOR env and UTC display mode) after parsing."""
+    """Apply global CLI side effects (NO_COLOR env, UTC display mode, --dir expansion) after parsing."""
     if no_color_present:
         setattr(args, "no_color", True)
     if getattr(args, "no_color", False):
         os.environ["NO_COLOR"] = "1"
+
+    raw_dir = getattr(args, "dir", None)
+    if isinstance(raw_dir, str) and raw_dir:
+        setattr(args, "dir", os.path.expanduser(os.path.expandvars(raw_dir)))
 
     # Timestamp display timezone: local by default, UTC when --utc is given
     # (status/show). Timestamps are always stored as UTC epochs. (IPD EC-17.)
@@ -3664,12 +3757,22 @@ def main(argv: Optional[List[str]] = None) -> None:
             )
             return
 
-    # Shifting logic: if run_dir is a bare section name, shift it to section and null run_dir.
+    # Shifting/swapping logic: normalize `show <section>` and `show <section> <run>`.
     if args.command in {"show", "report"}:
         from pubrun.report.diagnostics import SHOW_SECTIONS
         if getattr(args, "run_dir", None) in SHOW_SECTIONS:
-            args.section = args.run_dir
-            args.run_dir = None
+            sec = getattr(args, "section", None)
+            if sec is None:
+                args.section = args.run_dir
+                args.run_dir = None
+            elif sec in SHOW_SECTIONS:
+                _print_error(
+                    f"Multiple sections specified: '{args.run_dir}' and '{sec}'. "
+                    f"Pass at most one section ({', '.join(SHOW_SECTIONS)})."
+                )
+                sys.exit(2)
+            else:
+                args.run_dir, args.section = sec, args.run_dir
 
     executed = False
 
@@ -3708,6 +3811,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     getattr(args, "section", None),
                     utc=getattr(args, "utc", False),
                     output_dir=out_dir,
+                    runs=all_runs,
                 )
         else:
             _run_report(

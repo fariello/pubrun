@@ -1423,6 +1423,13 @@ def print_resources_report(
 ) -> None:
     """Print a diagnostic resources report with ASCII utilization graphs over time."""
     stream = out if out is not None else sys.stdout
+    last_seconds: Optional[float] = None
+    if last is not None:
+        try:
+            last_seconds = parse_duration(last)
+        except ValueError as e:
+            raise DiagnosticsError(f"Invalid duration for --last: {e}") from e
+
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
@@ -1617,13 +1624,6 @@ def print_resources_report(
     if not timestamps:
         print(f"\n{yellow}No resource samples found in events.jsonl.{rst}\n", file=stream)
         return
-
-    last_seconds = None
-    if last is not None:
-        try:
-            last_seconds = parse_duration(last)
-        except ValueError as e:
-            raise DiagnosticsError(f"Invalid duration for --last: {e}") from e
 
     if last_seconds is not None and timestamps:
         cutoff_time = timestamps[-1] - last_seconds

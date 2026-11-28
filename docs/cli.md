@@ -40,13 +40,12 @@ Every command that takes a run (`show`/`report`, `res`/`cpu`/`mem`, `methods`, `
 | **Recency index** | `pubrun show 1` | `1` = most recent run, `2` = second most recent, and so on (1-based). A bare positive integer (<= 999). |
 | **Run id / prefix** | `pubrun show 8b9dc889` | The full run id or a unique leading prefix. |
 | **Directory-name substring** | `pubrun show train-20260509` | A unique substring of the run directory name. |
-| **Directory path** | `pubrun show ./runs/pubrun-20260509` | A run directory or its `manifest.json` path (not accepted by `status` or `combined`). |
+| **Directory path** | `pubrun show ./runs/pubrun-20260509` | A run directory or its `manifest.json` path. |
 
-`status` and `combined` accept only a recency index, a run-id prefix, or a unique substring of
-the run directory name, searched within `--dir` or the configured output directory. They do not
-accept an arbitrary directory path or a `manifest.json` path. `show`/`report`, `res`/`cpu`/`mem`,
-`methods`, `inspect`, `rerun`, and `diff` accept those three selector forms and also accept a
-run directory path or a `manifest.json` path directly.
+Every command above, including `status` and `combined`, accepts all four selector forms: a
+recency index, a run-id prefix, a unique substring of the run directory name (searched within
+`--dir` or the configured output directory), or a direct run directory path or `manifest.json`
+path.
 
 The recency index counts within the active output directory (from `--dir`, `PUBRUN_OUTPUT_DIR`,
 configured `[core].output_dir`, or `./runs`). `pubrun status` shows the index in its leading `#` column, so the

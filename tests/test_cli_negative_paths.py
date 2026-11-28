@@ -563,3 +563,127 @@ class TestCliHelpAndNegativePaths2ge0ea:
         assert res.returncode == 1
         assert "pubrun show " in res.stderr
         assert "pubrun report " not in res.stderr
+
+
+# ---------------------------------------------------------------------------
+# TEST-U4 (IPD kk83rk): pubrun run SIGTERM forwarding & KeyboardInterrupt escalation
+# ---------------------------------------------------------------------------
+
+
+class TestPubrunRunSignalSupervision:
+    """Behavioral tests for `pubrun run` SIGTERM forwarding and KeyboardInterrupt escalation."""
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGTERM forwarding test")
+    def test_pubrun_run_forwards_sigterm_to_child_with_no_orphan(self, tmp_path):
+        import os
+
+        ready_file = tmp_path / "child_ready.pid"
+        sig_marker = tmp_path / "child_sigterm.txt"
+        child_script = (
+            "import os, signal, sys, time\n"
+            f"ready = {str(ready_file)!r}\n"
+            f"marker = {str(sig_marker)!r}\n"
+            "def _on_term(signum, frame):\n"
+            "    with open(marker, 'w', encoding='utf-8') as fh:\n"
+            "        fh.write('CHILD_GOT_SIGTERM')\n"
+            "    sys.exit(0)\n"
+            "signal.signal(signal.SIGTERM, _on_term)\n"
+            "with open(ready, 'w', encoding='utf-8') as fh:\n"
+            "    fh.write(str(os.getpid()))\n"
+            "deadline = time.monotonic() + 20.0\n"
+            "while time.monotonic() < deadline:\n"
+            "    time.sleep(0.05)\n"
+            "sys.exit(99)\n"
+        )
+        src_dir = Path(__file__).resolve().parents[1] / "src"
+        env = dict(os.environ)
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing}" if existing else str(src_dir)
+        env["NO_COLOR"] = "1"
+        env["PUBRUN_AUTO_START"] = "false"
+
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "pubrun", "run", "--", sys.executable, "-c", child_script],
+            cwd=str(tmp_path),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            deadline = time.monotonic() + 10.0
+            child_pid = None
+            while time.monotonic() < deadline:
+                if ready_file.exists():
+                    raw = ready_file.read_text(encoding="utf-8").strip()
+                    if raw.isdigit():
+                        child_pid = int(raw)
+                        break
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.02)
+            assert child_pid is not None, f"child did not signal readiness (proc rc={proc.poll()})"
+
+            proc.terminate()
+            rc = proc.wait(timeout=10)
+            assert rc == 0
+            assert sig_marker.exists()
+            assert sig_marker.read_text(encoding="utf-8") == "CHILD_GOT_SIGTERM"
+
+            # Verify no orphan process remains.
+            with pytest.raises(ProcessLookupError):
+                os.kill(child_pid, 0)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
+    def test_pubrun_run_keyboard_interrupt_escalates_terminate_then_kill(self, monkeypatch):
+        from pubrun.__main__ import main
+
+        events = []
+
+        class _FakePopen:
+            def __init__(self, cmd, env=None):
+                self.cmd = cmd
+                self.env = env
+                self._alive = True
+                self._wait_calls = 0
+
+            def poll(self):
+                return None if self._alive else -9
+
+            def wait(self, timeout=None):
+                self._wait_calls += 1
+                events.append(("wait", timeout))
+                if self._wait_calls == 1:
+                    raise KeyboardInterrupt
+                if self._wait_calls == 2:
+                    assert timeout == 3.0
+                    raise subprocess.TimeoutExpired(self.cmd, timeout)
+                if self._wait_calls == 3:
+                    assert timeout == 5.0
+                    raise subprocess.TimeoutExpired(self.cmd, timeout)
+                return -9
+
+            def terminate(self):
+                events.append("terminate")
+
+            def kill(self):
+                events.append("kill")
+                self._alive = False
+
+        monkeypatch.setattr(subprocess, "Popen", _FakePopen)
+
+        with pytest.raises(SystemExit) as exc_info:
+            main(["pubrun", "run", "--", "fake-child-cmd"])
+
+        assert exc_info.value.code == 130
+        assert events == [
+            ("wait", None),
+            ("wait", 3.0),
+            "terminate",
+            ("wait", 5.0),
+            "kill",
+            ("wait", None),
+        ]

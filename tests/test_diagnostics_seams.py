@@ -365,6 +365,23 @@ class TestDiagnosticsError:
         err = exc_info.value
         assert err.exit_code == 1
         assert str(err).startswith("Invalid duration for --last: ")
+        assert buf.getvalue() == ""
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+
+    def test_print_resources_report_invalid_last_without_events_jsonl(self, tmp_path, capsys):
+        manifest_path = _create_run_fixture(tmp_path)
+        (manifest_path.parent / "events.jsonl").unlink()
+        buf = io.StringIO()
+
+        with pytest.raises(DiagnosticsError) as exc_info:
+            print_resources_report(str(manifest_path), last="bogus", out=buf)
+
+        err = exc_info.value
+        assert err.exit_code == 1
+        assert str(err).startswith("Invalid duration for --last: ")
+        assert buf.getvalue() == ""
         captured = capsys.readouterr()
         assert captured.out == ""
         assert captured.err == ""
