@@ -160,6 +160,41 @@ class TestAggregateGenerator:
         assert r"\_" in tex and r"\{" in tex and r"\}" in tex
         assert r"\textasciitilde{}" in tex and r"\textasciicircum{}" in tex
 
+    def test_non_highlighted_twelve_packages_truncation_variance(self):
+        from pubrun.report.methods import generate_report_multi
+
+        twelve_pkgs = [{"name": f"custom-pkg-{i:02d}", "version": "1.0.0"} for i in range(1, 13)]
+        m_twelve = _manifest(
+            packages={"records": twelve_pkgs, "capture_state": {"status": "complete"}}
+        )
+        m_single = _manifest(
+            packages={
+                "records": [{"name": "other-pkg", "version": "2.0.0"}],
+                "capture_state": {"status": "complete"},
+            }
+        )
+        md = generate_report_multi([m_twelve, m_single], "markdown")
+        assert "- Key packages:" in md
+        assert "(+2 more; 12 recorded)" in md
+        assert "other-pkg (v2.0.0)" in md
+
+    def test_suppressed_packages_variance(self):
+        from pubrun.report.methods import generate_report_multi
+
+        m_suppressed = _manifest(
+            packages={"records": [], "capture_state": {"status": "suppressed"}}
+        )
+        m_complete = _manifest(
+            packages={
+                "records": [{"name": "numpy", "version": "1.26.0"}],
+                "capture_state": {"status": "complete"},
+            }
+        )
+        md = generate_report_multi([m_suppressed, m_complete], "markdown")
+        assert "- Key packages:" in md
+        assert "(package capture disabled)" in md
+        assert "numpy (v1.26.0)" in md
+
 
 # ---------------------------------------------------------------------------
 # CLI: methods --all end-to-end + non-methods note

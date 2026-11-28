@@ -1102,3 +1102,60 @@ class TestReproducibilityFormattersAndIsolation:
         )
         assert res.returncode == 0, res.stderr
         assert res.stdout.strip() == "ISOLATED"
+
+
+class TestHasRecordedSeedAnnotation:
+    """Behavioral tests for _has_recorded_seed_annotation resilience and scan caps."""
+
+    def test_skips_corrupt_non_dict_and_non_dict_payload_before_valid_seed(self, tmp_path: Path):
+        from pubrun.report.reproducibility import _has_recorded_seed_annotation
+
+        events_path = tmp_path / "events.jsonl"
+        lines = [
+            '{"type": "annotation", corrupt json',
+            '["annotation", 123]',
+            '{"type": "other", "text": "annotation"}',
+            '{"type": "annotation", "payload": "not-a-dict"}',
+            '{"type": "annotation", "payload": {"seed": 42}}',
+        ]
+        events_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        assert _has_recorded_seed_annotation(str(tmp_path / "manifest.json")) is True
+
+    def test_seed_null_returns_false(self, tmp_path: Path):
+        from pubrun.report.reproducibility import _has_recorded_seed_annotation
+
+        events_path = tmp_path / "events.jsonl"
+        events_path.write_text(
+            '{"type": "annotation", "payload": {"seed": null}}\n',
+            encoding="utf-8",
+        )
+
+        assert _has_recorded_seed_annotation(str(tmp_path / "manifest.json")) is False
+
+    def test_scan_stops_at_line_and_byte_caps(self, tmp_path: Path, monkeypatch):
+        import pubrun.report.reproducibility as repro_mod
+
+        events_path = tmp_path / "events.jsonl"
+        manifest_path = str(tmp_path / "manifest.json")
+
+        # Line cap: valid seed sits past _SEED_SCAN_MAX_LINES.
+        monkeypatch.setattr(repro_mod, "_SEED_SCAN_MAX_LINES", 3)
+        events_path.write_text(
+            '{"type": "metric", "payload": {"i": 0}}\n'
+            '{"type": "metric", "payload": {"i": 1}}\n'
+            '{"type": "metric", "payload": {"i": 2}}\n'
+            '{"type": "annotation", "payload": {"seed": 7}}\n',
+            encoding="utf-8",
+        )
+        assert repro_mod._has_recorded_seed_annotation(manifest_path) is False
+
+        # Byte cap: valid seed sits past _SEED_SCAN_MAX_BYTES.
+        monkeypatch.setattr(repro_mod, "_SEED_SCAN_MAX_LINES", 100)
+        monkeypatch.setattr(repro_mod, "_SEED_SCAN_MAX_BYTES", 64)
+        events_path.write_text(
+            '{"type": "metric", "payload": {"pad": "' + ("x" * 80) + '"}}\n'
+            '{"type": "annotation", "payload": {"seed": 7}}\n',
+            encoding="utf-8",
+        )
+        assert repro_mod._has_recorded_seed_annotation(manifest_path) is False

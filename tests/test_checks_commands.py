@@ -356,6 +356,84 @@ class TestLiveChecksModel:
         from pubrun.report.checks import live_findings
         assert [f["code"] for f in findings] == [f["code"] for f in live_findings()]
 
+    def test_live_findings_and_checks_deterministic_branches(self, tmp_path, monkeypatch):
+        """Deterministically exercise low_memory, high_load, git_missing, fs_hung_*, and fs_slow_*."""
+        import pubrun.capture.filesystem as fs_mod
+        import pubrun.capture.system_metrics as sm_mod
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("PUBRUN_OUTPUT_DIR", str(tmp_path / "runs"))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg_config"))
+        monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+        for v in ("SLURM_JOB_ID", "PBS_JOBID", "LSB_JOBID", "JOB_ID", "PE_HOSTFILE"):
+            monkeypatch.delenv(v, raising=False)
+
+        monkeypatch.setattr(checks.os, "cpu_count", lambda: 4)
+        monkeypatch.setattr(checks.shutil, "which", lambda cmd: None)
+        monkeypatch.setattr(
+            sm_mod,
+            "get_system_memory",
+            lambda: {"total_bytes": 16 * 1024 ** 3, "available_bytes": 512 * 1024 ** 2},
+        )
+        monkeypatch.setattr(
+            sm_mod,
+            "get_load_average",
+            lambda: {"1min": 12.0, "5min": 10.0, "15min": 8.0},
+        )
+
+        def fake_get_filesystem(cfg, paths):
+            return {
+                "tmpdir": {
+                    "path": str(tmp_path / "tmp"),
+                    "mount_point": "/scratch",
+                    "fstype": "nfs4",
+                    "is_network": False,
+                },
+                "output_dir": {
+                    "path": str(tmp_path / "runs"),
+                    "mount_point": "/project",
+                    "fstype": "lustre",
+                    "is_network": False,
+                },
+                "capture_state": {"status": "complete"},
+            }
+
+        def fake_probe_paths_live(fs_data):
+            fs_data["tmpdir"]["live"] = {"status": "pending", "hung": True, "waited_s": 5.0}
+            fs_data["output_dir"]["live"] = {"status": "complete", "slow": True, "elapsed_s": 2.5}
+            return fs_data
+
+        monkeypatch.setattr(fs_mod, "get_filesystem", fake_get_filesystem)
+        monkeypatch.setattr(fs_mod, "probe_paths_live", fake_probe_paths_live)
+
+        findings = checks.live_findings()
+        by_code = {f["code"]: f for f in findings}
+        assert by_code["low_memory"]["severity"] == "warn"
+        assert by_code["high_load"]["severity"] == "warn"
+        assert by_code["git_missing"]["severity"] == "info"
+        assert by_code["fs_hung_tmpdir"]["severity"] == "warn"
+        assert by_code["fs_slow_output_dir"]["severity"] == "warn"
+
+        check_list, check_findings = checks.live_checks()
+        assert [f["code"] for f in check_findings] == [f["code"] for f in findings]
+
+        by_name = {}
+        for item in check_list:
+            by_name.setdefault(item["name"], []).append(item)
+
+        assert [c["status"] for c in by_name["memory"]] == ["warn"]
+        assert "512 MiB free" in by_name["memory"][0]["detail"]
+        assert [c["status"] for c in by_name["load"]] == ["warn"]
+        assert "12.0 on 4 cores" in by_name["load"][0]["detail"]
+        assert [c["status"] for c in by_name["git_available"]] == ["info"]
+        assert "git" in by_name["git_available"][0]["detail"]
+
+        fs_checks = by_name["filesystems"]
+        assert [c["status"] for c in fs_checks] == ["warn", "warn"]
+        fs_details = [c["detail"] for c in fs_checks]
+        assert any("$TMPDIR" in d and "still pending after 5.0s" in d for d in fs_details)
+        assert any("the run output directory" in d and "took 2.5s" in d for d in fs_details)
+
 
 class TestSelfCheckCLI:
     def test_self_check_runs_exit_zero_by_default(self):
