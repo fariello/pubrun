@@ -106,7 +106,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ## Deferred / out of scope (with reason)
 
-- Other synchronous callers of `from pubrun.capture.subprocesses import disable_spy` (`src/pubrun/capture/liveness.py`, `src/pubrun/core.py`, and `src/pubrun/report/reproducibility.py`) are out of scope for backlog item `ctx0hj`. None of those modules run during `import pubrun.nopatch` startup: `liveness.py` is imported by `status.py` for status queries, `core.py` uses `disable_spy` only inside explicit manual `pubrun.subprocess` or `pubrun.popen` calls, and `reproducibility.py` runs only during report evaluation.
+None. All requirements of backlog item `ctx0hj` are covered in this plan. Other synchronous callers of `from pubrun.capture.subprocesses import disable_spy` (`src/pubrun/capture/liveness.py`, `src/pubrun/core.py`, and `src/pubrun/report/reproducibility.py`) require no changes and are out of scope because none of them execute during `import pubrun.nopatch` startup: `liveness.py` is imported by `status.py` for status queries, `core.py` uses `disable_spy` only inside explicit manual `pubrun.subprocess` or `pubrun.popen` calls, and `reproducibility.py` runs only during report evaluation.
 
 ## Scope check
 
