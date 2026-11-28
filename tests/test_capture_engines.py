@@ -520,3 +520,58 @@ class TestGit:
         assert out["capture_state"]["status"] == "unavailable"
         assert len(calls) == 1
         assert calls[0][1]["env"]["LC_ALL"] == "C"
+
+
+# ---------------------------------------------------------------------------
+# Filesystem live probing
+# ---------------------------------------------------------------------------
+class TestFilesystemLiveProbing:
+
+    def test_probe_paths_live_uses_mount_point_when_first_path_uncreated(self, tmp_path):
+        """BUG-E7: an uncreated first path sharing a mount point must not poison sibling probes."""
+        from pubrun.capture.filesystem import probe_paths_live
+
+        missing_results = tmp_path / "does-not-exist-yet"
+        assert not missing_results.exists()
+
+        fs_data = {
+            "results_dir": {
+                "path": str(missing_results),
+                "mount_point": str(tmp_path),
+                "fstype": "tmpfs",
+                "is_network": False,
+            },
+            "install_dir": {
+                "path": str(tmp_path),
+                "mount_point": str(tmp_path),
+                "fstype": "tmpfs",
+                "is_network": False,
+            },
+            "capture_state": {"status": "complete"},
+        }
+        out = probe_paths_live(fs_data)
+        assert out is fs_data
+        for key in ("results_dir", "install_dir"):
+            live = out[key]["live"]
+            assert live["status"] == "complete", live
+            assert isinstance(live["total_bytes"], int) and live["total_bytes"] > 0
+            assert isinstance(live["free_bytes"], int) and live["free_bytes"] >= 0
+            assert isinstance(live["avail_bytes"], int) and live["avail_bytes"] >= 0
+
+    def test_probe_paths_live_falls_back_to_path_when_mount_point_absent(self, tmp_path):
+        """When mount_point is absent or empty, probe_paths_live falls back to entry['path']."""
+        from pubrun.capture.filesystem import probe_paths_live
+
+        fs_data = {
+            "fallback_only": {
+                "path": str(tmp_path),
+                "mount_point": "",
+                "fstype": "tmpfs",
+                "is_network": False,
+            },
+            "capture_state": {"status": "complete"},
+        }
+        out = probe_paths_live(fs_data)
+        live = out["fallback_only"]["live"]
+        assert live["status"] == "complete", live
+        assert isinstance(live["total_bytes"], int) and live["total_bytes"] > 0

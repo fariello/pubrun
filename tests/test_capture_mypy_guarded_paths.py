@@ -134,7 +134,9 @@ def test_merge_treats_non_dict_capture_state_as_empty() -> None:
     assert cs["warnings"] == ["final-warning"]
 
 
-def test_probe_paths_live_probes_each_entry_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_paths_live_probes_each_entry_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
     calls: List[str] = []
     real_probe = filesystem.probe_filesystem_live
 
@@ -143,14 +145,19 @@ def test_probe_paths_live_probes_each_entry_path(monkeypatch: pytest.MonkeyPatch
         return real_probe(path, wait_budget_s)
 
     monkeypatch.setattr(filesystem, "probe_filesystem_live", _spy)
+    fallback_path = str(tmp_path)
     fs_data: Any = {
         "a": {"path": "/tmp/a", "mount_point": "/tmp"},
         "b": {"mount_point": "/var"},
+        "c": {"path": fallback_path},
+        "d": {"mount_point": 123},
         "capture_state": {"status": "complete"},
     }
 
     result = filesystem.probe_paths_live(fs_data, wait_budget_s=0.5)
 
-    assert calls == ["/tmp/a", "/var"]
+    assert calls == ["/tmp", "/var", fallback_path]
     assert "live" in result["a"]
     assert "live" in result["b"]
+    assert "live" in result["c"]
+    assert "live" not in result["d"]

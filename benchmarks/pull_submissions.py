@@ -35,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import List, Optional, Sequence, Tuple
 
 _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parent
@@ -250,7 +251,15 @@ def _already_commented(repo: str, issue_number: int, reason: str) -> bool:
     return False
 
 
-def _retag(repo: str, issue_number: int, accepted: bool, reason: str, *, apply: bool) -> None:
+def _retag(
+    repo: str,
+    issue_number: int,
+    accepted: bool,
+    reason: str,
+    *,
+    apply: bool,
+    current_labels: Optional[Sequence[str]] = None,
+) -> None:
     """Set the decision label, always dropping status:pending (PR-003). Comment ONLY on
     rejection, and only once per distinct reason. All writes are the maintainer's own gh
     actions; no-op unless apply."""
@@ -260,13 +269,24 @@ def _retag(repo: str, issue_number: int, accepted: bool, reason: str, *, apply: 
         return
     # issue_number is an int; labels are fixed constants; never a shell.
     num = str(int(issue_number))
-    attempts = (
-        ["--add-label", add, "--remove-label", remove, "--remove-label", _LABEL_PENDING],
-        # The opposite decision label may not exist on the issue (gh refuses to remove an
-        # absent label); still drop status:pending.
-        ["--add-label", add, "--remove-label", _LABEL_PENDING],
-        ["--add-label", add],
-    )
+    attempts: Tuple[List[str], ...]
+    if current_labels is None:
+        attempts = (
+            ["--add-label", add, "--remove-label", remove, "--remove-label", _LABEL_PENDING],
+            # The opposite decision label may not exist on the issue (gh refuses to remove an
+            # absent label); still drop status:pending, or drop only the opposite decision label
+            # when status:pending was already removed on an earlier pass.
+            ["--add-label", add, "--remove-label", _LABEL_PENDING],
+            ["--add-label", add, "--remove-label", remove],
+            ["--add-label", add],
+        )
+    else:
+        present = set(current_labels)
+        targeted = ["--add-label", add]
+        for label in (remove, _LABEL_PENDING):
+            if label in present:
+                targeted.extend(["--remove-label", label])
+        attempts = (targeted, ["--add-label", add]) if len(targeted) > 2 else (targeted,)
     for extra in attempts:
         try:
             _run_gh(["issue", "edit", num, "--repo", repo, *extra], timeout=30)
@@ -304,14 +324,14 @@ def _process_issue(repo: str, issue: dict, data_dir: Path, apply: bool, report: 
             sha, stored, deduped = store_accepted(
                 src, data_dir, issue_number=num, issue_url=issue["url"],
                 submitter=issue["author"], kind=kind, host=host, apply=apply)
-            _retag(repo, num, True, "", apply=apply)
+            _retag(repo, num, True, "", apply=apply, current_labels=issue.get("labels"))
             entry = {"issue": num, "sha": sha, "stored": stored, "deduped": deduped}
             report["accepted"].append(entry)
             if deduped:
                 report["deduped"].append(entry)
         else:
             reason = f"{verdict.get('stage', '?')}: {verdict.get('reason', 'invalid')}"
-            _retag(repo, num, False, reason, apply=apply)
+            _retag(repo, num, False, reason, apply=apply, current_labels=issue.get("labels"))
             report["rejected"].append({"issue": num, "reason": reason})
 
 

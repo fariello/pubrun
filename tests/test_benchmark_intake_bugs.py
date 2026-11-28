@@ -563,8 +563,11 @@ class TestPullIsolation:
         monkeypatch.setattr(ps, "_require_gh_ready", lambda: None)
         monkeypatch.setattr(ps, "list_issues", lambda *a, **k: self._issues())
         retagged = []
-        monkeypatch.setattr(ps, "_retag", lambda repo, num, acc, reason, apply: retagged.append(
-            (num, acc)))
+        monkeypatch.setattr(
+            ps,
+            "_retag",
+            lambda repo, num, acc, reason, apply, current_labels=None: retagged.append((num, acc)),
+        )
 
         def _mat(body, workdir):
             if body == "b1":
@@ -675,13 +678,13 @@ class TestPullRetag:
 
     def test_final_fallback_adds_label_only(self, ps, monkeypatch):
         PullErrorHolder.cls = ps.PullError
-        calls, run = self._gh(fail_edits=2)
+        calls, run = self._gh(fail_edits=3)
         monkeypatch.setattr(ps, "_run_gh", run)
         ps._retag("o/r", 8, True, "", apply=True)
         edits = [c for c in calls if c[:2] == ["issue", "edit"]]
-        assert len(edits) == 3
-        assert edits[2][-2:] == ["--add-label", "status:accepted"]
-        assert "--remove-label" not in edits[2]
+        assert len(edits) == 4
+        assert edits[3][-2:] == ["--add-label", "status:accepted"]
+        assert "--remove-label" not in edits[3]
 
     def test_primary_edit_first_and_no_fallback_on_success(self, ps, monkeypatch):
         PullErrorHolder.cls = ps.PullError
