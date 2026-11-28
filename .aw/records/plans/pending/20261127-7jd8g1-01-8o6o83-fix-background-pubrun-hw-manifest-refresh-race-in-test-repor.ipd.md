@@ -6,7 +6,9 @@
 - Scope: Update `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` to pass `capture={"hardware": {"depth": "off"}}` to `active_run(...)`, document the reason with a brief inline comment, and assert that `orig_manifest` records suppressed hardware capture before testing rejected report and artifact names. No production source files change.
 - Scope-Paths: tests/test_explicit_api.py
 - Item-Dependencies: none
-- Status: to-review
+- Status: reviewed
+- Readiness: go-pending-approval
+- Review-Depth: simple
 - Short-Description: Pass capture.hardware.depth='off' in test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively to prevent background pubrun-hw manifest refresh races
 - Work-Kind: bug
 - Priority: low
@@ -22,6 +24,7 @@
 
 ## Workflow history
 
+- 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-27 to-review (Antigravity): Authored review-ready Implementation Plan Document (IPD) graduating backlog item 7jd8g1.
 - 2026-11-27 draft (Antigravity): created.
 
@@ -101,9 +104,9 @@ None. All requirements of backlog item `7jd8g1` are covered in this plan.
 
 ## Required tests / validation
 
-1. Deterministic `pubrun-hw` and refresh-write probe:
+1. Deterministic `pubrun-hw` and refresh-write probe (with `PYTHONPATH=src` and non-auto-start import mode so importing `pubrun.writer` loads this checkout without auto-starting a background `pubrun-hw` thread or writing `runs/` in the repository root):
    ```sh
-   python3 -c 'import threading, pytest, pubrun.writer as writer_mod
+   PUBRUN_IMPORT_MODE=minimal PUBRUN_RUN_MODE_OVERRIDE="" PYTHONPATH=src python3 -c 'import threading, pytest, pubrun.writer as writer_mod
    spawned, refreshes = [], []
    real_start = threading.Thread.start
    real_write = writer_mod.ArtifactWriter.write_startup_manifest
@@ -117,7 +120,7 @@ None. All requirements of backlog item `7jd8g1` are covered in this plan.
        return real_write(self, *a, is_refresh=is_refresh, **kw)
    threading.Thread.start = spy_start
    writer_mod.ArtifactWriter.write_startup_manifest = spy_write
-   rc = pytest.main(["-q", "tests/test_explicit_api.py", "-k", "test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively"])
+   rc = pytest.main(["-q", "tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively"])
    assert rc == 0, f"pytest exited {rc}"
    assert spawned == [], f"unexpected pubrun-hw spawn: {spawned}"
    assert refreshes == [], f"unexpected manifest refresh: {refreshes}"
@@ -134,7 +137,7 @@ None. All requirements of backlog item `7jd8g1` are covered in this plan.
 
 ## Spec / documentation sync
 
-N/A. No user-facing command-line interface (CLI), public application programming interface (API), configuration key, or manifest schema changes.
+Not applicable. No user-facing command-line interface (CLI), public application programming interface (API), configuration key, or manifest schema changes.
 
 ## Open questions
 
@@ -145,12 +148,12 @@ None. Backlog item `7jd8g1` explicitly permits passing `hardware depth=off` befo
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
 - [ ] V-01 validates E-01
-  - Required evidence: Pasted output of `git diff -- tests/test_explicit_api.py` showing only the targeted edit in `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` (`active_run(capture={"hardware": {"depth": "off"}})`, explanatory comment, and `hardware.capture_state.status == "suppressed"` assertion), plus pasted output of Command 1 from `## Required tests / validation` showing `1 passed` and `NO_HW_RACE_OK` with exit `0` (exercising `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` -> `src/pubrun/tracker.py::Run._bootstrap_engines` -> `src/pubrun/writer.py::ArtifactWriter.write_startup_manifest` updated in `E-01`).
+  - Required evidence: Pasted output of `git diff -- tests/test_explicit_api.py` showing only the targeted edit in `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` (`active_run(capture={"hardware": {"depth": "off"}})`, explanatory comment, and `hardware.capture_state.status == "suppressed"` assertion), plus pasted output of Command 1 from `## Required tests / validation` exiting `0` and printing `NO_HW_RACE_OK` with zero `pubrun-hw` thread spawns and zero `is_refresh=True` startup manifest writes while passing the blank/reserved report and artifact name rejection test (re-deriving its active test node name at execution time, e.g. `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively`; exercising `tests/test_explicit_api.py::test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` -> `src/pubrun/tracker.py::Run._bootstrap_engines` -> `src/pubrun/writer.py::ArtifactWriter.write_startup_manifest` updated in `E-01`).
   - Observed evidence:
   - Result: pending
 
 - [ ] V-02 validates E-02
-  - Required evidence: Pasted output of Command 2 (`python3 -m pytest tests/test_explicit_api.py tests/test_startup_overhead_writes.py -v`) and Command 3 (`python3 -m pytest -p randomly tests/test_explicit_api.py tests/test_startup_overhead_writes.py -v`), both exiting `0` and explicitly listing `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` and `test_hardware_off_skips_thread_spawn_and_duplicate_startup_write` as `PASSED`.
+  - Required evidence: Pasted output of Command 2 (`python3 -m pytest tests/test_explicit_api.py tests/test_startup_overhead_writes.py -v`) and Command 3 (`python3 -m pytest -p randomly tests/test_explicit_api.py tests/test_startup_overhead_writes.py -v`), both exiting `0` and confirming that the tests pinning (a) blank/reserved report and artifact name rejection with suppressed hardware and unchanged `manifest.json` and (b) `hardware.depth == "off"` skipping thread spawn and duplicate startup write both pass in default and randomized order (re-deriving active test node names at execution time, e.g. `test_report_and_artifact_reject_blank_and_reserved_names_case_insensitively` and `test_hardware_off_skips_thread_spawn_and_duplicate_startup_write`).
   - Observed evidence:
   - Result: pending
 
@@ -160,7 +163,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
 - Cohesion rationale: not required
 
 1. **Open questions and approval:** This plan is a proposal and must not be executed until all blocking open questions are resolved (none remain) and explicit human approval is recorded (`aw ipd set approved 8o6o83 --by-human`).
-2. **Scope declaration:** `- Scope-Paths:` declares the exact file this plan modifies (`tests/test_explicit_api.py`). Do not expand scope; if execution appears to require touching an additional file, stop and report (or justify any approved delta at finalization with `--scope-reason` or `--scope-ack`).
+2. **Scope declaration:** `- Scope-Paths:` declares the expected file this plan modifies (`tests/test_explicit_api.py`). Keep changes within this scope; if execution genuinely requires editing an additional file or leaving the declared file untouched, make the necessary change and justify the delta at finalization with `--scope-reason` (per out-of-scope path) or `--scope-ack` (per declared-but-unmodified path) rather than stopping mid-run. Stop and report only on a genuinely unsafe condition (such as an unresolvable concurrent-edit conflict or missing prerequisite symbols).
 3. **Validation honesty (hard requirement):** Every `V-*` item must paste actual runner output from this workspace confirming exit `0` and the required behavior; never claim passing tests that were not actually run.
 4. **Commits and push policy:** Commit only files changed for this plan using `aw commit 8o6o83 -- tests/test_explicit_api.py` (never `git add -A`, bare `git add`, `git commit -a`, or raw `git commit`). Never push, tag, or publish.
 5. **Lifecycle finalization:** On completion, finalize this plan to `.aw/records/plans/executed/` only after every `E-*` item is `performed` and every `V-*` item is `pass`. When run under `aw oc run` or `aw agy run`, the runner owns `aw ipd finalize 8o6o83`; when executed manually outside a runner, the executor runs `aw ipd finalize 8o6o83` (never hand-roll `git mv` to `executed/`).
