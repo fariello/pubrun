@@ -229,7 +229,7 @@ def get_invocation(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
                     arg_data: Dict[str, Any] = {
                         "arg_index": idx,
                         "path": candidate,
-                        "real_path": str(po.resolve()),
+                        "real_path": os.path.realpath(candidate),
                         "is_dir": is_dir,
                         "size": st.st_size,
                         "mtime": st.st_mtime,

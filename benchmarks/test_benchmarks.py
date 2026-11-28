@@ -132,8 +132,9 @@ class TestBenchChildEnvIsolation:
                 pass_envs.append(dict(env))
                 return 0.001
 
+            harness_target = getattr(h, "_shim_target", h)
             monkeypatch.setattr(h._scenarios, "all_scenarios", lambda: [auto_scn])
-            monkeypatch.setattr(h, "_time_once", _capture_pass)
+            monkeypatch.setattr(harness_target, "_time_once", _capture_pass)
             h._run_pass(1, iterations=1, warmup=0, workdir=tmp_path / "measured")
             assert len(pass_envs) == 1
             assert pass_envs[0]["PUBRUN_PROFILE"] == "default"
@@ -155,7 +156,7 @@ class TestBenchChildEnvIsolation:
                 return 0.001
 
             monkeypatch.setattr(h._scenarios, "all_scenarios", lambda: [devnull_scn, tmpdir_scn])
-            monkeypatch.setattr(h, "_time_once", _capture_baseline)
+            monkeypatch.setattr(harness_target, "_time_once", _capture_baseline)
             h._run_baseline_pass(iterations=1, warmup=0, workdir=tmp_path / "baseline")
             assert (
                 baseline_envs["io-baseline-devnull"]["PUBRUN_BENCH_IO_TARGET"]

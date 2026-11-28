@@ -160,10 +160,11 @@ def _classify_path_linux(
     *,
     case_insensitive: bool = False,
 ) -> Dict[str, Any]:
-    # os.path.realpath resolves symlinks lexically on the string where possible, but
-    # can stat components; to stay non-blocking we use os.path.abspath (pure string) and
-    # normpath. This is sufficient for mount-prefix matching and never touches the mount.
-    resolved = os.path.normpath(os.path.abspath(path))
+    import posixpath
+
+    # posixpath.abspath + normpath is pure string manipulation (non-blocking) and
+    # remains POSIX-semantic even when exercised from unit tests on Windows.
+    resolved = posixpath.normpath(posixpath.abspath(path))
     if resolved.startswith("//"):
         resolved = "/" + resolved.lstrip("/")
     match = _longest_prefix_fstype(resolved, entries, case_insensitive=case_insensitive)

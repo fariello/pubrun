@@ -105,7 +105,7 @@ class TestDiagnosticsNegativePaths:
             },
         ]
         run_dir = _write_run(tmp_path / "runs", "pubrun-res", manifest=_good_manifest(), events=events)
-        res = run_pubrun("res", str(run_dir), "--last", last_val, cwd=str(tmp_path), env=_CLI_ENV)
+        res = run_pubrun("res", str(run_dir), f"--last={last_val}", cwd=str(tmp_path), env=_CLI_ENV)
         assert res.returncode == 1
         assert expected_err in res.stderr
         assert "Traceback" not in res.stderr

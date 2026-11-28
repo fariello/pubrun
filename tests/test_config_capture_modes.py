@@ -406,9 +406,14 @@ class TestEnvironmentCapture:
         assert get_environment(cfg)["variables"] == []
 
     def test_allowlist_glob_is_case_insensitive_on_windows(self, isolated_home, monkeypatch):
+        from pubrun.capture import environment as env_mod
+
         monkeypatch.setattr("sys.platform", "win32")
-        monkeypatch.setenv("PRT_UPPER", "1")
-        monkeypatch.setenv("Prt_Mixed", "2")
+        monkeypatch.setattr(
+            env_mod.os,
+            "environ",
+            {"PRT_UPPER": "1", "Prt_Mixed": "2", "OTHER_VAR": "3"},
+        )
         cfg = _env_config(mode="allowlist", allowlist=["prt_upper", "prt_m*"])
         assert _names(get_environment(cfg)) == ["PRT_UPPER", "Prt_Mixed"]
 

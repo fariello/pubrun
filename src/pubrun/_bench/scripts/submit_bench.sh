@@ -37,8 +37,11 @@ if [ -n "$PARTITION" ]; then
     SINFO_ARGS+=(-p "$PARTITION")
 fi
 
-# Collect idle node names (one per line, deduped).
-mapfile -t IDLE_NODES < <(sinfo "${SINFO_ARGS[@]}" 2>/dev/null | sort -u | sed '/^$/d')
+# Collect idle node names (one per line, deduped; Bash 3.2-compatible).
+IDLE_NODES=()
+while IFS= read -r _node; do
+    [ -n "$_node" ] && IDLE_NODES+=("$_node")
+done < <(sinfo "${SINFO_ARGS[@]}" 2>/dev/null | sort -u)
 
 # Optionally drop excluded nodes (e.g. GPU boxes).
 if [ -n "$EXCLUDE" ] && [ "${#IDLE_NODES[@]}" -gt 0 ]; then

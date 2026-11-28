@@ -7,6 +7,7 @@ model display), BUG-52 (diff depth fallback and warning preservation), BUG-53
 """
 import asyncio
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -137,10 +138,15 @@ class TestActionsPanel:
                 panel = app.query_one("#actions-view", ActionsPanel)
                 panel.display_run(RunInfo(lock_dir))
                 await pilot.pause()
-                assert panel.rerun_command == "cd /tmp/work && python train.py --epochs 3"
+                expected_cmd = (
+                    "cd /tmp/work\npython train.py --epochs 3"
+                    if sys.platform == "win32"
+                    else "cd /tmp/work && python train.py --epochs 3"
+                )
+                assert panel.rerun_command == expected_cmd
                 panel.query_one("#btn-copy-rerun").press()
                 await pilot.pause()
-                assert copied == ["cd /tmp/work && python train.py --epochs 3"]
+                assert copied == [expected_cmd]
                 assert any("copied" in msg.lower() for msg, _ in notes)
 
         asyncio.run(_drive())

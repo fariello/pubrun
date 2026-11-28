@@ -53,7 +53,9 @@ if [ -n "${PUBRUN_ACCOUNT:-}" ]; then
 fi
 
 # Job body: run the packaged harness on the assigned node and write a result JSON.
-JOB_SCRIPT="$(cat <<'EOF'
+# Direct heredoc avoids Bash 3.2 $(cat <<'EOF' ...) parser quirks on macOS.
+echo "Submitting pubrun benchmark to PBS (default placement)..."
+qsub "${QSUB_OPTS[@]}" <<'EOF'
 #!/bin/bash
 set -euo pipefail
 PUBRUN_REPO="${PUBRUN_REPO:-}"
@@ -98,7 +100,3 @@ fi
 "$PUBRUN_PY" -m pubrun._bench.harness "${HARNESS_OUT_ARGS[@]}" $PUBRUN_BENCH_ARGS
 echo "Done. Redacted result: $REDACTED_OUT"
 EOF
-)"
-
-echo "Submitting pubrun benchmark to PBS (default placement)..."
-printf '%s\n' "$JOB_SCRIPT" | qsub "${QSUB_OPTS[@]}"

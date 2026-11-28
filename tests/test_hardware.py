@@ -471,8 +471,12 @@ def test_get_hardware_zero_total_timeout_spawns_no_subprocesses(monkeypatch):
     monkeypatch.setattr(hw_mod.subprocess, "check_output", fail_check_output)
 
     # Current platform with zero total budget: zero subprocess spawns, partial or timeout state.
+    # On Windows, native in-process winreg GPU detection still runs without spawning subprocesses.
     hw = get_hardware({"capture": {"hardware": {"depth": "basic", "total_timeout": 0}}})
-    assert hw["gpus"] == []
+    if sys.platform != "win32":
+        assert hw["gpus"] == []
+    else:
+        assert isinstance(hw["gpus"], list)
     assert hw["capture_state"]["status"] in {"partial", "timeout"}
     if hw["capture_state"]["status"] == "partial":
         assert hw["capture_state"]["detail"] == "hardware capture budget exhausted"

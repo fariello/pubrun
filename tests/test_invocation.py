@@ -171,8 +171,9 @@ class TestCommandFormattingAndSecurity:
         assert "hunter2" not in res["rerun_command"]
 
     def test_win32_commands_use_redacted_argv(self, argv, monkeypatch):
+        win_py = r"C:\Program Files\Python311\python.exe"
         monkeypatch.setattr(sys, "platform", "win32")
-        monkeypatch.setattr(sys, "executable", r"C:\Program Files\Python311\python.exe")
+        monkeypatch.setattr(sys, "executable", win_py)
         argv(["s.py", "--password", "hunter2", "my file.csv"])
 
         res = get_invocation()
@@ -181,7 +182,7 @@ class TestCommandFormattingAndSecurity:
         assert res["command_line"] == subprocess.list2cmdline(expected_argv)
         assert res["rerun_command"] == (
             f"cd {subprocess.list2cmdline([str(Path.cwd())])}\n"
-            f"{subprocess.list2cmdline([r'C:\Program Files\Python311\python.exe'])} "
+            f"{subprocess.list2cmdline([win_py])} "
             f"{subprocess.list2cmdline(expected_argv)}"
         )
         assert "hunter2" not in res["command_line"]

@@ -55,8 +55,9 @@ if [ -n "${PUBRUN_PE:-}" ]; then
     QSUB_OPTS+=(-pe ${PUBRUN_PE})
 fi
 
-# Job body piped to qsub on stdin.
-JOB_SCRIPT="$(cat <<'EOF'
+# Job body piped to qsub on stdin (direct heredoc avoids Bash 3.2 $(cat <<'EOF' ...) quirks on macOS).
+echo "Submitting pubrun benchmark to SGE (default placement)..."
+qsub "${QSUB_OPTS[@]}" <<'EOF'
 #!/bin/bash
 set -euo pipefail
 PUBRUN_REPO="${PUBRUN_REPO:-}"
@@ -101,7 +102,3 @@ fi
 "$PUBRUN_PY" -m pubrun._bench.harness "${HARNESS_OUT_ARGS[@]}" $PUBRUN_BENCH_ARGS
 echo "Done. Redacted result: $REDACTED_OUT"
 EOF
-)"
-
-echo "Submitting pubrun benchmark to SGE (default placement)..."
-printf '%s\n' "$JOB_SCRIPT" | qsub "${QSUB_OPTS[@]}"

@@ -2087,11 +2087,11 @@ class TestCliErgonomicsAndCompat2ge0ea:
 
         plain = resolve_config()
         withp, prov = resolve_config_with_provenance()
-        expected = str(tmp_path / "var_base" / "custom_runs")
-        assert plain["core"]["output_dir"] == expected
+        expected = tmp_path / "var_base" / "custom_runs"
+        assert Path(plain["core"]["output_dir"]) == expected
         assert withp == plain
         assert prov["core.output_dir"]["layer"] == "env"
-        assert prov["core.output_dir"]["value"] == expected
+        assert Path(prov["core.output_dir"]["value"]) == expected
 
         # Empty/whitespace PUBRUN_OUTPUT_DIR is ignored; local config with ~ expands identically
         monkeypatch.setenv("PUBRUN_OUTPUT_DIR", "   ")

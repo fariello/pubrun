@@ -50,8 +50,10 @@ if [ -n "${PUBRUN_PROJECT:-}" ]; then
     BSUB_OPTS+=(-P "$PUBRUN_PROJECT")
 fi
 
-# Job body piped to bsub on stdin (LSF reads the job script from stdin).
-JOB_SCRIPT="$(cat <<'EOF'
+# Job body piped to bsub on stdin (LSF reads the job script from stdin;
+# direct heredoc avoids Bash 3.2 $(cat <<'EOF' ...) parser quirks on macOS).
+echo "Submitting pubrun benchmark to LSF (default placement)..."
+bsub "${BSUB_OPTS[@]}" <<'EOF'
 #!/bin/bash
 set -euo pipefail
 PUBRUN_REPO="${PUBRUN_REPO:-}"
@@ -96,7 +98,3 @@ fi
 "$PUBRUN_PY" -m pubrun._bench.harness "${HARNESS_OUT_ARGS[@]}" $PUBRUN_BENCH_ARGS
 echo "Done. Redacted result: $REDACTED_OUT"
 EOF
-)"
-
-echo "Submitting pubrun benchmark to LSF (default placement)..."
-printf '%s\n' "$JOB_SCRIPT" | bsub "${BSUB_OPTS[@]}"
