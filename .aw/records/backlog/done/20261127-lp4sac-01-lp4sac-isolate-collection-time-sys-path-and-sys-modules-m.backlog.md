@@ -1,5 +1,5 @@
 - Id: lp4sac
-- Status: graduated
+- Status: done
 - Graduated-To: lp4sac
 - Set: lp4sac
 - Work-Kind: chore
@@ -10,6 +10,7 @@
 > Write and proofread this backlog item per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
+- 2026-11-28 done (aw backlog): closed by aw agy run: IPD ha5fbl executed (every IPD carrier is executed and this run executed .aw/records/plans/executed/20261127-lp4sac-01-ha5fbl-isolate-collection-time-sys-path-and-sys-modules-mutations-i.ipd.md); evidence .aw/records/plans/executed/20261127-lp4sac-01-ha5fbl-isolate-collection-time-sys-path-and-sys-modules-mutations-i.ipd.md
 - 2026-11-28 graduated (aw backlog): graduated by run run-20261128T034300Z-475761: ha5fbl
 - 2026-11-28 created (aw backlog): Isolate collection-time sys.path and sys.modules mutations in tests/test_benchmark_intake_bugs.py
 
