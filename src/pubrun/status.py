@@ -12,7 +12,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TextIO, Tuple
+from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
 
 from pubrun.capture.liveness import (
     get_cpu_percent,
@@ -20,7 +20,7 @@ from pubrun.capture.liveness import (
     get_rss_bytes,
     is_same_process,
 )
-from pubrun.config import resolve_config
+from pubrun.config import _section, resolve_config
 from pubrun.report.output import use_color
 from pubrun.tracker import Run
 
@@ -302,20 +302,21 @@ class RunInfo:
         try:
             with open(manifest_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            if not isinstance(data, dict):
+                return
             if self._keep_manifest:
                 self.manifest = data
 
-            git = data.get("git", {})
+            git = _section(data, "git")
             if not self.git_commit:
                 self.git_commit = git.get("commit")
 
-            host = data.get("host", {})
-            if isinstance(host, dict):
-                hostname_val = host.get("hostname")
-                if isinstance(hostname_val, dict):
-                    self.hostname = hostname_val.get("value") or self.hostname
-                elif isinstance(hostname_val, str):
-                    self.hostname = hostname_val or self.hostname
+            host = _section(data, "host")
+            hostname_val = host.get("hostname")
+            if isinstance(hostname_val, dict):
+                self.hostname = hostname_val.get("value") or self.hostname
+            elif isinstance(hostname_val, str):
+                self.hostname = hostname_val or self.hostname
         except Exception:
             pass
 
@@ -352,13 +353,17 @@ class RunInfo:
         try:
             with open(manifest_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            if not isinstance(data, dict):
+                self._parse_dir_name()
+                self.status = STATUS_CRASHED
+                self.timing_semantics = classify_timing_semantics({}, status=self.status)
+                return
             if self._keep_manifest:
                 self.manifest = data
-            self.run_id = data.get("run", {}).get("run_id")
-            self.outcome = data.get("status", {}).get("outcome", "unknown")
+            self.run_id = _section(data, "run").get("run_id")
+            self.outcome = _section(data, "status").get("outcome", "unknown")
 
-            raw_timing = data.get("timing")
-            timing = raw_timing if isinstance(raw_timing, dict) else {}
+            timing = _section(data, "timing")
             self.started_at_utc = _as_float(timing.get("started_at_utc"))
             self.ended_at_utc = _as_float(timing.get("ended_at_utc"))
             self.workload_seconds = _as_float(timing.get("workload_seconds"))
@@ -382,46 +387,45 @@ class RunInfo:
                 )
 
             # Git
-            git = data.get("git", {})
+            git = _section(data, "git")
             self.git_commit = git.get("commit")
 
             # Invocation
-            invocation = data.get("invocation", {})
-            script_data = invocation.get("script", {})
-            if isinstance(script_data, dict) and script_data.get("basename"):
+            invocation = _section(data, "invocation")
+            script_data = _section(invocation, "script")
+            argv = invocation.get("argv")
+            if script_data.get("basename"):
                 self.script = script_data["basename"]
-            elif invocation.get("argv"):
+            elif isinstance(argv, list) and argv:
                 # Fallback: use first argv element (e.g. "-c", "train.py").
                 # Guard against a non-string argv[0] from a foreign/edited manifest.
-                argv0 = invocation["argv"][0]
+                argv0 = argv[0]
                 if isinstance(argv0, str):
                     self.script = Path(argv0).stem
 
             # Command-line arguments (everything after the script name). Coerce
             # every element to str so a non-string entry cannot crash the join.
-            argv = invocation.get("argv", [])
             if isinstance(argv, list) and len(argv) > 1:
                 self.args = " ".join(str(a) for a in argv[1:])
 
             # Signals/exit
-            signals = data.get("signals", {})
+            signals = _section(data, "signals")
             self.exit_code = _as_int(signals.get("exit_code"))
             self.signals_received = _as_signal_list(signals.get("signals_received", []))
 
             # Non-disruptive config notices (e.g. deprecated core.profile)
-            cfg = data.get("config", {})
-            if isinstance(cfg, dict):
-                notices = cfg.get("notices", [])
-                if isinstance(notices, list):
-                    self.config_notices = [n for n in notices if isinstance(n, dict)]
+            cfg = _section(data, "config")
+            notices = cfg.get("notices", [])
+            if isinstance(notices, list):
+                self.config_notices = [n for n in notices if isinstance(n, dict)]
 
             # Process
-            process = data.get("process", {})
+            process = _section(data, "process")
             self.pid = _as_int(process.get("pid"))
             # host.hostname is ``string | null`` per the schema; older crash
             # closeouts wrote a ``{"representation": ..., "value": ...}`` dict.
-            host = data.get("host", {})
-            hostname_val = host.get("hostname") if isinstance(host, dict) else None
+            host = _section(data, "host")
+            hostname_val = host.get("hostname")
             if isinstance(hostname_val, dict):
                 hostname_val = hostname_val.get("value")
             self.hostname = hostname_val if isinstance(hostname_val, str) and hostname_val else None
@@ -435,6 +439,25 @@ class RunInfo:
                 self.status = STATUS_INTERRUPTED
             elif self.outcome == "ghost":
                 self.status = STATUS_GHOST
+            elif self.outcome == "running":
+                if (
+                    (not self.hostname or self.hostname == get_hostname())
+                    and self.pid
+                    and self.pid > 0
+                    and self.started_at_utc is not None
+                    and is_same_process(
+                        self.pid,
+                        self.started_at_utc,
+                        expected_script=self.script,
+                    )
+                ):
+                    self.status = STATUS_RUNNING
+                    if self.elapsed is None:
+                        self.elapsed = max(0.0, time.time() - self.started_at_utc)
+                    self.rss_bytes = get_rss_bytes(self.pid)
+                    self.cpu_percent = get_cpu_percent(self.pid)
+                else:
+                    self.status = STATUS_CRASHED
             elif self._received_sigpipe():
                 self.status = STATUS_BROKEN_PIPE
             else:
@@ -453,6 +476,11 @@ class RunInfo:
         try:
             with open(lock_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            if not isinstance(data, dict):
+                self._parse_dir_name()
+                self.status = STATUS_CRASHED
+                self.timing_semantics = classify_timing_semantics({}, status=self.status)
+                return
             self.lock_data = data
             self.pid = _as_int(data.get("pid"))
             self.started_at_utc = _as_float(data.get("started_at_utc"))
@@ -504,6 +532,7 @@ class RunInfo:
         except (json.JSONDecodeError, OSError):
             self._parse_dir_name()
             self.status = STATUS_CRASHED
+            self.timing_semantics = classify_timing_semantics({}, status=self.status)
 
     def _parse_dir_name(self) -> None:
         """Extract what we can from the directory name pattern:
@@ -891,13 +920,16 @@ def close_out_crashed_run(run_dir: Path, lock_data: Optional[Dict[str, Any]]) ->
 # Scanning
 # --------------------------------------------------------------------------
 
-def _resolve_output_dir(output_dir: Optional[str] = None) -> Path:
+def _resolve_output_dir(output_dir: Optional[Union[str, "os.PathLike[str]"]] = None) -> Path:
     """Resolve the runs output directory from an override, config, or ./runs."""
     if output_dir:
-        return Path(output_dir)
+        raw = os.fspath(output_dir)
+        return Path(os.path.expanduser(os.path.expandvars(raw)))
     config = resolve_config()
-    base_str = config.get("core", {}).get("output_dir", "")
-    return Path(base_str) if base_str else Path.cwd() / "runs"
+    base_str = _section(config, "core").get("output_dir", "")
+    if isinstance(base_str, str) and base_str:
+        return Path(os.path.expanduser(os.path.expandvars(base_str)))
+    return Path.cwd() / "runs"
 
 
 def scan_runs(
@@ -1069,29 +1101,36 @@ def find_run(
         if n >= 1:
             by_recency = all_runs[n - 1] if n <= len(all_runs) else None
             exact_id = [r for r in all_runs if r.run_id == sel]
-            if by_recency is not None and len(exact_id) == 1 and exact_id[0] is not by_recency:
-                # A run is literally named the same as the recency index -> do not guess.
-                raise AmbiguousRunSelectorError(sel, by_recency, exact_id[0])
+            other_exact = [r for r in exact_id if r is not by_recency]
+            if by_recency is not None and other_exact:
+                # One or more runs are literally named the same as the recency
+                # index -> do not guess.
+                raise AmbiguousRunSelectorError(
+                    sel,
+                    by_recency,
+                    other_exact[0],
+                    candidates=[by_recency, *other_exact],
+                )
             if by_recency is not None:
                 return by_recency
             # Out of range: fall through to id/dirname resolution.
 
     # (2) id / prefix match.
-    matches = [r for r in all_runs if r.run_id and r.run_id.startswith(run_id_or_prefix)]
+    matches = [r for r in all_runs if r.run_id and r.run_id.startswith(sel)]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        exact = [r for r in matches if r.run_id == run_id_or_prefix]
+        exact = [r for r in matches if r.run_id == sel]
         if len(exact) == 1:
             return exact[0]
-        raise AmbiguousRunSelectorError(run_id_or_prefix, None, None, candidates=matches)
+        raise AmbiguousRunSelectorError(sel, None, None, candidates=matches)
 
     # (3) directory-name substring match.
-    matches = [r for r in all_runs if run_id_or_prefix in r.run_dir.name]
+    matches = [r for r in all_runs if sel in r.run_dir.name]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        raise AmbiguousRunSelectorError(run_id_or_prefix, None, None, candidates=matches)
+        raise AmbiguousRunSelectorError(sel, None, None, candidates=matches)
     return None
 
 
@@ -1558,8 +1597,11 @@ def _dir_size(path: Path) -> int:
     total = 0
     try:
         for f in path.rglob("*"):
-            if f.is_file():
-                total += f.stat().st_size
+            try:
+                if not f.is_symlink() and f.is_file():
+                    total += f.stat().st_size
+            except OSError:
+                continue
     except OSError:
         pass
     return total
