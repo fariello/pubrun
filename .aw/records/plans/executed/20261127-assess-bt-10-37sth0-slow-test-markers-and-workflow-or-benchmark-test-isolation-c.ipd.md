@@ -6,7 +6,7 @@
 - Scope: Update `tests/test_compatibility.py`, `tests/test_package_benchmark.py`, and `tests/test_startup_benchmark.py` (test-only changes; no production source edits).
 - Scope-Paths: tests/test_compatibility.py, tests/test_package_benchmark.py, tests/test_startup_benchmark.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: standard
 - Short-Description: Add @pytest.mark.slow markers, harden workflow assertions in test_compatibility.py, and isolate sys.path/sys.modules in benchmark tests
@@ -17,12 +17,12 @@
 - Highest E allocated: 04
 - Author: Antigravity
 - Id: 37sth0
-- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 37sth0 verified (set assess-bt, attempt 1).
 - 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-27 to-review (Antigravity): Authored review-ready child IPD from `/assess testing` Slice 3 audit on HEAD `512ee68` / `8f2aacd`.
