@@ -12,6 +12,7 @@ from unittest import mock
 import pytest
 
 from pubrun.capture.redaction import format_safe_error_detail, redact_argv
+from pubrun.capture.subprocesses import SubprocessSpy
 from pubrun.report.utils import _is_meta_ref_allowed
 from pubrun.__main__ import _format_rerun_cmd_for_platform
 
@@ -173,3 +174,102 @@ def test_aggregate_sanitizes_markdown_and_csv_formula_injection(tmp_path: Path) 
     # No injected newline breaking the table row
     table_rows = [ln for ln in md_text.splitlines() if ln.startswith("| ") and "Machine" not in ln]
     assert len(table_rows) == 1
+
+
+def test_boolean_sensitive_flags_subcommands_and_redacted_marker_preservation() -> None:
+    """Boolean sensitive flags and subcommands must not leak following secrets or corrupt [REDACTED]."""
+    cases = [
+        ("--use-auth --password supersecret", "--use-auth --password [REDACTED]"),
+        ("--use-key --password supersecret", "--use-key --password [REDACTED]"),
+        ("--token --secret supersecret", "--token --secret [REDACTED]"),
+        ("auth --password supersecret", "auth --password [REDACTED]"),
+    ]
+    for raw_cmd, expected_cmd in cases:
+        unsplit_out = redact_argv([raw_cmd])
+        assert unsplit_out == [expected_cmd]
+        assert "supersecret" not in unsplit_out[0]
+
+        tokenized_out = redact_argv(raw_cmd.split())
+        assert " ".join(tokenized_out) == expected_cmd
+        assert "supersecret" not in " ".join(tokenized_out)
+
+        err_out = format_safe_error_detail(RuntimeError(raw_cmd))
+        assert err_out == f"RuntimeError: {expected_cmd}"
+        assert "supersecret" not in err_out
+
+    assert redact_argv(["curl", "-H", "Bearer tok123"]) == ["curl", "-H", "Bearer [REDACTED]"]
+    bearer_err = format_safe_error_detail(RuntimeError("Bearer tok123"))
+    assert bearer_err == "RuntimeError: Bearer [REDACTED]"
+    assert "tok123" not in bearer_err
+
+    for already_redacted in (
+        "--password [REDACTED]",
+        "--password=[REDACTED]",
+        "password: [REDACTED]",
+    ):
+        argv_out = redact_argv([f"cmd {already_redacted}"])
+        assert "[REDACTED]]" not in argv_out[0]
+        assert already_redacted in argv_out[0]
+
+        err_out = format_safe_error_detail(RuntimeError(already_redacted))
+        assert err_out == f"RuntimeError: {already_redacted}"
+        assert "[REDACTED]]" not in err_out
+
+
+def test_windows_mid_token_quote_splitting_and_redaction() -> None:
+    """Windows non-POSIX splitting keeps mid-token quoted values intact so redact_argv hides full secrets."""
+    assert SubprocessSpy._safe_shlex_split("", posix=False) == []
+    assert SubprocessSpy._safe_shlex_split("   \t\n  ", posix=False) == []
+
+    # Empty quoted tokens
+    assert SubprocessSpy._safe_shlex_split('""', posix=False) == [""]
+    assert SubprocessSpy._safe_shlex_split('a "" b', posix=False) == ["a", "", "b"]
+    empty_pw_tokens = SubprocessSpy._safe_shlex_split('--password=""', posix=False)
+    assert empty_pw_tokens == ["--password="]
+    assert redact_argv(empty_pw_tokens) == ["--password=[REDACTED]"]
+
+    # Trailing backslash before closing quote stays verbatim and closes cleanly
+    assert SubprocessSpy._safe_shlex_split('"C:\\dir\\"', posix=False) == ["C:\\dir\\"]
+
+    # Mid-token double and single quotes, nested opposite quotes, backslashes, and KEY="val"
+    cmd = (
+        r'tool.exe --password="my secret" '
+        "--token='my other secret' "
+        r'--data="C:\Program Files\a.csv" KEY="top secret" '
+        '''--api-key="it's secret" --secret='a "b" c' '''
+        r"C:\work\O'Brien\train.py --password supersecret"
+    )
+    tokens = SubprocessSpy._safe_shlex_split(cmd, posix=False)
+    assert tokens == [
+        "tool.exe",
+        "--password=my secret",
+        "--token=my other secret",
+        r"--data=C:\Program Files\a.csv",
+        "KEY=top secret",
+        "--api-key=it's secret",
+        '--secret=a "b" c',
+        r"C:\work\O'Brien\train.py",
+        "--password",
+        "supersecret",
+    ]
+
+    redacted = redact_argv(tokens)
+    assert redacted == [
+        "tool.exe",
+        "--password=[REDACTED]",
+        "--token=[REDACTED]",
+        r"--data=C:\Program Files\a.csv",
+        "KEY=[REDACTED]",
+        "--api-key=[REDACTED]",
+        "--secret=[REDACTED]",
+        r"C:\work\O'Brien\train.py",
+        "--password",
+        "[REDACTED]",
+    ]
+    joined = " ".join(redacted)
+    for leaked in ("my secret", "my other secret", "top secret", "it's secret", 'a "b" c', "supersecret"):
+        assert leaked not in joined
+
+    # Unterminated quotes fall back to [args]
+    unterminated = r'app.exe --password="unterminated secret'
+    assert SubprocessSpy._safe_shlex_split(unterminated, posix=False) == [unterminated]

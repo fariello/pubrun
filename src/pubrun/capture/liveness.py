@@ -182,10 +182,12 @@ def _check_command_macos(pid: int, expected_script: str) -> Optional[bool]:
     if _script_is_generic(expected_script):
         return None
     try:
-        result = subprocess.run(
-            ["ps", "-o", "command=", "-p", str(pid)],
-            capture_output=True, text=True, timeout=5
-        )
+        from pubrun.capture.subprocesses import disable_spy
+        with disable_spy():
+            result = subprocess.run(
+                ["ps", "-o", "command=", "-p", str(pid)],
+                capture_output=True, text=True, timeout=5
+            )
         if result.returncode == 0:
             cmdline = result.stdout.strip()
             if cmdline:
@@ -199,10 +201,12 @@ def _check_command_windows(pid: int, expected_script: str) -> Optional[bool]:
     if _script_is_generic(expected_script):
         return None
     try:
-        result = subprocess.run(
-            ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine"],
-            capture_output=True, text=True, timeout=10
-        )
+        from pubrun.capture.subprocesses import disable_spy
+        with disable_spy():
+            result = subprocess.run(
+                ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine"],
+                capture_output=True, text=True, timeout=10
+            )
         if result.returncode == 0:
             lines = [l.strip() for l in result.stdout.strip().splitlines() if l.strip()]
             if len(lines) >= 2:
@@ -402,10 +406,12 @@ def _get_start_time_macos(pid: int) -> Optional[float]:
         env = dict(os.environ)
         env["LC_ALL"] = "C"
         env["LC_TIME"] = "C"
-        result = subprocess.run(
-            ["ps", "-o", "lstart=", "-p", str(pid)],
-            capture_output=True, text=True, timeout=5, env=env
-        )
+        from pubrun.capture.subprocesses import disable_spy
+        with disable_spy():
+            result = subprocess.run(
+                ["ps", "-o", "lstart=", "-p", str(pid)],
+                capture_output=True, text=True, timeout=5, env=env
+            )
         if result.returncode != 0 or not result.stdout.strip():
             return None
         # With LC_ALL=C the output is "Thu May 31 14:02:17 2026".
@@ -444,10 +450,12 @@ def _parse_c_locale_lstart(text: str) -> Optional[float]:
 def _get_rss_macos(pid: int) -> Optional[int]:
     """Get RSS via ps -o rss= (output in kilobytes)."""
     try:
-        result = subprocess.run(
-            ["ps", "-o", "rss=", "-p", str(pid)],
-            capture_output=True, text=True, timeout=5
-        )
+        from pubrun.capture.subprocesses import disable_spy
+        with disable_spy():
+            result = subprocess.run(
+                ["ps", "-o", "rss=", "-p", str(pid)],
+                capture_output=True, text=True, timeout=5
+            )
         if result.returncode != 0 or not result.stdout.strip():
             return None
         return int(result.stdout.strip()) * 1024  # kB -> bytes
@@ -458,13 +466,15 @@ def _get_rss_macos(pid: int) -> Optional[int]:
 def _get_cpu_macos(pid: int) -> Optional[float]:
     """Get CPU% via ps -o %cpu=."""
     try:
-        result = subprocess.run(
-            ["ps", "-o", "%cpu=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            env={**os.environ, "LC_ALL": "C"},
-        )
+        from pubrun.capture.subprocesses import disable_spy
+        with disable_spy():
+            result = subprocess.run(
+                ["ps", "-o", "%cpu=", "-p", str(pid)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env={**os.environ, "LC_ALL": "C"},
+            )
         if result.returncode != 0 or not result.stdout.strip():
             return None
         return float(result.stdout.strip())
@@ -603,10 +613,14 @@ def _is_pid_alive_windows(pid: int) -> bool:
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         STILL_ACTIVE = 259
+        ERROR_ACCESS_DENIED = 5
 
         kernel32 = _get_win_kernel32()
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if not handle:
+            get_last_error = getattr(ctypes, "get_last_error", None)
+            if get_last_error is not None and get_last_error() == ERROR_ACCESS_DENIED:
+                return True
             return False
         try:
             exit_code = ctypes.wintypes.DWORD()
@@ -695,10 +709,12 @@ def _get_rss_windows(pid: int) -> Optional[int]:
         pass
 
     try:
-        result = subprocess.run(
-            ["wmic", "process", "where", f"ProcessId={pid}", "get", "WorkingSetSize"],
-            capture_output=True, text=True, timeout=10
-        )
+        from pubrun.capture.subprocesses import disable_spy
+        with disable_spy():
+            result = subprocess.run(
+                ["wmic", "process", "where", f"ProcessId={pid}", "get", "WorkingSetSize"],
+                capture_output=True, text=True, timeout=10
+            )
         if result.returncode != 0:
             return None
         lines = [l.strip() for l in result.stdout.strip().splitlines() if l.strip()]

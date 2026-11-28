@@ -95,6 +95,63 @@ def _decode_wait_status(status: Any) -> Any:
         pass
     return status
 
+def _split_windows_cmdline(command: str) -> List[str]:
+    """Split a Windows command string on unquoted whitespace, keeping backslashes verbatim.
+
+    Double quotes may open and close quoted spans anywhere in a token; single
+    quotes open a quoted span at token start or immediately after ``=`` so
+    apostrophes in unquoted Windows paths (such as ``O'Brien``) stay literal.
+    Opposite quotes inside an active span are treated as literal characters,
+    empty quoted tokens are preserved, and unterminated quotes fall back to
+    ``[command]``.
+    """
+    tokens: List[str] = []
+    buf: List[str] = []
+    in_token = False
+    after_eq = False
+    quote: Optional[str] = None
+
+    for ch in command:
+        if quote is not None:
+            if ch == quote:
+                quote = None
+            else:
+                buf.append(ch)
+            continue
+
+        if ch.isspace():
+            if in_token:
+                tokens.append("".join(buf))
+                buf = []
+                in_token = False
+                after_eq = False
+            continue
+
+        if ch == '"':
+            quote = '"'
+            in_token = True
+            after_eq = False
+            continue
+
+        if ch == "'" and (not in_token or after_eq):
+            quote = "'"
+            in_token = True
+            after_eq = False
+            continue
+
+        buf.append(ch)
+        in_token = True
+        after_eq = ch == "="
+
+    if quote is not None:
+        return [command]
+
+    if in_token:
+        tokens.append("".join(buf))
+
+    return tokens
+
+
 class SubprocessSpy:
     """Patches subprocess.Popen and os.system to record spawned processes transparently."""
     _installed = False
@@ -777,24 +834,19 @@ class SubprocessSpy:
         """Parse a command string into a list, falling back to [args] on failure.
 
         Defaults to ``posix=(sys.platform != "win32")``. In non-POSIX (Windows)
-        mode, preserves backslashes in paths while stripping one matched outer
-        pair of double or single quotes from each token.
+        mode, uses a Windows quote-aware splitter that preserves backslashes
+        verbatim and groups mid-token double-quoted and post-``=`` single-quoted
+        spans into single tokens.
         """
         if isinstance(args, str):
             use_posix = (sys.platform != "win32") if posix is None else bool(posix)
+            if not use_posix:
+                return _split_windows_cmdline(args)
             try:
-                tokens = shlex.split(args, posix=use_posix)
+                return shlex.split(args, posix=True)
             except ValueError:
                 # Unterminated quotes or other parse errors — store raw string
                 return [args]
-            if not use_posix:
-                cleaned = []
-                for tok in tokens:
-                    if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ('"', "'"):
-                        tok = tok[1:-1]
-                    cleaned.append(tok)
-                return cleaned
-            return tokens
         elif isinstance(args, (list, tuple)):
             return [str(a) for a in args]
         else:

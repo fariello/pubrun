@@ -458,3 +458,84 @@ class TestLivenessPlatformBranches:
         calls_before = len(state["open_calls"])
         assert liveness._is_pid_alive_windows(0x100000000) is False
         assert len(state["open_calls"]) == calls_before
+
+    def test_all_six_subprocess_helpers_bypass_subprocess_spy(self, monkeypatch):
+        from pubrun.capture.subprocesses import SubprocessSpy, _spy_bypassed
+
+        observed = []
+
+        def fake_run(cmd, **kwargs):
+            bypassed = _spy_bypassed()
+            # Exercise the live patched subprocess.Popen path so any missing
+            # disable_spy() wrapper records an entry in SubprocessSpy.
+            probe = subprocess.Popen([sys.executable, "-c", "pass"])
+            probe.wait(timeout=10)
+            observed.append((list(cmd), bypassed))
+            if cmd[0] == "ps":
+                fmt = cmd[2]
+                if fmt == "command=":
+                    return SimpleNamespace(returncode=0, stdout="python custom_train_script.py\n")
+                if fmt == "lstart=":
+                    return SimpleNamespace(returncode=0, stdout="Thu May 31 14:02:17 2026\n")
+                if fmt == "rss=":
+                    return SimpleNamespace(returncode=0, stdout="2048\n")
+                if fmt == "%cpu=":
+                    return SimpleNamespace(returncode=0, stdout="12.5\n")
+            if cmd[0] == "wmic":
+                if "CommandLine" in cmd:
+                    return SimpleNamespace(
+                        returncode=0, stdout="CommandLine\npython custom_train_script.py\n"
+                    )
+                if "WorkingSetSize" in cmd:
+                    return SimpleNamespace(returncode=0, stdout="WorkingSetSize\n4096000\n")
+            raise AssertionError(f"unexpected command: {cmd!r}")
+
+        def fail_kernel32():
+            raise RuntimeError("force wmic fallback")
+
+        monkeypatch.setattr(liveness.subprocess, "run", fake_run)
+        monkeypatch.setattr(liveness, "_get_win_kernel32", fail_kernel32)
+
+        SubprocessSpy.uninstall()
+        assert SubprocessSpy.install(owner="liveness_bypass_test") is True
+        try:
+            assert liveness._check_command_macos(123, "custom_train_script.py") is True
+            assert liveness._check_command_windows(123, "custom_train_script.py") is True
+            assert liveness._get_start_time_macos(123) is not None
+            assert liveness._get_rss_macos(123) == 2048 * 1024
+            assert liveness._get_cpu_macos(123) == 12.5
+            assert liveness._get_rss_windows(123) == 4096000
+
+            assert len(observed) == 6
+            assert all(bypassed is True for _, bypassed in observed)
+            assert SubprocessSpy.get_records() == []
+        finally:
+            SubprocessSpy.uninstall(owner="liveness_bypass_test")
+
+    def test_windows_openprocess_access_denied_vs_invalid_parameter(self, monkeypatch):
+        monkeypatch.setattr(liveness, "_PLATFORM", "win32")
+
+        class DenyOrMissingKernel32:
+            def OpenProcess(self, access, inherit, pid):
+                return 0
+
+        monkeypatch.setattr(
+            ctypes,
+            "windll",
+            SimpleNamespace(kernel32=DenyOrMissingKernel32()),
+            raising=False,
+        )
+
+        # ERROR_ACCESS_DENIED (5): process exists under another owner -> alive (POSIX parity).
+        monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+        assert liveness._is_pid_alive_windows(1234) is True
+        assert is_pid_alive(1234) is True
+
+        # ERROR_INVALID_PARAMETER (87): PID does not exist -> dead.
+        monkeypatch.setattr(ctypes, "get_last_error", lambda: 87, raising=False)
+        assert liveness._is_pid_alive_windows(1234) is False
+        assert is_pid_alive(1234) is False
+
+        # When ctypes.get_last_error is unavailable (e.g. non-Windows host), returns False safely.
+        monkeypatch.delattr(ctypes, "get_last_error", raising=False)
+        assert liveness._is_pid_alive_windows(1234) is False

@@ -514,32 +514,51 @@ class ConsoleInterceptor:
     def resume_after_migration(self, new_dir: Path, *, reenable_faulthandler: bool = False) -> None:
         """Update run_dir, reopen console logs in append mode, reattach tees, and optionally re-enable faulthandler."""
         self.run_dir = new_dir
-        if self.mode == "off":
+        if self.mode == "off" or not self._started:
             return
-        try:
-            self.stdout_log = open(
-                new_dir / "stdout.log", "a", encoding="utf-8", errors="backslashreplace"
-            )
-            if self.stdout_tee is not None:
-                with finalization_lock(self.stdout_tee._lock, 0.25):
-                    self.stdout_tee.log_file = self.stdout_log
 
-            self.stderr_log = open(
-                new_dir / "stderr.log", "a", encoding="utf-8", errors="backslashreplace"
-            )
-            if self.stderr_tee is not None:
-                with finalization_lock(self.stderr_tee._lock, 0.25):
-                    self.stderr_tee.log_file = self.stderr_log
+        for log_attr, tee, filename in (
+            ("stdout_log", self.stdout_tee, "stdout.log"),
+            ("stderr_log", self.stderr_tee, "stderr.log"),
+        ):
+            opened_handle: Optional[TextIO] = None
+            try:
+                opened_handle = open(
+                    new_dir / filename, "a", encoding="utf-8", errors="backslashreplace"
+                )
+                setattr(self, log_attr, opened_handle)
+                if tee is not None:
+                    with finalization_lock(tee._lock, 0.25) as acquired:
+                        if not acquired:
+                            raise TimeoutError(
+                                f"timed out acquiring tee lock while reopening {filename}"
+                            )
+                        tee.log_file = opened_handle
+            except Exception as reopen_err:
+                if opened_handle is not None:
+                    try:
+                        opened_handle.close()
+                    except Exception:
+                        pass
+                setattr(self, log_attr, None)
+                if tee is not None:
+                    with finalization_lock(tee._lock, 0.25):
+                        tee.log_file = None
+                        tee._log_write_failed = True
+                from pubrun.capture.redaction import format_safe_error_detail
+                logger.debug(
+                    "Failed to reopen %s after migration: %s",
+                    filename,
+                    format_safe_error_detail(reopen_err, self._config),
+                )
 
-            if reenable_faulthandler and self.stderr_log is not None:
-                try:
-                    import faulthandler
-                    faulthandler.enable(file=self.stderr_log)
-                    self._faulthandler_owned = True
-                except Exception:
-                    self._faulthandler_owned = False
-        except Exception as reopen_err:
-            logger.debug("Failed to reopen console logs after migration: %s", reopen_err)
+        if reenable_faulthandler and self.stderr_log is not None:
+            try:
+                import faulthandler
+                faulthandler.enable(file=self.stderr_log)
+                self._faulthandler_owned = True
+            except Exception:
+                self._faulthandler_owned = False
 
     def migrate_directory(self, new_dir: Path) -> None:
         """Suspend, update target directory, and resume console logging in one step."""
