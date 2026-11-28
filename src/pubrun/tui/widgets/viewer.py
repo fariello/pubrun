@@ -12,7 +12,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, RichLog, Select
 
 from pubrun.status import _format_bytes
-from pubrun.tui.widgets.config import _is_select_empty
+from pubrun.tui.widgets.config import _SELECT_EMPTY_VALUE, _is_select_empty
 
 MAX_LOG_BYTES = 2 * 1024 * 1024  # 2 MiB tail window
 MAX_LOG_LINES = 5000
@@ -75,8 +75,24 @@ class LogViewer(Vertical):
             yield Button("Refresh", id="btn-refresh-log", variant="success")
         yield RichLog(id="log-content-area", classes="log-area")
 
-    def display_run_logs(self, run_dir: Path) -> None:
+    def clear(self) -> None:
+        """Reset the log viewer to its empty no-run state."""
+        self.run_dir = None
+        self.log_files = []
+
+        select_widget = self.query_one("#select-log-file", Select)
+        log_content = self.query_one("#log-content-area", RichLog)
+        log_content.clear()
+        with select_widget.prevent(Select.Changed):
+            select_widget.set_options([])
+            select_widget.value = _SELECT_EMPTY_VALUE
+
+    def display_run_logs(self, run_dir: Optional[Path]) -> None:
         """Scan the run directory for log files and populate the selection dropdown."""
+        if run_dir is None:
+            self.clear()
+            return
+
         self.run_dir = run_dir
         self.log_files = []
 
@@ -84,9 +100,10 @@ class LogViewer(Vertical):
         log_content = self.query_one("#log-content-area", RichLog)
         log_content.clear()
 
-        if not run_dir or not run_dir.exists():
+        if not run_dir.exists():
             with select_widget.prevent(Select.Changed):
                 select_widget.set_options([])
+                select_widget.value = _SELECT_EMPTY_VALUE
             return
 
         # Scan for log files (.log, .jsonl, .txt) and sort deterministically.
@@ -102,6 +119,7 @@ class LogViewer(Vertical):
         if not self.log_files:
             with select_widget.prevent(Select.Changed):
                 select_widget.set_options([])
+                select_widget.value = _SELECT_EMPTY_VALUE
             log_content.write("No log files found in this run directory.")
             log_content.write(
                 'Tip: Enable console capture via [console].capture_mode = "standard" '

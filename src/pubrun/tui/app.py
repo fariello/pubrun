@@ -221,6 +221,9 @@ class PubrunTUIApp(App):
             self.selected_run_info = None
             self._dirty_tabs.clear()
             self.query_one("#details-view", RunDetailsView).show_onboarding()
+            self.query_one("#logs-view", LogViewer).clear()
+            self.query_one("#resources-view", RunResourcesView).clear()
+            self.query_one("#actions-view", ActionsPanel).display_run(None)
 
         self.notify("Runs database and cache refreshed.", severity="information")
 

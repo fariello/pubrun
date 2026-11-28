@@ -117,8 +117,18 @@ class RunResourcesView(Vertical):
             Static("Select a run to view its CPU and memory usage.", id="resources-body")
         )
 
-    def display_run(self, run_info: RunInfo) -> None:
+    def clear(self) -> None:
+        """Reset the resources view to its empty no-run state."""
+        self.run_info = None
+        self.query_one("#resources-body", Static).update(
+            "Select a run to view its CPU and memory usage."
+        )
+
+    def display_run(self, run_info: Optional[RunInfo]) -> None:
         """Render the resource digest and manifest summary for ``run_info`` (never raises)."""
+        if run_info is None:
+            self.clear()
+            return
         self.run_info = run_info
         body = self.query_one("#resources-body", Static)
         try:
