@@ -210,9 +210,9 @@ class TestDiffRobustness:
 
     def test_unflatten_prefix_collision(self):
         from pubrun.analysis.diff import unflatten_manifest
-        # 'a.b' scalar and 'a.b.c' nested collide; must not raise.
+        # 'a.b' scalar and 'a.b.c' nested collide; preserve both without crashing.
         result = unflatten_manifest({"a.b": 1, "a.b.c": 2})
-        assert result  # produced something without crashing
+        assert result == {"a": {"b": 1}, "a.b.c": 2}
 
     def test_normalize_tolerates_non_list_sections(self):
         from pubrun.analysis.diff import _normalize_manifest

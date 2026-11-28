@@ -480,7 +480,7 @@ class TestImportMetadataInManifest:
         tracker = start()
         manifest = tracker.to_manifest_dict()
         imports = manifest["pubrun_imports"]
-        assert imports["selected_mode"] in ("auto", "noauto", "nopatch", "noconsole", "minimal")
+        assert imports["selected_mode"] in VALID_MODES
         assert isinstance(imports["selected_behavior"], dict)
         assert "auto_start" in imports["selected_behavior"]
         assert "global_hooks" in imports["selected_behavior"]
@@ -496,7 +496,7 @@ class TestImportMetadataInManifest:
             lock_data = json.load(f)
         assert "import_mode" in lock_data
         assert "import_selected_by" in lock_data
-        assert lock_data["import_mode"] in ("auto", "noauto", "nopatch", "noconsole", "minimal", None)
+        assert lock_data["import_mode"] in (VALID_MODES | {None})
         tracker.stop()
 
 

@@ -6,7 +6,7 @@
 - Scope: Harden `tests/conftest.py` (user-config isolation + resetting 7 omitted module-level caches/latches), add real-file `load_user_config()` tests in `tests/test_config.py`, and tighten assertions / replace sleeps and private pinning across `tests/test_api.py`, `tests/test_edge_cases.py`, `tests/test_import_modes.py`, `tests/test_signals.py`, `tests/test_capture.py`, and `tests/test_events.py`.
 - Scope-Paths: tests/conftest.py, tests/test_config.py, tests/test_api.py, tests/test_edge_cases.py, tests/test_import_modes.py, tests/test_signals.py, tests/test_capture.py, tests/test_events.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Isolate host user config and reset 7 module caches in conftest.py, tighten vacuous assertions, and replace fixed sleeps and private slot pins
@@ -17,12 +17,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: kgoymu
-- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: kgoymu verified (set assess-bt, attempt 1).
 - 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-27 to-review (Antigravity): Authored review-ready child IPD from `/assess testing` Slices 1 and 3 on HEAD `512ee68` / `8f2aacd`.
@@ -54,7 +54,7 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
 
 ### Task group 1: Hermetic `conftest.py` isolation and user-config coverage
 
-- [ ] E-01 Isolate host user config and reset all 7 omitted module-level caches/latches in `tests/conftest.py`, and add real-file `load_user_config()` tests in `tests/test_config.py` (`TEST-C7`, `TEST-I4`):
+- [x] E-01 Isolate host user config and reset all 7 omitted module-level caches/latches in `tests/conftest.py`, and add real-file `load_user_config()` tests in `tests/test_config.py` (`TEST-C7`, `TEST-I4`):
   - In `tests/conftest.py`, add a **session-scoped** `autouse=True` fixture (for example `_isolate_user_config(tmp_path_factory)`) that sets `os.environ["XDG_CONFIG_HOME"]` and `os.environ["APPDATA"]` to a clean empty directory from `tmp_path_factory.mktemp("pubrun_xdg_config")` and restores their prior values on session teardown. Session scope guarantees the isolated paths are active before function-scoped `pubrun_state_isolation` captures `_env_snapshot = dict(os.environ)`, so per-test `monkeypatch.setenv` / `delenv` overrides still work and revert to the clean empty directory after each test.
   - In `tests/conftest.py::pubrun_state_isolation` (in `_reset()`, running on both setup and teardown), reset all 7 omitted module-level caches/latches strictly via `sys.modules.get(...)` (never eagerly importing unloaded modules, except `pubrun` and `pubrun.capture.signals` which `conftest.py` already imports):
     1. `pubrun.capture.signals`: clear `_timed_out_locks` (`_signals._timed_out_locks.clear()`).
@@ -67,40 +67,40 @@ Execution-state rule: mark an `E-*` item complete only after performing the acti
   - In `tests/test_config.py`, add real-file behavioral tests for `load_user_config()` covering (a) missing file returns `None`, (b) valid TOML under temporary `XDG_CONFIG_HOME` returns the parsed dict, (c) malformed TOML under temporary `XDG_CONFIG_HOME` returns `None` and logs `"ignoring malformed config file"` via `caplog`, and (d) Windows `APPDATA` resolution via `monkeypatch.setattr(sys, "platform", "win32")` + `monkeypatch.setenv("APPDATA", ...)`.
   - Depends on: none
   - Expected outcome: Running the suite with a hostile host `XDG_CONFIG_HOME/pubrun/config.toml` (`profile = "deep"`, `on_inactive_annotate = "error"`) stays 100% green, `tests/test_config_capture_modes.py::TestGlobalConfigDir` stays green, and cross-test cache/warning-latch leakage across all 7 modules is eliminated without eagerly importing lazy modules.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 2: Tighten vacuous assertions and clean up sleeps and private pinning
 
-- [ ] E-02 Tighten vacuous and drifted assertions in `tests/test_api.py`, `tests/test_edge_cases.py`, and `tests/test_import_modes.py` (`TEST-C8`, `TEST-I10`):
+- [x] E-02 Tighten vacuous and drifted assertions in `tests/test_api.py`, `tests/test_edge_cases.py`, and `tests/test_import_modes.py` (`TEST-C8`, `TEST-I10`):
   - In `tests/test_api.py`: in `TestDiff.test_diff_with_ignores`, assert ignored prefixes (`"timing"`, `"run"`, `"capture"`) do not appear in `set(result["modified"]) | set(result["added"]) | set(result["removed"])`; in `TestPhase.test_phase_context_manager` and `test_phase_with_exception`, assert exact `"phase_start"` and `"phase_end"` event types and `end_events[0]["payload"]["error"] == "ValueError"`; in `TestManifestSchema.test_capture_state_present_in_sections`, assert `isinstance(data, dict)` unconditionally before checking `"capture_state" in data`; add concrete post-condition assertions to the three "does-not-throw" tests (`TestStop.test_stop_without_active_run_no_crash` asserting `get_current_run() is None` after `stop()`; `TestAnnotate.test_annotate_without_active_run_no_crash` and `TestPhase.test_phase_without_active_run_no_crash` asserting `get_current_run() is None` and zero `"No active run"` warnings via `caplog` under default `ignore` policy).
   - In `tests/test_edge_cases.py`: in `TestDiffRobustness.test_unflatten_prefix_collision`, assert exact collision-preservation output (`assert result == {"a": {"b": 1}, "a.b.c": 2}`, matching `src/pubrun/analysis/diff.py::unflatten_manifest`) rather than bare `assert result`.
   - In `tests/test_import_modes.py`: align allowed-mode tuples in `TestImportMetadataInManifest.test_manifest_imports_has_correct_mode` and `test_lock_file_contains_import_mode` with `VALID_MODES` (including `"full"`).
   - Depends on: E-01
   - Expected outcome: Every tightened test fails when its contract is broken rather than passing vacuously.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-03 Clean up `tests/test_signals.py` (`TEST-C9`, `TEST-I7`, `TEST-I10`):
+- [x] E-03 Clean up `tests/test_signals.py` (`TEST-C9`, `TEST-I7`, `TEST-I10`):
   - Remove the private tuple-equality pin `finalization_lock.__slots__ == ("_lock", "_timeout", "_acquired")` in `TestSignalHardeningAndRecovery.test_finalization_lock_uses_slots_and_releases_on_exception` while keeping `assert not hasattr(ctx, "__dict__")` and behavioral exception-release checks (`TEST-C9`).
   - Replace the two fixed-sleep thread handshakes (`time.sleep(0.05)` in `test_sigterm_finalizes_while_lock_held` for `write_lock_vs_hw_refresh` and `errors_lock_vs_hw_refresh`, around lines 715 and 727) with deterministic `threading.Event` coordination (`TEST-I7`): wrap `run.writer.write_startup_manifest` (for `write_lock_vs_hw_refresh`) and `run._check_section_failed` (for `errors_lock_vs_hw_refresh`) to set an `entering = threading.Event()` right before delegating to the real method, and wait on `assert entering.wait(5)` instead of `time.sleep(0.05)` after `assert ready.wait(5)`.
   - Add concrete post-condition assertions to the three "does-not-throw" tests in `tests/test_signals.py` (`TEST-I10`): `test_double_install_is_safe` (assert `cap._installed is True` after both `install()` calls and `False` after `uninstall()`, with original handlers restored), `test_double_uninstall_is_safe` (assert `cap._installed is False` after both `uninstall()` calls), and `test_finalize_active_run_no_crash_without_active_run` (assert `signals._finalizing_active_run is False` and `signals._timed_out_locks == set()` after the call).
   - Depends on: E-01
   - Expected outcome: `tests/test_signals.py` tests observable locking and signal outcomes without fixed-sleep handshake races or private-slot tuple coupling.
-  - Execution state: pending
+  - Execution state: performed
 
-- [ ] E-04 Add post-condition assertions to "does-not-throw" tests in `tests/test_capture.py` and `tests/test_events.py` (`TEST-I10`):
+- [x] E-04 Add post-condition assertions to "does-not-throw" tests in `tests/test_capture.py` and `tests/test_events.py` (`TEST-I10`):
   - In `tests/test_capture.py`: tighten `TestTqdmSafeTeeBrokenPipe.test_flush_catches_broken_pipe` to assert that `BrokenFlush.flush` was actually invoked (via a call counter) and that `"data\n"` was persisted to `log_file.getvalue()`, plus audit any remaining assertion-free tests in `tests/test_capture.py`.
   - In `tests/test_events.py`: tighten `TestEventStreamClose.test_close_idempotent` (assert `stream._file is None` after both closes and `events.jsonl` still contains the 1 `"test"` event), `TestEventStreamClose.test_emit_after_close_is_silent` (assert `stream._file is None` and `events.jsonl` remains empty), and `TestEventStreamConstructorFailure.test_emit_after_open_failure_is_silent` (assert `stream._file is None` and `(tmp_path / "events.jsonl")` does not exist).
   - Depends on: E-01
   - Expected outcome: Every test in `tests/test_capture.py` and `tests/test_events.py` asserts an observable post-condition.
-  - Execution state: pending
+  - Execution state: performed
 
 ### Task group 3: Validate under hostile host config and randomized ordering
 
-- [ ] E-05 Run targeted `pytest -p randomly` both normally and under a hostile temporary `XDG_CONFIG_HOME` and record complete output:
+- [x] E-05 Run targeted `pytest -p randomly` both normally and under a hostile temporary `XDG_CONFIG_HOME` and record complete output:
   - Run both commands listed in `## Required tests / validation` and verify exit `0`.
   - Depends on: E-02, E-03, E-04
   - Expected outcome: All targeted test files (including `tests/test_config_capture_modes.py`) pass under `-p randomly` even when host `XDG_CONFIG_HOME` and `APPDATA` contain hostile pubrun settings.
-  - Execution state: pending
+  - Execution state: performed
 
 ## Project conventions discovered (Step 0)
 
@@ -169,30 +169,30 @@ None.
 
 Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` item complete from memory or from the matching execution checkmark. Accepted validation results: blocked, failed, pass, pending; terminal gate demands 'pass'. Runtime-demonstration reachability rule: for each `V-*` item demanding the software be observed acting (such as a run, a dispatch, or a transition), as distinct from items demanding a diff, a file's content, or a test result (which are reachable by construction), name the code path that produces the observation or the sibling `E-*` that creates it, else the demand is UNDER-SCOPE.
 
-- [ ] V-01 validates E-01
+- [x] V-01 validates E-01
   - Required evidence: Pasted `git diff -- tests/conftest.py tests/test_config.py` confirming session-scoped `XDG_CONFIG_HOME`/`APPDATA` isolation, all 7 module cache/latch resets via `sys.modules.get(...)` (`signals._timed_out_locks`, `file_io._warned_invalid_algorithms`, `writer._warned_invalid_durability`, `report.output.set_debug(None)`, `pubrun._reset_version_cache()`, `core._INACTIVE_POLICY_CACHE`/`_USER_CONFIG_PATH_MEMO`/`_LOCAL_CONFIG_PATHS_MEMO`, `packages.invalidate_package_cache()`), and real-file `load_user_config()` tests, plus passing output from Command 2 (`HOSTILE_USER_CONFIG_ISOLATION_OK`, exercising `tests/conftest.py::_isolate_user_config` and `pubrun_state_isolation` updated in `E-01`) and `python3 -m pytest tests/test_config.py tests/test_config_capture_modes.py -v` exiting `0`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff -- tests/conftest.py tests/test_config.py` (+60 lines in `tests/conftest.py`: session-scoped autouse `_isolate_user_config(tmp_path_factory)` isolating `XDG_CONFIG_HOME`/`APPDATA` with teardown restore, plus `_reset()` resetting `_signals._timed_out_locks`, `file_io._warned_invalid_algorithms` under `_warn_lock`, `writer._warned_invalid_durability` under `_durability_warn_lock`, `report.output.set_debug(None)`, `pubrun._reset_version_cache()`, `core._INACTIVE_POLICY_CACHE`/`_USER_CONFIG_PATH_MEMO`/`_LOCAL_CONFIG_PATHS_MEMO`, and `packages.invalidate_package_cache()` via `sys.modules.get(...)`; +51/-1 lines in `tests/test_config.py` adding `TestLoadUserConfig` with 4 real-file tests: `test_missing_user_config_returns_none`, `test_valid_user_config_under_xdg`, `test_malformed_user_config_returns_none_and_warns`, and `test_windows_appdata_user_config`). Runner output: `python3 -m pytest tests/test_config.py tests/test_config_capture_modes.py -v` exited `0` (`collected 116 items`, `116 passed in 1.27s`); Command 2 hostile `XDG_CONFIG_HOME`/`APPDATA` subprocess exited `0` (`112 passed in 6.62s`, `HOSTILE_USER_CONFIG_ISOLATION_OK`).
+  - Result: pass
 
-- [ ] V-02 validates E-02
+- [x] V-02 validates E-02
   - Required evidence: Pasted `git diff -- tests/test_api.py tests/test_edge_cases.py tests/test_import_modes.py` confirming tightened assertions, exact `unflatten_manifest` collision equality, inactive no-crash post-conditions, and `VALID_MODES` alignment, plus passing `python3 -m pytest -p randomly tests/test_api.py tests/test_edge_cases.py tests/test_import_modes.py -v` output exiting `0` (re-deriving active test node names at execution time).
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff -- tests/test_api.py tests/test_edge_cases.py tests/test_import_modes.py` (`tests/test_api.py` +31/-15: `TestDiff.test_diff_with_ignores` asserts ignored prefixes `"timing"`, `"run"`, `"capture"` do not appear in `set(result["modified"]) | set(result["added"]) | set(result["removed"])`, `TestPhase.test_phase_context_manager` and `test_phase_with_exception` assert exact `"phase_start"`/`"phase_end"` types and `end_events[0]["payload"]["error"] == "ValueError"`, `TestManifestSchema.test_capture_state_present_in_sections` asserts `isinstance(data, dict)` unconditionally, and `test_stop_without_active_run_no_crash`, `test_annotate_without_active_run_no_crash`, `test_phase_without_active_run_no_crash` assert `get_current_run() is None` and zero `"No active run"` warnings; `tests/test_edge_cases.py` +2/-2: `TestDiffRobustness.test_unflatten_prefix_collision` asserts `result == {"a": {"b": 1}, "a.b.c": 2}`; `tests/test_import_modes.py` +2/-2: `TestImportMetadataInManifest.test_manifest_imports_has_correct_mode` asserts `in VALID_MODES` and `test_lock_file_contains_import_mode` asserts `in (VALID_MODES | {None})`). Runner output: `python3 -m pytest -p randomly tests/test_api.py tests/test_edge_cases.py tests/test_import_modes.py -v` exited `0` (`Using --randomly-seed=3906917880`, `173 passed in 28.29s`).
+  - Result: pass
 
-- [ ] V-03 validates E-03
+- [x] V-03 validates E-03
   - Required evidence: Pasted `git diff -- tests/test_signals.py` confirming removal of private `__slots__` tuple equality, replacement of the two `time.sleep(0.05)` handshakes with deterministic `threading.Event` entry coordination, and added post-conditions on double-install/uninstall and inactive `_finalize_active_run()`, plus passing `python3 -m pytest -p randomly tests/test_signals.py -v` output exiting `0`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff -- tests/test_signals.py` (+36/-7: removed `assert finalization_lock.__slots__ == ("_lock", "_timeout", "_acquired")` while keeping `assert not hasattr(ctx, "__dict__")` and exception-release checks; replaced both `time.sleep(0.05)` handshakes in `write_lock_vs_hw_refresh` and `errors_lock_vs_hw_refresh` with wrapped `run.writer.write_startup_manifest` / `run._check_section_failed` setting `entering = threading.Event()` and waiting via `assert entering.wait(5)`; added post-conditions in `test_double_install_is_safe`, `test_double_uninstall_is_safe`, and `test_finalize_active_run_no_crash_without_active_run`). Runner output: `python3 -m pytest -p randomly tests/test_signals.py -v` exited `0` (`Using --randomly-seed=836963991`, `42 passed in 13.11s`).
+  - Result: pass
 
-- [ ] V-04 validates E-04
+- [x] V-04 validates E-04
   - Required evidence: Pasted `git diff -- tests/test_capture.py tests/test_events.py` confirming observable post-condition assertions added to the broken-pipe flush and closed/failed-open `EventStream` tests, plus passing `python3 -m pytest -p randomly tests/test_capture.py tests/test_events.py -v` output exiting `0`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Inspected `git diff -- tests/test_capture.py tests/test_events.py` (`tests/test_capture.py` +9/-1: `test_flush_catches_broken_pipe` asserts `broken.flush_calls == 1` and `log_file.getvalue() == "data\n"`, and AST audit confirmed zero remaining assertion-free tests in `tests/test_capture.py`, `tests/test_events.py`, `tests/test_api.py`, and `tests/test_signals.py`; `tests/test_events.py` +9: `test_close_idempotent` asserts `stream._file is None` after both closes and 1 `"test"` event in `events.jsonl`, `test_emit_after_close_is_silent` asserts `stream._file is None` and empty `events.jsonl`, and `test_emit_after_open_failure_is_silent` asserts `stream._file is None` and `events.jsonl` does not exist). Runner output: `python3 -m pytest -p randomly tests/test_capture.py tests/test_events.py -v` exited `0` (`Using --randomly-seed=3330895999`, `60 passed in 5.72s`).
+  - Result: pass
 
-- [ ] V-05 validates E-05
+- [x] V-05 validates E-05
   - Required evidence: Pasted complete output of Command 1 (all eight pytest files under `-p randomly`) and Command 2 (hostile `XDG_CONFIG_HOME`/`APPDATA` isolation subprocess printing `HOSTILE_USER_CONFIG_ISOLATION_OK`, exercising `tests/conftest.py::_isolate_user_config` and `pubrun_state_isolation` updated in `E-01`) from `## Required tests / validation`, both exiting `0`.
-  - Observed evidence:
-  - Result: pending
+  - Observed evidence: Command 1 (`python3 -m pytest -p randomly tests/test_config.py tests/test_config_capture_modes.py tests/test_api.py tests/test_edge_cases.py tests/test_import_modes.py tests/test_signals.py tests/test_capture.py tests/test_events.py -v`) exited `0` (`Using --randomly-seed=2941827217`, `391 passed in 46.04s`); Command 2 (hostile `XDG_CONFIG_HOME`/`APPDATA` isolation subprocess with `profile = "deep"` and `on_inactive_annotate = "error"`) exited `0` (`112 passed in 6.62s`, `HOSTILE_USER_CONFIG_ISOLATION_OK`). Full repository suite (`aw suite`) also exited `0` (`2532 passed in 104.75s (0:01:44)`).
+  - Result: pass
 
 ## Approval and execution gate
 

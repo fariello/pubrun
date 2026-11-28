@@ -39,6 +39,24 @@ def _subprocess_pythonpath():
         os.environ["PYTHONPATH"] = previous
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_user_config(tmp_path_factory):
+    """Isolate the test session from host user-level pubrun config files."""
+    empty_config = str(tmp_path_factory.mktemp("pubrun_xdg_config"))
+    previous = {
+        key: os.environ.get(key)
+        for key in ("XDG_CONFIG_HOME", "APPDATA")
+    }
+    os.environ["XDG_CONFIG_HOME"] = empty_config
+    os.environ["APPDATA"] = empty_config
+    yield empty_config
+    for key, val in previous.items():
+        if val is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = val
+
+
 @pytest.fixture(autouse=True)
 def isolated_cwd(tmp_path, monkeypatch):
     """
@@ -103,6 +121,48 @@ def pubrun_state_isolation():
             _status._DISPLAY_UTC = False
         except Exception:
             pass
+        try:
+            _signals._timed_out_locks.clear()
+        except Exception:
+            pass
+        _file_io = sys.modules.get("pubrun.capture.file_io")
+        if _file_io is not None:
+            try:
+                with _file_io._warn_lock:
+                    _file_io._warned_invalid_algorithms.clear()
+            except Exception:
+                pass
+        _writer = sys.modules.get("pubrun.writer")
+        if _writer is not None:
+            try:
+                with _writer._durability_warn_lock:
+                    _writer._warned_invalid_durability.clear()
+            except Exception:
+                pass
+        _output = sys.modules.get("pubrun.report.output")
+        if _output is not None:
+            try:
+                _output.set_debug(None)
+            except Exception:
+                pass
+        try:
+            pubrun._reset_version_cache()
+        except Exception:
+            pass
+        _core_mod = sys.modules.get("pubrun.core")
+        if _core_mod is not None:
+            try:
+                _core_mod._INACTIVE_POLICY_CACHE = None
+                _core_mod._USER_CONFIG_PATH_MEMO = None
+                _core_mod._LOCAL_CONFIG_PATHS_MEMO = None
+            except Exception:
+                pass
+        _packages = sys.modules.get("pubrun.capture.packages")
+        if _packages is not None:
+            try:
+                _packages.invalidate_package_cache()
+            except Exception:
+                pass
 
     _env_snapshot = dict(os.environ)
     _orig_excepthook = sys.excepthook

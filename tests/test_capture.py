@@ -407,17 +407,25 @@ class TestTqdmSafeTeeBrokenPipe:
         from pubrun.capture.console import TqdmSafeTee
 
         class BrokenFlush:
+            def __init__(self):
+                self.flush_calls = 0
+
             def write(self, data):
                 return len(data)
+
             def flush(self):
+                self.flush_calls += 1
                 raise BrokenPipeError("pipe closed")
 
+        broken = BrokenFlush()
         log_file = io.StringIO()
-        tee = TqdmSafeTee(BrokenFlush(), log_file)
+        tee = TqdmSafeTee(broken, log_file)
         tee.write("data\n")
 
         # flush should NOT raise
         tee.flush()
+        assert broken.flush_calls == 1
+        assert log_file.getvalue() == "data\n"
 
 
 class _FakeClock:

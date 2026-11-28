@@ -45,6 +45,7 @@ class TestStop:
         """Calling stop() with no active run should not crash."""
         assert get_current_run() is None
         stop()  # Should be silent
+        assert get_current_run() is None
 
     def test_stop_sets_inactive(self):
         tracker = start()
@@ -86,10 +87,14 @@ class TestAnnotate:
         assert len(annotations) >= 1
         assert annotations[0]["type"] == "annotation"
 
-    def test_annotate_without_active_run_no_crash(self):
+    def test_annotate_without_active_run_no_crash(self, caplog):
         """Annotating with no active run should be silent."""
+        import logging
         assert get_current_run() is None
-        annotate("orphaned annotation")  # Should not raise
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            annotate("orphaned annotation")  # Should not raise
+        assert get_current_run() is None
+        assert not any("No active run" in r.getMessage() for r in caplog.records)
 
     def test_annotate_message_only(self):
         tracker = start(events={"enabled": True})
@@ -128,8 +133,8 @@ class TestPhase:
         with open(events_path, "r") as f:
             lines = [json.loads(l) for l in f.readlines()]
         types = [r["type"] for r in lines]
-        assert "phase_start" in types or "phase_started" in types
-        assert "phase_end" in types or "phase_ended" in types
+        assert "phase_start" in types
+        assert "phase_end" in types
 
     def test_phase_with_exception(self):
         tracker = start(events={"enabled": True})
@@ -140,15 +145,21 @@ class TestPhase:
         events_path = tracker.run_dir / "events.jsonl"
         with open(events_path, "r") as f:
             lines = [json.loads(l) for l in f.readlines()]
-        # The phase_end event should include error info
-        end_events = [r for r in lines if "phase_end" in r["type"]]
-        assert len(end_events) >= 1
-        assert "error" in str(end_events[0].get("payload", {}))
+        start_events = [r for r in lines if r["type"] == "phase_start"]
+        end_events = [r for r in lines if r["type"] == "phase_end"]
+        assert len(start_events) == 1
+        assert len(end_events) == 1
+        assert end_events[0]["payload"]["error"] == "ValueError"
 
-    def test_phase_without_active_run_no_crash(self):
+    def test_phase_without_active_run_no_crash(self, caplog):
         """Phase with no active run should not crash."""
-        with phase("orphaned"):
-            pass
+        import logging
+        assert get_current_run() is None
+        with caplog.at_level(logging.WARNING, logger="pubrun"):
+            with phase("orphaned"):
+                pass
+        assert get_current_run() is None
+        assert not any("No active run" in r.getMessage() for r in caplog.records)
 
 
 class TestTrackedRun:
@@ -238,8 +249,13 @@ class TestDiff:
         dir_b = str(t2.run_dir)
 
         result = pubrun.diff(dir_a, dir_b, ignores=["timing", "run", "capture"])
-        # With timing/run/capture ignored, most volatile fields are excluded
+        # Ignored prefixes must not appear in any diff bucket
         assert isinstance(result, dict)
+        diff_keys = set(result["modified"]) | set(result["added"]) | set(result["removed"])
+        for prefix in ("timing", "run", "capture"):
+            assert not any(k == prefix or k.startswith(prefix + ".") for k in diff_keys), (
+                f"Ignored prefix {prefix!r} leaked into diff keys: {diff_keys}"
+            )
 
     def test_diff_invalid_path(self, tmp_path):
         with pytest.raises(FileNotFoundError):
@@ -278,9 +294,9 @@ class TestManifestSchema:
         with open(manifest_path, "r") as f:
             manifest = json.load(f)
         for section in self.SECTIONS_WITH_CAPTURE_STATE:
-            data = manifest.get(section, {})
-            if isinstance(data, dict):
-                assert "capture_state" in data, f"Section '{section}' missing capture_state"
+            data = manifest.get(section)
+            assert isinstance(data, dict), f"Section '{section}' is not a dict: {type(data)!r}"
+            assert "capture_state" in data, f"Section '{section}' missing capture_state"
 
     def test_timing_values_are_floats(self):
         tracker = start()
