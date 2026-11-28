@@ -6,7 +6,7 @@
 - Scope: Harden `tests/conftest.py` (user-config isolation + resetting 7 omitted module-level caches/latches), add real-file `load_user_config()` tests in `tests/test_config.py`, and tighten assertions / replace sleeps and private pinning across `tests/test_api.py`, `tests/test_edge_cases.py`, `tests/test_import_modes.py`, `tests/test_signals.py`, `tests/test_capture.py`, and `tests/test_events.py`.
 - Scope-Paths: tests/conftest.py, tests/test_config.py, tests/test_api.py, tests/test_edge_cases.py, tests/test_import_modes.py, tests/test_signals.py, tests/test_capture.py, tests/test_events.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Isolate host user config and reset 7 module caches in conftest.py, tighten vacuous assertions, and replace fixed sleeps and private slot pins
@@ -17,11 +17,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: kgoymu
+- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-27 to-review (Antigravity): Authored review-ready child IPD from `/assess testing` Slices 1 and 3 on HEAD `512ee68` / `8f2aacd`.
 - 2026-11-27 draft (Antigravity): created.

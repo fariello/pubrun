@@ -6,7 +6,7 @@
 - Scope: Fix `src/pubrun/__main__.py`, `src/pubrun/analysis/render.py`, and `src/pubrun/report/diagnostics.py`, sync `docs/cli.md` for `BUG-U3`, and add behavioral regression tests in `tests/test_cli_diff_bugs.py`, `tests/test_combined.py`, `tests/test_render.py`, `tests/test_diagnostics_seams.py`, and `tests/test_cli_negative_paths.py`.
 - Scope-Paths: src/pubrun/__main__.py, src/pubrun/analysis/render.py, src/pubrun/report/diagnostics.py, docs/cli.md, tests/test_cli_diff_bugs.py, tests/test_combined.py, tests/test_render.py, tests/test_diagnostics_seams.py, tests/test_cli_negative_paths.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Fix status/combined dir paths, --dir expansion, bounded combined streaming, diff fast-path and array/ANSI render, show swap/--utc, and run signal tests
@@ -17,11 +17,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: kk83rk
+- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 reviewed (Antigravity): /plan-review (complex tier, Round 1 + Round 2 re-review after adding `docs/cli.md` to `Scope-Paths`); preserved `--last` `exit_code=1` contract, specified multiset common-first array diff and ANSI-safe truncation, clarified `leading_buffer` boundary yield and two-stage `KeyboardInterrupt` test seam, expanded validation suite, and hardened execution gate; readiness `go-pending-approval`.
 - 2026-11-27 to-review (Antigravity): Authored review-ready child Implementation Plan Document (IPD) from parallel `/assess bugs` and `/assess testing` audits on HEAD `512ee68` / `8f2aacd`.
 - 2026-11-27 draft (Antigravity): created.

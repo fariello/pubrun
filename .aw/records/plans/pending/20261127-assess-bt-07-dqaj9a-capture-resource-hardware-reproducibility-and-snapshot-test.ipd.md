@@ -6,7 +6,7 @@
 - Scope: Add deterministic behavioral tests (no production code changes) in `tests/test_resources.py`, `tests/test_hardware.py`, `tests/test_hpc_hydration_e2e.py`, `tests/test_reproducibility_assessment.py`, `tests/test_checks_commands.py`, `tests/test_reports.py`, and `tests/test_methods_multi.py`.
 - Scope-Paths: tests/test_resources.py, tests/test_hardware.py, tests/test_hpc_hydration_e2e.py, tests/test_reproducibility_assessment.py, tests/test_checks_commands.py, tests/test_reports.py, tests/test_methods_multi.py
 - Item-Dependencies: none
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Add deterministic tests for ResourceWatcher partial/failed states, hardware parsers/timeouts, meta_snapshot containment, seed scan caps, and checks/methods
@@ -17,11 +17,13 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: dqaj9a
+- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 reviewed (Antigravity): /plan-review (complex tier, single pass); added tuple-via-list cycle case for `meta_snapshot.py:49`, `b'"annotation"'` pre-filter requirement for `reproducibility.py:1198-1199`, started-watcher abort precondition in `E-01`, exact hardware parser/budget isolation in `E-02`, deterministic `os.cpu_count`/local-import isolation and multi-run variance pairing in `E-04`, and hardened execution gate; readiness `go-pending-approval`.
 - 2026-11-27 to-review (Antigravity): Authored review-ready child Implementation Plan Document (IPD) from `/assess testing` Slices 1 and 2 on HEAD `512ee68` / `8f2aacd`.
 - 2026-11-27 draft (Antigravity): created.

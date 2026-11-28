@@ -6,7 +6,7 @@
 - Scope: Coordinate ten file-disjoint child Implementation Plan Documents (IPDs) (`wcjdbu`, `ndobra`, `thbepl`, `qum7gf`, `kk83rk`, `n39jh9`, `dqaj9a`, `kgoymu`, `4eo4z2`, `37sth0`) across `src/pubrun/`, `tests/`, `benchmarks/`, `docs/`, `.github/workflows/ci.yml`, `.github/scripts/`, `examples/verify_all.py`, and `tox.ini`. This orchestrator edits no product code, tests, docs, or CI files directly; all work is delegated to the ten child IPDs below.
 - Scope-Paths: .aw/records/plans/pending/20261127-assess-bt-00-n6250e-bugs-and-testing-assessment-rollup-post-assess-8l.ipd.md
 - Item-Dependencies: executed:wcjdbu, executed:ndobra, executed:thbepl, executed:qum7gf, executed:kk83rk, executed:n39jh9, executed:dqaj9a, executed:kgoymu, executed:4eo4z2, executed:37sth0
-- Status: reviewed
+- Status: approved
 - Readiness: go-pending-approval
 - Coverage: pass
 - Coverage-Fingerprint: 31a361198090d37e71aa77bcfbee14893642ba5985cb7f057b65715feef0ff3b
@@ -20,11 +20,13 @@
 - Highest E allocated: 10
 - Author: Antigravity
 - Id: n6250e
+- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 approved (aw set): status set to approved
 - 2026-11-28 coverage pass (aw oc run): fingerprint 31a361198090, model uri/its_direct/pt3-claude-opus-5.5-1m-us
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003
 - 2026-11-27 coverage pass (aw oc run): fingerprint 30777cad4447, model uri/its_direct/pt3-claude-opus-5.5-1m-us
