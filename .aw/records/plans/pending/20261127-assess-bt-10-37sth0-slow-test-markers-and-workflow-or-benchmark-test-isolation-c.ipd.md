@@ -165,7 +165,7 @@ Validation-state rule: inspect evidence in a separate pass. Do not mark a `V-*` 
   - Result: pending
 
 - [ ] V-04 validates E-04
-  - Required evidence: Pasted complete execution-time output of Commands 1, 2, and 3 in `## Required tests / validation` (exercising `python3 -m pytest -p randomly` and `pytest.main(["-m", "not slow", ...])`), confirming exit `0`, all collected tests passing in Command 1, all marked slow tests visibly deselected (`deselected`) while fast tests pass in Command 2, and `BENCH_TESTS_IMPORT_CLEAN_OK` in Command 3.
+  - Required evidence: Pasted complete execution-time output of Commands 1, 2, and 3 in `## Required tests / validation` across `tests/test_compatibility.py`, `tests/test_package_benchmark.py`, and `tests/test_startup_benchmark.py`, confirming exit `0`, all collected tests passing in Command 1, all marked slow tests (`test_scaling_benchmark_quick_smoke_and_share_safety`, `TestPackageCaptureBenchRun`, `TestBreakdownEndToEnd`, and `TestBreakdownScrubBoundaries.test_cli_with_short_username_emits_intact_output`) visibly deselected (`deselected`) while fast tests pass in Command 2, and `BENCH_TESTS_IMPORT_CLEAN_OK` in Command 3.
   - Observed evidence:
   - Result: pending
 
