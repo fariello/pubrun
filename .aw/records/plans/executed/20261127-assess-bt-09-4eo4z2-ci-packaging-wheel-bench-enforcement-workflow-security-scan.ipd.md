@@ -6,7 +6,7 @@
 - Scope: Update `.github/workflows/ci.yml`, `.github/scripts/test_benchmark_intake_workflow.py`, `.github/scripts/test_extract_attachment_url.py`, `.github/scripts/test_validate_benchmark_submission.py`, `tox.ini`, `examples/verify_all.py`, `tests/test_bench_command.py`, and `tests/test_cli.py`.
 - Scope-Paths: .github/workflows/ci.yml, .github/scripts/test_benchmark_intake_workflow.py, .github/scripts/test_extract_attachment_url.py, .github/scripts/test_validate_benchmark_submission.py, tox.ini, examples/verify_all.py, tests/test_bench_command.py, tests/test_cli.py
 - Item-Dependencies: none
-- Status: approved
+- Status: executed
 - Readiness: go-pending-approval
 - Review-Depth: complex
 - Short-Description: Enforce TestWheelNonCheckoutBench and verify_all.py in CI, scan multi-line run/script blocks in benchmark-intake, isolate .github/scripts/ imports, update tox.ini, and fix CLI/bench test hygiene
@@ -17,12 +17,12 @@
 - Highest E allocated: 05
 - Author: Antigravity
 - Id: 4eo4z2
-- Approval: 2026-11-28, recorded via aw ipd set: status set to approved
 
 > Write and proofread this plan per the technical writing standard, `.aw/system/workflows/technical-writing/technical-writing.md` (`.agents/workflows/technical-writing/technical-writing.md` in a legacy-layout install), including requirement 12 (diagrams).
 
 ## Workflow history
 
+- 2026-11-28 executed (aw agy run model=Gemini-4-Neon-High): aw agy run self-finalize: 4eo4z2 verified (set assess-bt, attempt 1).
 - 2026-11-28 approved (aw set): status set to approved
 - 2026-11-27 /plan-review (Antigravity): APPROVE WITH REVISIONS APPLIED; PR-001, PR-002, PR-003, PR-004
 - 2026-11-27 to-review (Antigravity): Authored review-ready child IPD from `/assess testing` Slices 2 and 3 on HEAD `512ee68` / `8f2aacd`.
